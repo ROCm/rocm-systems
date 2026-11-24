@@ -4,7 +4,7 @@
 // Tests for M0-relative VGPR reads and writes.
 
 #include "register/helpers.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_register.h"
 
 #include <gtest/gtest.h>
 #include <stdint.h>

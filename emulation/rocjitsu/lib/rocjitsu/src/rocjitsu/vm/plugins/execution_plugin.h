@@ -16,6 +16,7 @@
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/kernel_dispatch_info.h"
+#include "rocjitsu/vm/plugins/lds_barrier_arrival_observation.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 #include "rocjitsu/vm/plugins/tensor_dma_issue_observation.h"
@@ -41,9 +42,67 @@ enum class BarrierKind : uint8_t {
   Cluster,
 };
 
+/// Optional notification when an implicit instruction wait retires its memory producers.
+class AmdgpuImplicitMemoryWaitObserver {
+public:
+  virtual ~AmdgpuImplicitMemoryWaitObserver() = default;
+  virtual void onAmdgpuImplicitMemoryWait(amdgpu::Wavefront &wf,
+                                          const amdgpu::WaitFields &fields) = 0;
+};
+
+/// @brief Reports cancellation of an individual previously routed memory issue.
+/// @details Delivery requires observes_memory_routing() and a matching hot-hook subscription
+/// for the wavefront. The instruction and wavefront are borrowed for this call, which precedes
+/// deletion of the cancelled instruction. Whole-wave cancellation uses
+/// ExecutionPlugin::onAmdgpuWavefrontCancelled() for cleanup.
+class AmdgpuMemoryCancellationObserver {
+public:
+  virtual ~AmdgpuMemoryCancellationObserver() = default;
+  virtual void onAmdgpuMemoryAccessCancelled(const Instruction &inst, amdgpu::Wavefront &wf) = 0;
+};
+
+/// @brief Observes the LDS portion of a mixed FLAT access after its global lanes succeed.
+/// @details Requires memory-routing observation and a matching wave hot-hook subscription.
+/// The instruction and wavefront are borrowed for the duration of the callback.
+class AmdgpuMixedFlatLdsObserver {
+public:
+  virtual ~AmdgpuMixedFlatLdsObserver() = default;
+  virtual void onAmdgpuMixedFlatLdsAccess(const Instruction &inst, amdgpu::Wavefront &wf) = 0;
+};
+
+/// Observes conditional image returns after translation succeeds, before shader execution resumes.
+class AmdgpuImageFeedbackObserver {
+public:
+  virtual ~AmdgpuImageFeedbackObserver() = default;
+  virtual void onAmdgpuImageFeedbackQualified(const Instruction &inst, amdgpu::Wavefront &wf) = 0;
+};
+
+/// One round of one barrier: the signals counted between two completions.
+/// Passed to the split-barrier hooks so a plugin can match each wave's signal
+/// and wait to the round that ordered them.
+struct BarrierRound {
+  BarrierKind kind = BarrierKind::Workgroup;
+  /// The Wavefront completion bit the round sets: 0 named, 1 workgroup,
+  /// 2 workgroup trap, 3 cluster, 4 cluster trap.
+  uint8_t completion_bit = 0;
+  /// The named barrier ID (1-16) for a Named round, otherwise 0.
+  uint32_t named_id = 0;
+  /// Counts completed rounds of this barrier, and S_BARRIER_INIT, which
+  /// discards the signals counted so far. Starts at 0 for each workgroup. A
+  /// single-wave workgroup has no barrier state, so on a target with a single
+  /// s_barrier instruction each of its rounds reports generation 0.
+  uint64_t generation = 0;
+
+  bool operator==(const BarrierRound &) const = default;
+};
+
 /// @brief Abstract plugin interface for execution hooks.
 ///
 /// Plugins receive callbacks at key points during simulation execution.
+/// Plugin callbacks, policy queries, construction and destruction must not throw.
+/// Expected instruction failures use Wavefront::report_instruction_execution_error();
+/// callbacks must still preserve issue/completion accounting and cancellation.
+/// This is a semantic contract; callback types do not impose noexcept.
 /// All hooks have empty default implementations so plugins only override
 /// what they need. The no-plugin path has near-zero overhead (the
 /// default empty group returns before locking or dispatch).
@@ -248,6 +307,25 @@ public:
   virtual void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation & /*issue*/,
                                        const amdgpu::Wavefront & /*wf*/) {}
 
+  /// Called for each arrival at an LDS barrier cell (CDNA5 ISA 11.2.2), after
+  /// the cell has been updated. The DS arrive instructions report one arrival
+  /// per active lane whose address is in range, in the simulator's lane order,
+  /// within the issuing wave's instruction step and after
+  /// onAmdgpuMemoryAccessRouted(); issued with EXEC zero they report nothing.
+  /// ds_atomic_barrier_arrive_rtn_b64 with an update value of zero reads the
+  /// cell without arriving, and is reported with `old_state == new_state`. A
+  /// tensor DMA instruction whose descriptor requests an arrival reports one,
+  /// after onAmdgpuTensorDmaIssued() and after the transfer has written LDS;
+  /// `wf` is the wave that issued the transfer. A tensor instruction ignores
+  /// EXEC (CDNA5 ISA 10.11.1) and reports nothing only for a NULL descriptor.
+  /// A transfer deferred until its memory is available arrives when it
+  /// resumes, outside any instruction step of its wave and before the wave
+  /// issues another instruction.
+  /// May run concurrently across simulation partitions unless
+  /// requires_serial_hot_hooks() returns true.
+  virtual void onAmdgpuLdsBarrierArrived(const amdgpu::LdsBarrierArrivalObservation & /*arrival*/,
+                                         const amdgpu::Wavefront & /*wf*/) {}
+
   /// Called when the command processor has parsed an AQL kernel dispatch packet
   /// and created a DispatchEntry. Fires during packet fetching, before any
   /// workgroups are placed. Multiple packets may be parsed in a single fetch.
@@ -285,6 +363,8 @@ public:
 
   /// Called when a wavefront terminates normally, after its memory operations
   /// have drained and before its resources are freed.
+  /// This is a terminal notification; report problems through sink().write().
+  /// Instruction-execution errors recorded here are discarded with the wave.
   /// Dispatch cancellation uses onAmdgpuWavefrontCancelled instead.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWavefrontHalted(amdgpu::Wavefront & /*wf*/) {}
@@ -345,22 +425,68 @@ public:
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) {
-    if (!wf || reg.cls != RegClass::SGPR)
+    if (!wf || reg.cls != RegClass::SGPR) {
       return;
-    for (uint32_t offset = 0; offset < reg.width; ++offset)
+    }
+    for (uint32_t offset = 0; offset < reg.width; ++offset) {
       onAmdgpuReadSgpr(wf, wf->sgpr_alloc().base + reg.index + offset);
+    }
   }
 
   /// Called when an architectural scalar register is written during instruction execution.
   /// Memory completion and runtime initialization remain unobserved storage operations.
   virtual void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront * /*wf*/, RegisterRef /*reg*/) {}
 
-  /// Called with the waves synchronized by a completed barrier domain.
+  /// Called with the waves a completed barrier round notified.
   /// Workgroup callbacks include all surviving waves of one workgroup.
   /// Waves that ended before the barrier resolved are not included.
+  /// Notification is not synchronization: on targets with s_barrier_signal and
+  /// s_barrier_wait, a notified wave is ordered after the round only once
+  /// onAmdgpuBarrierWaitPassed() reports that it passed its wait for it.
+  /// onAmdgpuBarrierRoundCompleted() says which notified waves the round
+  /// armed, that is, whose next wait it releases.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/,
                                        BarrierKind /*kind*/) {}
+
+  /// Called when a wave's barrier signal is counted toward `round`. Signals the
+  /// hardware ignores are not reported, nor is a second signal from one
+  /// workgroup to a cluster barrier. Fires before the round can complete, so
+  /// the completing signal precedes onAmdgpuBarrierRoundCompleted(). On
+  /// targets with a single s_barrier instruction it fires for each member when
+  /// the barrier resolves.
+  /// Fires once per counted signal, on the thread executing the wave. A named
+  /// barrier counts signals, not waves, so one wave can signal a round more
+  /// than once. May run concurrently across simulation partitions unless
+  /// requires_serial_hot_hooks() returns true.
+  virtual void onAmdgpuBarrierSignaled(const amdgpu::Wavefront & /*wf*/,
+                                       const BarrierRound & /*round*/) {}
+
+  /// Called when `round` completes. `notified` lists every wave the round
+  /// notified, as onAmdgpuBarrierResolved() does. `armed` lists those whose
+  /// completion bit the round set: the waves whose next wait on this barrier
+  /// it releases. A wave whose bit was still set by an earlier round is
+  /// notified but not armed; its wait passes for that round. `armed` is empty
+  /// when every notified wave's bit was already set. Fires immediately after
+  /// onAmdgpuBarrierResolved(). A round that notifies no wave, such as a named
+  /// round no live wave has joined, reports neither.
+  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
+  virtual void onAmdgpuBarrierRoundCompleted(std::span<amdgpu::Wavefront *> /*notified*/,
+                                             std::span<amdgpu::Wavefront *> /*armed*/,
+                                             const BarrierRound & /*round*/) {}
+
+  /// Called when a wave passes s_barrier_wait. `round` is the round whose
+  /// completion released it. Fires after onAmdgpuBarrierRoundCompleted() for
+  /// that round. The round is the one that set the wave's completion bit; a
+  /// bit set by other means, such as a privileged STATE_PRIV write, reports
+  /// the round that last set it.
+  /// A wave that finds its bit set fires this on the thread executing it. A
+  /// wave parked in the wait fires it on the thread that completes the round;
+  /// for a cluster round that is the command processor's thread, while the
+  /// dispatch workers are stopped. May run concurrently across simulation
+  /// partitions unless requires_serial_hot_hooks() returns true.
+  virtual void onAmdgpuBarrierWaitPassed(const amdgpu::Wavefront & /*wf*/,
+                                         const BarrierRound & /*round*/) {}
 
   /// Whether this plugin consumes onAmdgpuMemoryAccessRouted(). Building the
   /// observation is real work on the per-instruction path, so a plugin that
@@ -381,17 +507,33 @@ public:
   /// group samples this stable policy when the plugin is added.
   virtual bool observes_tensor_dma_issue() const { return false; }
 
+  /// Whether this plugin consumes onAmdgpuLdsBarrierArrived(). The group
+  /// samples this stable policy when the plugin is added.
+  virtual bool observes_lds_barrier_arrival() const { return false; }
+
   /// Whether this plugin needs typed scalar-register reads or legacy SGPR reads.
   /// The group samples this policy once when the plugin is added. The
   /// conservative default preserves existing plugin behavior: callbacks
   /// continue unless a plugin explicitly opts out.
   virtual bool observes_sgpr_reads() const { return true; }
 
+  /// Opt in to reads of the LDS-direct VALU source. Sampled when the plugin is registered.
+  virtual bool observes_lds_direct_reads() const { return false; }
+  virtual void onAmdgpuLdsDirectRead(const amdgpu::Wavefront &, uint32_t, uint32_t, uint32_t) {}
+
 private:
   friend class ExecutionPluginGroup;
   std::string name_;
   uint32_t slot_index_ = 0;
   PluginSink *sink_ = &StderrSink::instance();
+};
+
+/// Optional interface for plugins that observe a wave entering its trap handler.
+/// Separate from ExecutionPlugin to preserve its vtable for loadable plugins.
+class AmdgpuTrapEntryObserver {
+public:
+  virtual ~AmdgpuTrapEntryObserver() = default;
+  virtual void onAmdgpuTrapEntered(amdgpu::Wavefront &wf) = 0;
 };
 
 } // namespace rocjitsu

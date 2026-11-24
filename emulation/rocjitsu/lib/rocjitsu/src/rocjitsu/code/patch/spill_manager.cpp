@@ -52,15 +52,17 @@ std::optional<uint32_t> SpillManager::allocate_slot(RegisterRef reg) {
   }
   // Overflow-safe equivalent of `next_offset_ + kSlotBytes > limit_`.
   auto offset = slots_.allocate(kSlotBytes, kSlotBytes, limit_);
-  if (!offset)
+  if (!offset) {
     return std::nullopt;
+  }
   reg_to_offset_.emplace(key, *offset);
   return offset;
 }
 
 std::optional<uint32_t> SpillManager::allocate_slots(RegisterRef reg, unsigned width) {
-  if (width == 0)
+  if (width == 0) {
     return std::nullopt;
+  }
   // Reject ranges that would wrap the uint16_t register index space.
   if (static_cast<uint32_t>(reg.index) + width - 1 > std::numeric_limits<uint16_t>::max()) {
     return std::nullopt;
@@ -79,8 +81,9 @@ std::optional<uint32_t> SpillManager::allocate_slots(RegisterRef reg, unsigned w
   // Build a width-N range and reserve
   RegisterSet set;
   set.expand(RegisterRef{reg.cls, reg.index, static_cast<uint8_t>(width)});
-  if (!reserve(set))
+  if (!reserve(set)) {
     return std::nullopt;
+  }
   // width=1 is irrelevant here; offset_for keys on (cls, index) only.
   return offset_for(RegisterRef{reg.cls, reg.index, 1});
 }
@@ -90,15 +93,17 @@ bool SpillManager::reserve(const RegisterSet &set) {
   // request up front rather than letting one reach allocate_slot's bounds
   // rejection and trip the post-capacity-check assert below. Special-register
   // preservation is out of scope for this allocator.
-  if (set.has_specials())
+  if (set.has_specials()) {
     return false;
+  }
 
   // Count NEW registers (cache misses) so we can size-check upfront.
   unsigned num_new = 0;
   set.for_each_ordinary([&](RegisterRef reg) {
     const std::pair<RegClass, uint16_t> key{reg.cls, reg.index};
-    if (!reg_to_offset_.contains(key))
+    if (!reg_to_offset_.contains(key)) {
       ++num_new;
+    }
   });
   if (num_new > 0 && !slots_.preview(kSlotBytes * num_new, kSlotBytes, limit_)) {
     return false;

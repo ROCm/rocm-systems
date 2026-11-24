@@ -4,6 +4,7 @@
 // Tests for cube-map coordinates, face selection, and major-axis magnitude.
 
 #include "graphics/helpers.h"
+#include "rj_arith/detail/rj_arith_graphics.h"
 
 // Check graphics results, modifiers, EXEC masks, and source/destination aliases.
 TEST(GraphicsCubeidF32W32Gfx11, Arithmetic) {

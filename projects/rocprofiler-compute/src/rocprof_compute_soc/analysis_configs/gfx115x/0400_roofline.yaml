@@ -30,7 +30,7 @@ Panel Config:
           peak: $FP64Flops_empirical_peak
         GL2 Cache BW:
           # Note: GL1C-GL2 reads can be 32B, 64B, or 128B. Writes can be 32B or 64B.
-          value: SUM(GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_WRITE_32B_sum * 32 + GL1C_GL2_REQ_WRITE_64B_sum * 64) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          value: 1e9 * ($gl2_read_bandwidth + $gl2_write_bandwidth)
           unit: Bytes/s
           peak: $L2Bw_empirical_peak * 1e9
         GL1 Cache BW:
@@ -57,7 +57,7 @@ Panel Config:
       metric:
         AI L2:
           # Note: GL1-GL2 reads can be 32B, 64B, or 128B. Writes can be 32B or 64B.
-          value: SUM($wave_size * SQ_INSTS_VALU_sum) / SUM(GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_WRITE_32B_sum * 32 + GL1C_GL2_REQ_WRITE_64B_sum * 64)
+          value: SUM($valu_flops) / SUM($gl2_read_bytes + $gl2_write_bytes)
           unit: FLOPs/Byte
         AI L1:
           value: SUM($wave_size * SQ_INSTS_VALU_sum) / (64 * SUM(TCP_GL1_REQ_READ_sum + TCP_GL1_REQ_WRITE_sum))

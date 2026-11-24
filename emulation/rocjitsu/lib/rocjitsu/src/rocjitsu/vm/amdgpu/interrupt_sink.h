@@ -16,6 +16,8 @@
 
 namespace rocjitsu::amdgpu {
 
+enum class VmAccessKind : uint8_t;
+
 class InterruptSubscription;
 
 /// @brief Copyable route carried by a queue and every dispatch derived from it.
@@ -27,6 +29,8 @@ public:
   InterruptSink() = default;
 
   void deliver(uint32_t process_id, uint32_t event_id) const;
+  void notify_idle(uint32_t process_id) const;
+  void report_vm_fault(uint32_t process_id, uint64_t address, VmAccessKind access) const;
   explicit operator bool() const { return state_ != nullptr; }
 
 private:
@@ -45,9 +49,14 @@ private:
 class InterruptSubscription {
 public:
   using Callback = std::function<void(uint32_t process_id, uint32_t event_id)>;
+  using VmFaultCallback =
+      std::function<void(uint32_t process_id, uint64_t address, VmAccessKind access)>;
+
+  using IdleCallback = std::function<void(uint32_t process_id)>;
 
   InterruptSubscription() = default;
-  explicit InterruptSubscription(Callback callback);
+  explicit InterruptSubscription(Callback callback, VmFaultCallback vm_fault_callback = {},
+                                 IdleCallback idle_callback = {});
   ~InterruptSubscription();
   InterruptSubscription(InterruptSubscription &&other) noexcept;
   InterruptSubscription &operator=(InterruptSubscription &&other) noexcept;
@@ -66,19 +75,52 @@ private:
 
 class InterruptSink::State {
 public:
-  explicit State(InterruptSubscription::Callback callback) : callback_(std::move(callback)) {}
+  State(InterruptSubscription::Callback callback,
+        InterruptSubscription::VmFaultCallback vm_fault_callback,
+        InterruptSubscription::IdleCallback idle_callback)
+      : callback_(std::move(callback)), vm_fault_callback_(std::move(vm_fault_callback)),
+        idle_callback_(std::move(idle_callback)) {}
 
   void deliver(uint32_t process_id, uint32_t event_id) {
     InterruptSubscription::Callback callback;
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      if (!active_)
+      if (!active_ || !callback_) {
         return;
+      }
       callback = callback_;
       ++callbacks_in_flight_;
     }
     CallbackLease lease(this);
     callback(process_id, event_id);
+  }
+
+  void report_vm_fault(uint32_t process_id, uint64_t address, VmAccessKind access) {
+    InterruptSubscription::VmFaultCallback callback;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (!active_ || !vm_fault_callback_) {
+        return;
+      }
+      callback = vm_fault_callback_;
+      ++callbacks_in_flight_;
+    }
+    CallbackLease lease(this);
+    callback(process_id, address, access);
+  }
+
+  void notify_idle(uint32_t process_id) {
+    InterruptSubscription::IdleCallback callback;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (!active_ || !idle_callback_) {
+        return;
+      }
+      callback = idle_callback_;
+      ++callbacks_in_flight_;
+    }
+    CallbackLease lease(this);
+    callback(process_id);
   }
 
   void revoke_and_drain() {
@@ -89,6 +131,8 @@ public:
       return callbacks_in_flight_ <= callbacks_on_this_thread;
     });
     callback_ = {};
+    vm_fault_callback_ = {};
+    idle_callback_ = {};
   }
 
 private:
@@ -108,8 +152,9 @@ private:
 
     [[nodiscard]] static uint64_t count(const State *state) {
       uint64_t count = 0;
-      for (const CallbackLease *lease = current_; lease != nullptr; lease = lease->previous_)
+      for (const CallbackLease *lease = current_; lease != nullptr; lease = lease->previous_) {
         count += lease->state_ == state;
+      }
       return count;
     }
 
@@ -122,19 +167,40 @@ private:
   std::mutex mutex_;
   std::condition_variable idle_;
   InterruptSubscription::Callback callback_;
+  InterruptSubscription::VmFaultCallback vm_fault_callback_;
+  // Synthetic queue-idle notification, separate from packet event context zero.
+  InterruptSubscription::IdleCallback idle_callback_;
   uint64_t callbacks_in_flight_ = 0;
   bool active_ = true;
 };
 
 inline void InterruptSink::deliver(uint32_t process_id, uint32_t event_id) const {
-  if (state_)
+  if (state_) {
     state_->deliver(process_id, event_id);
+  }
 }
 
-inline InterruptSubscription::InterruptSubscription(Callback callback) {
-  if (callback)
-    state_.store(std::make_shared<InterruptSink::State>(std::move(callback)),
+inline void InterruptSink::notify_idle(uint32_t process_id) const {
+  if (state_) {
+    state_->notify_idle(process_id);
+  }
+}
+
+inline void InterruptSink::report_vm_fault(uint32_t process_id, uint64_t address,
+                                           VmAccessKind access) const {
+  if (state_) {
+    state_->report_vm_fault(process_id, address, access);
+  }
+}
+
+inline InterruptSubscription::InterruptSubscription(Callback callback,
+                                                    VmFaultCallback vm_fault_callback,
+                                                    IdleCallback idle_callback) {
+  if (callback || vm_fault_callback || idle_callback) {
+    state_.store(std::make_shared<InterruptSink::State>(
+                     std::move(callback), std::move(vm_fault_callback), std::move(idle_callback)),
                  std::memory_order_release);
+  }
 }
 
 inline InterruptSubscription::~InterruptSubscription() { reset(); }
@@ -144,8 +210,9 @@ inline InterruptSubscription::InterruptSubscription(InterruptSubscription &&othe
 
 inline InterruptSubscription &
 InterruptSubscription::operator=(InterruptSubscription &&other) noexcept {
-  if (this == &other)
+  if (this == &other) {
     return *this;
+  }
   reset();
   state_.store(other.state_.exchange(nullptr, std::memory_order_acq_rel),
                std::memory_order_release);
@@ -154,8 +221,9 @@ InterruptSubscription::operator=(InterruptSubscription &&other) noexcept {
 
 inline void InterruptSubscription::reset() {
   std::shared_ptr<InterruptSink::State> state = state_.exchange(nullptr, std::memory_order_acq_rel);
-  if (!state)
+  if (!state) {
     return;
+  }
   state->revoke_and_drain();
 }
 

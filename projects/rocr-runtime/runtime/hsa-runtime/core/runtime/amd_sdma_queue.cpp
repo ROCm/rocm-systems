@@ -108,7 +108,16 @@ hsa_status_t SdmaQueue::AllocateQueueBuffer() {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
-  memset(queue_start_addr_, 0, queue_size_);
+  if (IsDeviceMemRingBuf()) {
+    // Non-temporal stores keep the ring out of the cache of a host that maps device memory
+    // write-back, which the engine would otherwise snoop for each line of the first lap.
+    const uint8_t zero_line[64] = {};
+    for (size_t offset = 0; offset < queue_size_; offset += sizeof(zero_line))
+      nontemporal_copy(queue_start_addr_ + offset, zero_line, sizeof(zero_line));
+    store_fence();
+  } else {
+    memset(queue_start_addr_, 0, queue_size_);
+  }
   return HSA_STATUS_SUCCESS;
 }
 

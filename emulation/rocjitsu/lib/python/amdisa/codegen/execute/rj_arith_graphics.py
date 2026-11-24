@@ -15,11 +15,16 @@ INTERP_NAMES = {
     'V_INTERP_P2_RTZ_F16_F32',
 }
 
+# Architecture suffix of the MULLIT entry points. RDNA3 owns the unsuffixed entry and RDNA4
+# the _gfx12 entry; both accept bit-exact semantics. gfx1250 inherits the same model through a
+# loose-only entry until its captures are reviewed.
+MULLIT_ARCH_SUFFIX = {'rdna3': '', 'rdna4': '_gfx12', 'cdna5': '_gfx1250'}
+
 
 def gen_interp(ctx: ExecuteContext) -> str | None:
     arch, mnemonic = ctx.arch_name, ctx.inst.name
     dst, src, enc_name = ctx.dst_ops, ctx.src_ops, ctx.enc_name
-    if arch not in ('rdna3', 'rdna4') or mnemonic not in INTERP_NAMES:
+    if arch not in ('rdna3', 'rdna3_5', 'rdna4') or mnemonic not in INTERP_NAMES:
         return None
     if enc_name != 'ENC_VINTERP' or len(dst) != 1 or len(src) != 3:
         return None
@@ -34,17 +39,23 @@ def gen_interp(ctx: ExecuteContext) -> str | None:
         '(inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u)',
     ]
     if half:
-        opsel = 'inst_.op_sel' if arch == 'rdna3' else 'inst_.opsel'
+        opsel = 'inst_.opsel' if arch == 'rdna4' else 'inst_.op_sel'
         terms += [f'(({opsel} & 1) ? RJ_ARITH_ALU_HIGH_A : 0u)']
         terms += [
             f'(({opsel} & {8 if p2 else 4}) ? RJ_ARITH_ALU_HIGH_{"D" if p2 else "C"} : 0u)'
         ]
+    controls = 'wf.cu().arithmetic_flags()'
+    wave32, wave64 = wave_api(api, 32), wave_api(api, 64)
+    if arch == 'rdna3_5':
+        p2_half_rtz = ', '.join(str(b).lower() for b in (p2, half, '_RTZ_' in mnemonic))
+        kernel = f'amdgpu::arith::gfx115_interp<{p2_half_rtz}, '
+        wave32, wave64 = kernel + 'uint32_t>', kernel + 'uint64_t>'
     return '\n'.join(
         [
             '  const uint64_t modifiers = ' + ' | '.join(terms) + ';',
             f'  amdgpu::arith::execute_interp<{str(p2).lower()}, {str(half).lower()}>(',
-            f'      wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
-            '      wf.cu().arithmetic_flags(), modifiers,',
+            f'      wf, {wave32}, {wave64},',
+            f'      {controls}, modifiers,',
             f'      {dst[0]}, {", ".join(src)});',
         ]
     )
@@ -56,17 +67,25 @@ def gen_cube(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if arch not in ('rdna3', 'rdna4') or mnemonic not in CUBE_NAMES or not is_vop3:
+    if (
+        arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+        or mnemonic not in CUBE_NAMES
+        or not is_vop3
+    ):
         return None
     if len(dst) != 1 or len(src) != 3:
         return None
-    api = 'rj_arith_' + mnemonic.lower() + ('_gfx12' if arch == 'rdna4' else '')
+    api = (
+        'rj_arith_'
+        + mnemonic.lower()
+        + ('_gfx12' if arch in ('rdna4', 'cdna5') else '')
+    )
     lines = [
         '  uint64_t flags = wf.cu().arithmetic_flags();',
         '  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;',
         '  if (wf.ieee_mode()) flags |= RJ_ARITH_FP_IEEE_MODE;',
     ]
-    if arch == 'rdna3':
+    if arch in ('rdna3', 'cdna3', 'cdna4'):
         lines += ['  if (!wf.dx10_clamp()) flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;']
     lines += [
         '  const uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
@@ -90,11 +109,15 @@ def gen_mullit(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if arch not in ('rdna3', 'rdna4') or mnemonic != 'V_MULLIT_F32' or not is_vop3:
+    if (
+        arch not in ('rdna3', 'rdna4', 'cdna5')
+        or mnemonic != 'V_MULLIT_F32'
+        or not is_vop3
+    ):
         return None
     if len(dst) != 1 or len(src) != 3:
         return None
-    api = 'rj_arith_v_mullit_f32' + ('_gfx12' if arch == 'rdna4' else '')
+    api = 'rj_arith_v_mullit_f32' + MULLIT_ARCH_SUFFIX[arch]
     terms = []
     for i, letter in enumerate('ABC'):
         terms += [

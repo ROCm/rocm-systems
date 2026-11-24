@@ -56,8 +56,17 @@ stream:
     <<: *level_default
     tags: [callback, P1]
   Unit_hipStreamAddCallback_WithCreatedStream:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [callback, P0]
+  Unit_hipStreamAddCallback_OrderedWithKernels:
+    <<: *level_default
+    tags: [callback, synchronization, P1]
+  Unit_hipEventSynchronize_BlockingSyncAfterKernel:
+    <<: *level_default
+    tags: [synchronization, P1]
+  Unit_hipEventElapsedTime_TimedAndUntimedRecords:
+    <<: *level_default
+    tags: [synchronization, P1]
   Unit_hipStreamAttachMemAsync_Negative:
     <<: *level_default
     disabled:
@@ -155,6 +164,9 @@ stream:
     <<: *level_default
     tags: [lifecycle, smoke, P0]
   Unit_hipStreamDestroy_Negative_NullStream:
+    <<: *level_default
+    tags: [lifecycle, P1]
+  Unit_hipStreamDestroy_Negative_StaleAfterDeviceReset:
     <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamDestroy_WithFinishedWork:
@@ -547,8 +559,8 @@ stream:
   Unit_hipSharedQueueAnyOrderOverlap_StreamWaitValueDependencyHonored:
     <<: *level_default
     disabled:
-      targets: [amd_windows]
-      reason: "AIRUNTIME-2892 - pre-existing PAL limitation (unrelated to the barrier-bit opt): spin-wait blit stream wait-value deadlocks on HW rings; gfx1201 (amd_windows) hangs (>300s timeout); needs to be re-triaged"
+      targets: [amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2892 - pre-existing PAL limitation (unrelated to the barrier-bit opt): spin-wait blit stream wait-value deadlocks on HW rings; gfx1201 (amd_windows) hangs (>300s timeout); needs to be re-triaged. AIRUNTIME-3125 - test fails on WSL. Skipping for now."
     tags: [synchronization, overlap]
   Unit_hipStreamImplicitSync_RepeatedLaunchesAfterNullStream:
     <<: *level_default

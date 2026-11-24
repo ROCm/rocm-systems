@@ -217,7 +217,12 @@ impl PcSamplingResource for KfdPcSampling {
                 self.state = SamplingState::Stopped;
                 Ok(())
             }
-            Err(source) if source.native_error_code() == Some(errno::EALREADY) => {
+            Err(source)
+                if source
+                    .native_status()
+                    .and_then(crate::NativeStatus::errno_code)
+                    == Some(errno::EALREADY) =>
+            {
                 // KFD found this trace but reports that collection is already
                 // disabled, which is sufficient to permit its destruction.
                 self.state = SamplingState::Stopped;

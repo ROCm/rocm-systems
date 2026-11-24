@@ -4,12 +4,17 @@
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
+#include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include <array>
 #include <gtest/gtest.h>
@@ -17,15 +22,15 @@
 
 namespace rocjitsu {
 namespace {
-class FlatLdsTransfer : public testing::TestWithParam<std::pair<rj_code_arch_t, unsigned>> {
+class FlatLdsTransfer : public testing::TestWithParam<std::pair<rocjitsu::IsaFamily, unsigned>> {
 protected:
   bool modern() const {
-    return GetParam().first == ROCJITSU_CODE_ARCH_CDNA3 ||
-           GetParam().first == ROCJITSU_CODE_ARCH_CDNA4;
+    return GetParam().first == rocjitsu::IsaFamily::Cdna3 ||
+           GetParam().first == rocjitsu::IsaFamily::Cdna4;
   }
   bool rdna() const {
-    return GetParam().first == ROCJITSU_CODE_ARCH_RDNA1 ||
-           GetParam().first == ROCJITSU_CODE_ARCH_RDNA2;
+    return GetParam().first == rocjitsu::IsaFamily::Rdna1 ||
+           GetParam().first == rocjitsu::IsaFamily::Rdna2;
   }
   unsigned vector_saddr() const { return rdna() ? 125 : 127; }
   void SetUp() override {
@@ -48,8 +53,9 @@ protected:
     pipeline = std::make_unique<amdgpu::GlobalMemPipeline>(&cu->l1_vector(), &l2);
   }
   void TearDown() override {
-    if (wave)
+    if (wave) {
       wave->halt();
+    }
   }
   void scalar(unsigned reg, uint32_t value) {
     cu->write_sgpr(wave->sgpr_alloc().base + reg, value);
@@ -77,10 +83,12 @@ protected:
                                2, false, saddr, offset, true, vdst);
   }
   void clear() {
-    for (unsigned a = 0; a < 1408; a += 4)
+    for (unsigned a = 0; a < 1408; a += 4) {
       wave->lds().write32(a, 0xcccccccc);
-    for (unsigned lane = 0; lane < wave->wf_size(); ++lane)
+    }
+    for (unsigned lane = 0; lane < wave->wf_size(); ++lane) {
       vector(8, lane, 0xdeadbeef);
+    }
   }
   void issue(std::array<uint32_t, 2> words, bool lds = true) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
@@ -109,11 +117,12 @@ protected:
 };
 
 TEST_P(FlatLdsTransfer, ScratchWidthsAndAddressModesPreserveInactiveLanesAndVgprs) {
-  for (unsigned kind = 0; kind < 5; ++kind)
+  for (unsigned kind = 0; kind < 5; ++kind) {
     for (unsigned mode = 0;
-         mode < (modern() || GetParam().first == ROCJITSU_CODE_ARCH_RDNA2 ? 4u : 2u); ++mode) {
-      if (!modern() && mode == 2)
+         mode < (modern() || GetParam().first == rocjitsu::IsaFamily::Rdna2 ? 4u : 2u); ++mode) {
+      if (!modern() && mode == 2) {
         continue; // Legacy encodings have no combined form.
+      }
       SCOPED_TRACE(testing::Message() << "kind=" << kind << " mode=" << mode);
       clear();
       wave->set_exec(0x25);
@@ -124,9 +133,10 @@ TEST_P(FlatLdsTransfer, ScratchWidthsAndAddressModesPreserveInactiveLanesAndVgpr
       for (unsigned lane = 0; lane < wave->wf_size(); ++lane) {
         const unsigned subword = kind < 2 ? lane % 4 : kind < 4 ? (lane % 2) * 2 : 0;
         vector(2, lane, has_vector ? 4 + subword : 0xffffffff);
-        for (unsigned slot = 0; slot < 8; ++slot)
+        for (unsigned slot = 0; slot < 8; ++slot) {
           memory.write32(0x10000 + slot * wave->wf_size() * 4 + lane * 4,
                          0x89878583u + lane * 0x01010101u + slot * 0x02020202u);
+        }
       }
       ASSERT_NO_FATAL_FAILURE(issue(encoding(kind, 1, has_vector,
                                              has_scalar   ? 4
@@ -141,24 +151,30 @@ TEST_P(FlatLdsTransfer, ScratchWidthsAndAddressModesPreserveInactiveLanesAndVgpr
         const unsigned slot = (has_vector ? 1 : 0) + (has_scalar ? 2 : 0) + 1;
         uint32_t expected =
             (0x89878583u + lane * 0x01010101u + slot * 0x02020202u) >> (subword * 8);
-        if (kind == 0)
+        if (kind == 0) {
           expected &= 0xff;
-        if (kind == 1)
+        }
+        if (kind == 1) {
           expected = static_cast<int8_t>(expected);
-        if (kind == 2)
+        }
+        if (kind == 2) {
           expected &= 0xffff;
-        if (kind == 3)
+        }
+        if (kind == 3) {
           expected = static_cast<int16_t>(expected);
+        }
         EXPECT_EQ(wave->lds().read32(128 + 68 + lane * 4),
                   (0x25 & (uint64_t{1} << lane)) ? expected : 0xcccccccc);
         EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 8, lane), 0xdeadbeef);
       }
     }
+  }
 }
 
 TEST_P(FlatLdsTransfer, GlobalLoadsToLdsAdvertiseVmemObligation) {
-  if (!modern())
+  if (!modern()) {
     GTEST_SKIP() << "Tests specific to modern architectures.";
+  }
   for (unsigned kind = 0; kind < 5; ++kind) {
     SCOPED_TRACE(testing::Message() << "kind=" << kind);
     const auto words = encoding(kind, 2, false, vector_saddr());
@@ -174,8 +190,9 @@ TEST_P(FlatLdsTransfer, GlobalLoadsToLdsAdvertiseVmemObligation) {
 }
 
 TEST_P(FlatLdsTransfer, GlobalLoadsToLdsPreserveInactiveLanesAndVgprs) {
-  if (!modern())
+  if (!modern()) {
     GTEST_SKIP() << "Tests specific to modern architectures.";
+  }
   const std::array<uint32_t, 5> expected{0x81, 0xffffff81, 0x8081, 0xffff8081, 0x76548081};
   const int base_offset = 64;
   const uint64_t exec_mask = 0x25;
@@ -219,19 +236,105 @@ TEST_P(FlatLdsTransfer, GlobalLoadsToLdsPreserveInactiveLanesAndVgprs) {
 }
 
 TEST_P(FlatLdsTransfer, Cdna3RejectsCdna4WideGlobalLoadEncodings) {
-  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA3)
+  if (GetParam().first != rocjitsu::IsaFamily::Cdna3) {
     GTEST_SKIP() << "Checks the CDNA3 decoder boundary.";
+  }
   for (unsigned dwords : {3u, 4u}) {
     auto words = global_wide_lds_encoding(dwords, 127, 0);
     EXPECT_TRUE(decode_fails(*decoder, words.data()));
   }
 }
 
+TEST_P(FlatLdsTransfer, CoincidentDsWritesIgnoreData1) {
+  wave->set_lds_size(512);
+  wave->set_exec(1);
+  vector(0, 0, 0);
+  vector(2, 0, 0x12345678);
+  vector(3, 0, 0x90abcdef);
+  auto &board = wave->ensure_memory_wait_scoreboard();
+  unsigned hazards = 0;
+  const auto ds_words = [&](uint16_t opcode, uint8_t offset, uint8_t data1) {
+    return rdna()
+               ? rdna1::build_ds(
+                     opcode, {.offset1 = offset, .addr = 0, .data0 = 2, .data1 = data1, .vdst = 10})
+               : cdna3::build_ds(
+                     opcode,
+                     {.offset1 = offset, .addr = 0, .data0 = 2, .data1 = data1, .vdst = 10});
+  };
+  for (uint16_t opcode :
+       {cdna3::kDsWrite2B32, cdna3::kDsWrite2st64B32, cdna3::kDsWrite2B64, cdna3::kDsWrite2st64B64,
+        cdna3::kDsWrxchg2RtnB32, cdna3::kDsWrxchg2st64RtnB32, cdna3::kDsWrxchg2RtnB64,
+        cdna3::kDsWrxchg2st64RtnB64}) {
+    SCOPED_TRACE(opcode);
+    for (uint8_t offset : {0, 1}) {
+      auto words = ds_words(opcode, offset, 8);
+      std::unique_ptr<Instruction> store(decode_valid(*decoder, words.data()));
+      ASSERT_NE(store, nullptr);
+      board.clear();
+      const auto load = amdgpu::WaitCounterKind::Load;
+      board.add({board.issue(load), 0x100, 1, {RegClass::VGPR, 8, 1}, load, 0xf});
+      hazards = 0;
+      board.bind(8, &hazards, [](void *context, const amdgpu::MemoryWaitScoreboard::Hazard &) {
+        ++*static_cast<unsigned *>(context);
+      });
+      board.check_instruction(*store, *wave);
+      EXPECT_EQ(hazards, offset != 0 ? 1u : 0u);
+    }
+    board.clear();
+    // A coincident store must also execute when DATA1 is outside the VGPR allocation.
+    auto words = ds_words(opcode, 0, 254);
+    std::unique_ptr<Instruction> store(decode_valid(*decoder, words.data()));
+    ASSERT_NE(store, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(store.get(), *wave).succeeded());
+    amdgpu::LocalMemPipeline local;
+    ASSERT_EQ(local.issue(store.release(), *wave), amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(wave->lds().read32(wave->lds_base()), 0x12345678u);
+  }
+}
+
+TEST_P(FlatLdsTransfer, Cdna3DualAddressAccessesRespectTheWorkgroupAllocation) {
+  if (GetParam().first != rocjitsu::IsaFamily::Cdna3) {
+    GTEST_SKIP();
+  }
+  ASSERT_EQ(cu->allocate_lds(1), 0u);
+  const uint32_t allocation = cu->allocate_lds(1);
+  ASSERT_EQ(allocation, 512u);
+  wave->set_lds_base(allocation);
+  wave->set_lds_size(512);
+  wave->set_m0(0xffffffffu);
+  wave->set_exec(1);
+  vector(0, 0, 508);
+  vector(1, 0, 0x11223344);
+  vector(2, 0, 0xaabbccdd);
+  const uint32_t last = allocation + 508;
+  wave->lds().write32(last + 4, 0xdeadbeef);
+  amdgpu::LocalMemPipeline local;
+  auto issue_ds = [&](uint16_t op, uint8_t offset1) {
+    const auto words =
+        cdna3::build_ds(op, {.offset1 = offset1, .addr = 0, .data0 = 1, .data1 = 2, .vdst = 6});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+    ASSERT_EQ(local.issue(inst.release(), *wave), amdgpu::VmAccessOutcome::Complete);
+  };
+  ASSERT_NO_FATAL_FAILURE(issue_ds(cdna3::kDsWrite2B32, 0));
+  EXPECT_EQ(wave->lds().read32(last), 0x11223344u);
+  ASSERT_NO_FATAL_FAILURE(issue_ds(cdna3::kDsWrite2B32, 1));
+  EXPECT_EQ(wave->lds().read32(last + 4), 0xdeadbeefu);
+  ASSERT_NO_FATAL_FAILURE(issue_ds(cdna3::kDsRead2B32, 1));
+  EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 6, 0), 0x11223344u);
+  EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 7, 0), 0u);
+  ASSERT_NO_FATAL_FAILURE(issue_ds(cdna3::kDsWrxchg2RtnB32, 0));
+  EXPECT_EQ(wave->lds().read32(last), 0x11223344u);
+  EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 7, 0), 0x11223344u);
+}
+
 TEST_P(FlatLdsTransfer, LegacyGlobalWidthsAndScalarOrVectorBase) {
-  if (modern())
+  if (modern()) {
     GTEST_SKIP() << "Modern GLOBAL LDS transfers use separate opcodes.";
+  }
   const std::array<uint32_t, 5> expected{0x81, 0xffffff81, 0x8081, 0xffff8081, 0x76548081};
-  for (unsigned kind = 0; kind < 5; ++kind)
+  for (unsigned kind = 0; kind < 5; ++kind) {
     for (bool scalar_base : {false, true}) {
       clear();
       wave->set_exec(0x25);
@@ -244,10 +347,12 @@ TEST_P(FlatLdsTransfer, LegacyGlobalWidthsAndScalarOrVectorBase) {
         memory.write32(0x20000 + lane * 4, 0x76548081);
       }
       ASSERT_NO_FATAL_FAILURE(issue(encoding(kind, 2, true, scalar_base ? 4 : vector_saddr(), -4)));
-      for (unsigned lane = 0; lane < wave->wf_size(); ++lane)
+      for (unsigned lane = 0; lane < wave->wf_size(); ++lane) {
         EXPECT_EQ(wave->lds().read32(128 + 64 + lane * 4),
                   (0x25 & (uint64_t{1} << lane)) ? expected[kind] : 0xcccccccc);
+      }
     }
+  }
 }
 
 TEST_P(FlatLdsTransfer, DestinationBoundsAndNegativeOffsetsDoNotEscapeAllocation) {
@@ -257,8 +362,9 @@ TEST_P(FlatLdsTransfer, DestinationBoundsAndNegativeOffsetsDoNotEscapeAllocation
     wave->set_lds_size(12);
     wave->set_m0(0);
     scalar(4, 8);
-    for (unsigned lane = 0; lane < wave->wf_size(); ++lane)
+    for (unsigned lane = 0; lane < wave->wf_size(); ++lane) {
       memory.write32(0x10000 + (8 + offset) / 4 * wave->wf_size() * 4 + lane * 4, 0x12345678);
+    }
     ASSERT_NO_FATAL_FAILURE(issue(encoding(4, 1, false, 4, offset)));
     for (unsigned a = 0; a < 160; a += 4) {
       const bool written = offset < 0 ? a == 128 || a == 132 : a == 132 || a == 136;
@@ -273,6 +379,24 @@ TEST_P(FlatLdsTransfer, EmptyExecDoesNotTouchLdsOrVgprs) {
   wave->set_m0(0);
   ASSERT_NO_FATAL_FAILURE(issue(encoding(4, 1, true, 127)));
   EXPECT_EQ(wave->lds().read32(128), 0xcccccccc);
+}
+
+TEST_P(FlatLdsTransfer, Cdna2ScratchChecksLogicalBytesBeforeSwizzling) {
+  if (GetParam().first != rocjitsu::IsaFamily::Cdna2) {
+    GTEST_SKIP();
+  }
+  clear();
+  wave->set_exec(3);
+  wave->set_scratch_lane_size(4);
+  vector(2, 0, 0);
+  vector(2, 1, 4);
+  memory.write32(0x10000, 0xabcdef01);
+  memory.write32(0x10000 + 256 + 4, 0xfeedbeef);
+  ASSERT_NO_FATAL_FAILURE(issue(encoding(4, 1, true, 127, 0, false), false));
+  EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 8, 0), 0xabcdef01u);
+  EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 8, 1), 0u);
+  // The dedicated SCRATCH instruction bypasses generic FLAT aperture error checking.
+  EXPECT_EQ(wave->trapsts() & (1u << 8), 0u);
 }
 
 TEST_P(FlatLdsTransfer, OrdinaryScratchLoadsUseSameAddressSelection) {
@@ -306,8 +430,9 @@ TEST_P(FlatLdsTransfer, M0WidthAndPartialDwordBounds) {
   wave->set_lds_size(74);
   wave->set_m0(0x10040);
   scalar(4, 0);
-  for (unsigned lane = 0; lane < 3; ++lane)
+  for (unsigned lane = 0; lane < 3; ++lane) {
     memory.write32(0x10000 + lane * 4, 123);
+  }
   ASSERT_NO_FATAL_FAILURE(issue(encoding(4, 1, false, 4)));
   EXPECT_EQ(wave->lds().read32(128 + 64), modern() ? 0xcccccccc : 123);
   EXPECT_EQ(wave->lds().read32(128 + 68), modern() ? 0xcccccccc : 123);
@@ -321,8 +446,6 @@ TEST_P(FlatLdsTransfer, SegmentDispatchAndInvalidLegacyDestinations) {
       EXPECT_TRUE(decode_fails(*decoder, words.data()));
     }
     if (modern()) {
-      // Preserve the GLOBAL sibling's decoding. Its execution remains
-      // unimplemented and is covered by a separate change (PR #13218).
       auto words = encoding(kind, 2, false, 127);
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
@@ -337,10 +460,11 @@ TEST_P(FlatLdsTransfer, SegmentDispatchAndInvalidLegacyDestinations) {
 }
 
 TEST_P(FlatLdsTransfer, RdnaD16LdsWritesFullDwordsWithoutDestinationDependencies) {
-  if (!rdna())
+  if (!rdna()) {
     GTEST_SKIP() << "This encoding is specific to RDNA1/2.";
+  }
   // LLVM opcode order: UBYTE, UBYTE_HI, SBYTE, SBYTE_HI, SHORT, SHORT_HI.
-  for (unsigned opcode = 32; opcode <= 37; ++opcode)
+  for (unsigned opcode = 32; opcode <= 37; ++opcode) {
     for (unsigned segment : {1u, 2u}) {
       SCOPED_TRACE(testing::Message() << "opcode=" << opcode << " segment=" << segment);
       clear();
@@ -357,14 +481,17 @@ TEST_P(FlatLdsTransfer, RdnaD16LdsWritesFullDwordsWithoutDestinationDependencies
       words[1] = (words[1] & 0x00ffffff) | (255u << 24);
       ASSERT_NO_FATAL_FAILURE(issue(words));
       const uint32_t expected = opcode < 34 ? 0x83 : opcode < 36 ? 0xffffff83 : 0xa783;
-      for (unsigned lane : {0u, 2u})
+      for (unsigned lane : {0u, 2u}) {
         EXPECT_EQ(wave->lds().read32(128 + lane * 4), expected);
+      }
     }
+  }
 }
 
 TEST_P(FlatLdsTransfer, RdnaLlvmEncodingsAndUnsignedGlobalOffsets) {
-  if (!rdna())
+  if (!rdna()) {
     GTEST_SKIP() << "This encoding is specific to RDNA1/2.";
+  }
   clear();
   wave->set_exec(1);
   wave->set_m0(0);
@@ -374,13 +501,13 @@ TEST_P(FlatLdsTransfer, RdnaLlvmEncodingsAndUnsignedGlobalOffsets) {
   EXPECT_EQ(wave->lds().read32(132), 0x11223344);
   ASSERT_NO_FATAL_FAILURE(issue({0xdc304004, 0x087d0002}, false));
   EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 8, 0), 0x11223344);
-  if (GetParam().first == ROCJITSU_CODE_ARCH_RDNA2) {
+  if (GetParam().first == rocjitsu::IsaFamily::Rdna2) {
     memory.write32(0x10000 + wave->wf_size() * 4, 0x55667788);
     vector(0, 0, 0xffffffff);
     ASSERT_NO_FATAL_FAILURE(issue({0xdc304004, 0x087f0000}, false));
     EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 8, 0), 0x55667788);
   }
-  for (bool lds : {false, true})
+  for (bool lds : {false, true}) {
     for (bool scalar_base : {false, true}) {
       vector(2, 0, 0x80000000);
       vector(3, 0, 2);
@@ -397,12 +524,15 @@ TEST_P(FlatLdsTransfer, RdnaLlvmEncodingsAndUnsignedGlobalOffsets) {
       EXPECT_EQ(lds ? wave->lds().read32(128) : cu->read_vgpr(wave->vgpr_alloc().base + 8, 0),
                 0x31415926);
     }
+  }
 }
 
 TEST_P(FlatLdsTransfer, RdnaScratchScalarOffsetIsUnsigned) {
-  if (!rdna())
+  if (!rdna()) {
     GTEST_SKIP() << "CDNA retains its existing scalar-offset arithmetic.";
+  }
   wave->set_exec(1);
+  wave->set_scratch_lane_size(0x80000004);
   scalar(4, 0x80000000);
   auto words = encoding(4, 1, false, 4);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
@@ -414,13 +544,14 @@ TEST_P(FlatLdsTransfer, RdnaScratchScalarOffsetIsUnsigned) {
 }
 
 TEST_P(FlatLdsTransfer, GlobalWideLoadsPreservePaddingInactiveLanesAndVgprs) {
-  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA4)
+  if (GetParam().first != rocjitsu::IsaFamily::Cdna4) {
     GTEST_SKIP() << "Wide GLOBAL LDS loads require CDNA4.";
+  }
   constexpr uint64_t base = 0x123400020000;
-  for (unsigned count : {3u, 4u})
-    for (bool scalar_base : {false, true})
-      for (int offset : {-16, -4, 0, 4, 16})
-        for (uint64_t exec : {uint64_t{0}, uint64_t{0x25}, uint64_t{0x8000000000000025}})
+  for (unsigned count : {3u, 4u}) {
+    for (bool scalar_base : {false, true}) {
+      for (int offset : {-16, -4, 0, 4, 16}) {
+        for (uint64_t exec : {uint64_t{0}, uint64_t{0x25}, uint64_t{0x8000000000000025}}) {
           for (unsigned vdst : {8u, 255u}) {
             SCOPED_TRACE(testing::Message() << count << ',' << scalar_base << ',' << offset << ','
                                             << exec << ',' << vdst);
@@ -437,8 +568,9 @@ TEST_P(FlatLdsTransfer, GlobalWideLoadsPreservePaddingInactiveLanesAndVgprs) {
               vector(3, lane, address >> 32);
               for (unsigned word = 0; word < 4; ++word) {
                 vector(8 + word, lane, 0xdeadbeef);
-                if (word < count)
+                if (word < count) {
                   memory.write32(address + offset + word * 4, 0x12340000 + lane * 16 + word);
+                }
               }
             }
             ASSERT_NO_FATAL_FAILURE(
@@ -454,18 +586,25 @@ TEST_P(FlatLdsTransfer, GlobalWideLoadsPreservePaddingInactiveLanesAndVgprs) {
                         written ? 0x12340000 + lane * 16 + word : 0xcccccccc)
                   << address;
             }
-            for (unsigned lane = 0; lane < wave->wf_size(); ++lane)
-              for (unsigned word = 0; word < 4; ++word)
+            for (unsigned lane = 0; lane < wave->wf_size(); ++lane) {
+              for (unsigned word = 0; word < 4; ++word) {
                 EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 8 + word, lane), 0xdeadbeef);
+              }
+            }
           }
+        }
+      }
+    }
+  }
 }
 
 TEST_P(FlatLdsTransfer, GlobalWideLoadsRespectM0WidthAndWholePayloadBounds) {
-  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA4)
+  if (GetParam().first != rocjitsu::IsaFamily::Cdna4) {
     GTEST_SKIP() << "Wide GLOBAL LDS loads require CDNA4.";
-  for (unsigned count : {3u, 4u})
-    for (uint32_t m0 : {0u, 3u, 0x10003u, 0xfffc0003u})
-      for (int offset : {-16, 0, 16})
+  }
+  for (unsigned count : {3u, 4u}) {
+    for (uint32_t m0 : {0u, 3u, 0x10003u, 0xfffc0003u}) {
+      for (int offset : {-16, 0, 16}) {
         // Include exact-fit and one-byte-short boundaries for the first two lanes.
         for (unsigned allocation_size : {11u, 12u, 15u, 16u, 27u, 28u, 31u, 32u, 44u}) {
           SCOPED_TRACE(testing::Message()
@@ -478,8 +617,9 @@ TEST_P(FlatLdsTransfer, GlobalWideLoadsRespectM0WidthAndWholePayloadBounds) {
           for (unsigned lane = 0; lane < 3; ++lane) {
             vector(2, lane, 0x20000 + lane * 32);
             vector(3, lane, 0);
-            for (unsigned word = 0; word < count; ++word)
+            for (unsigned word = 0; word < count; ++word) {
               memory.write32(0x20000 + lane * 32 + offset + word * 4, 0xabc000 + lane * 16 + word);
+            }
           }
           ASSERT_NO_FATAL_FAILURE(issue(global_wide_lds_encoding(count, 127, offset)));
           for (unsigned address = 0; address < 256; address += 4) {
@@ -487,52 +627,62 @@ TEST_P(FlatLdsTransfer, GlobalWideLoadsRespectM0WidthAndWholePayloadBounds) {
             for (unsigned lane = 0; lane < 3; ++lane) {
               const int relative =
                   static_cast<int>(m0 & 0x3fffcu) + offset + static_cast<int>(lane) * 16;
-              if (relative < 0 || relative + count * 4 > allocation_size)
+              if (relative < 0 || relative + count * 4 > allocation_size) {
                 continue;
-              for (unsigned word = 0; word < count; ++word)
-                if (address == 128 + relative + word * 4)
+              }
+              for (unsigned word = 0; word < count; ++word) {
+                if (address == 128 + relative + word * 4) {
                   expected = 0xabc000 + lane * 16 + word;
+                }
+              }
             }
             EXPECT_EQ(wave->lds().read32(address), expected) << address;
           }
         }
+      }
+    }
+  }
 }
 
 TEST_P(FlatLdsTransfer, GlobalWideLoadsApplyThirteenBitOffsetToLds) {
-  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA4)
+  if (GetParam().first != rocjitsu::IsaFamily::Cdna4) {
     GTEST_SKIP() << "Wide GLOBAL LDS loads require CDNA4.";
+  }
   // Offset 2048 sets bit 11, so it becomes -2048 if only 12 bits are sign-extended.
   constexpr int offset = 2048;
   constexpr unsigned destination = 128 + offset;
   for (unsigned count : {3u, 4u}) {
     SCOPED_TRACE(count);
     clear();
-    for (unsigned word = 0; word < 4; ++word)
+    for (unsigned word = 0; word < 4; ++word) {
       wave->lds().write32(destination + word * 4, 0xcccccccc);
+    }
     cu->flush_all();
     wave->set_lds_size(4096);
     wave->set_exec(1);
     wave->set_m0(0);
     vector(2, 0, 0x20000);
     vector(3, 0, 0);
-    for (unsigned word = 0; word < count; ++word)
+    for (unsigned word = 0; word < count; ++word) {
       memory.write32(0x20000 + offset + word * 4, 0xabc000 + word);
+    }
     ASSERT_NO_FATAL_FAILURE(issue(global_wide_lds_encoding(count, 127, offset)));
-    for (unsigned word = 0; word < 4; ++word)
+    for (unsigned word = 0; word < 4; ++word) {
       EXPECT_EQ(wave->lds().read32(destination + word * 4),
                 word < count ? 0xabc000 + word : 0xcccccccc)
           << word;
+    }
   }
 }
 
 INSTANTIATE_TEST_SUITE_P(Architectures, FlatLdsTransfer,
-                         testing::Values(std::pair{ROCJITSU_CODE_ARCH_CDNA1, 64u},
-                                         std::pair{ROCJITSU_CODE_ARCH_CDNA2, 64u},
-                                         std::pair{ROCJITSU_CODE_ARCH_CDNA3, 64u},
-                                         std::pair{ROCJITSU_CODE_ARCH_CDNA4, 64u},
-                                         std::pair{ROCJITSU_CODE_ARCH_RDNA1, 32u},
-                                         std::pair{ROCJITSU_CODE_ARCH_RDNA1, 64u},
-                                         std::pair{ROCJITSU_CODE_ARCH_RDNA2, 32u},
-                                         std::pair{ROCJITSU_CODE_ARCH_RDNA2, 64u}));
+                         testing::Values(std::pair{rocjitsu::IsaFamily::Cdna1, 64u},
+                                         std::pair{rocjitsu::IsaFamily::Cdna2, 64u},
+                                         std::pair{rocjitsu::IsaFamily::Cdna3, 64u},
+                                         std::pair{rocjitsu::IsaFamily::Cdna4, 64u},
+                                         std::pair{rocjitsu::IsaFamily::Rdna1, 32u},
+                                         std::pair{rocjitsu::IsaFamily::Rdna1, 64u},
+                                         std::pair{rocjitsu::IsaFamily::Rdna2, 32u},
+                                         std::pair{rocjitsu::IsaFamily::Rdna2, 64u}));
 } // namespace
 } // namespace rocjitsu

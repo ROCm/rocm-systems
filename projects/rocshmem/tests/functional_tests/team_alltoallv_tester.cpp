@@ -68,6 +68,8 @@ TEAM_ALLTOALLV_DEF_GEN(unsigned short, ushort)
 TEAM_ALLTOALLV_DEF_GEN(unsigned int, uint)
 TEAM_ALLTOALLV_DEF_GEN(unsigned long, ulong)
 TEAM_ALLTOALLV_DEF_GEN(unsigned long long, ulonglong)
+TEAM_ALLTOALLV_DEF_GEN(__half, half)
+TEAM_ALLTOALLV_DEF_GEN(__hip_bfloat16, bfloat16)
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -86,9 +88,9 @@ __global__ void TeamAlltoallvTest(int loop, int skip,
                                   [[maybe_unused]] ShmemContextType ctx_type,
                                   rocshmem_team_t *teams) {
 
-  // In no-TDM build, rocshmem_query_tdm_lds_bytes() returns 0.
+  // Without an LDS-staged build (USE_LDS_STAGE/USE_TDM) this returns 0.
   extern __shared__ uint8_t tdm_lds[];
-  rocshmem_set_tdm_lds(tdm_lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
   __syncthreads();
 
@@ -176,7 +178,7 @@ void TeamAlltoallvTester<T1>::preLaunchKernel() {
 template <typename T1>
 void TeamAlltoallvTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
                                           int loop, size_t size) {
-  size_t shared_bytes = rocshmem_query_tdm_lds_bytes();
+  size_t shared_bytes = rocshmem_query_lds_stage_bytes();
   int num_elems = size / sizeof(T1);
   size_t disp = 0;
 
@@ -220,6 +222,10 @@ void TeamAlltoallvTester<T1>::resetBuffers(size_t size) {
                     std::is_same<T1, unsigned char>::value) {
         source_buf[idx] = static_cast<T1>('a' + my_pe + pe);
       }
+      else if constexpr (std::is_same<T1, __half>::value ||
+                         std::is_same<T1, __hip_bfloat16>::value) {
+        source_buf[idx] = static_cast<T1>(3.5f + my_pe + pe);
+      }
       else if constexpr (std::is_floating_point<T1>::value) {
         source_buf[idx] = static_cast<T1>(3.14 + my_pe + pe);
       }
@@ -243,8 +249,14 @@ void TeamAlltoallvTester<T1>::verifyResults(size_t size) {
     for(size_t i = 0; i < static_cast<size_t>(dest_nelems[pe]); i++) {
       if (dst[i] != src[i]) {
         std::cerr << "Data validation error at idx " << i << std::endl;
-        std::cerr << "PE " << my_pe << " Got " << dest_buf[i]
-        << ", Expected " << source_buf[i] << std::endl;
+        if constexpr (std::is_same<T1, __half>::value ||
+                      std::is_same<T1, __hip_bfloat16>::value) {
+          std::cerr << "PE " << my_pe << " Got " << static_cast<float>(dst[i])
+                    << ", Expected " << static_cast<float>(src[i]) << std::endl;
+        } else {
+          std::cerr << "PE " << my_pe << " Got " << dst[i]
+                    << ", Expected " << src[i] << std::endl;
+        }
         exit(-1);
       }
     }

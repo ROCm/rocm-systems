@@ -150,7 +150,7 @@ public:
                 }
                 if (num_threads != nullptr) {
                     *num_threads = atoi(argv[i]);
-                    if (*num_threads <= 0 || *num_threads > 32) {
+                    if (*num_threads <= 0 || *num_threads > 64) {
                         ShowHelpAndExit(argv[i], num_threads != nullptr, batch_size != nullptr);
                     }
                 }
@@ -689,7 +689,7 @@ private:
         "-crop  [crop rectangle] - crop rectangle for output in a comma-separated format: left,top,right,bottom - [optional]\n"
         "-d     [device id] - specify the GPU device id for the desired device (use 0 for the first device, 1 for the second device, and so on) [optional - default: 0]\n";
         if (show_threads) {
-            std::cout << "-t     [threads] - number of threads (<= 32) for parallel JPEG decoding - [optional - default: 1]\n";
+            std::cout << "-t     [threads] - number of threads (<= 64) for parallel JPEG decoding - [optional - default: 1]\n";
         }
         if (show_batch_size) {
             std::cout << "-b     [batch_size] - decode images from input by batches of a specified size - [optional - default: 1]\n";

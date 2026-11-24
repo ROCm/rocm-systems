@@ -4,13 +4,64 @@
 // AVX-512 lane permutations across rows, half-waves, and whole waves.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
+#include "common/simd.h"
 #include "register/permlane.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_register.h"
 
 #include <immintrin.h>
 #include <stdint.h>
 
 namespace rocjitsu::arith {
+// Route within normalized groups, retaining the original lane at invalid boundaries.
+// Stage the complete wave before publishing aliases.
+void group_permutation_x86_64_v4(GroupPermutation op, int lanes, uint64_t exec_mask, uint32_t *d,
+                                 const uint32_t *a, uint32_t selector, uint32_t width) {
+  const auto a0 = _mm512_loadu_si512(a);
+  const auto a1 = _mm512_loadu_si512(a + 16);
+  const auto a2 = lanes == 64 ? _mm512_loadu_si512(a + 32) : a0;
+  const auto a3 = lanes == 64 ? _mm512_loadu_si512(a + 48) : a1;
+  auto mask = _mm512_set1_epi32(int(width - 1));
+  auto selected = _mm512_set1_epi32(int(selector));
+  for (int lane = 0; lane < lanes; lane += 16) {
+    auto index =
+        _mm512_add_epi32(_mm512_set1_epi32(lane),
+                         _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15));
+    auto offset = _mm512_and_si512(index, mask);
+    auto address = index;
+    switch (op) {
+    case GroupPermutation::Bcast:
+      address = _mm512_or_si512(_mm512_andnot_si512(mask, index), _mm512_and_si512(selected, mask));
+      break;
+    case GroupPermutation::Up:
+      address =
+          _mm512_mask_sub_epi32(index, _mm512_cmple_epu32_mask(selected, offset), index, selected);
+      break;
+    case GroupPermutation::Down: {
+      auto remaining = _mm512_sub_epi32(_mm512_set1_epi32(int(width)), offset);
+      address = _mm512_mask_add_epi32(index, _mm512_cmplt_epu32_mask(selected, remaining), index,
+                                      selected);
+      break;
+    }
+    case GroupPermutation::Xor: {
+      auto source = _mm512_xor_si512(index, selected);
+      auto upper =
+          _mm512_add_epi32(_mm512_andnot_si512(mask, index), _mm512_set1_epi32(int(width)));
+      if (selector < uint32_t(lanes)) {
+        address = _mm512_mask_mov_epi32(index, _mm512_cmplt_epu32_mask(source, upper), source);
+      }
+      break;
+    }
+    }
+    auto value = _mm512_permutex2var_epi32(a0, address, a1);
+    if (lanes == 64) {
+      auto upper = _mm512_permutex2var_epi32(a2, address, a3);
+      value = _mm512_mask_mov_epi32(value, _mm512_test_epi32_mask(address, _mm512_set1_epi32(32)),
+                                    upper);
+    }
+    _mm512_mask_storeu_epi32(d + lane, __mmask16(exec_mask >> lane), value);
+  }
+}
+
 // Permute source lanes. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
 template <bool Cross, bool Var>
@@ -60,4 +111,22 @@ template void permlane_x86_64_v4<true, false>(uint32_t, uint32_t, uint32_t *, co
 template void permlane_x86_64_v4<true, true>(uint32_t, uint32_t, uint32_t *, const uint32_t *,
                                              const uint32_t *, uint32_t, uint32_t);
 
+// Stage the complete wave before masked stores, including overlapping source ranges.
+void permlane_index_x86_64_v4(int lanes, uint64_t exec_mask, uint32_t *d, const uint32_t *a,
+                              uint32_t group_width) {
+  __m512i result[64 / 16];
+  auto mask = _mm512_set1_epi32(int(group_width - 1));
+  for (int lane = 0; lane < lanes; lane += 16) {
+    auto index =
+        _mm512_add_epi32(_mm512_set1_epi32(lane),
+                         _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15));
+    auto source = _mm512_and_si512(_mm512_loadu_si512(a + lane),
+                                   _mm512_set1_epi32(int(63 & (group_width - 1))));
+    result[lane / 16] =
+        _mm512_slli_epi32(_mm512_or_si512(_mm512_andnot_si512(mask, index), source), 2);
+  }
+  for (int lane = 0; lane < lanes; lane += 16) {
+    _mm512_mask_storeu_epi32(d + lane, __mmask16(exec_mask >> lane), result[lane / 16]);
+  }
+}
 } // namespace rocjitsu::arith

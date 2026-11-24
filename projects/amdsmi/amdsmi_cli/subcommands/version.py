@@ -57,6 +57,8 @@ class VersionCommands:
         self.logger.output["amdgpu_version"] = "N/A"
         self.logger.output["amd_hsmp_driver_version"] = "N/A"
         self.logger.output["nic_driver_version"] = "N/A"
+        # Appended after the older keys so existing CSV columns keep their positions
+        self.logger.output["amdgpu_package"] = "N/A"
 
         if args.gpu_version and not self.helpers.is_driver_loaded("amdgpu"):
             gpu_version_str = "not loaded"
@@ -65,8 +67,9 @@ class VersionCommands:
             try:
                 gpus = amdsmi_interface.amdsmi_get_processor_handles()
                 if isinstance(gpus, list) and len(gpus) > 0:
-                    gpu_version_info = amdsmi_interface.amdsmi_get_gpu_driver_info(gpus[0])
-                    gpu_version_str = gpu_version_info["driver_version"]
+                    gpu_version_info = self.helpers.get_gpu_driver_info(gpus[0])
+                    gpu_version_str = gpu_version_info["driver_full_version"]
+                    self.logger.output["amdgpu_package"] = gpu_version_info["driver_package"]
                 else:
                     gpu_version_str = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
@@ -96,8 +99,8 @@ class VersionCommands:
             self.logger.output["amd_hsmp_driver_version"] = cpu_version_str
 
         nic_version_str = "N/A"
-        if args.nic_version and not (
-            self.helpers.is_driver_loaded("ionic") or self.helpers.is_driver_loaded("bnxt_en")
+        if args.nic_version and not any(
+            self.helpers.is_driver_loaded(driver) for driver in ("ionic", "bnxt_en", "bng_en")
         ):
             nic_version_str = "not loaded"
             self.logger.output["nic_driver_version"] = nic_version_str
@@ -125,6 +128,10 @@ class VersionCommands:
                 human_readable_output = (
                     human_readable_output + f" | amdgpu version: {gpu_version_str}"
                 )
+                if self.logger.output["amdgpu_package"] != "N/A":
+                    human_readable_output += (
+                        f" | amdgpu package: {self.logger.output['amdgpu_package']}"
+                    )
             if args.cpu_version:
                 human_readable_output = (
                     human_readable_output + f" | hsmp version: {cpu_version_str}"

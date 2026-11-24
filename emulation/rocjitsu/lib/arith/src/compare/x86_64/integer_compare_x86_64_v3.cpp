@@ -6,7 +6,7 @@
 
 #include "compare/integer_compare.h"
 #include "compare/predicate.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_compare.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -18,7 +18,7 @@ namespace rocjitsu::arith {
 template <int Bits, bool Signed, unsigned Predicate>
 uint32_t integer_compare_x86_64_v3(uint32_t mode, const uint32_t *const *a,
                                    const uint32_t *const *b) {
-  uint32_t less = 0, equal = 0;
+  __m256i results[4];
   for (int lane = 0; lane < 32; lane += 8) {
     auto av = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a[Bits == 64 ? 1 : 0] + lane));
     auto bv = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(b[Bits == 64 ? 1 : 0] + lane));
@@ -42,10 +42,26 @@ uint32_t integer_compare_x86_64_v3(uint32_t mode, const uint32_t *const *a,
       lt = _mm256_or_si256(lt, _mm256_and_si256(eq, low_lt));
       eq = _mm256_and_si256(eq, _mm256_cmpeq_epi32(al, bl));
     }
-    less |= uint32_t(_mm256_movemask_ps(_mm256_castsi256_ps(lt))) << lane;
-    equal |= uint32_t(_mm256_movemask_ps(_mm256_castsi256_ps(eq))) << lane;
+    __m256i bits;
+    if constexpr (Predicate == CompareLess || Predicate == CompareGreaterEqual) {
+      bits = lt;
+    } else if constexpr (Predicate == CompareEqual || Predicate == CompareNotEqual) {
+      bits = eq;
+    } else {
+      bits = _mm256_or_si256(lt, eq);
+    }
+    results[lane / 8] = bits;
   }
-  return integer_compare_result<Predicate>(less, equal);
+  auto a01 = _mm256_packs_epi32(results[0], results[1]),
+       a23 = _mm256_packs_epi32(results[2], results[3]);
+  auto bytes = _mm256_packs_epi16(a01, a23);
+  bytes = _mm256_permutevar8x32_epi32(bytes, _mm256_setr_epi32(0, 4, 1, 5, 2, 6, 3, 7));
+  auto mask = uint32_t(_mm256_movemask_epi8(bytes));
+  if constexpr (Predicate == CompareGreaterEqual || Predicate == CompareNotEqual ||
+                Predicate == CompareGreater) {
+    return ~mask;
+  }
+  return mask;
 }
 
 template uint32_t

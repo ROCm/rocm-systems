@@ -163,6 +163,15 @@ struct testColl {
   // Other collectives leave it nullptr via aggregate initialization, so no other
   // struct needs to change.
   testResult_t (*deviceTime)(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, double* outDeltaSec);
+  // Optional: for -D != 0 runs, report which device-kernel tier actually serves a
+  // message of `count` elements, given the env-resolved thresholds the kernel uses.
+  // Writes both columns (each <=8 chars, fitting the fixed layout): algo names the
+  // movement pattern with a "T-" prefix marking a rccl-Test device kernel (e.g.
+  // T-DIRECT / T-SAG / T-RING), proto names the transport (GIN / LSA / LL /
+  // LSA/GIN). NULL for collectives without a tiered device kernel. deviceImpl is
+  // the -D value.
+  testResult_t (*getDeviceImplInfo)(int deviceImpl, size_t count, ncclDataType_t type,
+      int nRanks, int lsaSize, char* algoOut, char* protoOut);
 };
 extern struct testColl allReduceTest;
 extern struct testColl allGatherTest;
@@ -205,10 +214,17 @@ struct testEngine {
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
   testResult_t (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs, ncclComm_t comm);
+  /* Optional: fills up to testMaxDevComms reqs (preset to NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER) for
+   * one communicator; *nReqs == 0 skips, testNotImplemented falls back to getDevCommRequirements. */
+  testResult_t (*getMultiDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs, int* nReqs, ncclComm_t comm);
 #elif defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   bool (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs);
 #endif
 };
+
+// DevComm slots per GPU: threadArgs::devComms holds gpu i's DevComms at
+// [i*testMaxDevComms, i*testMaxDevComms + nDevComms).
+constexpr int testMaxDevComms = 2;
 
 extern struct testEngine ncclTestEngine;
 
@@ -240,6 +256,7 @@ struct threadArgs {
   ncclComm_t* comms;
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   ncclDevComm* devComms;
+  int nDevComms;  // DevComms created per GPU; 0 when the device implementation skipped
 #endif
   cudaStream_t* streams;
   void** bias;
@@ -273,6 +290,12 @@ struct threadArgs {
   char devtimeAugmentLine[512];
 #endif
 };
+
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+static inline ncclDevComm* testDevComms(struct threadArgs* args, int gpu) {
+  return args->devComms + gpu * testMaxDevComms;
+}
+#endif
 
 typedef testResult_t (*threadFunc_t)(struct threadArgs* args);
 struct testThread {

@@ -15,6 +15,13 @@ on:
         description: 'Runner label to run on.'
         type: string
         required: true
+      shared_scratch:
+        description: >-
+          Shared-filesystem scratch root when compute nodes cannot see the
+          runner workspace. Empty keeps RUNNER_TEMP.
+        type: string
+        required: false
+        default: ''
       job:
         description: 'coco job key to run.'
         type: string
@@ -27,7 +34,7 @@ on:
         description: 'ROCm/tRCCL git ref (commit, tag, or branch) to check out the harness at.'
         type: string
         required: false
-        default: '1.4.x'
+        default: '1.5.x'
       trigger_kind:
         description: 'coco --trigger-kind, recorded against the run. Required, so a caller that does not wire it through fails rather than mislabelling its run.'
         type: string
@@ -126,11 +133,11 @@ jobs:
       # ~/.cache/pip is on a small NFS home quota, here and on the compute nodes.
       PIP_NO_CACHE_DIR: '1'
       UV_NO_CACHE: '1'
-      # TW runners' workspace is a runner-local mount the compute nodes cannot see, but
-      # coco's sysinfo probe runs this venv's python on a compute node. Without a venv on
-      # the shared filesystem the probe exits 127 and every snapshot falls back to the
-      # runner VM's hardware. Empty on every other cluster, which keep RUNNER_TEMP.
-      COCO_SHARED_SCRATCH: ${{ startsWith(inputs.runs_on, 'tw-') && '/share_nfs/coco/ci-scratch' || '' }}
+      UV_VERSION: 0.9.26
+      UV_SHA256: 30ccbf0a66dc8727a02b0e245c583ee970bdafecf3a443c1686e1b30ec4939e8
+      # coco runs this venv on a compute node, which cannot see a TW or Crusoe
+      # workspace. Empty on other clusters, which keep RUNNER_TEMP.
+      COCO_SHARED_SCRATCH: ${{ inputs.shared_scratch }}
     steps:
       # In RUNNER_TEMP, so no step deletes NFS files coco may still hold open.
       # COCO_SHARED_SCRATCH replaces it where compute nodes must run the venv.
@@ -144,8 +151,15 @@ jobs:
           base="${RUNNER_TEMP}"
           if [[ -n "${COCO_SHARED_SCRATCH}" ]]; then
             mkdir -p "${COCO_SHARED_SCRATCH}"
-            # Concurrent jobs share this root and a run lasts under 2 days, so only
-            # directories older than that can be stale; never delete a live one.
+            # The venv under here runs with the DB URL and HF token, so the root
+            # must be ours and closed to every other account.
+            if [[ -L "${COCO_SHARED_SCRATCH}" || ! -O "${COCO_SHARED_SCRATCH}" ]]; then
+              echo "::error::${COCO_SHARED_SCRATCH} must be a real directory owned by the runner user."
+              exit 1
+            fi
+            chmod 700 "${COCO_SHARED_SCRATCH}"
+            # Concurrent jobs share this root. A run lasts under 2 days, so a 5-day
+            # cutoff never deletes a live one.
             find "${COCO_SHARED_SCRATCH}" -maxdepth 1 -name 'coco.*' -mtime +5 -exec rm -rf {} + || true
             base="${COCO_SHARED_SCRATCH}"
           fi
@@ -183,18 +197,27 @@ jobs:
         run: |
           set -euo pipefail
           # Never activated; invoked by absolute path.
+          # Fetch the uv release binary directly so runners do not need python3-venv.
+          mkdir -p "${CI_SCRATCH}/uv-boot/bin"
+          tarball="${CI_SCRATCH}/uv-boot/uv.tar.gz"
+          curl -fsSL --retry 3 --retry-all-errors -o "${tarball}" \
+            "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${UV_SHA256}  ${tarball}" | sha256sum -c -
+          tar -xzf "${tarball}" -C "${CI_SCRATCH}/uv-boot/bin" --strip-components=1
+          rm -f "${tarball}"
           if [[ -n "${COCO_SHARED_SCRATCH}" ]]; then
-            # The runner and the compute nodes run different system Pythons (3.12 vs
-            # 3.10), so use a uv-managed 3.10 kept next to the venv, and a regular install
-            # so the venv holds coco itself rather than pointing back at the workspace.
-            python3 -m venv "${CI_SCRATCH}/uv-boot"
-            "${CI_SCRATCH}/uv-boot/bin/python3" -m pip install --quiet uv
+            # Runner is 3.12, compute nodes 3.10/3.12: uv-managed 3.10, non-editable install.
             UV_PYTHON_INSTALL_DIR="${CI_SCRATCH}/python" \
-              "${CI_SCRATCH}/uv-boot/bin/uv" venv --python 3.10 "${COCO_VENV}"
+              "${CI_SCRATCH}/uv-boot/bin/uv" venv --python-preference only-managed \
+              --python 3.10 "${COCO_VENV}"
+            # setuptools only packages files inside the package directory;
+            # stage a fresh copy so the non-editable wheel carries configs/.
+            rm -rf coco/configs
+            cp -r configs coco/configs
             "${CI_SCRATCH}/uv-boot/bin/uv" pip install --python "${COCO_VENV}/bin/python3" .
           else
-            python3 -m venv "${COCO_VENV}"
-            "${COCO_VENV}/bin/python3" -m pip install -e .
+            "${CI_SCRATCH}/uv-boot/bin/uv" venv "${COCO_VENV}"
+            "${CI_SCRATCH}/uv-boot/bin/uv" pip install --python "${COCO_VENV}/bin/python3" -e .
           fi
           # Surfaces a packaging problem here rather than after the queue.
           "${COCO_VENV}/bin/coco" --help > /dev/null
@@ -248,6 +271,11 @@ jobs:
           MAD_SECRETS_HFTOKEN: ${{ secrets.HF_TOKEN || '' }}
         run: |
           set -euo pipefail
+          # Systemd runner services do not source /etc/profile.d/*.sh (e.g. spur.sh on Crusoe).
+          if [[ -r /etc/profile.d/spur.sh ]]; then
+            # shellcheck disable=SC1091
+            source /etc/profile.d/spur.sh
+          fi
           if [[ -z "${COCO_DATABASE_URL:-}" ]]; then
             echo "::warning::RCCL_COCO_DB_URL is empty; this run will not publish results to the coco database."
           fi

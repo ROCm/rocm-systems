@@ -8,22 +8,14 @@
 Testcase Scenarios :
  Regression for ROCM-24799.
 
- The fix promotes GraphNode::nextID and Graph::nextID from plain
- `static int` to std::atomic<int>, so the read-modify-write inside
- the constructors is indivisible. Without the fix, concurrent graph
- construction across multiple threads races on the shared counter and
- produces duplicate id_ values; intra-graph duplicates then truncate
- Graph::FindPathsDFS and silently drop nodes from the dispatched
- packet.
-
  Tests in this file:
-   - ConcurrentConstruct_NextIDRace: per-thread graph, asserts every
-     GraphNode::id_ is unique via hipGraphDebugDotPrint readback.
-   - ConcurrentCreate_GraphIDRace:   companion for Graph::nextID,
+   - ConcurrentConstruct_LocalIDSequence: per-thread graph, asserts every
+     graph independently assigns node IDs 0..N-1.
+   - ConcurrentCreate_GraphIDRace: companion for Graph::nextID,
      asserts every Graph::id_ is unique via the same channel.
    - ConcurrentConstruct_LaunchDropSmoke: per-thread linear-chain of
      memset nodes; launches and checks for any dropped node via
-     sentinel buffer (the customer's exact symptom path).
+     sentinel buffer.
 */
 #include <hip_test_common.hh>
 
@@ -49,8 +41,7 @@ void BuildAndDumpGraph(std::atomic<int>* start_gate, std::string dot_path,
   hipGraph_t graph{};
   HIP_CHECK_THREAD(hipGraphCreate(&graph, 0));
 
-  // Release the gate so every thread enters the AddNode loop at the same
-  // moment, maximising concurrent nextID++ contention.
+  // Release the gate so every thread enters the AddNode loop at the same moment.
   start_gate->fetch_add(1, std::memory_order_release);
   while (start_gate->load(std::memory_order_acquire) < kThreads) {
     std::this_thread::yield();
@@ -63,9 +54,8 @@ void BuildAndDumpGraph(std::atomic<int>* start_gate, std::string dot_path,
 
   HIP_CHECK_THREAD(hipGraphDebugDotPrint(graph, dot_path.c_str(), 0));
 
-  // hipGraphDebugDotPrint emits one "graph_<G>_node_<id>"[ declaration
-  // line per GraphNode. <id> is GraphNode::id_; if two nodes share id_,
-  // two matching declarations land in the file.
+  // hipGraphDebugDotPrint emits one "graph_<G>_node_<id>" declaration
+  // per GraphNode, in graph insertion order.
   std::ifstream in(dot_path);
   std::string line;
   std::regex decl_re(R"(\"graph_\d+_node_(\d+)\"\[)");
@@ -85,10 +75,8 @@ void BuildAndDumpGraph(std::atomic<int>* start_gate, std::string dot_path,
 }  // namespace
 
 /**
- Companion for the second fixed counter: Graph::nextID. Concurrent
- hipGraphCreate calls race on the global counter; pre-fix two Graph
- objects can be assigned the same id_. Detection uses
- hipGraphDebugDotPrint's "subgraph cluster_<id>" token. Threads race
+ Concurrent hipGraphCreate calls must assign unique graph IDs. Detection
+ uses hipGraphDebugDotPrint's "subgraph cluster_<id>" token. Threads race
  in a tight hipGraphCreate burst (phase 1), then a single thread dumps
  each graph and extracts the cluster id (phase 2), and global
  uniqueness is asserted.
@@ -149,7 +137,8 @@ HIP_TEST_CASE(Unit_hipGraph_ConcurrentCreate_GraphIDRace) {
   }
 }
 
-HIP_TEST_CASE(Unit_hipGraph_ConcurrentConstruct_NextIDRace) {
+// Build one graph per thread and verify that each graph assigns local IDs 0..N-1.
+HIP_TEST_CASE(Unit_hipGraph_ConcurrentConstruct_LocalIDSequence) {
   std::atomic<int> start_gate{0};
   std::vector<std::vector<int>> per_thread_ids(kThreads);
   std::vector<std::thread> workers;
@@ -165,18 +154,11 @@ HIP_TEST_CASE(Unit_hipGraph_ConcurrentConstruct_NextIDRace) {
   for (auto& w : workers) w.join();
   HIP_CHECK_THREAD_FINALIZE();
 
-  // Aggregate id counts across all threads. Any count > 1 is a
-  // duplicate id (intra- or inter-graph) and direct evidence of the
-  // race on nextID.
-  std::unordered_map<int, int> count_across;
   for (int t = 0; t < kThreads; ++t) {
     REQUIRE(static_cast<int>(per_thread_ids[t].size()) == kNodesPerThread);
-    for (int id : per_thread_ids[t]) {
-      ++count_across[id];
+    for (int i = 0; i < kNodesPerThread; ++i) {
+      REQUIRE(per_thread_ids[t][i] == i);
     }
-  }
-  for (auto& kv : count_across) {
-    REQUIRE(kv.second == 1);
   }
 }
 
@@ -187,8 +169,7 @@ HIP_TEST_CASE(Unit_hipGraph_ConcurrentConstruct_NextIDRace) {
  to classic that would mask drops). Each memset writes a unique
  non-sentinel value into a slot of a sentinel-filled device buffer.
  After launch, any slot still holding the sentinel was dropped by
- FindPathsDFS due to a duplicate id earlier in the chain. Independent
- of hipGraphDebugDotPrint output format.
+ graph traversal. Independent of hipGraphDebugDotPrint output format.
 */
 HIP_TEST_CASE(Unit_hipGraph_ConcurrentConstruct_LaunchDropSmoke) {
   constexpr uint32_t kSentinel = 0xDEADBEEFu;

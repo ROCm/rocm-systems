@@ -5,13 +5,14 @@
 #include <cstdio>
 #include <dlfcn.h>
 
-namespace rocjitsu::amdgpu {
-class Wavefront;
+namespace rocjitsu {
+class ThreadContext;
 }
 
 int main(int argc, char **argv) {
-  if (argc != 3)
+  if (argc != 3) {
     return 2;
+  }
   // The interposer owns process-lifetime state. Keep it mapped through exit,
   // as it is during normal preloaded execution.
   void *core = ::dlopen(argv[1], RTLD_NOW | RTLD_GLOBAL | RTLD_NODELETE);
@@ -24,7 +25,7 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "register observer load failed: %s\n", ::dlerror());
     return 1;
   }
-  using Probe = void (*)(rocjitsu::amdgpu::Wavefront *, uint32_t, uint32_t);
+  using Probe = void (*)(rocjitsu::ThreadContext *, uint32_t, uint32_t);
   auto probe = reinterpret_cast<Probe>(::dlsym(observer, "rj_probe_register_observer"));
   if (!probe) {
     std::fprintf(stderr, "register observer entry point missing: %s\n", ::dlerror());

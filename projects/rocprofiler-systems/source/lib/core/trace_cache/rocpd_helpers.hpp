@@ -6,7 +6,7 @@
 #include "core/agent.hpp"
 
 #include <cstddef>
-#include <profiler-hub/writer_types.hpp>
+#include <profiler-hub/cpp/writer_types.hpp>
 
 #include <optional>
 #include <string>

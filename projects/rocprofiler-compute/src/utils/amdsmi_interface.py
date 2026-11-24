@@ -4,9 +4,8 @@
 import functools
 import os
 import sys
-from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 
 from utils.logger import (
     console_debug,
@@ -114,7 +113,7 @@ def get_mem_max_clock(device: Any, amdsmi: Any) -> float:  # noqa: ANN401
     default_return=("N/A", "N/A", "N/A"),
     warning_label="gpu model info",
 )
-def get_gpu_model(device: Any, amdsmi: Any) -> tuple[str, str, str]:  # noqa: ANN401
+def get_gpu_model(device: Any, amdsmi: Any) -> Tuple[str, str, str]:  # noqa: ANN401
     """Get GPU model related names."""
     gpu_model_info = (
         amdsmi.amdsmi_get_gpu_board_info(device)["product_name"],
@@ -195,7 +194,7 @@ def get_gpu_vram_bit_width(device: Any, amdsmi: Any) -> Optional[int]:  # noqa: 
 @functools.partial(
     _per_device_query, default_return=None, warning_label="GPU cache info"
 )
-def get_gpu_cache_info(device: Any, amdsmi: Any) -> dict[str, Any]:  # noqa: ANN401
+def get_gpu_cache_info(device: Any, amdsmi: Any) -> Dict[str, Any]:  # noqa: ANN401
     """Get the GPU cache level information."""
     cache_info = amdsmi.amdsmi_get_gpu_cache_info(device)
     console_debug(f"GPU Cache Info: {cache_info}")

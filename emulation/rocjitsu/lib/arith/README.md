@@ -1,9 +1,11 @@
 # Rocjitsu Arithmetic Library
 
-Dense CDNA matrices include gfx942/gfx950 FP16/BF16 MFMA and gfx1250
-16x16x32 FP16/BF16 WMMA, including packed and mixed BF16F32 outputs.
-These use established approximate arithmetic in Loose and Compatibility;
-strict bit-exact modes remain unsupported for these new forms.
+Dense CDNA matrices include gfx942/gfx950 FP16/BF16 and FP8/BF8 MFMA,
+gfx942 XF32 MFMA, and gfx1250 FP16/BF16 and OCP FP8/BF8 WMMA,
+including packed FP16/BF16 and mixed BF16F32 outputs.
+Loose and Compatibility use established approximate arithmetic. The 20 dense
+gfx942 forms also support strict bit-exact modes when CBSZ, ABID and BLGP are
+zero and `FP16_OVFL` is clear; the gfx950 and gfx1250 forms remain approximate.
 
 The Rocjitsu Arithmetic Library (`rj-arith`) provides a synchronous C interface to GPU arithmetic. Each call executes one GPU instruction for an entire wave on the
 calling CPU thread. The library includes matrix instructions, floating-point arithmetic, dot products, conversions, math functions, comparisons, integer arithmetic, scalar arithmetic, dual-issue arithmetic, graphics arithmetic and register/lane routing, with portable code and x86 SIMD paths.

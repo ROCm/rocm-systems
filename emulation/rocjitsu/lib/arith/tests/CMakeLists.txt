@@ -20,7 +20,17 @@ function(rj_arith_add_test target source)
     endif()
 endfunction()
 
-rj_arith_add_test(rj_arith_mfma_half_test mfma/mfma_half_test.cpp)
+rj_arith_add_test(rj_arith_gfx1250_binary_test fp/gfx1250_binary_test.cpp)
+
+rj_arith_add_test(rj_arith_packed_u64_gfx1251_test integer/packed_u64_gfx1251_test.cpp)
+rj_arith_add_test(rj_arith_sparse_matrix_i8_test mfma/sparse_matrix_i8_test.cpp)
+rj_arith_add_test(rj_arith_matrix_i8_test mfma/matrix_i8_test.cpp)
+rj_arith_add_test(rj_arith_mfma_f64_test mfma/mfma_f64_test.cpp)
+rj_arith_add_test(rj_arith_mfma_floating_test mfma/mfma_floating_test.cpp)
+rj_arith_add_test(rj_arith_mfma_fp8_test mfma/mfma_fp8_test.cpp)
+rj_arith_add_test(rj_arith_mfma_gfx942_exact_test mfma/gfx942_exact_test.cpp)
+rj_arith_add_test(rj_arith_wmma_gfx1250_f32_test wmma/gfx1250_f32_test.cpp)
+rj_arith_add_test(rj_arith_wmma_gfx1250_fp8_test wmma/gfx1250_fp8_test.cpp)
 rj_arith_add_test(rj_arith_wmma_gfx1250_half_test wmma/gfx1250_half_test.cpp)
 
 # One explicit source, executable and arithmetic test per instruction.
@@ -102,14 +112,19 @@ foreach(
         v_div_scale
         v_fma_dx9_zero
         v_fma
+        v_fma64_variants
+        v_mad_f16
         v_fma_mix
+        v_fma_mix_bf16
         v_fmaak
         v_fmac
         v_fmamk
         v_exponent
         v_min_max_med3
+        v_min_max_med3_cdna
         v_min_max_med3_num
         v_min_max
+        v_min_max_cdna
         v_min_max_num
         v_minimum_maximum3
         v_minimum_maximum
@@ -117,9 +132,15 @@ foreach(
         v_minmax_maxmin
         v_minmax_maxmin_num
         v_mul_dx9_zero_f32
+        v_mul_legacy_f32
         v_mul
+        v_mad_mix
+        v_mad_mix_gfx908
         v_pk_add_mul_f16
+        v_pk_add_mul_f32
+        v_pk_bf16
         v_pk_fma_f16
+        v_pk_fma_f32
         v_pk_fmac_f16
         v_pk_selection_f16
         v_rcp_rsq_sqrt_f64
@@ -135,6 +156,9 @@ foreach(
     IN
     ITEMS
         integer_pack
+        bf16
+        float16_packed
+        nibble_pack
         byte
         float16
         float32
@@ -143,13 +167,22 @@ foreach(
         packed
         fp8_widen
         fp8_narrow
+        scaled_widen
+        wide_scaled_widen
+        scaled_fp8_narrow
+        scaled_fp4_narrow
+        wide_scaled_narrow
 )
     set(target "rj_arith_conversion_${family}_test")
     rj_arith_add_test(${target} conversion/${family}_test.cpp)
 endforeach()
 
 # Dot-product formats retain family-specific arithmetic and status expectations.
-foreach(family IN ITEMS integer fp8 half dot2)
+foreach(
+    family
+    IN
+    ITEMS integer fp8 half dot2 cdna
+)
     set(target "rj_arith_dot_${family}_test")
     rj_arith_add_test(${target} dot/${family}_test.cpp)
 endforeach()
@@ -164,7 +197,16 @@ endforeach()
 foreach(
     family
     IN
-    ITEMS move_cndmask swap ds permlane relative lane
+    ITEMS
+        move_cndmask
+        pair_move
+        swap
+        ds
+        permlane
+        relative
+        lane
+        packed_permute
+        screen_partition
 )
     set(target "rj_arith_register_${family}_test")
     rj_arith_add_test(${target} register/${family}_test.cpp)
@@ -181,7 +223,7 @@ foreach(
 endforeach()
 
 # VOPD wrappers retain the ordinary instructions' arithmetic and status contracts.
-foreach(family IN ITEMS alu fused dot)
+foreach(family IN ITEMS alu fused dot gfx1250)
     set(target "rj_arith_dual_${family}_test")
     rj_arith_add_test(${target} dual/${family}_test.cpp)
 endforeach()
@@ -190,7 +232,9 @@ endforeach()
 rj_arith_add_test(rj_arith_cpu_test common/cpu_test.cpp)
 target_compile_definitions(
     rj_arith_cpu_test
-    PRIVATE RJ_ARITH_IMPL_NAMESPACE=test_cpu
+    PRIVATE
+        RJ_ARITH_IMPL_NAMESPACE=test_cpu
+        "$<FILTER:$<TARGET_PROPERTY:rj_arith,COMPILE_DEFINITIONS>,INCLUDE,^RJ_ARITH_HAVE_>"
 )
 add_subdirectory(headers)
 
@@ -214,6 +258,13 @@ if(UNIX AND CMAKE_NM AND RJ_ARITH_ENABLE_X86_64)
     )
 endif()
 
+rj_arith_add_test(rj_arith_mfma_mixed_test mfma/mfma_mixed_test.cpp)
+
+rj_arith_add_test(rj_arith_wmma_gfx1250_mixed_test wmma/gfx1250_mixed_test.cpp)
+rj_arith_add_test(rj_arith_smfmac_float_test mfma/smfmac_float_test.cpp)
+
+rj_arith_add_test(rj_arith_swmmac_gfx1250_float_test wmma/gfx1250_sparse_float_test.cpp)
+
 # Related comparison predicates share a binary; every entry point has its own test.
 foreach(
     family
@@ -225,6 +276,7 @@ foreach(
         class
         float_equality
         float_ordered
+        float_gfx1150
         float_unordered
 )
     set(target "rj_arith_compare_${family}_test")
@@ -237,6 +289,8 @@ foreach(
     IN
     ITEMS
         half_binary
+        integer64
+        byte_shift
         half_ternary
         add
         multiply
@@ -247,7 +301,7 @@ foreach(
         boolean
         mad
         packed_binary
-        packed_mad
+        packed_ternary
         shift
         sad
         carry
@@ -278,6 +332,7 @@ foreach(
         state
         relative
         pseudo
+        gfx1150_fp
 )
     set(target "rj_arith_scalar_${family}_test")
     rj_arith_add_test(${target} scalar/${family}_test.cpp)

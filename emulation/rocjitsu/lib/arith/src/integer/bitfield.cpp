@@ -6,9 +6,10 @@
 
 #include "integer/bitfield.h"
 #include "common/bits.h"
-#include "common/internal.h"
+#include "common/validation.h"
+#include "common/wave_alignment.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_integer.h"
 
 #include <stdint.h>
 
@@ -24,7 +25,7 @@ template <rocjitsu::arith::Bitfield Op> uint32_t evaluate(uint32_t a, uint32_t b
       return (a >> offset) & field_mask;
     }
 
-    // rocjitsu's simd_bfe_i32 sign-extends A before extracting: fields
+    // The inherited model sign-extends A before extracting: fields
     // crossing bit 31 include copies of A's sign bit.
     uint32_t sign = 0u - (a >> 31);
     uint32_t field = (((a ^ sign) >> offset) ^ sign) & field_mask;
@@ -102,14 +103,17 @@ int bitfield(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const 
       cp = high_counts;
     }
   }
+  [[maybe_unused]] const auto level = rocjitsu::arith::wave_cpu_level(
+      flags, Op == rocjitsu::arith::Bitfield::Permute || Op == rocjitsu::arith::Bitfield::Reverse ||
+                 Op == rocjitsu::arith::Bitfield::Mask || rocjitsu::arith::aligned_for_512(a[0]));
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V4) {
     rocjitsu::arith::bitfield_x86_64_v4<Op>(exec_mask, d[0], a[0], bp, cp);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V3) {
     rocjitsu::arith::bitfield_x86_64_v3<Op>(exec_mask, d[0], a[0], bp, cp);
     return RJ_ARITH_SUCCESS;
   }

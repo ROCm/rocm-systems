@@ -83,21 +83,21 @@ std::string cxa_demangle(const std::string& mangled_name, int* status)
 }
 }  // namespace
 
+std::string_view strip_kernel_descriptor_suffix(std::string_view name) noexcept
+{
+    constexpr std::string_view kKernelDescriptorSuffix = ".kd";
+    if (name.size() > kKernelDescriptorSuffix.size() &&
+        name.substr(name.size() - kKernelDescriptorSuffix.size()) == kKernelDescriptorSuffix)
+        name.remove_suffix(kKernelDescriptorSuffix.size());
+    return name;
+}
+
 std::string format_kernel_name(const char* mangled_name)
 {
     if (mangled_name == nullptr)
         return std::string{};
 
-    auto name = std::string{mangled_name};
-    // Kernel descriptor symbols carry a ".kd" suffix that does not demangle.
-    constexpr std::string_view kKernelDescriptorSuffix = ".kd";
-    if (name.size() > kKernelDescriptorSuffix.size() &&
-        name.compare(name.size() - kKernelDescriptorSuffix.size(),
-                     kKernelDescriptorSuffix.size(),
-                     kKernelDescriptorSuffix) == 0)
-    {
-        name.erase(name.size() - kKernelDescriptorSuffix.size());
-    }
+    const auto name = std::string{strip_kernel_descriptor_suffix(mangled_name)};
 
     int demangle_status = 0;
     return cxa_demangle(name, &demangle_status);

@@ -5,11 +5,11 @@
 // Owns public entry points and their validation/dispatch policy.
 
 #include "common/alu.h"
-#include "common/internal.h"
 #include "common/simd.h"
+#include "common/validation.h"
 #include "fp/fma_scalar.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <stdint.h>
 

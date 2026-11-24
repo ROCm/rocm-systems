@@ -98,6 +98,18 @@ void note_unreplayable(const char* api, const char* reason);
 // Thread-safe. Skips the write when the same bytes are already in this archive.
 Hash128 write_blob(const void* data, size_t len, bool capped = true);
 
+// write_blob() for a caller that has hashed `data` with hash_bytes(). The
+// caller must not change `data` in between, or the blob differs from its name.
+Hash128 write_blob_hashed(const void* data, size_t len, Hash128 h, bool capped = true);
+
+// The hash write_blob() names `data` by, without writing anything.
+Hash128 hash_bytes(const void* data, size_t len);
+
+// True when write_blob() of `len` bytes hashing to `h` would write nothing and
+// return `h`: the blob is already in this archive. Takes g_file_mu, then
+// g_blob_mu, one at a time.
+bool blob_written(Hash128 h, size_t len);
+
 // Write a code object (.hsaco) blob. Returns hash, or {} as write_blob() does.
 Hash128 write_code_object(const void* image, size_t image_size);
 

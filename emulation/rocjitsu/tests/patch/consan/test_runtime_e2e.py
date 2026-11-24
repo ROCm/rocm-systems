@@ -41,6 +41,166 @@ class RuntimeIntegration(unittest.TestCase):
                     (driver.directory / 'prepare.stderr').read_text(), 'rejected'
                 )
 
+    def test_grouped_scenarios_keep_their_original_fixtures(self):
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            source = build / 'source'
+            source.mkdir()
+            (build / 'CMakeCache.txt').write_text(
+                f'CMAKE_HOME_DIRECTORY:INTERNAL={source}\n'
+            )
+            binaries = {}
+            for name in ('prepare', 'runner', 'inspect', 'plugin'):
+                binaries[name] = build / name
+                binaries[name].write_bytes(b'test driver input')
+            fixtures = build / 'fixtures'
+            for gpu, wave_size in (
+                ('gfx942', 64),
+                ('gfx950', 64),
+                ('gfx1100', 32),
+                ('gfx1100', 64),
+                ('gfx1201', 32),
+                ('gfx1201', 64),
+                ('gfx1250', 32),
+            ):
+                target = fixtures / 'targets' / gpu / f'wave{wave_size}'
+                target.mkdir(parents=True)
+                for number in (1, 2, 3):
+                    (target / f'group-{number}.hsaco').write_bytes(
+                        b'fixture selection only'
+                    )
+                cases = [
+                    ('grouped_disjoint', 1),
+                    ('grouped_race', 3),
+                    ('grouped_repeat', 2),
+                    ('grouped_barrier', 2),
+                ]
+                for case, number in cases:
+                    with self.subTest(gpu=gpu, wave_size=wave_size, case=case):
+                        args = argparse.Namespace(
+                            **binaries,
+                            source=source,
+                            fixtures=fixtures,
+                            root=build / 'evidence',
+                            case=case,
+                            fixture_kind='assembly',
+                            target=gpu,
+                            wave_size=wave_size,
+                            threads=2 * wave_size + 1,
+                            workgroups=4,
+                            launcher=None,
+                            test_statistics=False,
+                        )
+                        driver = Driver(args)
+                        with mock.patch.object(
+                            driver,
+                            'prepare_original',
+                            side_effect=RuntimeError('stop before preparation'),
+                        ) as prepare:
+                            with self.assertRaisesRegex(
+                                RuntimeError, 'stop before preparation'
+                            ):
+                                driver.execute()
+                        prepare.assert_called_once_with(
+                            target / f'group-{number}.hsaco',
+                            driver.directory / 'original.hsaco',
+                        )
+
+    def test_wave64_grouped_rows_include_the_partial_third_wave(self):
+        with tempfile.TemporaryDirectory() as directory:
+            driver = Driver(
+                argparse.Namespace(
+                    root=Path(directory),
+                    case='grouped_disjoint',
+                    threads=129,
+                    wave_size=64,
+                    workgroups=4,
+                )
+            )
+            rows = []
+            for group in range(4):
+                for wave in range(3):
+                    rows.append(
+                        {
+                            'serial': 1,
+                            'workgroup_x': group,
+                            'wave': wave,
+                            'status': 3,
+                            'loss': 0,
+                            'final_sequence': 2,
+                            'records': [
+                                {
+                                    'site': site,
+                                    'sequence': site + 1,
+                                    'offset': wave * 4,
+                                    'commit': 0x43534143,
+                                    'flags': 1,
+                                    'width': 4,
+                                    'mask': 1,
+                                }
+                                for site in range(2)
+                            ],
+                        }
+                    )
+            decoded = {
+                'sites': [{'access': 2}, {'access': 1}],
+                'executions': [
+                    {
+                        'serial': 1,
+                        'argument_u32': 7,
+                        'grid_x': 516,
+                        'workgroup_size_x': 129,
+                        'rows': rows,
+                    }
+                ],
+            }
+            driver.assert_workgroup_observations(decoded, 'grouped_disjoint')
+            decoded['executions'][0]['rows'].pop()
+            with self.assertRaises(AssertionError):
+                driver.assert_workgroup_observations(decoded, 'grouped_disjoint')
+
+    def test_grouped_output_requires_the_full_tracked_allocation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            driver = Driver(
+                argparse.Namespace(
+                    root=Path(directory),
+                    case='grouped_race',
+                    threads=65,
+                    wave_size=32,
+                    workgroups=16,
+                )
+            )
+            with self.assertRaisesRegex(AssertionError, '12 bytes.*192 bytes'):
+                driver.assert_workgroup_output_allocation(
+                    {'output_allocation_bytes': 12}
+                )
+            for allocated_bytes in (192, 4096):
+                driver.assert_workgroup_output_allocation(
+                    {'output_allocation_bytes': allocated_bytes}
+                )
+
+    def test_grouped_output_extent_uses_the_actual_wave_size(self):
+        for threads, required_bytes in ((65, 32), (129, 48)):
+            with self.subTest(
+                threads=threads
+            ), tempfile.TemporaryDirectory() as directory:
+                driver = Driver(
+                    argparse.Namespace(
+                        root=Path(directory),
+                        case='grouped_isolation',
+                        threads=threads,
+                        wave_size=64,
+                        workgroups=4,
+                    )
+                )
+                driver.assert_workgroup_output_allocation(
+                    {'output_allocation_bytes': required_bytes}
+                )
+                with self.assertRaisesRegex(AssertionError, 'ROCr output allocation'):
+                    driver.assert_workgroup_output_allocation(
+                        {'output_allocation_bytes': required_bytes - 1}
+                    )
+
     def test_missing_statistics_checks_the_requested_agent_first(self):
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)

@@ -203,6 +203,34 @@ impl KfdHostAlias {
         (self.address - self.source.host_address) as u64
     }
 
+    #[allow(unsafe_code)]
+    pub(crate) fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        self.source
+            .vm
+            .kfd()
+            .check_process()
+            .map_err(|source| super::super::native_error("diagnostic host backing", source))?;
+        if !self.active {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "diagnostic backing has retired or is uncertain",
+            ));
+        }
+        let info = self.cached_info();
+        // SAFETY: This borrow retains the host mapping and excludes native
+        // cleanup. Registered callers retain their originally borrowed pages.
+        unsafe {
+            crate::device::gpu::diagnostic::DiagnosticMemory::borrow(
+                self,
+                info.device_address,
+                info.host_address,
+                info.size,
+            )
+        }
+    }
+
     pub(crate) fn check(&self) -> Result<(), Error> {
         if !self.active {
             return Err(error(ErrorKind::Unsupported, "host alias was released"));
@@ -256,25 +284,34 @@ impl KfdAllocation {
             .kfd
             .check_process()
             .map_err(|source| native_error("host alias identity process check", source))?;
-        let source = self.host_alias_record.as_ref().ok_or_else(|| {
-            error(
-                ErrorKind::Unsupported,
-                "allocation has no host alias record",
-            )
-        })?;
         let _registry = self
             .vm
             .loss
             .host_aliases
             .lock()
             .map_err(|_| error(ErrorKind::Internal, "KFD host alias registry lock poisoned"))?;
-        if source.aliases.load(Ordering::Acquire) != 0 {
+        if identity == [0; 2]
+            || self
+                .host_alias_frontend_id
+                .get()
+                .is_some_and(|known| *known != identity)
+        {
             return Err(error(
-                ErrorKind::Busy,
-                "host alias identity is already observable",
+                ErrorKind::InvalidArgument,
+                "invalid or rebound host alias identity",
             ));
         }
-        source.set_frontend_identity(identity)?;
+        if let Some(source) = self.host_alias_record.as_ref() {
+            if source.aliases.load(Ordering::Acquire) != 0 {
+                return Err(error(
+                    ErrorKind::Busy,
+                    "host alias identity is already observable",
+                ));
+            }
+            source.set_frontend_identity(identity)?;
+        }
+        // An access update may have temporarily removed the alias record.
+        // Retain the binding on the backing itself for later republication.
         let _ = self.host_alias_frontend_id.set(identity);
         Ok(())
     }

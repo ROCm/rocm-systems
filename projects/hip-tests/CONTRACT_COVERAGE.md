@@ -13,22 +13,22 @@ contract tier intentionally pins only small, portable semantic guarantees.
 ## Snapshot
 
 <!-- contract-coverage-snapshot
-contract_tests: 631
-contract_domains: 118
-declared_apis: 505
-covered_apis: 492
+contract_tests: 655
+contract_domains: 120
+declared_apis: 514
+covered_apis: 501
 uncovered_allowlisted: 13
-coverage_pct: 97.4
+coverage_pct: 97.5
 -->
 
-- Snapshot date: 2026-08-26
-- Snapshot commit: `920418c484`
-- Contract tests: 631
-- Contract domains: 118
-- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 505
-- Declared HIP runtime APIs directly exercised by contract tests: 492
+- Snapshot date: 2026-11-17
+- Snapshot commit: `6f9d517d5c6`
+- Contract tests: 655
+- Contract domains: 120
+- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 513
+- Declared HIP runtime APIs directly exercised by contract tests: 500
 - Intentionally uncovered, allowlisted APIs: 13
-- Approximate declared API-name coverage: 97.4%
+- Approximate declared API-name coverage: 97.5%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 - Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`,
   `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`,
@@ -55,7 +55,7 @@ plan or the full covered-API listing here.
 
 ## Current allowlisted gaps
 
-The checker currently reports these 11 uncovered declared APIs, all intentionally
+The checker currently reports these 13 uncovered declared APIs, all intentionally
 allowlisted:
 
 ### External-semaphore graph nodes
@@ -137,6 +137,7 @@ binaries instead of exposing portable state to assert.
 | `graph_exec_lifecycle` | 5 |
 | `graph_generic_node` | 3 |
 | `graph_host` | 3 |
+| `graph_id` | 8 |
 | `graph_instantiate_params` | 2 |
 | `graph_kernel` | 3 |
 | `graph_mem_nodes` | 7 |
@@ -171,7 +172,7 @@ binaries instead of exposing portable state to assert.
 | `mem_batch_copy_3d` | 4 |
 | `mem_batch_discard` | 7 |
 | `mem_location_pool` | 4 |
-| `mem_map_array` | 2 |
+| `mem_map_array` | 3 |
 | `memory` | 5 |
 | `memory_pool` | 6 |
 | `memory_pool_access` | 3 |

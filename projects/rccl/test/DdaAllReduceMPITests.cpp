@@ -404,6 +404,8 @@ TEST_F(DdaMPI_AllReduce, LLOneShotMultiRank)
 
 TEST_F(DdaMPI_AllReduce, LLTwoShotMultiRank)
 {
+    // The gfx1250 AllReduce LL tier stops at 1M; restore 32 MiB so this message stays on the LL two-shot.
+    MPIHelpers::MpiEnvGuard llTierGuard("RCCL_DDA_LL_THRESHOLD", "33554432");
     if(!validateTestPrerequisites(kMinProcessesForMPI))
         GTEST_SKIP() << "Need at least 2 MPI ranks";
 
@@ -414,6 +416,13 @@ TEST_F(DdaMPI_AllReduce, LLTwoShotMultiRank)
                      << nRanks;
 
     runAllReduce(count, kTwoShotLogNeedle, "DdaMPI_AllReduce/LLTwoShotMultiRank");
+}
+
+// 1 MiB of f32 is the largest LL one-shot message, which from 5 ranks runs as the spread two-shot on its grid.
+TEST_F(DdaMPI_AllReduce, LLSpreadTwoShotMultiRank)
+{
+    const char* needle = MPIEnvironment::world_size < 5 ? kOneShotLogNeedle : "DDA fabric AllReduce LL spread two-shot";
+    runAllReduce(kDefaultLLOneShotThresholdBytes / sizeof(float), needle, "DdaMPI_AllReduce/LLSpreadTwoShotMultiRank");
 }
 
 // The LL128 tiers sit behind the LL ones in ncclAllReduceDdaFabricLL, each gated
@@ -434,15 +443,16 @@ TEST_F(DdaMPI_AllReduce, LLTwoShotMultiRank)
 // Run in a process that already touched those thresholds, the guards are inert
 // and the COLL-log assertion reports whichever tier actually claimed the message.
 
-// 256 KiB of f32 is inside the 4 MiB LL128 one-shot threshold and inside a slot
-// at any supported rank count, so with the LL tiers switched off it is the LL128
-// one-shot tier that claims it.
+// 256 KiB of f32, cut to the LL128 one-shot cap (4 MiB / nRanks with the peer-parallel
+// kernels) and inside a slot at any supported rank count, so with the LL tiers
+// switched off it is the LL128 one-shot tier that claims it.
 TEST_F(DdaMPI_AllReduce, LL128OneShotMultiRank)
 {
     MPIHelpers::MpiEnvGuard llOneShotGuard("RCCL_DDA_LL_ONESHOT_THRESHOLD", "0");
     MPIHelpers::MpiEnvGuard llTwoShotGuard("RCCL_DDA_LL_TWOSHOT_THRESHOLD", "0");
 
-    runAllReduce(kOneShotCount, kLL128OneShotLogNeedle, "DdaMPI_AllReduce/LL128OneShotMultiRank");
+    const size_t count = ll128OneShotBytes(kOneShotCount * sizeof(float), MPIEnvironment::world_size) / sizeof(float);
+    runAllReduce(count, kLL128OneShotLogNeedle, "DdaMPI_AllReduce/LL128OneShotMultiRank");
 }
 
 // Zeroing the LL128 one-shot threshold as well leaves the two-shot tier as the
@@ -670,8 +680,9 @@ TEST_F(DdaMPI_AllReduce, LL128OneShotBitIdenticalAcrossRanks)
     MPIHelpers::MpiEnvGuard llOneShotGuard("RCCL_DDA_LL_ONESHOT_THRESHOLD", "0");
     MPIHelpers::MpiEnvGuard llTwoShotGuard("RCCL_DDA_LL_TWOSHOT_THRESHOLD", "0");
 
-    runBitIdenticalAcrossRanks({ncclFloat32, ncclBfloat16}, {256 * 1024}, kLL128OneShotLogNeedle,
-                               "DdaMPI_AllReduce/LL128OneShotBitIdenticalAcrossRanks");
+    // 256 KiB, cut to the LL128 one-shot cap at this rank count.
+    runBitIdenticalAcrossRanks({ncclFloat32, ncclBfloat16}, {ll128OneShotBytes(256 * 1024, MPIEnvironment::world_size)},
+                               kLL128OneShotLogNeedle, "DdaMPI_AllReduce/LL128OneShotBitIdenticalAcrossRanks");
 }
 
 // AICOMRCCL-2184: RCCL selects the collective's device itself, and the device the caller left

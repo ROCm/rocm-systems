@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Shared FP64 loose-only unary checks and unsupported-semantics expectations.
+// Shared FP64 unary checks and unsupported-semantics expectations.
 
 #pragma once
 
@@ -11,7 +11,7 @@
 #include "fp/elementwise.h"
 #include "fp/omod_f64_test.h"
 #include "fp/reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <algorithm>
 #include <gtest/gtest.h>
@@ -20,8 +20,8 @@
 
 namespace rocjitsu::arith::test {
 
-// Exercise the common loose-only FP64 unary contract, including rejected exact
-// modes, modifiers, EXEC, aliasing, and untouched FP status. The caller supplies
+// Exercise the common FP64 unary contract, including exact modes rejected on RDNA3,
+// modifiers, EXEC, aliasing, and untouched FP status. The caller supplies
 // the entry point and an independent scalar reference expression.
 template <int Lanes, typename Call, typename Reference>
 void check_loose_unary_f64(Call call, Reference reference, bool gfx12) {
@@ -51,8 +51,8 @@ void check_loose_unary_f64(Call call, Reference reference, bool gfx12) {
   };
   expect_invalid_fp_requests(invalid_request);
 
-  // This entry point is loose-only. Its reference is computed independently;
-  // strict numeric semantics and required reporting are checked as error contracts.
+  // Both architectures accept strict numeric semantics; only FP status is unsupported. The
+  // reference is computed independently; unsupported modes are checked as error contracts.
   const auto cpu_levels = rocjitsu::arith::test::supported_cpu_levels();
   for (uint64_t cpu : cpu_levels) {
     for (uint64_t semantics : rocjitsu::arith::test::semantics_modes()) {
@@ -70,12 +70,6 @@ void check_loose_unary_f64(Call call, Reference reference, bool gfx12) {
             int result = call(flags, exec_mask, mode, r.v + aliasing_offset, r.v, &fp_status);
             if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
               EXPECT_EQ(result, RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
-              r.expect_preserved(input, 0, 0);
-              EXPECT_EQ(fp_status, 0x80000000U);
-              continue;
-            }
-            if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-              EXPECT_EQ(result, RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
               r.expect_preserved(input, 0, 0);
               EXPECT_EQ(fp_status, 0x80000000U);
               continue;

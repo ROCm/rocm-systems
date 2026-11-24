@@ -38,4 +38,7 @@ target_sources(
     ibv.cpp
     ib_ctrl.cpp
     mr_registry.cpp
+    rma_engine.cpp
+    window_info_verbs.cpp
+    verbs_host.cpp
 )

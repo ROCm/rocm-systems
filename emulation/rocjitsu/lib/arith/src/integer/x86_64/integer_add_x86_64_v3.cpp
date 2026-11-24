@@ -6,7 +6,7 @@
 
 #include "common/x86_64/alu_x86_64_v3.h"
 #include "integer/integer_add.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_integer.h"
 
 #include <immintrin.h>
 #include <stdint.h>

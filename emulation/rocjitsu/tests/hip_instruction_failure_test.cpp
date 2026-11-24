@@ -42,9 +42,10 @@ public:
     // Match the diagnostic to the actual exit, so an unrelated abort cannot
     // pass merely because the disconnect monitor also printed its message.
     const char *pattern = "rocjitsu: daemon connection lost";
-    if (::testing::KilledBySignal(SIGABRT)(status_))
+    if (::testing::KilledBySignal(SIGABRT)(status_)) {
       pattern = kind_ == FailureKind::Decode ? "Queue error: HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION:"
                                              : "Queue error: HSA_STATUS_ERROR_EXCEPTION:";
+    }
     const ::testing::Matcher<const std::string &> diagnostic =
         rocjitsu::test::ExpectedFailureDiagnostic(pattern);
     return diagnostic.MatchAndExplain(output, listener);
@@ -68,7 +69,10 @@ private:
 } // namespace
 
 __global__ void unsupported_instruction() {
-  asm volatile(".long %0" : : "n"(rocjitsu::test::kUnimplementedInstruction));
+  asm volatile(".long %0, %1"
+               :
+               : "n"(rocjitsu::test::kUnimplementedInstruction[0]),
+                 "n"(rocjitsu::test::kUnimplementedInstruction[1]));
 }
 
 __global__ void undecodable_instruction() {
@@ -78,18 +82,22 @@ __global__ void undecodable_instruction() {
 __global__ void valid_instruction(int *output) { *output = 17; }
 
 [[noreturn]] void wait_for_instruction_failure(FailureKind kind) {
-  if (hipInit(0) != hipSuccess)
+  if (hipInit(0) != hipSuccess) {
     std::_Exit(kInitializationFailure);
-  if (kind == FailureKind::Unsupported)
+  }
+  if (kind == FailureKind::Unsupported) {
     unsupported_instruction<<<4, 64>>>();
-  else
+  } else {
     undecodable_instruction<<<4, 64>>>();
-  if (hipGetLastError() != hipSuccess)
+  }
+  if (hipGetLastError() != hipSuccess) {
     std::_Exit(kLaunchFailure);
+  }
   // Queue-owner exception delivery can return a HIP error before the engine
   // thread finishes shutdown. Successful synchronization is always a failure.
-  if (hipDeviceSynchronize() == hipSuccess)
+  if (hipDeviceSynchronize() == hipSuccess) {
     std::_Exit(kSynchronizationReturned);
+  }
   std::this_thread::sleep_for(std::chrono::seconds(2));
   std::_Exit(kSynchronizationReturned);
 }
@@ -134,24 +142,29 @@ TEST(HipDaemonInstructionFailureTest, DecodeFailureExitsWithFailure) {
 
 TEST(HipDaemonInstructionFailureTest, ValidClientExitsWhenAnotherClientFails) {
   const char *ready_path = std::getenv("ROCJITSU_TEST_CLIENT_READY");
-  if (!ready_path)
+  if (!ready_path) {
     GTEST_SKIP() << "requires a second client controlled by the daemon fixture";
+  }
   GTEST_FLAG_SET(death_test_style, "threadsafe");
   const auto run_valid_client = [&] {
     int *device_output = nullptr;
-    if (hipInit(0) != hipSuccess || hipMalloc(&device_output, sizeof(int)) != hipSuccess)
+    if (hipInit(0) != hipSuccess || hipMalloc(&device_output, sizeof(int)) != hipSuccess) {
       std::_Exit(kInitializationFailure);
+    }
     valid_instruction<<<1, 1>>>(device_output);
-    if (hipGetLastError() != hipSuccess || hipDeviceSynchronize() != hipSuccess)
+    if (hipGetLastError() != hipSuccess || hipDeviceSynchronize() != hipSuccess) {
       std::_Exit(kLaunchFailure);
+    }
     int output = 0;
     if (hipMemcpy(&output, device_output, sizeof(output), hipMemcpyDeviceToHost) != hipSuccess ||
-        output != 17)
+        output != 17) {
       std::_Exit(kSynchronizationReturned);
+    }
     // Only release the faulting client after this one completed valid work.
     const int ready = ::open(ready_path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
-    if (ready < 0 || ::close(ready) != 0)
+    if (ready < 0 || ::close(ready) != 0) {
       std::_Exit(kInitializationFailure);
+    }
     for (;;) {
       valid_instruction<<<1, 1>>>(device_output);
       if (hipGetLastError() != hipSuccess || hipDeviceSynchronize() != hipSuccess) {

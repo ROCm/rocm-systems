@@ -9,7 +9,7 @@
 #include "common/integer.h"
 #include "common/registers.h"
 #include "compare/helpers.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 #include <bit>
 
 #include <limits>

@@ -8,8 +8,8 @@ Production builds neither import generators nor copy fixture JSON.
 `feedback-publication.js` adds three deterministic develop slowdowns (attempts
 18, 20 and 22) to exercise speedups below 1.00× in Performance Trend. It also adds
 `users/RattataKing/test-branch` and one interrupted
-develop run, `fictional-unfinished-develop`. The interrupted run has a finish
-timestamp, one completed result and unexecuted cases; Recent Runs shows its run
+develop run, `fictional-unfinished-develop`. The interrupted run has a start
+timestamp and a null `finished_at`, one completed result and unexecuted cases; Recent Runs shows its run
 time and Fail status. Each document has corpus `schema_version: 1`,
 flat rows with embedded workload definitions and literal `single`/`default`
 thread policies, raw provenance and fictional publication context. The two

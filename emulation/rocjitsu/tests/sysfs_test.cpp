@@ -11,6 +11,7 @@
 /// that IP discovery publishes the configured GC, SDMA, and NBIF versions.
 
 #include "config_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "scoped_temp.h"
 #include "util/diagnostic.h"
@@ -69,8 +70,9 @@ std::unordered_map<std::string, uint64_t> read_properties(const std::string &pat
   std::ifstream f(path);
   std::string key;
   uint64_t value = 0;
-  while (f >> key >> value)
+  while (f >> key >> value) {
     props[key] = value;
+  }
   return props;
 }
 
@@ -185,13 +187,13 @@ TEST(SysfsTopologyTest, ShippedCdnaKfdDefaultsAreFullyCpuVisible) {
 TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
   struct Case {
     const char *config_name;
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     uint32_t max_vgprs;
   };
   for (const auto &[config_name, arch, max_vgprs] :
-       {Case{"gfx942_cdna3_kmd.json", ROCJITSU_CODE_ARCH_CDNA3, 256},
-        Case{"gfx950_mi350x_kmd.json", ROCJITSU_CODE_ARCH_CDNA4, 256},
-        Case{"gfx1250_mi455x.json", ROCJITSU_CODE_ARCH_CDNA5, 1024}}) {
+       {Case{"gfx942_cdna3_kmd.json", rocjitsu::IsaFamily::Cdna3, 256},
+        Case{"gfx950_mi350x_kmd.json", rocjitsu::IsaFamily::Cdna4, 256},
+        Case{"gfx1250_mi455x.json", rocjitsu::IsaFamily::Cdna5, 1024}}) {
     SCOPED_TRACE(config_name);
     config::LoadedConfig loaded;
     ASSERT_TRUE(test::load_valid_config(std::string(CONFIG_DIR) + "/" + config_name, loaded));
@@ -208,8 +210,9 @@ TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
     // Use the CUs and wave slots from the CWSR producer's XCC, including
     // simulated slots beyond the enabled SIMD count advertised by KFD.
     uint64_t resident_waves = 0;
-    for (auto *cu : loaded.soc()->xcd(0)->command_processor()->compute_units())
+    for (auto *cu : loaded.soc()->xcd(0)->command_processor()->compute_units()) {
       resident_waves += cu->num_wf_slots();
+    }
     EXPECT_EQ(control % 4096, 0u);
     EXPECT_EQ(context % 4096, 0u);
     ASSERT_GT(control, 0u);
@@ -219,8 +222,9 @@ TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
     // Verify the advertised area with the serializer itself, rather than a
     // second size formula that could diverge from compute_geometry.
     std::vector<kmd::CwsrWaveState> waves(resident_waves);
-    for (auto &wave : waves)
+    for (auto &wave : waves) {
       wave.num_vgprs = 8;
+    }
     waves.front().num_vgprs = max_vgprs;
     uint64_t writes = 0;
     const auto layout = kmd::serialize_queue_cwsr(
@@ -231,10 +235,12 @@ TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
     // libhsakmt stores the total queue save allocation in uint32_t. One
     // maximal LDS group per CU can coexist with the other resident waves.
     const auto &cus = loaded.soc()->xcd(0)->command_processor()->compute_units();
-    for (auto &wave : waves)
+    for (auto &wave : waves) {
       wave.is_first_in_group = true;
-    for (uint64_t i = 0; i < cus.size(); ++i)
+    }
+    for (uint64_t i = 0; i < cus.size(); ++i) {
       waves[i].lds.resize(cus[i]->config().lds_size_kb * 1024);
+    }
     writes = 0;
     const auto mixed = kmd::serialize_queue_cwsr(
         0x100000, info.context_save_size, waves, [&](uint64_t, uint32_t) { ++writes; }, arch);
@@ -244,7 +250,7 @@ TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
     EXPECT_LE((uint64_t{info.context_save_size} + debugger_reserve) * xcc_count,
               std::numeric_limits<uint32_t>::max());
 
-    if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    if (arch == rocjitsu::IsaFamily::Cdna4) {
       // A large LDS group alongside many empty groups must fit while
       // preserving the independent record size of each group.
       std::vector<kmd::CwsrWaveState> mixed_lds(512);
@@ -274,7 +280,7 @@ TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
   uint32_t writes = 0;
   EXPECT_FALSE(kmd::serialize_queue_cwsr(
                    0x100000, info.context_save_size, wave, [&](uint64_t, uint32_t) { ++writes; },
-                   ROCJITSU_CODE_ARCH_RDNA3)
+                   rocjitsu::IsaFamily::Rdna3)
                    .ok);
   EXPECT_EQ(writes, 0u);
 }
@@ -409,10 +415,11 @@ void check_topology_batching() {
         message->msg_iov[0].iov_len == sizeof(kmd::KeeperRequest)) {
       const auto &request = *static_cast<const kmd::KeeperRequest *>(message->msg_iov[0].iov_base);
       if (request.operation == kmd::KeeperOperation::BatchFile &&
-          request.size <= kmd::kKeeperInlineFileSize)
+          request.size <= kmd::kKeeperInlineFileSize) {
         ++inline_files;
-      else if (request.operation == kmd::KeeperOperation::FlushFiles)
+      } else if (request.operation == kmd::KeeperOperation::FlushFiles) {
         flush_sizes.push_back(request.size);
+      }
     }
     return sent;
   };
@@ -646,9 +653,11 @@ constexpr DebugCapExpectation kDebugCapExpectations[] = {
 
 // Finds the golden expectation row for a gfx_target_version, or nullptr.
 const DebugCapExpectation *find_expectation(uint32_t gfx_target_version) {
-  for (const auto &e : kDebugCapExpectations)
-    if (e.gfx_target_version == gfx_target_version)
+  for (const auto &e : kDebugCapExpectations) {
+    if (e.gfx_target_version == gfx_target_version) {
       return &e;
+    }
+  }
   return nullptr;
 }
 
@@ -759,8 +768,9 @@ TEST(SysfsTopologyDebugCapabilityTest, ExplicitCapabilityAndDebugPropArePreserve
 // debug_prop exactly for every GFXIP we have a reference for.
 TEST(SysfsTopologyDebugCapabilityTest, DefaultDebugPropMatchesHardware) {
   for (const auto &e : kDebugCapExpectations) {
-    if (e.capability == 0)
+    if (e.capability == 0) {
       continue; // no captured real-hardware reference for this GFXIP
+    }
     SCOPED_TRACE(e.name);
 
     Sysfs sysfs;
@@ -799,8 +809,9 @@ TEST(SysfsTopologyDebugCapabilityTest, Mi455xConfigPublishesB0AsicRevision) {
 // registers the simulated ASIC does not have.
 TEST(SysfsTopologyDebugCapabilityTest, DefaultWatchPointCountMatchesHardware) {
   for (const auto &e : kDebugCapExpectations) {
-    if (e.capability == 0)
+    if (e.capability == 0) {
       continue; // no captured real-hardware reference for this GFXIP
+    }
     SCOPED_TRACE(e.name);
 
     Sysfs sysfs;
@@ -990,23 +1001,27 @@ TEST(SysfsTopologyGeometryTest, ShippedConfigsMatchTheSimulatedSoC) {
   std::unordered_map<std::string, PartGeometry> parts;
 
   for (const auto &entry : std::filesystem::directory_iterator(config_dir)) {
-    if (entry.path().extension() != ".json")
+    if (entry.path().extension() != ".json") {
       continue;
+    }
     const std::string name = entry.path().filename().string();
     // DBT guest configs describe a synthetic node with no SoC behind it; their
     // geometry is validated by validate_guest_device_geometry() at load time.
-    if (name.rfind("guest_", 0) == 0)
+    if (name.rfind("guest_", 0) == 0) {
       continue;
+    }
     SCOPED_TRACE(name);
 
     config::LoadedConfig loaded;
-    if (name == "gfx1250_mi455x_kmd_2node_net.json") {
+    if (name == "gfx1250_mi455x_kmd_2node_net.json" ||
+        name == "gfx1250_mi455x_kmd_4node_2gpu_if.json") {
       ASSERT_TRUE(test::load_valid_config_for_node(entry.path().string(), loaded, "node0"));
     } else {
       ASSERT_TRUE(test::load_valid_config(entry.path().string(), loaded));
     }
-    if (!loaded.device.present || loaded.soc() == nullptr)
+    if (!loaded.device.present || loaded.soc() == nullptr) {
       continue;
+    }
     ++checked;
 
     const uint32_t num_xcc = loaded.soc()->num_xcds();
@@ -1031,8 +1046,9 @@ TEST(SysfsTopologyGeometryTest, ShippedConfigsMatchTheSimulatedSoC) {
     for (uint32_t xcd_index = 0; xcd_index < num_xcc; ++xcd_index) {
       const auto *xcd = loaded.soc()->xcd(xcd_index);
       ASSERT_NE(xcd, nullptr);
-      for (uint32_t se_index = 0; se_index < xcd->num_shader_engines(); ++se_index)
+      for (uint32_t se_index = 0; se_index < xcd->num_shader_engines(); ++se_index) {
         soc_cus += xcd->shader_engine(se_index)->num_compute_units();
+      }
     }
     EXPECT_EQ(cus, soc_cus) << "the advertised CU geometry is not the machine the simulator runs: "
                             << cus << " advertised vs " << soc_cus << " instantiated";

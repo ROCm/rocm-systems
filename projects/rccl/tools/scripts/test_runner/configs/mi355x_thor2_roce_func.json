@@ -312,6 +312,11 @@
           "name": "GdrFlush_RepeatedFlushBurst",
           "description": "50-iteration GPU recv+flush burst over the dma-buf scratchpad; an intermittent QP async-fatal would surface as a non-success flush. The whole burst must stay clean.",
           "test_filter": "GdrFlushTest.RepeatedFlush_NoFaultBurst"
+        },
+        {
+          "name": "GdrFlush_ScratchpadWriteRoundTrip",
+          "description": "The chained flush must write the host sentinel into the RO=0 scratchpad and read it back. Dropping the write leaves the scratchpad zero.",
+          "test_filter": "GdrFlushTest.ScratchpadWrite_RoundTripsSentinel"
         }
       ]
     },
@@ -369,7 +374,13 @@
         }
       ]
     },
-    "gdr_flush_cumem_multinode": {
+    "net_ib_gdr_flush_cast": {
+      "extends": "net_ib_gdr_flush",
+      "env_variables": {
+        "NCCL_NET": "ib-cast",
+        "NCCL_GDR_FLUSH_DISABLE": "0"
+      }
+    },    "gdr_flush_cumem_multinode": {
       "extends": "default",
       "is_gtest": true,
       "binary": "rccl-UnitTestsMPI",
@@ -981,8 +992,8 @@
         },
         {
           "name": "Resiliency_GidChangeRefresh",
-          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
-          "test_filter": "Transport/NetIbGidChangeTest.*"
+          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery; excludes plain net_ib recovery until AICOMNET-433 adds its UC capability gate",
+          "test_filter": "Transport/NetIbGidChangeTest.*-Transport/NetIbGidChangeTest.PortRecoveryRefreshesStaleCommGid/NetIb"
         }
       ]
     },
@@ -3929,6 +3940,20 @@
           }
         }
       ]
+    },
+    "net_ib_transfer_max_msg": {
+      "extends": "net_ib_transfer",
+      "description": "Same InfiniBand transfer tests with RCCL_IB_MAX_MSG_SIZE at 1 MiB, so the 16 MiB transfer is posted as several work requests.",
+      "env_variables": {
+        "RCCL_IB_MAX_MSG_SIZE": "1048576"
+      }
+    },
+    "gin_device_get_flush_max_msg": {
+      "extends": "gin_device_get_flush",
+      "description": "Same GIN get/flush tests with RCCL_IB_MAX_MSG_SIZE at 1 MiB, below the 4 MiB get.",
+      "env_variables": {
+        "RCCL_IB_MAX_MSG_SIZE": "1048576"
+      }
     }
   },
   "test_suites": [
@@ -3996,6 +4021,12 @@
       "name": "GDR Flush Flag - 4 QPs split (2-Node, 2-Rank)",
       "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1",
       "config": "net_ib_gdr_flush_flag_4qps_split",
+      "enabled": true
+    },
+    {
+      "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank) (IB-CAST)",
+      "description": "Whitebox coverage of the NET/IB GDR flush: dma-buf and peermem RO=0 scratchpad fence, feature-disabled fallback, and repeated-flush burst",
+      "config": "net_ib_gdr_flush_cast",
       "enabled": true
     },
     {
@@ -4566,6 +4597,18 @@
       "name": "GIN Device MPI - Get/Flush Visibility",
       "description": "GIN proxy device-side get + flush / flushAsync + wait visibility and a put burst over RoCE across two nodes",
       "config": "gin_device_get_flush",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Data Transfer (1 MiB post cap)",
+      "description": "InfiniBand transfer tests with RCCL_IB_MAX_MSG_SIZE=1 MiB",
+      "config": "net_ib_transfer_max_msg",
+      "enabled": true
+    },
+    {
+      "name": "GIN Device MPI - Get/Flush Visibility (1 MiB post cap)",
+      "description": "GIN get/flush tests with RCCL_IB_MAX_MSG_SIZE=1 MiB",
+      "config": "gin_device_get_flush_max_msg",
       "enabled": true
     }
   ]

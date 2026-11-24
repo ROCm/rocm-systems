@@ -102,7 +102,6 @@ public:
     bar(bar&&)                 = delete;
     bar& operator=(bar&&)      = delete;
 
-    void on_set_total(std::uint64_t total) noexcept;
     void on_advance(std::uint64_t delta) noexcept;
     void on_finish() noexcept;
 

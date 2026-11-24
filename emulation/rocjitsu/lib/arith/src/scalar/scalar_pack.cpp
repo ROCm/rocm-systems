@@ -7,8 +7,8 @@
 // Semantics follow rocjitsu generated/shared/execute_shared.h. Bit spreading and
 // compression implement the same per-bit operations without scalar loops.
 
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_scalar.h"
 
 #include <stdint.h>
 

@@ -7,10 +7,11 @@
 // Comparisons follow rocjitsu's execute_v_cmp_* integer models.
 
 #include "compare/integer_compare.h"
-#include "common/internal.h"
+#include "common/validation.h"
+#include "common/wave_alignment.h"
 #include "compare/predicate.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_compare.h"
 
 #include <stdint.h>
 
@@ -50,15 +51,20 @@ int compare_wave32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *
                                                      b);
     }
   }
+  [[maybe_unused]] const auto level =
+      rocjitsu::arith::wave_cpu_level(flags, Bits != 64 ||
+                                                 (Predicate != rocjitsu::arith::CompareEqual &&
+                                                  Predicate != rocjitsu::arith::CompareNotEqual) ||
+                                                 rocjitsu::arith::aligned_for_512(a[0]));
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    *d =
-        rocjitsu::arith::integer_compare_x86_64_v4<Bits, Signed, Predicate>(mode, a, b) & exec_mask;
+  if (level >= RJ_ARITH_CPU_X86_64_V4) {
+    *d = rocjitsu::arith::integer_compare_x86_64_v4<Bits, Signed, Predicate>(32, mode, a, b) &
+         exec_mask;
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V3) {
     *d =
         rocjitsu::arith::integer_compare_x86_64_v3<Bits, Signed, Predicate>(mode, a, b) & exec_mask;
     return RJ_ARITH_SUCCESS;
@@ -103,8 +109,60 @@ int compare_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint64_t *
           compare_wave32<Bits, Signed, Predicate>(flags, 0, mode, masks, nullptr, nullptr)) {
     return error;
   }
+  if constexpr (Bits == 64) {
+    if (exec_mask && !(exec_mask & (exec_mask - 1))) {
+      int lane = __builtin_ctzll(exec_mask);
+      uint64_t x = a[0][lane] | (uint64_t(a[1][lane]) << 32);
+      uint64_t y = b[0][lane] | (uint64_t(b[1][lane]) << 32);
+      if constexpr (Signed) {
+        x ^= uint64_t(1) << 63;
+        y ^= uint64_t(1) << 63;
+      }
+      bool selected = rocjitsu::arith::integer_compare_result<Predicate>(x < y, x == y) & 1;
+      uint64_t result = selected ? exec_mask : 0;
+      __builtin_memcpy(static_cast<void *>(d), &result, sizeof result);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (exec_mask && !(mode >> 32) &&
+      rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    uint64_t result = rocjitsu::arith::integer_compare_x86_64_v4<Bits, Signed, Predicate>(
+                          64, uint32_t(mode), a, b) &
+                      exec_mask;
+    __builtin_memcpy(static_cast<void *>(d), &result, sizeof result);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  // The wave controls are already validated. Skip empty halves and reuse the first
+  // half's VGPR pointers without a second public dispatch.
+  if (exec_mask && !(mode >> 32) &&
+      rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    if (uint32_t(exec_mask)) {
+      masks[0] = rocjitsu::arith::integer_compare_x86_64_v3<Bits, Signed, Predicate>(mode, a, b);
+    }
+    if (exec_mask >> 32) {
+      constexpr int words = Bits == 64 ? 2 : 1;
+      const uint32_t *high_a[words], *high_b[words];
+      for (int word = 0; word < words; ++word) {
+        high_a[word] = a[word] + 32;
+        high_b[word] = b[word] + 32;
+      }
+      masks[1] =
+          rocjitsu::arith::integer_compare_x86_64_v3<Bits, Signed, Predicate>(mode, high_a, high_b);
+    }
+    uint64_t result = (uint64_t(masks[0]) | (uint64_t(masks[1]) << 32)) & exec_mask;
+    __builtin_memcpy(static_cast<void *>(d), &result, sizeof result);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
   if (exec_mask) {
     for (int half = 0; half < 2; ++half) {
+      uint32_t half_mask = uint32_t(exec_mask >> (half * 32));
+      if (!half_mask) {
+        continue;
+      }
       uint64_t half_instruction_flags = mode;
       if (mode & RJ_ARITH_DPP16) {
         uint64_t rows = (mode & RJ_ARITH_DPP_ROW_MASK) >> RJ_ARITH_DPP_ROW_SHIFT;
@@ -118,8 +176,7 @@ int compare_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint64_t *
         source_b[word] = b[word] + half * 32;
       }
       if (int error = compare_wave32<Bits, Signed, Predicate>(
-              flags, uint32_t(exec_mask >> (half * 32)), half_instruction_flags, masks + half,
-              source_a, source_b)) {
+              flags, half_mask, half_instruction_flags, masks + half, source_a, source_b)) {
         return error;
       }
     }

@@ -11,6 +11,8 @@
 #include "utils/nontemporal.hpp"
 #include "device/rocm/rocmemory.hpp"
 #include "device/rocm/rocblit.hpp"
+#include "device/rocm/rocabce.hpp"
+#include "device/rocm/rocabceblit.hpp"
 #include "device/rocm/roccounters.hpp"
 #include "platform/activity.hpp"
 #include "platform/kernel.hpp"
@@ -83,11 +85,6 @@ static constexpr uint16_t kBarrierPacketAcquireHeader =
     (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
     (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
 
-static constexpr uint16_t kBarrierPacketReleaseHeader =
-    (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) | (1 << HSA_PACKET_HEADER_BARRIER) |
-    (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
-    (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
-
 static constexpr uint16_t kBarrierVendorPacketHeader =
     (HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE) | (1 << HSA_PACKET_HEADER_BARRIER) |
     (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
@@ -98,13 +95,14 @@ static constexpr uint16_t kBarrierVendorPacketNopScopeHeader =
     (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
     (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
 
-static constexpr hsa_barrier_and_packet_t kBarrierAcquirePacket = {
-    kBarrierPacketAcquireHeader, 0, 0, {{0}}, 0, {0}};
-
-static constexpr hsa_barrier_and_packet_t kBarrierReleasePacket = {
-    kBarrierPacketReleaseHeader, 0, 0, {{0}}, 0, {0}};
-
 static constexpr uint16_t kBarrierBit = 1 << HSA_PACKET_HEADER_BARRIER;
+
+// A barrier-AND header with the barrier bit and fence scopes of the given header
+static constexpr uint16_t BarrierAndHeader(uint16_t header) {
+  constexpr uint16_t kTypeMask = ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1)
+                                 << HSA_PACKET_HEADER_TYPE;
+  return (header & ~kTypeMask) | (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE);
+}
 
 namespace {
 
@@ -274,13 +272,16 @@ static inline void logAqlDispatchPacketExtended(
   const char* prefix = formatVirtualPipePrefix(buf, sizeof(buf), dev, queue);
   const uint64_t rptr = Hsa::queue_load_read_index_relaxed(queue);
 
+  const bool is_format4 =
+      pkt->amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD;
+
   emitAqlLine(sink, amd::LOG_DETAIL_DEBUG, aqlFormat(
           "SWq=0x%zx, HWq=0x%zx, id=%d, priority=%d,%s Dispatch Header = "
           "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
-          "setup=%d, cluster_count=[%u, %u, %u], cluster_size=[%u, %u, %u], "
+          "amd_format=%d, setup=%d, cluster_count=[%u, %u, %u], cluster_size=[%u, %u, %u], "
           "workgroup=[%u, %u, %u], private_seg_size=%u, group_seg_size=%u, "
           "group_mem_carveout=%u, kernel_obj=0x%zx, "
-          "kernarg_address=0x%zx, dep_signal=0x%zx, completion_signal=0x%zx, "
+          "kernarg_address=0x%zx, %s=0x%zx, completion_signal=0x%zx, "
           "rptr=%" PRIu64 ", wptr=%" PRIu64,
           queue, queue->base_address, queue->id, static_cast<int>(priority), prefix, header,
           extractAqlBits(header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
@@ -289,12 +290,30 @@ static inline void logAqlDispatchPacketExtended(
                          HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
           extractAqlBits(header, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
                          HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
+          static_cast<int>(pkt->amd_format),
           pkt->setup, pkt->cluster_count_x, pkt->cluster_count_y, pkt->cluster_count_z,
           pkt->cluster_size_x, pkt->cluster_size_y, pkt->cluster_size_z, pkt->workgroup_size_x,
           pkt->workgroup_size_y, pkt->workgroup_size_z, pkt->private_segment_size,
           pkt->group_segment_size, static_cast<unsigned>(pkt->perf_hint.group_mem_carveout),
-          pkt->kernel_object, pkt->kernarg_address, pkt->dep_signal.handle,
+          pkt->kernel_object, pkt->kernarg_address,
+          is_format4 ? "launch_descriptor" : "dep_signal",
+          pkt->dep_signal.handle,
           pkt->completion_signal.handle, rptr, wptr));
+
+  if (is_format4) {
+    auto* ld = pkt->launch_descriptor;
+    if (ld != nullptr) {
+      emitAqlLine(sink, amd::LOG_DETAIL_DEBUG, aqlFormat("launch_desc version=%u, cu_enable=0x%x, "
+                  "dispatch_granularity_limiter=%u, tg_chunk_size=%u", ld->version, ld->cu_enable,
+                  ld->dispatch_granularity_limiter, ld->tg_chunk_size));
+      for (int r = 0; r < AMD_LAUNCH_DESCRIPTOR_MAX_PREFETCH_REGIONS; ++r) {
+        const auto& p = ld->prefetch[r];
+        emitAqlLine(sink, amd::LOG_DETAIL_DEBUG, aqlFormat("prefetch[%d]: mode=%u, num_burst=%u, "
+                    "burst_size=%u, stride=%u, addr=0x%x:%07x, temporal=%u, scope=%u", r, p.mode,
+                   p.num_burst, p.burst_size, p.stride, p.addr_hi, p.addr_lo, p.temporal, p.scope));
+      }
+    }
+  }
 
   logAqlMetadataPacket(dev, queue, meta, wptr, sink);
 }
@@ -364,8 +383,9 @@ void ProfilingSignal::CacheTimingData(hsa_agent_t gpu_device, bool completed) {
     return;
   }
 
-  // Wait for this signal to complete if not already done
-  if (!completed && Hsa::signal_load_relaxed(signal_) > 0) {
+  // Wait for this signal to complete if not already done. The wait loads the value first, so a
+  // device-memory signal skips this load, which crosses PCIe on a PCIe host.
+  if (!completed && (in_device_memory_ || Hsa::signal_load_relaxed(signal_) > 0)) {
     WaitForSignal(signal_, /*active_wait=*/false, /*yield=*/false, in_device_memory_);
   }
 
@@ -373,6 +393,13 @@ void ProfilingSignal::CacheTimingData(hsa_agent_t gpu_device, bool completed) {
   if (!timed_use_) {
     cached_timing_.start_ = 0;
     cached_timing_.end_ = 0;
+  } else if (engine_ == HwQueueEngine::SdmaAbce) {
+    // ABCE writes SDMA global-clock timestamps directly into the signal but
+    // does not submit through ROCr's async-copy API.
+    hsa_amd_profiling_dispatch_time_t time = {};
+    Hsa::profiling_get_dispatch_time(gpu_device, signal_, &time);
+    cached_timing_.start_ = time.start;
+    cached_timing_.end_ = time.end;
   } else if (IsSdmaEngine(engine_)) {
     hsa_amd_profiling_async_copy_time_t time = {};
     Hsa::profiling_get_async_copy_time(signal_, &time);
@@ -736,6 +763,11 @@ void VirtualGPU::MemoryDependency::clear(bool all) {
 VirtualGPU::HwQueueTracker::~HwQueueTracker() {
   for (auto& signal : signal_list_) {
     CpuWaitForSignal(signal);
+  }
+  // Every consumer of a pinned wait owns a use, or precedes one, on this queue. ~VirtualGPU
+  // drained the queue first, so that also holds for AQL waiters no fence use followed.
+  ReleaseAllPins();
+  for (auto& signal : signal_list_) {
     signal->release();
   }
   // Destroy all extra signals. Note: these signals must be idle already
@@ -764,6 +796,7 @@ VirtualGPU::RetiringSignalTracker::~RetiringSignalTracker() {
     disarm(signal);
   }
   ReleasePins(/*release_all=*/true);
+  ReleaseHeldSignals();
   for (ProfilingSignal* signal : spare_signals_) {
     disarm(signal);
     signal->release();
@@ -804,6 +837,7 @@ bool VirtualGPU::HwQueueTracker::CreateSignal(ProfilingSignal* signal, bool inte
     return false;
   }
   signal->flags_.interrupt_ = interrupt;
+  signal->event_id_ = amd_signal_from_handle(signal->signal_.handle)->event_id;
   return true;
 }
 
@@ -825,6 +859,7 @@ bool VirtualGPU::HwQueueTracker::CreateSignals(uint32_t count, bool interrupt,
     signal->signal_ = handle;
     signal->flags_.interrupt_ = interrupt;
     signal->in_device_memory_ = in_device_memory;
+    signal->event_id_ = amd_signal_from_handle(handle.handle)->event_id;
     signals.push_back(signal);
   }
   return true;
@@ -865,7 +900,11 @@ void VirtualGPU::RetiringSignalTracker::PreparePooledSignals(
 
 // ================================================================================================
 bool VirtualGPU::RetiringSignalTracker::IsRetired(const ProfilingSignal* signal) const {
+  // A stream synchronize waits on the command's signal outside the tracker and only records the
+  // completion in use_completion_
   return signal->use_retired_ ||
+         (signal->use_completion_.load(std::memory_order_acquire) &
+          ProfilingSignal::kUseCompleteBit) != 0 ||
          (signal->use_aql_slot_ != kInvalidAqlSlot && signal->use_queue_gen_ == queue_gen_ &&
           signal->use_aql_slot_ < retired_below_);
 }
@@ -902,9 +941,9 @@ void VirtualGPU::RetiringSignalTracker::NoteQueueChange() {
 // ================================================================================================
 void VirtualGPU::RetiringSignalTracker::NoteQueueDrained() {
   ClosePins();
-  for (PinnedWaits& pins : closed_pins_) {
-    if (pins.queue_gen == queue_gen_) {
-      pins.consumers_passed = true;
+  for (PinnedWait& pin : pins_) {
+    if (pin.close_seq != 0 && pin.queue_gen == queue_gen_) {
+      pin.consumers_passed = true;
     }
   }
   ReleasePins();
@@ -981,12 +1020,12 @@ ProfilingSignal* VirtualGPU::RetiringSignalTracker::TakeHostSignal() {
 }
 
 // ================================================================================================
-void VirtualGPU::RetiringSignalTracker::PlaceForUse(bool timing_only) {
+void VirtualGPU::RetiringSignalTracker::PlaceForUse(bool host_memory) {
   ProfilingSignal* current = signal_list_[current_id_];
-  if (current->in_device_memory_ != timing_only) {
+  if (current->in_device_memory_ != host_memory) {
     return;
   }
-  ProfilingSignal* replacement = timing_only ? TakeHostSignal() : TakeSpare();
+  ProfilingSignal* replacement = host_memory ? TakeHostSignal() : TakeSpare();
   if (replacement == nullptr) {
     return;
   }
@@ -995,7 +1034,7 @@ void VirtualGPU::RetiringSignalTracker::PlaceForUse(bool timing_only) {
     spare_signals_.push_back(replacement);
     return;
   }
-  (timing_only ? spare_signals_ : host_signals_).push_back(current);
+  (host_memory ? spare_signals_ : host_signals_).push_back(current);
   signal_list_[current_id_] = replacement;
 }
 
@@ -1016,6 +1055,8 @@ void VirtualGPU::RetiringSignalTracker::RecycleParked() {
   // submission that triggers it. A bounded number per call keeps pace with the parking, which is
   // at most kArmBatch per Reclaim too.
   const size_t num_scans = std::min(parked_signals_.size(), kArmBatch);
+  ProfilingSignal* free_signals[kArmBatch];
+  size_t num_free = 0;
   for (size_t scan = 0; scan < num_scans; ++scan) {
     ProfilingSignal* signal = parked_signals_.front();
     parked_signals_.pop_front();
@@ -1024,6 +1065,11 @@ void VirtualGPU::RetiringSignalTracker::RecycleParked() {
       continue;
     }
     ProcessSignalTiming(signal);
+    free_signals[num_free++] = signal;
+  }
+  // As in Reclaim, the arms follow the timing work and its locks
+  for (size_t free_idx = 0; free_idx < num_free; ++free_idx) {
+    ProfilingSignal* signal = free_signals[free_idx];
     StoreValue(signal, kInitSignalValueOne);
     signal->armed_ = true;
     // ActiveSignal swaps interrupt and host-memory signals in from their own pools
@@ -1074,6 +1120,10 @@ void VirtualGPU::RetiringSignalTracker::Reclaim() {
   }
   // A Timestamp still listing a signal reads its timestamps, which the next use overwrites
   CacheRetiredTiming(retired, num_retired);
+  // The arms follow all the timing work: ProcessSignalTiming takes a lock, and a locked
+  // instruction waits for every earlier non-temporal store to device memory to land
+  ProfilingSignal* arm_signals[kArmBatch];
+  size_t num_arms = 0;
   for (size_t retired_idx = 0; retired_idx < num_retired; ++retired_idx) {
     const size_t slot = retired[retired_idx].slot;
     ProfilingSignal* signal = signal_list_[slot];
@@ -1087,9 +1137,12 @@ void VirtualGPU::RetiringSignalTracker::Reclaim() {
       }
     } else {
       ProcessSignalTiming(signal);
-      StoreValue(signal, kInitSignalValueOne);
-      signal->armed_ = true;
+      arm_signals[num_arms++] = signal;
     }
+  }
+  for (size_t arm_idx = 0; arm_idx < num_arms; ++arm_idx) {
+    StoreValue(arm_signals[arm_idx], kInitSignalValueOne);
+    arm_signals[arm_idx]->armed_ = true;
   }
   // One flush publishes every arm before any of the slots is handed to a packet
   FlushStores();
@@ -1143,6 +1196,9 @@ void VirtualGPU::RetiringSignalTracker::AcquireSlot() {
       MarkCompleted(oldest);
       const bool replaced = oldest->referenceCount() > 1 && ReplaceWithSpare(next);
       if (!replaced) {
+        if (oldest->referenceCount() > 1) {
+          LogError("No spare signal: reusing a signal that another holder may still wait on");
+        }
         assert(oldest->referenceCount() == 1 && "Signal reuse conflicts with another holder!");
         StoreValue(oldest, kInitSignalValueOne);
         FlushStores();
@@ -1161,53 +1217,58 @@ void VirtualGPU::RetiringSignalTracker::AcquireSlot() {
 
 // ================================================================================================
 void VirtualGPU::RetiringSignalTracker::ClosePins() {
-  if (open_pins_.signals.empty() || gpu_.gpu_queue_ == nullptr) {
+  if (num_open_pins_ == 0 || gpu_.gpu_queue_ == nullptr) {
     return;
   }
-  open_pins_.close_seq = next_use_seq_;
-  open_pins_.close_aql = Hsa::queue_load_write_index_relaxed(gpu_.gpu_queue_);
-  open_pins_.queue_gen = queue_gen_;
-  closed_pins_.push_back(std::move(open_pins_));
-  open_pins_ = PinnedWaits{};
+  CloseOpenPins(Hsa::queue_load_write_index_relaxed(gpu_.gpu_queue_), queue_gen_);
 }
 
 // ================================================================================================
 void VirtualGPU::RetiringSignalTracker::ReleasePins(bool release_all) {
-  for (auto pins = closed_pins_.begin(); pins != closed_pins_.end();) {
+  if (release_all) {
+    ReleaseAllPins();
+    return;
+  }
+  const size_t num_closed = pins_.size() - num_open_pins_;
+  auto pin = pins_.begin();
+  for (size_t closed_idx = 0; closed_idx < num_closed; ++closed_idx) {
     // AQL consumers precede close_aql and the others own a use below close_seq
     const bool consumers_passed =
-        pins->consumers_passed ||
-        (pins->queue_gen == queue_gen_ && pins->close_aql <= retired_below_);
-    if (release_all || (consumers_passed && oldest_unretired_seq_ >= pins->close_seq)) {
-      for (ProfilingSignal* signal : pins->signals) {
-        signal->release();
-      }
-      pins = closed_pins_.erase(pins);
+        pin->consumers_passed || (pin->queue_gen == queue_gen_ && pin->close_aql <= retired_below_);
+    if (consumers_passed && oldest_unretired_seq_ >= pin->close_seq) {
+      pin->signal->release();
+      pin = pins_.erase(pin);
     } else {
-      ++pins;
+      ++pin;
     }
-  }
-  if (release_all) {
-    for (ProfilingSignal* signal : open_pins_.signals) {
-      signal->release();
-    }
-    open_pins_.signals.clear();
   }
 }
 
 // ================================================================================================
 hsa_signal_value_t VirtualGPU::RetiringSignalTracker::LoadValue(
     const ProfilingSignal* signal) const {
-  return reinterpret_cast<const amd_signal_t*>(signal->signal_.handle)->value;
+  const volatile hsa_signal_value_t* value =
+      &reinterpret_cast<const amd_signal_t*>(signal->signal_.handle)->value;
+  const hsa_signal_value_t loaded = *value;
+  // A host that needs no PCIe flush reaches device memory over coherent xGMI and caches it
+  if (signal->in_device_memory_ && !gpu_.dev().PcieStoresNeedFlush()) {
+    amd::cachelineEvict(value);
+  }
+  return loaded;
 }
 
 // ================================================================================================
 void VirtualGPU::RetiringSignalTracker::StoreValue(ProfilingSignal* signal,
                                                    hsa_signal_value_t value) {
-  reinterpret_cast<amd_signal_t*>(signal->signal_.handle)->value = value;
+  auto* amd_signal = reinterpret_cast<amd_signal_t*>(signal->signal_.handle);
   if (signal->in_device_memory_) {
+    // A plain store would bring the line into the cache of a host that maps device memory
+    // write-back, and the CP's completion atomic on the signal would have to probe it
+    amd::nontemporalStore64(&amd_signal->value, value);
     unflushed_store_ = signal;
     unflushed_value_ = value;
+  } else {
+    amd_signal->value = value;
   }
 }
 
@@ -1216,8 +1277,8 @@ void VirtualGPU::RetiringSignalTracker::FlushStores() {
   if (unflushed_store_ == nullptr) {
     return;
   }
-  // The BAR is write-combined, so a store can stay in this core until a fence, unseen by any GPU,
-  // including a peer that waits on the signal over XGMI
+  // StoreValue writes device-memory signals with non-temporal stores, which can stay in this
+  // core until a fence, unseen by any GPU, including a peer that waits on the signal over XGMI
   amd::nontemporalStoreFence();
   // A device-memory ring receives the packets that use these signals through the same BAR after
   // the stores, in order, so only a system-memory ring needs the HDP flush
@@ -1232,6 +1293,7 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
                                                       bool attach_signal, uint64_t aql_slot,
                                                       bool barrier_bit, bool timing_only) {
   amd::Command* cmd = gpu_.command();
+
   // If no signal is needed, decrement the refcount and clear the hw_event of current command
   if (!attach_signal) {
     if (nullptr != cmd) {
@@ -1278,7 +1340,8 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
     }
   }
   if (!use_irq) {
-    PlaceForUse(timing_only);
+    // An SDMA submission reads and flushes a device-memory signal across the bus
+    PlaceForUse(timing_only || IsSdmaEngine(engine_));
   }
   ProfilingSignal* prof_signal = signal_list_[current_id_];
   const bool blocking_callback = enqueHandler && ts->command().Callback() != nullptr &&
@@ -1332,8 +1395,12 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
 }
 
 // ================================================================================================
-std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngine engine) {
+std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngine engine,
+                                                                     uint32_t abce_ring) {
   bool explicit_wait = false;
+  const bool same_abce_ring =
+      engine == HwQueueEngine::SdmaAbce && engine_ == HwQueueEngine::SdmaAbce &&
+      abce_ring != kInvalidAbceRing && abce_ring == abce_ring_;
   // Reset all current waiting signals
   waiting_signals_.clear();
   NoteWaitsSubmitted();
@@ -1341,7 +1408,6 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
   // Does runtime switch the active engine?
   if (engine != engine_) {
     // Yes, return the signal from the previous operation for a wait
-    engine_ = engine;
     explicit_wait = true;
   } else {
     // Unknown engine in use, hence return a wait signal always
@@ -1349,13 +1415,16 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
       explicit_wait = true;
     } else {
       // Check if skip wait optimization is enabled. It will try to predict the same engine in ROCr
-      // and ignore the signal wait, relying on in-order engine execution
-      const Settings& settings = gpu_.dev().settings();
-      if (engine != HwQueueEngine::Compute) {
+      // and ignore the signal wait, relying on in-order engine execution.
+      if (engine == HwQueueEngine::SdmaAbce) {
+        explicit_wait = !same_abce_ring;
+      } else if (engine != HwQueueEngine::Compute) {
         explicit_wait = true;
       }
     }
   }
+  engine_ = engine;
+  abce_ring_ = engine == HwQueueEngine::SdmaAbce ? abce_ring : kInvalidAbceRing;
 
   // Check if a wait is required
   if (explicit_wait) {
@@ -1375,16 +1444,24 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
 
   // Validate all signals for the wait and skip already completed
   for (uint32_t i = 0; i < external_signals_.size(); ++i) {
+    const Settings& settings = gpu_.dev().settings();
+    // DEBUG_CLR_GRAPH_FAST_LAUNCH: a signal in device memory (graph signals, device-memory queue
+    // signals) is not read: the read crosses the host link, on PCIe it waits for the
+    // write-combined packet stores ahead of it, on A+A (device memory mapped write-back) it
+    // leaves the line in the CPU cache for the CP to probe, and the CP checks the wait anyway.
+    // Only a wait the host bookkeeping proves retired, with no read, is left out
+    const bool unread = DEBUG_CLR_GRAPH_FAST_LAUNCH && external_signals_[i]->in_device_memory_ &&
+                        !settings.cpu_wait_for_signal_;
     // Early signal status check
-    if (IsBusy(external_signals_[i])) {
-      const Settings& settings = gpu_.dev().settings();
+    if (unread ? !IsKnownRetired(external_signals_[i]) : IsBusy(external_signals_[i])) {
       if (settings.cpu_wait_for_signal_) {
         // Wait on CPU for completion if requested
         CpuWaitForSignal(external_signals_[i]);
       } else {
-        // Add HSA signal for tracking on GPU
+        // Add HSA signal for tracking on GPU. Compute callers wait in AQL packets, the others
+        // hand the waits to ROCr operations that each complete a use of this tracker.
         waiting_signals_.push_back(external_signals_[i]->signal_);
-        NoteGpuWait(external_signals_[i]);
+        NoteGpuWait(external_signals_[i], engine == HwQueueEngine::Compute);
       }
     }
   }
@@ -1401,9 +1478,47 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
 }
 
 // ================================================================================================
+void VirtualGPU::HwQueueTracker::NoteGpuWait(ProfilingSignal* signal, bool aql_waiter) {
+  // Keep the owner from rearming the signal before the GPU waiter reads it
+  signal->retain();
+  PinnedWait pin{signal};
+  pin.aql_waiter = aql_waiter;
+  pins_.push_back(pin);
+  ++num_open_pins_;
+}
+
+// ================================================================================================
+void VirtualGPU::HwQueueTracker::CloseOpenPins(uint64_t close_aql, uint64_t queue_gen) {
+  for (auto pin = pins_.end() - num_open_pins_; pin != pins_.end(); ++pin) {
+    pin->close_seq = next_use_seq_;
+    pin->close_aql = close_aql;
+    pin->queue_gen = queue_gen;
+  }
+  num_open_pins_ = 0;
+}
+
+// ================================================================================================
+void VirtualGPU::HwQueueTracker::ReleaseAllPins() {
+  for (PinnedWait& pin : pins_) {
+    pin.signal->release();
+  }
+  pins_.clear();
+  num_open_pins_ = 0;
+  for (ProfilingSignal* signal : unfenced_pins_) {
+    signal->release();
+  }
+  unfenced_pins_.clear();
+  for (ProfilingSignal* signal : stale_pins_) {
+    signal->release();
+  }
+  stale_pins_.clear();
+}
+
+// ================================================================================================
 bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
-  // Wait for the current signal to complete
-  if (Hsa::signal_load_relaxed(signal->signal_) > 0) {
+  // Wait for the current signal to complete. The wait loads the value first, so a device-memory
+  // signal skips this load, which crosses PCIe on a PCIe host.
+  if (signal->in_device_memory_ || Hsa::signal_load_relaxed(signal->signal_) > 0) {
     ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Host wait on completion_signal=0x%zx",
             signal->signal_.handle);
     if (!WaitForSignal(signal->signal_, gpu_.ActiveWait(), /*yield=*/false,
@@ -1462,11 +1577,22 @@ void VirtualGPU::LegacySignalTracker::AcquireSlot() {
     // Find valid index
     ++current_id_ %= signal_list_.size();
     // Make sure the previous operation on the current signal is done
-    WaitCurrent();
+    if (WaitCurrent()) {
+      NoteCompleted(signal_list_[current_id_]);
+    }
 
     // Have to wait the next signal in the queue to avoid a race condition between
     // a GPU waiter(which may be not triggered yet) and CPU signal reset below
     WaitNext();
+
+    // The GPU waiters, beyond the one owning the next slot, that a pin protects may be done
+    ReleaseCompletedPins();
+    if (signal_list_[current_id_]->referenceCount() > 1 && pins_.size() > num_open_pins_) {
+      // Several operations polled the signal, such as the ops of one batch copy. They are
+      // usually long done, which saves replacing the signal.
+      ProbeCompleted();
+      ReleaseCompletedPins();
+    }
   }
 
   if (signal_list_[current_id_]->referenceCount() > 1) {
@@ -1495,10 +1621,87 @@ void VirtualGPU::HwQueueTracker::BeginUse(ProfilingSignal* signal, hsa_signal_va
 
 // ================================================================================================
 void VirtualGPU::LegacySignalTracker::ArmForUse(ProfilingSignal* signal,
-                                                hsa_signal_value_t init_val, uint64_t /*aql_slot*/,
-                                                bool /*barrier_bit*/, bool /*blocking_callback*/) {
+                                                hsa_signal_value_t init_val, uint64_t aql_slot,
+                                                bool barrier_bit, bool /*blocking_callback*/) {
   // Reset the signal and return
   Hsa::signal_silent_store_relaxed(signal->signal_, init_val);
+  signal->use_seq_ = next_use_seq_++;
+  signal->use_fence_ = barrier_bit && aql_slot != kInvalidAqlSlot;
+  if (signal->use_fence_) {
+    NoteFenceUse(signal->use_seq_);
+  }
+}
+
+// ================================================================================================
+void VirtualGPU::LegacySignalTracker::NoteWaitsSubmitted() {
+  if (num_open_pins_ == 0) {
+    return;
+  }
+  // Compacts the open pins that stay in pins_ toward the front of the open range
+  const auto open_begin = pins_.end() - num_open_pins_;
+  auto kept = open_begin;
+  for (auto pin = open_begin; pin != pins_.end(); ++pin) {
+    if (!pin->aql_waiter) {
+      // Each consumer owns a use issued since the WaitingSignal call
+      pin->close_seq = next_use_seq_;
+    } else if (pin->close_seq == 0) {
+      // A consumer may be an AQL packet without a signal, such as the barrier ahead of a kernel,
+      // so only a later fence use proves that it passed the wait
+      unfenced_pins_.push_back(pin->signal);
+      continue;
+    }
+    *kept++ = *pin;
+  }
+  pins_.erase(kept, pins_.end());
+  num_open_pins_ = 0;
+}
+
+// ================================================================================================
+void VirtualGPU::LegacySignalTracker::NoteFenceUse(uint64_t fence_seq) {
+  // The callers publish the AQL packets consuming a WaitingSignal result before the next use's
+  // packet, so the fence follows them on the queue even while their pins are open. The pins
+  // awaiting a fence when the HW queue changed are not in unfenced_pins_ any more (see
+  // NoteQueueChange), so every one of them was published on the queue of this fence.
+  for (auto pin = pins_.end() - num_open_pins_; pin != pins_.end(); ++pin) {
+    if (pin->aql_waiter && pin->close_seq == 0) {
+      pin->close_seq = fence_seq + 1;
+    }
+  }
+  // The closed pins in pins_ closed at most at fence_seq, before this use was issued, so the
+  // fenced pins go after them, ahead of the open ones, and keep close_seq non-decreasing. Only the
+  // first fence after a WaitingSignal call finds unfenced pins, so the open ones close at
+  // fence_seq + 1 or later.
+  for (ProfilingSignal* signal : unfenced_pins_) {
+    PinnedWait pin{signal, fence_seq + 1};
+    pin.aql_waiter = true;
+    pins_.insert(pins_.end() - num_open_pins_, pin);
+  }
+  unfenced_pins_.clear();
+}
+
+// ================================================================================================
+void VirtualGPU::LegacySignalTracker::NoteQueueChange() {
+  // The pins of the last WaitingSignal call stay open until the next one, so between submissions
+  // their consumers are all published, on the queue that is being left. Close them first, which
+  // moves the pins of AQL waiters that no fence followed to unfenced_pins_.
+  NoteWaitsSubmitted();
+  // The HW queue may change while the old one still holds the AQL consumers of these pins, as in
+  // ReacquireQueueExcluding(). A fence use on the new queue doesn't order them, so they are kept
+  // until the tracker is destroyed, like the pins of RetiringSignalTracker from an earlier queue.
+  stale_pins_.insert(stale_pins_.end(), unfenced_pins_.begin(), unfenced_pins_.end());
+  unfenced_pins_.clear();
+}
+
+// ================================================================================================
+void VirtualGPU::LegacySignalTracker::NoteQueueDrained() {
+  // The queue's last packet completed, and packets are processed in order, so every consumer of
+  // a pin awaiting a fence passed its wait, including those of the last WaitingSignal call, which
+  // closing its pins moves to unfenced_pins_
+  NoteWaitsSubmitted();
+  for (ProfilingSignal* signal : unfenced_pins_) {
+    signal->release();
+  }
+  unfenced_pins_.clear();
 }
 
 // ================================================================================================
@@ -1520,13 +1723,54 @@ void VirtualGPU::LegacySignalTracker::WaitNext() {
   ProfilingSignal* signal = signal_list_[next];
   // Only wait, there is no need to save timestamp for the next signal
   // It will be saved when the signal is actually used
-  WaitForSignal(signal->signal_, gpu_.ActiveWait(), /*yield=*/false, signal->in_device_memory_);
+  if (WaitForSignal(signal->signal_, gpu_.ActiveWait(), /*yield=*/false,
+                    signal->in_device_memory_)) {
+    NoteCompleted(signal);
+  }
+}
+
+// ================================================================================================
+void VirtualGPU::LegacySignalTracker::NoteCompleted(const ProfilingSignal* signal) {
+  completed_below_seq_ = std::max(completed_below_seq_, signal->use_seq_ + 1);
+}
+
+// ================================================================================================
+void VirtualGPU::LegacySignalTracker::ProbeCompleted() {
+  // close_seq never decreases along pins_, so the newest closed pin needs the most uses
+  const uint64_t needed_seq = pins_[pins_.size() - num_open_pins_ - 1].close_seq;
+  const size_t size = signal_list_.size();
+  // From the use after the next slot's toward the newest
+  for (size_t offset = 2; offset < size && completed_below_seq_ < needed_seq; ++offset) {
+    const ProfilingSignal* signal = signal_list_[(current_id_ + offset) % size];
+    // Signals without a use in flight, unused or rolled back, prove nothing
+    if (signal->use_seq_ < completed_below_seq_) {
+      continue;
+    }
+    if (IsBusy(signal)) {
+      break;
+    }
+    NoteCompleted(signal);
+  }
+}
+
+// ================================================================================================
+void VirtualGPU::LegacySignalTracker::ReleaseCompletedPins() {
+  // The consumers of a pin own a use below its close_seq, or precede the fence use below it on
+  // the AQL queue. A pin still awaiting its fence is not in pins_ and blocks nothing.
+  while (pins_.size() > num_open_pins_ && pins_.front().close_seq <= completed_below_seq_) {
+    pins_.front().signal->release();
+    pins_.pop_front();
+  }
 }
 
 // ================================================================================================
 void VirtualGPU::LegacySignalTracker::ResetCurrentSignal() {
+  // Only ROCr operations fail after taking their use, and those are never fences that closed pins
+  assert(!signal_list_[current_id_]->use_fence_ && "Rolled back a fence use!");
   // Reset the signal and return
   Hsa::signal_silent_store_relaxed(signal_list_[current_id_]->signal_, 0);
+  // The use never ran. Its slot is reused next, out of use order, so its wait proves nothing.
+  signal_list_[current_id_]->use_seq_ = 0;
   // Fallback to the previous signal
   current_id_ = (current_id_ == 0) ? (signal_list_.size() - 1) : (current_id_ - 1);
 }
@@ -1576,17 +1820,66 @@ hsa_status_t VirtualGPU::RetiringSignalTracker::SetAsyncHandler(ProfilingSignal*
 
 // ================================================================================================
 bool VirtualGPU::RetiringSignalTracker::IsBusy(const ProfilingSignal* signal) const {
-  return !(signal == signal_list_[current_id_] && IsRetired(signal)) && LoadValue(signal) > 0;
+  return !IsKnownRetired(signal) && LoadValue(signal) > 0;
+}
+
+// ================================================================================================
+bool VirtualGPU::RetiringSignalTracker::IsKnownRetired(const ProfilingSignal* signal) const {
+  return signal == signal_list_[current_id_] && IsRetired(signal);
 }
 
 // ================================================================================================
 void VirtualGPU::RetiringSignalTracker::NoteWaitsSubmitted() { ClosePins(); }
 
 // ================================================================================================
-void VirtualGPU::RetiringSignalTracker::NoteGpuWait(ProfilingSignal* signal) {
-  // Keep the owner from rearming the signal before the GPU waiter reads it
+void VirtualGPU::RetiringSignalTracker::NoteGpuWait(ProfilingSignal* signal, bool aql_waiter) {
+  // The command whose packets wait holds the pin until it completes, which follows the wait. A
+  // queue that only waits, such as a graph side queue, never retires uses of its own to release
+  // queue pins
+  amd::Command* waiter = gpu_.command();
+  if (waiter != nullptr) {
+    // Keep the owner from rearming the signal before the GPU waiter reads it
+    signal->retain();
+    waiter->PinHwEvent(signal);
+    return;
+  }
+  HwQueueTracker::NoteGpuWait(signal, aql_waiter);
+}
+
+// ================================================================================================
+void VirtualGPU::RetiringSignalTracker::HoldSignal(ProfilingSignal* signal) {
   signal->retain();
-  open_pins_.signals.push_back(signal);
+  held_signals_.push_back(signal);
+}
+
+// ================================================================================================
+void VirtualGPU::RetiringSignalTracker::ReleaseHeldSignals(size_t mark) {
+  for (size_t i = mark; i < held_signals_.size(); ++i) {
+    held_signals_[i]->release();
+  }
+  held_signals_.resize(std::min(mark, held_signals_.size()));
+}
+
+// ================================================================================================
+void VirtualGPU::HwQueueTracker::KeepUntilRetired(const std::vector<void*>& pins) {
+  for (void* pin : pins) {
+    reinterpret_cast<ProfilingSignal*>(pin)->release();
+  }
+  ReleaseHeldSignals();
+}
+
+// ================================================================================================
+void VirtualGPU::RetiringSignalTracker::KeepUntilRetired(const std::vector<void*>& pins) {
+  // The references move into open pins, which close at the current queue position
+  for (void* pin : pins) {
+    pins_.push_back(PinnedWait{reinterpret_cast<ProfilingSignal*>(pin)});
+  }
+  for (ProfilingSignal* signal : held_signals_) {
+    pins_.push_back(PinnedWait{signal});
+  }
+  num_open_pins_ += pins.size() + held_signals_.size();
+  held_signals_.clear();
+  ClosePins();
 }
 
 // ================================================================================================
@@ -1788,9 +2081,8 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
               amd::Image* img = mem->asImage();
 
               // Copy memory from the original image buffer into the backing store image
-              bool result =
-                  blitMgr().copyBufferToImage(*devBuf, *devCpImg, offs, offs, img->getRegion(),
-                                              true, img->getRowPitch(), img->getSlicePitch());
+              (void)blitMgr().copyBufferToImage(*devBuf, *devCpImg, offs, offs, img->getRegion(),
+                                                true, img->getRowPitch(), img->getSlicePitch());
               // Make sure the copy operation is done
               setAqlHeader(dispatchPacketHeader_);
               // Use backing store SRD as the replacment
@@ -2027,7 +2319,8 @@ std::string VirtualGPU::AnalyzeAqlQueueBody() const {
   // and the debug log print identical packet detail, including the metadata blob.
   if (pkt_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC) {
     auto* vendor_hdr = reinterpret_cast<const hsa_amd_vendor_packet_header_t*>(aql_loc);
-    if (vendor_hdr->AmdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH) {
+    if (vendor_hdr->AmdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH ||
+        vendor_hdr->AmdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD) {
       auto* ext = reinterpret_cast<const hsa_amd_ext_kernel_dispatch_packet_t*>(aql_loc);
       lookupKernelName(ext->kernel_object);
       logAqlDispatchPacketExtended(dev(), gpu_queue_, header, ext, index, priority_, meta,
@@ -2067,12 +2360,14 @@ template <typename AqlPacket>
 void VirtualGPU::writePacketToRingBuffer(AqlPacket* aql_loc, AqlPacket* packet,
                                          uint16_t header, uint16_t rest, uint64_t slot_index) {
   if (use_movdir64b_) {
-    metadata_preloader_.SetMetadata(packet, header, slot_index, true, device_mem_ring_buf_);
+    metadata_preloader_.SetMetadata(packet, header, slot_index, true, device_mem_ring_buf_,
+                                    rest, aql_loc);
     amd::nontemporalStoreFence();
     amd::nontemporalWriteAQL(aql_loc, packet, header, rest);
   } else {
     amd::nontemporalCopyAQL(aql_loc, packet);
-    metadata_preloader_.SetMetadata(packet, header, slot_index, false, device_mem_ring_buf_);
+    metadata_preloader_.SetMetadata(packet, header, slot_index, false, device_mem_ring_buf_,
+                                    rest, aql_loc);
     amd::nontemporalStoreFence();
     packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), header, rest);
   }
@@ -2118,7 +2413,7 @@ AqlSlotReservation VirtualGPU::ReserveAqlSlots(size_t packet_count) {
 // ================================================================================================
 void VirtualGPU::OptimizeStreamOrderingBarrier(
     uint16_t& header, const AqlSlotReservation& reservation) const {
-  if (!roc_device_.settings().aql_barrier_opt_) {
+  if (!roc_device_.settings().aql_barrier_opt_ || barriers_->NeedsFence()) {
     return;
   }
 
@@ -2202,6 +2497,7 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   }
   if (packet->completion_signal.handle != 0) {
     packet->completion_signal = Barriers().GetLastSignal()->PacketHandle(timestamp_ != nullptr);
+    metadata_preloader_.SetCompletionEventId(Barriers().GetLastSignal()->event_id_);
   }
 
   TrackQueueProgress(*packet, index);
@@ -2211,8 +2507,9 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
 
   if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
     if constexpr (std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
-      // setup travels in `rest`, not in the local packet struct, so the log
-      // would otherwise print setup=0. Populate it before logging.
+      // amd_format and setup travel in `rest`, not in the local packet struct,
+      // so the log would otherwise print amd_format=0 and setup=0.
+      packet->amd_format = static_cast<hsa_amd_packet_type8_t>(rest & 0xFF);
       packet->setup = static_cast<uint8_t>((rest >> 8) & 0xFF);
     }
     if (dev().settings().ext_dispatch_packet_) {
@@ -2257,26 +2554,37 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
 }
 
 // ================================================================================================
-void VirtualGPU::adjustHeader(uint16_t& header) {
-  setFenceDirty(true);
-
+void VirtualGPU::applySystemScopeRequest(uint16_t& header) {
   if (TestAndClearStateFlag(kAddSystemScope)) {
     header &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE |
                 HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
     header |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE |
                HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
   }
+}
+
+// ================================================================================================
+void VirtualGPU::adjustHeader(uint16_t& header) {
+  setFenceDirty(true);
+
+  applySystemScopeRequest(header);
 
   auto expected_fence_state = extractAqlBits(header, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
                                              HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE);
 
+  // A system-scope release publishes the dispatch's writes to all agents and satisfies the
+  // outstanding flush. Clear the dirty flag so later synchronization does not emit a redundant
+  // system-scope barrier.
   if (expected_fence_state == amd::Device::kCacheStateSystem) {
     setFenceDirty(false);
   }
 
+  // `fence_state_` tracks requested, not emitted, scope. Keep the first system-scope release in a
+  // run, then restore the default header on later packets. With an agent-scoped default, their
+  // writes remain dirty until one system-scope barrier publishes them at synchronization, avoiding
+  // a flush after every dispatch. Preserve an explicit any-order request when replacing the header.
   if (fence_state_ == amd::Device::kCacheStateSystem &&
       expected_fence_state == amd::Device::kCacheStateSystem) {
-    // honor an explicit any-order
     const bool any_order = (header & kBarrierBit) == 0;
     header = dispatchPacketHeader_;
     if (any_order) {
@@ -2289,14 +2597,20 @@ void VirtualGPU::adjustHeader(uint16_t& header) {
 }
 
 // ================================================================================================
-void VirtualGPU::dispatchBlockingWait(hsa_kernel_dispatch_packet_t* packet) {
+void VirtualGPU::dispatchBlockingWait(hsa_kernel_dispatch_packet_t* packet,
+                                      hsa_amd_packet_type8_t amd_format) {
   auto wait_signals = Barriers().WaitingSignal();
-  if (dev().settings().ext_dispatch_packet_ && wait_signals.size() == 1 && packet != nullptr) {
-      // The Ext Dispatch Packet supports only one dependent signal
-      auto ext_packet = reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(packet);
-      ext_packet->dep_signal = wait_signals[0];
+
+  // Format 3 (DISPATCH) supports one dep_signal when there's exactly one wait signal
+  if (amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH &&
+      wait_signals.size() == 1 && packet != nullptr) {
+    auto ext_packet = reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(packet);
+    ext_packet->dep_signal = wait_signals[0];
   } else {
-    // AQL dispatch doesn't support dependent signals and extra barrier packet must be generated
+    // All other cases: use barrier packets for dependencies
+    // - Format 4 (DISPATCH1): dep_signal field is launch_descriptor, must use barriers
+    // - Format 3 with multiple signals or null packet: use barriers
+    // - Standard dispatch packets: use barriers
     for (uint32_t i = 0; i < wait_signals.size(); ++i) {
       uint32_t j = i % 5;
       barrier_packet_.dep_signal[j] = wait_signals[i];
@@ -2314,7 +2628,7 @@ template <typename AqlPacket>
 bool VirtualGPU::dispatchAqlPacket(AqlPacket* packet, uint16_t header,
                                    uint16_t rest, bool blocking, bool attach_signal) {
   if (command_ != nullptr && command_->getPktCapturingState()) {
-    adjustHeader(header);
+    applySystemScopeRequest(header);
     packet->header = header;
     if constexpr (std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
       // For ext dispatch packets the first 32 bits are {header(16), amd_format(8), setup(8)}.
@@ -2334,7 +2648,12 @@ bool VirtualGPU::dispatchAqlPacket(AqlPacket* packet, uint16_t header,
     }
     return true;
   } else {
-    dispatchBlockingWait(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet));
+    // rest is setup (dimensions) for regular dispatch; amd_format lives in rest only for ext packets.
+    hsa_amd_packet_type8_t amd_format = 0;
+    if constexpr (std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
+      amd_format = static_cast<hsa_amd_packet_type8_t>(rest & 0xFF);
+    }
+    dispatchBlockingWait(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet), amd_format);
     return dispatchGenericAqlPacket(packet, header, rest, blocking, attach_signal);
   }
 }
@@ -2373,6 +2692,77 @@ static inline void writeMetadataPacketToRing(uint8_t* dst, const uint8_t* src,
 //     signal + valid header).  Reserved slots already carry INVALID headers from the CP's
 //     previous consumption, so publish order is irrelevant and no packet-0-last dance is
 //     needed.  The metadata ring uses the same NT-vs-MOVDIR64B split.
+void VirtualGPU::FlushPendingForkWait() {
+  if (pending_fork_wait_ == nullptr) {
+    return;
+  }
+  // The wait as 0009 issues it: a barrier without completion signal
+  barrier_packet_.dep_signal[0] = pending_fork_wait_->signal_;
+  constexpr bool kSkipSignal = true;
+  constexpr bool kDepSignalsSet = true;
+  dispatchBarrierPacket(kNopPacketHeader, kSkipSignal, hsa_signal_t{0}, kDepSignalsSet);
+  ReleasePendingForkWait();
+}
+
+// ================================================================================================
+void VirtualGPU::ReleasePendingForkWait() {
+  pending_fork_wait_->release();
+  pending_fork_wait_ = nullptr;
+  pending_fork_anchor_ = nullptr;
+}
+
+// ================================================================================================
+bool VirtualGPU::dispatchGraphForkWait(amd::Command* wait_cmd, amd::AccumulateCommand* anchor) {
+  // The waited command's queue attaches a marker with a HW event if the command has none
+  wait_cmd->notifyCmdQueue();
+  amd::Event* event = (wait_cmd->NotifyEvent() != nullptr) ? wait_cmd->NotifyEvent() : wait_cmd;
+  auto* hw_event = reinterpret_cast<ProfilingSignal*>(event->HwEvent());
+  if (hw_event == nullptr) {
+    // Nothing to wait for if it completed; otherwise the caller waits with a marker
+    return wait_cmd->status() == CL_COMPLETE;
+  }
+
+  std::scoped_lock lock(execution());
+  profilingBegin(*anchor);
+  Barriers().AddExternalSignal(hw_event);
+  device::VirtualDevice* wait_vdev =
+      (wait_cmd->queue() != nullptr) ? wait_cmd->queue()->vdev() : nullptr;
+  if ((wait_vdev != nullptr) && (wait_vdev != this) && wait_vdev->isFenceDirty()) {
+    setFenceDirty(true);
+  }
+  // Like the fork marker's barrier, without its scopes, but with no completion signal: the
+  // queue's first packet after it starts once the waits are met
+  const auto& wait_signals = Barriers().WaitingSignal();
+  // With the ext dispatch packet, a single wait on the waited command's own signal is left pending
+  // for the segment's first packet, which carries it in its dep_signal if it is an ext dispatch
+  if (dev().settings().ext_dispatch_packet_ &&
+      (wait_signals.size() == 1) && (wait_signals[0].handle == hw_event->signal_.handle)) {
+    // Two level-0 segments on this queue wait on the same command
+    if (pending_fork_wait_ != hw_event) {
+      FlushPendingForkWait();
+      hw_event->retain();
+      pending_fork_wait_ = hw_event;
+      pending_fork_anchor_ = anchor;
+    }
+    profilingEnd();
+    anchor->holdCommand(wait_cmd);
+    return true;
+  }
+  constexpr size_t kDepSignals = 5;
+  for (size_t i = 0; i < wait_signals.size(); i += kDepSignals) {
+    for (size_t j = 0; (j < kDepSignals) && ((i + j) < wait_signals.size()); ++j) {
+      barrier_packet_.dep_signal[j] = wait_signals[i + j];
+    }
+    constexpr bool kSkipSignal = true;
+    constexpr bool kDepSignalsSet = true;
+    dispatchBarrierPacket(kNopPacketHeader, kSkipSignal, hsa_signal_t{0}, kDepSignalsSet);
+  }
+  profilingEnd();
+  anchor->holdCommand(wait_cmd);
+  return true;
+}
+
+// ================================================================================================
 bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>& flatPacketData,
                                             const std::vector<uint32_t>& validFullHeaders,
                                             amd::AccumulateCommand* vcmd, bool attach_signal,
@@ -2417,7 +2807,8 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   const bool firstPacketIsKernel =
       firstPacketType == HSA_PACKET_TYPE_KERNEL_DISPATCH ||
       (firstPacketType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
-       (firstSetup & 0xFF) == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+       ((firstSetup & 0xFF) == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH ||
+        (firstSetup & 0xFF) == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD));
   const bool firstHeaderRequestedBarrier =
       firstPacketIsKernel && ((firstHeader & kBarrierBit) != 0);
   if (TestAndClearStateFlag(kAddSystemScope)) {
@@ -2431,6 +2822,26 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     if (numPackets == 1) {
       firstHeader &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
       firstHeader |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    }
+  }
+
+  // A pending fork wait (DEBUG_CLR_GRAPH_FAST_LAUNCH) goes in the first packet's dep_signal if it
+  // is an ext dispatch without one (a level-0 segment has no other dependency), else in a
+  // barrier ahead of the batch
+  hsa_signal_t fork_dep{0};
+  bool forkWaitAhead = false;
+  if (pending_fork_wait_ != nullptr) {
+    const auto* first =
+        reinterpret_cast<const hsa_amd_ext_kernel_dispatch_packet_t*>(flatPacketData.data());
+    const bool first_is_ext = (firstPacketType == HSA_PACKET_TYPE_VENDOR_SPECIFIC) &&
+                              ((firstSetup & 0xFF) == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+    if (first_is_ext && (first->dep_signal.handle == 0)) {
+      // The anchor holds the waited command, so the signal is not rearmed before the wait
+      fork_dep = pending_fork_wait_->signal_;
+      ReleasePendingForkWait();
+    } else {
+      FlushPendingForkWait();
+      forkWaitAhead = true;
     }
   }
 
@@ -2451,17 +2862,27 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   }
   fence_state_ = static_cast<Device::CacheState>(expected_fence_state);
 
-  // A chunk is reserved whole, so it can never exceed the ring capacity. Cap it at
-  // half the ring: a full-capacity chunk is only grantable once read_dispatch_id has
-  // caught up exactly.
-  const size_t kPeriod = std::min<size_t>(DEBUG_HIP_GRAPH_BATCH_SIZE, queueSize / 2);
-  // Ramp-up: submit a small first (lead) chunk so the doorbell is rung after
-  // copying only kLead packets instead of a full kPeriod, then double the chunk
-  // size up to kPeriod. The GPU starts executing the lead while the CPU keeps
-  // copying the remaining packet+metadata payload. Doubling keeps each chunk's
-  // host work (copy plus per-packet profiling fixups) covered by the GPU executing
-  // the previous chunk; jumping from kLead straight to kPeriod lets the GPU drain
-  // the lead and idle until the full kPeriod chunk is published.
+  // A chunk is reserved whole, so it can never exceed the ring capacity. Cap every chunk,
+  // including one a remainder is merged into, at half the ring: a full-capacity chunk is
+  // only grantable once read_dispatch_id has caught up exactly.
+  const size_t kMaxChunk = queueSize / 2;
+  const size_t kPeriod = std::min<size_t>(DEBUG_HIP_GRAPH_BATCH_SIZE, kMaxChunk);
+  // A small first (lead) chunk rings the doorbell after copying only kLead packets, so the
+  // GPU starts on them while the CPU copies the rest of the packet+metadata payload. It
+  // only helps when the GPU would otherwise sit idle. When the queue already holds kLead
+  // unconsumed packets, or the batch's first packet waits on another segment (a leading
+  // barrier, or the dependency an ext kernel dispatch carries in dep_signal), the GPU
+  // cannot start the batch sooner and the lead only adds a reservation, fence and doorbell.
+  // Every chunk after the lead is a full kPeriod. A graph batch is one segment, a chain the
+  // GPU runs in order, so the kLead packets take at least kLead dependent dispatches, which
+  // covers copying the next kPeriod packets.
+  // Profiling breaks that balance. A profiled launch gives each packet its own signal and
+  // dispatch record, and an attached profiler tool scans and rewrites every packet from the
+  // host when the doorbell rings. Either slows submitting a packet far more than it slows
+  // running one, so the chunk size then doubles after the lead up to kPeriod, keeping the
+  // GPU running one chunk while the next is submitted.
+  // A remainder smaller than half the next chunk rides in the chunk before it instead of
+  // costing its own doorbell.
   constexpr size_t kLead = 8;
 
   // A pre-patched packet already carries the completion signal ApplyHwEventPatches
@@ -2477,6 +2898,21 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
       }
     }
   }
+
+  // Completion signal the batch's last packet is published with. Every source of it is a
+  // host write (the flat buffer, or a signal attached below), so it is tracked here rather
+  // than read back from the ring: reading a device-memory ring crosses the host link, which on
+  // a PCIe host waits for the write-combined stores ahead of it and on A+A (write-back) leaves
+  // the line in the CPU cache for the CP to probe.
+  uint64_t lastSignalHandle = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
+      flatPacketData.data() + (numPackets - 1) * kPacketSize)->completion_signal.handle;
+  auto setPacketSignal = [&](hsa_kernel_dispatch_packet_t* pkt, hsa_signal_t signal,
+                             bool isLast) {
+    pkt->completion_signal = signal;
+    if (isLast) {
+      lastSignalHandle = signal.handle;
+    }
+  };
 
   // Attach profiling / completion signals to one packet and return the signal
   // that times it when this is a kernel dispatch. Used by the MOVDIR64B path,
@@ -2494,7 +2930,8 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     const bool isKernelDispatch =
         isBaseKernelDispatch ||
         (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
-         amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+         (amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH ||
+          amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD));
     // A segmented graph's cross-stream dependencies are BARRIER_AND/OR or vendor
     // BARRIER_VALUE packets.  They carry the timing of the wait they perform,
     // so report them alongside the dispatches instead of dropping their signal.
@@ -2504,8 +2941,9 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
                             amdFormat == HSA_AMD_PACKET_TYPE_BARRIER_VALUE);
     if (timestamp_ != nullptr) {
       // Read the pre-patched completion signal from the host-side flat buffer, not
-      // from |pkt|: on the NT path |pkt| is the write-combining ring slot, which
-      // cannot be read back reliably.
+      // from |pkt|: on the NT path |pkt| is the ring slot, which a PCIe host maps
+      // write-combining and cannot read back reliably, and which an A+A host maps
+      // write-back, where the read leaves the line in the CPU cache for the CP to probe.
       const auto* hostPkt = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
           flatPacketData.data() + i * kPacketSize);
       const uint64_t prePatchedHandle =
@@ -2515,8 +2953,9 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         const bool timing_only = !(isLast && (attach_signal || blocking));
         Barriers().ActiveSignal(kInitSignalValueOne, timestamp_, true, kInvalidAqlSlot, false,
                                 timing_only);
-        pkt->completion_signal =
-            Barriers().GetLastSignal()->PacketHandle(isKernelDispatch || BarrierTimestamps());
+        setPacketSignal(
+            pkt, Barriers().GetLastSignal()->PacketHandle(isKernelDispatch || BarrierTimestamps()),
+            isLast);
         if (isKernelDispatch || isBarrier) {
           if (isBaseKernelDispatch && amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
             pkt->reserved2 = timestamp_->command().profilingInfo().correlation_id_;
@@ -2535,15 +2974,15 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         if (it != prePatchedSignals.end()) {
           // Disabling nodes can move the signal off the packet it was patched for, so the
           // timestamp hint follows the packet that carries it now
-          pkt->completion_signal =
-              it->second->PacketHandle(isKernelDispatch || BarrierTimestamps());
+          setPacketSignal(pkt, it->second->PacketHandle(isKernelDispatch || BarrierTimestamps()),
+                          isLast);
           timestamp_->AddProfilingSignal(it->second);
           return (isKernelDispatch || isBarrier) ? it->second : nullptr;
         }
       }
     } else if (isLast && (attach_signal || blocking)) {
       Barriers().ActiveSignal();
-      pkt->completion_signal = Barriers().GetLastSignal()->PacketHandle(false);
+      setPacketSignal(pkt, Barriers().GetLastSignal()->PacketHandle(false), isLast);
     }
     return nullptr;
   };
@@ -2557,8 +2996,9 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
                          IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL);
 
   // All packet fields are read from the host-side flat buffer (|flatPacketData|), never
-  // from the ring slot: the device-resident ring is write-combining, so reading
-  // kernel_object back from it is unreliable.  Kernel names are resolved from the device
+  // from the ring slot: a PCIe host maps the device-resident ring write-combining, so reading
+  // kernel_object back from it is unreliable, and on an A+A host (write-back) the read leaves
+  // the line in the CPU cache for the CP to probe.  Kernel names are resolved from the device
   // KernelMap by kernel_object and, when activity tracing is on, recorded into the command
   // via addKernelDispatch(). The returned dispatch slot is stored on |packetSignal| so
   // timing extraction can fill the same record regardless of signal drain order. The
@@ -2577,7 +3017,8 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     const bool isKernelDispatch =
         isBaseKernelDispatch ||
         (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
-         amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+         (amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH
+          || amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD));
     if (record_dispatches && packetSignal != nullptr &&
         (pktType == HSA_PACKET_TYPE_BARRIER_AND || pktType == HSA_PACKET_TYPE_BARRIER_OR ||
          (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
@@ -2606,10 +3047,14 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         if (isBaseKernelDispatch) {
           logAqlDispatchPacket(roc_device_, gpu_queue_, hdr, hostPkt, slotIdx, priority_);
         } else {
-          logAqlDispatchPacketExtended(
-              roc_device_, gpu_queue_, hdr,
-              reinterpret_cast<const hsa_amd_ext_kernel_dispatch_packet_t*>(hostPkt), slotIdx,
-              priority_);
+          // The ring copy of the first packet may carry the fork wait
+          hsa_amd_ext_kernel_dispatch_packet_t logged =
+              *reinterpret_cast<const hsa_amd_ext_kernel_dispatch_packet_t*>(hostPkt);
+          if ((i == 0) && (fork_dep.handle != 0)) {
+            logged.dep_signal = fork_dep;
+          }
+          logAqlDispatchPacketExtended(roc_device_, gpu_queue_, hdr, &logged, slotIdx,
+                                       priority_);
         }
       }
     } else if (kLogBatch && pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
@@ -2643,9 +3088,45 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   // Reserving the full batch up front lets the write index lead the read index by a full
   // ring or more, which the CP cannot tell apart from an empty queue.
   uint64_t lastIndex = 0;
-  size_t chunk_size = std::min(kLead, kPeriod);
+  bool useLead = numPackets > std::min(kLead, kPeriod);
+  if (useLead) {
+    // A batch that starts behind a wait gains nothing from the lead. The fork wait is not in
+    // the flat buffer: it goes in the ring copy of the first packet (fork_dep), or in a barrier
+    // just submitted ahead of the batch. Only format 3 has a dep_signal; format 4 keeps its
+    // launch_descriptor in those dwords.
+    const bool firstPacketWaits =
+        (fork_dep.handle != 0) || forkWaitAhead ||
+        (firstPacketIsKernel
+             ? (firstPacketType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+                (firstSetup & 0xFF) == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH &&
+                reinterpret_cast<const hsa_amd_ext_kernel_dispatch_packet_t*>(
+                    flatPacketData.data())->dep_signal.handle != 0)
+             : (firstPacketType == HSA_PACKET_TYPE_BARRIER_AND ||
+                firstPacketType == HSA_PACKET_TYPE_BARRIER_OR ||
+                (firstPacketType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+                 (firstSetup & 0xFF) == HSA_AMD_PACKET_TYPE_BARRIER_VALUE)));
+    if (firstPacketWaits) {
+      useLead = false;
+    } else {
+      // The indices live in the queue descriptor, which is in system memory even when the
+      // ring is in device memory. Load the read index before the write index so the pair
+      // never shows read > write.
+      cached_read_dispatch_id_ = Hsa::queue_load_read_index_scacquire(gpu_queue_);
+      const uint64_t writeIndex = Hsa::queue_load_write_index_relaxed(gpu_queue_);
+      useLead = (writeIndex - cached_read_dispatch_id_) < kLead;
+    }
+  }
+  const bool rampChunks =
+      profiled || amd::activity_prof::tool_attached.load(std::memory_order_relaxed);
+  size_t chunk_size = useLead ? std::min(kLead, kPeriod) : kPeriod;
   for (size_t chunkStart = 0; chunkStart < numPackets; ) {
-    const size_t chunkEnd  = std::min(chunkStart + chunk_size, numPackets);
+    size_t chunkEnd = std::min(chunkStart + chunk_size, numPackets);
+    const bool isLeadChunk = useLead && chunkStart == 0;
+    const size_t nextChunkSize = rampChunks ? std::min(chunk_size * 2, kPeriod) : kPeriod;
+    if (!isLeadChunk && (numPackets - chunkEnd) < nextChunkSize / 2 &&
+        (numPackets - chunkStart) <= kMaxChunk) {
+      chunkEnd = numPackets;
+    }
     const size_t thisChunk = chunkEnd - chunkStart;
     const bool isFirstChunk = (chunkStart == 0);
     const bool isLastChunk  = (chunkEnd == numPackets);
@@ -2700,7 +3181,12 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
           queueBase + (chunkLastIndex & queueMask) * kPacketSize);
       if (isLastChunk && (attach_signal || blocking) && timestamp_ == nullptr) {
         Barriers().ActiveSignal();
-        lastSlotPtr->completion_signal = Barriers().GetLastSignal()->PacketHandle(false);
+        setPacketSignal(lastSlotPtr, Barriers().GetLastSignal()->PacketHandle(false), true);
+      }
+      if (isFirstChunk && (fork_dep.handle != 0)) {
+        reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(queueBase +
+                                                                chunkSlot * kPacketSize)
+            ->dep_signal = fork_dep;
       }
 
       // Per-packet fixups: profiling signals, kernel-name printing, inline barrier logging.
@@ -2752,6 +3238,9 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         std::memcpy(&stg, flatPacketData.data() + i * kPacketSize, kPacketSize);
         ProfilingSignal* packetSignal =
             attachPacketSignal(&stg, i, i == numPackets - 1);
+        if ((i == 0) && (fork_dep.handle != 0)) {
+          reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(&stg)->dep_signal = fork_dep;
+        }
         const uint32_t dword = validFullHeaders[i];
         const uint16_t hdr = (i == 0)                 ? firstHeader
                              : (i == numPackets - 1)  ? lastHeader
@@ -2773,27 +3262,24 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     }
 
     chunkStart = chunkEnd;
-    chunk_size = std::min(chunk_size * 2, kPeriod);
+    chunk_size = nextChunkSize;
   }
 
   SetStateFlag(kHasPendingDispatch);
 
-  auto* finalLastSlot = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
-      queueBase + (lastIndex & queueMask) * kPacketSize);
-
   // Skip the pending dispatch only when both conditions are met: a completion
   // signal tracks the last packet and the fence is already clean (system scope).
-  if (finalLastSlot->completion_signal.handle != 0 && !isFenceDirty()) {
+  if (lastSignalHandle != 0 && !isFenceDirty()) {
     ClearStateFlag(kHasPendingDispatch);
   }
 
-  TrackQueueProgress(*finalLastSlot, lastIndex, pre_patched);
+  TrackQueueProgress(hsa_signal_t{lastSignalHandle}, lastIndex, pre_patched);
 
   if (blocking) {
     LogInfo("Running serialized as blocking is requested");
     if (!Barriers().WaitCurrent()) {
       LogPrintfError("Failed blocking queue wait with signal [0x%lx]",
-                     finalLastSlot->completion_signal.handle);
+                     lastSignalHandle);
       profilingEnd();
       return false;
     }
@@ -2831,11 +3317,11 @@ void VirtualGPU::WaitCompleteSignal(hsa_signal_t signal) {
 
 // ================================================================================================
 void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
-                                       hsa_signal_t signal) {
+                                       hsa_signal_t signal, bool depSignalsSet, bool skipTs) {
   const uint32_t queueSize = gpu_queue_->size;
   const uint32_t queueMask = queueSize - 1;
 
-  if (!skipSignal) {
+  if (!skipSignal && !depSignalsSet) {
     // Make sure the wait is issued before queue index reservation
     auto wait_signals = Barriers().WaitingSignal();
     for (uint32_t i = 0; i < wait_signals.size(); ++i) {
@@ -2864,10 +3350,11 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
   const bool external_signal = skipSignal || (signal.handle != 0);
   if (!external_signal) {
     // Get active signal for current dispatch if profiling is necessary
-    Barriers().ActiveSignal(kInitSignalValueOne, timestamp_, true, index,
+    Barriers().ActiveSignal(kInitSignalValueOne, skipTs ? nullptr : timestamp_, true, index,
                             (packetHeader & kBarrierBit) != 0);
     barrier_packet_.completion_signal =
-        Barriers().GetLastSignal()->PacketHandle(BarrierTimestamps());
+        Barriers().GetLastSignal()->PacketHandle(!skipTs && BarrierTimestamps());
+    metadata_preloader_.SetCompletionEventId(Barriers().GetLastSignal()->event_id_);
   } else {
     // Attach external signal to the packet
     barrier_packet_.completion_signal = signal;
@@ -2898,6 +3385,38 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
 }
 
 // ================================================================================================
+bool VirtualGPU::PlaceBarrierWaits(hsa_amd_barrier_value_packet_t& value_packet,
+                                   hsa_barrier_and_packet_t& and_packet) {
+  constexpr uint32_t kMaxBarrierDeps = 5;
+  auto wait_signals = Barriers().WaitingSignal();
+  // DEBUG_CLR_GRAPH_FAST_LAUNCH: 2 to 5 waits fit one barrier-AND with the same scopes
+  // and completion signal, instead of a nop barrier-AND and the barrier-value
+  if (DEBUG_CLR_GRAPH_FAST_LAUNCH && (wait_signals.size() >= 2) &&
+      (wait_signals.size() <= kMaxBarrierDeps)) {
+    for (uint32_t wait_idx = 0; wait_idx < wait_signals.size(); ++wait_idx) {
+      and_packet.dep_signal[wait_idx] = wait_signals[wait_idx];
+    }
+    return true;
+  }
+  if (wait_signals.size() > 0) {
+    value_packet.signal = wait_signals[0];
+    value_packet.value = kInitSignalValueOne;
+    value_packet.mask = std::numeric_limits<int64_t>::max();
+    value_packet.cond = HSA_SIGNAL_CONDITION_LT;
+    for (uint32_t wait_idx = 1; wait_idx < wait_signals.size(); ++wait_idx) {
+      const uint32_t dep_slot = (wait_idx - 1) % kMaxBarrierDeps;
+      barrier_packet_.dep_signal[dep_slot] = wait_signals[wait_idx];
+      constexpr bool kSkipSignal = true;
+      // If runtime reached the packet limit or the count limit, then flush the barrier
+      if ((dep_slot == kMaxBarrierDeps - 1) || ((wait_idx + 1) == wait_signals.size())) {
+        dispatchBarrierPacket(kNopPacketHeader, kSkipSignal);
+      }
+    }
+  }
+  return false;
+}
+
+// ================================================================================================
 void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveDepSignal,
                                             hsa_signal_t signal, hsa_signal_value_t value,
                                             hsa_signal_value_t mask, hsa_signal_condition32_t cond,
@@ -2913,23 +3432,12 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
 
   // Dependent signal and external signal cant be true at the same time
   assert((resolveDepSignal && (signal.handle != 0)) == false);
-  if (resolveDepSignal) {
-    auto wait_signals = Barriers().WaitingSignal();
-    if (wait_signals.size() > 0) {
-      barrier_value_packet_.signal = wait_signals[0];
-      barrier_value_packet_.value = kInitSignalValueOne;
-      barrier_value_packet_.mask = std::numeric_limits<int64_t>::max();
-      barrier_value_packet_.cond = HSA_SIGNAL_CONDITION_LT;
-      for (uint32_t i = 1; i < wait_signals.size(); ++i) {
-        uint32_t j = (i - 1) % 5;
-        barrier_packet_.dep_signal[j] = wait_signals[i];
-        constexpr bool kSkipSignal = true;
-        // If runtime reached the packet limit or the count limit, then flush the barrier
-        if ((j == 4) || ((i + 1) == wait_signals.size())) {
-          dispatchBarrierPacket(kNopPacketHeader, kSkipSignal);
-        }
-      }
-    }
+  if (resolveDepSignal && PlaceBarrierWaits(barrier_value_packet_, barrier_packet_)) {
+    constexpr bool kDepSignalsSet = true;
+    dispatchBarrierPacket(BarrierAndHeader(packetHeader), false, completionSignal, kDepSignalsSet,
+                          skipTs);
+    barrier_value_packet_.signal = hsa_signal_t{};
+    return;
   }
 
   setFenceDirty(true);
@@ -2952,6 +3460,7 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
                             (packetHeader & kBarrierBit) != 0);
     barrier_value_packet_.completion_signal =
         Barriers().GetLastSignal()->PacketHandle(!skipTs && BarrierTimestamps());
+    metadata_preloader_.SetCompletionEventId(Barriers().GetLastSignal()->event_id_);
   } else {
     // Attach external signal to the packet
     barrier_value_packet_.completion_signal = completionSignal;
@@ -3049,18 +3558,19 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
       maskGroups_(0),
       schedulerThreads_(0),
       schedulerQueue_(nullptr),
+      schedulerQueueThreadRunning_(false),
       barriers_(device.QueueDeviceSignals()
                     ? std::unique_ptr<HwQueueTracker>(new RetiringSignalTracker(*this))
                     : std::unique_ptr<HwQueueTracker>(new LegacySignalTracker(*this))),
-      managed_buffer_(*this, kStagingPoolNumSignals * device.settings().stagedXferSize_, kStagingPoolNumSignals),
+      managed_buffer_(*this, kStagingPoolNumSignals * device.settings().stagedXferSize_,
+                      kStagingPoolNumSignals),
       managed_kernarg_buffer_(*this, device.settings().kernargPoolSize_, kKernArgPoolNumSignals),
       cuMask_(cuMask),
       priority_(priority),
+      dedicated_queue_(dedicated_queue),
       copy_command_type_(0),
       fence_state_(Device::CacheState::kCacheStateInvalid),
       fence_dirty_(false),
-      dedicated_queue_(dedicated_queue),
-      schedulerQueueThreadRunning_(false),
       hostcallBuffer_(nullptr) {
   index_ = device.numOfVgpus_++;
   gpu_device_ = device.getBackendDevice();
@@ -3154,6 +3664,10 @@ VirtualGPU::~VirtualGPU() {
     LogError("There was a timestamp that was not used; deleting.");
   }
 
+  if (pending_fork_wait_ != nullptr) {
+    ReleasePendingForkWait();
+  }
+
   delete printfdbg_;
 
   if (nullptr != schedulerQueue_) {
@@ -3204,9 +3718,7 @@ bool VirtualGPU::create() {
                                        dedicated_queue_));
   if (!gpu_queue_) return false;
 
-  if (dev().isa().versionMajor() == 12 && dev().isa().versionMinor() >= 5) {
-    metadata_preloader_.SetLaunchDescriptorVersion(AMD_LAUNCH_DESCRIPTOR_VERSION_GFX1250);
-  }
+  metadata_preloader_.SetLaunchDescriptorVersion(AMD_LAUNCH_DESCRIPTOR_VERSION_GFX1250);
 
   if (!managed_kernarg_buffer_.Create(Device::MemorySegment::kKernArg)) {
     LogError("Couldn't allocate arguments/signals for the queue");
@@ -3214,7 +3726,11 @@ bool VirtualGPU::create() {
   }
 
   device::BlitManager::Setup blitSetup;
-  blitMgr_ = new KernelBlitManager(*this, blitSetup);
+  if (DEBUG_CLR_ENABLE_ABCE && roc_device_.abceEngineSet() != nullptr) {
+    blitMgr_ = new AbceBlitManager(*this, blitSetup);
+  } else {
+    blitMgr_ = new KernelBlitManager(*this, blitSetup);
+  }
   if ((nullptr == blitMgr_) || !blitMgr_->create(roc_device_)) {
     LogError("Could not create BlitManager!");
     return false;
@@ -3342,10 +3858,11 @@ address VirtualGPU::ManagedBuffer::Acquire(uint32_t size, uint32_t alignment) {
     // Dispatch a barrier packet into the queue
     gpu_.dispatchBarrierPacket(kBarrierPacketHeader, kSkipSignal, chunk_signal);
     // Get the next chunk
-    active_chunk_ = ++active_chunk_ % num_chunk_signals_;
+    active_chunk_ = (active_chunk_ + 1) % num_chunk_signals_;
     // Make sure the new active chunk is free
-    bool test = WaitForSignal(pool_signal_[active_chunk_], gpu_.ActiveWait(), /*yield=*/false,
-                              gpu_.dev().QueueDeviceSignals());
+    [[maybe_unused]] bool test =
+        WaitForSignal(pool_signal_[active_chunk_], gpu_.ActiveWait(), /*yield=*/false,
+                      gpu_.dev().QueueDeviceSignals());
     assert(test && "Runtime can't fail a wait for chunk!");
     // Make sure the current offset matches the new chunk to avoid possible overlaps
     // between chunks and issues during recycle
@@ -3388,13 +3905,15 @@ address VirtualGPU::allocKernelArguments(size_t size, size_t alignment) {
 
 // ================================================================================================
 void VirtualGPU::ReleaseSdmaEngines() {
-  if (!hasAssignedSdmaEngine()) {
-    return;
-  }
   // Release SDMA engine assignment when queue is idle
   // This allows the engine to be reassigned to other active streams
-  dev().ReleaseSdmaEngine(this);
-  ClearAssignedSdmaEngine();
+  if (hasAssignedSdmaEngine()) {
+    dev().ReleaseSdmaEngine(this);
+    ClearAssignedSdmaEngine();
+  }
+  if (auto* abce_engines = dev().abceEngineSet(); abce_engines != nullptr) {
+    abce_engines->engine_allocator().Release(this);
+  }
 }
 
 // ================================================================================================
@@ -3485,6 +4004,11 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
   // Dedicated queues keep their HW queue, never acquire from pool
   if (!dedicated_queue_ && gpu_queue_ == nullptr) {
     SetGpuQueue(roc_device_.AcquireActiveQueue(priority_));
+  }
+  // A pending fork wait orders only its own launch's segments: any other command gets it as a
+  // barrier ahead of its packets
+  if ((pending_fork_wait_ != nullptr) && (&command != pending_fork_anchor_)) {
+    FlushPendingForkWait();
   }
   // Track the current command
   command_ = &command;
@@ -3661,7 +4185,7 @@ void VirtualGPU::updateCommandsState(amd::Command* list) const {
   while (current != nullptr) {
     if (current->profilingInfo().enabled_) {
       if (!current->data().empty()) {
-        for (auto i = 0; i < current->data().size(); i++) {
+        for (size_t i = 0; i < current->data().size(); i++) {
           // Since this is a valid command to get a timestamp, we use the
           // timestamp provided by the runtime (saved in the data())
           ts = reinterpret_cast<Timestamp*>(current->data()[i]);
@@ -4422,6 +4946,7 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
 }
 
 // ================================================================================================
+
 void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
@@ -4473,16 +4998,21 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
   // When there are no extra signals (e.g. a pure P2P/D2D batch that collapses to one
   // engine-group op), the sole completion signal already represents the whole batch and
   // the next op waits on it through the engine switch, so the barrier is pure overhead.
-  if (result && !Barriers().IsExternalSignalListEmpty()) {
+  if (!Barriers().IsExternalSignalListEmpty()) {
     dispatchBarrierPacket(kNopPacketHeader);
   }
-
   if (!result) {
     LogError("submitBatchCopyMemory failed!");
+    // The error status drops the command's pins before the GPU passes the waits
+    Barriers().KeepUntilRetired(cmd.TakePinnedHwEvents());
     cmd.setStatus(CL_OUT_OF_RESOURCES);
-  } else if (!amd::IS_HIP) {
-    for (const auto& op : copyOps) {
-      op.dstMemory->signalWrite(&dev());
+  } else {
+    // The barrier pinned the batch signals it waits on
+    Barriers().ReleaseHeldSignals();
+    if (!amd::IS_HIP) {
+      for (const auto& op : copyOps) {
+        op.dstMemory->signalWrite(&dev());
+      }
     }
   }
 
@@ -5064,7 +5594,7 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
     // the AQLPacket because atomics on kernels can bypass L2 cache on some hardware.
     addSystemScope();
 
-    bool result;
+    bool result = false;
     switch (flags) {
       case ROCCLR_STREAM_WRITE_VALUE_DEFAULT: {
         result = blitMgr().streamOpsWrite(*memory, value, offset, sizeBytes);
@@ -5129,63 +5659,20 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
     return;
   }
 
-  // Get the amd::Memory object for the physical address
-  amd::Memory* phys_mem_obj = vcmd.memory();
-  hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
-
-  // If Physical address is not set, then it is map command. If set, it is unmap command.
-  if (phys_mem_obj != nullptr) {
-    amd::Memory* vaddr_sub_obj = nullptr;
-    if (vcmd.trackMapping()) {
-      vaddr_sub_obj =
-          dev().MapMemObjBookkeeping(phys_mem_obj, const_cast<void*>(vcmd.ptr()), vcmd.size());
-      if (vaddr_sub_obj == nullptr) {
-        LogError("HSA Command: MapMemObjBookkeeping failed!");
-        profilingEnd();
-        return;
-      }
-    }
-    // Map the physical to virtual address the hsa api
-    hsa_amd_vmem_alloc_handle_t opaque_hsa_handle;
-    opaque_hsa_handle.handle = phys_mem_obj->getUserData().hsa_handle;
-    size_t phys_offset = (vaddr_sub_obj != nullptr) ? vaddr_sub_obj->getOffset() : 0;
-    if ((hsa_status = Hsa::vmem_map(const_cast<void*>(vcmd.ptr()), vcmd.size(), phys_offset,
-                                    opaque_hsa_handle, 0)) != HSA_STATUS_SUCCESS) {
-      LogError("HSA Command: hsa_amd_vmem_map failed!");
-    } else if (vaddr_sub_obj != nullptr) {
-      constexpr bool kImportVmmForInterprocess = true;
-      dev().FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys_mem_obj, const_cast<void*>(vcmd.ptr()),
-                                         kImportVmmForInterprocess);
-      // The VA is now backed, so the true owning agent (a peer device for imported memory)
-      // can finally be resolved. create() ran before the mapping existed, so cache it now.
-      if (auto* devMem = static_cast<Memory*>(vaddr_sub_obj->getDeviceMemory(dev()))) {
-        devMem->refreshOwningAgentFromPointerInfo();
-      }
-    }
+  void* va = const_cast<void*>(vcmd.ptr());
+  cl_int status = CL_SUCCESS;
+  // If Physical address is set, then it is map command. If not set, it is unmap command.
+  if (vcmd.memory() != nullptr) {
+    status = dev().MapPhysicalToVirtual(va, vcmd.size(), vcmd.memory(), vcmd.trackMapping());
   } else {
     dispatchBarrierPacket(kBarrierPacketHeader, false);
     Barriers().WaitCurrent();
 
-    if (!vcmd.trackMapping()) {
-      if ((hsa_status = Hsa::vmem_unmap(const_cast<void*>(vcmd.ptr()), vcmd.size())) !=
-          HSA_STATUS_SUCCESS) {
-        LogError("HSA Command: hsa_amd_vmem_unmap failed");
-      }
-    } else {
-      amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
-      assert(vaddr_sub_obj != nullptr);
+    status = dev().UnmapVirtual(va, vcmd.size(), vcmd.trackMapping());
+  }
 
-      // Unmap the object, since the physical addr is set.
-      if ((hsa_status = Hsa::vmem_unmap(vaddr_sub_obj->getSvmPtr(), vcmd.size())) ==
-          HSA_STATUS_SUCCESS) {
-        constexpr bool kDestroyVirtualBuffer = true;
-        constexpr bool kReleaseSubObj = true;
-        dev().UnmapMemObjBookkeeping(vaddr_sub_obj, const_cast<void*>(vcmd.ptr()),
-                                     kDestroyVirtualBuffer, kReleaseSubObj);
-      } else {
-        LogError("HSA Command: hsa_amd_vmem_unmap failed");
-      }
-    }
+  if (status != CL_SUCCESS) {
+    vcmd.setStatus(status);
   }
 
   // Since this is a memory operation, the HW event set for barrier packet
@@ -5210,8 +5697,6 @@ void VirtualGPU::submitSvmFillMemory(amd::SvmFillMemoryCommand& cmd) {
 
     size_t offset = reinterpret_cast<uintptr_t>(cmd.dst()) -
                     reinterpret_cast<uintptr_t>(dstMemory->getSvmPtr());
-
-    Memory* memory = dev().getRocMemory(dstMemory);
 
     amd::Coord3D origin(offset, 0, 0);
     amd::Coord3D size(fillSize, 1, 1);
@@ -5475,11 +5960,20 @@ bool VirtualGPU::createVirtualQueue(uint deviceQueueSize) {
   return true;
 }
 
-
 void VirtualGPU::HiddenHeapInit() {
   // We don't really need its id, just want to ensure the queue is created.
   (void)getQueueID();
   const_cast<Device&>(dev()).HiddenHeapInit(*this);
+}
+
+// ================================================================================================
+hsa_amd_packet_type8_t VirtualGPU::SelectExtDispatchAmdFormat(
+    bool ext_dispatch_packet, const amd::NDRangeKernelCommand* vcmd) const {
+  if (ext_dispatch_packet && vcmd != nullptr &&
+      vcmd->dynDataPrefetchConfig().isEnabled()) {
+    return HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD;
+  }
+  return HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH;
 }
 
 // ================================================================================================
@@ -5510,7 +6004,6 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   }
 
   const amd::KernelSignature& signature = kernel.signature();
-  const amd::KernelParameters& kernelParams = kernel.parameters();
 
   bool isGraphCapture = command_ != nullptr && command_->getPktCapturingState();
 
@@ -5728,6 +6221,8 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     // header, so no HDP flush or readback workaround is needed — the sfence
     // before packet_store_release is sufficient.
     if (roc_device_.info().largeBar_ && !isGraphCapture && !device_mem_ring_buf_) {
+      // Settings choose the readback mode only when ROCr reports that host stores to device
+      // memory need a flush (PcieStoresNeedFlush()); over coherent xGMI they don't
       const auto kernArgImpl = dev().settings().kernel_arg_impl_;
       if (kernArgImpl == KernelArgImpl::DeviceKernelArgsReadback && argSize != 0) {
 #if defined(ATI_ARCH_X86)
@@ -5741,7 +6236,8 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 #else
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
 #endif
-        auto kSentinel = *reinterpret_cast<volatile unsigned char*>(argBuffer + argSize - 1);
+        [[maybe_unused]] auto kSentinel =
+            *reinterpret_cast<volatile unsigned char*>(argBuffer + argSize - 1);
       }
     }
   }
@@ -5870,6 +6366,8 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     }
   }
 
+  const hsa_amd_packet_type8_t amd_format = SelectExtDispatchAmdFormat(extDispatchPacket, vcmd);
+
   // Copy scheduler's AQL packet for possible relaunch from the scheduler itself
     if (aql_packet != nullptr) {
       *aql_packet = dispatchPacket;
@@ -5879,8 +6377,8 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
                               (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
                               (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
         // For an ext-dispatch vendor packet byte+2 is amd_format, not setup; set
-        // amd_format=EXT_KERNEL_DISPATCH and shift setup (dimensions) into byte+3.
-        aql_packet->setup = static_cast<uint16_t>(HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH
+        // amd_format and shift setup (dimensions) into byte+3.
+        aql_packet->setup = static_cast<uint16_t>(amd_format
                               | ((sizes.dimensions()
                                   << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS) << 8));
       } else {
@@ -5900,15 +6398,14 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       // on normal dispatch packet, first 32 bits are header & setup. In ext dispatch packet,
       // the first 32 bits are header, amd_format, setup. Update the "rest" of the 32 bits, so we
       // can commit it atomically in packet_store_release.
-      rest = (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH
-              | ((sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS) << 8));
+      rest = (amd_format | ((sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS) << 8));
     } else {
       rest = (sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS);
     }
 
-    metadata_preloader_.PrepareDispatch(gpuKernel.MetadataKernelDescriptor(),
-                                        gpuKernel.MetadataPreloadLength(),
-                                        gpuKernel.MetadataPreloadOffset());
+    metadata_preloader_.PrepareDispatch(
+        gpuKernel.MetadataKernelDescriptor(), gpuKernel.MetadataPreloadLength(),
+        gpuKernel.MetadataPreloadOffset(), hidden_arguments, argSize);
 
     bool dispatched = extDispatchPacket
         ? dispatchAqlPacket(&dispatchPacketUnion.extKernelDispatch, aqlHeaderWithOrder, rest,
@@ -5944,8 +6441,8 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       Memory* cpyImage = dev().getGpuMemory(devImage->CopyImageBuffer());
       amd::Coord3D offs(0);
       // Copy memory from the the backing store image into original buffer
-      bool result = blitMgr().copyImageToBuffer(*cpyImage, *buffer, offs, offs, image->getRegion(),
-                                                true, image->getRowPitch(), image->getSlicePitch());
+      (void)blitMgr().copyImageToBuffer(*cpyImage, *buffer, offs, offs, image->getRegion(), true,
+                                        image->getRowPitch(), image->getSlicePitch());
     }
   }
   return true;
@@ -6133,6 +6630,7 @@ void VirtualGPU::CompleteCpuWait(amd::Command& cmd) {
 
   // Wait without the execution() lock. The marker holds a reference to the signal,
   // so the tracker can't reuse it in the meantime
+  const uint64_t completion = signal->use_completion_.load(std::memory_order_acquire);
   WaitForSignal(signal->signal_, ActiveWait(), /*yield=*/false, signal->in_device_memory_);
 
   // The wait returns early, with the signal not completed normally, if the device is in an error
@@ -6141,6 +6639,8 @@ void VirtualGPU::CompleteCpuWait(amd::Command& cmd) {
   // threads waiting for its commands would hang. The state is checked directly: a signal in device
   // memory costs a PCIe read.
   if (!(HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError())) {
+    // Lets the tracker leave this use out of later waits without reading the signal
+    signal->MarkUseComplete(completion);
     std::scoped_lock lock(execution());
     Barriers().ProcessSignalTiming(signal);
     // Kernel arguments and memory dependencies can be released only if the wait covered all
@@ -6157,13 +6657,94 @@ void VirtualGPU::CompleteCpuWait(amd::Command& cmd) {
 }
 
 // ================================================================================================
+ProfilingSignal* VirtualGPU::dispatchSplitEndMarker() {
+  alignas(64) hsa_amd_barrier_value_packet_t wait_value_packet{};
+  alignas(64) hsa_barrier_and_packet_t wait_and_packet{};
+  wait_value_packet.header.header = kInvalidAql;
+  wait_and_packet.header = kInvalidAql;
+  const bool waits_on_barrier_and = PlaceBarrierWaits(wait_value_packet, wait_and_packet);
+  uint16_t wait_header = waits_on_barrier_and
+                             ? BarrierAndHeader(kBarrierVendorPacketNopScopeHeader)
+                             : kBarrierVendorPacketNopScopeHeader;
+  alignas(64) hsa_barrier_and_packet_t nop_packet{};
+  nop_packet.header = kInvalidAql;
+  // Keeps its barrier bit: the interrupt signal must not complete before the waits resolve
+  const uint16_t nop_header = kNopPacketHeader;
+
+  AqlSlotReservation reservation = ReserveAqlSlots(2);
+  const uint64_t wait_index = reservation.start_slot;
+  const uint64_t nop_index = wait_index + 1;
+  OptimizeStreamOrderingBarrier(wait_header, reservation);
+  RecordAqlPacketHeader(reservation, 0, wait_header);
+  RecordAqlPacketHeader(reservation, 1, nop_header);
+  CompleteAqlSubmission(reservation);
+  setFenceDirty(true);
+
+  Barriers().ActiveSignal(kInitSignalValueOne, nullptr, true, wait_index,
+                          (wait_header & kBarrierBit) != 0);
+  ProfilingSignal* waits_resolved = Barriers().GetLastSignal();
+  const hsa_signal_t wait_completion = waits_resolved->PacketHandle(false);
+  Barriers().ActiveSignal(kInitSignalValueOne, timestamp_, true, nop_index, true);
+  ProfilingSignal* nop_signal = Barriers().GetLastSignal();
+  nop_packet.completion_signal = nop_signal->PacketHandle(BarrierTimestamps());
+  TrackQueueProgress(nop_packet.completion_signal, nop_index);
+
+  const uint32_t queue_mask = gpu_queue_->size - 1;
+  metadata_preloader_.SetCompletionEventId(waits_resolved->event_id_);
+  if (waits_on_barrier_and) {
+    wait_and_packet.completion_signal = wait_completion;
+    auto* wait_slot = &reinterpret_cast<hsa_barrier_and_packet_t*>(
+        gpu_queue_->base_address)[wait_index & queue_mask];
+    writePacketToRingBuffer(wait_slot, &wait_and_packet, wait_header, uint16_t{0},
+                            wait_index & queue_mask);
+  } else {
+    wait_value_packet.completion_signal = wait_completion;
+    auto* wait_slot = &reinterpret_cast<hsa_amd_barrier_value_packet_t*>(
+        gpu_queue_->base_address)[wait_index & queue_mask];
+    writePacketToRingBuffer(wait_slot, &wait_value_packet, wait_header,
+                            uint16_t{HSA_AMD_PACKET_TYPE_BARRIER_VALUE}, wait_index & queue_mask);
+  }
+  metadata_preloader_.SetCompletionEventId(nop_signal->event_id_);
+  auto* nop_slot =
+      &reinterpret_cast<hsa_barrier_and_packet_t*>(gpu_queue_->base_address)[nop_index & queue_mask];
+  writePacketToRingBuffer(nop_slot, &nop_packet, nop_header, uint16_t{0}, nop_index & queue_mask);
+  ringQueueDoorbell(nop_index);
+
+  if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
+    if (waits_on_barrier_and) {
+      logAqlBarrierPacket(roc_device_, gpu_queue_, wait_header, &wait_and_packet, wait_index,
+                          priority_);
+    } else {
+      logAqlBarrierValuePacket(roc_device_, gpu_queue_, wait_header, &wait_value_packet,
+                               wait_index, priority_);
+    }
+    logAqlBarrierPacket(roc_device_, gpu_queue_, nop_header, &nop_packet, nop_index, priority_);
+  }
+  return waits_resolved;
+}
+
+// ================================================================================================
 void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
   profilingBegin(vcmd);
 
   const Settings& settings = dev().settings();
-  if (settings.barrier_value_packet_) {
+  // DEBUG_CLR_GRAPH_FAST_LAUNCH: the end marker of a graph launch carries the batch, so its
+  // completion signal is an interrupt signal, and the next launch's side queues wait on it. The
+  // waits are resolved on a first packet instead, whose tracker signal has no interrupt and is the
+  // command's HW event for the waiters on other queues; the interrupt signal goes on a nop barrier
+  // after it, which no GPU waiter reads
+  // Only a launch with segments on other queues has such waiters; a single-stream launch keeps
+  // the single packet
+  const bool split_end_marker =
+      DEBUG_CLR_GRAPH_FAST_LAUNCH && vcmd.multiStream() && settings.split_end_marker_ &&
+      dev().ActiveWait() && (timestamp_ != nullptr) &&
+      ((vcmd.Callback() != nullptr) || (vcmd.GetBatchHead() != nullptr)) &&
+      !vcmd.CpuWaitRequested();
+  if (split_end_marker) {
+    AttachHwEvent(&vcmd, dispatchSplitEndMarker());
+  } else if (settings.barrier_value_packet_) {
     dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true);
   } else {
     dispatchBarrierPacket(kNopPacketHeader, false);
@@ -6502,12 +7083,12 @@ uint32_t VirtualGPU::MetaDataPreloader::FillKernelDispatchMetadata(
           dyn_data_prefetch_num_regions_);
     }
 
-    // Write event_id from amd_signal_t directly (non-interrupt signals have event_id == 0).
-    if (aql->completion_signal.handle) {
-      const amd_signal_t* signal = amd_signal_from_handle(aql->completion_signal.handle);
-      m->event_id = signal->event_id;
-    } else {
-      m->event_id = 0;
+    // Non-interrupt signals have event_id == 0
+    m->event_id = 0;
+    if (aql->completion_signal.handle != 0) {
+      m->event_id = completion_event_id_ >= 0
+                        ? static_cast<uint32_t>(completion_event_id_)
+                        : amd_signal_from_handle(aql->completion_signal.handle)->event_id;
     }
 
     // Fill hsa_amd_metadata_kernel_dispatch_packet->kernel_descriptor fields.
@@ -6531,10 +7112,18 @@ uint32_t VirtualGPU::MetaDataPreloader::FillKernelDispatchMetadata(
     }
 
     if (preload_length > 0) {
-      const uint8_t* kernargs = reinterpret_cast<const uint8_t*>(aql->kernarg_address);
-      assert(kernargs);
+      // Read the preload values from the host copy of the kernel arguments. Reading the device
+      // copy would cross the link and leave its lines in the CPU cache, where the kernel's
+      // argument loads would have to probe them. Bytes past the host copy preload as zero.
+      uint32_t preload_words[kPreload_limit] = {};
       // Kernarg preload offset is in DWORDs
-      const uint8_t* src = kernargs + pending_preload_offset_ * sizeof(uint32_t);
+      const size_t preload_begin = pending_preload_offset_ * sizeof(uint32_t);
+      if (preload_begin < pending_kernarg_bytes_) {
+        std::memcpy(preload_words, pending_kernargs_ + preload_begin,
+                    std::min<size_t>(pending_kernarg_bytes_ - preload_begin,
+                                     preload_length * sizeof(uint32_t)));
+      }
+      const uint8_t* src = reinterpret_cast<const uint8_t*>(preload_words);
       uint16_t remain = preload_length;
 
       constexpr uint16_t kSec0 = sizeof(m->kernarg_preload_0_14) / sizeof(uint32_t);
@@ -6581,10 +7170,12 @@ uint32_t VirtualGPU::MetaDataPreloader::FillKernelDispatchMetadata(
 // via FillKernelDispatchMetadata; only the final transfer to the ring buffer
 // differs:
 //
-// (A) Device memory (WC over PCIe BAR): stage locally, then copy 4 x 64B
+// (A) Device memory: stage locally, then copy 4 x 64B
 //     segments via MOVDIR64B (if available) or NT stores.  Each segment's
 //     body + header are in the same atomic/NT copy — no sfence between them.
-//     Avoids dozens of scattered WC stores over the bus.
+//     Avoids dozens of scattered stores over the bus: a PCIe host maps the ring
+//     WC, and an A+A host maps it WB, where plain stores would leave the lines in
+//     the CPU cache for the CP to probe.
 //
 // (B) System memory (WB): write fields directly into the ring buffer (all
 //     stores hit L1 cache).  SFENCE between body and headers because the
@@ -6598,9 +7189,9 @@ void VirtualGPU::MetaDataPreloader::SetPacket(
     bool use_movdir64b, bool device_mem_ring_buf) {
   assert(pending_descriptor_ != nullptr);
 
-  // Staging is only needed for device-memory (WC) ring buffers to avoid
-  // scattered WC stores over PCIe.  For system-memory (WB) queues, direct
-  // writes hit L1 cache and are fast — no staging overhead needed.
+  // Staging is only needed for device-memory ring buffers, see (A).  For
+  // system-memory (WB) queues, direct writes hit L1 cache and are fast — no
+  // staging overhead needed.
   const bool use_staging = device_mem_ring_buf;
 
   if (use_staging) {
@@ -6632,11 +7223,11 @@ void VirtualGPU::MetaDataPreloader::SetPacket(
     uint32_t metadata_header = FillKernelDispatchMetadata(aql, header, metadata, false);
 
     // Write headers last — arms the metadata packet for the CP.
-    // SFENCE between body and headers: the metadata ring buffer may be WC-mapped
-    // (device memory) and the CP's prefetcher reads it independently. Without a
-    // fence, WC reordering could make valid headers visible before the body is
-    // flushed, causing the prefetcher to read garbage. This fence ensures all
-    // body writes are ordered before the header writes (ordering point #7).
+    // SFENCE between body and headers: this branch only writes system-memory
+    // rings (see (B)), and the CP's prefetcher reads them independently, so valid
+    // headers must not become visible before the body, or the prefetcher reads
+    // garbage. This fence ensures all body writes are ordered before the header
+    // writes (ordering point #7).
     amd::nontemporalStoreFence();
     metadata->header3 = metadata_header;
     metadata->header2 = metadata_header;

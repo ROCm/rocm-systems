@@ -4,13 +4,13 @@
 // FP16 sine/cosine with guest input/output modifiers.
 // Owns public entry points and their validation/dispatch policy.
 
-#include "common/float_formats.h"
-#include "common/internal.h"
+#include "common/float_encoding.h"
+#include "common/validation.h"
 #include "math/trig.h"
 #include "math/trig_exceptions.h"
 #include "math/trig_model.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_math.h"
 
 #include <stdint.h>
 

@@ -113,8 +113,9 @@ TEST(WaitCounterTest, MixedDscntKmcnt) {
 
 TEST(WaitCounterTest, SaturationAtMax) {
   WaitCounters c;
-  for (int i = 0; i < 100; ++i)
+  for (int i = 0; i < 100; ++i) {
     c.increment(WaitCounterType::VMCNT);
+  }
   EXPECT_EQ(c.vmcnt, WaitCounters::VMCNT_MAX);
 }
 
@@ -177,6 +178,7 @@ TEST(WaitCounterPolicy, SupportedRuntimeTagsRoundTripToCoveringWaits) {
       {SplitGfx12, DSCNT, WaitCounterKind::Ds, DSCNT},
       {SplitGfx12, KMCNT, WaitCounterKind::Km, KMCNT},
       {SplitGfx12, EXPCNT, WaitCounterKind::Exp, EXPCNT},
+      {SplitGfx12, BVHCNT, WaitCounterKind::Bvh, BVHCNT},
       {SplitGfx12, ASYNCCNT, WaitCounterKind::Async, ASYNCCNT},
       {SplitGfx12, TENSORCNT, WaitCounterKind::Tensor, TENSORCNT},
   };
@@ -200,10 +202,13 @@ TEST(WaitCounterPolicy, UnmappedDomainsHaveNoMemoryPipelineWait) {
                         WaitCounterKind::Count}) {
       SCOPED_TRACE(static_cast<unsigned>(model));
       SCOPED_TRACE(static_cast<unsigned>(domain));
-      if (domain == WaitCounterKind::Sample && model == WaitcntModel::SplitGfx12)
+      if (domain == WaitCounterKind::Sample && model == WaitcntModel::SplitGfx12) {
         EXPECT_EQ(memory_wait_counter_type(domain, model), WaitCounterType::SAMPLECNT);
-      else
+      } else if (domain == WaitCounterKind::Bvh && model == WaitcntModel::SplitGfx12) {
+        EXPECT_EQ(memory_wait_counter_type(domain, model), WaitCounterType::BVHCNT);
+      } else {
         EXPECT_FALSE(memory_wait_counter_type(domain, model));
+      }
     }
   }
 }

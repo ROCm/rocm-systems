@@ -64,19 +64,19 @@ public:
 
   __host__ DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf);
 
-  __device__ inline bool setFlagNoMemFence(int senderRank, int senderBlock, DdaKernelParams params) {
+  __device__ inline bool setFlagNoMemFence(int senderRank, int senderBlock, DdaKernelParams params) const {
     return putFlag<std::memory_order_relaxed>(flags_ + getFlagIdx(senderRank, senderBlock), params);
   }
 
-  __device__ inline bool waitFlagNoMemFence(int senderRank, int senderBlock, DdaKernelParams params) {
+  __device__ inline bool waitFlagNoMemFence(int senderRank, int senderBlock, DdaKernelParams params) const {
     return waitFlag<std::memory_order_relaxed>(flags_ + getFlagIdx(senderRank, senderBlock), params);
   }
 
-  __device__ inline bool setFlagWithMemFence(int senderRank, int senderBlock, DdaKernelParams params) {
+  __device__ inline bool setFlagWithMemFence(int senderRank, int senderBlock, DdaKernelParams params) const {
     return putFlag<std::memory_order_release>(flags_ + getFlagIdx(senderRank, senderBlock), params);
   }
 
-  __device__ inline bool waitFlagWithMemFence(int senderRank, int senderBlock, DdaKernelParams params) {
+  __device__ inline bool waitFlagWithMemFence(int senderRank, int senderBlock, DdaKernelParams params) const {
     return waitFlag<std::memory_order_acquire>(flags_ + getFlagIdx(senderRank, senderBlock), params);
   }
 
@@ -84,7 +84,7 @@ private:
   int nBlocks_;
   FlagType* flags_;
 
-  __device__ inline int getFlagIdx(int rank, int block) {
+  __device__ inline int getFlagIdx(int rank, int block) const {
     return block * NRANKS + rank;
   }
 };
@@ -104,8 +104,20 @@ public:
   static __host__ std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> mallocAndInit(
     int nRanks, int nBlocks, int selfRank, void* bootstrap, DdaKernelParams params);
 
+  // `aborted` is the caller-held sticky abort state of this block: false at kernel
+  // start and passed to every barrier of the kernel. Once any signaling lane gives
+  // up a barrier on abort, the block signals no later barrier, so a late peer cannot
+  // pair its earlier flag with this block's next one and read data this rank never
+  // finished producing. The signaling lanes all sit in wave 0, so it is uniform
+  // across them.
+  //
+  // It is held by the caller, not by this object, on purpose. Kernels take the
+  // barrier by value; writing a member of a by-value kernel argument makes the
+  // compiler copy the whole object (mailbox table included) to per-lane scratch at
+  // every launch, because allMailboxes_ is indexed per lane. Keeping the barrier
+  // const lets it be read straight from the kernarg segment.
   template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess>
-  __device__ __forceinline__ void syncOnSameBlockIdx() {
+  __device__ __forceinline__ void syncOnSameBlockIdx(bool& aborted) const {
     enum class MemFenceType {
       RELEASE_ACQUIRE,
       RELEASE_ONLY,
@@ -122,7 +134,7 @@ public:
     if constexpr (hasPreviousMemAccess) {
       __syncthreads();
     }
-    if (threadIdx.x < NRANKS && !aborted_) {
+    if (threadIdx.x < NRANKS && !aborted) {
       auto peerRank = threadIdx.x;
       bool signaled = false;
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
@@ -139,7 +151,7 @@ public:
           arrived = allMailboxes_[selfRank_].waitFlagWithMemFence(peerRank, blockIdx.x, params_);
         }
       }
-      aborted_ = __any(!arrived);
+      aborted = __any(!arrived);
     }
     if constexpr (hasSubsequentMemAccess) {
       __syncthreads();
@@ -151,11 +163,6 @@ private:
   int selfRank_{-1};
   std::array<DeviceMailbox, NRANKS> allMailboxes_;
   DdaKernelParams params_{};
-  // Sticky for the rest of the kernel and uniform across the signaling lanes,
-  // which all sit in wave 0: once any of them gives up a barrier on abort, the
-  // block signals no later barrier, so a late peer cannot pair its earlier flag
-  // with this block's next one and read data this rank never finished producing.
-  bool aborted_{false};
 
   __host__ IpcGpuBarrier(int nRanks, int nBlocks, int selfRank, const std::array<DeviceMailbox, NRANKS>& allMailboxes,
                          DdaKernelParams params);

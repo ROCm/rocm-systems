@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/result.h"
+#include "util/diagnostic.h"
 
 #include <array>
 #include <cstdint>
@@ -25,26 +26,46 @@ using Digest = std::array<uint8_t, 32>;
 // and internal API changes alone do not require a new token; no negotiation is
 // performed between producers and consumers.
 inline constexpr std::array<uint8_t, 16> kProducerContract = {
-    0x9a, 0x62, 0xb4, 0x31, 0x37, 0xe0, 0x4d, 0x6c, 0xae, 0x59, 0x71, 0x38, 0x02, 0x96, 0xf8, 0x42};
+    0x8e, 0x0e, 0x82, 0xe9, 0xcf, 0xff, 0x4b, 0x43, 0x88, 0x29, 0x4e, 0x68, 0xad, 0x33, 0xce, 0xc8};
 // Canonical hash input for the manifest's options identity. Changing any byte
 // changes the identity required by artifact and capture admission.
 inline constexpr std::string_view kMvpOptions =
-    "native-lds-b32;no-sync;one-workgroup-1d;mask64;address-groups-per-site=4;collision=on";
+    "native-lds-widths=2,4,8,16;native-lds-epoch-workgroup-barriers;single-block-loop;"
+    "loop-lane-bank=ctz-mod4;sync-"
+    "quota=16;workgroup-id=entry-scalar;workgroups-1d=1..16;mask64;address-groups-per-"
+    "site=4;collision=on";
 // Software record slots for distinct effective LDS address groups per wave/site.
-// Remaining lanes after these slots are filled cause one lost occurrence;
-// this reservation count is independent of the GPU's hardware LDS banks.
+// Acyclic accesses fill sequential slots; lanes beyond four groups cause loss.
+// Repeated accesses instead claim immutable lane-based banks, where a collision
+// can lose a representative before every bank is occupied. Neither policy
+// describes the GPU's hardware LDS banks.
 inline constexpr uint32_t kAddressGroupsPerSite = 4;
 inline constexpr uint32_t kReportHeaderBytes = 64;
 inline constexpr uint32_t kRowHeaderBytes = 64;
 inline constexpr uint32_t kAccessRecordBytes = 64;
 inline constexpr uint32_t kContextBytes = 64;
+inline constexpr uint32_t kSyncRecordBytes = 32;
+inline constexpr uint32_t kSyncCapacity = 16;
+inline constexpr uint32_t kWorkgroupCapacity = 16;
+inline constexpr uint32_t kWorkgroupIdTtmp9Selector = 108 + 9;
+
+constexpr uint64_t sync_offset(uint64_t sites) {
+  return kRowHeaderBytes + sites * kAddressGroupsPerSite * kAccessRecordBytes;
+}
+constexpr uint64_t report_row_bytes(uint64_t sites, bool has_barriers) {
+  return sync_offset(sites) + (has_barriers ? kSyncCapacity * kSyncRecordBytes : 0);
+}
 inline constexpr std::array<KernargExtensionPayloadLayout, 1> kContextPointerPayloads = {
     {{.size = sizeof(uint64_t), .alignment = alignof(uint64_t)}}};
 
 enum class AnalysisKind : uint32_t { Invalid = 0, LdsRaceDetection = 1 };
 enum class RecordKind : uint32_t { Access = 1 };
 enum class AccessKind : uint32_t { Read = 1, Write = 2 };
-enum class ScopeKind : uint32_t { NativeLdsNoSynchronization = 1 };
+enum class ScopeKind : uint32_t {
+  NativeLdsNoSynchronization = 1,
+  NativeLdsWorkgroupBarrier = 2,
+  NativeLdsWorkgroupBarrierLoop = 3
+};
 
 /// @brief GPU wire offsets; consumers never serialize native C++ struct layout.
 namespace wire {
@@ -70,10 +91,29 @@ inline constexpr uint32_t kRowWave = 12;
 inline constexpr uint32_t kRowStatus = 16;
 inline constexpr uint32_t kRowLoss = 20;
 inline constexpr uint32_t kRowFinalSequence = 24;
-inline constexpr uint32_t kRowReservedBegin = 28;
+inline constexpr uint32_t kRowFinalPhase = 28;
+inline constexpr uint32_t kRowSyncLoss = 32;
+inline constexpr uint32_t kRowAddressLoss = 36;
+inline constexpr uint32_t kRowCounterExhausted = 40;
+inline constexpr uint32_t kRowWorkgroupX = 44;
+inline constexpr uint32_t kRowReservedBegin = 48;
 inline constexpr uint32_t kRowEntered = 1;
 inline constexpr uint32_t kRowExited = 2;
 inline constexpr uint32_t kRowExhausted = 4;
+
+// Acyclic groups retain slot=group, occurrence=1, phase=slot+1. Repeated
+// groups retain the first sixteen completion ordinals: group=slot%groups,
+// occurrence=slot/groups+1, phase=slot+1. Later completions add sync loss;
+// phase and loss counters saturate and set the sticky exhaustion flag.
+// Producer, reader, and compatibility changes must preserve this shared profile.
+inline constexpr uint32_t kSyncCommit = 0;
+inline constexpr uint32_t kSyncGroup = 4;
+inline constexpr uint32_t kSyncOccurrence = 8;
+inline constexpr uint32_t kSyncParticipants = 12;
+inline constexpr uint32_t kSyncSequence = 16;
+inline constexpr uint32_t kSyncPhase = 20;
+inline constexpr uint32_t kSyncReservedBegin = 24;
+inline constexpr uint32_t kBarrierCompleted = 0x43534243;
 
 inline constexpr uint32_t kRecordCommit = 0;
 inline constexpr uint32_t kRecordAnalysis = 4;
@@ -85,25 +125,11 @@ inline constexpr uint32_t kRecordLdsOffset = 24;
 inline constexpr uint32_t kRecordWidth = 28;
 inline constexpr uint32_t kRecordGuestMask = 32;
 inline constexpr uint32_t kRecordFlags = 40;
-inline constexpr uint32_t kRecordReservedBegin = 44;
+inline constexpr uint32_t kRecordPhase = 44;
+inline constexpr uint32_t kRecordReservedBegin = 48;
 inline constexpr uint32_t kAccessCommitted = 0x43534143;
 inline constexpr uint32_t kExactGuestMask = 1;
 } // namespace wire
-
-enum class ContractErrorCode {
-  None,
-  InvalidEncoding,
-  IncompatibleContract,
-  IdentityMismatch,
-  InvalidFacts,
-  UnsupportedLaunch,
-  ResourceLimit,
-};
-
-struct ContractError {
-  ContractErrorCode code = ContractErrorCode::None;
-  std::string message;
-};
 
 /// @brief Initial software budgets, checked before allocating untrusted extents.
 /// @details These conservative experimental caps are not measured production
@@ -131,7 +157,7 @@ public:
   bool operator==(const ImageIdentity &) const = default;
 };
 
-/// @brief One physical native LDS instruction, owned by the sole MVP entry.
+/// @brief One physical native LDS instruction, owned by the sole entry.
 /// @details Offsets are .text-relative. A zero mapping size means missing,
 /// whereas offset zero is a valid location. Both checks share this reservation.
 class SiteFacts {
@@ -142,7 +168,8 @@ public:
   RecordKind record = RecordKind::Access;
   uint32_t range_id = 0;
   AccessKind access = AccessKind::Read;
-  uint32_t width = 4;
+  // Byte count: explicitly set to 2, 4, 8 or 16. Zero is unspecified/invalid.
+  uint32_t width = 0;
   uint64_t original_offset = 0;
   uint32_t original_size = 0;
   uint64_t prepared_guest_offset = 0;
@@ -170,13 +197,36 @@ public:
   uint32_t prepared_sgprs = 0;
   uint32_t prepared_vgprs = 0;
   uint32_t maximum_workgroup_size = 1024;
+  // Scalar operand selector for the original workgroup-X input: an ordinary
+  // SGPR or TTMP9 on gfx12. UINT32_MAX means the descriptor does not request X.
+  uint32_t workgroup_id_scalar = UINT32_MAX;
   bool operator==(const EntryFacts &) const = default;
+};
+
+/// @brief A qualified full-workgroup barrier with an implicit identity.
+/// @details Legacy barriers use the same signal/wait position; split barriers use identity -1.
+/// The original drain precedes signal; signal/wait share a block without
+/// intervening memory operations or barriers. Acyclic groups dominate every exit and execute once
+/// per wave. Loop groups execute once per iteration of the qualified block, which may be bypassed.
+/// Completion follows the unchanged scalar wait, independently of EXEC; access positions refer to
+/// original guest instructions.
+class BarrierFacts {
+public:
+  uint64_t original_drain = 0;
+  uint64_t original_signal = 0;
+  uint64_t original_wait = 0;
+  uint64_t prepared_signal = 0;
+  uint64_t prepared_wait = 0;
+  uint64_t completion_probe = 0;
+  uint32_t probe_size = 0;
+  uint32_t identity = UINT32_MAX;
+  bool operator==(const BarrierFacts &) const = default;
 };
 
 /// @brief Owning static handoff shared by AOT, runtime and offline readers.
 /// @details This subset admits one entry, dynamically sized wave rows, native LDS
-/// b32 Read/Write, no relevant synchronization, no private frame or segment
-/// addends. The compiler must establish the scope from original instructions.
+/// single-range Read/Write, qualified full workgroup barriers, no private frame
+/// or segment addends. The compiler must establish the scope from original instructions.
 /// Codec validation establishes structural consistency, not ISA safety.
 class Manifest {
 public:
@@ -191,6 +241,7 @@ public:
   uint64_t prepared_text_bytes = 0;
   EntryFacts entry;
   std::vector<SiteFacts> sites;
+  std::vector<BarrierFacts> barriers;
   bool operator==(const Manifest &) const = default;
 };
 
@@ -208,7 +259,10 @@ public:
   uint64_t report_bytes = 0;
   uint32_t group_bytes = 0;
   uint32_t private_bytes = 0;
+  // Total report rows: workgroup_count * waves_per_workgroup, grouped by workgroup.
   uint32_t wave_count = 0;
+  uint32_t workgroup_count = 1;
+  uint32_t waves_per_workgroup = 0;
   bool operator==(const LaunchLayout &) const = default;
 };
 
@@ -221,37 +275,39 @@ struct TransportImage {
 [[nodiscard]] FailureOr<TransportImage>
 initialize_transport(const Manifest &manifest, const LaunchDimensions &dimensions,
                      uint32_t group_bytes, uint32_t private_bytes, uint64_t serial,
-                     uint64_t report_address, ContractError *error = nullptr);
+                     uint64_t report_address, util::DiagnosticEmitter diagnostic = {});
 
 [[nodiscard]] Digest digest(std::span<const uint8_t> bytes);
 [[nodiscard]] Digest mvp_options_digest();
 
-[[nodiscard]] Result validate_manifest(const Manifest &manifest, ContractError *error = nullptr,
+[[nodiscard]] Result validate_manifest(const Manifest &manifest,
+                                       util::DiagnosticEmitter diagnostic = {},
                                        const ContractLimits &limits = {});
 
 /// @brief Check exact image bytes separately from static-facts-only decoding.
 /// @details Offline captures own facts, but need not retain either code image.
 [[nodiscard]] Result match_images(const Manifest &manifest, std::span<const uint8_t> original,
-                                  std::span<const uint8_t> prepared, ContractError *error = nullptr,
+                                  std::span<const uint8_t> prepared,
+                                  util::DiagnosticEmitter diagnostic = {},
                                   const ContractLimits &limits = {});
 
 /// @brief Encode canonical, checksummed, explicitly little-endian static facts.
-[[nodiscard]] FailureOr<std::vector<uint8_t>> encode_manifest(const Manifest &manifest,
-                                                              ContractError *error = nullptr,
-                                                              const ContractLimits &limits = {});
+[[nodiscard]] FailureOr<std::vector<uint8_t>>
+encode_manifest(const Manifest &manifest, util::DiagnosticEmitter diagnostic = {},
+                const ContractLimits &limits = {});
 
 /// @brief Decode bounded, owning facts; reject trailing bytes and absent mappings.
 [[nodiscard]] FailureOr<Manifest> decode_manifest(std::span<const uint8_t> bytes,
-                                                  ContractError *error = nullptr,
+                                                  util::DiagnosticEmitter diagnostic = {},
                                                   const ContractLimits &limits = {});
 
 /// @brief Check actual launch shape and derive the single canonical storage layout.
-/// @details One one-dimensional workgroup, bounded by kernel facts and budgets.
+/// @details Complete one-dimensional workgroups, bounded by kernel facts and budgets.
 /// Segment minima preserve the original packet extents. No dynamic private
 /// frame is admitted in MVP.
 [[nodiscard]] FailureOr<LaunchLayout>
 plan_launch(const Manifest &manifest, const LaunchDimensions &dimensions,
             uint32_t packet_group_bytes, uint32_t packet_private_bytes,
-            ContractError *error = nullptr, const ContractLimits &limits = {});
+            util::DiagnosticEmitter diagnostic = {}, const ContractLimits &limits = {});
 
 } // namespace rocjitsu::consan

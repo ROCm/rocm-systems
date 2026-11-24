@@ -184,6 +184,9 @@ __device__ __noinline__ void QueuePairMLX5::post_wqe_rma(
     // acquire SQ lock and poll until we have enough WQEBB for all lanes using this QP
     lock_pollcq<PostOptions>(wf_info.num_pe_group_lanes);
   }
+  /* Only the PE group's last lane takes the SQ lock. Without a wave barrier the compiler may
+   * move the other lanes' reads of lock-protected state (sq.post) ahead of the lock. */
+  __builtin_amdgcn_wave_barrier();
 
   // wqe_idx is the logical WQE id that wraps at 0xFFFF, sq_idx is the index into the actual SQ
   uint16_t wqe_idx = get_wqe_idx(wf_info.pe_group_logical_lane_id);
@@ -250,6 +253,8 @@ __device__ __noinline__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_
     // acquire SQ lock and poll until we have enough WQEBB for all lanes using this QP
     lock_pollcq<PostOptions>(wf_info.num_pe_group_lanes);
   }
+  // see post_wqe_rma: other lanes read sq.post and fetching_atomic_idx
+  __builtin_amdgcn_wave_barrier();
 
   uint64_t* atomic_laddr = get_atomic_addr<Fetch>();
   uint32_t atomic_lkey   = get_atomic_lkey<Fetch>();
@@ -285,6 +290,8 @@ __device__ __noinline__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_
       quiet_single();
     }
   }
+  // only the last lane waited for the fetch result, so other lanes must not read it earlier
+  __builtin_amdgcn_wave_barrier();
 
   if constexpr (Fetch == AMOFetchType::Blocking) {
     return *atomic_laddr;

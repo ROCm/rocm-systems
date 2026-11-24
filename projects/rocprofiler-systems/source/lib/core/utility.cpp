@@ -7,7 +7,10 @@
 #include "common/string_utility.hpp"
 #include "logger/debug.hpp"
 
+#include <fmt/format.h>
+
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 
 namespace rocprofsys::utility
@@ -39,11 +42,14 @@ template <typename Tp, typename ContainerT, typename Up>
 ContainerT
 parse_numeric_range(std::string _input_string, const std::string& _label, Up _incr)
 {
-    auto const _get_value = [](const std::string& _inp) {
-        std::stringstream iss{ _inp };
-        auto              var = Tp{};
-        iss >> var;
-        return var;
+    auto const _get_value = [&](const std::string& _inp) {
+        auto const _parsed = utility::string::safe_from_chars<Tp>(_inp);
+        if(_parsed.is_error())
+        {
+            throw std::invalid_argument(
+                fmt::format("Invalid {} value '{}': {}", _label, _inp, _parsed.error()));
+        }
+        return _parsed.value();
     };
 
     _input_string = utility::string::to_lower(_input_string);
@@ -67,7 +73,15 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
             auto const _incr_str = _v.substr(_incr_pos + 1);
             if(!_incr_str.empty())
             {
-                _incr_v = static_cast<Up>(std::stoull(_incr_str));
+                auto const _parsed =
+                    utility::string::safe_from_chars<std::uint64_t>(_incr_str);
+                if(_parsed.is_error())
+                {
+                    throw std::invalid_argument(
+                        fmt::format("Invalid {} increment '{}': {}", _label, _incr_str,
+                                    _parsed.error()));
+                }
+                _incr_v = static_cast<Up>(_parsed.value());
             }
             _v = _v.substr(0, _incr_pos);
         }
@@ -107,6 +121,13 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
                             _label, _v, _v);
                 continue;
             }
+            // A non-positive increment never reaches _vN and would loop forever.
+            if(_incr_v <= 0)
+            {
+                throw std::invalid_argument(fmt::format(
+                    "Invalid {} range specification: {}. Increment must be positive",
+                    _label, _v));
+            }
             do
             {
                 emplace(result, _vn);
@@ -115,7 +136,7 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
         }
         else
         {
-            emplace(result, std::stoll(_v));
+            emplace(result, _get_value(_v));
         }
     }
     return result;

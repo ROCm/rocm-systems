@@ -7,7 +7,7 @@
 #include "common/floating_point.h"
 #include "common/half_reference.h"
 #include "dot/helpers.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_dot.h"
 #include <bit>
 
 #include <gtest/gtest.h>

@@ -29,6 +29,7 @@ enum class WaitCounterType : uint8_t {
   TENSORCNT, ///< Tensor data mover count (GFX12.5).
   ASYNCCNT,  ///< Async global/cluster LDS transfer count (GFX12.5).
   SAMPLECNT, ///< Image sample/gather count (GFX12).
+  BVHCNT,    ///< Ray-intersection count (GFX12).
 };
 
 /// @brief Return whether waiting on @p wait_type also constrains an event
@@ -52,6 +53,7 @@ enum class WaitCounterType : uint8_t {
   case WaitCounterType::KMCNT:
   case WaitCounterType::TENSORCNT:
   case WaitCounterType::ASYNCCNT:
+  case WaitCounterType::BVHCNT:
   case WaitCounterType::SAMPLECNT:
     return event_type == wait_type;
   }

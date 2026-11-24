@@ -23,18 +23,20 @@ void write_json_string(std::ostream &out, std::string_view value) {
   constexpr char digits[] = "0123456789abcdef";
   out << '"';
   for (const unsigned char ch : value) {
-    if (ch == '"' || ch == '\\')
+    if (ch == '"' || ch == '\\') {
       out << '\\' << ch;
-    else if (ch < 32)
+    } else if (ch < 32) {
       out << "\\u00" << digits[ch >> 4] << digits[ch & 15];
-    else
+    } else {
       out << ch;
+    }
   }
   out << '"';
 }
 
 void write_participant(std::ostream &out, const LdsRaceParticipant &value) {
-  out << "{\"wave\":" << value.wave << ",\"site\":" << value.site
+  out << "{\"workgroup_x\":" << value.workgroup << ",\"wave\":" << value.wave
+      << ",\"site\":" << value.site << ",\"phase\":" << value.phase
       << ",\"sequence\":" << value.sequence << ",\"mask\":" << value.mask
       << ",\"offset\":" << value.offset << ",\"width\":" << value.width
       << ",\"original_offset\":" << value.original_offset << ",\"access\":\""
@@ -45,16 +47,25 @@ void write_examples(std::ostream &out, const std::vector<LdsRaceFinding> &findin
   out << '[';
   bool first = true;
   for (const LdsRaceFinding &finding : findings) {
-    if (!first)
+    if (!first) {
       out << ',';
+    }
     first = false;
     out << "{\"kind\":\""
         << (finding.kind == LdsRaceFindingKind::CrossWave ? "cross_wave" : "instruction_collision")
         << "\",\"lane_pairs\":" << finding.lane_pairs;
-    if (finding.kind == LdsRaceFindingKind::CrossWave)
-      out << ",\"ordering\":\"unordered\"";
-    else
+    if (finding.kind == LdsRaceFindingKind::CrossWave) {
+      out << ",\"ordering\":\""
+          << (finding.ordering == LdsRaceOrdering::Ordered      ? "ordered"
+              : finding.ordering == LdsRaceOrdering::Unresolved ? "ordering_unresolved"
+                                                                : "unordered")
+          << "\"";
+    } else {
       out << ",\"reason\":\"ordinary_store_exact_mask\"";
+    }
+    if (finding.ordering == LdsRaceOrdering::Unresolved) {
+      out << ",\"reason\":\"incomplete_synchronization_evidence\"";
+    }
     out << ",\"first\":";
     write_participant(out, finding.first);
     if (finding.kind == LdsRaceFindingKind::CrossWave) {
@@ -74,53 +85,101 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
   out << std::boolalpha;
   out << "{\"verdict\":\""
       << (result.cross_wave_pairs || result.collision_groups ? "findings" : "no_observed_findings")
-      << "\",\"scope\":\"native_lds_b32_no_sync_one_workgroup\"" << ",\"run_identity\":\""
-      << hex_bytes(result.run_identity) << "\",\"original_sha256\":\""
-      << hex_bytes(result.original.sha256) << "\",\"original_bytes\":" << result.original.bytes
-      << ",\"entry\":";
+      << "\",\"scope\":\""
+      << (result.scope != ScopeKind::NativeLdsNoSynchronization
+              ? "native_lds_single_range_epoch_workgroup_barriers"
+              : "native_lds_single_range_no_sync_bounded_1d")
+      << "\"" << ",\"run_identity\":\"" << hex_bytes(result.run_identity)
+      << "\",\"original_sha256\":\"" << hex_bytes(result.original.sha256)
+      << "\",\"original_bytes\":" << result.original.bytes << ",\"selection_profile\":\""
+      << hex_bytes(result.selection_profile) << "\",\"entries\":[";
+  bool first_entry = true;
+  for (const LdsRaceImageEntry &entry : result.entries) {
+    if (!first_entry) {
+      out << ',';
+    }
+    first_entry = false;
+    out << "{\"entry_key\":" << entry.key << ",\"entry\":";
+    write_json_string(out, entry.name);
+    out << ",\"disposition\":\""
+        << (entry.disposition == EntryDisposition::Selected ? "selected" : "native_uncovered")
+        << "\"}";
+  }
+  out << "],\"entry\":";
   write_json_string(out, result.entry);
   out << ",\"target\":" << result.target << ",\"wave_size\":" << result.wave_size
       << ",\"execution_conditions\":" << result.execution_conditions
       << ",\"coverage_complete\":" << result.coverage_complete
+      << ",\"ordering_unresolved_pairs\":" << result.ordering_unresolved_pairs
+      << ",\"ordered_pairs\":" << result.ordered_pairs
       << ",\"cross_wave_pairs\":" << result.cross_wave_pairs
       << ",\"collision_groups\":" << result.collision_groups << ",\"executions\":[";
   bool first = true;
   for (const LdsRaceExecutionResult &execution : result.executions) {
-    if (!first)
+    if (!first) {
       out << ',';
+    }
     first = false;
-    out << "{\"serial\":" << execution.serial
+    // Once any counter exhausts, do not present the difference of saturating
+    // total-loss and address-loss counters as an exact dropped count; emit null.
+    out << "{\"serial\":" << execution.serial << ",\"entry_key\":" << execution.entry_key
+        << ",\"entry\":";
+    write_json_string(out, execution.entry);
+    out << ",\"workgroup_count\":" << execution.workgroup_count
+        << ",\"waves_per_workgroup\":" << execution.waves_per_workgroup
         << ",\"valid_observations\":" << execution.valid_observations
         << ",\"rejected_records\":" << execution.rejected_records
-        << ",\"lost_occurrences\":" << execution.lost_occurrences
+        << ",\"lost_occurrences\":" << execution.lost_occurrences << ",\"dropped_representatives\":"
+        << (execution.counter_exhausted_waves ? "null"
+                                              : std::to_string(execution.dropped_representatives))
+        << ",\"synchronization_loss\":" << execution.synchronization_loss
+        << ",\"address_group_exhaustion\":" << execution.address_group_exhaustion
+        << ",\"counter_exhausted_waves\":" << execution.counter_exhausted_waves
         << ",\"coverage_complete\":" << execution.coverage_complete
         << ",\"ordering_uncertain\":" << execution.ordering_uncertain
         << ",\"integrity_events\":" << execution.integrity_events
+        << ",\"ordered_pairs\":" << execution.ordered_pairs
+        << ",\"ordering_unresolved_pairs\":" << execution.ordering_unresolved_pairs
+        << ",\"required_barrier_waves\":" << execution.required_barrier_waves
+        << ",\"completed_barrier_waves\":" << execution.completed_barrier_waves
         << ",\"cross_wave_pairs\":" << execution.cross_wave_pairs
         << ",\"cross_wave_lane_pairs\":" << execution.cross_wave_lane_pairs
         << ",\"collision_groups\":" << execution.collision_groups
         << ",\"collision_lane_pairs\":" << execution.collision_lane_pairs << ",\"issues\":[";
     bool first_issue = true;
     for (const LdsRaceIntegrityIssue &issue : execution.issues) {
-      if (!first_issue)
+      if (!first_issue) {
         out << ',';
+      }
       first_issue = false;
       out << "{\"wave\":";
-      if (issue.wave == UINT32_MAX)
+      if (issue.wave == UINT32_MAX) {
         out << "null";
-      else
+      } else {
         out << issue.wave;
+      }
       out << ",\"site\":";
-      if (issue.site == UINT32_MAX)
+      if (issue.site == UINT32_MAX) {
         out << "null";
-      else
+      } else {
         out << issue.site;
+      }
+      out << ",\"workgroup_x\":";
+      if (issue.workgroup == UINT32_MAX) {
+        out << "null";
+      } else {
+        out << issue.workgroup;
+      }
       out << ",\"reason\":";
       write_json_string(out, issue.reason);
       out << '}';
     }
     out << "],\"cross_wave_examples\":";
     write_examples(out, execution.cross_wave_examples);
+    out << ",\"unresolved_examples\":";
+    write_examples(out, execution.unresolved_examples);
+    out << ",\"ordered_examples\":";
+    write_examples(out, execution.ordered_examples);
     out << ",\"collision_examples\":";
     write_examples(out, execution.collision_examples);
     out << '}';

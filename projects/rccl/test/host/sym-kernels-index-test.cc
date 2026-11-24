@@ -15,15 +15,7 @@
 
 #include "sym_kernels.h"
 
-// Neuter __global__: a real definition needs hipLaunchKernel/__hipRegisterFunction, unavailable under -no-hip-rt.
-#undef __global__
-#define __global__
-
-#include "fakes/sym_kernels_test_stubs.h"
-
-#include SYM_KERNELS_HOST_CC_PATH
-
-#undef __global__
+#include "fakes/sym_kernels_host_include.h"
 
 namespace {
 
@@ -62,6 +54,8 @@ const std::vector<ExpectedKernelCase>& TmaValidCases() {
   static const std::vector<ExpectedKernelCase> kCases = {
       {"AllGather_TmaST", ncclSymkKernelId_AllGather_TmaST, ncclDevSum, ncclFloat32,
        (void*)ncclSymkDevKernel_AllGather_TmaST, (void*)ncclSymkDevKernel_AllGather_TmaST_profile},
+      {"AllGather_HierLsaTmaST", ncclSymkKernelId_AllGather_HierLsaTmaST, ncclDevSum, ncclFloat32,
+       (void*)ncclSymkDevKernel_AllGather_HierLsaTmaST, (void*)ncclSymkDevKernel_AllGather_HierLsaTmaST_profile},
 
       {"AllReduce_RSxTmaLD_AGxTmaST_sum_f32", ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST, ncclDevSum, ncclFloat32,
        (void*)ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_f32,
@@ -309,8 +303,9 @@ const std::vector<InvalidKernelCase>& InvalidCases() {
       // Outer switch(id) default: the sentinel past the last real enumerator.
       {"UnimplementedId_Count", ncclSymkKernelId_Count, ncclDevSum, ncclFloat32},
       // Outer switch(id) default: an in-range value that is not an enumerator. Casting -1 would fall
-      // outside the enum's [0,31] value range, which is undefined per C++17, not unspecified.
-      {"UnimplementedId_InRangeNonEnumerator", (ncclSymkKernelId)31, ncclDevSum, ncclFloat32},
+      // outside the enum's value range, which is undefined per C++17, not unspecified.
+      {"UnimplementedId_InRangeNonEnumerator", (ncclSymkKernelId)(ncclSymkKernelId_Count + 1), ncclDevSum,
+       ncclFloat32},
 
       // Inner switch(red) default: a real ncclDevRedOp_t this id has no case for.
       {"AllReduce_AGxLL_R_UnknownRed_Prod", ncclSymkKernelId_AllReduce_AGxLL_R, ncclDevProd, ncclFloat32},
@@ -324,7 +319,7 @@ const std::vector<InvalidKernelCase>& InvalidCases() {
       {"ReduceScatter_RailA2A_LsaLD_UnknownType_Float64", ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD,
        ncclDevSumPostDiv, ncclFloat64},
   };
-  // The three DMA-staged ids swap sides with the build: unimplemented where generate.py emitted no
+  // The four DMA-staged ids swap sides with the build: unimplemented where generate.py emitted no
   // case, and otherwise carrying their own switch arms whose defaults are worth pinning.
   static const std::vector<InvalidKernelCase> kAll = [] {
     std::vector<InvalidKernelCase> all = kCases;
@@ -338,6 +333,8 @@ const std::vector<InvalidKernelCase>& InvalidCases() {
                      ncclInt64});
     } else {
       all.push_back({"UnimplementedId_AllGather_TmaST", ncclSymkKernelId_AllGather_TmaST, ncclDevSum, ncclFloat32});
+      all.push_back({"UnimplementedId_AllGather_HierLsaTmaST", ncclSymkKernelId_AllGather_HierLsaTmaST, ncclDevSum,
+                     ncclFloat32});
       all.push_back({"UnimplementedId_AllReduce_RSxTmaLD_AGxTmaST", ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST,
                      ncclDevSum, ncclFloat32});
       all.push_back({"UnimplementedId_ReduceScatter_TmaLD", ncclSymkKernelId_ReduceScatter_TmaLD, ncclDevSum,

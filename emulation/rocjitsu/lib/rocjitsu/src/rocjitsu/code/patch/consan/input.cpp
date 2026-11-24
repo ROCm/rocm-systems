@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/patch/consan/input.h"
 #include "rocjitsu/code/consan/image/metadata.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -18,6 +19,7 @@
 #include <array>
 #include <cstring>
 #include <limits>
+#include <unordered_map>
 #include <utility>
 
 namespace rocjitsu::consan {
@@ -34,20 +36,23 @@ Result reject(InputError &error, InputErrorCode code, std::string message,
 Result validate_image_header(std::span<const uint8_t> image, const TargetProfile &profile,
                              InputError &error) {
   Elf64_Ehdr header{};
-  if (image.size() < sizeof(header))
+  if (image.size() < sizeof(header)) {
     return reject(error, InputErrorCode::InvalidImage, "truncated ELF header");
+  }
   std::memcpy(&header, image.data(), sizeof(header));
   if (std::memcmp(header.e_ident, EI_MAGIC, EI_MAGIC_SIZE) != 0 ||
       header.e_ident[EI_CLASS] != ELFCLASS64 || header.e_ident[EI_DATA] != ELFDATA2LSB ||
       header.e_ident[EI_OSABI] != ELFOSABI_AMDGPU_HSA || header.e_type != ET_DYN ||
-      header.e_machine != EM_AMDGPU)
+      header.e_machine != EM_AMDGPU) {
     return reject(error, InputErrorCode::InvalidImage,
                   "expected little-endian AMDHSA ET_DYN ELF64");
+  }
   if (header.e_ident[EI_ABIVERSION] != ELFABIVERSION_AMDGPU_HSA_V5 ||
       (header.e_flags & EF_AMDGPU_MACH) != profile.elf_machine ||
-      (header.e_flags & ~uint32_t{0xfff}) != 0)
+      (header.e_flags & ~uint32_t{0xfff}) != 0) {
     return reject(error, InputErrorCode::UnsupportedTarget,
                   "concrete target requires matching code-object v5");
+  }
   return Result::success();
 }
 
@@ -55,32 +60,38 @@ Result validate_entry_abi(const kd::kernel_descriptor_t &descriptor, const Targe
                           InputError &error) {
   constexpr uint32_t kProperties = kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR |
                                    kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32;
-  if ((descriptor.kernel_code_properties & ~kProperties) != 0)
+  if ((descriptor.kernel_code_properties & ~kProperties) != 0) {
     return reject(error, InputErrorCode::UnsupportedEntry, "unsupported kernel entry properties");
+  }
   if ((descriptor.kernel_code_properties &
-       kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR) == 0)
+       kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR) == 0) {
     return reject(error, InputErrorCode::UnsupportedEntry,
                   "entry requires the kernarg SGPR pointer");
+  }
 
   const uint32_t user_sgprs = kernel_descriptor_user_sgpr_count(target.arch, descriptor);
-  if (user_sgprs < 2 || user_sgprs > 16)
+  if (user_sgprs < 2 || user_sgprs > 16) {
     return reject(error, InputErrorCode::UnsupportedEntry, "unsupported entry user SGPR count");
+  }
   const uint32_t wave_size = kernel_wavefront_size(target.arch, descriptor);
-  if (!supports_wave(target, wave_size))
+  if (!supports_wave(target, wave_size)) {
     return reject(error, InputErrorCode::UnsupportedEntry, "unsupported kernel wave mode");
+  }
   // The gfx1100 wave32 CP initialization workaround needs sixteen inputs even
   // when the program uses fewer; scratch must also start beyond those inputs.
   if (target.id == 1100 && wave_size == 32 &&
-      kernel_descriptor_initial_sgpr_count(target.arch, descriptor) < 16)
+      kernel_descriptor_initial_sgpr_count(target.arch, descriptor) < 16) {
     return reject(error, InputErrorCode::UnsupportedEntry,
                   "gfx1100 wave32 requires input SGPR padding");
+  }
 
   // The shared bootstrap restores a conventional argument pointer; preload
   // and private-frame setup are outside this entry protocol.
   if (kernarg_preload_length(descriptor) != 0 || descriptor.private_segment_fixed_size != 0 ||
-      descriptor.kernarg_size == 0)
+      descriptor.kernarg_size == 0) {
     return reject(error, InputErrorCode::UnsupportedEntry,
                   "entry requires nonempty kernargs, no preload and no private frame");
+  }
   if (RJ_AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2,
                          kd::COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID) != 0 ||
       RJ_AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2,
@@ -88,56 +99,96 @@ Result validate_entry_abi(const kd::kernel_descriptor_t &descriptor, const Targe
       RJ_AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2,
                          kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z) != 0 ||
       RJ_AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2,
-                         kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO) != 0)
+                         kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO) != 0) {
     return reject(error, InputErrorCode::UnsupportedEntry,
                   "entry supports workitem X and optional workgroup X only");
+  }
   return Result::success();
 }
 
 Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                              InputProgram &program, RegisterSet &used, const InputLimits &limits,
                              InputError &error) {
+  const FailureOr<std::vector<const BasicBlock *>> ordered = qualify_lds_race_cfg(blocks, error);
+  if (ordered.failed()) {
+    return Result::failure();
+  }
+  std::unordered_map<const BasicBlock *, std::optional<uint64_t>> latest_access;
+  latest_access.reserve(ordered.value().size());
+  for (const BasicBlock *block : ordered.value()) {
+    latest_access.emplace(block, std::nullopt);
+  }
   size_t instruction_count = 0;
-  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+  for (const BasicBlock *block : ordered.value()) {
     if (block->has_implicit_terminator() ||
         block->successor_issue() != BasicBlock::SuccessorIssue::None ||
-        !block->call_edges().empty())
+        !block->call_edges().empty()) {
       return reject(error, InputErrorCode::UnsupportedFlow, "original control flow is not closed",
                     block->start_offset());
-    if (qualify_lds_race_block(*block, error).failed())
-      return Result::failure();
+    }
+    std::optional<uint64_t> latest = latest_access.find(block)->second;
     for (const Instruction &instruction : block->instructions()) {
-      if (instruction_count++ >= limits.instructions)
+      if (instruction_count++ >= limits.instructions) {
         return reject(error, InputErrorCode::ResourceLimit, "instruction analysis budget exceeded");
+      }
       const uint64_t offset = instruction.src_loc();
-      if ((instruction.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0)
+      if ((instruction.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0) {
         return reject(error, InputErrorCode::UnsupportedFlow, "indirect transfer is outside MVP",
                       offset);
+      }
+      const size_t previous_accesses = program.accesses.size();
       if (classify_lds_race_instruction(instruction, program.target->arch, program.original_vgprs,
                                         program.accesses, error)
-              .failed())
+              .failed()) {
         return Result::failure();
+      }
+      // The analyzer's site IDs follow source-PC order. Acyclic control flow
+      // may return from a cave, but native accesses must retain that same order
+      // on every path; a larger predecessor PC would invert valid record sequences.
+      for (size_t index = previous_accesses; index < program.accesses.size(); ++index) {
+        const uint64_t access = program.accesses[index].original_offset;
+        if (latest && access <= *latest) {
+          return reject(error, InputErrorCode::UnsupportedFlow,
+                        "MVP requires increasing LDS access order along every CFG path", access);
+        }
+        latest = access;
+      }
       const InstDefUse effects(instruction, program.wave_size);
       used |= effects.uses;
       used |= effects.defs;
       const std::optional<int64_t> branch = instruction.branch_offset_bytes();
       if (branch) {
         const int64_t destination = static_cast<int64_t>(offset) + instruction.size() + *branch;
-        if (destination < 0 || static_cast<uint64_t>(destination) >= program.text_bytes)
+        if (destination < 0 || static_cast<uint64_t>(destination) >= program.text_bytes) {
           return reject(error, InputErrorCode::UnsupportedFlow, "branch leaves original text",
                         offset);
+        }
       }
-      if ((instruction.flags() & PROGRAM_TERMINATOR) != 0)
+      if ((instruction.flags() & PROGRAM_TERMINATOR) != 0) {
         program.exit_offsets.push_back(offset);
+      }
+    }
+    for (const BasicBlock *successor : block->successors()) {
+      // The deferred self-edge starts another repeated epoch if the later
+      // barrier gate qualifies it; propagate this epoch's maximum only to exits.
+      if (successor == block) {
+        continue;
+      }
+      std::optional<uint64_t> &incoming = latest_access.find(successor)->second;
+      if (latest && (!incoming || *latest > *incoming)) {
+        incoming = latest;
+      }
     }
   }
-  if (program.accesses.empty())
+  if (program.accesses.empty()) {
     return reject(error, InputErrorCode::UnsupportedAccess,
                   "selected entry has no native LDS sites");
+  }
   std::ranges::sort(program.exit_offsets);
   std::ranges::sort(program.accesses, {}, &NativeLdsAccess::original_offset);
-  for (size_t index = 0; index < program.accesses.size(); ++index)
+  for (size_t index = 0; index < program.accesses.size(); ++index) {
     program.accesses[index].site = static_cast<uint32_t>(index);
+  }
   return Result::success();
 }
 
@@ -146,23 +197,26 @@ Result validate_original_registers(const RegisterSet &used, uint32_t declared_vg
   bool invalid_register = false;
   used.for_each_ordinary([&](RegisterRef reg) {
     if ((reg.cls == RegClass::SGPR && reg.index >= program.original_sgprs) ||
-        (reg.cls == RegClass::VGPR && reg.index >= declared_vgprs) || reg.cls == RegClass::ACC_VGPR)
+        (reg.cls == RegClass::VGPR && reg.index >= declared_vgprs) ||
+        reg.cls == RegClass::ACC_VGPR) {
       invalid_register = true;
+    }
   });
-  if (invalid_register)
+  if (invalid_register) {
     return reject(error, InputErrorCode::UnsupportedEntry,
                   "original operands exceed declared registers");
+  }
   return Result::success();
 }
 
-} // namespace
-
-FailureOr<InputProgram> build_input_program(std::span<const uint8_t> image,
+FailureOr<InputProgram> build_entry_program(std::span<const uint8_t> image,
                                             const TargetProfile &target, std::string_view entry,
-                                            InputError &error, const InputLimits &limits) {
+                                            InputError &error, const InputLimits &limits,
+                                            bool allow_siblings) {
   error = {};
-  if (image.size() > limits.image_bytes)
+  if (image.size() > limits.image_bytes) {
     return reject(error, InputErrorCode::ResourceLimit, "code object exceeds image budget");
+  }
 
   // Validate concrete identity before interpreting target-dependent bytes.
   // A caller may supply a temporary aggregate or a non-static name view.
@@ -175,62 +229,73 @@ FailureOr<InputProgram> build_input_program(std::span<const uint8_t> image,
       break;
     }
   }
-  if (profile == nullptr)
+  if (profile == nullptr) {
     return reject(error, InputErrorCode::UnsupportedTarget,
                   "unsupported or inconsistent native LDS target profile");
-  const rj_code_arch_t arch = profile->arch;
+  }
+  const rocjitsu::IsaFamily arch = profile->arch;
   const IsaTargetRegistry &registry = default_isa_target_registry();
-  const IsaGpuTargetDescription *binding =
-      registry.find_gpu_target_by_code_object_id(profile->name);
+  const IsaTargetBinding *binding = registry.find_target_by_code_object_id(profile->name);
   const IsaTargetDescriptor *provider = registry.find(profile->public_id);
   if (!registry.ok() || binding == nullptr || provider == nullptr ||
-      binding->elf_machine != profile->elf_machine || provider->architecture_id != arch)
+      binding->elf_machine != profile->elf_machine || provider->family != arch) {
     return reject(error, InputErrorCode::UnsupportedTarget, "selected ISA provider is unavailable");
-  if (validate_image_header(image, *profile, error).failed())
+  }
+  if (validate_image_header(image, *profile, error).failed()) {
     return Result::failure();
+  }
 
   // Establish the original binary/entry/metadata bounds before CFG decoding.
   AmdGpuCodeObject object(image.data(), image.size());
   if (!object.is_valid() || object.text_sections().size() != 1 ||
-      object.allocated_executable_sections().size() != 1)
+      object.allocated_executable_sections().size() != 1) {
     return reject(error, InputErrorCode::InvalidImage,
                   "expected one valid executable .text section");
+  }
   const Section &text = *object.text_sections().front();
-  if (text.size() > limits.text_bytes)
+  if (text.size() > limits.text_bytes) {
     return reject(error, InputErrorCode::ResourceLimit, "text exceeds analysis budget");
+  }
   const std::vector<KernelDescriptorInfo> kernels =
       scan_kernel_descriptors(image, text.sectionOffset(), text.size(), text.sectionHeaderIndex());
   const std::vector<KernelDescriptorInfo>::const_iterator selected =
       std::ranges::find(kernels, entry, &KernelDescriptorInfo::kernel_name);
-  if (selected == kernels.end())
+  if (selected == kernels.end()) {
     return reject(error, InputErrorCode::UnsupportedEntry,
                   "requested kernel entry '" + std::string(entry) + "' was not found");
-  if (kernels.size() != 1)
+  }
+  if (!allow_siblings && kernels.size() != 1) {
     return reject(error, InputErrorCode::UnsupportedEntry,
                   "ConSan requires a single-kernel code object; found " +
                       std::to_string(kernels.size()) + " kernels");
+  }
   const KernelDescriptorInfo &kernel = *selected;
-  if (validate_entry_abi(kernel.descriptor, *profile, error).failed())
+  if (validate_entry_abi(kernel.descriptor, *profile, error).failed()) {
     return Result::failure();
+  }
   InputProgram program;
   program.kernel = kernel;
   program.target = profile;
   program.wave_size = kernel_wavefront_size(arch, kernel.descriptor);
-  if (qualify_lds_race_entry(program, error).failed())
+  if (qualify_lds_race_entry(program, error).failed()) {
     return Result::failure();
+  }
   if (text.vaddr() > std::numeric_limits<uint64_t>::max() - kernel.entry_text_offset ||
-      ((text.vaddr() + kernel.entry_text_offset) % kKernelEntryAlignment) != 0)
+      ((text.vaddr() + kernel.entry_text_offset) % kKernelEntryAlignment) != 0) {
     return reject(error, InputErrorCode::UnsupportedEntry,
                   "hardware entry is not 256-byte aligned");
+  }
   CodeObjectPatcher patcher(object);
   if (patcher.has_relocations_within_text() || patcher.has_unsupported_relocation_to_text() ||
       patcher.has_malformed_rocr_relocation_section() ||
-      patcher.has_rocr_rejected_none_relocation())
+      patcher.has_rocr_rejected_none_relocation()) {
     return reject(error, InputErrorCode::UnsupportedFlow, "unsupported code relocation");
+  }
   std::string metadata_error;
   const FailureOr<MetadataResources> metadata = inspect_metadata(image, kernel, &metadata_error);
-  if (metadata.failed())
+  if (metadata.failed()) {
     return reject(error, InputErrorCode::UnsupportedEntry, metadata_error);
+  }
   program.original_sgprs = metadata.value().sgprs;
   program.maximum_workgroup_size = metadata.value().maximum_workgroup_size;
   program.original_vgprs =
@@ -244,23 +309,61 @@ FailureOr<InputProgram> build_input_program(std::span<const uint8_t> image,
   // Decoders/blocks stay alive through classification and register-use planning;
   // the returned program owns original bytes, offsets and operations only.
   std::unique_ptr<Decoder> decoder = Decoder::create(registry, profile->public_id);
-  if (decoder == nullptr)
+  if (decoder == nullptr) {
     return reject(error, InputErrorCode::DecodeFailure, "concrete target decoder is unavailable");
+  }
   const std::array<uint64_t, 1> entries = {kernel.entry_text_offset};
   std::string decode_message;
   const auto sink = [&decode_message](std::string_view message) { decode_message = message; };
   const FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks = BasicBlock::build_reachable(
       object, *decoder, arch, entries, util::DiagnosticEmitter{util::DiagnosticSink{sink}}, {}, {},
       {}, profile->public_id);
-  if (blocks.failed())
+  if (blocks.failed()) {
     return reject(error, InputErrorCode::DecodeFailure, "invalid original CFG: " + decode_message);
+  }
+  if (allow_siblings) {
+    for (const std::unique_ptr<BasicBlock> &block : blocks.value()) {
+      for (const Instruction &instruction : block->instructions()) {
+        for (const KernelDescriptorInfo &sibling : kernels) {
+          if (sibling.descriptor_file_offset != kernel.descriptor_file_offset &&
+              instruction.src_loc() == sibling.entry_text_offset) {
+            return reject(error, InputErrorCode::UnsupportedFlow,
+                          "selected control flow enters another kernel", instruction.src_loc());
+          }
+        }
+      }
+    }
+  }
   RegisterSet used;
   if (collect_original_code(blocks.value(), program, used, limits, error).failed() ||
-      validate_original_registers(used, metadata.value().vgprs, program, error).failed())
+      validate_original_registers(used, metadata.value().vgprs, program, error).failed()) {
     return Result::failure();
+  }
+  std::vector<BasicBlock *> scope;
+  for (const std::unique_ptr<BasicBlock> &block : blocks.value()) {
+    scope.push_back(block.get());
+  }
+  if (qualify_lds_race_barrier(program, scope, error).failed()) {
+    return Result::failure();
+  }
   program.identity = {.sha256 = digest(image), .bytes = image.size()};
   program.image.assign(image.begin(), image.end());
   return program;
+}
+
+} // namespace
+
+FailureOr<InputProgram> build_input_program(std::span<const uint8_t> image,
+                                            const TargetProfile &target, std::string_view entry,
+                                            InputError &error, const InputLimits &limits) {
+  return build_entry_program(image, target, entry, error, limits, /*allow_siblings=*/false);
+}
+
+FailureOr<InputProgram> build_image_entry_program(std::span<const uint8_t> image,
+                                                  const TargetProfile &target,
+                                                  std::string_view entry, InputError &error,
+                                                  const InputLimits &limits) {
+  return build_entry_program(image, target, entry, error, limits, /*allow_siblings=*/true);
 }
 
 } // namespace rocjitsu::consan

@@ -222,7 +222,8 @@ export default function App() {
     reloadAll: false,
     cacheGeneration: readCacheGeneration(),
   }));
-  const targets = dataState.data?.targets;
+  // First-seen order, not the alphabetical data.targets used by the filters: colors must not move when a target is added.
+  const targets = dataState.data?.targetColorOrder;
   const theme = useMemo(() => createDashboardTheme(mode, targets), [mode, targets]);
   const state = useDashboardState(dataState.data ?? emptyDashboardData);
 

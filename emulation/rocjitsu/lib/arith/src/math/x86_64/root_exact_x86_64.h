@@ -10,7 +10,7 @@
 #include "math/rsq_model.h"
 #include "math/sqrt_model.h"
 #include "math/x86_64/trans_exact_x86_64.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <immintrin.h>
 #include <stdint.h>

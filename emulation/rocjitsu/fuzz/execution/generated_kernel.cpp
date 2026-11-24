@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "generated_kernel.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/smem_builders.h"
@@ -35,10 +36,9 @@
 
 #include <algorithm>
 #include <array>
-#include <format>
+#include <cassert>
 #include <initializer_list>
 #include <random>
-#include <stdexcept>
 #include <vector>
 
 namespace rocjitsu::execution_fuzz {
@@ -104,8 +104,8 @@ struct KernelEncoding {
 };
 
 template <typename Vop2, typename Vopc, size_t FlatWords, typename FlatFields>
-void emit(std::span<uint8_t> payload, rj_code_arch_t arch, uint64_t seed,
-          const KernelEncoding<Vop2, Vopc, FlatWords, FlatFields> &encoding) {
+util::Result emit(std::span<uint8_t> payload, rocjitsu::IsaFamily arch, uint64_t seed,
+                  const KernelEncoding<Vop2, Vopc, FlatWords, FlatFields> &encoding) {
   std::mt19937_64 random(seed);
   const auto address_pair = [&] {
     return static_cast<uint8_t>(2 * (random() % kAddressPairCount));
@@ -137,9 +137,10 @@ void emit(std::span<uint8_t> payload, rj_code_arch_t arch, uint64_t seed,
   // At most one backward edge. Its counter is initialized before any branch.
   const bool loop = random() % 2 == 0;
   const size_t loop_end = 7 + random() % (op_count - 7);
-  if (loop)
+  if (loop) {
     words.push_back(
         build_s_mov_b32(kLoopCounter, vop3_inline_uint(2 + random() % 2), arch).value());
+  }
   constexpr std::array kOps = {KernelOp::VectorAlu,  KernelOp::VectorAlu, KernelOp::VectorAlu,
                                KernelOp::ScalarAlu,  KernelOp::FlatLoad,  KernelOp::FlatStore,
                                KernelOp::ScalarLoad, KernelOp::Compare,   KernelOp::RestoreExec,
@@ -202,8 +203,9 @@ void emit(std::span<uint8_t> payload, rj_code_arch_t arch, uint64_t seed,
                          encoding.null_saddr, addr, reg, offset, is_store));
       // Drain both vector memory and LDS counters before the next branch target.
       append(is_store ? encoding.wait_store : encoding.wait_load);
-      if (!is_store)
+      if (!is_store) {
         last_vgpr = reg;
+      }
       break;
     }
     case KernelOp::ScalarLoad: {
@@ -234,28 +236,33 @@ void emit(std::span<uint8_t> payload, rj_code_arch_t arch, uint64_t seed,
     }
   }
   op_offsets.push_back(words.size());
-  for (const ForwardBranch &branch : forward_branches)
+  for (const ForwardBranch &branch : forward_branches) {
     words[branch.word_index] =
         branch_word(branch.opcode, branch.word_index,
                     op_offsets[std::min(branch.target_op_index, op_offsets.size() - 1)]);
+  }
   words.push_back(build_s_endpgm(arch).value());
-  if (words.size() > capacity)
-    throw std::logic_error("generated kernel exceeded its instruction payload");
+  assert(words.size() <= capacity && "generated kernel exceeded its instruction payload");
   size_t offset = 0;
-  for (uint32_t word : words)
-    for (unsigned byte = 0; byte < sizeof(word); ++byte)
+  for (uint32_t word : words) {
+    for (unsigned byte = 0; byte < sizeof(word); ++byte) {
       payload[offset++] = static_cast<uint8_t>(word >> (8 * byte));
+    }
+  }
+  return util::Result::success();
 }
 
 } // namespace
 
-void write_generated_kernel(std::span<uint8_t> payload, rj_code_arch_t arch, uint64_t seed) {
-  if (payload.size() < kMinGeneratedKernelBytes)
-    throw std::invalid_argument(std::format(
-        "generated kernels require at least {} instruction bytes", kMinGeneratedKernelBytes));
+util::Result write_generated_kernel(std::span<uint8_t> payload, rocjitsu::IsaFamily arch,
+                                    uint64_t seed, util::DiagnosticEmitter diagnostic) {
+  if (payload.size() < kMinGeneratedKernelBytes) {
+    return diagnostic.emit() << "generated kernels require at least " << kMinGeneratedKernelBytes
+                             << " instruction bytes";
+  }
   // Pick opcodes and waits from the generated definitions for each target.
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1: {
+  case rocjitsu::IsaFamily::Cdna1: {
     namespace isa = cdna1;
     const uint32_t wait_all = isa::build_sopp(isa::kSWaitcntSopp)[0];
     return emit(payload, arch, seed,
@@ -280,7 +287,7 @@ void write_generated_kernel(std::span<uint8_t> payload, rj_code_arch_t arch, uin
                     .wait_store = {wait_all},
                 });
   }
-  case ROCJITSU_CODE_ARCH_CDNA2: {
+  case rocjitsu::IsaFamily::Cdna2: {
     namespace isa = cdna2;
     const uint32_t wait_all = isa::build_sopp(isa::kSWaitcntSopp)[0];
     return emit(payload, arch, seed,
@@ -305,7 +312,7 @@ void write_generated_kernel(std::span<uint8_t> payload, rj_code_arch_t arch, uin
                     .wait_store = {wait_all},
                 });
   }
-  case ROCJITSU_CODE_ARCH_CDNA3: {
+  case rocjitsu::IsaFamily::Cdna3: {
     namespace isa = cdna3;
     const uint32_t wait_all = isa::build_sopp(isa::kSWaitcntSopp)[0];
     return emit(payload, arch, seed,
@@ -330,7 +337,7 @@ void write_generated_kernel(std::span<uint8_t> payload, rj_code_arch_t arch, uin
                     .wait_store = {wait_all},
                 });
   }
-  case ROCJITSU_CODE_ARCH_CDNA4: {
+  case rocjitsu::IsaFamily::Cdna4: {
     namespace isa = cdna4;
     const uint32_t wait_all = isa::build_sopp(isa::kSWaitcntSopp)[0];
     return emit(payload, arch, seed,
@@ -355,7 +362,7 @@ void write_generated_kernel(std::span<uint8_t> payload, rj_code_arch_t arch, uin
                     .wait_store = {wait_all},
                 });
   }
-  case ROCJITSU_CODE_ARCH_RDNA1: {
+  case rocjitsu::IsaFamily::Rdna1: {
     namespace isa = rdna1;
     const uint32_t wait_all = isa::build_sopp(isa::kSWaitcntSopp)[0];
     return emit(payload, arch, seed,
@@ -382,7 +389,7 @@ void write_generated_kernel(std::span<uint8_t> payload, rj_code_arch_t arch, uin
                                    wait_all},
                 });
   }
-  case ROCJITSU_CODE_ARCH_RDNA2: {
+  case rocjitsu::IsaFamily::Rdna2: {
     namespace isa = rdna2;
     const uint32_t wait_all = isa::build_sopp(isa::kSWaitcntSopp)[0];
     return emit(payload, arch, seed,
@@ -409,7 +416,7 @@ void write_generated_kernel(std::span<uint8_t> payload, rj_code_arch_t arch, uin
                                    wait_all},
                 });
   }
-  case ROCJITSU_CODE_ARCH_RDNA3: {
+  case rocjitsu::IsaFamily::Rdna3: {
     namespace isa = rdna3;
     const uint32_t wait_all = isa::build_sopp(isa::kSWaitcntSopp)[0];
     return emit(payload, arch, seed,
@@ -436,7 +443,7 @@ void write_generated_kernel(std::span<uint8_t> payload, rj_code_arch_t arch, uin
                                    wait_all},
                 });
   }
-  case ROCJITSU_CODE_ARCH_RDNA3_5: {
+  case rocjitsu::IsaFamily::Rdna3_5: {
     namespace isa = rdna3_5;
     const uint32_t wait_all = isa::build_sopp(isa::kSWaitcntSopp)[0];
     return emit(payload, arch, seed,
@@ -463,7 +470,7 @@ void write_generated_kernel(std::span<uint8_t> payload, rj_code_arch_t arch, uin
                                    wait_all},
                 });
   }
-  case ROCJITSU_CODE_ARCH_RDNA4: {
+  case rocjitsu::IsaFamily::Rdna4: {
     namespace isa = rdna4;
     return emit(payload, arch, seed,
                 KernelEncoding{
@@ -487,7 +494,7 @@ void write_generated_kernel(std::span<uint8_t> payload, rj_code_arch_t arch, uin
                     .wait_store = {isa::build_sopp(isa::kSWaitStorecntDscntSopp)[0]},
                 });
   }
-  case ROCJITSU_CODE_ARCH_CDNA5: {
+  case rocjitsu::IsaFamily::Cdna5: {
     namespace isa = cdna5;
     return emit(payload, arch, seed,
                 KernelEncoding{
@@ -512,7 +519,7 @@ void write_generated_kernel(std::span<uint8_t> payload, rj_code_arch_t arch, uin
                 });
   }
   default:
-    throw std::logic_error("no generated kernel encoding for target");
+    return diagnostic.emit() << "no generated kernel encoding for target";
   }
 }
 

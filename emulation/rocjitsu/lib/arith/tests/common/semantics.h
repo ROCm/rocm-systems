@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
 #include <vector>
@@ -17,6 +17,12 @@ inline std::vector<uint64_t> semantics_modes() {
   return {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
           RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
           RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, RJ_ARITH_SEMANTICS_COMPATIBILITY};
+}
+
+// Return the modes that must reproduce captured hardware results for an entry point whose
+// Compatibility resolves to strict exact. Loose and mode 1 may take approximate shortcuts.
+inline std::vector<uint64_t> hardware_semantics() {
+  return {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS};
 }
 
 } // namespace rocjitsu::arith::test

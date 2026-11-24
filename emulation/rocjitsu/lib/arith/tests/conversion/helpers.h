@@ -13,7 +13,7 @@
 #include "common/registers.h"
 #include "common/semantics.h"
 #include "common/wave.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <bit>
 #include <cmath>
@@ -116,12 +116,88 @@ int invoke_conversion(Call call, uint64_t flags, Mask exec_mask, uint64_t mode, 
   }
 }
 
+// Check one captured gfx1201 lane in Compatibility and strict exact mode on every CPU level,
+// so a faster loose path cannot change default-mode results. IEEE mode is set as on the
+// capture hardware. A may hold FP64 bits; B and C are passed only to multi-source
+// conversions; D seeds the destination bits a conversion preserves.
+// gfx1100 rows pass their own IEEE bit and instruction modifiers through
+// expect_captured_conversion_gfx11.
+template <int Operands, int OutputWords, typename Call>
+void expect_captured_conversion_lane(Call call, uint64_t flags_without_cpu, uint64_t modifiers,
+                                     uint64_t a, uint32_t b, uint32_t c, uint64_t d,
+                                     uint64_t expected) {
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : hardware_semantics()) {
+      SCOPED_TRACE(::testing::Message() << std::hex << cpu << '/' << semantics << '/' << a);
+      Registers<8, 32> r;
+      r.v[0][0] = uint32_t(a);
+      r.v[1][0] = uint32_t(a >> 32);
+      r.v[2][0] = b;
+      r.v[4][0] = c;
+      r.v[6][0] = uint32_t(d);
+      r.v[7][0] = uint32_t(d >> 32);
+      const uint32_t *const *sources[] = {r.v, r.v + 2, r.v + 4};
+      const uint64_t flags = cpu | semantics | flags_without_cpu;
+      int error;
+      if constexpr (Operands == 1) {
+        error =
+            invoke_conversion(call, flags, uint32_t(1), modifiers, r.v + 6, nullptr, sources[0]);
+      } else if constexpr (Operands == 2) {
+        error = invoke_conversion(call, flags, uint32_t(1), modifiers, r.v + 6, nullptr, sources[0],
+                                  sources[1]);
+      } else {
+        error = invoke_conversion(call, flags, uint32_t(1), modifiers, r.v + 6, nullptr, sources[0],
+                                  sources[1], sources[2]);
+      }
+      ASSERT_EQ(error, RJ_ARITH_SUCCESS);
+      EXPECT_EQ(r.v[6][0] | (OutputWords == 2 ? uint64_t(r.v[7][0]) << 32 : uint64_t(0)), expected);
+    }
+  }
+}
+
+template <int Operands, int OutputWords, typename Call>
+void expect_captured_conversion(Call call, uint64_t guest_flags, uint64_t a, uint32_t b, uint32_t c,
+                                uint64_t d, uint64_t expected) {
+  expect_captured_conversion_lane<Operands, OutputWords>(call, RJ_ARITH_FP_IEEE_MODE | guest_flags,
+                                                         0, a, b, c, d, expected);
+}
+
+// One captured gfx1100 lane. mode is the hardware MODE register as in CapturedGfx11: rounding
+// in bits 3:0 (FP32 in 1:0, FP16/FP64 in 3:2), denormals in 7:4, DX10_CLAMP in bit 8, IEEE in
+// bit 9 and FP16_OVFL in bit 23. Width selects the rounding and denormal fields of the operand
+// format that rounds.
+template <int Operands, int OutputWords, int Width, typename Call>
+void expect_captured_conversion_gfx11(Call call, uint32_t mode, uint64_t modifiers, uint64_t a,
+                                      uint32_t b, uint32_t c, uint64_t d, uint64_t expected) {
+  constexpr int shift = Width == 32 ? 0 : 2;
+  uint64_t flags = uint64_t((mode >> shift) & 3) << 24;
+  if (!(mode & 0x100)) {
+    flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+  }
+  if (!(mode & (0x10U << shift))) {
+    flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  if (!(mode & (0x20U << shift))) {
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  }
+  if (mode & 0x200) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (mode & (1U << 23)) {
+    flags |= RJ_ARITH_FP16_OVFL;
+  }
+  expect_captured_conversion_lane<Operands, OutputWords>(call, flags, modifiers, a, b, c, d,
+                                                         expected);
+}
+
 // A narrow conversion shares this memory/semantics contract with widening and
 // packing. References return one or two words; comparators own numeric rules.
+// Exact entry points without a status parameter accept mode 3 only when status_free.
 template <int Lanes, int Operands, int InputWords, int OutputWords, bool Dpp, typename Call,
           typename Reference, typename Compare>
 void check_conversion(Call call, const Registers<8, Lanes> &input, Reference reference,
-                      Compare compare, uint64_t modifiers, bool exact, uint64_t guest_flags = 0) {
+                      Compare compare, uint64_t modifiers, bool exact, uint64_t guest_flags = 0,
+                      uint64_t separately_tested_modifiers = 0, bool status_free = true) {
   using Mask = WaveMask<Lanes>;
   using Source = const uint32_t *const *;
   constexpr bool status_parameter =
@@ -152,7 +228,7 @@ void check_conversion(Call call, const Registers<8, Lanes> &input, Reference ref
                   RJ_ARITH_ERROR_INVALID_FLAGS);
         return error;
       },
-      modifiers);
+      modifiers | separately_tested_modifiers);
   auto modes = conversion_modes(modifiers, Dpp);
   auto cpu_levels = supported_cpu_levels();
   // Independent samples of guest policies and modifiers, plus a full-mask
@@ -179,7 +255,8 @@ void check_conversion(Call call, const Registers<8, Lanes> &input, Reference ref
                                                    : scenario >= 5 + int(modes.size()) ? 0
                                                    : scenario % 2                      ? 0
                                                                                        : 3);
-        int error = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL && status_parameter
+        int error = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL &&
+                            (status_parameter || (exact && !status_free))
                         ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
                     : !exact && (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
                                  semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)

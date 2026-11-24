@@ -6,7 +6,7 @@
 #pragma once
 
 #include "common/isa.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include <stdint.h>
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
@@ -50,26 +50,62 @@ template <int Bits, int WaveSize> constexpr SparseField swmmac_a_field(int row, 
   }
 }
 
+// Locate a compressed element's two-bit selector within its metadata bank.
+template <int Bits, int WaveSize> constexpr int swmmac_index_slot(int ck) {
+  return WaveSize == 64 ? ck % 4 : Bits == 16 ? (ck % 4) + 4 * (ck / 8) : ck % 8;
+}
+
 // Decode the dense B coordinate selected by A's compressed slot and metadata key.
 // Metadata pair ordering is a caller precondition, not validated here.
 template <int Bits, int WaveSize>
 inline int swmmac_selected_k(const uint32_t *const *index, int row, int ck, int key) {
   auto field = swmmac_a_field<Bits, WaveSize>(row, ck);
-  int slot = WaveSize == 64 ? ck % 4 : Bits == 16 ? (ck % 4) + 4 * (ck / 8) : ck % 8;
+  int slot = swmmac_index_slot<Bits, WaveSize>(ck);
   return 4 * (ck / 2) + ((index[0][field.lane] >> (key + 2 * slot)) & 3);
 }
 
-// Read one raw dense B value at k in [0,32), before source modifiers.
-template <int Bits, int WaveSize>
-inline uint32_t swmmac_b_bits(const uint32_t *const *b, int col, int k) {
+// Locate one packed dense B field at k in [0,32), before source modifiers.
+template <int Bits, int WaveSize> constexpr SparseField swmmac_b_field(int col, int k) {
   if constexpr (Bits == 16) {
     int lane = col + 16 * (WaveSize == 64 ? k / 8 : (k / 8) & 1);
     int slot = WaveSize == 64 ? k % 8 : 8 * (k / 16) + k % 8;
-    return (b[slot / 2][lane] >> (16 * (slot % 2))) & 0xffff;
+    return {slot / 2, lane, 16 * (slot % 2)};
   } else {
     int lane = col + 16 * (k / 16) + (WaveSize == 64 ? 32 * ((k / 8) % 2) : 0);
-    return (b[(k % (WaveSize == 64 ? 8 : 16)) / 4][lane] >> (8 * (k % 4))) & 0xff;
+    return {(k % (WaveSize == 64 ? 8 : 16)) / 4, lane, 8 * (k % 4)};
   }
+}
+
+// Read one zero-extended dense B field.
+template <int Bits, int WaveSize>
+inline uint32_t swmmac_b_bits(const uint32_t *const *b, int col, int k) {
+  return swmmac_b_field<Bits, WaveSize>(col, k).read(b) & ((1u << Bits) - 1);
+}
+
+// Wave64 K=64 orders the two compressed halves by accumulation stage.
+template <int K, int WaveSize> constexpr int swmmac4_position(int ck) {
+  return WaveSize == 64 && K == 64 ? 16 * ((ck / 8) & 1) + 8 * (ck / 16) + ck % 8 : ck;
+}
+
+template <int K, int WaveSize> constexpr int swmmac4_index_slot(int ck) {
+  return WaveSize == 64 ? swmmac4_position<K, WaveSize>(ck) % 8 : 8 * (ck / 16) + ck % 8;
+}
+
+// Locate an INT4 packed field using the same lane convention as scalar arithmetic.
+template <int K, int WaveSize> constexpr SparseField swmmac4_a_field(int row, int ck) {
+  int block = swmmac4_position<K, WaveSize>(ck) / 8;
+  int lane = row + 16 * (WaveSize == 32 ? (ck / 8) & 1
+                         : K == 32      ? block
+                                        : 2 * (block & 1) + block / 2);
+  int local = swmmac4_index_slot<K, WaveSize>(ck);
+  return {local / 8, lane, 4 * (local % 8)};
+}
+
+template <int K, int WaveSize> constexpr SparseField swmmac4_b_field(int col, int k) {
+  int block = k / (K / 4);
+  int lane = col + (WaveSize == 32 ? 16 * ((k / 16) & 1) : 32 * (block & 1) + 16 * (block / 2));
+  int local = WaveSize == 32 ? 16 * (k / 32) + k % 16 : k % (K / 4);
+  return {local / 8, lane, 4 * (local % 8)};
 }
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE

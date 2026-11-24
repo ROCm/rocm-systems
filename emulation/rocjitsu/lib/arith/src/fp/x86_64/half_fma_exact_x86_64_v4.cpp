@@ -4,12 +4,13 @@
 // AVX-512 exact FP16 FMA and packed FMA fast paths using instruction-local rounding and scalar
 // repair. CPU-specific arithmetic stays here; public entry points select this backend.
 
-#include "common/internal.h"
+#include "common/compiler.h"
 #include "common/simd.h"
+#include "common/validation.h"
 #include "fp/packed_fma.h"
 #include "fp/scalar_repair.h"
 #include "fp/x86_64/fma_exact_x86_64_v4.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -57,6 +58,7 @@ void half_fma_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instr
     const uint32_t *inputs[] = {a, b, c};
     __m512 values[3];
     __mmask16 input_denormal = 0, bad = 0;
+    RJ_ARITH_UNROLL(3)
     for (int operand = 0; operand < 3; ++operand) {
       auto bits = _mm512_loadu_si512(inputs[operand] + lane);
       if (instruction_flags & (RJ_ARITH_ALU_HIGH_A << operand)) {

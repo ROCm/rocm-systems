@@ -4,10 +4,14 @@
 #include "aql_queue.h"
 #include "config_test_util.h"
 #include "halt_snapshot_plugin.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "target_fixture.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#ifdef CONSAN_ANALYZER_ENABLED
+#include "rocjitsu/code/consan/analysis/lds_race.h"
+#endif
 #include "rocjitsu/code/consan/encoding.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/consan/input.h"
@@ -16,6 +20,8 @@
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
+#include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/soc.h"
 #include "simdojo/sim/simulation.h"
@@ -27,6 +33,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <tuple>
 
 namespace rocjitsu::consan {
 namespace {
@@ -59,7 +66,14 @@ constexpr std::string_view kTopology = R"({
       {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10},
       {"src":"xcd0.se0.cu1.req","dst":"xcd0.l2.cpl_1","latency":1,"weight":10}]}})";
 
-enum class Bootstrap { None, Enabled, OmitPointerRestore, OmitPayloadLoad, Instrumented };
+enum class Bootstrap {
+  None,
+  Enabled,
+  OmitPointerRestore,
+  OmitPayloadLoad,
+  Instrumented,
+  InstrumentedWithoutPublicationWait
+};
 
 struct RunResult {
   std::array<uint32_t, 2> output{};
@@ -69,6 +83,56 @@ struct RunResult {
   std::vector<uint8_t> report;
   std::vector<uint32_t> full_output;
   uint32_t original_sgprs = 0, original_vgprs = 0;
+  uint32_t workgroups = 1, waves_per_workgroup = 0;
+};
+
+// Simulator-only near-limit control: seed report state after the entry callback
+// and before any guest operation. This does not claim billions of iterations.
+class SeedCountersAtGuestEntry : public ExecutionPlugin {
+public:
+  SeedCountersAtGuestEntry(uint64_t entry_pc, uint32_t stride, uint32_t waves)
+      : ExecutionPlugin("seed_counters"), entry_pc_(entry_pc), stride_(stride),
+        seeded_(waves, false) {}
+  bool requires_serial_hot_hooks() const override { return true; }
+  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &,
+                                        amdgpu::Wavefront &wave) override {
+    if (pc != entry_pc_) {
+      return;
+    }
+    const uint32_t index = wave.wave_in_group();
+    ASSERT_LT(index, seeded_.size());
+    if (seeded_[index]) {
+      return;
+    }
+    const uint64_t row = kReport + kReportHeaderBytes + uint64_t{index} * stride_;
+    std::array<uint8_t, 4> word{};
+    ASSERT_EQ(wave.read_gpu_memory(row + wire::kRowStatus, word),
+              amdgpu::VmAccessOutcome::Complete);
+    ASSERT_EQ(wire::read_u32(word, 0), wire::kRowEntered);
+    wire::write_u32(word, 0, UINT32_MAX - 1);
+    // Entry initialization may remain cached. Seed through the owning CU's
+    // write-through path so compiled probes cannot reload stale counter zeros.
+    wave.cu().l1_scalar().invalidate_all();
+    amdgpu::L1VectorCache &cache = wave.cu().l1_vector();
+    for (const uint32_t offset :
+         {wire::kRowFinalSequence, wire::kRowFinalPhase, wire::kRowLoss, wire::kRowSyncLoss}) {
+      const std::array<uint64_t, 1> address = {row + offset};
+      ASSERT_EQ(cache.store(address.data(), 1, sizeof(uint32_t), 1, word.data(), amdgpu::Mtype::RW,
+                            false, 1, wave.process_id()),
+                amdgpu::VmAccessOutcome::Complete);
+      ASSERT_EQ(wave.read_gpu_memory(row + offset, word), amdgpu::VmAccessOutcome::Complete);
+      ASSERT_EQ(wire::read_u32(word, 0), UINT32_MAX - 1);
+    }
+    seeded_[index] = true;
+  }
+  bool seeded_every_wave() const {
+    return std::ranges::all_of(seeded_, [](bool value) { return value; });
+  }
+
+private:
+  uint64_t entry_pc_;
+  uint32_t stride_;
+  std::vector<bool> seeded_;
 };
 
 class ConSanBootstrapSim : public ::testing::Test {
@@ -81,7 +145,8 @@ protected:
 
   void run(std::string_view fixture, Bootstrap mode, RunResult &result,
            test::TargetMode target_mode = {"gfx1100", 32}, uint32_t threads = 64,
-           bool target_fixture = false) {
+           bool target_fixture = false, uint32_t output_words_per_wave = 1,
+           bool seed_counters = false, uint32_t workgroups = 1) {
 #ifdef CONSAN_FIXTURE_DIR
     const std::vector<uint8_t> original =
         test::read_fixture(target_fixture ? test::target_fixture_path(target_mode, fixture)
@@ -90,8 +155,12 @@ protected:
     ASSERT_FALSE(original.empty());
     const TargetProfile *profile = target_profile(target_mode.target);
     ASSERT_NE(profile, nullptr);
-    const rj_code_arch_t arch = profile->arch;
-    const uint32_t wave_count = (threads + target_mode.wave_size - 1) / target_mode.wave_size;
+    const rocjitsu::IsaFamily arch = profile->arch;
+    const uint32_t waves_per_workgroup =
+        (threads + target_mode.wave_size - 1) / target_mode.wave_size;
+    const uint32_t wave_count = workgroups * waves_per_workgroup;
+    result.workgroups = workgroups;
+    result.waves_per_workgroup = waves_per_workgroup;
     InputError error;
     const FailureOr<InputProgram> analyzed = build_input_program(
         original, *target_profile(target_mode.target), "lds_producer_consumer", error);
@@ -100,12 +169,36 @@ protected:
     result.original_sgprs = input.original_sgprs;
     result.original_vgprs = input.original_vgprs;
     std::vector<uint8_t> image = original;
-    if (mode == Bootstrap::Instrumented) {
+    const bool instrumented =
+        mode == Bootstrap::Instrumented || mode == Bootstrap::InstrumentedWithoutPublicationWait;
+    if (instrumented) {
       const FailureOr<PreparedArtifact> artifact =
           prepare(original, *target_profile(target_mode.target), "lds_producer_consumer", error);
       ASSERT_TRUE(artifact.succeeded()) << error.message;
       image = artifact.value().image;
       result.manifest = artifact.value().manifest;
+      if (mode == Bootstrap::InstrumentedWithoutPublicationWait) {
+        ASSERT_EQ(result.manifest.barriers.size(), 2u);
+        const BarrierFacts &publication = result.manifest.barriers.back();
+        if (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5) {
+          ASSERT_LT(publication.prepared_signal, publication.prepared_wait);
+        } else {
+          ASSERT_EQ(publication.prepared_signal, publication.prepared_wait);
+        }
+        AmdGpuCodeObject prepared(image.data(), image.size());
+        ASSERT_TRUE(prepared.is_valid());
+        ASSERT_EQ(prepared.text_sections().size(), 1u);
+        const uint64_t wait = prepared.text_sections().front()->sectionOffset() +
+                              result.manifest.barriers.back().prepared_wait;
+        const FailureOr<uint32_t> nop = build_s_nop(0, arch);
+        ASSERT_TRUE(nop.succeeded());
+        ASSERT_TRUE(wire::read_u32(image, wait).has_value());
+        ASSERT_NE(*wire::read_u32(image, wait), nop.value());
+        // Fault injection changes only the relocated publication wait. Keep
+        // the completion callback and all other instrumentation intact.
+        wire::write_u32(image, wait, nop.value());
+        result.manifest.prepared.sha256 = digest(image);
+      }
     } else if (mode != Bootstrap::None) {
       const std::optional<DbiEntryProloguePlan> plan = test::bootstrap_plan(input);
       ASSERT_TRUE(plan);
@@ -173,24 +266,36 @@ protected:
     ::rocjitsu::test::HaltSnapshotPlugin *snapshots = nullptr;
     const std::shared_ptr<ExecutionPluginGroup> plugins =
         ::rocjitsu::test::make_halt_snapshot_group(&snapshots);
-    soc->set_plugin_group(plugins);
+
+    SeedCountersAtGuestEntry *counter_seed = nullptr;
 
     // Load the actual selected descriptor, including its wave mode and
     // register allocation, rather than substituting a synthetic dispatch ABI.
     AmdGpuCodeObject object(image.data(), image.size());
     ASSERT_TRUE(object.is_valid());
+    if (seed_counters) {
+      ASSERT_EQ(mode, Bootstrap::Instrumented);
+      ASSERT_EQ(workgroups, 1u);
+      auto seed = std::make_unique<SeedCountersAtGuestEntry>(
+          kImageBase + object.text_sections().front()->vaddr() + input.kernel.entry_text_offset,
+          static_cast<uint32_t>(report_row_bytes(result.manifest.sites.size(), true)), wave_count);
+      counter_seed = seed.get();
+      ASSERT_TRUE(plugins->add(std::move(seed)));
+    }
+    soc->set_plugin_group(plugins);
     object.load_to_memory(memory, kImageBase);
     const uint64_t descriptor = object.kernel_descriptor_offset("lds_producer_consumer");
     ASSERT_NE(descriptor, 0u);
     std::array<uint8_t, 16> arguments{};
     const uint32_t input_value = 7;
     std::memcpy(arguments.data(), &input_value, sizeof(input_value));
+    std::memcpy(arguments.data() + 4, &waves_per_workgroup, sizeof(waves_per_workgroup));
     std::memcpy(arguments.data() + 8, &kOutput, sizeof(kOutput));
     memory->load_image(arguments.data(), arguments.size(), kOriginalArguments);
-    if (mode == Bootstrap::Instrumented) {
+    if (instrumented) {
       const FailureOr<TransportImage> transport =
           initialize_transport(result.manifest,
-                               {{threads, 1, 1},
+                               {{threads * workgroups, 1, 1},
                                 { threads,
                                   1,
                                   1 }},
@@ -219,7 +324,7 @@ protected:
                                                   kOriginalArguments, writes));
       // A safe binding control makes restoration observable: the original
       // pointer still names input=7 while the copied prefix now says input=13.
-      if (mode != Bootstrap::Instrumented) {
+      if (!instrumented) {
         const uint32_t poison = 13;
         std::memcpy(wrapper.data(), &poison, sizeof(poison));
       }
@@ -227,24 +332,37 @@ protected:
       dispatched_arguments = kWrapper;
     }
     ::rocjitsu::test::AqlQueue queue(memory, soc->xcd(0)->command_processor());
-    queue.dispatch(kImageBase + descriptor, threads, static_cast<uint16_t>(threads),
+    queue.dispatch(kImageBase + descriptor, threads * workgroups, static_cast<uint16_t>(threads),
                    dispatched_arguments);
     engine.run();
+    if (counter_seed) {
+      EXPECT_TRUE(counter_seed->seeded_every_wave());
+    }
     amdgpu::CommandProcessor *cp = soc->xcd(0)->command_processor();
     ASSERT_FALSE(cp->queue_faulted_for_test(1, 0));
     ASSERT_EQ(cp->dispatched_count(), 1u);
-    ASSERT_EQ(cp->dispatched_workgroups(), 1u);
+    ASSERT_EQ(cp->dispatched_workgroups(), workgroups);
     ASSERT_EQ(snapshots->snapshots().size(), wave_count);
     result.waves = snapshots->snapshots();
-    std::ranges::sort(result.waves, {}, &::rocjitsu::test::WavefrontSnapshot::wf_id);
+    if (workgroups > 1) {
+      std::ranges::sort(result.waves, [](const auto &first, const auto &second) {
+        return std::tuple{first.sgpr(14), first.vgpr(0, 0)} <
+               std::tuple{second.sgpr(14), second.vgpr(0, 0)};
+      });
+    } else {
+      std::ranges::sort(result.waves, {}, &::rocjitsu::test::WavefrontSnapshot::wf_id);
+    }
     soc->flush_all();
-    if (mode == Bootstrap::Instrumented)
+    if (instrumented) {
       memory->read_block(kReport, result.report);
-    std::vector<uint8_t> output(std::max(wave_count, 2u) * sizeof(uint32_t));
+    }
+    std::vector<uint8_t> output(std::max(wave_count * output_words_per_wave, 2u) *
+                                sizeof(uint32_t));
     memory->read_block(kOutput, output);
     std::memcpy(result.output.data(), output.data(), sizeof(result.output));
-    result.full_output.resize(wave_count);
-    std::memcpy(result.full_output.data(), output.data(), wave_count * sizeof(uint32_t));
+    result.full_output.resize(wave_count * output_words_per_wave);
+    std::memcpy(result.full_output.data(), output.data(),
+                result.full_output.size() * sizeof(uint32_t));
 #else
     (void)fixture;
     (void)mode;
@@ -252,6 +370,8 @@ protected:
     (void)target_mode;
     (void)threads;
     (void)target_fixture;
+    (void)output_words_per_wave;
+    (void)workgroups;
 #endif
   }
 };
@@ -291,8 +411,9 @@ TEST_F(ConSanBootstrapSim, ContextDeliveryAndOriginalArgumentViewSurviveInBothWa
     EXPECT_EQ(after.status & 1, before.status & 1);
     EXPECT_EQ(after.mode_raw, before.mode_raw);
     for (uint32_t reg = 0; reg < 8; ++reg) {
-      for (uint32_t lane = 0; lane < 32; ++lane)
+      for (uint32_t lane = 0; lane < 32; ++lane) {
         EXPECT_EQ(after.vgpr(reg, lane), before.vgpr(reg, lane));
+      }
     }
   }
 }
@@ -303,8 +424,9 @@ TEST_F(ConSanBootstrapSim, RemovingPointerRestoreChangesTheIndependentNumericOra
   ASSERT_FALSE(HasFatalFailure());
   ASSERT_EQ(control.waves.size(), 2u);
   EXPECT_EQ(control.output, (std::array<uint32_t, 2>{13, 14}));
-  for (const ::rocjitsu::test::WavefrontSnapshot &wave : control.waves)
+  for (const ::rocjitsu::test::WavefrontSnapshot &wave : control.waves) {
     EXPECT_EQ(wave.sgpr64(0), kWrapper);
+  }
 }
 
 TEST_F(ConSanBootstrapSim, RemovingPayloadLoadStopsContextDelivery) {
@@ -313,8 +435,9 @@ TEST_F(ConSanBootstrapSim, RemovingPayloadLoadStopsContextDelivery) {
   ASSERT_FALSE(HasFatalFailure());
   ASSERT_EQ(control.waves.size(), 2u);
   EXPECT_EQ(control.output, (std::array<uint32_t, 2>{7, 8}));
-  for (const ::rocjitsu::test::WavefrontSnapshot &wave : control.waves)
+  for (const ::rocjitsu::test::WavefrontSnapshot &wave : control.waves) {
     EXPECT_NE(wave.sgpr64(control.context_sgpr), kOpaqueContext);
+  }
 }
 
 TEST_F(ConSanBootstrapSim,
@@ -338,11 +461,13 @@ TEST_F(ConSanBootstrapSim,
       EXPECT_EQ(after.status & 1, before.status & 1);
       EXPECT_EQ(after.mode_raw, before.mode_raw);
       EXPECT_EQ(after.sgpr64(0), kOriginalArguments);
-      for (uint32_t reg = 0; reg < 16; ++reg)
+      for (uint32_t reg = 0; reg < 16; ++reg) {
         EXPECT_EQ(after.sgprs[reg], before.sgprs[reg]);
+      }
       for (uint32_t reg = 0; reg < 8; ++reg) {
-        for (uint32_t lane = 0; lane < 32; ++lane)
+        for (uint32_t lane = 0; lane < 32; ++lane) {
           EXPECT_EQ(after.vgpr(reg, lane), before.vgpr(reg, lane));
+        }
       }
       const size_t row = kReportHeaderBytes + wave * (kRowHeaderBytes + 8 * kAccessRecordBytes);
       EXPECT_EQ(wire::read_u32(instrumented.report, row + wire::kRowStatus),
@@ -372,15 +497,19 @@ TEST_F(ConSanBootstrapSim, ProductionRaceReadReadAndCollisionMasksComeFromGuestP
     for (uint32_t wave = 0; wave < 2; ++wave) {
       const size_t row = kReportHeaderBytes + wave * stride;
       EXPECT_EQ(wire::read_u64(result.report, row + wire::kRowSerial), 41u);
-      EXPECT_EQ(wire::read_u32(result.report, row + wire::kRowWave), wave);
+      EXPECT_EQ(wire::read_u32(result.report, row + wire::kRowWave),
+                wave % result.waves_per_workgroup);
+      EXPECT_EQ(wire::read_u32(result.report, row + wire::kRowWorkgroupX),
+                wave / result.waves_per_workgroup);
       EXPECT_EQ(wire::read_u32(result.report, row + wire::kRowStatus), kCompletedRowStatus);
       EXPECT_EQ(wire::read_u32(result.report, row + wire::kRowLoss), 0u);
       for (uint32_t site = 0; site < sites; ++site) {
         for (uint32_t address_group = 0; address_group < 4; ++address_group) {
           const size_t record =
               row + kRowHeaderBytes + (site * 4 + address_group) * kAccessRecordBytes;
-          if (wire::read_u32(result.report, record + wire::kRecordCommit) == 0u)
+          if (wire::read_u32(result.report, record + wire::kRecordCommit) == 0u) {
             continue;
+          }
           ++records;
           EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordCommit),
                     wire::kAccessCommitted);
@@ -419,8 +548,9 @@ TEST_F(ConSanBootstrapSim,
         for (uint32_t address_group = 0; address_group < 4; ++address_group) {
           const size_t record =
               row + kRowHeaderBytes + (site.first_slot + address_group) * kAccessRecordBytes;
-          if (wire::read_u32(result.report, record + wire::kRecordCommit) == 0)
+          if (wire::read_u32(result.report, record + wire::kRecordCommit) == 0) {
             continue;
+          }
           ++count;
           if (fixture == "four_ranges" || fixture == "exhausted") {
             EXPECT_EQ(wave, 0u);
@@ -449,6 +579,32 @@ TEST_F(ConSanBootstrapSim,
 class ConSanTargetSim : public ConSanBootstrapSim,
                         public ::testing::WithParamInterface<test::TargetMode> {};
 
+TEST_P(ConSanTargetSim, PublicationBarrierBlocksAnEarlyConsumer) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size + 1;
+  // Both kernels initialize LDS to zero and synchronize. Only the producer
+  // then delays. Without the second barrier the consumer must see the old
+  // value; original and instrumented barriers must both expose input=7.
+  RunResult without_publication_barrier;
+  ASSERT_NO_FATAL_FAILURE(
+      run("native-37", Bootstrap::None, without_publication_barrier, target, threads, true));
+  EXPECT_EQ(without_publication_barrier.output, (std::array<uint32_t, 2>{0, 0}));
+
+  for (const Bootstrap mode : {Bootstrap::None, Bootstrap::Instrumented}) {
+    SCOPED_TRACE(mode == Bootstrap::None ? "original" : "instrumented");
+    RunResult synchronized;
+    ASSERT_NO_FATAL_FAILURE(run("native-36", mode, synchronized, target, threads, true));
+    EXPECT_EQ(synchronized.output, (std::array<uint32_t, 2>{7, 0}));
+  }
+
+  // Callback execution must not substitute for the wait. If callback growth
+  // hides this missing wait, increase the producer delay to restore the oracle.
+  RunResult without_wait;
+  ASSERT_NO_FATAL_FAILURE(run("native-36", Bootstrap::InstrumentedWithoutPublicationWait,
+                              without_wait, target, threads, true));
+  EXPECT_EQ(without_wait.output, (std::array<uint32_t, 2>{0, 0}));
+}
+
 void expect_guest_state(const RunResult &before, const RunResult &after) {
   ASSERT_EQ(before.waves.size(), after.waves.size());
   EXPECT_EQ(before.full_output, after.full_output);
@@ -462,27 +618,34 @@ void expect_guest_state(const RunResult &before, const RunResult &after) {
     EXPECT_EQ(a.status & 1, b.status & 1);
     EXPECT_EQ(a.mode_raw, b.mode_raw);
     EXPECT_EQ(a.vgpr_msb_mode, b.vgpr_msb_mode);
-    for (uint32_t reg = 0; reg < before.original_sgprs; ++reg)
+    for (uint32_t reg = 0; reg < before.original_sgprs; ++reg) {
       EXPECT_EQ(a.sgpr(reg), b.sgpr(reg)) << "SGPR " << reg;
-    for (uint32_t reg = 0; reg < before.original_vgprs; ++reg)
-      for (uint32_t lane = 0; lane < a.wf_size; ++lane)
+    }
+    for (uint32_t reg = 0; reg < before.original_vgprs; ++reg) {
+      for (uint32_t lane = 0; lane < a.wf_size; ++lane) {
         EXPECT_EQ(a.vgpr(reg, lane), b.vgpr(reg, lane)) << "VGPR " << reg << " lane " << lane;
+      }
+    }
   }
 }
 
 struct ObservedAccess {
   uint32_t wave, site, offset;
   uint64_t mask;
+  uint32_t workgroup = 0;
 };
 
 std::vector<ObservedAccess> published_accesses(const RunResult &result, bool exhausted = false) {
   std::vector<ObservedAccess> accesses;
-  const uint32_t stride =
-      kRowHeaderBytes + result.manifest.sites.size() * kAddressGroupsPerSite * kAccessRecordBytes;
+  const uint32_t stride = static_cast<uint32_t>(
+      report_row_bytes(result.manifest.sites.size(), !result.manifest.barriers.empty()));
   for (uint32_t wave = 0; wave < result.waves.size(); ++wave) {
     const size_t row = kReportHeaderBytes + wave * stride;
     EXPECT_EQ(wire::read_u64(result.report, row + wire::kRowSerial), 41u);
-    EXPECT_EQ(wire::read_u32(result.report, row + wire::kRowWave), wave);
+    EXPECT_EQ(wire::read_u32(result.report, row + wire::kRowWave),
+              wave % result.waves_per_workgroup);
+    EXPECT_EQ(wire::read_u32(result.report, row + wire::kRowWorkgroupX),
+              wave / result.waves_per_workgroup);
     EXPECT_EQ(wire::read_u32(result.report, row + wire::kRowStatus),
               exhausted && wave == 0 ? (kCompletedRowStatus | wire::kRowExhausted)
                                      : kCompletedRowStatus);
@@ -492,16 +655,19 @@ std::vector<ObservedAccess> published_accesses(const RunResult &result, bool exh
       for (uint32_t address_group = 0; address_group < kAddressGroupsPerSite; ++address_group) {
         const size_t record =
             row + kRowHeaderBytes + (site.first_slot + address_group) * kAccessRecordBytes;
-        if (wire::read_u32(result.report, record + wire::kRecordCommit) == 0)
+        if (wire::read_u32(result.report, record + wire::kRecordCommit) == 0) {
           continue;
+        }
         EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordCommit),
                   wire::kAccessCommitted);
         EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordSite), site.id);
+        EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordWidth), site.width);
         EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordFlags),
                   wire::kExactGuestMask);
-        accesses.push_back({wave, site.id,
+        accesses.push_back({wave % result.waves_per_workgroup, site.id,
                             *wire::read_u32(result.report, record + wire::kRecordLdsOffset),
-                            *wire::read_u64(result.report, record + wire::kRecordGuestMask)});
+                            *wire::read_u64(result.report, record + wire::kRecordGuestMask),
+                            wave / result.waves_per_workgroup});
       }
     }
   }
@@ -547,14 +713,16 @@ TEST_P(ConSanTargetSim, HighLaneMasksAndEmptyExecHaveRealPublicationEvidence) {
         EXPECT_EQ(after.waves[wave].vcc, before.waves[wave].vcc);
         EXPECT_EQ(after.waves[wave].status & 1, before.waves[wave].status & 1);
         EXPECT_EQ(after.waves[wave].mode_raw, before.waves[wave].mode_raw);
-        for (uint32_t reg = 0; reg < before.original_sgprs; ++reg)
+        for (uint32_t reg = 0; reg < before.original_sgprs; ++reg) {
           EXPECT_EQ(after.waves[wave].sgpr(reg), before.waves[wave].sgpr(reg));
+        }
         // v3 is the deliberately unsynchronized read result; do not assign it
         // a fixed numeric oracle. Every other guest VGPR must be preserved.
         for (uint32_t reg = 0; reg < before.original_vgprs; ++reg) {
           if (reg != 3) {
-            for (uint32_t lane = 0; lane < target.wave_size; ++lane)
+            for (uint32_t lane = 0; lane < target.wave_size; ++lane) {
               EXPECT_EQ(after.waves[wave].vgpr(reg, lane), before.waves[wave].vgpr(reg, lane));
+            }
           }
         }
       }
@@ -627,6 +795,440 @@ TEST_P(ConSanHipSim, CompiledHipRaceDisjointAndReadReadExecuteTheirNativeSites) 
       expect_guest_state(before, after);
       EXPECT_EQ(after.full_output, (std::vector<uint32_t>{7, 8}));
     }
+  }
+}
+
+TEST_P(ConSanTargetSim, BarrierPreservesOutputAndGuestStateAtEmptyExecAndHighLanes) {
+  const test::TargetMode target = GetParam();
+  for (const char *fixture :
+       {"native-15", "native-16", "native-20", "native-21", "native-24", "native-39"}) {
+    for (const uint32_t threads : {2 * target.wave_size, 2 * target.wave_size + 1}) {
+      SCOPED_TRACE(fixture);
+      SCOPED_TRACE(threads);
+      RunResult before, after;
+      run(fixture, Bootstrap::None, before, target, threads, true);
+      ASSERT_FALSE(HasFatalFailure());
+      run(fixture, Bootstrap::Instrumented, after, target, threads, true);
+      ASSERT_FALSE(HasFatalFailure());
+      EXPECT_EQ(before.output[0], 7u);
+      EXPECT_EQ(after.output[0], 7u);
+      expect_guest_state(before, after);
+      const std::vector<ObservedAccess> records = published_accesses(after);
+      const bool reuses_word =
+          std::string_view(fixture) == "native-24" || std::string_view(fixture) == "native-39";
+      ASSERT_EQ(records.size(), reuses_word ? 3u : 2u);
+      EXPECT_EQ(records.front().wave, 0u);
+      EXPECT_EQ(records.back().wave, 1u);
+      if (reuses_word) {
+        EXPECT_EQ(records[1].wave, 0u);
+        EXPECT_EQ(records[1].site, 2u);
+        EXPECT_EQ(after.manifest.sites[records[1].site].access, AccessKind::Write);
+      }
+      const uint64_t mask =
+          std::string_view(fixture) == "native-20" ? uint64_t{1} << (target.wave_size - 1) : 1;
+      for (const ObservedAccess &record : records) {
+        EXPECT_EQ(record.mask, mask);
+      }
+    }
+  }
+}
+
+TEST_P(ConSanTargetSim, RepeatedBarrierLoopsPreserveStateAndRetainIndependentSites) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size;
+  for (const auto &[fixture, iterations] :
+       std::array<std::pair<const char *, uint32_t>, 6>{{{"native-25", 0},
+                                                         {"native-26", 1},
+                                                         {"native-27", 3},
+                                                         {"native-28", 6},
+                                                         {"native-29", 20},
+                                                         {"native-32", 10}}}) {
+    SCOPED_TRACE(fixture);
+    RunResult before, after;
+    run(fixture, Bootstrap::None, before, target, threads, true);
+    ASSERT_FALSE(HasFatalFailure());
+    run(fixture, Bootstrap::Instrumented, after, target, threads, true);
+    ASSERT_FALSE(HasFatalFailure());
+    expect_guest_state(before, after);
+    EXPECT_EQ(after.output[0], 7u);
+    const bool late = std::string_view(fixture) == "native-32";
+#ifdef CONSAN_ANALYZER_ENABLED
+    CapturedExecution execution;
+    execution.serial = 41;
+    execution.dimensions = {{threads, 1, 1}, {threads, 1, 1}};
+    execution.group_bytes = after.manifest.entry.prepared_group_bytes;
+    execution.report = after.report;
+    const LdsRaceExecutionResult analysis =
+        analyze_lds_race_execution(after.manifest, execution, 8);
+    EXPECT_EQ(analysis.rejected_records, 0u);
+    EXPECT_EQ(analysis.valid_observations, 1 + 2 * (late ? 1u : std::min(iterations, 4u)));
+    EXPECT_EQ(analysis.cross_wave_pairs, 0u);
+    EXPECT_EQ(analysis.ordering_unresolved_pairs, late ? 1u : 0u);
+    EXPECT_EQ(analysis.lost_occurrences, late ? 0u : 2 * (iterations - std::min(iterations, 4u)));
+    EXPECT_EQ(analysis.synchronization_loss,
+              2 * (2 * iterations - std::min(2 * iterations, kSyncCapacity)));
+    EXPECT_EQ(analysis.coverage_complete, iterations <= 4);
+#endif
+    const uint32_t stride = *wire::read_u32(after.report, wire::kReportRowStride);
+    for (uint32_t wave = 0; wave < 2; ++wave) {
+      const size_t row = kReportHeaderBytes + wave * stride;
+      EXPECT_EQ(wire::read_u32(after.report, row + wire::kRowFinalPhase), 2 * iterations);
+      EXPECT_EQ(wire::read_u32(after.report, row + wire::kRowFinalSequence),
+                (late ? 1u : iterations) + (wave == 0 ? 1u : 0u));
+      for (uint32_t bank = 0; bank < (late ? 1u : std::min(iterations, 4u)); ++bank) {
+        const size_t record =
+            row + kRowHeaderBytes + (wave * kAddressGroupsPerSite + bank) * kAccessRecordBytes;
+        EXPECT_EQ(wire::read_u32(after.report, record + wire::kRecordSequence), bank + 1);
+        EXPECT_EQ(wire::read_u32(after.report, record + wire::kRecordPhase),
+                  2 * (late ? 9 : bank) + wave);
+      }
+    }
+  }
+}
+
+TEST_P(ConSanTargetSim, RepeatedBarrierLoopsRetainHighLaneMasks) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size;
+  RunResult before, after;
+  run("native-42", Bootstrap::None, before, target, threads, true);
+  ASSERT_FALSE(HasFatalFailure());
+  run("native-42", Bootstrap::Instrumented, after, target, threads, true);
+  ASSERT_FALSE(HasFatalFailure());
+  expect_guest_state(before, after);
+  EXPECT_EQ(after.output[0], 7u);
+#ifdef CONSAN_ANALYZER_ENABLED
+  const CapturedExecution execution = {.serial = 41,
+                                       .dimensions = {{threads, 1, 1}, {threads, 1, 1}},
+                                       .group_bytes = after.manifest.entry.prepared_group_bytes,
+                                       .arguments = {},
+                                       .report = after.report};
+  const LdsRaceExecutionResult analysis = analyze_lds_race_execution(after.manifest, execution, 8);
+  EXPECT_EQ(analysis.valid_observations, 7u);
+  EXPECT_EQ(analysis.rejected_records, 0u);
+  EXPECT_EQ(analysis.cross_wave_pairs, 0u);
+  EXPECT_EQ(analysis.ordering_unresolved_pairs, 0u);
+  EXPECT_EQ(analysis.lost_occurrences, 0u);
+  EXPECT_EQ(analysis.synchronization_loss, 0u);
+  EXPECT_TRUE(analysis.coverage_complete);
+#endif
+  const uint32_t stride = *wire::read_u32(after.report, wire::kReportRowStride);
+  for (uint32_t wave = 0; wave < 2; ++wave) {
+    for (uint32_t bank = 0; bank < 3; ++bank) {
+      const size_t record = kReportHeaderBytes + wave * stride + kRowHeaderBytes +
+                            (wave * kAddressGroupsPerSite + bank) * kAccessRecordBytes;
+      EXPECT_EQ(wire::read_u32(after.report, record + wire::kRecordSite), wave);
+      EXPECT_EQ(wire::read_u32(after.report, record + wire::kRecordSequence), bank + 1);
+      EXPECT_EQ(wire::read_u32(after.report, record + wire::kRecordPhase), 2 * bank + wave);
+      EXPECT_EQ(wire::read_u64(after.report, record + wire::kRecordGuestMask),
+                uint64_t{1} << (target.wave_size - 4 + bank));
+    }
+  }
+}
+
+TEST_P(ConSanTargetSim, ThreeBarrierGroupsRetainEachOccurrenceWithoutChangingGuestState) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size;
+  RunResult before, after;
+  run("native-38", Bootstrap::None, before, target, threads, true);
+  ASSERT_FALSE(HasFatalFailure());
+  run("native-38", Bootstrap::Instrumented, after, target, threads, true);
+  ASSERT_FALSE(HasFatalFailure());
+  expect_guest_state(before, after);
+  EXPECT_EQ(after.output[0], 7u);
+  ASSERT_EQ(after.manifest.barriers.size(), 3u);
+#ifdef CONSAN_ANALYZER_ENABLED
+  const CapturedExecution execution = {.serial = 41,
+                                       .dimensions = {{threads, 1, 1}, {threads, 1, 1}},
+                                       .group_bytes = after.manifest.entry.prepared_group_bytes,
+                                       .arguments = {},
+                                       .report = after.report};
+  const LdsRaceExecutionResult analysis = analyze_lds_race_execution(after.manifest, execution, 8);
+  EXPECT_EQ(analysis.rejected_records, 0u);
+  EXPECT_EQ(analysis.valid_observations, 7u);
+  EXPECT_EQ(analysis.cross_wave_pairs, 0u);
+  EXPECT_EQ(analysis.ordering_unresolved_pairs, 0u);
+  EXPECT_EQ(analysis.lost_occurrences, 0u);
+  EXPECT_EQ(analysis.synchronization_loss, 0u);
+  EXPECT_TRUE(analysis.coverage_complete);
+#endif
+  const uint32_t stride = *wire::read_u32(after.report, wire::kReportRowStride);
+  for (uint32_t wave = 0; wave < 2; ++wave) {
+    const size_t row = kReportHeaderBytes + wave * stride;
+    EXPECT_EQ(wire::read_u32(after.report, row + wire::kRowFinalPhase), 9u);
+    for (uint32_t index = 0; index < 9; ++index) {
+      const size_t record =
+          row + sync_offset(after.manifest.sites.size()) + index * kSyncRecordBytes;
+      EXPECT_EQ(wire::read_u32(after.report, record + wire::kSyncCommit), wire::kBarrierCompleted);
+      EXPECT_EQ(wire::read_u32(after.report, record + wire::kSyncGroup), index % 3);
+      EXPECT_EQ(wire::read_u32(after.report, record + wire::kSyncOccurrence), index / 3 + 1);
+      EXPECT_EQ(wire::read_u32(after.report, record + wire::kSyncPhase), index + 1);
+    }
+  }
+}
+
+#ifdef CONSAN_ANALYZER_ENABLED
+TEST_F(ConSanBootstrapSim, UnequalWaveTripCountsKeepValidOrderingWitnesses) {
+  for (const auto &[fixture, consumer_iterations] :
+       std::array<std::pair<const char *, uint32_t>, 2>{{{"native-40", 2}, {"native-41", 0}}}) {
+    SCOPED_TRACE(fixture);
+    RunResult before, after;
+    run(fixture, Bootstrap::None, before, {"gfx1250", 32}, 64, true);
+    ASSERT_FALSE(HasFatalFailure());
+    run(fixture, Bootstrap::Instrumented, after, {"gfx1250", 32}, 64, true);
+    ASSERT_FALSE(HasFatalFailure());
+    expect_guest_state(before, after);
+    const CapturedExecution execution = {.serial = 41,
+                                         .dimensions = {{64, 1, 1}, {64, 1, 1}},
+                                         .group_bytes = after.manifest.entry.prepared_group_bytes,
+                                         .arguments = {},
+                                         .report = after.report};
+    const LdsRaceExecutionResult analysis =
+        analyze_lds_race_execution(after.manifest, execution, 8);
+    EXPECT_EQ(analysis.valid_observations, 4 + consumer_iterations);
+    EXPECT_EQ(analysis.rejected_records, 0u);
+    EXPECT_EQ(analysis.integrity_events, 0u);
+    EXPECT_EQ(analysis.ordered_pairs, 3 * consumer_iterations);
+    EXPECT_EQ(analysis.cross_wave_pairs, 0u);
+    EXPECT_EQ(analysis.ordering_unresolved_pairs, 0u);
+    EXPECT_FALSE(analysis.coverage_complete);
+    const uint32_t stride = *wire::read_u32(after.report, wire::kReportRowStride);
+    EXPECT_EQ(wire::read_u32(after.report, kReportHeaderBytes + wire::kRowFinalPhase), 6u);
+    EXPECT_EQ(wire::read_u32(after.report, kReportHeaderBytes + stride + wire::kRowFinalPhase),
+              2 * consumer_iterations);
+  }
+}
+
+TEST_P(ConSanTargetSim, RemovingLoopPublicationOrReuseBarrierRetainsConfirmedEndpoints) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size;
+  for (const char *fixture : {"native-30", "native-31"}) {
+    SCOPED_TRACE(fixture);
+    RunResult after;
+    run(fixture, Bootstrap::Instrumented, after, target, threads, true);
+    ASSERT_FALSE(HasFatalFailure());
+    CapturedExecution execution;
+    execution.serial = 41;
+    execution.dimensions = {{threads, 1, 1}, {threads, 1, 1}};
+    execution.group_bytes = after.manifest.entry.prepared_group_bytes;
+    execution.report = after.report;
+    const LdsRaceExecutionResult analysis =
+        analyze_lds_race_execution(after.manifest, execution, 8);
+    EXPECT_TRUE(analysis.coverage_complete);
+    EXPECT_EQ(analysis.valid_observations, 7u);
+    EXPECT_EQ(analysis.cross_wave_pairs, std::string_view(fixture) == "native-30" ? 3u : 2u);
+    EXPECT_EQ(analysis.ordering_unresolved_pairs, 0u);
+    EXPECT_EQ(analysis.lost_occurrences, 0u);
+  }
+}
+
+#endif
+
+TEST_P(ConSanTargetSim, SeededNearLimitLoopCountersSaturateWithoutStoppingGuest) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size;
+  RunResult before, after;
+  run("native-28", Bootstrap::None, before, target, threads, true);
+  ASSERT_FALSE(HasFatalFailure());
+  run("native-28", Bootstrap::Instrumented, after, target, threads, true, 1, true);
+  ASSERT_FALSE(HasFatalFailure());
+  expect_guest_state(before, after);
+  EXPECT_EQ(after.output[0], 7u);
+  const uint32_t stride = *wire::read_u32(after.report, wire::kReportRowStride);
+  for (uint32_t wave = 0; wave < 2; ++wave) {
+    const size_t row = kReportHeaderBytes + wave * stride;
+    EXPECT_EQ(wire::read_u32(after.report, row + wire::kRowFinalSequence), UINT32_MAX);
+    EXPECT_EQ(wire::read_u32(after.report, row + wire::kRowFinalPhase), UINT32_MAX);
+    EXPECT_EQ(wire::read_u32(after.report, row + wire::kRowLoss), UINT32_MAX);
+    EXPECT_EQ(wire::read_u32(after.report, row + wire::kRowCounterExhausted), 1u);
+    EXPECT_EQ(wire::read_u32(after.report, row + wire::kRowSyncLoss), UINT32_MAX);
+    EXPECT_EQ(wire::read_u32(after.report, row + wire::kRowStatus), 7u);
+    const std::span<const uint8_t> journal =
+        std::span(after.report)
+            .subspan(row + sync_offset(after.manifest.sites.size()),
+                     kSyncCapacity * kSyncRecordBytes);
+    EXPECT_TRUE(std::ranges::all_of(journal, [](uint8_t byte) { return byte == 0; }));
+  }
+}
+
+TEST_P(ConSanTargetSim, RepeatedAddressGroupExhaustionIsSeparateFromOccupiedBanks) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size;
+  RunResult before, after;
+  run("native-33", Bootstrap::None, before, target, threads, true);
+  ASSERT_FALSE(HasFatalFailure());
+  run("native-33", Bootstrap::Instrumented, after, target, threads, true);
+  ASSERT_FALSE(HasFatalFailure());
+  expect_guest_state(before, after);
+  EXPECT_EQ(after.output[0], 7u);
+#ifdef CONSAN_ANALYZER_ENABLED
+  CapturedExecution execution;
+  execution.serial = 41;
+  execution.dimensions = {{threads, 1, 1}, {threads, 1, 1}};
+  execution.group_bytes = after.manifest.entry.prepared_group_bytes;
+  execution.report = after.report;
+  const LdsRaceExecutionResult result = analyze_lds_race_execution(after.manifest, execution, 8);
+  EXPECT_EQ(result.valid_observations, 13u);
+  EXPECT_EQ(result.cross_wave_pairs, 0u);
+  EXPECT_EQ(result.ordering_unresolved_pairs, 0u);
+  EXPECT_EQ(result.rejected_records, 0u);
+  // Three wave/site streams each present five addresses on three iterations.
+  // The fifth address gives 3*3=9 exhaustion events. After the first iteration,
+  // four occupied banks per stream give 3*2*4=24 dropped representatives;
+  // the legacy loss total combines both: 9+24=33.
+  EXPECT_EQ(result.address_group_exhaustion, 9u);
+  EXPECT_EQ(result.dropped_representatives, 24u);
+  EXPECT_EQ(result.lost_occurrences, 33u);
+  EXPECT_EQ(result.synchronization_loss, 0u);
+  EXPECT_EQ(result.integrity_events, 0u);
+  EXPECT_FALSE(result.coverage_complete);
+#endif
+}
+
+TEST_P(ConSanTargetSim, NativeWidthsPreserveEveryWordAndAllGuestState) {
+  const test::TargetMode target = GetParam();
+  const uint32_t wave_size = target.wave_size;
+  for (const char *name : {"u16", "i16", "b64", "b128", "u16-high", "i16-high", "b64-high",
+                           "b128-high", "b128-alias"}) {
+    const std::string_view kind(name);
+    if (std::string_view(target.target) != "gfx1250" && kind != "i16" && kind != "b64-high" &&
+        kind != "b128-alias") {
+      continue;
+    }
+    for (const uint32_t threads : {2 * wave_size, 2 * wave_size + 1}) {
+      SCOPED_TRACE(name);
+      SCOPED_TRACE(threads);
+      const std::string fixture = "width-" + std::string(name);
+      RunResult before, after;
+      run(fixture, Bootstrap::None, before, target, threads, true, 4);
+      ASSERT_FALSE(HasFatalFailure());
+      run(fixture, Bootstrap::Instrumented, after, target, threads, true, 4);
+      ASSERT_FALSE(HasFatalFailure());
+      expect_guest_state(before, after);
+      std::vector<uint32_t> expected;
+      const uint32_t waves = (threads + wave_size - 1) / wave_size;
+      for (uint32_t wave = 0; wave < waves; ++wave) {
+        const bool inactive =
+            kind.ends_with("-high") && wave * wave_size + wave_size - 1 >= threads;
+        std::array<uint32_t, 4> words{7u + wave, 0x01234567u, 0x76543210u, 0xa5a5a5a5u};
+        if (kind.starts_with("i16")) {
+          words[0] += 0xffff8000u;
+        } else if (kind.starts_with("u16")) {
+          words[0] += 0x8000u;
+        } else {
+          words[1] = 0x89abcdefu;
+        }
+        if (kind.starts_with("b128")) {
+          words[2] = 0x13579bdfu;
+          words[3] = 0xfedcba98u;
+        }
+        if (inactive) {
+          words.fill(0);
+        }
+        expected.insert(expected.end(), words.begin(), words.end());
+      }
+      EXPECT_EQ(before.full_output, expected);
+      EXPECT_EQ(after.full_output, expected);
+      const std::vector<ObservedAccess> records = published_accesses(after);
+      const bool high = kind.ends_with("-high");
+      EXPECT_EQ(records.size(), 2u * (high ? threads / wave_size : waves));
+      for (const ObservedAccess &record : records) {
+        EXPECT_EQ(record.mask, high ? uint64_t{1} << (wave_size - 1) : 1);
+      }
+    }
+  }
+}
+
+TEST_F(ConSanBootstrapSim, MixedWidthBarrierPreservesTheIndependentCrossWaveValueAndState) {
+  RunResult before, after;
+  run("mixed-5", Bootstrap::None, before, {"gfx1250", 32}, 65, true);
+  ASSERT_FALSE(HasFatalFailure());
+  run("mixed-5", Bootstrap::Instrumented, after, {"gfx1250", 32}, 65, true);
+  ASSERT_FALSE(HasFatalFailure());
+  expect_guest_state(before, after);
+  EXPECT_EQ(before.output[0], 8u);
+  EXPECT_EQ(after.output[0], 8u);
+  const std::vector<ObservedAccess> records = published_accesses(after);
+  ASSERT_EQ(records.size(), 2u);
+  EXPECT_EQ(records[0].offset, 0u);
+  EXPECT_EQ(records[1].offset, 4u);
+  EXPECT_EQ(after.manifest.sites[0].width, 8u);
+  EXPECT_EQ(after.manifest.sites[1].width, 4u);
+}
+
+TEST_F(ConSanBootstrapSim, BoundedWorkgroupsPreserveEveryOutputRegisterAndLaunchIdentity) {
+  for (const test::TargetMode target : test::kTargetModes) {
+    for (const char *fixture : {"group-1", "group-2", "group-5"}) {
+      const bool barrier = std::string_view(fixture) != "group-1";
+      for (const uint32_t groups : {1u, 4u, 16u}) {
+        for (const uint32_t threads : {2 * target.wave_size, 2 * target.wave_size + 1}) {
+          SCOPED_TRACE(target.target);
+          SCOPED_TRACE(target.wave_size);
+          SCOPED_TRACE(fixture);
+          SCOPED_TRACE(groups);
+          SCOPED_TRACE(threads);
+          RunResult before, after;
+          run(fixture, Bootstrap::None, before, target, threads, true, 1, false, groups);
+          ASSERT_FALSE(HasFatalFailure());
+          run(fixture, Bootstrap::Instrumented, after, target, threads, true, 1, false, groups);
+          ASSERT_FALSE(HasFatalFailure());
+          expect_guest_state(before, after);
+          const uint32_t waves = (threads + target.wave_size - 1) / target.wave_size;
+          const bool ttmp = std::string_view(target.target) == "gfx1201" ||
+                            std::string_view(target.target) == "gfx1250";
+          EXPECT_EQ(after.manifest.entry.workgroup_id_scalar, ttmp ? 117u : 15u);
+          std::vector<uint32_t> expected;
+          for (uint32_t group = 0; group < groups; ++group) {
+            for (uint32_t wave = 0; wave < waves; ++wave) {
+              expected.push_back(7 + 16 * group + (barrier ? 0 : wave));
+              if (ttmp) {
+                EXPECT_EQ(before.waves[group * waves + wave].ttmp(9), group);
+                EXPECT_EQ(after.waves[group * waves + wave].ttmp(9), group);
+              }
+              EXPECT_EQ(after.waves[group * waves + wave].sgpr(14), group);
+              EXPECT_EQ(after.waves[group * waves + wave].sgpr(15), 99u);
+              EXPECT_EQ(after.waves[group * waves + wave].vgpr(0, 0), wave * target.wave_size);
+            }
+          }
+          EXPECT_EQ(before.full_output, expected);
+          EXPECT_EQ(after.full_output, expected);
+          const std::vector<ObservedAccess> records = published_accesses(after);
+          ASSERT_EQ(records.size(), 2u * groups * waves);
+          for (const ObservedAccess &record : records) {
+            EXPECT_LT(record.workgroup, groups);
+            EXPECT_LT(record.wave, waves);
+            EXPECT_EQ(record.mask, 1u);
+            EXPECT_EQ(record.offset, record.site == 0 || !barrier ? record.wave * 4 : 0);
+          }
+          if (barrier) {
+            for (uint32_t row = 0; row < groups * waves; ++row) {
+              const size_t offset = kReportHeaderBytes +
+                                    row * report_row_bytes(after.manifest.sites.size(), true) +
+                                    sync_offset(after.manifest.sites.size());
+              EXPECT_EQ(wire::read_u32(after.report, offset + wire::kSyncParticipants), waves);
+              EXPECT_EQ(wire::read_u32(after.report, offset + wire::kSyncCommit),
+                        wire::kBarrierCompleted);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_F(ConSanBootstrapSim, MissingOriginalWorkgroupIdKeepsSingleGroupFunctional) {
+  for (const test::TargetMode target : test::kTargetModes) {
+    SCOPED_TRACE(target.target);
+    SCOPED_TRACE(target.wave_size);
+    RunResult before, after;
+    const uint32_t threads = 2 * target.wave_size + 1;
+    run("native-no-workgroup-id", Bootstrap::None, before, target, threads, true);
+    ASSERT_FALSE(HasFatalFailure());
+    run("native-no-workgroup-id", Bootstrap::Instrumented, after, target, threads, true);
+    ASSERT_FALSE(HasFatalFailure());
+    expect_guest_state(before, after);
+    EXPECT_EQ(after.full_output, (std::vector<uint32_t>{7, 8, 9}));
+    EXPECT_EQ(after.manifest.entry.workgroup_id_scalar, UINT32_MAX);
+    EXPECT_EQ(published_accesses(after).size(), 6u);
   }
 }
 

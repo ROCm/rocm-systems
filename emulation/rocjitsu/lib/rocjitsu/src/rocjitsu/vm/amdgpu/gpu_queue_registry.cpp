@@ -21,8 +21,9 @@ GpuQueueRegistry::OperationLease::OperationLease(OperationLease &&other) noexcep
 
 GpuQueueRegistry::OperationLease &
 GpuQueueRegistry::OperationLease::operator=(OperationLease &&other) noexcept {
-  if (this == &other)
+  if (this == &other) {
     return *this;
+  }
   release();
   registry_ = std::exchange(other.registry_, nullptr);
   queue_ = std::move(other.queue_);
@@ -32,8 +33,9 @@ GpuQueueRegistry::OperationLease::operator=(OperationLease &&other) noexcept {
 GpuQueueRegistry::OperationLease::~OperationLease() { release(); }
 
 void GpuQueueRegistry::OperationLease::release() {
-  if (registry_ == nullptr)
+  if (registry_ == nullptr) {
     return;
+  }
   registry_->release_operation(queue_);
   registry_ = nullptr;
   queue_.reset();
@@ -50,8 +52,9 @@ void GpuQueueRegistry::QueueRecord::close_binding() noexcept { binding.reset(); 
 GpuQueueRegistry::~GpuQueueRegistry() { close_all(false); }
 
 GpuQueueRegistry::RegistrationRollback::~RegistrationRollback() {
-  if (!committed_)
+  if (!committed_) {
     (void)gpu_vm_.release_queue(address_space_);
+  }
 }
 
 void GpuQueueRegistry::close_all(bool reopen_registration) {
@@ -62,20 +65,23 @@ void GpuQueueRegistry::close_all(bool reopen_registration) {
     close_all_in_progress_ = true;
     admission_open_ = false;
     ++admission_epoch_;
-    if (admission_epoch_ == 0)
+    if (admission_epoch_ == 0) {
       ++admission_epoch_;
+    }
     condition_.wait(lock, [this]() { return active_registrations_ == 0 && active_closes_ == 0; });
     for (uint32_t index = 0; index < slots_.size(); ++index) {
       Slot &slot = slots_[index];
-      if (!slot.queue)
+      if (!slot.queue) {
         continue;
+      }
       slot.queue->state = QueueState::Closing;
       ++active_closes_;
       queues.push_back(slot.queue);
       slot.queue.reset();
       ++slot.generation;
-      if (slot.generation == 0)
+      if (slot.generation == 0) {
         ++slot.generation;
+      }
       free_slots_.push_back(index);
     }
     condition_.wait(lock, [&queues]() {
@@ -84,14 +90,16 @@ void GpuQueueRegistry::close_all(bool reopen_registration) {
       });
     });
   }
-  for (std::shared_ptr<QueueRecord> &queue : queues)
+  for (std::shared_ptr<QueueRecord> &queue : queues) {
     (void)close(std::move(queue));
+  }
   {
     std::unique_lock lock(mutex_);
     condition_.wait(lock, [this]() { return active_closes_ == 0; });
     ++lifecycle_epoch_;
-    if (lifecycle_epoch_ == 0)
+    if (lifecycle_epoch_ == 0) {
       ++lifecycle_epoch_;
+    }
     admission_open_ = reopen_registration;
     close_all_in_progress_ = false;
     condition_.notify_all();
@@ -114,11 +122,14 @@ QueueHandle GpuQueueRegistry::allocate_locked(std::shared_ptr<QueueRecord> queue
 
 std::shared_ptr<GpuQueueRegistry::QueueRecord>
 GpuQueueRegistry::find_locked(QueueHandle handle) const {
-  if (!handle || handle.slot >= slots_.size())
+  if (!handle || handle.slot >= slots_.size()) {
     return {};
+  }
   const Slot &slot = slots_[handle.slot];
-  if (slot.generation != handle.generation || !slot.queue || slot.queue->state != QueueState::Open)
+  if (slot.generation != handle.generation || !slot.queue ||
+      slot.queue->state != QueueState::Open) {
     return {};
+  }
   return slot.queue;
 }
 
@@ -137,8 +148,9 @@ bool GpuQueueRegistry::identity_is_pending_locked(const QueueIdentity &identity)
 GpuQueueRegistry::OperationLease GpuQueueRegistry::acquire_operation(QueueHandle handle) {
   std::lock_guard lock(mutex_);
   std::shared_ptr<QueueRecord> queue = find_locked(handle);
-  if (!queue)
+  if (!queue) {
     return {};
+  }
   ++queue->active_operations;
   return OperationLease(*this, std::move(queue));
 }
@@ -176,14 +188,16 @@ void GpuQueueRegistry::finish_registration(std::pair<uint32_t, uint32_t> identit
 }
 
 QueueHandle GpuQueueRegistry::register_queue(const QueueRegistrationRequest &request) {
-  if (!request.binding_factory || !request.identity.address_space)
+  if (!request.binding_factory || !request.identity.address_space) {
     return {};
+  }
   uint64_t admission_epoch = 0;
   {
     std::lock_guard lock(mutex_);
     if (!admission_open_ || identity_exists_locked(request.identity) ||
-        identity_is_pending_locked(request.identity))
+        identity_is_pending_locked(request.identity)) {
       return {};
+    }
     pending_identities_.emplace(request.identity.process_id, request.identity.queue_id);
     admission_epoch = admission_epoch_;
     ++active_registrations_;
@@ -192,13 +206,15 @@ QueueHandle GpuQueueRegistry::register_queue(const QueueRegistrationRequest &req
                                       request.identity.queue_id);
   const std::optional<AddressSpaceInfo> address_space =
       gpu_vm_.retain_queue_address_space(request.identity.address_space);
-  if (!address_space)
+  if (!address_space) {
     return {};
+  }
 
   RegistrationRollback rollback(gpu_vm_, request.identity.address_space);
   QueueBindingCreateResult bound = request.binding_factory->create_binding(request);
-  if (!bound)
+  if (!bound) {
     return {};
+  }
   std::shared_ptr<QueueRecord> queue = std::make_shared<QueueRecord>(request.identity);
   queue->binding = std::move(bound.binding);
 
@@ -220,16 +236,18 @@ QueueHandle GpuQueueRegistry::register_queue(const QueueRegistrationRequest &req
 QueueReconfigureResult GpuQueueRegistry::reconfigure_queue(QueueHandle handle,
                                                            QueueReconfigureRequest request) {
   OperationLease queue = acquire_operation(handle);
-  if (!queue)
+  if (!queue) {
     return {};
+  }
   return {.found = true, .status = queue->binding->reconfigure(request)};
 }
 
 QueueSubmissionResult GpuQueueRegistry::submit_producer(QueueHandle handle,
                                                         uint64_t producer_value) {
   OperationLease queue = acquire_operation(handle);
-  if (!queue)
+  if (!queue) {
     return {};
+  }
   return {.found = true, .status = queue->binding->submit_producer(producer_value)};
 }
 
@@ -239,16 +257,18 @@ QueueCloseResult GpuQueueRegistry::unregister_queue(QueueHandle handle, QueueClo
     std::unique_lock lock(mutex_);
     condition_.wait(lock, [this]() { return !close_all_in_progress_; });
     queue = find_locked(handle);
-    if (!queue)
+    if (!queue) {
       return {};
+    }
     queue->state = QueueState::Closing;
     ++active_closes_;
     condition_.wait(lock, [&queue]() { return queue->active_operations == 0; });
   }
 
-  const QueuePrepareCloseStatus prepared = mode == QueueCloseMode::ForceCancel
-                                               ? QueuePrepareCloseStatus::Ready
-                                               : queue->binding->prepare_close();
+  const QueuePrepareCloseStatus prepared =
+      mode == QueueCloseMode::ForceCancel ? QueuePrepareCloseStatus::Ready
+      : mode == QueueCloseMode::Preempt   ? queue->binding->prepare_preempt_close()
+                                          : queue->binding->prepare_close();
   if (prepared != QueuePrepareCloseStatus::Ready) {
     std::lock_guard lock(mutex_);
     queue->state = QueueState::Open;
@@ -266,8 +286,9 @@ QueueCloseResult GpuQueueRegistry::unregister_queue(QueueHandle handle, QueueClo
     assert(slot.queue == queue);
     slot.queue.reset();
     ++slot.generation;
-    if (slot.generation == 0)
+    if (slot.generation == 0) {
       ++slot.generation;
+    }
     free_slots_.push_back(handle.slot);
   }
   close(std::move(queue));
@@ -284,8 +305,9 @@ bool GpuQueueRegistry::contains(QueueHandle handle) const {
 std::size_t GpuQueueRegistry::active_queues() const {
   std::lock_guard lock(mutex_);
   std::size_t count = 0;
-  for (const Slot &slot : slots_)
+  for (const Slot &slot : slots_) {
     count += slot.queue != nullptr;
+  }
   return count;
 }
 

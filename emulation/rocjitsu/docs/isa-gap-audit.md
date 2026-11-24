@@ -11,7 +11,7 @@ structured inputs or missing from rocjitsu.
   equivalent Markdown).
 - The matching checked-in MR ISA XML under
   `shared/machine-readable-isa/isa/`.
-- Rocjitsu generated and handwritten ISA support under
+- rocjitsu generated and handwritten ISA support under
   `emulation/rocjitsu/lib/`.
 
 ## Audit workflow

@@ -17,19 +17,23 @@ ASSERT_HOOK_MATCHES_PROD(g_symkTmaKernelMask, ncclSymkTmaKernelMask);
 ASSERT_HOOK_MATCHES_PROD(g_symkGetKernelIndex, ncclSymkGetKernelIndex);
 ASSERT_HOOK_MATCHES_PROD(g_symkKernelIdToString, ncclSymkKernelIdToString);
 ASSERT_HOOK_MATCHES_PROD(g_symkMakeDevWork, ncclSymkMakeDevWork);
+ASSERT_HOOK_MATCHES_PROD(g_genkKernelMask, ncclGenkKernelMask);
+ASSERT_HOOK_MATCHES_PROD(g_genkGetKernelIndex, ncclGenkGetKernelIndex);
+ASSERT_HOOK_MATCHES_PROD(g_genkInitStart, ncclGenkInitStart);
+ASSERT_HOOK_MATCHES_PROD(g_genkInitEnd, ncclGenkInitEnd);
 #undef ASSERT_HOOK_MATCHES_PROD
 
-static int DefaultSymkLLKernelMask() { return 0; }
-std::function<int()> g_symkLLKernelMask = DefaultSymkLLKernelMask;
-int ncclSymkLLKernelMask() { return g_symkLLKernelMask(); }
+static uint64_t DefaultSymkLLKernelMask() { return 0; }
+std::function<uint64_t()> g_symkLLKernelMask = DefaultSymkLLKernelMask;
+ncclSymkKernelMask ncclSymkLLKernelMask() { return g_symkLLKernelMask(); }
 
-static int DefaultSymkDynamicSmemKernelMask() { return 0; }
-std::function<int()> g_symkDynamicSmemKernelMask = DefaultSymkDynamicSmemKernelMask;
-int ncclSymkDynamicSmemKernelMask() { return g_symkDynamicSmemKernelMask(); }
+static uint64_t DefaultSymkDynamicSmemKernelMask() { return 0; }
+std::function<uint64_t()> g_symkDynamicSmemKernelMask = DefaultSymkDynamicSmemKernelMask;
+ncclSymkKernelMask ncclSymkDynamicSmemKernelMask() { return g_symkDynamicSmemKernelMask(); }
 
-static int DefaultSymkTmaKernelMask() { return 0; }
-std::function<int()> g_symkTmaKernelMask = DefaultSymkTmaKernelMask;
-int ncclSymkTmaKernelMask() { return g_symkTmaKernelMask(); }
+static uint64_t DefaultSymkTmaKernelMask() { return 0; }
+std::function<uint64_t()> g_symkTmaKernelMask = DefaultSymkTmaKernelMask;
+ncclSymkKernelMask ncclSymkTmaKernelMask() { return g_symkTmaKernelMask(); }
 
 // Index 0 always: the kernel-table arrays below are sized ncclSymkKernelId_Count but only index 0 is populated.
 static int DefaultSymkGetKernelIndex(ncclSymkKernelId, int, ncclDataType_t) { return 0; }
@@ -57,6 +61,32 @@ void* ncclSymkKernelList[ncclSymkKernelId_Count] = {nullptr};
 void* ncclSymkKernelListProfile[ncclSymkKernelId_Count] = {nullptr};
 int ncclSymkKernelMaxDynamicSmem[ncclSymkKernelId_Count] = {0};
 
+// NCCL 2.32.6 general (Genk) kernels. AMD builds no Genk kernels: sym_kernels.cc's fallback reports an empty
+// mask and index -1, and genk_runtime.cc's init seams default to success here.
+static uint64_t DefaultGenkKernelMask() { return 0; }
+std::function<uint64_t()> g_genkKernelMask = DefaultGenkKernelMask;
+ncclSymkKernelMask ncclGenkKernelMask() { return g_genkKernelMask(); }
+
+static int DefaultGenkGetKernelIndex(ncclSymkKernelId, int, ncclDataType_t) { return -1; }
+std::function<int(ncclSymkKernelId, int, ncclDataType_t)> g_genkGetKernelIndex = DefaultGenkGetKernelIndex;
+int ncclGenkGetKernelIndex(ncclSymkKernelId kernelId, int red, ncclDataType_t ty) {
+  return g_genkGetKernelIndex(kernelId, red, ty);
+}
+
+static ncclResult_t DefaultGenkInitStart(struct ncclComm*, bool*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*, bool*)> g_genkInitStart = DefaultGenkInitStart;
+ncclResult_t ncclGenkInitStart(struct ncclComm* comm, bool* needGenkDevComm) {
+  return g_genkInitStart(comm, needGenkDevComm);
+}
+
+static ncclResult_t DefaultGenkInitEnd(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_genkInitEnd = DefaultGenkInitEnd;
+ncclResult_t ncclGenkInitEnd(struct ncclComm* comm) { return g_genkInitEnd(comm); }
+
+void* ncclGenkKernelList[ncclSymkKernelId_Count] = {nullptr};
+void* ncclGenkKernelListProfile[ncclSymkKernelId_Count] = {nullptr};
+int ncclGenkKernelMaxDynamicSmem[ncclSymkKernelId_Count] = {0};
+
 void ResetSymKernelsIndexFakes() {
   g_symkLLKernelMask = DefaultSymkLLKernelMask;
   g_symkDynamicSmemKernelMask = DefaultSymkDynamicSmemKernelMask;
@@ -64,7 +94,14 @@ void ResetSymKernelsIndexFakes() {
   g_symkGetKernelIndex = DefaultSymkGetKernelIndex;
   g_symkKernelIdToString = DefaultSymkKernelIdToString;
   g_symkMakeDevWork = DefaultSymkMakeDevWork;
+  g_genkKernelMask = DefaultGenkKernelMask;
+  g_genkGetKernelIndex = DefaultGenkGetKernelIndex;
+  g_genkInitStart = DefaultGenkInitStart;
+  g_genkInitEnd = DefaultGenkInitEnd;
   for (int i = 0; i < ncclSymkKernelId_Count; i++) {
+    ncclGenkKernelList[i] = nullptr;
+    ncclGenkKernelListProfile[i] = nullptr;
+    ncclGenkKernelMaxDynamicSmem[i] = 0;
     ncclSymkKernelList[i] = nullptr;  // raw globals, not std::function seams: reset here to avoid cross-test leaks
     ncclSymkKernelListProfile[i] = nullptr;
     ncclSymkKernelMaxDynamicSmem[i] = 0;

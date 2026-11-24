@@ -1,6 +1,6 @@
 # Configuration
 
-Rocjitsu behavior is configured declaratively in JSON. Simulator configs
+rocjitsu behavior is configured declaratively in JSON. Simulator configs
 specify the component hierarchy, link connectivity, and simulation parameters;
 DBT guest configs select the guest and host targets and execution backend.
 
@@ -17,8 +17,10 @@ Pre-built simulator configs are in `configs/`:
 | `gfx950_mi350x_kmd.json` | Single CDNA4 GPU (daemon/KFD mode) |
 | `gfx950_mi350x_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
 | `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone or PCI/VFIO simulation) |
+| `gfx1250_mi455x_4gpu_scaleup.json` | Four local CDNA5 GPUs with ScaleUp routes |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four MI455X GPUs (multi-GPU daemon mode) |
 | `gfx1250_mi455x_kmd_2node_net.json` | Schematic two-node, one-GPU-per-node RCCL NET fixture |
+| `gfx1250_mi455x_kmd_4node_2gpu_if.json` | Four-node, two-GPU-per-node mixed P2P/NET fixture; see the [same-host RCCL gate](same-host-pod-rccl-gate.md#run-this-gate) |
 | `gfx1251_synthetic.json` | Minimal synthetic gfx1251 topology for functional simulation; not a product model |
 | `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
@@ -31,13 +33,17 @@ callers keep working; use the `gfx950_mi350x*` names instead. The
 `gfx950_mi355x*` configs will later describe an MI355X (PCI device ID `0x75a3`);
 see [#14644](https://github.com/ROCm/rocm-systems/issues/14644).
 
+`system.coherence_domains` describes GPU membership for inventory and
+validation. Changing that grouping does not grant peer-memory access or change
+runtime cache maintenance, which is assembled per SoC from the modeled routes.
+
 ### PCI/VFIO guest compatibility
 
 The gfx1250 PCI profile intentionally advertises no UVD, VCN, or JPEG hardware.
 Compute-only guests therefore require an AMDGPU kernel containing commit
 `4e07da515d1c` (`drm/amdgpu: enumerate UMSCH HW IP`) or an equivalent backport.
 That change makes multimedia discovery accept a device with no VCN instance.
-Rocjitsu does not emulate a placeholder media block, and adding one would expand
+rocjitsu does not emulate a placeholder media block, and adding one would expand
 the device contract beyond the compute functionality modeled here.
 
 The generic `scripts/run-vfio-guest.py` launcher requires externally prepared
@@ -50,9 +56,12 @@ For a two-node launch recipe with reference and NET-channel checks, see
 currently unqualified. A manifest's network or local fabric edges describe
 reachability; they do not grant peer memory access. Legacy replicated-GPU
 configs retain their XGMI links, hive ID, and XGMI SDMA count for
-compatibility. A manifest with those same GPUs suppresses the advertisement
-until its local peer routes can execute, so converting a legacy config to a
-manifest changes what ROCr discovers. Legacy single-GPU drivers also keep the
+compatibility. An explicit manifest suppresses that XGMI discovery metadata
+even when its local ScaleUp or Infinity Fabric routes execute through the
+VM-owned `FabricEndpoint`. Those routes model local effects behind the stock
+driver's UC PCIe peer BAR mappings; they do not establish native XGMI
+discovery or cacheable peer access. Converting a legacy config to a manifest
+therefore changes what ROCr discovers. Legacy single-GPU drivers also keep the
 old render-node routing: they claim any render minor even when their config
 advertises a different one. Manifest drivers select only their configured
 render minors. The daemon handshake carries this policy to remote clients, so
@@ -182,14 +191,16 @@ permit up to 16 partitions, while `num_threads: 4` assigns XCDs from both GPUs
 to each partition.
 
 `gfx950_mi350x_kmd_2gpu.json` (with its deprecated copy
-`gfx950_mi355x_kmd_2gpu.json`) and `gfx1250_mi455x_kmd_4gpu.json` are the
-shipped configs that still pin `num_threads: 1`. Any multi-partition setting on
-the 2-GPU config hangs RCCL collectives (`AllReduce`, `Broadcast`, `AllGather`,
-`ReduceScatter`) with the engine workers spinning and the simulation making no
-progress; point-to-point `SendRecv` is unaffected. The hang predates the default
-and reproduces with as few as two partitions. The 4-GPU config keeps the pin for
-the same reason, though the hang has only been characterised on the 2-GPU
-config. Remove the pins once it is fixed.
+`gfx950_mi355x_kmd_2gpu.json`), `gfx1250_mi455x_kmd_4gpu.json`,
+`gfx1250_mi455x_kmd_2node_net.json`, `gfx1250_mi455x_4gpu_scaleup.json`, and
+`gfx1250_mi455x_kmd_4node_2gpu_if.json` are the shipped multi-GPU KMD and
+scale-up fixture configs that pin `num_threads: 1`. Any multi-partition setting
+on the 2-GPU MI350X config hangs RCCL collectives (`AllReduce`, `Broadcast`,
+`AllGather`, `ReduceScatter`) with the engine workers spinning and the simulation
+making no progress; point-to-point `SendRecv` is unaffected. The hang predates
+the default and reproduces with as few as two partitions. The other configs keep
+the pin for the same reason, though the hang has only been characterised on the
+2-GPU config. Remove the pins once it is fixed.
 
 Raising `num_threads` only pays off if the work reaches more than one XCD, which
 is decided by `AqlQueueConfig::xcd_fanout` rather than by how the queue was created (see
@@ -215,25 +226,30 @@ engine caller and can share the SoC's D-1 persistent workers. Callers progress
 concurrently and join only their own submission. Runtime, doorbell and daemon
 threads are outside this execution budget.
 
-The single-GPU tables retain these synchronous engine/dispatch pairs (H=0):
+The multi-XCD single-GPU presets use these synchronous engine/dispatch pairs (H=0).
 
-| Budget | gfx950 E/D | gfx1250 E/D | gfx1100/gfx1151/gfx1201 E/D |
+| Budget | gfx942 E/D | gfx950 E/D | gfx1250 E/D |
 |---:|---:|---:|---:|
 | 1 | 1/1 | 1/1 | 1/1 |
 | 2 | 1/2 | 1/2 | 1/2 |
-| 4 | 2/3 | 1/4 | 1/4 |
-| 8 | 2/7 | 2/7 | 1/8 |
-| 16 | 8/9 | 8/9 | 1/16 |
-| 24 | 8/17 | 8/17 | 1/24 |
-| 32 | 8/17 | 8/25 | 1/24 |
-| 40 and above | 8/17 | 8/33 | 1/24 |
+| 4 | 2/3 | 2/3 | 1/4 |
+| 8 | 2/7 | 2/7 | 2/7 |
+| 16 | 8/9 | 8/9 | 8/9 |
+| 24 | 8/17 | 8/17 | 8/17 |
+| 32 | 8/25 | 8/25 | 8/25 |
+| 40 | 8/25 | 8/25 | 8/33 |
+| 48 | 8/41 | 8/41 | 8/41 |
+| 56 | 8/41 | 8/41 | 8/49 |
+| 64 and above | 8/41 | 8/41 | 8/57 |
 
-The gfx950/gfx1250 tables also contain the [async MMA triples](async-instructions.md#thread-policy).
-gfx950 adds eight helpers at budget 32, selecting 8/17/8; gfx1250 adds eight
-at budget 48, selecting 8/33/8. Larger hosts retain those allocations.
-`async_helper_threads: 0` retains the synchronous choices above. Desktop and MI210 tables stop at 1/24/0;
-CDNA3 stops at 8/17/0.
-A budget of 12 selects the eight-thread row.
+The highest entries use eight engines. gfx942 and gfx950 add 40 shared CU
+dispatch workers, and gfx1250 adds 56. All matrix handlers execute on the
+issuing thread. See the
+[async MMA thread policy](async-instructions.md#thread-policy).
+
+Desktop and MI210 presets use one engine, so their dispatch width equals the
+retained thread count. Their granules are 1, 2, 4, 8, 16 and 24 threads.
+MI210 adds a 32-thread granule. A budget of 12 selects the eight-thread row.
 
 Print allocations for any target without constructing a simulated GPU:
 
@@ -279,20 +295,19 @@ so these retained pools do not imply simultaneous execution on every GPU.
 Dispatch workers can accelerate compute batches. The E=1 pin addresses the
 documented RCCL hang; the D=1 default preserves small-collective performance.
 
-Mirage embeds the tables in its RocJITsu backend at build time and
+Mirage embeds the tables in its rocjitsu backend at build time and
 selects them by the agent's GPU target and GPU count. The hardware agent format carries no
 host scheduling policy. Unknown targets use the serial fallback. For multiple
 GPUs, it uses the matching native preset when available. Other GPU counts
 convert each single-GPU granule's budget B to E=1, D=1+floor((B-1)/GPUs) and H=0,
-then leave selection to rocjitsu. B includes helper slots, which become dispatch
-workers in this opt-in path: derived gfx950 tables use a budget of 32 and
-gfx1250 uses 48, while desktop and CDNA3 tables use 24.
+then leave selection to rocjitsu. The starting budgets come from the
+single-GPU tables above.
 Its multi-GPU configurations default to E=1/D=1/H=0 for the same reasons. A positive
 engine override can change that pin;
 `num_threads: 0` retains it. Profile options may override `cpu_thread_budget`,
 `num_threads`, `cpu_dispatch_threads` and `async_helper_threads`. A supplied
-config file is used verbatim. Automatic helper selection (-1) preserves the
-multi-GPU H=0 default; a positive override can enable helpers.
+config file is used verbatim. The runtime preserves explicit helper requests for checkpoints and selects
+zero effective helpers while all matrix handlers run synchronously.
 Checkpoints retain the configured requests and tables, including custom tables,
 so restore re-evaluates that policy for the receiving process's affinity. They
 preserve the user's configuration, rather than an exact host allocation or a
@@ -334,6 +349,19 @@ read; the default 32-bit HW_ID read therefore still warns and writes zero.
 Unknown or unrepresentable identity fields likewise issue an `s_getreg_b32`
 warning and write zero.
 
+RDNA3/RDNA4 `HW_ID1` reports the wave slot, the CU's WGP and its half of it,
+SA_ID and SE_ID. A CU's wave slots alternate between its two SIMDs, so slot
+`s` reads SIMD `s % 2` and WAVE_ID `s / 2`. SIMD_ID, WGP_ID and SA_ID require
+an even shader-array width of at most 32 CUs and at most two arrays per shader
+engine; SE_ID must fit in three bits. DP_RATE reads 1 on gfx11 and gfx12 and
+is unsupported on gfx11.5, which has no measured value. Reads touching an
+unrepresentable field warn and write zero.
+
+RDNA3/RDNA4 `HW_ID2` reports ME_ID 1, since every wave comes from a compute
+queue, and STATE_ID 0. RocJITsu has no hardware queue slots, workgroup slots
+or per-wave hardware VMID, so QUEUE_ID, PIPE_ID, WG_ID and VM_ID are
+unsupported and the default 32-bit `HW_ID2` read warns and writes zero.
+
 Omitted geometry fields inherit defaults selected by `gfx_target_version`.
 For a smaller topology, set both `num_cu_per_sh` and
 `num_shader_arrays_per_engine` to match its CU groups; for example, two arrays
@@ -354,6 +382,8 @@ The optional top-level `arithmetic` object selects one semantics mode for
 instructions executed through rj-arith, regardless of GPU architecture.
 Instructions not yet migrated to rj-arith retain their existing implementations
 and do not use this setting.
+On RDNA2 this includes FP32 FMA/FMAC, FP64 FMA, FP16 add/subtract/multiply,
+and VOP3 floating-point comparisons.
 
 ```json
 "arithmetic": {
@@ -408,20 +438,20 @@ rocjitsu responsibilities.
 
 Matrix adapters forward FP16_OVFL where applicable. Floating-point WMMA ignores
 guest rounding and denormal controls; integer WMMA does not accept those controls.
-rj-arith never explicitly changes host FP controls. It assumes the default host FP
-environment: round-to-nearest, FTZ/DAZ disabled, and exceptions masked. In local mode,
-the executable must satisfy this precondition too: linking with `-ffast-math` can
-enable FTZ/DAZ before emulation starts. Arithmetic may set host sticky exception flags. Compatibility deliberately
-does not retain legacy host-environment isolation; nondefault host controls are
-outside the contract in every semantics mode. `RJ_FORCE_SCALAR`
+rocjitsu, including rj-arith, assumes the default host FP environment: round-to-nearest,
+FTZ/DAZ disabled, and exceptions masked. rj-arith never explicitly changes host FP
+controls. In local mode, the executable must satisfy this precondition too: linking with
+`-ffast-math` can enable FTZ/DAZ before emulation starts. Arithmetic may set host sticky
+exception flags. Nondefault host controls are outside the contract in every semantics
+mode. `RJ_FORCE_SCALAR`
 selects rj-arith's baseline CPU path; the test override also applies to existing CUs.
 It does not change semantics.
 
-Scalar FP arithmetic currently retains a guest-rounding limitation from the legacy
-handlers: Compatibility uses nearest-even for scalar F16/F32 add, subtract,
-multiply, and integer-to-F32 conversion. For example, `S_CVT_F32_I32 0x01000001`
-produces `0x4b800000` even with guest rounding toward +infinity; gfx1201 produces
-`0x4b800001`. The corresponding library entry points reject nonzero rounding flags.
+Scalar F16/F32 add, subtract, multiply, FMAC and the rounding conversions follow the
+MODE rounding field of their destination format (MODE[1:0] for FP32, MODE[3:2] for FP16).
+For example, under guest rounding toward +infinity `S_CVT_F32_I32 0x01000001` produces
+`0x4b800001`, as on gfx1201, both in decoded RDNA4 Compatibility, which also records FP
+causes, and through the rj-arith entry points in the configured semantics.
 
 
 ### Memory wait diagnostics
@@ -502,7 +532,14 @@ to the correct device based on `gpu_id`.
 
 `configs/gfx950_mi350x_kmd_2gpu.json` is the default multi-GPU
 configuration for RCCL tests. `configs/gfx1250_mi455x_kmd_4gpu.json`
-provides a four-GPU daemon topology for explicit multi-GPU runs.
+provides a four-GPU daemon topology through legacy GPU replication.
+`configs/gfx1250_mi455x_4gpu_scaleup.json` is a separate explicit system
+manifest. It connects four GPUs using one abstract switch for functional
+testing. The four-GPU shape and links are simulator choices; they do not
+describe a physical tray, switch, bandwidth, timing, or peer-memory
+coherence. KFD peer discovery stays off until the routed data and coherence
+paths qualify separately.
+
 When the selected ROCm compiler parses `gfx1250`, its HIP runtime advertises
 that target, and its RCCL library exists, the build also produces
 `tests/hip_rccl_gfx1250_test`. This is a compilation gate for the numerically
@@ -531,5 +568,11 @@ This is an inactivity timeout policy, not a deadlock diagnosis: a process that
 keeps executing instructions can keep its waits alive indefinitely. Quiescence or insufficient
 residency never releases a GWS wait. Barriers require an explicit GWS INIT;
 unsupported residency can exhaust the budget but cannot produce a successful
-rendezvous. Checkpoints containing GWS resource state are rejected because the
-format does not serialize the shared table.
+rendezvous. Before checkpointing, processes must release their GWS resource
+tables and any device GDS state that the checkpoint cannot serialize. Resident
+RDNA2 waves may be running or waiting at a workgroup barrier once their memory
+counters have drained. Checkpoints preserve CU-owned LDS. Release shared WGP LDS
+and process-backed scratch reservations before saving. Restoring an active RDNA2 wave
+requires its recorded process, memory and register allocations, and sticky
+exception flags. An older checkpoint taken after all RDNA2 waves retired can
+still be restored.

@@ -8,7 +8,7 @@
 
 #include "common/bits.h"
 #include "dot/x86_64/exact_dot_x86_64.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_dot.h"
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE::exact_dot {
 

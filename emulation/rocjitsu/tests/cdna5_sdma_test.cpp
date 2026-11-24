@@ -40,8 +40,9 @@ template <typename Predicate>
 bool wait_until(Predicate predicate, std::chrono::milliseconds timeout = std::chrono::seconds(1)) {
   const std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + timeout;
   while (!predicate()) {
-    if (std::chrono::steady_clock::now() >= deadline)
+    if (std::chrono::steady_clock::now() >= deadline) {
       return false;
+    }
     std::this_thread::sleep_for(std::chrono::microseconds(50));
   }
   return true;
@@ -57,8 +58,9 @@ class TransientAqlAddressSpace final : public amdgpu::AddressSpaceTranslator,
 public:
   amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
                                         amdgpu::VmAccessKind) const override {
-    if (size == 0 || address > bytes_.size() || size > bytes_.size() - address)
+    if (size == 0 || address > bytes_.size() || size > bytes_.size() - address) {
       return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    }
     return {
         .outcome = amdgpu::VmAccessOutcome::Complete,
         .translation = {.domain = amdgpu::VmMemoryDomain::System,
@@ -73,29 +75,33 @@ public:
     std::function<void()> callback;
     {
       std::lock_guard lock(mutex_);
-      if (address == tracked_read_address_)
+      if (address == tracked_read_address_) {
         ++tracked_read_attempts_;
+      }
       if (next_read_outcome_ && address == next_read_outcome_->address) {
         const amdgpu::VmAccessOutcome outcome = next_read_outcome_->outcome;
         next_read_outcome_.reset();
         return outcome;
       }
-      if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+      if (address > bytes_.size() || bytes.size() > bytes_.size() - address) {
         return amdgpu::VmAccessOutcome::Faulted;
+      }
       std::ranges::copy_n(bytes_.begin() + static_cast<ptrdiff_t>(address), bytes.size(),
                           bytes.begin());
       callback = take_hook(read_hook_, address);
     }
-    if (callback)
+    if (callback) {
       callback();
+    }
     return amdgpu::VmAccessOutcome::Complete;
   }
 
   amdgpu::VmAccessOutcome write(amdgpu::VmMemoryDomain, uint64_t address,
                                 std::span<const std::byte> bytes) override {
     std::lock_guard lock(mutex_);
-    if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+    if (address > bytes_.size() || bytes.size() > bytes_.size() - address) {
       return amdgpu::VmAccessOutcome::Faulted;
+    }
     std::ranges::copy(bytes, bytes_.begin() + static_cast<ptrdiff_t>(address));
     return amdgpu::VmAccessOutcome::Complete;
   }
@@ -119,8 +125,9 @@ public:
       std::memcpy(&value, bytes_.data() + address, width);
       callback = take_hook(atomic_load_hook_, address);
     }
-    if (callback)
+    if (callback) {
       callback();
+    }
     return {.outcome = amdgpu::VmAccessOutcome::Complete, .value = value};
   }
 
@@ -130,8 +137,9 @@ public:
     amdgpu::VmAccessOutcome outcome = amdgpu::VmAccessOutcome::Complete;
     {
       std::lock_guard lock(mutex_);
-      if (address == tracked_atomic_store_address_)
+      if (address == tracked_atomic_store_address_) {
         ++tracked_atomic_store_attempts_;
+      }
       if (fail_atomic_store_at_ && address == *fail_atomic_store_at_) {
         fail_atomic_store_at_.reset();
         callback = take_hook(atomic_store_hook_, address);
@@ -145,8 +153,9 @@ public:
         callback = take_hook(atomic_store_hook_, address);
       }
     }
-    if (callback)
+    if (callback) {
       callback();
+    }
     return outcome;
   }
 
@@ -222,8 +231,9 @@ private:
   };
 
   static std::function<void()> take_hook(std::optional<AccessHook> &hook, uint64_t address) {
-    if (!hook || hook->address != address)
+    if (!hook || hook->address != address) {
       return {};
+    }
     std::function<void()> callback = std::move(hook->callback);
     hook.reset();
     return callback;
@@ -276,8 +286,9 @@ public:
   }
 
   ~TransientAqlQueueForTest() {
-    if (registration_id_ != 0)
+    if (registration_id_ != 0) {
       sim_.cp()->unregister_queue(kQueueId, kProcessId);
+    }
     (void)sim_.soc->gpu_vm().unregister_address_space(address_space_);
   }
 
@@ -462,9 +473,10 @@ public:
   }
 
   ~HostSdmaQueueForTest() {
-    if (queue_handle_)
+    if (queue_handle_) {
       (void)sim_.soc->queue_registry().unregister_queue(queue_handle_,
                                                         amdgpu::QueueCloseMode::ForceCancel);
+    }
     (void)legacy_vm_.unregister_address_space(address_space_);
   }
 
@@ -486,8 +498,9 @@ public:
         ADD_FAILURE() << "timed out waiting for the host SDMA queue to retire or terminate";
         return;
       }
-      if (terminal_)
+      if (terminal_) {
         last_submission_status_ = amdgpu::QueueSubmissionStatus::Faulted;
+      }
     }
   }
 
@@ -522,15 +535,30 @@ private:
 
 class TranslatedSdmaQueueForTest {
 public:
-  explicit TranslatedSdmaQueueForTest(Gfx1250Sim &sim)
-      : sim_(sim), legacy_vm_(sim.soc->gpu_vm(), sim.soc->memory()), process_(kProcessId) {}
-
-  void initialize(amdgpu::InterruptSink interrupt_sink = {}) {
-    interrupt_sink_ = std::move(interrupt_sink);
-    address_space_ = legacy_vm_.register_address_space(kProcessId, &process_.page_table_,
-                                                       &process_.page_table_mutex_,
-                                                       process_.page_table_generation());
-    ASSERT_TRUE(address_space_) << "cannot register the translated SDMA test address space";
+  explicit TranslatedSdmaQueueForTest(Gfx1250Sim &sim, amdgpu::InterruptSink interrupt_sink = {},
+                                      bool enforce_dst_grant = false)
+      : sim_(sim), legacy_vm_(sim.soc->gpu_vm(), sim.soc->memory()), process_(kProcessId),
+        interrupt_sink_(std::move(interrupt_sink)) {
+    std::function<amdgpu::VmAccessAdmission(uint64_t, std::size_t, amdgpu::VmAccessKind)> admission;
+    if (enforce_dst_grant) {
+      admission = [this](uint64_t address, std::size_t size, amdgpu::VmAccessKind) {
+        const auto grant = process_.gpu_access_grant(1250, address, size);
+        return amdgpu::VmAccessAdmission{.outcome = grant.allowed
+                                                        ? amdgpu::VmAccessOutcome::Complete
+                                                        : amdgpu::VmAccessOutcome::Faulted,
+                                         .generation = grant.generation,
+                                         .cacheable = grant.cacheable};
+      };
+    }
+    address_space_ = legacy_vm_.register_address_space(
+        kProcessId, {.page_table = &process_.page_table_,
+                     .page_table_mutex = &process_.page_table_mutex_,
+                     .page_table_generation = process_.page_table_generation(),
+                     .request_mutex = {},
+                     .access_admission = std::move(admission)});
+    if (!address_space_) {
+      throw std::runtime_error("cannot register the translated SDMA test address space");
+    }
     process_.map_pages(kRingVa, ring_.data(), ring_.size() * sizeof(ring_[0]));
     process_.map_pages(kQueueStateVa, queue_state_.data(),
                        queue_state_.size() * sizeof(queue_state_[0]));
@@ -539,6 +567,16 @@ public:
     process_.map_pages(kDst2Va, dst2_.data(), dst2_.size());
     process_.map_pages(kSignalVa, signal_.data(), signal_.size() * sizeof(signal_[0]));
     process_.map_pages(kPollVa, poll_.data(), poll_.size() * sizeof(poll_[0]));
+
+    if (enforce_dst_grant) {
+      std::lock_guard lock(process_.alloc_mutex_);
+      KfdProcess::GpuAllocation allocation{};
+      allocation.gpu_va = kDstVa;
+      allocation.size = dst_.size();
+      allocation.handle = 1;
+      process_.allocations_.emplace(allocation.handle, std::move(allocation));
+      process_.publish_gpu_grants_locked();
+    }
 
     register_queue(kQueueStateVa);
   }
@@ -575,9 +613,10 @@ public:
   }
 
   ~TranslatedSdmaQueueForTest() {
-    if (queue_handle_)
+    if (queue_handle_) {
       (void)sim_.soc->queue_registry().unregister_queue(queue_handle_,
                                                         amdgpu::QueueCloseMode::ForceCancel);
+    }
     (void)legacy_vm_.unregister_address_space(address_space_);
   }
 
@@ -595,6 +634,20 @@ public:
   uint64_t dst2_va() const { return kDst2Va; }
   uint64_t signal_va() const { return kSignalVa; }
   uint64_t poll_va() const { return kPollVa; }
+
+  void set_dst_grant(bool granted) {
+    std::lock_guard lock(process_.alloc_mutex_);
+    auto &allocation = process_.allocations_.at(1);
+    if (granted) {
+      if (allocation.mapped_device_ids.insert(1250).second) {
+        allocation.admission_generations[1250] = process_.next_gpu_admission_generation_locked();
+      }
+    } else {
+      allocation.mapped_device_ids.erase(1250);
+      allocation.admission_generations.erase(1250);
+    }
+    process_.publish_gpu_grants_locked();
+  }
 
   void set_passthrough(bool passthrough) {
     ASSERT_TRUE(legacy_vm_.set_passthrough(address_space_, passthrough))
@@ -666,8 +719,9 @@ public:
         ADD_FAILURE() << "timed out waiting for the translated SDMA queue to retire or terminate";
         return;
       }
-      if (terminal_)
+      if (terminal_) {
         last_submission_status_ = amdgpu::QueueSubmissionStatus::Faulted;
+      }
     }
   }
 
@@ -927,11 +981,14 @@ TEST(CommandProcessorInterruptRoutingTest, QueuesWithTheSameProcessIdKeepDistinc
     second_status = 0;
   });
 
+  amdgpu::InterruptSubscription packet_owner([](uint32_t, uint32_t) {
+    ADD_FAILURE() << "Software queue exceptions must not use the packet interrupt route";
+  });
   auto register_queue = [&](uint32_t queue_id, uint64_t &exception_status, uint32_t event_id,
-                            const amdgpu::InterruptSink &interrupt_sink) {
+                            const amdgpu::InterruptSink &exception_event_sink) {
     amdgpu::ComputeQueueConfig queue{};
     queue.address_space = address_space;
-    queue.interrupt_sink = interrupt_sink;
+    queue.interrupt_sink = packet_owner.sink();
     queue.process_id = kProcessId;
     queue.queue_id = queue_id;
     queue.ring_base_va = 0x100;
@@ -940,6 +997,7 @@ TEST(CommandProcessorInterruptRoutingTest, QueuesWithTheSameProcessIdKeepDistinc
     queue.write_ptr_va = 0x88;
     queue.exception_status_va = reinterpret_cast<uint64_t>(&exception_status);
     queue.exception_event_id = event_id;
+    queue.exception_event_sink = exception_event_sink;
     (void)sim.cp()->register_queue(std::move(queue));
   };
   register_queue(17, first_status, 17, first_owner.sink());
@@ -1250,8 +1308,9 @@ TEST(Gfx1250SdmaTest, StaleAddressSpaceCannotExecuteThroughLegacyBacking) {
   std::array<uint64_t, 1> doorbells{write_idx};
   std::array<uint8_t, 32> source{};
   std::array<uint8_t, 32> destination{};
-  for (size_t index = 0; index < source.size(); ++index)
+  for (size_t index = 0; index < source.size(); ++index) {
     source[index] = static_cast<uint8_t>(index + 1);
+  }
 
   ring[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8);
   ring[1] = static_cast<uint32_t>(source.size() - 1);
@@ -1277,7 +1336,6 @@ TEST(Gfx1250SdmaTest, PollMem64WaitsForFull64BitCondition) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   queue.poll_value() = uint64_t{1} << 32;
 
   auto *packet = queue.ring();
@@ -1378,7 +1436,6 @@ TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingDirtyL2Line) {
   ASSERT_NE(l2, nullptr);
 
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr uint32_t kProcessId = 1251; // matches TranslatedSdmaQueueForTest.
   constexpr uint32_t kStaleWord = 0x11111111u;
   constexpr uint32_t kFillWord = 0x22222222u;
@@ -1409,7 +1466,6 @@ TEST(Gfx1250SdmaTest, ConstFillClippedDestinationRejectsWithoutPartialTransfer) 
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr size_t kFillBytes = 128;
   constexpr size_t kMappedBytes = 64;
   constexpr uint8_t kInitialByte = 0xa5;
@@ -1428,6 +1484,48 @@ TEST(Gfx1250SdmaTest, ConstFillClippedDestinationRejectsWithoutPartialTransfer) 
   EXPECT_EQ(queue.read_idx(), 0u);
   EXPECT_TRUE(std::ranges::all_of(queue.dst(), queue.dst() + kFillBytes,
                                   [](uint8_t value) { return value == kInitialByte; }));
+}
+
+TEST(Gfx1250SdmaTest, PinnedPacketHonorsLiveKfdDestinationGrant) {
+  class RecordingReporter : public amdgpu::MemoryFaultReporter {
+  public:
+    void report_memory_fault(uint32_t, uint64_t address, amdgpu::MemoryFaultCause cause) override {
+      addresses.push_back(address);
+      causes.push_back(cause);
+    }
+    std::vector<uint64_t> addresses;
+    std::vector<amdgpu::MemoryFaultCause> causes;
+  };
+
+  for (bool revoke_after_grant : {false, true}) {
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
+    TranslatedSdmaQueueForTest queue(sim, {}, /*enforce_dst_grant=*/true);
+    RecordingReporter reporter;
+    queue.set_fault_reporter(&reporter);
+    if (revoke_after_grant) {
+      queue.set_dst_grant(true);
+      queue.store<uint32_t>(queue.dst_va(), 0x11223344u);
+      queue.set_dst_grant(false);
+    }
+
+    auto *packet = queue.ring();
+    packet[0] = kSdmaOpConstFill | (0x2u << 30);
+    write_sdma_qword_va(packet, 1, 2, queue.dst_va());
+    packet[3] = 0x55667788u;
+    packet[4] = sizeof(uint32_t) - 1;
+    queue.submit(5);
+
+    EXPECT_EQ(queue.last_submission_status(), amdgpu::QueueSubmissionStatus::Faulted);
+    EXPECT_EQ(queue.read_idx(), 0u);
+    uint32_t destination = 0;
+    std::memcpy(&destination, queue.dst(), sizeof(destination));
+    EXPECT_EQ(destination, revoke_after_grant ? 0x11223344u : 0u);
+    ASSERT_EQ(reporter.addresses.size(), 1u);
+    EXPECT_EQ(reporter.addresses.front(), queue.dst_va());
+    EXPECT_EQ(reporter.causes.front(), amdgpu::MemoryFaultCause::NotPresent);
+    queue.set_fault_reporter(nullptr);
+  }
 }
 
 // A byte count that runs past the end of the address space is a malformed
@@ -1450,8 +1548,7 @@ TEST(Gfx1250SdmaTest, ClippedSignalMetadataHaltsWithoutDecrementing) {
   std::atomic<uint32_t> notified{0};
   amdgpu::InterruptSubscription interrupt_subscription(
       [&](uint32_t, uint32_t event_id) { notified.store(event_id, std::memory_order_release); });
-  TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize(interrupt_subscription.sink()));
+  TranslatedSdmaQueueForTest queue(sim, interrupt_subscription.sink());
 
   // Back the signal value but stop the mapping before the mailbox and event id,
   // so the record the completion path must read is clipped.
@@ -1480,7 +1577,6 @@ TEST(Gfx1250SdmaTest, WrappingCopyHaltsInsteadOfRetrying) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   ASSERT_NO_FATAL_FAILURE(queue.set_passthrough(true));
   constexpr uint64_t kNearTop = std::numeric_limits<uint64_t>::max() - 15;
   constexpr uint32_t kCopyBytes = 128;
@@ -1526,7 +1622,6 @@ TEST(Gfx1250SdmaTest, WrappingConstFillHaltsInsteadOfRetrying) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   ASSERT_NO_FATAL_FAILURE(queue.set_passthrough(true));
   constexpr uint64_t kNearTop = std::numeric_limits<uint64_t>::max() - 15;
   queue.signal_value() = 5;
@@ -1568,7 +1663,6 @@ TEST(Gfx1250SdmaTest, WrappingWriteHaltsInsteadOfLandingInLowMemory) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   ASSERT_NO_FATAL_FAILURE(queue.set_passthrough(true));
   constexpr uint64_t kNearTop = std::numeric_limits<uint64_t>::max() - 15;
   // Inside the bytes a wrapped walk would resume over.
@@ -1583,8 +1677,9 @@ TEST(Gfx1250SdmaTest, WrappingWriteHaltsInsteadOfLandingInLowMemory) {
   packet[0] = kSdmaOpWrite;
   write_sdma_qword_va(packet, 1, 2, kNearTop);
   packet[3] = kDwords - 1;
-  for (uint32_t i = 0; i < kDwords; ++i)
+  for (uint32_t i = 0; i < kDwords; ++i) {
     packet[4 + i] = 0xA5A5A5A5u;
+  }
   packet[4 + kDwords] = kSdmaOpFence;
   write_sdma_qword_va(packet, 5 + kDwords, 6 + kDwords, queue.signal_va());
   packet[7 + kDwords] = 0xDEADBEEFu;
@@ -1601,7 +1696,6 @@ TEST(Gfx1250SdmaTest, ConstFillUnmappedTailDoesNotAdvance) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr size_t kFillBytes = 8192;
   queue.unmap_dst_tail_page();
 
@@ -1626,7 +1720,6 @@ TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingScalarL1Line) {
   ASSERT_NE(cu, nullptr);
 
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr uint32_t kProcessId = 1251; // matches TranslatedSdmaQueueForTest.
   constexpr uint32_t kStaleWord = 0x11111111u;
   constexpr uint32_t kFillWord = 0x22222222u;
@@ -1654,8 +1747,9 @@ TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingScalarL1Line) {
   // Mimic later acquire/release maintenance. The clean K$ snapshot must not
   // resurrect stale data over the SDMA fill.
   cu->flush_l1(kProcessId);
-  if (auto *l2 = sim.xcd()->l2_cache())
+  if (auto *l2 = sim.xcd()->l2_cache()) {
     l2->flush_all();
+  }
 
   // Backing must reflect the SDMA fill, not the stale scalar line.
   uint32_t filled_word{};
@@ -1676,7 +1770,6 @@ TEST(Gfx1250SdmaTest, TimestampSupersedesOverlappingDirtyL2Line) {
   ASSERT_NE(l2, nullptr);
 
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr uint32_t kProcessId = 1251; // matches TranslatedSdmaQueueForTest.
   constexpr uint64_t kStaleQword = 0x1111111111111111ULL;
 
@@ -1694,8 +1787,9 @@ TEST(Gfx1250SdmaTest, TimestampSupersedesOverlappingDirtyL2Line) {
   EXPECT_EQ(queue.last_submission_status(), amdgpu::QueueSubmissionStatus::Accepted);
 
   // Force any still-resident dirty line out, mimicking a later flush.
-  if (auto *xl2 = sim.xcd()->l2_cache())
+  if (auto *xl2 = sim.xcd()->l2_cache()) {
     xl2->flush_all();
+  }
 
   // The timestamp value is nondeterministic, but it must not be the stale word
   // and must be a plausible nonzero nanosecond count.
@@ -1734,7 +1828,6 @@ TEST(Gfx1250SdmaTest, GcrWritebackPublishesInvalidateDropsNoopKeeps) {
     auto *l2 = sim.xcd()->l2_cache();
     ASSERT_NE(l2, nullptr);
     TranslatedSdmaQueueForTest queue(sim);
-    ASSERT_NO_FATAL_FAILURE(queue.initialize());
 
     // Put a known value in backing, then a different dirty value in L2 on top.
     ASSERT_NO_FATAL_FAILURE(queue.store(queue.dst_va(), kBackingWord));
@@ -1744,12 +1837,13 @@ TEST(Gfx1250SdmaTest, GcrWritebackPublishesInvalidateDropsNoopKeeps) {
 
     auto *packet = queue.ring();
     packet[0] = kSdmaOpGcr;
-    if (kind == GcrKind::WritebackOnly)
+    if (kind == GcrKind::WritebackOnly) {
       packet[kControlDw] = kGl2WbBit;
-    else if (kind == GcrKind::InvalidateOnly)
+    } else if (kind == GcrKind::InvalidateOnly) {
       packet[kControlDw] = kGl2InvBit;
-    else
+    } else {
       packet[kControlDw] = 0; // no GL2 bits: no-op.
+    }
 
     queue.submit(6); // gfx1250 GCR is 6 dwords.
     EXPECT_EQ(queue.last_submission_status(), amdgpu::QueueSubmissionStatus::Accepted);
@@ -1786,7 +1880,6 @@ TEST(Gfx1250SdmaTest, CopyWaitSignalResolvesTranslatedAddresses) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr uint32_t kCopyBytes = 128;
   queue.poll_value() = 0;
   queue.signal_value() = 5;
@@ -1818,6 +1911,7 @@ TEST(Gfx1250SdmaTest, CopyWaitSignalResolvesTranslatedAddresses) {
   EXPECT_EQ(queue.signal_value(), 4);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 // An endpoint that does not resolve YET is worth retrying, and
 // ConstFillUnmappedTailDoesNotAdvance pins that. An endpoint that does not
 // exist is not: the violation has already been reported to the process, and
@@ -1840,7 +1934,6 @@ TEST(Gfx1250SdmaTest, UnpublishableReadPointerHaltsInsteadOfReplayingPackets) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   ASSERT_NO_FATAL_FAILURE(queue.set_passthrough(true));
 
   constexpr uint32_t kCopyBytes = 64;
@@ -1878,9 +1971,10 @@ TEST(Gfx1250SdmaTest, UnpublishableReadPointerHaltsInsteadOfReplayingPackets) {
   std::memset(queue.dst(), 0, kCopyBytes);
   queue.submit(7);
   EXPECT_EQ(queue.last_submission_status(), amdgpu::QueueSubmissionStatus::Faulted);
-  for (uint32_t i = 0; i < kCopyBytes; ++i)
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
     ASSERT_EQ(queue.dst()[i], 0u) << "packet replayed after an unpublishable read pointer, byte "
                                   << i;
+  }
 
   ASSERT_EQ(mprotect(raw, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
   munmap(raw, KfdProcess::kPageSize);
@@ -1893,7 +1987,6 @@ TEST(Gfx1250SdmaTest, UnwritableReadPointerHaltsInsteadOfReplayingPackets) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   ASSERT_NO_FATAL_FAILURE(queue.set_passthrough(true));
 
   constexpr uint32_t kCopyBytes = 64;
@@ -1924,13 +2017,16 @@ TEST(Gfx1250SdmaTest, UnwritableReadPointerHaltsInsteadOfReplayingPackets) {
   std::memset(queue.dst(), 0, kCopyBytes);
   queue.submit(7);
   EXPECT_EQ(queue.last_submission_status(), amdgpu::QueueSubmissionStatus::Faulted);
-  for (uint32_t i = 0; i < kCopyBytes; ++i)
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
     ASSERT_EQ(queue.dst()[i], 0u) << "packet replayed after an unpublishable read pointer, byte "
                                   << i;
+  }
 
   mprotect(raw, KfdProcess::kPageSize, PROT_READ | PROT_WRITE);
   munmap(raw, KfdProcess::kPageSize);
 }
+
+#endif
 
 /// @brief A poll on a faulted address must halt rather than spin forever.
 /// @details A poll that cannot read its address is normally right to retry --
@@ -1942,7 +2038,6 @@ TEST(Gfx1250SdmaTest, PollOnFaultedAddressHaltsInsteadOfSpinning) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   ASSERT_NO_FATAL_FAILURE(queue.set_passthrough(true));
 
   void *raw = mmap(nullptr, KfdProcess::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -1980,11 +2075,11 @@ TEST(Gfx1250SdmaTest, PollOnFaultedAddressHaltsInsteadOfSpinning) {
   munmap(raw, KfdProcess::kPageSize);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(Gfx1250SdmaTest, FaultedCopyHaltsTheQueueBeforeLaterPackets) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   ASSERT_NO_FATAL_FAILURE(queue.set_passthrough(true));
 
   void *raw = mmap(nullptr, KfdProcess::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -2011,8 +2106,9 @@ TEST(Gfx1250SdmaTest, FaultedCopyHaltsTheQueueBeforeLaterPackets) {
   queue.submit(11);
   EXPECT_EQ(queue.last_submission_status(), amdgpu::QueueSubmissionStatus::Faulted);
 
-  for (uint32_t i = 0; i < kCopyBytes; ++i)
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
     ASSERT_EQ(queue.dst()[i], kSentinel) << "destination byte " << i;
+  }
   EXPECT_EQ(queue.signal_value(), 5)
       << "a packet behind a faulted copy must not run and publish completion";
 
@@ -2029,7 +2125,6 @@ TEST(Gfx1250SdmaTest, FaultedCopyDoesNotPublishItsCompletionSignal) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   ASSERT_NO_FATAL_FAILURE(queue.set_passthrough(true));
 
   void *raw = mmap(nullptr, KfdProcess::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -2075,7 +2170,6 @@ TEST(Gfx1250SdmaTest, CopyFromFaultedAddressRetiresPacketInsteadOfWedgingQueue) 
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   // Passthrough is what makes an unresolved address resolvable as a host
   // address at all, so it is required to reach the faulting path.
   ASSERT_NO_FATAL_FAILURE(queue.set_passthrough(true));
@@ -2109,11 +2203,12 @@ TEST(Gfx1250SdmaTest, CopyFromFaultedAddressRetiresPacketInsteadOfWedgingQueue) 
   munmap(raw, KfdProcess::kPageSize);
 }
 
+#endif
+
 TEST(Gfx1250SdmaTest, CompactCopyWaitPacketCopies) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr uint32_t kCopyBytes = 128;
   queue.poll_value() = 0;
   for (uint32_t i = 0; i < kCopyBytes; ++i) {
@@ -2143,7 +2238,6 @@ TEST(Gfx1250SdmaTest, CompactCopySignalPacketCopiesAndSignals) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr uint32_t kCopyBytes = 128;
   queue.signal_value() = 5;
   for (uint32_t i = 0; i < kCopyBytes; ++i) {
@@ -2172,7 +2266,6 @@ TEST(Gfx1250SdmaTest, CopyWaitSignalUnresolvedWaitAddressDoesNotAdvance) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr uint32_t kCopyBytes = 128;
   constexpr uint64_t kUnmappedWaitVa = 0x2000'0000'0000ULL;
   for (uint32_t i = 0; i < kCopyBytes; ++i) {
@@ -2202,7 +2295,6 @@ TEST(Gfx1250SdmaTest, CopyWaitSignalUnresolvedDstDoesNotAdvanceOrSignal) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr uint32_t kCopyBytes = 128;
   constexpr uint64_t kUnmappedDstVa = 0x2000'0000'2000ULL;
   queue.signal_value() = 5;
@@ -2232,7 +2324,6 @@ TEST(Gfx1250SdmaTest, CopyWaitSignalUnresolvedSignalDoesNotAdvanceOrCopy) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr uint32_t kCopyBytes = 128;
   constexpr uint64_t kUnmappedSignalVa = 0x2000'0000'4000ULL;
   queue.signal_value() = 5;
@@ -2262,7 +2353,6 @@ TEST(Gfx1250SdmaTest, CopyLinearUnresolvedDstDoesNotAdvance) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr uint32_t kCopyBytes = 128;
   constexpr uint64_t kUnmappedDstVa = 0x2000'0000'3000ULL;
   for (uint32_t i = 0; i < kCopyBytes; ++i) {
@@ -2286,7 +2376,6 @@ TEST(Gfx1250SdmaTest, CopyLinearUnmappedTailDoesNotAdvance) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr uint32_t kCopyBytes = 8192;
   queue.unmap_dst_tail_page();
 
@@ -2305,7 +2394,6 @@ TEST(Gfx1250SdmaTest, CopyLinearResumesAfterTailMappingIsInstalled) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr uint32_t kCopyBytes = 8192;
   for (uint32_t i = 0; i < kCopyBytes; ++i) {
     queue.src()[i] = static_cast<uint8_t>((i * 31 + 11) & 0xff);
@@ -2333,7 +2421,6 @@ TEST(Gfx1250SdmaTest, CopyLinearUnmappedSourceTailDoesNotAdvance) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr uint32_t kCopyBytes = 8192;
   queue.unmap_src_tail_page();
 
@@ -2352,7 +2439,6 @@ TEST(Gfx1250SdmaTest, CopyLinearClippedDestinationAdvancesWithoutPartialTransfer
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr uint32_t kCopyBytes = 128;
   constexpr uint32_t kMappedBytes = 64;
   queue.clip_dst_mapping(kMappedBytes);
@@ -2378,7 +2464,6 @@ TEST(Gfx1250SdmaTest, CopyLinearTransfersMultipleScratchChunks) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr uint32_t kCopyBytes = 8192;
   for (uint32_t i = 0; i < kCopyBytes; ++i) {
     queue.src()[i] = static_cast<uint8_t>((i * 17 + 3) & 0xff);
@@ -2401,7 +2486,6 @@ TEST(Gfx1250SdmaTest, BroadcastCopyTransfersMultipleScratchChunks) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr uint32_t kCopyBytes = 8192;
   for (uint32_t i = 0; i < kCopyBytes; ++i) {
     queue.src()[i] = static_cast<uint8_t>((i * 29 + 7) & 0xff);
@@ -2427,7 +2511,6 @@ TEST(Gfx1250SdmaTest, CopyLinearNpdBitDoesNotDecodeAsBroadcast) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr uint32_t kCopyBytes = 128;
   for (uint32_t i = 0; i < kCopyBytes; ++i) {
     queue.src()[i] = static_cast<uint8_t>(i ^ 0x4d);
@@ -2450,7 +2533,6 @@ TEST(Gfx1250SdmaTest, PollMem64ResolvesTranslatedAddress) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   queue.poll_value() = 1;
 
   auto *packet = queue.ring();
@@ -2475,7 +2557,6 @@ TEST(Gfx1250SdmaTest, PollMem64UnresolvedAddressDoesNotAdvance) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   TranslatedSdmaQueueForTest queue(sim);
-  ASSERT_NO_FATAL_FAILURE(queue.initialize());
   constexpr uint64_t kUnmappedPollVa = 0x2000'0000'1000ULL;
 
   auto *packet = queue.ring();

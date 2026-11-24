@@ -4,7 +4,7 @@
 //! HSA signals, IPC signal storage, waits, groups, and asynchronous handlers.
 //!
 //! The first 64 bytes of each native signal follow the public AMD signal layout
-//! used by queues and device-visible storage. HsaState-owned slabs keep ordinary
+//! used by queues and device-visible storage. HsaSession-owned slabs keep ordinary
 //! signal addresses stable, while dedicated rocddi allocations back interrupt
 //! and IPC-capable signals. Atomic operations preserve the ordering requested by
 //! each ABI entry point rather than strengthening all accesses indiscriminately.
@@ -22,30 +22,49 @@ use std::sync::{Arc, LazyLock, Mutex, MutexGuard, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::platform::event::{SignalEvent, SignalEventAddressing, SignalEventService};
+use rocddi::device::gpu::event::{
+    SignalEvent, SignalEventAddressing, SignalEventProtocol, SignalEventService,
+};
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
+use rocddi::memory::host::HostAllocation;
 #[cfg(test)]
 use rocddi::session::DriverContextLifetime;
 
+use crate::admission::InFlightToken;
 use crate::callback_arg::CallbackArg;
+use crate::events::CallbackScope;
 use crate::ffi::*;
+use crate::lifecycle::lock;
 use crate::memory::SignalBatchPool;
-use crate::runtime::{CallbackScope, HsaState, InFlightToken, lock, map_error};
+use crate::session::HsaSession;
+use crate::status::map_error;
 
 pub(crate) mod asynchronous;
 mod ipc;
 use asynchronous::AsyncDispatcher;
 #[cfg(test)]
 use asynchronous::*;
+mod value;
+pub(crate) use value::store;
 pub(crate) mod wait;
 #[cfg(test)]
 use crate::api::signal::wait::*;
 #[cfg(test)]
 use crate::api::signal::{atomic::*, core::*};
 use ipc::{ImportedIpcSignal, OwnedIpcSignal};
-pub(crate) use wait::set_system_frequency;
 #[cfg(test)]
 use wait::*;
+
+/// Destroys an HSA signal through its registry owner in an admitted generation.
+/// Native failures preserve the registered owner for retry.
+pub(crate) fn destroy(signal: HsaSignal) -> Result<(), Status> {
+    let mut guard = lock()?;
+    let runtime = crate::lifecycle::initialized_mut(&mut guard)?;
+    match runtime.signal_state.destroy_signal(signal) {
+        SUCCESS => Ok(()),
+        status => Err(status),
+    }
+}
 
 /// Signal size in bytes.
 const SIGNAL_BYTES: usize = 64;
@@ -316,8 +335,8 @@ impl AsyncSignalRecord {
 
 /// Stable device-visible storage from which ordinary signals are carved.
 pub(crate) struct SignalSlab {
-    /// GPU-visible allocation retaining every signal slot in this slab.
-    _allocation: Allocation,
+    /// Allocation retaining every signal slot in this slab.
+    _backing: SignalBacking,
     /// CPU address of the first signal slot.
     host: usize,
     /// Index of the next never-used slot.
@@ -326,18 +345,29 @@ pub(crate) struct SignalSlab {
 
 /// One contiguous native allocation retained by its public handle and members.
 #[allow(dead_code, reason = "the backing is held for its lifetime, not read")]
-enum SignalBatchBacking {
+enum SignalBacking {
     /// Dedicated native allocation backing an interrupt-capable signal.
     Native(Allocation),
+    /// Host pages used when this generation has no GPU consumers.
+    Host(HostAllocation),
     #[cfg(test)]
     /// In-memory signal records used to test batch ownership without KFD.
     Test(Box<[AmdSignal]>),
 }
 
+impl SignalBacking {
+    /// Allocates aligned signal pages without requiring a GPU or KFD event.
+    fn host(bytes: usize, page: usize) -> Result<(Self, usize), Status> {
+        let allocation = HostAllocation::allocate(bytes as u64, page as u64).map_err(map_error)?;
+        let host = allocation.info().host_address;
+        Ok((Self::Host(allocation), host))
+    }
+}
+
 /// Owns native signal backing and tracks free and live slots.
 struct SignalBatchStorage {
     /// Native allocation retained for the lifetime of this batch.
-    _backing: SignalBatchBacking,
+    _backing: SignalBacking,
     /// Number of batch slots that have not been allocated.
     remaining: usize,
     /// Whether the public batch handle is still valid.
@@ -361,8 +391,16 @@ impl Drop for SignalBatchStorage {
 
 impl SignalSlab {
     /// Allocates native backing for a device-visible signal batch.
-    fn create(runtime: &HsaState) -> Result<Self, Status> {
-        let (gpu, other_gpus) = runtime.gpus.split_first().ok_or(OUT_OF_RESOURCES)?;
+    fn create(runtime: &HsaSession) -> Result<Self, Status> {
+        let bytes = (SIGNAL_BYTES * SIGNALS_PER_SLAB).max(runtime.agents.host_page_size);
+        let Some((gpu, other_gpus)) = runtime.agents.gpus.split_first() else {
+            let (backing, host) = SignalBacking::host(bytes, runtime.agents.host_page_size)?;
+            return Ok(Self {
+                _backing: backing,
+                host,
+                next: 0,
+            });
+        };
         let peers = other_gpus
             .iter()
             .map(|peer| &peer.device)
@@ -372,14 +410,14 @@ impl SignalSlab {
             .allocate_with_peers(
                 &peers,
                 MemoryKind::System,
-                (SIGNAL_BYTES * SIGNALS_PER_SLAB).max(runtime.host_page_size) as u64,
-                runtime.host_page_size as u64,
+                bytes as u64,
+                runtime.agents.host_page_size as u64,
                 DeviceAccess::READ | DeviceAccess::WRITE,
             )
-            .map_err(crate::runtime::map_error)?;
+            .map_err(crate::status::map_error)?;
         let host = allocation.info().host_address.ok_or(OUT_OF_RESOURCES)?;
         Ok(Self {
-            _allocation: allocation,
+            _backing: SignalBacking::Native(allocation),
             host,
             next: 0,
         })
@@ -481,13 +519,13 @@ impl SignalState {
     }
 
     /// Initializes signal registries and stores the native context lifetime.
-    pub(crate) fn new(session: &rocddi::session::Session) -> Self {
-        Self {
+    pub(crate) fn new(session: &rocddi::session::Session) -> Result<Self, Status> {
+        Ok(Self {
             signal_slabs: Vec::new(),
             recycled_signals: Vec::new(),
             batches: HashMap::new(),
             batch_members: HashMap::new(),
-            event_service: SignalEventService::new(session),
+            event_service: SignalEventService::new(session).map_err(map_error)?,
             interrupt_signals: HashMap::new(),
             signal_event_pool: Vec::new(),
             owned_ipc_signals: HashMap::new(),
@@ -495,7 +533,7 @@ impl SignalState {
             async_signal_refs: HashMap::new(),
             signal_groups: HashMap::new(),
             async_dispatcher: None,
-        }
+        })
     }
 
     /// Releases HSA signal records after workers and native queues have stopped.
@@ -521,7 +559,7 @@ impl SignalState {
     }
 }
 
-impl HsaState {
+impl HsaSession {
     /// Ensures signal slab exists before use.
     fn ensure_signal_slab(&mut self) -> Result<(), Status> {
         if self
@@ -573,7 +611,7 @@ impl HsaState {
             .len()
             .checked_mul(SIGNAL_BYTES)
             .ok_or(OUT_OF_RESOURCES)?;
-        let page = self.host_page_size;
+        let page = self.agents.host_page_size;
         let allocation_bytes = bytes
             .checked_add(page - 1)
             .map(|size| size & !(page - 1))
@@ -601,45 +639,53 @@ impl HsaState {
                 .try_reserve(1)
                 .map_err(|_| OUT_OF_RESOURCES)?;
         }
-        let owner = self
-            .gpus
-            .get(owner_index)
-            .ok_or(OUT_OF_RESOURCES)?
-            .device
-            .clone();
-        let peers = self
-            .gpus
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| *index != owner_index)
-            .filter(|(index, _)| {
-                matches!(pool, SignalBatchPool::System)
-                    || consumers.is_empty()
-                    || consumers
-                        .iter()
-                        .any(|agent| agent.handle == GPU_AGENT_BASE + *index as u64)
-            })
-            .map(|(_, gpu)| gpu.device.clone())
-            .collect::<Vec<_>>();
-        let peer_refs = peers.iter().collect::<Vec<_>>();
-        let allocation = owner
-            .allocate_with_peers(
-                &peer_refs,
-                kind,
-                allocation_bytes as u64,
-                page as u64,
-                DeviceAccess::READ | DeviceAccess::WRITE,
-            )
-            .map_err(map_error)?;
-        let info = allocation.info();
-        let host = info.host_address.ok_or(OUT_OF_RESOURCES)?;
+        let (backing, host) =
+            if self.agents.gpus.is_empty() && matches!(pool, SignalBatchPool::System) {
+                SignalBacking::host(allocation_bytes, page)?
+            } else {
+                let owner = self
+                    .agents
+                    .gpus
+                    .get(owner_index)
+                    .ok_or(OUT_OF_RESOURCES)?
+                    .device
+                    .clone();
+                let peers = self
+                    .agents
+                    .gpus
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| *index != owner_index)
+                    .filter(|(index, _)| {
+                        matches!(pool, SignalBatchPool::System)
+                            || consumers.is_empty()
+                            || consumers
+                                .iter()
+                                .any(|agent| agent.handle == GPU_AGENT_BASE + *index as u64)
+                    })
+                    .map(|(_, gpu)| gpu.device.clone())
+                    .collect::<Vec<_>>();
+                let peer_refs = peers.iter().collect::<Vec<_>>();
+                let allocation = owner
+                    .allocate_with_peers(
+                        &peer_refs,
+                        kind,
+                        allocation_bytes as u64,
+                        page as u64,
+                        DeviceAccess::READ | DeviceAccess::WRITE,
+                    )
+                    .map_err(map_error)?;
+                let info = allocation.info();
+                let host = info.host_address.ok_or(OUT_OF_RESOURCES)?;
+                if info.device_address != host as u64
+                    || info.size < bytes as u64
+                    || host % SIGNAL_BYTES != 0
+                {
+                    return Err(OUT_OF_RESOURCES);
+                }
+                (SignalBacking::Native(allocation), host)
+            };
         let end = host.checked_add(bytes).ok_or(OUT_OF_RESOURCES)?;
-        if info.device_address != host as u64
-            || info.size < bytes as u64
-            || host % SIGNAL_BYTES != 0
-        {
-            return Err(OUT_OF_RESOURCES);
-        }
         self.signal_state
             .batches
             .try_reserve(1)
@@ -703,7 +749,7 @@ impl HsaState {
         self.signal_state.batches.insert(
             batch.handle,
             SignalBatchStorage {
-                _backing: SignalBatchBacking::Native(allocation),
+                _backing: backing,
                 remaining: values.len(),
                 handle_live: true,
                 host_atomics_supported: !flush,
@@ -716,14 +762,14 @@ impl HsaState {
     /// Creates signal event and records its ownership.
     pub(crate) fn create_signal_event(
         &mut self,
-    ) -> Option<(crate::platform::event::SignalEvent, usize, u32)> {
-        let gpu = self.gpus.first()?;
+    ) -> Option<(rocddi::device::gpu::event::SignalEvent, usize, u32)> {
+        let gpu = self.agents.gpus.first()?;
         let (event, mailbox) = self
             .signal_state
             .event_service
             .create(&gpu.device, SignalEventAddressing::Identity)
             .ok()?;
-        let id = event.info().kfd_event_id;
+        let SignalEventProtocol::KfdSignal { event_id: id } = event.protocol();
         Some((event, mailbox.host, id))
     }
 
@@ -732,13 +778,13 @@ impl HsaState {
         // Reuse the KFD event after its previous signal has been destroyed.
         // The stable process event page supplies the same mailbox address.
         if let Some(event) = self.signal_state.signal_event_pool.last() {
-            let gpu = self.gpus.first()?;
+            let gpu = self.agents.gpus.first()?;
             let mailbox = self
                 .signal_state
                 .event_service
                 .mailbox(&gpu.device, event)
                 .ok()?;
-            let id = event.info().kfd_event_id;
+            let SignalEventProtocol::KfdSignal { event_id: id } = event.protocol();
             let event = self.signal_state.signal_event_pool.pop()?;
             return Some((event, mailbox.host, id));
         }
@@ -1137,10 +1183,9 @@ pub(crate) unsafe fn with_public_signal<R>(
     signal: HsaSignal,
     operation: impl for<'a> FnOnce(&'a AmdSignal) -> R,
 ) -> Option<R> {
-    let admission = crate::runtime::enter_public_raw_handle()?;
-    let _lease_scope = crate::runtime::ApiLeaseScope::enter(admission);
+    let admission = crate::admission::enter_public_raw_handle()?;
     // SAFETY: The caller supplies the same ownership guarantee as with_signal.
-    unsafe { with_signal(signal, operation) }
+    crate::admission::ApiLeaseScope::run(admission, || unsafe { with_signal(signal, operation) })
 }
 
 /// Evaluates an HSA signal wait condition against the observed value.

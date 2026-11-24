@@ -14,6 +14,7 @@
  */
 
 #include <hip_test_common.hh>
+#include "hip_vmm_common.hh"
 
 /**
  * Test Description
@@ -41,6 +42,7 @@ HIP_TEST_CASE(Unit_hipMemRelease_Capture) {
   int device_id = 0;
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, device_id));
+  checkVMMSupported(device);
 
   hipMemAllocationProp allocation_prop{};
   allocation_prop.type = hipMemAllocationTypePinned;

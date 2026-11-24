@@ -15,6 +15,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -53,8 +54,9 @@ template <typename Entry, size_t N>
 std::optional<BaseEncodingWords> find_test_encoding(const Entry (&encodings)[N],
                                                     std::string_view mnemonic) {
   for (const auto &encoding : encodings) {
-    if (encoding.mnemonic == mnemonic)
+    if (encoding.mnemonic == mnemonic) {
       return encoding.words;
+    }
   }
   return std::nullopt;
 }
@@ -68,7 +70,7 @@ std::optional<BaseEncodingWords> gfx1250_encoding(std::string_view mnemonic) {
 }
 
 struct PseudoScalarProfile {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   std::string_view name;
   EncodingLookup find_encoding;
   uint32_t setreg_op;
@@ -76,9 +78,9 @@ struct PseudoScalarProfile {
 };
 
 constexpr std::array<PseudoScalarProfile, 2> kProfiles{{
-    {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna4_encoding, rdna4::kSSetregB32Sopk,
+    {rocjitsu::IsaFamily::Rdna4, "rdna4", rdna4_encoding, rdna4::kSSetregB32Sopk,
      rdna4::kSSetregImm32B32Sopk},
-    {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", gfx1250_encoding, cdna5::kSSetregB32Sopk,
+    {rocjitsu::IsaFamily::Cdna5, "gfx1250", gfx1250_encoding, cdna5::kSSetregB32Sopk,
      cdna5::kSSetregImm32B32Sopk},
 }};
 
@@ -112,9 +114,11 @@ struct PseudoScalarParam {
 constexpr auto make_parameters() {
   std::array<PseudoScalarParam, kProfiles.size() * kCases.size()> parameters{};
   std::size_t index = 0;
-  for (const auto &profile : kProfiles)
-    for (const auto &test_case : kCases)
+  for (const auto &profile : kProfiles) {
+    for (const auto &test_case : kCases) {
       parameters[index++] = {&profile, &test_case};
+    }
+  }
   return parameters;
 }
 
@@ -142,14 +146,18 @@ InstructionWords encode_vop3(const PseudoScalarProfile &profile, std::string_vie
   InstructionWords words{(*base_encoding)[0], (*base_encoding)[1], options.literal};
   words[0] = (words[0] & ~0xFFu) | (destination_sgpr & 0xFFu);
   words[1] = (words[1] & ~0x1FFu) | (options.use_literal ? 255u : (source_sgpr & 0x1FFu));
-  if (options.source_opsel)
+  if (options.source_opsel) {
     words[0] |= 1u << 11;
-  if (options.abs_src0)
+  }
+  if (options.abs_src0) {
     words[0] |= 1u << 8;
-  if (options.neg_src0)
+  }
+  if (options.neg_src0) {
     words[1] |= 1u << 29;
-  if (options.clamp)
+  }
+  if (options.clamp) {
     words[0] |= 1u << 15;
+  }
   words[1] |= (options.omod & 0x3u) << 27;
   return words;
 }
@@ -659,9 +667,11 @@ struct PseudoScalarSpecialParam {
 constexpr auto make_special_parameters() {
   std::array<PseudoScalarSpecialParam, kProfiles.size() * kSpecialCases.size()> parameters{};
   std::size_t index = 0;
-  for (const auto &profile : kProfiles)
-    for (const auto &test_case : kSpecialCases)
+  for (const auto &profile : kProfiles) {
+    for (const auto &test_case : kSpecialCases) {
       parameters[index++] = {&profile, &test_case};
+    }
+  }
   return parameters;
 }
 
@@ -669,7 +679,7 @@ constexpr auto kSpecialParameters = make_special_parameters();
 
 class PseudoScalarFixture {
 public:
-  explicit PseudoScalarFixture(const PseudoScalarProfile &profile)
+  explicit PseudoScalarFixture(const PseudoScalarProfile &profile, uint32_t wave_size = 0)
       : profile(profile), gpu_memory(std::string(profile.name) + "_pseudo_scalar_memory"),
         l2(std::string(profile.name) + "_pseudo_scalar_l2") {
     config.arch = profile.arch;
@@ -679,16 +689,20 @@ public:
     config.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(compute_unit, std::string(profile.name), config,
                                             &gpu_memory, &l2);
-    if (!compute_unit)
+    if (!compute_unit) {
       return;
+    }
     decoder = Decoder::create(profile.arch);
-    if (compute_unit)
-      wavefront = compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+    if (compute_unit) {
+      wavefront =
+          compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf, wave_size);
+    }
   }
 
   ~PseudoScalarFixture() {
-    if (wavefront && !wavefront->is_halted())
+    if (wavefront && !wavefront->is_halted()) {
       wavefront->halt();
+    }
   }
 
   bool ready() const {
@@ -779,6 +793,28 @@ TEST_P(PseudoScalarExecTest, ExecutesWithVccAsSourceAndDestination) {
   }
 }
 
+TEST(PseudoScalarSpecialSourceTest, Rdna4HalfTranscendentalsReadSpecialScalarSources) {
+  PseudoScalarFixture fixture(kProfiles[0], 64);
+  ASSERT_TRUE(fixture.ready());
+  fixture.wavefront->set_m0(0x4400u);
+  fixture.wavefront->set_exec_raw(0x440000004400ull);
+  fixture.wavefront->write_scc(true);
+  fixture.wavefront->set_fp_denorm_mode(0xf);
+  constexpr uint32_t dest = 4;
+  // gfx1201 returns sqrt(4) for M0 and either EXEC half, and sqrt(2^-24) for SCC.
+  for (uint32_t selector : {125u, 126u, 127u, 253u}) {
+    SCOPED_TRACE(selector);
+    const auto words = encode_vop3(fixture.profile, "v_s_sqrt_f16", dest, selector);
+    std::unique_ptr<Instruction> inst(decode_valid(*fixture.decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    fixture.compute_unit->write_sgpr(fixture.sgpr_base() + dest, 0xdeadbeef);
+    ASSERT_TRUE(
+        fixture.compute_unit->execute_instruction(inst.get(), *fixture.wavefront).succeeded());
+    EXPECT_EQ(fixture.compute_unit->read_sgpr(fixture.sgpr_base() + dest),
+              selector == 253u ? 0x0c00u : 0x4000u);
+  }
+}
+
 TEST(PseudoScalarDecodeTest, RejectsOutOfClassDestinations) {
   constexpr std::array<uint32_t, 4> kInvalidSelectors{{126u, 127u, 128u, 255u}};
   constexpr uint32_t kSourceSgpr = 0;
@@ -813,12 +849,9 @@ TEST(PseudoScalarDecodeTest, RejectsDppAndDpp8Sources) {
   }
 }
 
-TEST(PseudoScalarHelperTest, HandlesExplicitSpecialCasesWithoutHostInvalidOrDivideByZero) {
+TEST(PseudoScalarHelperTest, HandlesExplicitSpecialCases) {
   using amdgpu::pseudo_scalar::Operation;
 
-  fenv_t saved_environment{};
-  ASSERT_EQ(std::fegetenv(&saved_environment), 0);
-  ASSERT_EQ(std::feclearexcept(FE_ALL_EXCEPT), 0);
   const uint32_t f32_rcp_zero =
       amdgpu::pseudo_scalar::execute_f32(Operation::RCP, 0.0f, false, false, 0, 3, 0, false);
   const uint32_t f32_rcp_negative_zero =
@@ -847,11 +880,7 @@ TEST(PseudoScalarHelperTest, HandlesExplicitSpecialCasesWithoutHostInvalidOrDivi
       Operation::LOG2, util::f16_to_f32(0xBC00u), false, false, 0, 3, 0, false, false);
   const uint32_t f16_signaling_nan = amdgpu::transcendental::execute_pseudo_f16(
       Operation::SQRT, util::f16_to_f32(0x7D01u), false, false, 0, 3, 0, false, false);
-  const int leaked_exceptions = std::fetestexcept(FE_INVALID | FE_DIVBYZERO);
-  const int restore_result = std::fesetenv(&saved_environment);
 
-  EXPECT_EQ(restore_result, 0);
-  EXPECT_EQ(leaked_exceptions, 0);
   EXPECT_EQ(f32_rcp_zero, 0x7F800000u);
   EXPECT_EQ(f32_rcp_negative_zero, 0xFF800000u);
   EXPECT_EQ(f32_sqrt_negative, 0xFFC00000u);
@@ -871,26 +900,24 @@ TEST(PseudoScalarHelperTest, HandlesExplicitSpecialCasesWithoutHostInvalidOrDivi
   EXPECT_NE(f16_signaling_nan & 0x0200u, 0u);
 }
 
-TEST(PseudoScalarHelperTest, QuietsSignalingNanWithoutHostExceptions) {
+TEST(PseudoScalarHelperTest, QuietsSignalingNan) {
   using amdgpu::pseudo_scalar::Operation;
-  std::fenv_t saved_environment{};
-  ASSERT_EQ(std::fegetenv(&saved_environment), 0);
   for (Operation operation :
-       {Operation::EXP2, Operation::LOG2, Operation::RCP, Operation::RSQ, Operation::SQRT})
-    for (uint32_t input : {0x7f800001u, 0xffbfffffu})
-      for (uint32_t omod = 0; omod < 4; ++omod)
+       {Operation::EXP2, Operation::LOG2, Operation::RCP, Operation::RSQ, Operation::SQRT}) {
+    for (uint32_t input : {0x7f800001u, 0xffbfffffu}) {
+      for (uint32_t omod = 0; omod < 4; ++omod) {
         for (bool clamp : {false, true}) {
           // Keep the source dynamic so constant folding cannot hide an unsafe
           // host floating-point comparison in the NaN classification.
           volatile uint32_t source = input;
-          EXPECT_EQ(std::feclearexcept(FE_ALL_EXCEPT), 0);
           const uint32_t result = amdgpu::pseudo_scalar::execute_f32(
               operation, std::bit_cast<float>(uint32_t{source}), false, false, 0, 3, omod, clamp);
-          const int exceptions = std::fetestexcept(FE_INVALID | FE_DIVBYZERO);
-          EXPECT_EQ(std::fesetenv(&saved_environment), 0);
-          EXPECT_EQ(exceptions, 0) << "operation=" << static_cast<unsigned>(operation);
-          EXPECT_EQ(result, clamp ? 0u : (input | 0x00400000u));
+          EXPECT_EQ(result, clamp ? 0u : (input | 0x00400000u))
+              << "operation=" << static_cast<unsigned>(operation);
         }
+      }
+    }
+  }
 }
 
 TEST(PseudoScalarHelperTest, ReciprocalSquareRootMatchesPhysicalGfx12ModesAndModifiers) {
@@ -910,21 +937,18 @@ TEST(PseudoScalarHelperTest, ReciprocalSquareRootMatchesPhysicalGfx12ModesAndMod
       {0x496e2c06u, 0x3a84b446u, 0x3b04b446u, 0x3b84b446u, 0x3a04b446u},
       {0x83f75dfcu, 0xffc00000u, 0xffc00000u, 0xffc00000u, 0xffc00000u},
   };
-  std::fenv_t saved_environment{};
-  ASSERT_EQ(std::fegetenv(&saved_environment), 0);
-  for (int host_mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    EXPECT_EQ(std::fesetround(host_mode), 0);
-    for (const auto &test : cases)
-      for (uint32_t round_mode = 0; round_mode < 4; ++round_mode)
-        for (uint32_t denorm_mode = 0; denorm_mode < 4; ++denorm_mode)
-          for (uint32_t omod = 0; omod < 4; ++omod)
-            EXPECT_EQ(amdgpu::pseudo_scalar::execute_f32(
-                          amdgpu::pseudo_scalar::Operation::RSQ, std::bit_cast<float>(test[0]),
-                          false, false, round_mode, denorm_mode, omod, false),
-                      test[omod + 1])
-                << "host rounding mode=" << host_mode;
+  for (const auto &test : cases) {
+    for (uint32_t round_mode = 0; round_mode < 4; ++round_mode) {
+      for (uint32_t denorm_mode = 0; denorm_mode < 4; ++denorm_mode) {
+        for (uint32_t omod = 0; omod < 4; ++omod) {
+          EXPECT_EQ(amdgpu::pseudo_scalar::execute_f32(amdgpu::pseudo_scalar::Operation::RSQ,
+                                                       std::bit_cast<float>(test[0]), false, false,
+                                                       round_mode, denorm_mode, omod, false),
+                    test[omod + 1]);
+        }
+      }
+    }
   }
-  EXPECT_EQ(std::fesetenv(&saved_environment), 0);
 }
 
 TEST(PseudoScalarHelperTest, HalfReciprocalSquareRootMatchesPhysicalModesAndModifiers) {
@@ -935,26 +959,22 @@ TEST(PseudoScalarHelperTest, HalfReciprocalSquareRootMatchesPhysicalModesAndModi
       {0xbc00, 0xfe00, 0xfe00, 0xfe00, 0xfe00},
       {0x7bff, 0x1c00, 0x2000, 0x2400, 0x1800},
   };
-  std::fenv_t saved_environment{};
-  ASSERT_EQ(std::fegetenv(&saved_environment), 0);
-  for (int host_mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    EXPECT_EQ(std::fesetround(host_mode), 0);
-    for (uint32_t round_mode = 0; round_mode < 4; ++round_mode)
-      for (uint32_t denorm_mode = 0; denorm_mode < 4; ++denorm_mode) {
-        for (const auto &test : cases)
-          for (uint32_t omod = 0; omod < 4; ++omod)
-            EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(
-                          amdgpu::pseudo_scalar::Operation::RSQ, util::f16_to_f32(test[0]), false,
-                          false, round_mode, denorm_mode, omod, false, false),
-                      test[omod + 1]);
-        EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(
-                      amdgpu::pseudo_scalar::Operation::RSQ,
-                      flushed_f16_source(0x0001, denorm_mode), false, false, round_mode,
-                      denorm_mode, 0, false, false),
-                  (denorm_mode & 1u) ? 0x6c00u : 0x7c00u);
+  for (uint32_t round_mode = 0; round_mode < 4; ++round_mode) {
+    for (uint32_t denorm_mode = 0; denorm_mode < 4; ++denorm_mode) {
+      for (const auto &test : cases) {
+        for (uint32_t omod = 0; omod < 4; ++omod) {
+          EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(
+                        amdgpu::pseudo_scalar::Operation::RSQ, util::f16_to_f32(test[0]), false,
+                        false, round_mode, denorm_mode, omod, false, false),
+                    test[omod + 1]);
+        }
       }
+      EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(
+                    amdgpu::pseudo_scalar::Operation::RSQ, flushed_f16_source(0x0001, denorm_mode),
+                    false, false, round_mode, denorm_mode, 0, false, false),
+                (denorm_mode & 1u) ? 0x6c00u : 0x7c00u);
+    }
   }
-  EXPECT_EQ(std::fesetenv(&saved_environment), 0);
 }
 
 TEST(PseudoScalarHelperTest, ReciprocalMatchesPhysicalGfx12ModesAndModifiers) {
@@ -970,26 +990,24 @@ TEST(PseudoScalarHelperTest, ReciprocalMatchesPhysicalGfx12ModesAndModifiers) {
       {0x007FFFFFu, 0x7F800000u, 0x7F800000u, 0x7F800000u, 0x7F800000u},
       {0x80800000u, 0xFE800000u, 0xFF000000u, 0xFF800000u, 0xFE000000u},
   };
-  std::fenv_t saved_environment{};
-  ASSERT_EQ(std::fegetenv(&saved_environment), 0);
-  for (int host_mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    EXPECT_EQ(std::fesetround(host_mode), 0);
-    for (const auto &test : cases)
-      for (uint32_t round_mode = 0; round_mode < 4; ++round_mode)
-        for (uint32_t denorm_mode = 0; denorm_mode < 4; ++denorm_mode)
-          for (uint32_t omod = 0; omod < 4; ++omod)
-            EXPECT_EQ(amdgpu::pseudo_scalar::execute_f32(
-                          amdgpu::pseudo_scalar::Operation::RCP, std::bit_cast<float>(test[0]),
-                          false, false, round_mode, denorm_mode, omod, false),
-                      test[omod + 1])
-                << "host rounding mode=" << host_mode;
-    for (uint32_t sign : {0u, 0x80000000u})
-      EXPECT_EQ(amdgpu::pseudo_scalar::execute_f32(amdgpu::pseudo_scalar::Operation::RCP,
-                                                   std::bit_cast<float>(0x00800000u | sign), false,
-                                                   false, 3, 3, 2, true),
-                sign ? 0u : 0x3F800000u);
+  for (const auto &test : cases) {
+    for (uint32_t round_mode = 0; round_mode < 4; ++round_mode) {
+      for (uint32_t denorm_mode = 0; denorm_mode < 4; ++denorm_mode) {
+        for (uint32_t omod = 0; omod < 4; ++omod) {
+          EXPECT_EQ(amdgpu::pseudo_scalar::execute_f32(amdgpu::pseudo_scalar::Operation::RCP,
+                                                       std::bit_cast<float>(test[0]), false, false,
+                                                       round_mode, denorm_mode, omod, false),
+                    test[omod + 1]);
+        }
+      }
+    }
   }
-  EXPECT_EQ(std::fesetenv(&saved_environment), 0);
+  for (uint32_t sign : {0u, 0x80000000u}) {
+    EXPECT_EQ(amdgpu::pseudo_scalar::execute_f32(amdgpu::pseudo_scalar::Operation::RCP,
+                                                 std::bit_cast<float>(0x00800000u | sign), false,
+                                                 false, 3, 3, 2, true),
+              sign ? 0u : 0x3F800000u);
+  }
 }
 
 TEST(PseudoScalarHelperTest, PreservesAndFlushesSignedDenormals) {

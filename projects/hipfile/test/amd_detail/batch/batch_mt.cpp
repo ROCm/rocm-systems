@@ -5,6 +5,10 @@
 
 // Multithreading stress test for hipFile's batch context map
 //
+// All threads share a single batch context map, creating, looking up,
+// and destroying batch contexts in it at the same time. Each thread
+// only looks up and destroys the contexts it created.
+//
 // Just run the program. It takes no special arguments.
 //
 
@@ -14,6 +18,7 @@
 #include <array>
 #include <atomic>
 #include <cstdlib>
+#include <functional>
 #include <iostream>
 #include <mutex>
 #include <random>
@@ -39,16 +44,14 @@ static mutex io_mutex;
 
 static atomic<bool> run_flag{true};
 
-void thread_function(int);
+void thread_function(int, BatchContextMap &);
 
 void
-thread_function(int id)
+thread_function(int id, BatchContextMap &bcm)
 {
     constexpr int N_CYCLES  = 100; // # of cycles before checking the run flag
     constexpr int N_PRELOAD = 10;  // # of handles to load before cycling
     constexpr int CAPACITY  = 64;  // Arbitrary
-
-    auto bcm = BatchContextMap{};
 
     vector<hipFileBatchHandle_t> handles;
 
@@ -104,10 +107,17 @@ thread_function(int id)
                     //       on the data
                 } break;
                 default: {
-                    lock_guard<mutex> guard{io_mutex};
-                    cout << "ERROR: Tried to pick a non-existent case" << endl;
+                    {
+                        lock_guard<mutex> guard{io_mutex};
+                        cerr << "ERROR: Tried to pick a non-existent case" << endl;
+                    }
+                    // Don't call exit() from a worker thread: it destroys
+                    // static objects while the other threads are still
+                    // using them. abort() stops the process where it is,
+                    // and when the test runs under gdb, gdb prints every
+                    // thread's backtrace.
+                    abort();
                 }
-                    exit(EXIT_FAILURE);
             }
         }
     }
@@ -126,10 +136,14 @@ thread_function(int id)
 int
 main()
 {
+    // Shared by all the threads. It must outlive them, so it's declared
+    // before the threads, which are joined before it's destroyed.
+    BatchContextMap bcm;
+
     array<thread, N_THREADS> threads;
 
     for (size_t i{0}; i < N_THREADS; i++) {
-        threads[i] = thread{thread_function, i};
+        threads[i] = thread{thread_function, i, ref(bcm)};
     }
 
     sleep(RUNTIME_S);

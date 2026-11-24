@@ -664,6 +664,66 @@ typedef struct {
   uint32_t reserved[4];
 } rsmi_ampp_profile_t;
 
+//! The types/struct below mirror amdsmi_hawk_insertion_priority_t,
+//! amdsmi_power_stabilization_param_id_t, and
+//! amdsmi_power_stabilization_info_t (amd_smi/amdsmi.h) byte-for-byte so
+//! amd_smi.cc can translate between them with a single
+//! sizeof/offsetof-guarded reinterpret_cast.
+
+/**
+ * @brief HAWK dummy-compute insertion priority
+ */
+typedef enum {
+  RSMI_HAWK_INSERTION_PRIORITY_OPPORTUNISTIC = 0,  //!< Insert only when otherwise idle
+  RSMI_HAWK_INSERTION_PRIORITY_GUARANTEED = 1,     //!< Always insert to hold the Power Floor
+  RSMI_HAWK_INSERTION_PRIORITY_DYNAMIC = 2,        //!< Firmware chooses based on conditions
+  RSMI_HAWK_INSERTION_PRIORITY_LAST =
+      RSMI_HAWK_INSERTION_PRIORITY_DYNAMIC  //!< Highest valid priority value
+} rsmi_hawk_insertion_priority_t;
+
+/**
+ * @brief Identifies a single Power Stabilization parameter for
+ * rsmi_dev_power_stabilization_param_set(). Every parameter, including the
+ * two ramp rates below, is a plain int64_t.
+ */
+typedef enum {
+  RSMI_POWER_STABILIZATION_PARAM_ENABLE = 0,          //!< Enable/disable Power Stabilization (0/1)
+  RSMI_POWER_STABILIZATION_PARAM_POWER_FLOOR,         //!< Power Floor, % of power limit (0-100;
+                                                      //!< 0 disables Power Stabilization)
+  RSMI_POWER_STABILIZATION_PARAM_DELAY,               //!< Insertion delay, milliseconds
+  RSMI_POWER_STABILIZATION_PARAM_INSERTION_PRIORITY,  //!< ::rsmi_hawk_insertion_priority_t value
+  RSMI_POWER_STABILIZATION_PARAM_RAMP_ENABLE,         //!< Enable/disable Ramp Management (0/1)
+  RSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE,    //!< Max ramp-up rate, %PL/sec
+                                                           //!< (100 disables ramp-up management)
+  RSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE,  //!< Max ramp-down rate, %PL/sec
+                                                           //!< (100 disables ramp-down
+                                                           //!< management)
+  RSMI_POWER_STABILIZATION_PARAM_RAMP_MIN_TIME_AT_POWER_FLOOR,  //!< Minimum time at Power Floor,
+                                                                //!< seconds
+  RSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY,               //!< Ramp stop delay, seconds
+  RSMI_POWER_STABILIZATION_PARAM_LAST =
+      RSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY  //!< Sentinel for range validation
+} rsmi_power_stabilization_param_id_t;
+
+/**
+ * @brief Snapshot of all Power Stabilization and Ramp Management state for
+ * a device, as returned by rsmi_dev_power_stabilization_info_get().
+ */
+typedef struct {
+  bool host_control_enabled;                          //!< Read-only: true if host has control of
+                                                      //!< Power Stabilization
+  bool enabled;                                       //!< Power Stabilization enabled
+  uint32_t power_floor;                               //!< Power Floor, % of power limit (0-100)
+  uint32_t delay;                                     //!< Insertion delay, milliseconds
+  rsmi_hawk_insertion_priority_t insertion_priority;  //!< HAWK insertion priority
+  bool ramp_enabled;                                  //!< Ramp Management enabled
+  uint32_t ramp_max_ramp_up_rate;                     //!< Max ramp-up rate, %PL/sec
+  uint32_t ramp_max_ramp_down_rate;                   //!< Max ramp-down rate, %PL/sec
+  uint32_t ramp_min_time_at_power_floor;              //!< Minimum time at Power Floor, seconds
+  uint32_t ramp_stop_delay;                           //!< Ramp stop delay, seconds
+  uint64_t reserved[11];
+} rsmi_power_stabilization_info_t;
+
 /**
  * @brief NPM balancing mode
  *
@@ -925,6 +985,17 @@ typedef enum _RSMI_IO_LINK_TYPE {
 //! The CPU node index which will be used in rsmi_topo_get_link_type
 //! to query the link type between GPU and CPU
 #define CPU_NODE_INDEX 0xFFFFFFFF
+
+/**
+ * @brief One GPU<->CPU link (any type -- XGMI, PCIe, etc), distinct from the
+ * single-slot NUMA-affinity CPU neighbor used elsewhere (@see CPU_NODE_INDEX).
+ */
+typedef struct {
+  uint32_t numa_node_id;   //!< the CPU neighbor's real Linux NUMA node id
+  RSMI_IO_LINK_TYPE type;  //!< the link's type (e.g. RSMI_IOLINK_TYPE_XGMI,
+                           //!< RSMI_IOLINK_TYPE_PCIEXPRESS)
+  uint64_t reserved[4];
+} rsmi_cpu_link_t;
 
 /**
  * @brief The utilization counter type
@@ -1866,6 +1937,8 @@ typedef struct {
  *  to modify how RSMI initializes.
  *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_DRIVER_NOT_LOADED ROCm/KFD is not present on this system.
+ *  @retval ::RSMI_STATUS_INIT_ERROR initialization failed for other reasons.
  */
 rsmi_status_t rsmi_init(uint64_t init_flags);
 
@@ -1903,34 +1976,6 @@ rsmi_status_t rsmi_driver_status(rsmi_driver_state_t* state);
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  */
 rsmi_status_t rsmi_num_monitor_devices(uint32_t* num_devices);
-
-/**
- *  @brief Get the number of brcm nic devices that have monitor information.
- *
- *  @details The number of devices brcm nic which have monitors is returned. Monitors
- *  are referenced by the index which can be between 0 and @p num_devices - 1.
- *
- *  @param[inout] num_devices Caller provided pointer to uint32_t. Upon
- *  successful call, the value num_devices will contain the number of brcm nic monitor
- *  devices.
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- */
-rsmi_status_t rsmi_num_nic_monitor_devices(uint32_t* num_devices);
-
-/**
- *  @brief Get the number of brcm switch devices that have monitor information.
- *
- *  @details The number of devices brcm switch which have monitors is returned. Monitors
- *  are referenced by the index which can be between 0 and @p num_devices - 1.
- *
- *  @param[inout] num_devices Caller provided pointer to uint32_t. Upon
- *  successful call, the value num_devices will contain the number of brcm switch monitor
- *  devices.
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- */
-rsmi_status_t rsmi_num_switch_monitor_devices(uint32_t* num_devices);
 
 /**
  *  @brief Get the device id associated with the device with provided device
@@ -2572,8 +2617,6 @@ rsmi_status_t rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t*
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
 rsmi_status_t rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid);
-rsmi_status_t rsmi_nic_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid);
-rsmi_status_t rsmi_switch_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid);
 
 /**
  *  @brief Get the NUMA node associated with a device
@@ -3325,6 +3368,55 @@ rsmi_status_t rsmi_dev_ampp_profile_activate(uint32_t dv_ind, const char* profil
  */
 rsmi_status_t rsmi_dev_ampp_profile_configure(uint32_t dv_ind, const char* profile_name,
                                               const rsmi_ampp_field_t* fields, uint32_t num_fields);
+
+/**
+ *  @brief Get Power Stabilization info
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[out] info Pointer to receive the Power Stabilization info
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED Power Stabilization is not implemented
+ *  on this device, or the device is multi-VF
+ *  @retval ::RSMI_STATUS_INVALID_ARGS info is nullptr
+ */
+rsmi_status_t rsmi_dev_power_stabilization_info_get(uint32_t dv_ind,
+                                                    rsmi_power_stabilization_info_t* info);
+
+/**
+ *  @brief Set a single Power Stabilization parameter
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[in] param_id parameter to set
+ *  @param[in] value new value to write
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED Power Stabilization is not implemented
+ *  on this device, the device is multi-VF, or the driver rejects the write
+ *  due to an unmet dependency
+ *  @retval ::RSMI_STATUS_INVALID_ARGS param_id is invalid
+ */
+rsmi_status_t rsmi_dev_power_stabilization_param_set(uint32_t dv_ind,
+                                                     rsmi_power_stabilization_param_id_t param_id,
+                                                     int64_t value);
+
+/**
+ *  @brief Check whether Power Stabilization is supported on a device,
+ *  without reading any parameter value. Narrower than
+ *  rsmi_dev_power_stabilization_info_get(): validates the handle and the
+ *  sysfs directory's existence only, so a probe of this scope can't fail
+ *  due to an unrelated field's malformed sysfs content the way a full
+ *  info read could.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS the device index is valid and Power
+ *  Stabilization is supported
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED Power Stabilization is not implemented
+ *  on this device, or the device is multi-VF
+ *  @retval ::RSMI_STATUS_INVALID_ARGS dv_ind is out of range
+ */
+rsmi_status_t rsmi_dev_power_stabilization_check_support(uint32_t dv_ind);
 
 /**
  *  @brief Get the temperature metric value for the specified metric, from the
@@ -5149,6 +5241,30 @@ rsmi_status_t rsmi_minmax_bandwidth_get(uint32_t dv_ind_src, uint32_t dv_ind_dst
  */
 rsmi_status_t rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst, uint64_t* hops,
                                       RSMI_IO_LINK_TYPE* type);
+
+/**
+ *  @brief Retrieve a device's directly-connected CPU link(s), of any type
+ *
+ *  @details Given a source device index @p dv_ind, this discovers every
+ *  CPU-destined io_link neighbor of that GPU (e.g. an XGMI-typed
+ *  GPU-to-CPU-socket connection, or a PCIe-typed one) and
+ *  writes up to @p *num_links of them to @p links. On return, @p *num_links
+ *  holds the number of links found (which may be more than fit in the
+ *  caller's buffer if @p links is too small). A GPU is physically wired to
+ *  exactly one CPU socket, so p2p_link-reported *reachability* to a second,
+ *  non-directly-connected CPU is intentionally not considered here.
+ *
+ *  @param[in] dv_ind the source device index
+ *
+ *  @param[inout] num_links in: capacity of @p links; out: number of links found
+ *
+ *  @param[out] links buffer of at least *num_links entries (as passed in)
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful (including when zero
+ *  links are found -- that is a normal result, not an error)
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ */
+rsmi_status_t rsmi_topo_get_cpu_links(uint32_t dv_ind, uint32_t* num_links, rsmi_cpu_link_t* links);
 
 /**
  *  @brief Return P2P availability status between 2 GPUs

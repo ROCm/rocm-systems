@@ -1,0 +1,76 @@
+wgp.active_wgps:
+  name: Active WGPs
+  formula: SUM(SQG_LEVEL_WGP_ACTIVE_ACCUM) / SUM(SQG_CYCLES_sum)
+  unit: Count
+  description: >-
+    Average number of WGPs that had at least one active wavefront in a cycle.
+  peak: $cu_per_gpu
+wgp.bus_stall_rate_row0:
+  name: WGP Bus Stall Rate - Row0
+  formula: 100 * SUM(SQ_VMEM_REQ_ROW0_STALL_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)
+  unit: Percent
+  description: Percentage of cycles the TXA request bus Row 0 is stalled.
+wgp.bus_stall_rate_row1:
+  name: WGP Bus Stall Rate - Row1
+  formula: 100 * SUM(SQ_VMEM_REQ_ROW1_STALL_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)
+  unit: Percent
+  description: Percentage of cycles the TXA request bus Row 1 is stalled.
+wgp.bus_util_row0:
+  name: WGP Bus Utilization - Row0
+  formula: 100 * SUM(SQ_VMEM_REQ_ROW0_BUSY_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)
+  unit: Percent
+  description: >-
+    Percentage of cycles the TXA request bus Row 0 is carrying a valid request.
+wgp.bus_util_row1:
+  name: WGP Bus Utilization - Row1
+  formula: 100 * SUM(SQ_VMEM_REQ_ROW1_BUSY_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)
+  unit: Percent
+  description: >-
+    Percentage of cycles the TXA request bus Row 1 is carrying a valid request.
+wgp.gl0_lds_req_bus_util:
+  name: WGP-GL0 LDS Request Bus Utilization
+  formula: 100 * SUM(SQ_INST_CYCLES_LDS_sum) / SUM(SQ_BUSY_CYCLES_sum)
+  unit: Percent
+  description: >-
+    Percentage of cycles the WGP-to-GL0 bus is carrying an LDS request.
+wgp.gl0_req_bus_util:
+  name: WGP-GL0 Request Bus Utilization
+  formula: 100 * SUM(SQ_INST_CYCLES_TEX_sum) / SUM(SQ_BUSY_CYCLES_sum)
+  unit: Percent
+  description: >-
+    Percentage of cycles the WGP-to-GL0 request bus is carrying a valid request.
+wgp.gl0_vmem_rd_req_bus_util:
+  name: WGP-GL0 VMEM Read Request Bus Utilization
+  formula: 100 * SUM(SQ_INST_CYCLES_VMEM_LOAD_sum) / SUM(SQ_BUSY_CYCLES_sum)
+  unit: Percent
+  description: >-
+    Percentage of cycles the WGP-to-GL0 bus is carrying a VMEM read request.
+wgp.gl0_vmem_req_bus_util:
+  name: WGP-GL0 VMEM Request Bus Utilization
+  formula: 100 * SUM(SQ_INST_CYCLES_VMEM_sum) / SUM(SQ_BUSY_CYCLES_sum)
+  unit: Percent
+  description: >-
+    Percentage of cycles the WGP-to-GL0 bus is carrying a VMEM request.
+wgp.gl0_vmem_wr_req_bus_util:
+  name: WGP-GL0 VMEM Write Request Bus Utilization
+  formula: 100 * SUM(SQ_INST_CYCLES_VMEM_STORE_sum) / SUM(SQ_BUSY_CYCLES_sum)
+  unit: Percent
+  description: >-
+    Percentage of cycles the WGP-to-GL0 bus is carrying a VMEM write request.
+wgp.txd_data_bus_util:
+  name: TXD Data Bus Utilization
+  formula: 100 * SUM(SP_VGPR_TDLDS_DATA_WR_sum) / SUM(SQ_BUSY_CYCLES_sum)
+  unit: Percent
+  description: >-
+    Percentage of cycles the TXD data return bus is carrying valid return data.
+wgp.util:
+  name: WGP Utilization
+  formula: 100 * SUM(SQG_BUSY_CYCLES_sum) / SUM(SQG_CYCLES_sum)
+  unit: Percent
+  description: >-
+    Percentage of WGP clock cycles at least one wavefront is active.
+wgp.wall_clock:
+  name: Wall Clock
+  formula: AVG(SQG_REFCLKS_sum)
+  unit: Cycles
+  description: Total elapsed kernel clock cycles.

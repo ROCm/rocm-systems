@@ -28,6 +28,7 @@ for bits in (32, 64):
     for ones in (0, 1):
         SCALAR[f'S_BCNT{ones}_I32_B{bits}'] = ScalarShape(32, (bits,), True)
     SCALAR[f'S_CTZ_I32_B{bits}'] = ScalarShape(32, (bits,), False)
+    SCALAR[f'S_FF0_I32_B{bits}'] = ScalarShape(32, (bits,), False)
     SCALAR[f'S_CLZ_I32_U{bits}'] = ScalarShape(32, (bits,), False)
     for op in ('QUADMASK', 'WQM'):
         SCALAR[f'S_{op}_B{bits}'] = ScalarShape(bits, (bits,), True)
@@ -69,6 +70,18 @@ for bits in (32, 64):
 for halves in ('LL', 'LH', 'HL', 'HH'):
     SCALAR[f'S_PACK_{halves}_B32_B16'] = ScalarShape(32, (32, 32), False)
 SCALAR['S_BITREPLICATE_B64_B32'] = ScalarShape(64, (32,), False)
+
+# Older mnemonics share the same scalar result and SCC contract.
+SCALAR['S_FF1_I32_B32'] = SCALAR['S_CTZ_I32_B32']
+SCALAR['S_FF1_I32_B64'] = SCALAR['S_CTZ_I32_B64']
+SCALAR['S_FLBIT_I32_B32'] = SCALAR['S_CLZ_I32_U32']
+SCALAR['S_FLBIT_I32_B64'] = SCALAR['S_CLZ_I32_U64']
+SCALAR['S_FLBIT_I32'] = SCALAR['S_CLS_I32']
+SCALAR['S_FLBIT_I32_I64'] = SCALAR['S_CLS_I32_I64']
+SCALAR['S_ANDN2_B32'] = SCALAR['S_AND_NOT1_B32']
+SCALAR['S_ORN2_B32'] = SCALAR['S_OR_NOT1_B32']
+SCALAR['S_ANDN2_B64'] = SCALAR['S_AND_NOT1_B64']
+SCALAR['S_ORN2_B64'] = SCALAR['S_OR_NOT1_B64']
 
 # Comparisons have only an SCC output. CMPK's encoded sdst is an input.
 COMPARISONS = {}
@@ -142,6 +155,10 @@ FLOAT_ARITHMETIC.update(
         'S_FMAMK_F32': ScalarFloatOperation(3, 32, 32),
     }
 )
+ROUNDED_RESULTS = {
+    f'S_{op}_F{bits}' for bits in (16, 32) for op in ('ADD', 'SUB', 'MUL', 'FMAC')
+} | {'S_FMAAK_F32', 'S_FMAMK_F32', 'S_CVT_F32_I32', 'S_CVT_F32_U32', 'S_CVT_F16_F32'}
+GFX1250_ROUNDED_RESULTS = {'S_FMAC_F32', 'S_FMAAK_F32', 'S_FMAMK_F32'}
 MOVES = {f'S_{op}_B{bits}' for op in ('MOV', 'CMOV') for bits in (32, 64)} | {
     'S_MOVK_I32',
     'S_CMOVK_I32',
@@ -169,6 +186,16 @@ EXEC_UPDATES = {
     )
     for op in operations
 }
+# Older CDNA numbers operands from one; the explicit source is operand one.
+EXEC_UPDATES |= {
+    f'S_{op}_{action}_B64'
+    for action, operations in (
+        ('SAVEEXEC', ('ANDN1', 'ANDN2', 'ORN1', 'ORN2')),
+        ('WREXEC', ('ANDN1', 'ANDN2')),
+    )
+    for op in operations
+}
+
 RELATIVE_MOVES = {
     'S_MOVRELS_B32',
     'S_MOVRELS_B64',
@@ -194,6 +221,93 @@ SCALAR_NAMES = (
     | FLOAT_ROUNDING.keys()
     | FLOAT_ARITHMETIC.keys()
 )
+
+
+# Integer and FP families are enabled independently by architecture.
+INTEGER_NAMES = SCALAR.keys() | COMPARISONS.keys() | IMMEDIATE.keys() | BITSET.keys()
+
+
+# Operations confined to one 32-bit SGPR per operand and result.
+WORD_INTEGER_NAMES = (
+    {
+        name
+        for name, shape in SCALAR.items()
+        if shape.result_bits == 32 and max(shape.input_bits) <= 32
+    }
+    | {name for name, bits in COMPARISONS.items() if max(bits) <= 32}
+    | IMMEDIATE.keys()
+    | {name for name, bits in BITSET.items() if bits == 32}
+)
+
+# Paired SGPR inputs/results, including 32-bit counts of 64-bit operands.
+WIDE_INTEGER_NAMES = (
+    {
+        name
+        for name, shape in SCALAR.items()
+        if shape.result_bits == 64 or max(shape.input_bits) == 64
+    }
+    | {name for name, bits in COMPARISONS.items() if max(bits) == 64}
+    | {name for name, bits in BITSET.items() if bits == 64}
+)
+
+
+GFX1250_BINARY_NAMES = {
+    f'S_{op}_F{bits}'
+    for bits in (16, 32)
+    for op in ('ADD', 'SUB', 'MUL', 'MIN_NUM', 'MAX_NUM', 'MINIMUM', 'MAXIMUM')
+}
+
+
+GFX1250_FMA_NAMES = {'S_FMAC_F16', 'S_FMAC_F32', 'S_FMAAK_F32', 'S_FMAMK_F32'}
+
+
+GFX1250_CONVERSION_NAMES = {
+    name for name in FLOAT_ARITHMETIC if name.startswith('S_CVT_')
+}
+
+
+# gfx1150's MIN/MAX spellings predate gfx12's MIN_NUM/MAX_NUM names.
+GFX1150_SELECTION = {
+    f'S_{op}_F{bits}': f'S_{op}_NUM_F{bits}'
+    for bits in (16, 32)
+    for op in ('MIN', 'MAX')
+}
+GFX1150_FLOAT_NAMES = (
+    FLOAT_COMPARISONS.keys()
+    | FLOAT_ROUNDING.keys()
+    | (
+        FLOAT_ARITHMETIC.keys()
+        - {
+            f'S_{op}_F{bits}'
+            for bits in (16, 32)
+            for op in ('MIN_NUM', 'MAX_NUM', 'MINIMUM', 'MAXIMUM')
+        }
+    )
+    | GFX1150_SELECTION.keys()
+)
+
+
+def supports_scalar(arch: str, mnemonic: str) -> bool:
+    if arch == 'rdna3_5' and mnemonic in GFX1150_FLOAT_NAMES:
+        return True
+    if arch in ('rdna3', 'rdna4'):
+        return mnemonic in SCALAR_NAMES
+    if arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'):
+        return mnemonic in WORD_INTEGER_NAMES or mnemonic in WIDE_INTEGER_NAMES
+    if arch not in ('cdna3', 'cdna4', 'cdna5'):
+        return False
+    if mnemonic in INTEGER_NAMES | MOVES | RELATIVE_MOVES | EXEC_UPDATES:
+        return True
+    if arch == 'cdna5':
+        return (
+            mnemonic
+            in FLOAT_COMPARISONS
+            | FLOAT_ROUNDING
+            | FLOAT_ARITHMETIC.keys()
+            | MODE_UPDATES
+            | {'S_GET_PC_I64'}
+        )
+    return mnemonic == 'S_GETPC_B64'
 
 
 def _call(mnemonic, arguments, flags='wf.cu().arithmetic_flags()'):
@@ -262,7 +376,10 @@ def _gen_bitset(mnemonic, dst, src):
     return '\n'.join(lines)
 
 
-def _gen_float(mnemonic, dst, src):
+def _gen_float(mnemonic, dst, src, *, gfx1250=False, gfx1150=False):
+    api_name = mnemonic
+    if gfx1150:
+        mnemonic = GFX1150_SELECTION.get(mnemonic, mnemonic)
     comparison = mnemonic in FLOAT_COMPARISONS
     if mnemonic in FLOAT_ARITHMETIC:
         operation = FLOAT_ARITHMETIC[mnemonic]
@@ -275,6 +392,8 @@ def _gen_float(mnemonic, dst, src):
         '  amdgpu::RegisterAccess registers(wf);',
         f'  uint64_t flags = wf.cu().arithmetic_flags();',
     ]
+    if gfx1150 and not comparison:
+        lines.append('  if (wf.ieee_mode()) flags |= RJ_ARITH_FP_IEEE_MODE;')
     if mnemonic in (
         'S_ADD_F16',
         'S_SUB_F16',
@@ -293,8 +412,15 @@ def _gen_float(mnemonic, dst, src):
                 f'  if (!(wf.{denorm}() & {mask}u))',
                 f'    flags |= RJ_ARITH_FP_FLUSH_{flag}_DENORMALS;',
             ]
-    if mnemonic in ('S_FMAC_F32', 'S_FMAAK_F32', 'S_FMAMK_F32'):
-        lines.append('  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;')
+    # gfx1250 keeps its inherited model, which honors MODE rounding only for FP32 FMA.
+    if mnemonic in (GFX1250_ROUNDED_RESULTS if gfx1250 else ROUNDED_RESULTS):
+        # The destination format selects the MODE rounding field.
+        rounding = (
+            'fp_round_mode_f32'
+            if operation.output_fp_bits == 32
+            else 'fp_round_mode_f16_f64'
+        )
+        lines.append(f'  flags |= uint64_t(wf.{rounding}()) << 24;')
     for i, operand in enumerate(src):
         # Numeric FP16 inlines differ from raw scalar register/literal carriers.
         if operation.input_fp_bits == 16:
@@ -306,16 +432,29 @@ def _gen_float(mnemonic, dst, src):
     initial = f'registers.read_scalar({dst[0]})' if operation.accumulator else '0'
     lines += [f'  uint32_t result = {initial};', '  uint32_t causes = 0;']
     arguments = '&result, ' + ', '.join(f'input{i}' for i in range(len(src)))
-    lines += _call(mnemonic, arguments + ', &causes', 'flags')
+    lines += _call(
+        api_name
+        + ('_GFX1250' if gfx1250 else '_GFX1150' if gfx1150 and not comparison else ''),
+        arguments + ', &causes',
+        'flags',
+    )
     lines.append(
         '  wf.write_scc(result);'
         if comparison
         else f'  registers.write_scalar({dst[0]}, result);'
     )
-    lines += [
-        '  wf.set_trapsts(wf.trapsts() | causes);',
-        '  wf.raise_alu_causes(causes);',
-    ]
+    if gfx1150:
+        lines += [
+            '  if (!wf.instruction_execution_failed() && !wf.dx10_clamp()) {',
+            '    wf.set_trapsts(wf.trapsts() | causes);',
+            '    wf.raise_alu_causes(causes);',
+            '  }',
+        ]
+    elif not gfx1250:
+        lines += [
+            '  wf.set_trapsts(wf.trapsts() | causes);',
+            '  wf.raise_alu_causes(causes);',
+        ]
     return '\n'.join(lines)
 
 
@@ -385,7 +524,7 @@ def _gen_exec_update(mnemonic, dst, src):
     bits = 64 if wide else 32
     suffix = '64' if wide else ''
     read_exec = 'wf.exec_raw()' if wide else 'uint32_t(wf.exec())'
-    write_exec = 'write_exec' if wide else 'set_exec'
+    write_exec = 'write_exec' if wide else 'write_exec_lo'
     lines = [
         '  amdgpu::RegisterAccess registers(wf);',
         f'  const uint{bits}_t input = registers.read_scalar{suffix}({src[0]});',
@@ -408,14 +547,28 @@ def gen_scalar(ctx: ExecuteContext) -> str | None:
     mnemonic = ctx.inst.name
     dst = ctx.dst_ops
     src = ctx.src_ops
-    if arch not in ('rdna3', 'rdna4'):
+    if not supports_scalar(arch, mnemonic):
         return None
+    if mnemonic in ('S_GETPC_B64', 'S_GET_PC_I64'):
+        if len(dst) != 1 or src:
+            return None
+        lines = ['  uint64_t result = 0;']
+        lines += _call(mnemonic, '&result, wf.pc')
+        lines.append(f'  amdgpu::RegisterAccess(wf).write_scalar64({dst[0]}, result);')
+        return '\n'.join(lines)
     if (
         mnemonic in FLOAT_COMPARISONS
         or mnemonic in FLOAT_ROUNDING
         or mnemonic in FLOAT_ARITHMETIC
+        or (arch == 'rdna3_5' and mnemonic in GFX1150_SELECTION)
     ):
-        return _gen_float(mnemonic, dst, src) if arch == 'rdna4' else None
+        return (
+            _gen_float(
+                mnemonic, dst, src, gfx1250=arch == 'cdna5', gfx1150=arch == 'rdna3_5'
+            )
+            if arch in ('rdna4', 'cdna5', 'rdna3_5')
+            else None
+        )
     if mnemonic in EXEC_UPDATES:
         return _gen_exec_update(mnemonic, dst, src)
     if mnemonic in MODE_UPDATES:

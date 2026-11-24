@@ -4,8 +4,9 @@
 // Vector floating-point predicates, returning one comparison bit per lane.
 // The caller applies EXEC and handles FP exception reporting.
 
+#include "common/compiler.h"
 #include "compare/float_compare_impl.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_compare.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -91,11 +92,11 @@ public:
 
 } // namespace
 
-// Evaluate ordered/unordered FP predicates.
+// Evaluate a full wave; the result-mask width selects 32 or 64 lanes.
 // Requires the named CPU features and validated instruction controls.
-template <int Bits, unsigned Predicate>
-uint32_t float_compare_x86_64_v4(uint32_t mode, bool flush, const uint32_t *const *a,
-                                 const uint32_t *const *b) {
+template <int Bits, unsigned Predicate, typename Mask>
+Mask float_compare_x86_64_v4(uint32_t mode, bool flush, const uint32_t *const *a,
+                             const uint32_t *const *b) {
   using L = Lanes<Bits>;
   constexpr int lanes = 512 / (Bits == 64 ? 64 : 32);
   constexpr uint64_t sign = 1ULL << (Bits - 1), magnitude = sign - 1;
@@ -103,8 +104,10 @@ uint32_t float_compare_x86_64_v4(uint32_t mode, bool flush, const uint32_t *cons
                                 : Bits == 32 ? 0x7f800000
                                              : 0x7ff0000000000000ULL;
   auto zero = L::set(0), inf = L::set(infinity), mag = L::set(magnitude), sign_bit = L::set(sign);
-  uint32_t less = 0, equal = 0, unordered = 0;
-  for (int lane = 0; lane < 32; lane += lanes) {
+  static_assert(sizeof(Mask) == 4 || sizeof(Mask) == 8);
+  Mask less = 0, equal = 0, unordered = 0;
+  RJ_ARITH_UNROLL(16)
+  for (int lane = 0; lane < int(sizeof(Mask) * 8); lane += lanes) {
     auto av = L::load(a, lane), bv = L::load(b, lane);
     if constexpr (Bits == 16) {
       av = L::band(_mm512_srl_epi32(av, _mm_cvtsi32_si128(mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0)),
@@ -120,7 +123,7 @@ uint32_t float_compare_x86_64_v4(uint32_t mode, bool flush, const uint32_t *cons
       av = L::select(L::eq(L::band(av, inf), zero), av, L::band(av, sign_bit));
       bv = L::select(L::eq(L::band(bv, inf), zero), bv, L::band(bv, sign_bit));
     }
-    unordered |= (L::mask(L::gt(L::band(av, mag), inf)) | L::mask(L::gt(L::band(bv, mag), inf)))
+    unordered |= Mask(L::mask(L::gt(L::band(av, mag), inf)) | L::mask(L::gt(L::band(bv, mag), inf)))
                  << lane;
     av = L::select(L::eq(L::band(av, mag), zero), av, zero);
     bv = L::select(L::eq(L::band(bv, mag), zero), bv, zero);
@@ -128,8 +131,8 @@ uint32_t float_compare_x86_64_v4(uint32_t mode, bool flush, const uint32_t *cons
         av, L::select(L::eq(L::band(av, sign_bit), sign_bit), sign_bit, L::set(sign | magnitude)));
     bv = L::bxor(
         bv, L::select(L::eq(L::band(bv, sign_bit), sign_bit), sign_bit, L::set(sign | magnitude)));
-    less |= L::mask(L::lt_unsigned(av, bv)) << lane;
-    equal |= L::mask(L::eq(av, bv)) << lane;
+    less |= Mask(L::mask(L::lt_unsigned(av, bv))) << lane;
+    equal |= Mask(L::mask(L::eq(av, bv))) << lane;
   }
   return float_compare_result<Predicate>(less, equal, ~unordered);
 }
@@ -223,6 +226,91 @@ template uint32_t float_compare_x86_64_v4<64, rocjitsu::arith::CompareNotLessEqu
 template uint32_t float_compare_x86_64_v4<64, rocjitsu::arith::CompareNotEqualUnordered>(
     uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
 template uint32_t float_compare_x86_64_v4<64, rocjitsu::arith::CompareNotLess>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+
+template uint64_t float_compare_x86_64_v4<16, rocjitsu::arith::CompareLess, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<16, rocjitsu::arith::CompareEqual, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<16, rocjitsu::arith::CompareLessEqual, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<16, rocjitsu::arith::CompareGreater, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<16, rocjitsu::arith::CompareNotEqual, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<16, rocjitsu::arith::CompareGreaterEqual, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<16, rocjitsu::arith::CompareOrdered, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<16, rocjitsu::arith::CompareUnordered, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<16, rocjitsu::arith::CompareNotGreaterEqual, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<16, rocjitsu::arith::CompareNotLessGreater, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<16, rocjitsu::arith::CompareNotGreater, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<16, rocjitsu::arith::CompareNotLessEqual, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<16, rocjitsu::arith::CompareNotEqualUnordered, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<16, rocjitsu::arith::CompareNotLess, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<32, rocjitsu::arith::CompareLess, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<32, rocjitsu::arith::CompareEqual, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<32, rocjitsu::arith::CompareLessEqual, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<32, rocjitsu::arith::CompareGreater, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<32, rocjitsu::arith::CompareNotEqual, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<32, rocjitsu::arith::CompareGreaterEqual, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<32, rocjitsu::arith::CompareOrdered, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<32, rocjitsu::arith::CompareUnordered, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<32, rocjitsu::arith::CompareNotGreaterEqual, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<32, rocjitsu::arith::CompareNotLessGreater, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<32, rocjitsu::arith::CompareNotGreater, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<32, rocjitsu::arith::CompareNotLessEqual, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<32, rocjitsu::arith::CompareNotEqualUnordered, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<32, rocjitsu::arith::CompareNotLess, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<64, rocjitsu::arith::CompareLess, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<64, rocjitsu::arith::CompareEqual, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<64, rocjitsu::arith::CompareLessEqual, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<64, rocjitsu::arith::CompareGreater, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<64, rocjitsu::arith::CompareNotEqual, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<64, rocjitsu::arith::CompareGreaterEqual, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<64, rocjitsu::arith::CompareOrdered, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<64, rocjitsu::arith::CompareUnordered, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<64, rocjitsu::arith::CompareNotGreaterEqual, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<64, rocjitsu::arith::CompareNotLessGreater, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<64, rocjitsu::arith::CompareNotGreater, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<64, rocjitsu::arith::CompareNotLessEqual, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<64, rocjitsu::arith::CompareNotEqualUnordered, uint64_t>(
+    uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
+template uint64_t float_compare_x86_64_v4<64, rocjitsu::arith::CompareNotLess, uint64_t>(
     uint32_t, bool, const uint32_t *const *, const uint32_t *const *);
 
 } // namespace rocjitsu::arith

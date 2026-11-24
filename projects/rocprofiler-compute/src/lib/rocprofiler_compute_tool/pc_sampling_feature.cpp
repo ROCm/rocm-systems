@@ -3,6 +3,7 @@
 #include "pc_sampling_feature.h"
 
 #include "code_object_writer.h"
+#include "gsl_assert.h"
 #include "sdk_callbacks.h"
 
 using namespace rocprofiler_compute_tool;
@@ -62,15 +63,24 @@ void pc_sampling_feature_t::on_code_object_load(const rocprofiler_callback_traci
     m_collector->on_code_object_load(info);
 }
 
-void pc_sampling_feature_t::write(tool_data_t& /*tool_data*/)
+void pc_sampling_feature_t::write(tool_data_t& tool_data)
 {
-    if (m_enabled)
-        finalize();
+    if (!m_enabled)
+        return;
+
+    std::set<std::pair<uint64_t, std::string>> dispatched_symbols;
+    for (const auto& dispatch : tool_data.dispatch_records)
+    {
+        const auto found = tool_data.kernel_symbols.find(dispatch.kernel_id);
+        Expects(found != tool_data.kernel_symbols.end());
+        dispatched_symbols.emplace(found->second.code_object_id, found->second.mangled_name);
+    }
+    finalize(dispatched_symbols);
 }
 
-void pc_sampling_feature_t::finalize()
+void pc_sampling_feature_t::finalize(const std::set<std::pair<uint64_t, std::string>>& dispatched_symbols)
 {
-    m_collector->finalize(*m_writer);
+    m_collector->finalize(*m_writer, dispatched_symbols);
     // Processes that loaded no code objects (e.g. non-GPU launchers/forks)
     // should not leave an empty artifact behind.
     if (!m_writer->empty())

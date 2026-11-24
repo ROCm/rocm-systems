@@ -210,6 +210,53 @@ set(TEST_tile_get_wave_3d 192)
 set(TEST_tile_put_wave_4d 193)
 set(TEST_tile_get_wave_4d 194)
 set(TEST_signal_ops_on_stream 195)
+set(TEST_tile_put_3d_strided 196)
+set(TEST_tile_get_3d_strided 197)
+set(TEST_tile_put_wg_3d_strided 198)
+set(TEST_tile_get_wg_3d_strided 199)
+set(TEST_tile_put_wave_3d_strided 200)
+set(TEST_tile_get_wave_3d_strided 201)
+set(TEST_tile_put_4d_strided 202)
+set(TEST_tile_get_4d_strided 203)
+set(TEST_tile_put_wg_4d_strided 204)
+set(TEST_tile_get_wg_4d_strided 205)
+set(TEST_tile_put_wave_4d_strided 206)
+set(TEST_tile_get_wave_4d_strided 207)
+
+###############################################################################
+# Type Coverage
+###############################################################################
+
+# Tests whose tester honors -types (see Tester::create() in tester.cpp). Every
+# registration of one of these tests also gets a "<name>_typesfull" twin that
+# runs with -types full. The twin takes over the original's comprehensive/full
+# tier labels (see split_types_full_tier_labels()), so -L quick/standard run
+# the minimal type set and -L comprehensive/full run every type, each config
+# exactly once per tier.
+set(ROCSHMEM_TYPED_TESTS
+    # RMA
+    get getnbi put putnbi p g
+    # Collectives
+    teamreduction teamreducescatter reduce_wave reducescatter_wave
+    teambroadcast broadcast_wave
+    alltoall alltoallv alltoall_wave
+    fcollect fcollect_wave
+    # AMO
+    amo_fadd amo_finc amo_fetch amo_fcswap amo_add amo_inc amo_set amo_swap
+    amo_fetchand amo_and amo_fetchor amo_or amo_fetchxor amo_xor
+)
+
+# Tier labels that move from a typed test to its _typesfull twin, and tier
+# labels the twin must never carry. Must stay in sync with the tier names and
+# custom "labels:" entries in tests/test_categories.yaml. A custom label added
+# there but missing here simply stays on the original (minimal-type) test.
+set(ROCSHMEM_TYPES_FULL_TIER_LABELS
+    comprehensive full nightly weekly comprehensive_exclude full_exclude)
+set(ROCSHMEM_MINIMAL_TIER_LABELS
+    quick standard smoke pre-commit pr quick_exclude standard_exclude)
+
+# Timeout multiplier for _typesfull twins (they run every supported type).
+set(ROCSHMEM_TYPES_FULL_TIMEOUT_MULTIPLIER 3)
 
 # MPI should already be found by the parent CMakeLists.txt
 # Use standard CMake MPI variables set by find_package(MPI)
@@ -619,7 +666,76 @@ function(add_rocshmem_functional_test)
             ${_extra_flags}
         )
 
+        # Full-type twin for typed tests. Perf/heatmap registrations (no
+        # verification, no timeout) are skipped: they measure bandwidth, not
+        # per-type correctness.
+        set(_is_perf_test FALSE)
+        if(TEST_NO_VERIFY OR (DEFINED TEST_TIMEOUT AND TEST_TIMEOUT EQUAL 0))
+            set(_is_perf_test TRUE)
+        endif()
+        if(TEST_NAME IN_LIST ROCSHMEM_TYPED_TESTS AND NOT _is_perf_test)
+            set(typed_labels ${all_labels} types_full)
+            _add_single_rocshmem_test(
+                NAME ${TEST_NAME}
+                RANKS ${TEST_RANKS}
+                WORKGROUPS ${TEST_WORKGROUPS}
+                THREADS ${TEST_THREADS}
+                MAX_MSG_SIZE ${TEST_MAX_MSG_SIZE}
+                VOLUME_SIZE ${TEST_VOLUME_SIZE}
+                LOCALBUFTYPE ${TEST_LOCALBUFTYPE}
+                TIMEOUT ${TEST_TIMEOUT}
+                SUFFIX "${variant_suffix}"
+                ENV_VARS ${combined_env_vars}
+                LABELS "${typed_labels}"
+                TYPES full
+                ${_extra_flags}
+            )
+        endif()
+
     endforeach()
+endfunction()
+
+###############################################################################
+# Type Coverage Tier Label Split (build tree)
+###############################################################################
+
+# Must run after apply_ctest_category_labels(). For every "<X>_typesfull" test:
+#   twin = (twin labels - tier labels) + (labels(X) & FULL tier labels)
+#   X    = labels(X) - FULL tier labels
+# The twin's own tier labels are discarded first because YAML patterns ending
+# in ".*" also match the _typesfull names.
+function(split_types_full_tier_labels)
+    set(_all_tier_labels ${ROCSHMEM_TYPES_FULL_TIER_LABELS} ${ROCSHMEM_MINIMAL_TIER_LABELS})
+    get_property(_all_tests DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY TESTS)
+    set(_count 0)
+    foreach(_twin ${_all_tests})
+        if(NOT _twin MATCHES "^(.+)_typesfull$")
+            continue()
+        endif()
+        set(_orig "${CMAKE_MATCH_1}")
+        if(NOT TEST ${_orig})
+            continue()
+        endif()
+
+        get_property(_orig_labels TEST ${_orig} PROPERTY LABELS)
+        get_property(_twin_labels TEST ${_twin} PROPERTY LABELS)
+
+        set(_moved "")
+        foreach(_label ${_orig_labels})
+            if(_label IN_LIST ROCSHMEM_TYPES_FULL_TIER_LABELS)
+                list(APPEND _moved ${_label})
+            endif()
+        endforeach()
+        list(REMOVE_ITEM _orig_labels ${ROCSHMEM_TYPES_FULL_TIER_LABELS})
+        list(REMOVE_ITEM _twin_labels ${_all_tier_labels})
+        list(APPEND _twin_labels ${_moved})
+        list(REMOVE_DUPLICATES _twin_labels)
+
+        set_property(TEST ${_orig} PROPERTY LABELS "${_orig_labels}")
+        set_property(TEST ${_twin} PROPERTY LABELS "${_twin_labels}")
+        math(EXPR _count "${_count} + 1")
+    endforeach()
+    message(STATUS "Split tier labels for ${_count} typed test(s) and their _typesfull twins")
 endfunction()
 
 ###############################################################################
@@ -629,7 +745,7 @@ endfunction()
 function(_add_single_rocshmem_test)
     set(options NO_VERIFY)
     set(oneValueArgs NAME RANKS WORKGROUPS THREADS MAX_MSG_SIZE VOLUME_SIZE
-                     LOCALBUFTYPE TIMEOUT SUFFIX NUM_WF)
+                     LOCALBUFTYPE TIMEOUT SUFFIX NUM_WF TYPES)
     set(multiValueArgs ENV_VARS LABELS)
     cmake_parse_arguments(TEST "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
@@ -673,6 +789,11 @@ function(_add_single_rocshmem_test)
         set(FULL_TEST_NAME "${FULL_TEST_NAME}_${TEST_SUFFIX}")
     endif()
 
+    # Fixed type coverage (e.g. "full") gets its own test name
+    if(DEFINED TEST_TYPES)
+        set(FULL_TEST_NAME "${FULL_TEST_NAME}_types${TEST_TYPES}")
+    endif()
+
     # Environment variables for the test wrapper (NOT for MPI ranks)
     set(DEFAULT_ENV)
 
@@ -686,6 +807,11 @@ function(_add_single_rocshmem_test)
     # Default timeout
     if(NOT DEFINED TEST_TIMEOUT)
         set(TEST_TIMEOUT 300)  # 5 minutes
+    endif()
+
+    # Full type coverage runs every supported type, so allow more time
+    if(DEFINED TEST_TYPES AND TEST_TIMEOUT GREATER 0)
+        math(EXPR TEST_TIMEOUT "${TEST_TIMEOUT} * ${ROCSHMEM_TYPES_FULL_TIMEOUT_MULTIPLIER}")
     endif()
 
     # Compute MAX_NUM_CONTEXTS: wave tests need one context per wave (WGs * waves-per-WG);
@@ -798,6 +924,11 @@ function(_add_single_rocshmem_test)
         list(APPEND TEST_COMMAND -localbuftype ${TEST_LOCALBUFTYPE})
     else()
         list(APPEND TEST_COMMAND -localbuftype heap)
+    endif()
+
+    # Add type coverage
+    if(DEFINED TEST_TYPES)
+        list(APPEND TEST_COMMAND -types ${TEST_TYPES})
     endif()
 
     # Add the test
@@ -1128,12 +1259,16 @@ function(add_coll_tests)
         add_rocshmem_functional_test(NAME alltoall RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 512)
         add_rocshmem_functional_test(NAME alltoall RANKS 3 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 512)
         add_rocshmem_functional_test(NAME alltoall RANKS 5 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 512)
+        # Strided team test to validate team-relative pSync indexing
+        add_rocshmem_functional_test(NAME alltoall RANKS 4 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 512 STRIDE 2)
         add_rocshmem_functional_test(NAME teambroadcast RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
         add_rocshmem_functional_test(NAME teambroadcast RANKS 3 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
         add_rocshmem_functional_test(NAME teambroadcast RANKS 5 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
         add_rocshmem_functional_test(NAME fcollect RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
         add_rocshmem_functional_test(NAME fcollect RANKS 3 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
         add_rocshmem_functional_test(NAME fcollect RANKS 5 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+        # Strided team test to validate team-relative pSync indexing
+        add_rocshmem_functional_test(NAME fcollect RANKS 4 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768 STRIDE 2)
         add_rocshmem_functional_test(NAME teamreduction RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
         add_rocshmem_functional_test(NAME teamreducescatter RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
     end_test_group()
@@ -1153,6 +1288,11 @@ function(add_coll_tests)
         add_rocshmem_functional_test(NAME reducescatter_wave RANKS 2 WORKGROUPS 1 MAX_MSG_SIZE 32768 NUM_WF 1)
         add_rocshmem_functional_test(NAME reducescatter_wave RANKS 4 WORKGROUPS 1 MAX_MSG_SIZE 32768 NUM_WF 1)
         add_rocshmem_functional_test(NAME reducescatter_wave RANKS 8 WORKGROUPS 1 MAX_MSG_SIZE 32768 NUM_WF 1)
+        # Multi-wave tests (NUM_WF 4) to exercise multi-wave code paths
+        add_rocshmem_functional_test(NAME broadcast_wave RANKS 2 WORKGROUPS 1 MAX_MSG_SIZE 32768 NUM_WF 4)
+        add_rocshmem_functional_test(NAME alltoall_wave RANKS 2 WORKGROUPS 1 MAX_MSG_SIZE 512 NUM_WF 4)
+        add_rocshmem_functional_test(NAME fcollect_wave RANKS 2 WORKGROUPS 1 MAX_MSG_SIZE 32768 NUM_WF 4)
+        add_rocshmem_functional_test(NAME reduce_wave RANKS 2 WORKGROUPS 1 MAX_MSG_SIZE 32768 NUM_WF 4)
     end_test_group()
 endfunction()
 
@@ -1304,8 +1444,8 @@ function(add_other_tests)
             ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024")
     end_test_group()
 
-    # Fence tests - don't work with RO backend (AIROCSHMEM-418)
-    begin_test_group(CATEGORY "FENCE" TIER full BACKENDS "ipc;gda" GPUS "all")
+    # Fence tests
+    begin_test_group(CATEGORY "FENCE" TIER full BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME fence_putwavesignal RANKS 2 WORKGROUPS 1 NUM_WF 1 MAX_MSG_SIZE 1048576)
         add_rocshmem_functional_test(NAME fence_putwavesignal RANKS 2 WORKGROUPS 8 THREADS 256 MAX_MSG_SIZE 1048576)
         add_rocshmem_functional_test(NAME fence_putwavesignal RANKS 2 WORKGROUPS 32 THREADS 1024 MAX_MSG_SIZE 65536)
@@ -1429,6 +1569,23 @@ function(add_tile_tests)
         add_rocshmem_functional_test(NAME tile_get_wave_3d RANKS 2 WORKGROUPS 1 NUM_WF 4)
         add_rocshmem_functional_test(NAME tile_put_wave_4d RANKS 2 WORKGROUPS 1 NUM_WF 4)
         add_rocshmem_functional_test(NAME tile_get_wave_4d RANKS 2 WORKGROUPS 1 NUM_WF 4)
+    end_test_group()
+
+    # 3D and 4D strided tile RMA tests: 3D pads rows and planes (contiguous
+    # runs), 4D uses an innermost stride of 2 (element-wise transfers)
+    begin_test_group(CATEGORY "TILE;RMA;ND" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME tile_put_3d_strided      RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME tile_get_3d_strided      RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME tile_put_wg_3d_strided   RANKS 2 WORKGROUPS 4 NUM_WF 16)
+        add_rocshmem_functional_test(NAME tile_get_wg_3d_strided   RANKS 2 WORKGROUPS 4 NUM_WF 16)
+        add_rocshmem_functional_test(NAME tile_put_wave_3d_strided RANKS 2 WORKGROUPS 1 NUM_WF 4)
+        add_rocshmem_functional_test(NAME tile_get_wave_3d_strided RANKS 2 WORKGROUPS 1 NUM_WF 4)
+        add_rocshmem_functional_test(NAME tile_put_4d_strided      RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME tile_get_4d_strided      RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME tile_put_wg_4d_strided   RANKS 2 WORKGROUPS 4 NUM_WF 16)
+        add_rocshmem_functional_test(NAME tile_get_wg_4d_strided   RANKS 2 WORKGROUPS 4 NUM_WF 16)
+        add_rocshmem_functional_test(NAME tile_put_wave_4d_strided RANKS 2 WORKGROUPS 1 NUM_WF 4)
+        add_rocshmem_functional_test(NAME tile_get_wave_4d_strided RANKS 2 WORKGROUPS 1 NUM_WF 4)
     end_test_group()
 
     # Tile collective tests (broadcast and allgather)

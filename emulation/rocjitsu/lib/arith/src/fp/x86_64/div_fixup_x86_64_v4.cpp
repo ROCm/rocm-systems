@@ -9,8 +9,7 @@
 #include "fp/div_fixup_impl.h"
 #include "fp/float_output.h"
 #include "fp/x86_64/div_fixup_exceptions.h"
-#include "fp/x86_64/div_fixup_half.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -126,8 +125,7 @@ __m512i value(__m512i a, __m512i b, __m512i c, uint32_t mode, bool saturate, boo
        cm = _mm512_and_si512(c, magmask);
   auto sign = _mm512_and_si512(_mm512_xor_si512(b, c), signbit);
   auto overflow = VectorOps::set(F::infinity - (Width == 16 && saturate));
-  auto result =
-      _mm512_or_si512(sign, VectorOps::select(VectorOps::gt(inf, pm), pm, Rdna3 ? inf : overflow));
+  auto result = _mm512_or_si512(sign, VectorOps::select(VectorOps::gt(inf, pm), pm, overflow));
   if constexpr (Width != 16) {
     auto delta = VectorOps::sub(VectorOps::shr(cm, F::fraction), VectorOps::shr(bm, F::fraction));
     result = VectorOps::select(
@@ -142,33 +140,28 @@ __m512i value(__m512i a, __m512i b, __m512i c, uint32_t mode, bool saturate, boo
   result = VectorOps::select(VectorOps::either(bz, ci), _mm512_or_si512(sign, inf), result);
   result = VectorOps::select(VectorOps::either(VectorOps::both(bz, cz), VectorOps::both(bi, ci)),
                              VectorOps::set(F::sign | F::infinity | F::quiet), result);
-  const auto quiet = VectorOps::set(
-      Rdna3 && !ieee && !(Width == 16 && (mode & RJ_ARITH_ALU_OMOD_MASK)) ? 0 : F::quiet);
+  const bool quiet_snan = !Rdna3 || ieee;
+  const auto quiet = VectorOps::set(quiet_snan ? F::quiet : 0);
   result = VectorOps::select(VectorOps::gt(bm, inf), _mm512_or_si512(b, quiet), result);
   result = VectorOps::select(VectorOps::gt(cm, inf), _mm512_or_si512(c, quiet), result);
 
   // Output modifiers apply to the fixed-up result, not the provisional quotient.
   unsigned omod = (mode >> 6) & 3;
   if (omod) {
-    if constexpr (Rdna3 && Width == 16) {
-      result = rocjitsu::arith::fixup_half_omod<VectorOps>(result, omod, saturate);
+    auto exponent = _mm512_and_si512(result, inf), output_sign = _mm512_and_si512(result, signbit),
+         step = VectorOps::set(uint64_t(1) << F::fraction);
+    __m512i scaled;
+    if (omod == 3) {
+      scaled = VectorOps::select(VectorOps::eq(exponent, step), output_sign,
+                                 VectorOps::sub(result, step));
     } else {
-      auto exponent = _mm512_and_si512(result, inf),
-           output_sign = _mm512_and_si512(result, signbit),
-           step = VectorOps::set(uint64_t(1) << F::fraction);
-      __m512i scaled;
-      if (omod == 3) {
-        scaled = VectorOps::select(VectorOps::eq(exponent, step), output_sign,
-                                   VectorOps::sub(result, step));
-      } else {
-        auto increment = VectorOps::set(uint64_t(omod) << F::fraction);
-        scaled = VectorOps::select(
-            VectorOps::inverse(VectorOps::gt(VectorOps::sub(inf, increment), exponent)),
-            _mm512_or_si512(output_sign, overflow), VectorOps::add(result, increment));
-      }
-      result = VectorOps::select(VectorOps::eq(exponent, inf), result, scaled);
-      result = VectorOps::select(VectorOps::eq(exponent, zero), zero, result);
+      auto increment = VectorOps::set(uint64_t(omod) << F::fraction);
+      scaled = VectorOps::select(
+          VectorOps::inverse(VectorOps::gt(VectorOps::sub(inf, increment), exponent)),
+          _mm512_or_si512(output_sign, overflow), VectorOps::add(result, increment));
     }
+    result = VectorOps::select(VectorOps::eq(exponent, inf), result, scaled);
+    result = VectorOps::select(VectorOps::eq(exponent, zero), zero, result);
   }
   if (mode & RJ_ARITH_ALU_CLAMP) {
     const auto unclamped = result;

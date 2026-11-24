@@ -12,6 +12,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/big_int.h"
 #include "util/simd_test_hooks.h"
 
@@ -69,9 +70,9 @@ constexpr void vop3_sdstenc_encode(uint32_t op, uint32_t vdst, uint32_t sdst, ui
   words[1] = (src0 & 0x1FF) | ((src1 & 0x1FF) << 9) | ((src2 & 0x1FF) << 18);
 }
 
-std::array<uint32_t, 2> encode_mad64(rj_code_arch_t arch, bool is_signed, uint32_t sdst,
+std::array<uint32_t, 2> encode_mad64(rocjitsu::IsaFamily arch, bool is_signed, uint32_t sdst,
                                      uint32_t clamp = 0) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch == rocjitsu::IsaFamily::Rdna4) {
     return rdna4::build_vop3_sdst_enc(is_signed ? rdna4::kVMadCoI64I32Vop3SdstEnc
                                                 : rdna4::kVMadCoU64U32Vop3SdstEnc,
                                       {.vdst = kDstVgpr,
@@ -80,6 +81,7 @@ std::array<uint32_t, 2> encode_mad64(rj_code_arch_t arch, bool is_signed, uint32
                                        .src0 = 256,
                                        .src1 = 258,
                                        .src2 = 260});
+  }
   return cdna4::build_vop3_sdst_enc(is_signed ? cdna4::kVMadI64I32Vop3SdstEnc
                                               : cdna4::kVMadU64U32Vop3SdstEnc,
                                     {.vdst = kDstVgpr,
@@ -115,7 +117,7 @@ struct Fixture {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4)
+  explicit Fixture(rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4)
       : gpu_mem("vop3_shift64_mem"), l2("vop3_shift64_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
@@ -124,8 +126,9 @@ struct Fixture {
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_shift64", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -176,8 +179,9 @@ void check_revshift(const char *name, uint32_t op, uint64_t exec) {
   auto run = [&](bool force_scalar, uint32_t srot, uint32_t vrot) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
@@ -193,18 +197,20 @@ void check_revshift(const char *name, uint32_t op, uint64_t exec) {
     fx.wf->set_exec(exec);
     EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
     std::array<uint64_t, WF_SIZE> out{};
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out[lane] = fx.read64(vb + kDstVgpr, lane);
+    }
     delete inst;
     return out;
   };
-  for (uint32_t srot = 0; srot < kShifts.size(); ++srot)
+  for (uint32_t srot = 0; srot < kShifts.size(); ++srot) {
     for (uint32_t vrot = 0; vrot < kVals64.size(); vrot += 3) {
       const auto scalar_out = run(/*force_scalar=*/true, srot, vrot);
       const auto simd_out = run(/*force_scalar=*/false, srot, vrot);
       compare_and_check_inactive(name, exec, scalar_out, simd_out,
                                  "s" + std::to_string(srot) + ":v" + std::to_string(vrot));
     }
+  }
 }
 
 // v_lshl_add_u64: src0 = v0:v1 (64-bit value), src1 = v2 (32-bit shift),
@@ -214,8 +220,9 @@ void check_lshl_add(uint64_t exec) {
   auto run = [&](bool force_scalar, uint32_t srot, uint32_t crot) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
@@ -232,18 +239,20 @@ void check_lshl_add(uint64_t exec) {
     fx.wf->set_exec(exec);
     EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
     std::array<uint64_t, WF_SIZE> out{};
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out[lane] = fx.read64(vb + kDstVgpr, lane);
+    }
     delete inst;
     return out;
   };
-  for (uint32_t srot = 0; srot < kShifts.size(); ++srot)
+  for (uint32_t srot = 0; srot < kShifts.size(); ++srot) {
     for (uint32_t crot = 0; crot < kVals64.size(); crot += 3) {
       const auto scalar_out = run(/*force_scalar=*/true, srot, crot);
       const auto simd_out = run(/*force_scalar=*/false, srot, crot);
       compare_and_check_inactive("v_lshl_add_u64", exec, scalar_out, simd_out,
                                  "s" + std::to_string(srot) + ":c" + std::to_string(crot));
     }
+  }
 }
 
 struct Mad64Result {
@@ -277,14 +286,16 @@ Mad64Result expected_mad_i64_i32(uint32_t a, uint32_t b, uint64_t c) {
 uint64_t expected_mad64_sdst(bool is_signed, uint64_t exec, uint32_t arot, uint32_t crot) {
   uint64_t sdst = 0;
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-    if (((exec >> lane) & 1ULL) == 0)
+    if (((exec >> lane) & 1ULL) == 0) {
       continue;
+    }
     uint32_t a = kShifts[lane % kShifts.size()];
     uint32_t b = kShifts[(lane + arot) % kShifts.size()];
     uint64_t c = kVals64[(lane + crot) % kVals64.size()];
     const auto result = is_signed ? expected_mad_i64_i32(a, b, c) : expected_mad_u64_u32(a, b, c);
-    if (result.carry)
+    if (result.carry) {
       sdst |= (1ULL << lane);
+    }
   }
   return sdst;
 }
@@ -301,8 +312,9 @@ void check_mad64(const char *name, uint32_t op, bool is_signed, uint64_t exec) {
   auto run = [&](bool force_scalar, uint32_t arot, uint32_t crot) -> Mad64Output {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t sb = fx.wf->sgpr_alloc().base;
@@ -322,13 +334,14 @@ void check_mad64(const char *name, uint32_t op, bool is_signed, uint64_t exec) {
     fx.wf->set_exec(exec);
     EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
     Mad64Output out{};
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out.dst[lane] = fx.read64(vb + kDstVgpr, lane);
+    }
     out.sdst = fx.read_sgpr64(sb);
     delete inst;
     return out;
   };
-  for (uint32_t arot = 0; arot < kShifts.size(); ++arot)
+  for (uint32_t arot = 0; arot < kShifts.size(); ++arot) {
     for (uint32_t crot = 0; crot < kVals64.size(); crot += 3) {
       const auto scalar_out = run(/*force_scalar=*/true, arot, crot);
       const auto simd_out = run(/*force_scalar=*/false, arot, crot);
@@ -342,6 +355,7 @@ void check_mad64(const char *name, uint32_t op, bool is_signed, uint64_t exec) {
       EXPECT_EQ(scalar_out.sdst, simd_out.sdst)
           << name << " a" << arot << ":c" << crot << ": SIMD SDST diverged from scalar body";
     }
+  }
 }
 
 TEST(Vop3Shift64SimdCorrectness, MadWide64) {
@@ -374,10 +388,11 @@ TEST(Vop3Shift64SimdCorrectness, SignedMadCarryIsBit64OfTheWidenedResult) {
       Case{-1, 1, 0, UINT64_MAX, 1},
   };
   ForceScalarGuard guard;
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4})
+  for (auto arch : {rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna4}) {
     for (bool force_scalar : {false, true}) {
-      if (arch == ROCJITSU_CODE_ARCH_RDNA4 && !force_scalar)
+      if (arch == rocjitsu::IsaFamily::Rdna4 && !force_scalar) {
         continue; // The CO executor has no SIMD fast path.
+      }
       SCOPED_TRACE(testing::Message() << "arch=" << arch << " scalar=" << force_scalar);
       util::set_force_scalar_for_testing(force_scalar);
       Fixture fx(arch);
@@ -392,8 +407,9 @@ TEST(Vop3Shift64SimdCorrectness, SignedMadCarryIsBit64OfTheWidenedResult) {
         fx.cu->write_vgpr(vb + 2, lane, cases[lane].src1);
         fx.write64(vb + 4, lane, cases[lane].src2);
       }
-      for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane)
+      for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {
         fx.write64(vb + kDstVgpr, lane, dst_sentinel(lane));
+      }
       fx.wf->set_exec((1ULL << cases.size()) - 1);
       fx.write_sgpr64(sb, SDST_SENTINEL);
       ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
@@ -402,8 +418,9 @@ TEST(Vop3Shift64SimdCorrectness, SignedMadCarryIsBit64OfTheWidenedResult) {
       if (fx.wf->wf_size() == 32) {
         EXPECT_EQ(fx.cu->read_sgpr(sb + 1), SDST_SENTINEL >> 32);
       }
-      for (uint32_t lane = cases.size(); lane < fx.wf->wf_size(); ++lane)
+      for (uint32_t lane = cases.size(); lane < fx.wf->wf_size(); ++lane) {
         EXPECT_EQ(fx.read64(vb + kDstVgpr, lane), dst_sentinel(lane));
+      }
       for (uint32_t lane = 0; lane < cases.size(); ++lane) {
         SCOPED_TRACE(testing::Message() << "lane=" << lane << " scalar=" << force_scalar);
         EXPECT_EQ(fx.read64(vb + kDstVgpr, lane), cases[lane].expected);
@@ -414,6 +431,7 @@ TEST(Vop3Shift64SimdCorrectness, SignedMadCarryIsBit64OfTheWidenedResult) {
         EXPECT_EQ(fallback.carry, cases[lane].expected_carry);
       }
     }
+  }
 }
 
 TEST(Vop3Shift64SimdCorrectness, MadWide64ClampSaturatesAndPreservesCarry) {
@@ -435,10 +453,11 @@ TEST(Vop3Shift64SimdCorrectness, MadWide64ClampSaturatesAndPreservesCarry) {
                 static_cast<uint64_t>(INT64_MAX), static_cast<uint64_t>(INT64_MAX), 0},
   };
   for (const ClampCase &test : kCases) {
-    for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4})
+    for (auto arch : {rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna4}) {
       for (bool force_scalar : {false, true}) {
-        if (arch == ROCJITSU_CODE_ARCH_RDNA4 && !force_scalar)
+        if (arch == rocjitsu::IsaFamily::Rdna4 && !force_scalar) {
           continue; // The CO executor has no SIMD fast path.
+        }
         SCOPED_TRACE(testing::Message() << "arch=" << arch << " scalar=" << force_scalar);
         util::set_force_scalar_for_testing(force_scalar);
         Fixture fx(arch);
@@ -453,22 +472,25 @@ TEST(Vop3Shift64SimdCorrectness, MadWide64ClampSaturatesAndPreservesCarry) {
         fx.cu->write_vgpr(vb, 0, test.src0);
         fx.cu->write_vgpr(vb + 2, 0, test.src1);
         fx.write64(vb + 4, 0, test.src2);
-        for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane)
+        for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {
           fx.write64(vb + kDstVgpr, lane, dst_sentinel(lane));
+        }
         fx.write_sgpr64(sb, SDST_SENTINEL);
         fx.wf->set_exec(1u);
         EXPECT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
         EXPECT_EQ(fx.read64(vb + kDstVgpr, 0), test.expected)
             << "signed " << test.is_signed << " scalar " << force_scalar;
         const uint64_t mask = fx.wf->wf_size() == 32 ? fx.cu->read_sgpr(sb) : fx.read_sgpr64(sb);
-        for (uint32_t lane = 1; lane < fx.wf->wf_size(); ++lane)
+        for (uint32_t lane = 1; lane < fx.wf->wf_size(); ++lane) {
           EXPECT_EQ(fx.read64(vb + kDstVgpr, lane), dst_sentinel(lane));
+        }
         if (fx.wf->wf_size() == 32) {
           EXPECT_EQ(fx.cu->read_sgpr(sb + 1), SDST_SENTINEL >> 32);
         }
         EXPECT_EQ(mask, test.expected_carry)
             << "signed " << test.is_signed << " scalar " << force_scalar;
       }
+    }
   }
 }
 

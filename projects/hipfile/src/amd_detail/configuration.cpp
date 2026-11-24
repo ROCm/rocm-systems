@@ -57,13 +57,13 @@ Configuration::fastpath() const noexcept
     static bool readExists{!!getHipAmdFileReadPtr()};
     static bool writeExists{!!getHipAmdFileWritePtr()};
     static bool usesDxg{rocrUsesDxg()};
-    return readExists && writeExists && !usesDxg && m_fastpath_override.value_or(fastpath_env);
+    return readExists && writeExists && !usesDxg && m_fastpath_override.load().value_or(fastpath_env);
 }
 
 void
 Configuration::fastpath(bool enabled) noexcept
 {
-    m_fastpath_override = enabled;
+    m_fastpath_override.store(enabled);
 }
 
 bool
@@ -104,17 +104,6 @@ Configuration::unsupportedFileSystems() const noexcept
     return unsupported_file_systems_env;
 }
 
-size_t
-Configuration::asyncBufferSize() const noexcept
-{
-    static size_t async_buffer_size_env{[] {
-        constexpr size_t default_size{16_MiB};
-        auto             env = Environment::async_buffer_size();
-        return (env && *env > 0) ? *env : default_size;
-    }()};
-    return async_buffer_size_env;
-}
-
 bool
 Configuration::host() const noexcept
 {
@@ -126,4 +115,15 @@ void
 Configuration::host(bool enabled) noexcept
 {
     m_host_override = enabled;
+}
+
+size_t
+Configuration::deviceStreamPoolSize() const noexcept
+{
+    static size_t device_stream_pool_size_env{[] {
+        constexpr size_t default_size{4};
+        auto             env = Environment::device_stream_pool_size();
+        return (env && *env > 0) ? *env : default_size;
+    }()};
+    return device_stream_pool_size_env;
 }

@@ -1,13 +1,13 @@
 ---
 myst:
     html_meta:
-        "description": "Walk through compiling a HIP vector_add kernel for gfx950 and running it under rocJITsu in local simulation mode."
-        "keywords": "rocJITsu, ROCm, GPU simulation, HIP, vector_add, tutorial, rj_vm_create, rj_vm_step, LD_PRELOAD"
+        "description": "Walk through compiling a HIP vector_add kernel for gfx950 and running it under rocjitsu in local simulation mode."
+        "keywords": "rocjitsu, ROCm, GPU simulation, HIP, vector_add, tutorial, rj_vm_create, rj_vm_step, LD_PRELOAD"
 ---
 # Simulate a HIP vector_add kernel
 
 This tutorial walks through compiling a HIP `vector_add` kernel for the
-gfx950 target and running it under rocJITsu in local (in-process)
+gfx950 target and running it under rocjitsu in local (in-process)
 simulation mode --- no physical GPU required. You will see the full
 lifecycle from configuration loading through ISA execution and kernel
 completion, and optionally step through the simulation tick by tick with
@@ -15,11 +15,11 @@ the `rj_vm_step` C API.
 
 ## Prerequisites
 
--   rocJITsu built from source (see [Install and build rocJITsu](../install/install.md)).
+-   rocjitsu built from source (see [Install and build rocjitsu](../install/install.md)).
 -   A ROCm toolchain that provides `hipcc` (needed to compile the kernel
     for `--offload-arch=gfx950`).
 
-## Build rocJITsu
+## Build rocjitsu
 
 ``` bash
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -156,7 +156,7 @@ virtual machine API reference.
 ## Next steps
 
 -   [Inspect and disassemble a code object with the C API](inspect-code-object.md) ---
-    decode and disassemble the kernel's code object with the rocJITsu
+    decode and disassemble the kernel's code object with the rocjitsu
     code object API.
 -   [Translate a CDNA4 kernel to RDNA4 using rj_dbt_translate](translate-cdna4-to-rdna4.md)
     --- translate the gfx950 code object to RDNA4 using the dynamic

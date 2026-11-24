@@ -34,7 +34,42 @@ test('all qualifying branches are returned without a twenty-branch cap, newest e
   expect(branches[0].branch).toBe('fictional/branch-34');
 });
 
-test('automatic reference prefers the latest exact develop-base attempt and otherwise uses strictly earlier execution', () => {
+const minutes = (from, offset) => new Date(Date.parse(from) + offset * 60_000).toISOString();
+const withTimes = (run, runId, start, finish) => ({ ...run, runId, timestamp: start, finishedAt: finish });
+
+test('automatic reference is the latest finish at or before the candidate start, never a run still running or killed', () => {
+  const candidate = { ...data.allRuns.find(({ runId }) => runId === 'fictional-branch-01'), sourceBase: undefined };
+  const base = data.runs.find(({ runId }) => runId === 'fictional-develop-20');
+  const t0 = candidate.timestamp;
+  const early = withTimes(base, 'finished-0900', minutes(t0, -80), minutes(t0, -50));   // finished before the candidate started
+  const overlap = withTimes(base, 'overlap-1000', minutes(t0, -20), minutes(t0, 20));   // started earlier, finished after the candidate started
+  const killed = withTimes(base, 'killed-1010', minutes(t0, -10), null);                // checkpoint with no finish record
+  const pick = (runs) => selectors.selectAutomaticReference({ ...data, runs }, candidate);
+  expect(pick([early, overlap, killed])).toMatchObject({ reason: 'earlier-develop', run: { runId: 'finished-0900' } });
+  expect(pick([overlap, killed])).toMatchObject({ run: null, reason: 'unavailable' });
+  // Finished runs rank by finish time, not start time: the later start finished first.
+  const startsLater = withTimes(base, 'starts-later', minutes(t0, -70), minutes(t0, -60));
+  const startsEarlier = withTimes(base, 'starts-earlier', minutes(t0, -90), minutes(t0, -30));
+  expect(pick([startsLater, startsEarlier])).toMatchObject({ run: { runId: 'starts-earlier' } });
+  // A run that finishes exactly when the candidate starts was complete in time.
+  expect(pick([withTimes(base, 'boundary', minutes(t0, -30), t0)])).toMatchObject({ run: { runId: 'boundary' } });
+});
+
+test('with several develop attempts on the recorded base commit the latest finished one wins; a lone checkpoint is still used', () => {
+  const candidate = data.allRuns.find(({ runId }) => runId === 'fictional-branch-01');
+  const base = data.runs.find(({ runId }) => runId === 'fictional-develop-20');
+  const t0 = candidate.timestamp;
+  const finished = withTimes(base, 'finished-attempt', minutes(t0, -300), minutes(t0, -280));
+  const timedOutRetry = withTimes(base, 'timed-out-retry', minutes(t0, -200), null);
+  const pick = (runs) => selectors.selectAutomaticReference({ ...data, runs }, candidate);
+  expect(pick([finished, timedOutRetry])).toMatchObject({ reason: 'exact-base', run: { runId: 'finished-attempt' } });
+  expect(pick([timedOutRetry])).toMatchObject({ reason: 'exact-base', run: { runId: 'timed-out-retry' } });
+  // Among finished attempts the one that finished last wins, even if another started later.
+  const startsLaterFinishesFirst = withTimes(base, 'starts-later', minutes(t0, -290), minutes(t0, -285));   // starts after finished-attempt (-300) but finishes before it (-280)
+  expect(pick([finished, startsLaterFinishesFirst])).toMatchObject({ reason: 'exact-base', run: { runId: 'finished-attempt' } });
+});
+
+test('automatic reference prefers the latest exact develop-base attempt and otherwise the latest finish at or before the candidate start', () => {
   const candidate = data.allRuns.find(({ runId }) => runId === 'fictional-branch-01');
   const base = data.runs.find(({ runId }) => runId === 'fictional-develop-20');
   const retry = { ...base, runId: 'retry-z', timestamp: candidate.timestamp };
@@ -42,7 +77,7 @@ test('automatic reference prefers the latest exact develop-base attempt and othe
   expect(selectors.selectAutomaticReference({ ...data, runs: [...data.runs, retry, tied] }, candidate)).toMatchObject({ run: retry, reason: 'exact-base' });
   const fallback = { ...candidate, sourceBase: { branch: 'other', commit: candidate.provenance.rocjitsuCommitSha } };
   expect(selectors.selectAutomaticReference(data, fallback)).toMatchObject({ run: data.latestRun, reason: 'earlier-develop' });
-  const beforeAll = { ...candidate, timestamp: data.runs[0].timestamp, sourceBase: undefined };
+  const beforeAll = { ...candidate, timestamp: new Date(Date.parse(data.runs[0].timestamp) - 1).toISOString(), sourceBase: undefined };
   expect(selectors.selectAutomaticReference(data, beforeAll)).toMatchObject({ run: null, reason: 'unavailable' });
   expect(selectors.selectAutomaticReference({ ...data, runs: [] }, candidate).reason).toBe('unavailable');
   expect(selectors.selectAutomaticReference(data, null).run).toBeNull();

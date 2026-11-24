@@ -4,8 +4,8 @@
 #include "common/defines.h"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
+#include "common/spin_mutex.hpp"
 #include "core/categories.hpp"
-#include "core/locking.hpp"
 #include "core/state.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/runtime.hpp"
@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <future>
+#include <mutex>
 #include <pthread.h>
 #include <signal.h>
 #include <sstream>
@@ -48,7 +49,7 @@ constexpr auto k_timeout_signal_v    = static_cast<int>(k_timeout_signal);
 
 auto                       g_main_thread_native_handle         = pthread_self();
 bool                       g_ci_timeout_active                 = false;
-auto                       g_ci_timeout_mutex                  = locking::atomic_mutex{};
+auto                       g_ci_timeout_mutex                  = spin_mutex{};
 std::uint64_t              g_ci_timeout_backtrace_global_count = 1;
 std::uint64_t              g_ci_timeout_backtrace_global_done  = 0;
 thread_local std::uint64_t g_ci_timeout_backtrace_local_count  = 0;
@@ -70,8 +71,8 @@ ci_timeout_backtrace(int)
 
     unwind::detailed_backtrace<0>(err, cfg);
 
-    static auto s_mutex = locking::atomic_mutex{};
-    const auto  lock    = locking::atomic_lock{ s_mutex };
+    static auto s_mutex = spin_mutex{};
+    const auto  lock    = std::lock_guard{ s_mutex };
     LOG_INFO("{}", err.str());
 
     ++g_ci_timeout_backtrace_global_done;
@@ -194,7 +195,7 @@ void
 setup()
 {
     // make sure there isn't any datarace for ci_timeout_active
-    auto lock = locking::atomic_lock{ g_ci_timeout_mutex };
+    auto lock = std::unique_lock{ g_ci_timeout_mutex };
 
     if(g_ci_timeout_active)
     {

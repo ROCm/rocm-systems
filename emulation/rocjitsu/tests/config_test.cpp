@@ -6,6 +6,7 @@
 #include "decode_test_util.h"
 #include "halt_snapshot_plugin.h"
 #include "long_path_handoff.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "scoped_temp.h"
 #include "test_paths.h"
 
@@ -20,6 +21,14 @@
 #include "rocjitsu/config/pci_device_config.h"
 #include "rocjitsu/config/system_graph.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/rpc.h"
@@ -86,8 +95,9 @@ using namespace rocjitsu;
 
 [[nodiscard]] testing::AssertionResult write_temp_config(test::ScopedTempFile &file,
                                                          std::string_view json) {
-  if (testing::AssertionResult result = file.initialize("rocjitsu-config-"); !result)
+  if (testing::AssertionResult result = file.initialize("rocjitsu-config-"); !result) {
     return result;
+  }
   return file.write(json);
 }
 
@@ -95,8 +105,9 @@ template <typename T>
 [[nodiscard]] testing::AssertionResult
 require_config_value(T &output, util::FailureOr<T> result,
                      const util::StringDiagnostic &diagnostic) {
-  if (result.failed())
+  if (result.failed()) {
     return testing::AssertionFailure() << diagnostic.message();
+  }
   output = std::move(result).value();
   return testing::AssertionSuccess();
 }
@@ -157,8 +168,9 @@ load_config_from_string_for_node_valid(config::LoadedConfig &output, const std::
 [[nodiscard]] testing::AssertionResult validate_config_valid(const std::string &path,
                                                              const std::string &schema) {
   util::StringDiagnostic diagnostic;
-  if (config::validate_config(path, schema, diagnostic.emitter()).failed())
+  if (config::validate_config(path, schema, diagnostic.emitter()).failed()) {
     return testing::AssertionFailure() << diagnostic.message();
+  }
   return testing::AssertionSuccess();
 }
 
@@ -166,11 +178,13 @@ std::string config_load_error(const std::string &path, bool validate_only) {
   try {
     util::StringDiagnostic diagnostic;
     if (validate_only) {
-      if (config::validate_config(path, kEmbeddedSchema, diagnostic.emitter()).failed())
+      if (config::validate_config(path, kEmbeddedSchema, diagnostic.emitter()).failed()) {
         return diagnostic.message();
+      }
     } else {
-      if (config::load_config(path, kEmbeddedSchema, diagnostic.emitter()).failed())
+      if (config::load_config(path, kEmbeddedSchema, diagnostic.emitter()).failed()) {
         return diagnostic.message();
+      }
     }
     return {};
   } catch (const std::exception &error) {
@@ -185,8 +199,9 @@ std::vector<uint8_t> read_binary_file(const std::string &path) {
 
 bool replace_exactly_once(std::string &text, std::string_view from, std::string_view to) {
   const size_t offset = text.find(from);
-  if (offset == std::string::npos || text.find(from, offset + from.size()) != std::string::npos)
+  if (offset == std::string::npos || text.find(from, offset + from.size()) != std::string::npos) {
     return false;
+  }
   text.replace(offset, from.size(), to);
   return true;
 }
@@ -462,8 +477,9 @@ constexpr std::string_view kSystemGraphManifest = R"({
 
 [[nodiscard]] testing::AssertionResult local_switch_manifest(std::string &manifest) {
   manifest.assign(kSystemGraphManifest);
-  if (!replace_exactly_once(manifest, R"({"src":"e2","dst":"sw","link_class":"scale_up"},)", ""))
+  if (!replace_exactly_once(manifest, R"({"src":"e2","dst":"sw","link_class":"scale_up"},)", "")) {
     return testing::AssertionFailure() << "local switch test route was not isolated";
+  }
   return testing::AssertionSuccess();
 }
 
@@ -479,14 +495,16 @@ constexpr std::string_view kSystemGraphManifest = R"({
           {"name":"cp","type":"command_processor"},
           {"name":"se0","type":"shader_engine","children":[
             {"name":"cu[0:4]","type":"compute_unit"}]}]}]}})");
-  if (!topology_replaced)
+  if (!topology_replaced) {
     return testing::AssertionFailure() << "system graph test topology was not replaced";
+  }
   const bool budget_replaced = replace_exactly_once(json, R"("system":)",
                                                     R"("cpu_thread_budget":3,"thread_allocations":[
         {"num_threads":1,"cpu_dispatch_threads":2,"async_helper_threads":0},
         {"num_threads":1,"cpu_dispatch_threads":3,"async_helper_threads":0}],"system":)");
-  if (!budget_replaced)
+  if (!budget_replaced) {
     return testing::AssertionFailure() << "system graph test budget was not added";
+  }
   return testing::AssertionSuccess();
 }
 
@@ -527,12 +545,13 @@ TEST(SystemGraphTest, SelectionAndProjectionsReportOneFailure) {
       std::vector<std::string> messages;
       auto sink = [&](std::string_view message) { messages.emplace_back(message); };
       util::DiagnosticEmitter emit_error(sink);
-      if (operation == 0)
+      if (operation == 0) {
         EXPECT_TRUE(graph.select_node(emit_error, node_id).failed());
-      else if (operation == 1)
+      } else if (operation == 1) {
         EXPECT_TRUE(graph.local_gpus(emit_error, node_id).failed());
-      else
+      } else {
         EXPECT_TRUE(graph.local_peer_routes(emit_error, node_id).failed());
+      }
       ASSERT_EQ(messages.size(), 1u);
       EXPECT_THAT(messages.front(), testing::HasSubstr(expected));
     }
@@ -773,8 +792,9 @@ TEST(SystemGraphTest, PeerRouteProjectionBoundsSynchronousHopDepth) {
     path.push_back("eb");
     manifest += R"(],"links":[)";
     for (size_t i = 1; i < path.size(); ++i) {
-      if (i != 1)
+      if (i != 1) {
         manifest += ',';
+      }
       manifest +=
           R"({"src":")" + path[i - 1] + R"(","dst":")" + path[i] + R"(","link_class":"scale_up"})";
     }
@@ -1002,6 +1022,109 @@ TEST(SystemGraphTest, ExpandsLegacyFourGpuIdentity) {
   EXPECT_EQ(graph.links.size(), 6u);
 }
 
+TEST(SystemGraphTest, ProjectsFourGpuScaleUpSchematic) {
+  const std::string path = CONFIG_DIR_PATH + "/gfx1250_mi455x_4gpu_scaleup.json";
+  config::SystemGraph graph;
+  ASSERT_TRUE(load_system_graph_valid(graph, path, rocjitsu::kEmbeddedSchema));
+  ASSERT_TRUE(graph.explicit_manifest);
+  ASSERT_EQ(graph.nodes.size(), 1u);
+  EXPECT_EQ(graph.nodes[0].id, "node0");
+  ASSERT_EQ(graph.endpoints.size(), 5u);
+  ASSERT_EQ(graph.links.size(), 4u);
+  ASSERT_EQ(graph.coherence_domains.size(), 1u);
+  EXPECT_EQ(graph.coherence_domains[0].id, "node0_candidate");
+  EXPECT_EQ(graph.coherence_domains[0].gpus, (std::vector<std::string>{"g0", "g1", "g2", "g3"}));
+
+  util::StringDiagnostic graph_diagnostic;
+  const auto gpus_result = graph.local_gpus(graph_diagnostic.emitter());
+  ASSERT_TRUE(gpus_result.succeeded()) << graph_diagnostic.message();
+  const auto gpus = gpus_result.value();
+  ASSERT_EQ(gpus.size(), 4u);
+  for (size_t i = 0; i < gpus.size(); ++i) {
+    SCOPED_TRACE(i);
+    const auto index = std::to_string(i);
+    EXPECT_EQ(gpus[i].id, "g" + index);
+    EXPECT_EQ(gpus[i].profile, "vm");
+    EXPECT_EQ(gpus[i].device.gpu_id, 1250u + i);
+    EXPECT_EQ(gpus[i].device.unique_id, 1250u + i);
+    EXPECT_EQ(gpus[i].device.location_id, 0x0300u + (i << 8));
+    EXPECT_EQ(gpus[i].device.drm_render_minor, 128u + i);
+    EXPECT_EQ(graph.endpoints[i].id, "e" + index);
+    EXPECT_EQ(graph.endpoints[i].kind, config::SystemEndpointKind::Gpu);
+    EXPECT_EQ(graph.endpoints[i].gpu, gpus[i].id);
+    EXPECT_EQ(graph.links[i].src, graph.endpoints[i].id);
+    EXPECT_EQ(graph.links[i].dst, "switch");
+    EXPECT_EQ(graph.links[i].link_class, config::SystemLinkClass::ScaleUp);
+  }
+  EXPECT_EQ(graph.endpoints[4].id, "switch");
+  EXPECT_EQ(graph.endpoints[4].kind, config::SystemEndpointKind::Switch);
+
+  const auto projection_result = graph.local_peer_routes(graph_diagnostic.emitter());
+  ASSERT_TRUE(projection_result.succeeded()) << graph_diagnostic.message();
+  const auto &projection = projection_result.value();
+  EXPECT_EQ(projection.node_id(), "node0");
+  ASSERT_EQ(projection.routes().size(), 6u);
+  size_t directed_checks = 0;
+  for (size_t source = 0; source < gpus.size(); ++source) {
+    for (size_t target = 0; target < gpus.size(); ++target) {
+      if (source == target) {
+        continue;
+      }
+      SCOPED_TRACE(std::to_string(source) + " -> " + std::to_string(target));
+      const auto &source_name = gpus[source].id;
+      const auto &target_name = gpus[target].id;
+      const auto route = std::find_if(
+          projection.routes().begin(), projection.routes().end(),
+          [&](const config::SystemPeerRoute &candidate) {
+            return (candidate.source_gpu == source_name && candidate.target_gpu == target_name) ||
+                   (candidate.source_gpu == target_name && candidate.target_gpu == source_name);
+          });
+      ASSERT_NE(route, projection.routes().end());
+      const bool route_starts_at_source = route->source_gpu == source_name;
+      EXPECT_EQ(route->source_gpu_id, gpus[route_starts_at_source ? source : target].device.gpu_id);
+      EXPECT_EQ(route->target_gpu_id, gpus[route_starts_at_source ? target : source].device.gpu_id);
+      auto directed_path = route->endpoints;
+      if (!route_starts_at_source) {
+        std::reverse(directed_path.begin(), directed_path.end());
+      }
+      EXPECT_EQ(directed_path, (std::vector<std::string>{"e" + std::to_string(source), "switch",
+                                                         "e" + std::to_string(target)}));
+      for (size_t hop = 1; hop < directed_path.size(); ++hop) {
+        EXPECT_TRUE(std::any_of(
+            graph.links.begin(), graph.links.end(), [&](const config::SystemLink &link) {
+              return link.link_class == config::SystemLinkClass::ScaleUp &&
+                     ((link.src == directed_path[hop - 1] && link.dst == directed_path[hop]) ||
+                      (link.dst == directed_path[hop - 1] && link.src == directed_path[hop]));
+            }));
+      }
+      ++directed_checks;
+    }
+  }
+  EXPECT_EQ(directed_checks, 12u);
+
+  util::StringDiagnostic load_diagnostic;
+  auto loaded_result =
+      config::load_config(path, rocjitsu::kEmbeddedSchema, load_diagnostic.emitter());
+  ASSERT_TRUE(loaded_result.succeeded()) << load_diagnostic.message();
+  const auto &loaded = loaded_result.value();
+  EXPECT_EQ(loaded.local_node_id, "node0");
+  EXPECT_EQ(loaded.num_gpus, 4u);
+  constexpr uint64_t kGuestVramApertureBytes = 1ULL << 30;
+  EXPECT_EQ(loaded.pci.vram_aperture_bytes, kGuestVramApertureBytes);
+  ASSERT_EQ(loaded.devices.size(), 4u);
+  for (size_t i = 0; i < loaded.devices.size(); ++i) {
+    EXPECT_EQ(loaded.devices[i].gpu_id, gpus[i].device.gpu_id);
+    EXPECT_EQ(loaded.devices[i].unique_id, gpus[i].device.unique_id);
+    EXPECT_EQ(loaded.devices[i].drm_render_minor, gpus[i].device.drm_render_minor);
+    EXPECT_EQ(loaded.global_to_local_ordinals.at(gpus[i].id), i);
+    const auto pci_spec = rocjitsu::gpu_pci_spec_from_config(loaded.devices[i], loaded.pci);
+    EXPECT_EQ(pci_spec.vram_aperture_bytes, kGuestVramApertureBytes);
+  }
+  std::string source;
+  ASSERT_TRUE(read_config_file_valid(source, path));
+  EXPECT_THAT(source, testing::Not(testing::HasSubstr("\"num_gpus\"")));
+}
+
 TEST(SystemGraphTest, LegacyAndNetFixturesDoNotProjectLocalPeerRoutes) {
   util::StringDiagnostic diagnostic;
   config::SystemGraph legacy;
@@ -1026,6 +1149,38 @@ TEST(SystemGraphTest, LegacyAndNetFixturesDoNotProjectLocalPeerRoutes) {
   auto maybe_projection3 = two_node.local_peer_routes(diagnostic.emitter(), "node1");
   ASSERT_TRUE(maybe_projection3.succeeded()) << diagnostic.message();
   EXPECT_TRUE(maybe_projection3.value().routes().empty());
+}
+
+TEST(SystemGraphTest, ScaleUpSchematicDoesNotAdvertisePeerDiscovery) {
+  const std::string path = CONFIG_DIR_PATH + "/gfx1250_mi455x_4gpu_scaleup.json";
+  test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(runtime.initialize("rocjitsu-scaleup-sysfs-"));
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create(path.c_str(), RJ_VM_MODE_LOCAL, &raw), ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+  ASSERT_NE(vm->vm->driver(), nullptr);
+  ASSERT_EQ(vm->vm->driver()->num_gpus(), 4u);
+  const std::filesystem::path nodes =
+      std::filesystem::path(vm->vm->driver()->topology_path()) / "nodes";
+  for (uint32_t ordinal = 0; ordinal < 4; ++ordinal) {
+    SCOPED_TRACE(ordinal);
+    const auto *info = vm->vm->driver()->gpu_info_at(ordinal);
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(info->gpu_id, 1250u + ordinal);
+    EXPECT_EQ(info->hive_id, 0u);
+    EXPECT_EQ(info->num_sdma_xgmi_engines, 0u);
+    const auto node_path = nodes / std::to_string(ordinal + 1);
+    std::string gpu_id;
+    ASSERT_TRUE(read_config_file_valid(gpu_id, (node_path / "gpu_id").string()));
+    EXPECT_EQ(gpu_id, std::to_string(1250u + ordinal) + "\n");
+    std::string properties;
+    ASSERT_TRUE(read_config_file_valid(properties, (node_path / "properties").string()));
+    EXPECT_THAT(properties, testing::HasSubstr("p2p_links_count 0\n"));
+    EXPECT_THAT(properties, testing::HasSubstr("hive_id 0\n"));
+    EXPECT_THAT(properties, testing::HasSubstr("num_sdma_xgmi_engines 0\n"));
+    EXPECT_FALSE(std::filesystem::exists(node_path / "p2p_links"));
+  }
 }
 
 TEST(SystemGraphTest, ProjectsGfx1250TwoNodeNetFixture) {
@@ -1270,16 +1425,16 @@ TEST(SystemGraphTest, RejectsMultiGpuCheckpointWithoutWritingFile) {
 
 TEST(SoCTest, SelectsSdmaPacketDialect) {
   const std::array cases = {
-      std::pair{ROCJITSU_CODE_ARCH_CDNA1, amdgpu::SdmaPacketDialect::Legacy},
-      std::pair{ROCJITSU_CODE_ARCH_CDNA2, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
-      std::pair{ROCJITSU_CODE_ARCH_CDNA3, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
-      std::pair{ROCJITSU_CODE_ARCH_CDNA4, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
-      std::pair{ROCJITSU_CODE_ARCH_CDNA5, amdgpu::SdmaPacketDialect::Gfx1250},
-      std::pair{ROCJITSU_CODE_ARCH_RDNA1, amdgpu::SdmaPacketDialect::Legacy},
-      std::pair{ROCJITSU_CODE_ARCH_RDNA2, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
-      std::pair{ROCJITSU_CODE_ARCH_RDNA3, amdgpu::SdmaPacketDialect::Gfx11Plus},
-      std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, amdgpu::SdmaPacketDialect::Gfx11Plus},
-      std::pair{ROCJITSU_CODE_ARCH_RDNA4, amdgpu::SdmaPacketDialect::Rdna4},
+      std::pair{rocjitsu::IsaFamily::Cdna1, amdgpu::SdmaPacketDialect::Legacy},
+      std::pair{rocjitsu::IsaFamily::Cdna2, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{rocjitsu::IsaFamily::Cdna3, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{rocjitsu::IsaFamily::Cdna4, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{rocjitsu::IsaFamily::Cdna5, amdgpu::SdmaPacketDialect::Gfx1250},
+      std::pair{rocjitsu::IsaFamily::Rdna1, amdgpu::SdmaPacketDialect::Legacy},
+      std::pair{rocjitsu::IsaFamily::Rdna2, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{rocjitsu::IsaFamily::Rdna3, amdgpu::SdmaPacketDialect::Gfx11Plus},
+      std::pair{rocjitsu::IsaFamily::Rdna3_5, amdgpu::SdmaPacketDialect::Gfx11Plus},
+      std::pair{rocjitsu::IsaFamily::Rdna4, amdgpu::SdmaPacketDialect::Rdna4},
   };
   for (const auto &[arch, expected] : cases) {
     SCOPED_TRACE(static_cast<int>(arch));
@@ -1290,8 +1445,9 @@ TEST(SoCTest, SelectsSdmaPacketDialect) {
 
 TEST(ConfigLoaderTest, MatchesFullConstructionForRepositoryConfigurations) {
   for (const auto &entry : std::filesystem::directory_iterator(CONFIG_DIR_PATH)) {
-    if (entry.path().extension() != ".json")
+    if (entry.path().extension() != ".json") {
       continue;
+    }
     SCOPED_TRACE(entry.path().string());
     EXPECT_EQ(config_load_error(entry.path().string(), /*validate_only=*/true),
               config_load_error(entry.path().string(), /*validate_only=*/false));
@@ -1342,7 +1498,7 @@ TEST(ConfigLoaderTest, LoadCdna2Config) {
   ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx90a_mi210_kmd.json", loaded));
   auto *soc = loaded.soc();
 
-  EXPECT_EQ(soc->arch(), ROCJITSU_CODE_ARCH_CDNA2);
+  EXPECT_EQ(soc->arch(), rocjitsu::IsaFamily::Cdna2);
   EXPECT_EQ(loaded.device.gpu_id, 50149u);
   EXPECT_EQ(loaded.device.device_id, 0x740fu);
   EXPECT_EQ(loaded.device.family_id, 0x8du);
@@ -1410,17 +1566,20 @@ run_two_spi_dispatch(util::DiagnosticEmitter emit_error) {
   })";
 
   auto loaded_result = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, emit_error);
-  if (loaded_result.failed())
+  if (loaded_result.failed()) {
     return util::Result::failure();
+  }
   auto loaded = std::move(loaded_result).value();
   auto *soc = loaded.soc();
 
   simdojo::SimulationEngine engine(loaded.engine_config);
   engine.topology().set_root(loaded.take_root());
-  if (loaded.wire_links(engine.topology(), emit_error).failed())
+  if (loaded.wire_links(engine.topology(), emit_error).failed()) {
     return util::Result::failure();
-  if (engine.create(emit_error).failed())
+  }
+  if (engine.create(emit_error).failed()) {
     return util::Result::failure();
+  }
 
   rocjitsu::test::DispatchCountPlugin *dispatch_count = nullptr;
   soc->set_plugin_group(rocjitsu::test::make_dispatch_count_group(&dispatch_count));
@@ -1476,10 +1635,11 @@ TEST(ConfigLoaderTest, ImageAddressingUsesEachDeviceIdentity) {
     size_t checked = 0;
     for (auto *component : components) {
       auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(component);
-      if (!cu)
+      if (!cu) {
         continue;
+      }
       const amdgpu::ImageAddressConfig identity = cu->image_address_config();
-      EXPECT_EQ(identity.arch, ROCJITSU_CODE_ARCH_RDNA2);
+      EXPECT_EQ(identity.arch, rocjitsu::IsaFamily::Rdna2);
       EXPECT_EQ(identity.gb_addr_config,
                 kmd::gb_addr_config_for_gfx_target_version(loaded.device.gfx_target_version));
       EXPECT_EQ(identity.gb_addr_config, version == 100300 ? 0x444u : 0u);
@@ -1511,8 +1671,9 @@ TEST(ConfigLoaderTest, PartialDeviceIdentityRetainsWorkingImageDefaults) {
     size_t checked = 0;
     for (auto *component : components) {
       auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(component);
-      if (!cu)
+      if (!cu) {
         continue;
+      }
       const amdgpu::ImageAddressConfig identity = cu->image_address_config();
       EXPECT_EQ(identity.gb_addr_config, 0u)
           << "GET_TILE_CONFIG reports zero for an omitted target";
@@ -1724,8 +1885,9 @@ TEST(ConfigLoaderTest, LoadFourGpuMi455xKmdConfig) {
     EXPECT_EQ(loaded.devices[i].revision_id, 1u);
   }
 
-  for (const auto &build : loaded.extra_gpu_builds)
+  for (const auto &build : loaded.extra_gpu_builds) {
     EXPECT_NE(dynamic_cast<SoC *>(build.root.get()), nullptr);
+  }
 }
 
 TEST(ConfigLoaderTest, Gfx1250WgpIdsAreLocalToShaderArray) {
@@ -1757,8 +1919,9 @@ TEST(ConfigLoaderTest, Gfx1250WgpIdsAreLocalToShaderArray) {
     }
   };
   check_build(loaded.build_result);
-  for (const auto &build : loaded.extra_gpu_builds)
+  for (const auto &build : loaded.extra_gpu_builds) {
     check_build(build);
+  }
 }
 
 TEST(ConfigLoaderTest, CdnaLocationsSurviveTopologyInitializationAndCheckpoint) {
@@ -1794,10 +1957,13 @@ TEST(ConfigLoaderTest, CdnaLocationsSurviveTopologyInitializationAndCheckpoint) 
     ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
         << admission_diagnostic.message();
     constexpr uint32_t kSlot = 7;
-    for (auto *xcd : soc->xcds())
-      for (auto *se : xcd->shader_engines())
-        for (auto *cu : se->compute_units())
+    for (auto *xcd : soc->xcds()) {
+      for (auto *se : xcd->shader_engines()) {
+        for (auto *cu : se->compute_units()) {
           ASSERT_NE(cu->dispatch_wf_at(kSlot, 0, 0, 32, 8), nullptr);
+        }
+      }
+    }
 
     auto check_locations = [](SoC *machine) {
       ASSERT_EQ(machine->num_xcds(), 2u);
@@ -1867,7 +2033,7 @@ TEST(ConfigLoaderTest, CdnaMultiArrayGeometryKeepsCuIdUnsupported) {
     ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
     config::LoadedConfig loaded;
     ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
-    for (auto *xcd : loaded.build_result.xcds)
+    for (auto *xcd : loaded.build_result.xcds) {
       for (auto *se : xcd->shader_engines()) {
         ASSERT_EQ(se->num_compute_units(), 4u);
         for (auto *cu : se->compute_units()) {
@@ -1881,6 +2047,7 @@ TEST(ConfigLoaderTest, CdnaMultiArrayGeometryKeepsCuIdUnsupported) {
           wf->halt();
         }
       }
+    }
   }
 }
 
@@ -1917,8 +2084,9 @@ TEST(ConfigLoaderTest, MismatchedShaderArrayGeometryKeepsWgpIdUnsupported) {
         }
       };
       check_build(loaded.build_result);
-      for (const auto &build : loaded.extra_gpu_builds)
+      for (const auto &build : loaded.extra_gpu_builds) {
         check_build(build);
+      }
     }
   }
 }
@@ -1963,9 +2131,11 @@ TEST(ConfigLoaderTest, LaterShaderEngineMismatchInvalidatesAllShaderArrayWidths)
     ASSERT_EQ(xcd->num_shader_engines(), 2u);
     ASSERT_EQ(xcd->shader_engine(0)->num_compute_units(), 4u);
     ASSERT_EQ(xcd->shader_engine(1)->num_compute_units(), second_engine_cus);
-    for (auto *se : xcd->shader_engines())
-      for (auto *cu : se->compute_units())
+    for (auto *se : xcd->shader_engines()) {
+      for (auto *cu : se->compute_units()) {
         EXPECT_EQ(cu->cus_per_shader_array(), 0u);
+      }
+    }
   }
 }
 
@@ -2062,7 +2232,7 @@ TEST(ConfigLoaderTest, SerializedHotHookPluginKeepsSharedPoolAcrossProductionTop
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   config::LoadedConfig rdna4;
   ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1201_r9700.json", rdna4));
-  EXPECT_EQ(rdna4.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_EQ(rdna4.soc()->arch(), rocjitsu::IsaFamily::Rdna4);
   EXPECT_EQ(rdna4.device.gpu_id, 8716u);
   EXPECT_EQ(rdna4.device.device_id, 0x7551u);
   EXPECT_EQ(rdna4.device.family_id, 0x98u);
@@ -2094,7 +2264,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(kmd::gfx_target_name(120501u), "gfx1251");
   EXPECT_EQ(kmd::gfx_target_version_from_name("gfx1251"), 120501u);
   EXPECT_FALSE(kmd::gfx_target_version_from_name("cdna4"));
-  EXPECT_EQ(kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3_5), 0u);
+  EXPECT_EQ(kmd::gb_addr_config_for_arch(rocjitsu::IsaFamily::Rdna3_5), 0u);
   EXPECT_EQ(kmd::gb_addr_config_for_gfx_target_version(110500), 0u);
   EXPECT_EQ(kmd::gb_addr_config_for_gfx_target_version(120500), 0u);
   EXPECT_EQ(kmd::drm_shader_engine_count(0, 2), 0u);
@@ -2110,7 +2280,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
 
   config::LoadedConfig rdna3;
   ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1100_w7900.json", rdna3));
-  EXPECT_EQ(rdna3.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA3);
+  EXPECT_EQ(rdna3.soc()->arch(), rocjitsu::IsaFamily::Rdna3);
   EXPECT_EQ(rdna3.device.gpu_id, 7019u);
   EXPECT_EQ(rdna3.device.device_id, 0x7448u);
   EXPECT_EQ(rdna3.device.family_id, 0x91u);
@@ -2146,7 +2316,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
 
   config::LoadedConfig rdna35;
   ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1151.json", rdna35));
-  EXPECT_EQ(rdna35.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA3_5);
+  EXPECT_EQ(rdna35.soc()->arch(), rocjitsu::IsaFamily::Rdna3_5);
   EXPECT_EQ(rdna35.device.gpu_id, 5510u);
   EXPECT_EQ(rdna35.device.device_id, 0x1586u);
   EXPECT_EQ(rdna35.device.family_id, 0x91u);
@@ -2199,7 +2369,7 @@ TEST(ConfigLoaderTest, Gfx1151HighSgprsAndVccStayWithinTheirWave) {
   constexpr uint32_t sentinel = 0x12345678u;
   cu->write_sgpr(neighbor_base, sentinel);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3_5);
   ASSERT_NE(decoder, nullptr);
   // LLVM MC gfx1151 encodings exercise both the destination and source
   // selectors that the undersized 104-register profile could not back.
@@ -2605,8 +2775,9 @@ TEST(ConfigLoaderTest, DefaultKfdDeviceHasNoRegularSdmaQueueSchedulers) {
 TEST(ConfigLoaderTest, ShippedDevicesDeclareSdmaQueues) {
   unsigned checked = 0;
   for (const auto &entry : std::filesystem::directory_iterator(CONFIG_DIR_PATH)) {
-    if (entry.path().extension() != ".json")
+    if (entry.path().extension() != ".json") {
       continue;
+    }
 
     const std::string name = entry.path().filename().string();
     SCOPED_TRACE(name);
@@ -2621,7 +2792,8 @@ TEST(ConfigLoaderTest, ShippedDevicesDeclareSdmaQueues) {
       EXPECT_NE(dbt.guest_device.num_sdma_queues_per_engine, 0u);
     } else {
       config::LoadedConfig loaded;
-      if (name == "gfx1250_mi455x_kmd_2node_net.json") {
+      if (name == "gfx1250_mi455x_kmd_2node_net.json" ||
+          name == "gfx1250_mi455x_kmd_4node_2gpu_if.json") {
         ASSERT_TRUE(test::load_valid_config_for_node(entry.path().string(), loaded, "node0"));
       } else {
         ASSERT_TRUE(test::load_valid_config(entry.path().string(), loaded));
@@ -2654,22 +2826,25 @@ TEST(ConfigLoaderTest, GeneratedDeviceConfigsDeclareSdmaQueues) {
     EXPECT_NE(loaded.device.num_sdma_queues_per_engine, 0u);
   }
 }
+
 #endif
 
 TEST(ConfigLoaderTest, ShippedGfx950GuestsUseCapturedSdmaQueueCount) {
   unsigned checked = 0;
   for (const auto &entry : std::filesystem::directory_iterator(CONFIG_DIR_PATH)) {
     if (entry.path().extension() != ".json" ||
-        entry.path().filename().string().rfind("guest_", 0) != 0)
+        entry.path().filename().string().rfind("guest_", 0) != 0) {
       continue;
+    }
 
     util::StringDiagnostic dbt_diagnostic;
     auto dbt_result =
         config::load_dbt_guest_config_from_file(entry.path().string(), dbt_diagnostic.emitter());
     ASSERT_TRUE(dbt_result.succeeded()) << dbt_diagnostic.message();
     auto dbt = std::move(dbt_result).value();
-    if (dbt.guest_isa != "gfx950")
+    if (dbt.guest_isa != "gfx950") {
       continue;
+    }
 
     SCOPED_TRACE(entry.path().filename().string());
     ASSERT_TRUE(dbt.guest_device.present);
@@ -2716,12 +2891,13 @@ TEST(ConfigLoaderTest, RejectsInvalidDbtGuestFlatBufferEnums) {
     SCOPED_TRACE(field);
     flatbuffers::FlatBufferBuilder builder;
     fb::DbtGuestConfigBuilder guest_builder(builder);
-    if (field == 0)
+    if (field == 0) {
       guest_builder.add_execution_backend(static_cast<fb::DbtExecutionBackend>(127));
-    else if (field == 1)
+    } else if (field == 1) {
       guest_builder.add_guest_revision(static_cast<fb::DbtSiliconRevision>(127));
-    else
+    } else {
       guest_builder.add_host_revision(static_cast<fb::DbtSiliconRevision>(127));
+    }
     builder.Finish(guest_builder.Finish());
 
     util::StringDiagnostic diagnostic;
@@ -3241,13 +3417,15 @@ TEST(ConfigLoaderTest, WaitCheckingOverridesEveryCuAndGpu) {
       ASSERT_TRUE(test::load_valid_config_from_string(json.value(), loaded));
       std::vector<simdojo::Component *> components;
       loaded.build_result.root->collect_components(components);
-      for (auto &build : loaded.extra_gpu_builds)
+      for (auto &build : loaded.extra_gpu_builds) {
         build.root->collect_components(components);
+      }
       unsigned count = 0;
       for (auto *component : components) {
         auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(component);
-        if (!cu)
+        if (!cu) {
           continue;
+        }
         ++count;
         const auto &config = cu->config();
         EXPECT_EQ(config.memory_wait_diagnostics, mode && *mode != WaitChecking::Off
@@ -3256,8 +3434,8 @@ TEST(ConfigLoaderTest, WaitCheckingOverridesEveryCuAndGpu) {
         EXPECT_EQ(config.xcnt_diagnostics, !mode || *mode == WaitChecking::All
                                                ? MemoryWaitDiagnostics::Warn
                                                : MemoryWaitDiagnostics::Off);
-        EXPECT_EQ(config.xcnt_checks_enabled(),
-                  config.arch == ROCJITSU_CODE_ARCH_CDNA5 && (!mode || *mode == WaitChecking::All));
+        EXPECT_EQ(config.xcnt_checks_enabled(), config.arch == rocjitsu::IsaFamily::Cdna5 &&
+                                                    (!mode || *mode == WaitChecking::All));
       }
       EXPECT_GT(count, loaded.num_gpus);
     }
@@ -3480,11 +3658,12 @@ TEST(EffectiveConfigTest, ReadsNativeLaunchConfigHandoff) {
   std::vector<simdojo::Component *> components;
   loaded.build_result.root->collect_components(components);
   unsigned cus = 0;
-  for (auto *component : components)
+  for (auto *component : components) {
     if (auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(component)) {
       ++cus;
       EXPECT_FALSE(cu->config().memory_wait_checks_enabled());
     }
+  }
   EXPECT_GT(cus, 0u);
   auto source_after = config::read_config_file(source_path, config_diagnostic.emitter());
   ASSERT_TRUE(source_after.succeeded()) << config_diagnostic.message();
@@ -3602,8 +3781,9 @@ TEST(ConfigLoaderTest, ReadsRuntimeHandoffLargerThan4095Bytes) {
           "host_isa": "gfx942"
         }
       })");
-  if (handoff.status() == test::LongPathHandoff::Status::kSkip)
+  if (handoff.status() == test::LongPathHandoff::Status::kSkip) {
     GTEST_SKIP() << "cannot build the oversized handoff here: " << handoff.reason();
+  }
   ASSERT_TRUE(handoff.status() == test::LongPathHandoff::Status::kOk) << handoff.reason();
 
   const test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv,
@@ -3878,6 +4058,58 @@ void expect_config_target_failure(const std::string &json, const char *message) 
   EXPECT_EQ(validation_diagnostic.message(), message);
 }
 
+TEST(ConfigLoaderTest, RejectsInvalidComponentIntegersWithoutThrowing) {
+  const struct {
+    const char *type;
+    const char *key;
+  } fields[] = {{"compute_unit", "num_wf_slots"},   {"compute_unit", "sgprs_per_wf"},
+                {"compute_unit", "vgprs_per_wf"},   {"compute_unit", "lds_size_kb"},
+                {"compute_unit", "gws_wait_limit"}, {"compute_unit", "functional_quantum"},
+                {"iod", "num_hbm_stacks"}};
+  for (const auto &field : fields) {
+    for (const char *value : {"", "nonnumeric", "+", "18446744073709551616"}) {
+      SCOPED_TRACE(field.key);
+      SCOPED_TRACE(value);
+      const std::string json = std::string(R"({"num_threads":1,"vm":{"arch":"cdna3"},
+        "topology":{"root":{"name":"soc","type":"soc","children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"rejected","type":")") +
+                               field.type + R"(","config":[{"key":")" + field.key +
+                               R"(","value":")" + value + R"("}]}]}}})";
+      const std::string message =
+          std::string(field.key) + " must start with a decimal integer in unsigned long range";
+      EXPECT_NO_THROW(expect_config_target_failure(json, message.c_str()));
+      rj_vm_t sentinel;
+      rj_vm_t *output = &sentinel;
+      EXPECT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &output),
+                ROCJITSU_STATUS_INVALID_ARGUMENT);
+      EXPECT_EQ(output, &sentinel);
+    }
+  }
+}
+
+TEST(ConfigLoaderTest, PreservesComponentIntegerPrefixesSignsAndNarrowing) {
+  const struct {
+    const char *text;
+    uint32_t expected;
+  } cases[] = {{"0", 0},           {"4294967295", UINT32_MAX}, {"4294967296", 0},
+               {"-1", UINT32_MAX}, {" +7suffix", 7},           {"0x10", 0}};
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.text);
+    const std::string json = std::string(R"({"num_threads":1,"vm":{"arch":"cdna3"},
+      "topology":{"root":{"name":"soc","type":"soc","children":[
+        {"name":"vram","type":"gpu_memory"},
+        {"name":"cu","type":"compute_unit","config":[
+          {"key":"gws_wait_limit","value":")") +
+                             test_case.text + R"("}]}]}}})";
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
+    auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(loaded.soc()->find_child("cu"));
+    ASSERT_NE(cu, nullptr);
+    EXPECT_EQ(cu->config().gws_wait_limit, test_case.expected);
+  }
+}
+
 TEST(ConfigLoaderTest, PropagatesRootComputeUnitFailure) {
   const std::string json = R"({"vm":{"arch":"cdna3"},"topology":{
     "root":{"name":"rejected","type":"compute_unit","config":[
@@ -3920,8 +4152,9 @@ TEST(ConfigLoaderTest, RejectsInvalidCuAfterConstructingSibling) {
 TEST(ConfigLoaderTest, RejectsMissingOrInvalidArchitecture) {
   const std::array<const char *, 3> configs{R"({})", R"({"vm":{}})",
                                             R"({"vm":{"arch":"invalid"}})"};
-  for (const char *json : configs)
+  for (const char *json : configs) {
     expect_config_target_failure(json, "Missing or invalid 'arch' in vm configuration");
+  }
 }
 
 TEST(ConfigLoaderTest, RejectsInvalidTarget) {
@@ -3958,8 +4191,9 @@ TEST(ConfigLoaderTest, RejectsTargetVersionMismatch) {
   ASSERT_TRUE(
       replace_exactly_once(mismatches[0], R"("target": "gfx1251")", R"("target": "gfx1250")"));
   ASSERT_TRUE(replace_exactly_once(mismatches[1], "120501", "120500"));
-  for (const std::string &json : mismatches)
+  for (const std::string &json : mismatches) {
     expect_config_target_failure(json, "vm target does not match device.gfx_target_version");
+  }
 
   std::ifstream rdna3_base(test::config_path("gfx1100_w7900.json"));
   ASSERT_TRUE(rdna3_base.is_open());
@@ -4066,7 +4300,11 @@ TEST(ConfigLoaderTest, DispatchPlacementDoesNotFollowHostThreadCount) {
   EXPECT_EQ(se1_wfs, 0u);
 }
 
-std::string functional_quantum_checkpoint_config(uint32_t first, uint32_t second) {
+std::string functional_quantum_checkpoint_config(uint32_t first, uint32_t second,
+                                                 uint32_t lds_size_kib = 0) {
+  const std::string lds =
+      lds_size_kib ? R"({"key":"lds_size_kb","value":")" + std::to_string(lds_size_kib) + R"("},)"
+                   : "";
   return R"({"max_ticks":10000,"num_threads":1,"exec_mode":"functional",
     "vm":{"arch":"cdna3"},
     "topology":{"root":{"name":"soc","type":"soc","children":[
@@ -4076,11 +4314,11 @@ std::string functional_quantum_checkpoint_config(uint32_t first, uint32_t second
         {"name":"cp","type":"command_processor"},
         {"name":"se0","type":"shader_engine","children":[
           {"name":"cu0","type":"compute_unit","config":[
-            {"key":"functional_quantum","value":")" +
-         std::to_string(first) + R"("}]},
+            )" +
+         lds + R"({"key":"functional_quantum","value":")" + std::to_string(first) + R"("}]},
           {"name":"cu1","type":"compute_unit","config":[
-            {"key":"functional_quantum","value":")" +
-         std::to_string(second) + R"("}]}
+            )" +
+         lds + R"({"key":"functional_quantum","value":")" + std::to_string(second) + R"("}]}
         ]}
       ]}
     ]}}})";
@@ -4116,7 +4354,8 @@ TEST(ConfigLoaderTest, ComponentFailuresReturnDiagnosticsWithoutThrowing) {
 
 [[nodiscard]] testing::AssertionResult
 write_legacy_quantum_checkpoint(test::ScopedTempFile &file, uint32_t dispatch_threads = 1,
-                                uint32_t num_cus = 1, bool include_allocations = false) {
+                                uint32_t num_cus = 1, bool include_allocations = false,
+                                bool active_wave = false) {
   flatbuffers::FlatBufferBuilder builder;
   auto arch = builder.CreateString("cdna3");
   // The legacy writer supplied only the first four values. With the original
@@ -4139,8 +4378,11 @@ write_legacy_quantum_checkpoint(test::ScopedTempFile &file, uint32_t dispatch_th
                                  include_allocations ? 2 : 0, choices);
 
   auto cu_name = builder.CreateString("gpu_soc.xcd0.se0.cu0");
-  std::vector<flatbuffers::Offset<fb::WavefrontState>> no_wavefronts;
-  auto wavefronts = builder.CreateVector(no_wavefronts);
+  std::vector<flatbuffers::Offset<fb::WavefrontState>> legacy_waves;
+  if (active_wave) {
+    legacy_waves.push_back(fb::CreateWavefrontState(builder, 0, 0, 0x1000));
+  }
+  auto wavefronts = builder.CreateVector(legacy_waves);
   // Supply only legacy fields so the appended per-CU quantum marker is absent.
   auto cu_state = fb::CreateComputeUnitState(builder, cu_name, wavefronts, 0);
   std::vector<flatbuffers::Offset<fb::ComputeUnitState>> cu_state_offsets{cu_state};
@@ -4149,8 +4391,9 @@ write_legacy_quantum_checkpoint(test::ScopedTempFile &file, uint32_t dispatch_th
   builder.Finish(checkpoint);
 
   if (testing::AssertionResult result = file.initialize("rocjitsu-legacy-quantum-checkpoint-");
-      !result)
+      !result) {
     return result;
+  }
   return file.write(std::string_view(reinterpret_cast<const char *>(builder.GetBufferPointer()),
                                      builder.GetSize()));
 }
@@ -4190,9 +4433,10 @@ TEST(CheckpointTest, InvalidExecutionThreadAllocationsReturnFailure) {
     auto vm_config = fb::CreateVirtualMachineConfig(builder, arch, gpu_config);
     auto exec_mode = builder.CreateString("functional");
     std::vector<flatbuffers::Offset<fb::ExecutionThreadChoice>> entries;
-    for (const auto &choice : invalid.choices)
+    for (const auto &choice : invalid.choices) {
       entries.push_back(fb::CreateExecutionThreadChoice(builder, choice.engines, choice.dispatch,
                                                         choice.helpers));
+    }
     auto choices = builder.CreateVector(entries);
     auto simulation_config = fb::CreateSimulationConfig(builder, 0, 1, exec_mode, vm_config, 0, 0,
                                                         1, 0, choices, invalid.helpers);
@@ -4256,7 +4500,7 @@ TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
 TEST(CheckpointTest, RoundTripsCdna5ScratchAndDispatchCapacity) {
   config::LoadedConfig source;
   ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", source, 48));
-  ASSERT_EQ(source.execution_threads.dispatch, (std::vector<uint32_t>{33}));
+  ASSERT_EQ(source.execution_threads.dispatch, (std::vector<uint32_t>{41}));
   auto *source_cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(15);
   ASSERT_EQ(source_cu->num_wf_slots(), 64u);
   ASSERT_EQ(source_cu->scratch_slots_per_cu(), 32u);
@@ -4285,7 +4529,7 @@ TEST(CheckpointTest, RoundTripsCdna5ScratchAndDispatchCapacity) {
   EXPECT_EQ(restored.execution_threads.dispatch, source.execution_threads.dispatch);
   EXPECT_EQ(restored.execution_threads.helpers, source.execution_threads.helpers);
   restored.apply_cpu_dispatch_threads();
-  EXPECT_EQ(restored.soc()->dispatch_threads(), 33u);
+  EXPECT_EQ(restored.soc()->dispatch_threads(), source.execution_threads.dispatch.front());
   ASSERT_EQ(restored.soc()->num_xcds(), 8u);
   for (auto *xcd : restored.soc()->xcds()) {
     auto *cp = xcd->command_processor();
@@ -4511,7 +4755,7 @@ TEST(CApiTest, CheckpointRoundTripPreservesAsyncHelperPolicy) {
   ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
             ROCJITSU_STATUS_SUCCESS);
   std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> source(raw, &rj_vm_destroy);
-  ASSERT_EQ(source->loaded.execution_threads.helpers, 2u);
+  ASSERT_EQ(source->loaded.execution_threads.helpers, 0u);
   ASSERT_EQ(source->loaded.async_helper_threads, -1);
   test::ScopedTempFile checkpoint_file;
   ASSERT_TRUE(checkpoint_file.initialize("rocjitsu-helper-policy-"));
@@ -4520,10 +4764,10 @@ TEST(CApiTest, CheckpointRoundTripPreservesAsyncHelperPolicy) {
   config::LoadedConfig restored;
   ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   EXPECT_EQ(restored.async_helper_threads, -1);
-  EXPECT_EQ(restored.execution_threads.helpers, 2u);
+  EXPECT_EQ(restored.execution_threads.helpers, 0u);
   EXPECT_EQ(restored.thread_allocations, source->loaded.thread_allocations);
   ASSERT_NE(restored.async_resources, nullptr);
-  EXPECT_EQ(restored.async_resources->helpers(), 2u);
+  EXPECT_EQ(restored.async_resources->helpers(), 0u);
 }
 
 TEST(CheckpointTest, PresentEmptyAllocationTableKeepsSerialFallback) {
@@ -4560,11 +4804,1136 @@ TEST(CApiTest, GwsWaitFailureIsReportedByStep) {
   cu->gws_sema_p(*wave, 0);
   rj_status_t status = ROCJITSU_STATUS_SUCCESS;
   int active = 123;
-  for (int i = 0; i < 100 && status == ROCJITSU_STATUS_SUCCESS; ++i)
+  for (int i = 0; i < 100 && status == ROCJITSU_STATUS_SUCCESS; ++i) {
     status = rj_vm_step(handle.get(), &active);
+  }
   EXPECT_EQ(status, ROCJITSU_STATUS_ERROR);
   EXPECT_NE(handle->engine->last_exit().code, 0);
   EXPECT_FALSE(cu->has_active_wfs());
+}
+
+TEST(CheckpointTest, PreservesGfx1030ShaderCyclesOnEachHaltedWave) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, "cdna3", "rdna2"));
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
+  auto *se = loaded.soc()->xcd(0)->shader_engine(0);
+  constexpr uint16_t kCycles = 29 | (19 << 11);
+  std::array<uint32_t, 2> before{};
+  for (uint32_t i = 0; i < before.size(); ++i) {
+    auto *cu = se->compute_unit(i);
+    auto *wf = cu->dispatch_wf(0, 0x1000, 16, 16, 64);
+    ASSERT_NE(wf, nullptr);
+    wf->set_shader_halt(i ? 5 : 1);
+    for (uint32_t step = 0; step <= i; ++step) {
+      cu->step();
+    }
+    ASSERT_EQ(amdgpu::read_hwreg_field(*wf, kCycles, before[i]),
+              amdgpu::HwregAccessResult::Success);
+    ASSERT_EQ(before[i], i + 1);
+  }
+
+  test::ScopedTempFile checkpoint;
+  ASSERT_TRUE(checkpoint.initialize("rocjitsu-gfx1030-cycles-"));
+  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, {})
+                  .succeeded());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
+  auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
+  for (uint32_t i = 0; i < before.size(); ++i) {
+    auto *cu = restored_se->compute_unit(i);
+    auto *wf = cu->wf(0);
+    ASSERT_NE(wf, nullptr);
+    EXPECT_TRUE(wf->debug_paused());
+    EXPECT_EQ(wf->pc, 0x1000u);
+    cu->step();
+    uint32_t after = 0;
+    ASSERT_EQ(amdgpu::read_hwreg_field(*wf, kCycles, after), amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(after, before[i] + 1);
+    EXPECT_EQ(wf->pc, 0x1000u);
+  }
+}
+
+TEST(CheckpointTest, RestoredGfx1030WakeupUsesTheOriginalDispatchAndInTgBit) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, "cdna3", "rdna2"));
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  // Two dispatches have been launched, both with workgroup zero on this CU.
+  ASSERT_TRUE(loaded.soc()->xcd(0)->command_processor()->restore_dispatch_id_sequence(0, 1, 3));
+  for (uint32_t slot = 0; slot < 3; ++slot) {
+    auto *wave = cu->dispatch_wf(0, 0x1000, 16, 16, 32);
+    ASSERT_NE(wave, nullptr);
+    wave->set_workgroup_dispatch(slot == 2 ? 2 : 1, slot == 2 ? 1 : 2);
+    EXPECT_EQ((wave->status_raw() >> 11) & 1u, slot == 2 ? 0u : 1u);
+  }
+  cu->wf(1)->set_sleep_cycles(17);
+  test::ScopedTempFile checkpoint;
+  ASSERT_TRUE(checkpoint.initialize("rocjitsu-gfx1030-wakeup-"));
+  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, {})
+                  .succeeded());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
+  cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna2);
+  const uint32_t wake_word = 0xbf830000u, sleep_word = 0xbf8e0001u;
+  std::unique_ptr<Instruction> wake(decode_valid(*decoder, &wake_word));
+  std::unique_ptr<Instruction> sleep(decode_valid(*decoder, &sleep_word));
+  ASSERT_TRUE(wake && sleep);
+  auto *cp = restored.soc()->xcd(0)->command_processor();
+  cp->set_xcd_topology(0, {cp});
+  EXPECT_EQ(cp->next_dispatch_id_for_topology(0, 1), 3u);
+  EXPECT_EQ(cu->wf(1)->sleep_cycles(), 17u);
+  // A fresh sleep in each dispatch exercises wake grouping independently of the
+  // saved timer.
+  ASSERT_TRUE(cu->execute_instruction(sleep.get(), *cu->wf(1)).succeeded());
+  ASSERT_TRUE(cu->execute_instruction(sleep.get(), *cu->wf(2)).succeeded());
+  ASSERT_TRUE(cu->execute_instruction(wake.get(), *cu->wf(0)).succeeded());
+  EXPECT_EQ(cu->wf(1)->sleep_cycles(), 0u);
+  EXPECT_EQ(cu->wf(2)->sleep_cycles(), 64u);
+  // An issuer with IN_TG clear cannot wake peers even when the IDs match.
+  cu->wf(0)->set_status_raw(cu->wf(0)->status_raw() & ~amdgpu::Wavefront::kStatusInTgMask);
+  ASSERT_TRUE(cu->execute_instruction(sleep.get(), *cu->wf(1)).succeeded());
+  ASSERT_TRUE(cu->execute_instruction(wake.get(), *cu->wf(0)).succeeded());
+  EXPECT_EQ(cu->wf(1)->sleep_cycles(), 64u);
+}
+
+TEST(CheckpointTest, CdnaRealtimeFrequencySurvivesPublicRestore) {
+  using Vm = std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)>;
+  for (const auto &[arch, period] : std::array<std::pair<const char *, uint64_t>, 4>{
+           {{"cdna1", 40000}, {"cdna2", 40000}, {"cdna3", 10000}, {"cdna4", 10000}}}) {
+    SCOPED_TRACE(arch);
+    auto config = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(config, "cdna3", arch));
+    ASSERT_TRUE(replace_exactly_once(config, "10000", "150000"));
+    rj_vm_t *raw = nullptr;
+    ASSERT_EQ(rj_vm_create_from_string(config.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+              ROCJITSU_STATUS_SUCCESS);
+    Vm source(raw, &rj_vm_destroy);
+    constexpr uint64_t base = 0x1000;
+    amdhsa::kernel_descriptor_t descriptor{};
+    descriptor.kernel_code_entry_byte_offset = sizeof(descriptor);
+    descriptor.compute_pgm_rsrc1 = 3;
+    const uint64_t entry = base + sizeof(descriptor);
+    std::vector<uint32_t> kernel(6, 0xbf8e007fu); // s_sleep 127
+    const uint64_t first = entry + sizeof(uint32_t) * kernel.size();
+    kernel.insert(kernel.end(),
+                  {0xc0940000u, 0u, 0xbf8c0000u, 0xc0940080u, 0u, 0xbf8c0000u, 0xbf82ffffu});
+    auto *soc = source->soc;
+    soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&descriptor), sizeof(descriptor),
+                              base);
+    soc->memory()->load_image(reinterpret_cast<const uint8_t *>(kernel.data()),
+                              kernel.size() * sizeof(uint32_t), entry);
+    test::AqlQueue queue(soc->memory(), soc->xcd(0)->command_processor());
+    queue.dispatch(base, 64, 64);
+    const auto advance = [](const Vm &vm, uint64_t pc) -> amdgpu::Wavefront * {
+      auto *cu = vm->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+      for (unsigned step = 0; step < 100000; ++step) {
+        auto *wave = cu->wf(0);
+        if (wave && wave->pc == pc) {
+          return wave;
+        }
+        if (rj_vm_step(vm.get(), nullptr) != ROCJITSU_STATUS_SUCCESS) {
+          return nullptr;
+        }
+      }
+      return nullptr;
+    };
+    const auto read = [](const Vm &vm, const amdgpu::Wavefront &wave, unsigned reg) {
+      const auto base = wave.sgpr_alloc().base + reg;
+      const auto *cu = vm->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+      return uint64_t(cu->read_sgpr(base)) | (uint64_t(cu->read_sgpr(base + 1)) << 32);
+    };
+    ASSERT_NE(advance(source, first), nullptr);
+    const uint64_t ticks = source->engine->global_time();
+    ASSERT_GE(ticks, period);
+    auto *wave = advance(source, first + 12);
+    ASSERT_NE(wave, nullptr);
+    EXPECT_EQ(read(source, *wave, 0), ticks / period);
+    test::ScopedTempFile file;
+    ASSERT_TRUE(file.initialize("rocjitsu-cdna-rtc-"));
+    ASSERT_EQ(rj_vm_save_checkpoint(source.get(), file.path().c_str(), 0), ROCJITSU_STATUS_SUCCESS);
+    ASSERT_EQ(rj_vm_restore_checkpoint(file.path().c_str(), &raw), ROCJITSU_STATUS_SUCCESS);
+    Vm restored(raw, &rj_vm_destroy);
+    auto *continued = advance(source, first + 24);
+    auto *resumed = advance(restored, first + 24);
+    ASSERT_NE(continued, nullptr);
+    ASSERT_NE(resumed, nullptr);
+    EXPECT_EQ(read(restored, *resumed, 2), read(source, *continued, 2));
+    EXPECT_GE(read(restored, *resumed, 2), ticks / period);
+  }
+}
+
+TEST(CheckpointTest, PublicRestoreKeepsNewAqlDispatchesDistinctFromResidentWaves) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, "cdna3", "rdna2"));
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+            ROCJITSU_STATUS_SUCCESS);
+  using Vm = std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)>;
+  Vm source(raw, &rj_vm_destroy);
+  constexpr uint64_t first = 0x1000, second = 0x2000;
+  constexpr uint32_t loop = 0xbf82ffff; // s_branch -1
+  amdhsa::kernel_descriptor_t descriptor{};
+  descriptor.kernel_code_entry_byte_offset = sizeof(descriptor);
+  for (uint64_t address : {first, second}) {
+    source->soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&descriptor),
+                                      sizeof(descriptor), address);
+    source->soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&loop), sizeof(loop),
+                                      address + sizeof(descriptor));
+  }
+  const auto wave_at_entry = [](const Vm &vm, uint64_t address) -> amdgpu::Wavefront * {
+    const auto *engine = vm->soc->xcd(0)->shader_engine(0);
+    for (auto *cu : engine->compute_units()) {
+      for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+        if (auto *wave = cu->wf(slot); wave && wave->pc == address + sizeof(descriptor)) {
+          return wave;
+        }
+      }
+    }
+    return nullptr;
+  };
+  const auto launch = [&](const Vm &vm, uint64_t address) {
+    test::AqlQueue queue(vm->soc->memory(), vm->soc->xcd(0)->command_processor());
+    queue.dispatch(address, 64);
+    for (unsigned step = 0; step < 32 && !wave_at_entry(vm, address); ++step) {
+      int active = 0;
+      ASSERT_EQ(rj_vm_step(vm.get(), &active), ROCJITSU_STATUS_SUCCESS);
+    }
+    ASSERT_NE(wave_at_entry(vm, address), nullptr);
+  };
+  ASSERT_NO_FATAL_FAILURE(launch(source, first));
+  const auto original_id = wave_at_entry(source, first)->dispatch_id();
+  const auto next_id =
+      source->soc->xcd(0)->command_processor()->next_dispatch_id_for_topology(0, 1);
+  ASSERT_NE(original_id, next_id);
+
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-next-dispatch-"));
+  ASSERT_EQ(rj_vm_save_checkpoint(source.get(), file.path().c_str(), 0), ROCJITSU_STATUS_SUCCESS);
+  raw = nullptr;
+  ASSERT_EQ(rj_vm_restore_checkpoint(file.path().c_str(), &raw), ROCJITSU_STATUS_SUCCESS);
+  Vm restored(raw, &rj_vm_destroy);
+  ASSERT_NO_FATAL_FAILURE(launch(restored, second));
+  ASSERT_NE(wave_at_entry(restored, first), nullptr);
+  EXPECT_EQ(wave_at_entry(restored, first)->dispatch_id(), original_id);
+  EXPECT_EQ(wave_at_entry(restored, second)->dispatch_id(), next_id);
+}
+
+TEST(CheckpointTest, RestoresDistinctDispatchIdsForLegacyWorkgroupBarriers) {
+  for (const std::string_view profile :
+       {"cdna1", "cdna2", "cdna3", "cdna4", "rdna1", "rdna2", "rdna3", "rdna3_5"}) {
+    SCOPED_TRACE(profile);
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", profile));
+    config::LoadedConfig source;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+    auto *cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    for (uint32_t dispatch : {12u, 13u}) {
+      auto *wave = cu->dispatch_wf(7, 0x1000, 16, 16);
+      ASSERT_NE(wave, nullptr);
+      wave->set_dispatch_id(dispatch);
+    }
+    test::ScopedTempFile file;
+    ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-dispatch-barriers-"));
+    ASSERT_TRUE(config::save_checkpoint(file.path(), *source.soc(), 0, source.engine_config, 1, {})
+                    .succeeded());
+    config::LoadedConfig restored;
+    ASSERT_TRUE(test::restore_valid_checkpoint(file.path(), restored));
+    const uint32_t word = profile.starts_with("rdna3") ? 0xbfbd0000 : 0xbf8a0000; // s_barrier
+    const auto decoder = Decoder::create(cu->arch());
+    const auto barrier = decoder->decode_window(std::span(&word, 1));
+    ASSERT_TRUE(barrier.succeeded());
+    for (auto *unit : {cu, restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0)}) {
+      auto *first = unit->wf(0);
+      ASSERT_NE(first, nullptr);
+      ASSERT_NE(unit->wf(1), nullptr);
+      EXPECT_EQ(first->dispatch_id(), 12u);
+      EXPECT_EQ(unit->wf(1)->dispatch_id(), 13u);
+      ASSERT_TRUE(unit->execute_instruction(barrier.value().get(), *first).succeeded());
+      unit->run_issue_cycle(0);
+      EXPECT_EQ(first->state(), amdgpu::WfState::RUNNING);
+    }
+  }
+}
+
+TEST(CheckpointTest, RestoresUnallocatedScratchBaseRegister) {
+  for (std::string_view arch : {"cdna1", "cdna2", "cdna3", "cdna4", "cdna5", "rdna1", "rdna2",
+                                "rdna3", "rdna3_5", "rdna4"}) {
+    SCOPED_TRACE(arch);
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+    config::LoadedConfig source;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+    auto *cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    auto *wave = cu->dispatch_wf(0, 0x1000, 16, 16);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_EQ(wave->scratch_lane_size(), 0u);
+    constexpr uint64_t base = 0x12345678000;
+    wave->set_scratch_base(base);
+    test::ScopedTempFile file;
+    ASSERT_TRUE(file.initialize("rocjitsu-unallocated-scratch-base-"));
+    ASSERT_TRUE(config::save_checkpoint(file.path(), *source.soc(), 0, source.engine_config, 1, {})
+                    .succeeded());
+    config::LoadedConfig copy;
+    ASSERT_TRUE(test::restore_valid_checkpoint(file.path(), copy));
+    const auto *restored = copy.soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+    ASSERT_NE(restored, nullptr);
+    EXPECT_EQ(restored->scratch_base(), base);
+    EXPECT_EQ(restored->scratch_lane_size(), 0u);
+  }
+}
+
+TEST(CheckpointTest, LivePrivateScratchMustRetireBeforeSavingAqlDispatch) {
+  // SCRATCH_STORE_B32 v2, v1, off; wait for stores; S_ENDPGM.
+  const std::vector<uint32_t> gfx9{0xdc704000, 0x007f0102, 0xbf8c0f70, 0xbf810000};
+  const std::vector<uint32_t> gfx94{0xdc706000, 0x007f0102, 0xbf8c0f70, 0xbf810000};
+  const std::vector<uint32_t> gfx10{0xdc704000, 0x007d0102, 0xbbfd0000, 0xbf810000};
+  const std::vector<uint32_t> gfx11{0xdc690000, 0x00fc0102, 0xbc7c0000, 0xbfb00000};
+  const std::vector<uint32_t> gfx12{0xed06807c, 0x00820000, 2, 0xbfc10000, 0xbfb00000};
+  struct Case {
+    std::string_view arch;
+    const std::vector<uint32_t> &tail;
+  };
+  for (const auto &[arch, tail] :
+       {Case{"cdna1", gfx9}, Case{"cdna2", gfx9}, Case{"cdna3", gfx94}, Case{"cdna4", gfx94},
+        Case{"rdna1", gfx10}, Case{"rdna2", gfx10}, Case{"rdna3", gfx11}, Case{"rdna3_5", gfx11},
+        Case{"rdna4", gfx12}, Case{"cdna5", gfx12}}) {
+    SCOPED_TRACE(arch);
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+    using Vm = std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)>;
+    rj_vm_t *raw = nullptr;
+    ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+              ROCJITSU_STATUS_SUCCESS);
+    Vm vm(raw, &rj_vm_destroy);
+    auto *xcd = vm->soc->xcd(0);
+    auto *cu = xcd->shader_engine(0)->compute_unit(0);
+    auto *memory = vm->soc->memory();
+    constexpr uint64_t kernel = 0x1000, scratch_base = 0x1'0000'0000ULL;
+    constexpr uint32_t value = 0x12345678u;
+    amdhsa::kernel_descriptor_t kd{};
+    kd.kernel_code_entry_byte_offset = sizeof(kd);
+    kd.private_segment_fixed_size = 16;
+    // S_NOP; V_MOV_B32 v2, 0; V_MOV_B32 v1, value.
+    std::vector<uint32_t> code{0xbf800000u, 0x7e040280u, 0x7e0202ffu, value};
+    code.insert(code.end(), tail.begin(), tail.end());
+    memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kernel);
+    memory->load_image(reinterpret_cast<const uint8_t *>(code.data()),
+                       code.size() * sizeof(uint32_t), kernel + sizeof(kd));
+    const std::array<uint8_t, 1024> scratch_bytes{};
+    memory->load_image(scratch_bytes.data(), scratch_bytes.size(), scratch_base);
+    memory->load_image(scratch_bytes.data(), scratch_bytes.size(), 0);
+    memory->write32(0, 0xfeedfaceu);
+    test::AqlQueue queue(memory, xcd->command_processor());
+    hsa_kernel_dispatch_packet_t packet{};
+    packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    packet.setup = 1;
+    packet.grid_size_x = packet.workgroup_size_x = 64;
+    packet.grid_size_y = packet.grid_size_z = packet.workgroup_size_y = packet.workgroup_size_z = 1;
+    packet.kernel_object = kernel;
+    packet.private_segment_size = 16;
+    queue.submit(packet);
+    for (unsigned step = 0; step < 128 && !cu->has_active_wfs(); ++step) {
+      ASSERT_EQ(rj_vm_step(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+    }
+    ASSERT_NE(cu->wf(0), nullptr);
+    ASSERT_EQ(cu->wf(0)->scratch_base(), scratch_base);
+    ASSERT_EQ(cu->wf(0)->scratch_lane_size(), 16u);
+    ASSERT_EQ(memory->read32(scratch_base), 0u);
+    test::ScopedTempFile file;
+    ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-private-scratch-"));
+    ASSERT_TRUE(file.write("prior checkpoint"));
+    const auto previous = read_binary_file(file.path());
+    EXPECT_EQ(rj_vm_save_checkpoint(vm.get(), file.path().c_str(), 0), ROCJITSU_STATUS_ERROR);
+    EXPECT_EQ(read_binary_file(file.path()), previous);
+    for (unsigned step = 0; step < 256 && cu->has_active_wfs(); ++step) {
+      ASSERT_EQ(rj_vm_step(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+    }
+    ASSERT_FALSE(cu->has_active_wfs());
+    ASSERT_EQ(memory->read32(scratch_base), value);
+    ASSERT_EQ(memory->read32(0), 0xfeedfaceu);
+
+    ASSERT_EQ(rj_vm_save_checkpoint(vm.get(), file.path().c_str(), 0), ROCJITSU_STATUS_SUCCESS);
+    raw = nullptr;
+    ASSERT_EQ(rj_vm_restore_checkpoint(file.path().c_str(), &raw), ROCJITSU_STATUS_SUCCESS);
+    Vm restored(raw, &rj_vm_destroy);
+    EXPECT_EQ(restored->soc->memory()->read32(scratch_base), value);
+    EXPECT_EQ(restored->soc->memory()->read32(0), 0xfeedfaceu);
+  }
+}
+
+TEST(CheckpointTest, RefusesPendingAqlCompletionUntilTheWaveRetires) {
+  constexpr uint64_t kernel = 0x1000;
+  constexpr uint64_t signal = 0x2000;
+  constexpr uint64_t signal_value = signal + 8;
+  for (const std::string_view arch : {"cdna1", "cdna2", "cdna3", "cdna4", "cdna5", "rdna1", "rdna2",
+                                      "rdna3", "rdna3_5", "rdna4"}) {
+    SCOPED_TRACE(arch);
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+    rj_vm_t *raw = nullptr;
+    ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+              ROCJITSU_STATUS_SUCCESS);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+    auto *memory = vm->soc->memory();
+    auto *owner = vm->soc->xcd(0);
+    auto *cu = owner->shader_engine(0)->compute_unit(0);
+    test::AqlQueue queue(memory, owner->command_processor());
+    amdhsa::kernel_descriptor_t kd{};
+    kd.kernel_code_entry_byte_offset = sizeof(kd);
+    const bool gfx11_or_gfx12 = arch.starts_with("rdna3") || arch == "rdna4" || arch == "cdna5";
+    const uint32_t code[] = {0xbf800000u, 0xbf800000u, gfx11_or_gfx12 ? 0xbfb00000u : 0xbf810000u};
+    memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kernel);
+    memory->load_image(reinterpret_cast<const uint8_t *>(code), sizeof(code), kernel + sizeof(kd));
+    memory->write64(signal_value, 1);
+
+    test::ScopedTempFile file;
+    ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-aql-owner-"));
+    const auto save = [&] { return rj_vm_save_checkpoint(vm.get(), file.path().c_str(), 0); };
+    ASSERT_EQ(save(), ROCJITSU_STATUS_SUCCESS);
+    const auto previous = read_binary_file(file.path());
+
+    hsa_kernel_dispatch_packet_t packet{};
+    packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    packet.setup = 1;
+    packet.grid_size_x = packet.workgroup_size_x = 64;
+    packet.grid_size_y = packet.grid_size_z = packet.workgroup_size_y = packet.workgroup_size_z = 1;
+    packet.kernel_object = kernel;
+    packet.completion_signal.handle = signal;
+    queue.submit(packet);
+    for (unsigned step = 0; step < 128 && !cu->has_active_wfs(); ++step) {
+      ASSERT_EQ(rj_vm_step(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+    }
+    ASSERT_TRUE(cu->has_active_wfs());
+    ASSERT_EQ(memory->read64(signal_value), 1u);
+    EXPECT_EQ(save(), ROCJITSU_STATUS_ERROR);
+    EXPECT_EQ(read_binary_file(file.path()), previous);
+    for (unsigned step = 0;
+         step < 512 && (cu->has_active_wfs() || memory->read64(signal_value) != 0); ++step) {
+      ASSERT_EQ(rj_vm_step(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+    }
+    ASSERT_FALSE(cu->has_active_wfs());
+    ASSERT_EQ(memory->read64(signal_value), 0u);
+    EXPECT_EQ(save(), ROCJITSU_STATUS_SUCCESS);
+  }
+}
+
+TEST(CheckpointTest, RestoresCuOwnedLdsWindowsForDecodedReads) {
+  for (const std::string_view arch : {"cdna1", "cdna3"}) {
+    SCOPED_TRACE(arch);
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+    config::LoadedConfig source;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+    auto *cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    const std::array<uint32_t, 2> values{0x1234abcd, 0xcafe8042};
+    std::array<uint32_t, 2> bases{};
+    for (unsigned i = 0; i < values.size(); ++i) {
+      bases[i] = cu->allocate_lds(256);
+      auto *wave = cu->dispatch_wf(i, 0x1000, 16, 8);
+      ASSERT_NE(wave, nullptr);
+      wave->set_lds_base(bases[i]);
+      wave->set_lds_size(256);
+      wave->set_m0(0x20040);
+      wave->set_exec(1);
+      wave->lds().write32(bases[i] + 64, values[i]);
+      cu->write_vgpr(wave->vgpr_alloc().base, 0, 64);
+    }
+    ASSERT_GT(bases[1], bases[0]);
+    test::ScopedTempFile file;
+    ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-cu-lds-"));
+    ASSERT_TRUE(config::save_checkpoint(file.path(), *source.soc(), 0, source.engine_config, 1, {})
+                    .succeeded());
+    config::LoadedConfig restored;
+    ASSERT_TRUE(test::restore_valid_checkpoint(file.path(), restored));
+    auto *other = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    const auto decoder = Decoder::create(other->arch());
+    for (unsigned i = 0; i < values.size(); ++i) {
+      auto *wave = other->wf(i);
+      ASSERT_NE(wave, nullptr);
+      EXPECT_EQ(wave->lds_base(), bases[i]);
+      EXPECT_EQ(wave->lds_size(), 256u);
+      auto ds = decoder->decode_window(
+          std::array<uint32_t, 2>{0xd86c0000, 0x04000000}); // ds_read_b32 v4, v0
+      ASSERT_TRUE(ds.succeeded());
+      ASSERT_TRUE(other->execute_instruction(ds.value().get(), *wave).succeeded());
+      amdgpu::LocalMemPipeline pipeline;
+      ASSERT_EQ(pipeline.issue(ds.value().release(), *wave), amdgpu::VmAccessOutcome::Complete);
+      EXPECT_EQ(other->read_vgpr(wave->vgpr_alloc().base + 4, 0), values[i]);
+      if (arch == "cdna1") {
+        const uint32_t word = 0x7e0202fe; // v_mov_b32 v1, src_lds_direct
+        auto mov = decoder->decode_window(std::span(&word, 1));
+        ASSERT_TRUE(mov.succeeded());
+        ASSERT_TRUE(other->execute_instruction(mov.value().get(), *wave).succeeded());
+        EXPECT_EQ(other->read_vgpr(wave->vgpr_alloc().base + 1, 0), values[i]);
+      }
+    }
+  }
+}
+
+TEST(CheckpointTest, RestoresAnExhaustedLegacyLdsCursorUntilTheWavesRetire) {
+  for (const auto &[arch, kib] : {std::pair{"cdna4", 64u}, std::pair{"cdna5", 63u}}) {
+    SCOPED_TRACE(arch);
+    auto json = functional_quantum_checkpoint_config(1, 2, kib);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+    config::LoadedConfig source;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+    auto *cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    const uint32_t capacity = kib * 1024, window_size = capacity / 2;
+    const uint32_t granule = amdgpu::lds_allocation_granule(cu->arch());
+    ASSERT_EQ(cu->allocate_lds(capacity / granule * granule), 0u);
+    for (uint32_t slot = 0; slot < 2; ++slot) {
+      auto *wave = cu->dispatch_wf(slot, 0x1000, 16, 4);
+      ASSERT_NE(wave, nullptr);
+      wave->set_lds_base(slot * window_size);
+      wave->set_lds_size(window_size);
+      wave->lds().write32(wave->lds_base() + 64, 0xcafe1000 + slot);
+    }
+    test::ScopedTempFile file;
+    ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-exhausted-cursor-"));
+    ASSERT_TRUE(config::save_checkpoint(file.path(), *source.soc(), 0, source.engine_config, 1, {})
+                    .succeeded());
+    auto bytes = read_binary_file(file.path());
+    const auto *units = fb::GetSimulationCheckpoint(bytes.data())->compute_units();
+    ASSERT_NE(units, nullptr);
+    auto *unit = reinterpret_cast<flatbuffers::Table *>(units->GetMutableObject(0));
+    auto write_cursor = [&](uint32_t cursor) {
+      ASSERT_TRUE(unit->SetField<uint32_t>(fb::ComputeUnitState::VT_LDS_CURSOR, cursor));
+      ASSERT_TRUE(
+          file.write(std::string_view(reinterpret_cast<const char *>(bytes.data()), bytes.size())));
+    };
+    for (uint32_t malformed : {capacity + 256, capacity - 1}) {
+      ASSERT_NO_FATAL_FAILURE(write_cursor(malformed));
+      EXPECT_TRUE(config::restore_checkpoint(file.path(), {}).failed());
+    }
+    // A 256-byte placement writer can fit two equal windows exactly into this CU.
+    ASSERT_NO_FATAL_FAILURE(write_cursor(capacity));
+    for (unsigned round = 0; round < 2; ++round) {
+      SCOPED_TRACE(round);
+      config::LoadedConfig restored;
+      ASSERT_TRUE(test::restore_valid_checkpoint(file.path(), restored));
+      auto *out = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+      EXPECT_EQ(out->reserved_lds_bytes(), capacity);
+      EXPECT_TRUE(out->can_accept_workgroup(1, 0));
+      EXPECT_FALSE(out->can_accept_workgroup(1, 256));
+      for (uint32_t slot = 0; slot < 2; ++slot) {
+        auto *wave = out->wf(slot);
+        ASSERT_NE(wave, nullptr);
+        EXPECT_EQ(wave->lds_base(), slot * window_size);
+        EXPECT_EQ(wave->lds_size(), window_size);
+        EXPECT_EQ(wave->lds().read32(wave->lds_base() + 64), 0xcafe1000 + slot);
+      }
+      if (round == 0) {
+        ASSERT_TRUE(
+            config::save_checkpoint(file.path(), *restored.soc(), 0, restored.engine_config, 1, {})
+                .succeeded());
+      } else {
+        out->wf(0)->halt();
+        out->wf(1)->halt();
+        EXPECT_TRUE(out->can_accept_workgroup(1, 256));
+        EXPECT_EQ(out->allocate_lds(256), 0u);
+      }
+    }
+  }
+}
+
+TEST(CheckpointTest, PreservesLdsBackingPastTheLastNativeAllocation) {
+  struct Case {
+    const char *arch;
+    uint32_t capacity_kib;
+    uint32_t group_size;
+    uint32_t endpgm;
+  };
+  for (const auto &[arch, capacity_kib, group_size, endpgm] :
+       {Case{"cdna4", 64, 64000, 0xbf810000}, Case{"cdna5", 63, 63488, 0xbfb00000}}) {
+    SCOPED_TRACE(arch);
+    auto json = functional_quantum_checkpoint_config(1, 2, capacity_kib);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+    rj_vm_t *raw = nullptr;
+    ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+              ROCJITSU_STATUS_SUCCESS);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+    auto *soc = vm->soc;
+    auto *xcd = soc->xcd(0);
+    auto *cu = xcd->shader_engine(0)->compute_unit(0);
+    amdhsa::kernel_descriptor_t kd{};
+    kd.kernel_code_entry_byte_offset = sizeof(kd);
+    kd.group_segment_fixed_size = group_size;
+    constexpr uint64_t kernel = 0x1000;
+    const uint32_t code[] = {0xbf800000, 0xbf800000, endpgm};
+    soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kernel);
+    soc->memory()->load_image(reinterpret_cast<const uint8_t *>(code), sizeof(code),
+                              kernel + sizeof(kd));
+    test::AqlQueue queue(soc->memory(), xcd->command_processor());
+    hsa_kernel_dispatch_packet_t packet{};
+    packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    packet.setup = 1;
+    packet.workgroup_size_x = packet.grid_size_x = 32;
+    packet.workgroup_size_y = packet.grid_size_y = 1;
+    packet.workgroup_size_z = packet.grid_size_z = 1;
+    packet.kernel_object = kernel;
+    packet.group_segment_size = group_size;
+    queue.submit(packet);
+    int active = 0;
+    for (unsigned step = 0; !cu->has_active_wfs() && step < 100; ++step) {
+      ASSERT_EQ(rj_vm_step(vm.get(), &active), ROCJITSU_STATUS_SUCCESS);
+    }
+    ASSERT_TRUE(cu->has_active_wfs());
+    ASSERT_EQ(cu->reserved_lds_bytes(), group_size);
+    for (unsigned step = 0; cu->has_active_wfs() && step < 100; ++step) {
+      ASSERT_EQ(rj_vm_step(vm.get(), &active), ROCJITSU_STATUS_SUCCESS);
+    }
+    ASSERT_FALSE(cu->has_active_wfs());
+    ASSERT_EQ(cu->reserved_lds_bytes(), 0u);
+    const uint32_t capacity = capacity_kib * 1024u;
+    ASSERT_EQ(cu->lds().materialized_size_bytes(), capacity);
+    cu->lds().write32(capacity - 4, 0xcafebabe);
+    cu->lds().write32(group_size - 4, 0x1234abcd);
+    for (const bool resident : {false, true}) {
+      SCOPED_TRACE(resident);
+      if (resident) {
+        ASSERT_EQ(cu->allocate_lds(group_size), 0u);
+        auto *wave = cu->dispatch_wf(0, kernel, 16, 4);
+        ASSERT_NE(wave, nullptr);
+        wave->set_lds_size(group_size);
+      }
+      test::ScopedTempFile file;
+      ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-lds-backing-"));
+      ASSERT_EQ(rj_vm_save_checkpoint(vm.get(), file.path().c_str(), 0), ROCJITSU_STATUS_SUCCESS);
+      rj_vm_t *loaded = nullptr;
+      ASSERT_EQ(rj_vm_restore_checkpoint(file.path().c_str(), &loaded), ROCJITSU_STATUS_SUCCESS);
+      std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> restored(loaded, &rj_vm_destroy);
+      auto *other = restored->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+      EXPECT_EQ(other->reserved_lds_bytes(), resident ? group_size : 0u);
+      EXPECT_EQ(other->lds().read32(capacity - 4), 0xcafebabeu);
+      EXPECT_EQ(other->lds().read32(group_size - 4), 0x1234abcdu);
+      if (resident) {
+        ASSERT_NE(other->wf(0), nullptr);
+        EXPECT_EQ(other->wf(0)->lds_size(), group_size);
+      }
+    }
+  }
+}
+
+TEST(CheckpointTest, RestoresScalarFloatingPointExceptionsReadByTheShader) {
+  for (const std::string_view profile : {"rdna3_5", "rdna4"}) {
+    SCOPED_TRACE(profile);
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", profile));
+    config::LoadedConfig source;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+    auto *cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    auto *wave = cu->dispatch_wf(0, 0x1000, 16, 4, 32);
+    ASSERT_NE(wave, nullptr);
+    auto decoder = Decoder::create(cu->arch());
+    const auto execute = [&](uint32_t word) {
+      auto inst = decoder->decode_window(std::array<uint32_t, 1>{word});
+      ASSERT_TRUE(inst.succeeded());
+      ASSERT_TRUE(cu->execute_instruction(inst.value().get(), *wave).succeeded());
+    };
+    const bool gfx12 = profile == "rdna4";
+    wave->set_mode_raw(0xf0);
+    if (gfx12) {
+      wave->set_gfx12_excp_flag_user_extra_raw(1u << 30);
+      wave->set_trapsts(1u << 8); // EXCP_FLAG_PRIV.MEM_VIOL
+      wave->set_gfx12_trap_ctrl_raw(1u << 4);
+    }
+    cu->write_sgpr(wave->sgpr_alloc().base, 0x7f800000);
+    cu->write_sgpr(wave->sgpr_alloc().base + 1, 0);
+    ASSERT_NO_FATAL_FAILURE(execute(0xa2020100)); // s_mul_f32 s2,s0,s1
+    const auto check_register = [&](unsigned id, uint32_t expected) {
+      cu->write_sgpr(wave->sgpr_alloc().base + 3, ~0u);
+      ASSERT_NO_FATAL_FAILURE(execute(0xb883f800u | id)); // s_getreg_b32 s3,hwreg(id,0,32)
+      EXPECT_EQ(cu->read_sgpr(wave->sgpr_alloc().base + 3), expected) << id;
+    };
+    const auto check_flags = [&] {
+      ASSERT_NO_FATAL_FAILURE(check_register(gfx12 ? 18 : 3, gfx12 ? 0x40000001u : 1u));
+      if (gfx12) {
+        ASSERT_NO_FATAL_FAILURE(check_register(17, 1u << 4));
+        ASSERT_NO_FATAL_FAILURE(check_register(19, 1u << 4));
+      }
+    };
+    ASSERT_NO_FATAL_FAILURE(check_flags());
+    test::ScopedTempFile file;
+    ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-scalar-exceptions-"));
+    ASSERT_TRUE(config::save_checkpoint(file.path(), *source.soc(), 0, source.engine_config,
+                                        source.cpu_dispatch_threads, {})
+                    .succeeded());
+    config::LoadedConfig restored;
+    ASSERT_TRUE(test::restore_valid_checkpoint(file.path(), restored));
+    cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    wave = cu->wf(0);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_NO_FATAL_FAILURE(check_flags());
+  }
+}
+
+TEST(CheckpointTest, AlignsNewGfx10ReservationsAfterRestoringAnOlderLdsCursor) {
+  for (const std::string_view profile : {"rdna1", "rdna2"}) {
+    SCOPED_TRACE(profile);
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", profile));
+    config::LoadedConfig source;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+    auto *cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    auto *wave = cu->dispatch_wf(0, 0x1000, 16, 4);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_EQ(cu->allocate_lds(256), 0u);
+    wave->set_lds_base(0);
+    wave->set_lds_size(256);
+    wave->lds().write32(252, 0x1234abcd);
+    test::ScopedTempFile file;
+    ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-gfx10-lds-cursor-"));
+    ASSERT_TRUE(config::save_checkpoint(file.path(), *source.soc(), 0, source.engine_config,
+                                        source.cpu_dispatch_threads, {})
+                    .succeeded());
+
+    // Older GFX10 writers advanced the allocator by 256 bytes for this live window.
+    auto bytes = read_binary_file(file.path());
+    const auto *units = fb::GetSimulationCheckpoint(bytes.data())->compute_units();
+    ASSERT_NE(units, nullptr);
+    ASSERT_GT(units->size(), 0u);
+    auto *unit = reinterpret_cast<flatbuffers::Table *>(units->GetMutableObject(0));
+    auto *resources =
+        unit->GetPointer<flatbuffers::Table *>(fb::ComputeUnitState::VT_GFX10_RESOURCES);
+    ASSERT_NE(resources, nullptr);
+    ASSERT_TRUE(resources->SetField<uint32_t>(fb::Gfx10CuResources::VT_NEXT_LDS_ALLOC, 256));
+    ASSERT_TRUE(
+        file.write(std::string_view(reinterpret_cast<const char *>(bytes.data()), bytes.size())));
+
+    config::LoadedConfig restored;
+    ASSERT_TRUE(test::restore_valid_checkpoint(file.path(), restored));
+    auto *out = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    auto *resident = out->wf(0);
+    ASSERT_NE(resident, nullptr);
+    EXPECT_EQ(resident->lds_base(), 0u);
+    EXPECT_EQ(resident->lds_size(), 256u);
+    EXPECT_EQ(resident->lds().read32(252), 0x1234abcdu);
+    const auto fresh_base = cu->allocate_lds(256);
+    ASSERT_EQ(fresh_base, profile == "rdna1" ? 512u : 1024u);
+    EXPECT_EQ(out->reserved_lds_bytes(), fresh_base);
+    auto *next = out->dispatch_wf(1, 0x2000, 16, 4);
+    ASSERT_NE(next, nullptr);
+    next->set_lds_base(out->allocate_lds(256));
+    next->set_lds_size(fresh_base);
+    EXPECT_EQ(next->lds_base(), fresh_base);
+    const auto decoder = Decoder::create(out->arch());
+    auto read = decoder->decode_window(
+        rdna2::build_sopk(rdna2::kSGetregB32, {.simm16 = 0xf806, .sdst = 3}));
+    ASSERT_TRUE(read.succeeded());
+    ASSERT_TRUE(out->execute_instruction(read.value().get(), *next).succeeded());
+    EXPECT_EQ(out->read_sgpr(next->sgpr_alloc().base + 3), profile == "rdna1" ? 0x2002u : 0x4004u);
+  }
+}
+
+TEST(CheckpointTest, Gfx10RestoresLaneReadAllocationAndOwnedLds) {
+  struct Case {
+    const char *profile;
+    bool from_aql;
+    bool reject;
+  };
+  for (const auto &[profile, from_aql, reject] :
+       {Case{"rdna1", false, false}, Case{"rdna2", false, false}, Case{"rdna2", true, false},
+        Case{"rdna1", true, true}}) {
+    SCOPED_TRACE(testing::Message() << profile << " from_aql=" << from_aql);
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", profile));
+    rj_vm_t *raw = nullptr;
+    ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+              ROCJITSU_STATUS_SUCCESS);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+    auto *soc = vm->soc;
+    auto *xcd = soc->xcd(0);
+    amdhsa::kernel_descriptor_t kd{};
+    kd.kernel_code_entry_byte_offset = sizeof(kd);
+    kd.group_segment_fixed_size = 256;
+    constexpr uint64_t address = 0x1000;
+    constexpr uint32_t code[] = {0xbf8e0007, 0xbf810000}; // S_SLEEP; S_ENDPGM.
+    soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), address);
+    soc->memory()->load_image(reinterpret_cast<const uint8_t *>(code), sizeof(code),
+                              address + sizeof(kd));
+    test::AqlQueue queue(soc->memory(), xcd->command_processor());
+    hsa_kernel_dispatch_packet_t packet{};
+    packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    packet.setup = 1;
+    packet.workgroup_size_x = packet.grid_size_x = 64;
+    packet.workgroup_size_y = packet.grid_size_y = 1;
+    packet.workgroup_size_z = packet.grid_size_z = 1;
+    packet.kernel_object = address;
+    packet.group_segment_size = kd.group_segment_fixed_size;
+    auto *cu = xcd->shader_engine(0)->compute_unit(0);
+    if (from_aql) {
+      queue.submit(packet);
+      int active = 0;
+      for (unsigned step = 0; step < 100 && !cu->has_active_wfs(); ++step) {
+        ASSERT_EQ(rj_vm_step(vm.get(), &active), ROCJITSU_STATUS_SUCCESS);
+      }
+    } else {
+      auto *standalone = cu->dispatch_wf(0, 0x1000, 16, 4, 64);
+      ASSERT_NE(standalone, nullptr);
+      standalone->set_lds_base(cu->allocate_lds(256));
+      standalone->set_lds_size(256);
+    }
+    auto *wave = cu->wf(0);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_EQ(wave->num_vgprs(), 4u);
+    ASSERT_GE(wave->lds_size(), 256u);
+    constexpr uint32_t fallback = 0x12345678u, direct = 0x1234abcdu;
+    const auto decoder = Decoder::create(cu->arch());
+    ASSERT_NE(decoder, nullptr);
+    auto vgpr = decoder->decode_window(std::array<uint32_t, 2>{0xd7600004, 0x02010b28}); // s4,v40,5
+    auto lds =
+        decoder->decode_window(std::array<uint32_t, 2>{0xd7600006, 0x020100fe}); // s6,LDS_DIRECT,0
+    ASSERT_TRUE(vgpr.succeeded() && lds.succeeded());
+    auto check_operands = [&] {
+      cu->write_sgpr(wave->sgpr_alloc().base + 4, 0);
+      cu->write_sgpr(wave->sgpr_alloc().base + 6, 0);
+      ASSERT_TRUE(cu->execute_instruction(vgpr.value().get(), *wave).succeeded());
+      ASSERT_TRUE(cu->execute_instruction(lds.value().get(), *wave).succeeded());
+      EXPECT_EQ(cu->read_sgpr(wave->sgpr_alloc().base + 4), fallback);
+      EXPECT_EQ(cu->read_sgpr(wave->sgpr_alloc().base + 6), direct);
+    };
+    cu->write_vgpr(wave->vgpr_alloc().base, 5, fallback);
+    cu->write_vgpr(wave->vgpr_alloc().base + 40, 5, 0xbeef);
+    wave->lds().write32(wave->lds_base() + 0x40, direct);
+    wave->set_m0(0x20040);
+    ASSERT_NO_FATAL_FAILURE(check_operands());
+    const auto saved_lds_size = wave->lds_size();
+    const auto saved_lds_base = wave->lds_base();
+    test::ScopedTempFile checkpoint;
+    ASSERT_TRUE(checkpoint.initialize("gfx10-lane-operands-"));
+    const auto saved = rj_vm_save_checkpoint(vm.get(), checkpoint.path().c_str(), 0);
+    if (reject) {
+      EXPECT_NE(saved, ROCJITSU_STATUS_SUCCESS);
+      continue;
+    }
+    ASSERT_EQ(saved, ROCJITSU_STATUS_SUCCESS);
+    config::LoadedConfig restored;
+    ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
+    cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    wave = cu->wf(0);
+    ASSERT_NE(wave, nullptr);
+    EXPECT_EQ(wave->num_vgprs(), 4u);
+    EXPECT_EQ(wave->lds_base(), saved_lds_base);
+    EXPECT_EQ(wave->lds_size(), saved_lds_size);
+    EXPECT_EQ(wave->lds().read32(wave->lds_base() + 0x40), direct);
+    ASSERT_NO_FATAL_FAILURE(check_operands());
+  }
+}
+
+TEST(CheckpointTest, PreservesRequestedVgprsAcrossWaveArchitectures) {
+  for (const std::string_view arch : {"cdna1", "cdna2", "cdna3", "cdna4", "cdna5", "rdna1", "rdna2",
+                                      "rdna3", "rdna3_5", "rdna4"}) {
+    SCOPED_TRACE(arch);
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+    config::LoadedConfig source;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+    auto *cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    for (const uint32_t requested : {4u, cu->config().vgprs_per_wf}) {
+      SCOPED_TRACE(requested);
+      auto *wave = cu->dispatch_wf(0, 0x1000, 16, requested);
+      ASSERT_NE(wave, nullptr);
+      test::ScopedTempFile file;
+      ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-logical-vgprs-"));
+      ASSERT_TRUE(
+          config::save_checkpoint(file.path(), *source.soc(), 0, source.engine_config, 1, {})
+              .succeeded());
+      config::LoadedConfig restored;
+      ASSERT_TRUE(test::restore_valid_checkpoint(file.path(), restored));
+      auto *other = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+      ASSERT_NE(other, nullptr);
+      EXPECT_EQ(other->num_vgprs(), requested);
+      wave->halt();
+    }
+  }
+}
+
+TEST(CheckpointTest, PreservesRdna4ImageStoreVgprZeroSubstitution) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, "cdna3", "rdna4"));
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+            ROCJITSU_STATUS_SUCCESS);
+  using Vm = std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)>;
+  Vm original(raw, &rj_vm_destroy);
+  auto cu = [](const Vm &vm) { return vm->soc->xcd(0)->shader_engine(0)->compute_unit(0); };
+  constexpr uint64_t kernel = 0x1000, texel = 0x10000;
+  const auto store = rdna4::build_vimage(
+      rdna4::kImageStoreVimage, {.dim = 1, .dmask = 7, .vdata = 31, .vaddr0 = 4, .vaddr1 = 5});
+  auto *memory = original->soc->memory();
+  memory->load_image(reinterpret_cast<const uint8_t *>(store.data()), sizeof(store), kernel);
+  const std::array<uint32_t, 2> finish{0xbfc10000, 0xbfb00000}; // s_wait_storecnt 0; s_endpgm
+  memory->load_image(reinterpret_cast<const uint8_t *>(finish.data()), sizeof(finish),
+                     kernel + sizeof(store));
+  auto *wave = cu(original)->dispatch_wf(0, kernel, 16, 32, 32);
+  ASSERT_NE(wave, nullptr);
+  const std::array<uint32_t, 8> descriptor{uint32_t(texel >> 8),
+                                           (61u << 17) | (2u << 30),
+                                           1u << 14,
+                                           (9u << 28) | (4 | (5 << 3) | (6 << 6) | (7 << 9)),
+                                           63,
+                                           0,
+                                           0,
+                                           0};
+  for (unsigned i = 0; i < descriptor.size(); ++i) {
+    cu(original)->write_sgpr(wave->sgpr_alloc().base + i, descriptor[i]);
+  }
+  wave->set_exec(1);
+  const auto base = wave->vgpr_alloc().base;
+  cu(original)->write_vgpr(base + 4, 0, 0);
+  cu(original)->write_vgpr(base + 5, 0, 0);
+  cu(original)->write_vgpr(base + 31, 0, 0x11112222);
+  cu(original)->write_vgpr(base, 0, 0x33334444);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-rdna4-image-store-vgprs-"));
+  ASSERT_EQ(rj_vm_save_checkpoint(original.get(), file.path().c_str(), 0), ROCJITSU_STATUS_SUCCESS);
+  rj_vm_t *loaded = nullptr;
+  ASSERT_EQ(rj_vm_restore_checkpoint(file.path().c_str(), &loaded), ROCJITSU_STATUS_SUCCESS);
+  Vm restored(loaded, &rj_vm_destroy);
+  for (const auto *machine : {&original, &restored}) {
+    auto *unit = cu(*machine);
+    auto *resident = unit->wf(0);
+    ASSERT_NE(resident, nullptr);
+    EXPECT_EQ(resident->num_vgprs(), 32u);
+    for (unsigned i = 0; i < 64 && !resident->is_halted(); ++i) {
+      ASSERT_EQ(rj_vm_step(machine->get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+    }
+    ASSERT_TRUE(resident->is_halted());
+    unit->l1_vector().flush_all();
+    unit->l2()->flush_all();
+    const auto *output = (*machine)->soc->memory();
+    EXPECT_EQ(output->read32(texel), 0x11112222u);
+    EXPECT_EQ(output->read32(texel + 4), 0x33334444u);
+    EXPECT_EQ(output->read32(texel + 8), 0x33334444u);
+  }
+}
+
+TEST(CheckpointTest, PreservesReturningDsAtomicBehaviorAtTheVgprBoundary) {
+  for (const std::string_view arch : {"cdna3", "cdna5", "rdna4"}) {
+    SCOPED_TRACE(arch);
+    for (const uint32_t destination : {1u, 32u}) {
+      SCOPED_TRACE(destination);
+      auto json = functional_quantum_checkpoint_config(1, 1);
+      ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+      rj_vm_t *raw = nullptr;
+      ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+                ROCJITSU_STATUS_SUCCESS);
+      using Vm = std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)>;
+      Vm original(raw, &rj_vm_destroy);
+      const auto cu = [](const Vm &vm) {
+        return vm->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+      };
+      // Keep the wave resident after DS_ADD_RTN_U32 so its returned register can be read at
+      // completion.
+      std::array<uint32_t, 16> code;
+      code.fill(0xbf800000); // s_nop 0
+      code[0] = arch == "cdna3" ? 0xd8400000u : 0xd8800000u;
+      code[1] = destination << 24 | 0x302u;
+      code.back() = arch == "cdna3" ? 0xbf810000u : 0xbfb00000u;
+      original->soc->memory()->load_image(reinterpret_cast<const uint8_t *>(code.data()),
+                                          sizeof(code), 0x1000);
+      auto *wave = cu(original)->dispatch_wf(0, 0x1000, 16, 4, arch == "cdna3" ? 64 : 32);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(1);
+      wave->set_m0(UINT32_MAX);
+      wave->set_lds_base(cu(original)->allocate_lds(256));
+      wave->set_lds_size(256);
+      wave->lds().write32(8, 41);
+      cu(original)->write_vgpr(wave->vgpr_alloc().base + 2, 0, 8);
+      cu(original)->write_vgpr(wave->vgpr_alloc().base + 3, 0, 1);
+      cu(original)->write_vgpr(wave->vgpr_alloc().base + destination, 0, 0xfeed);
+      test::ScopedTempFile file;
+      ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-ds-atomic-boundary-"));
+      ASSERT_EQ(rj_vm_save_checkpoint(original.get(), file.path().c_str(), 0),
+                ROCJITSU_STATUS_SUCCESS);
+      rj_vm_t *other = nullptr;
+      ASSERT_EQ(rj_vm_restore_checkpoint(file.path().c_str(), &other), ROCJITSU_STATUS_SUCCESS);
+      Vm restored(other, &rj_vm_destroy);
+      std::array<uint32_t, 2> results{};
+      unsigned machine_index = 0;
+      for (const auto *machine : {&original, &restored}) {
+        auto *resident = cu(*machine)->wf(0);
+        ASSERT_NE(resident, nullptr);
+        EXPECT_EQ(resident->num_vgprs(), 4u);
+        const uint32_t physical_result = resident->vgpr_alloc().base + destination;
+        for (unsigned i = 0;
+             i < 32 && (resident->pc == 0x1000 || !resident->wait_counters().empty()); ++i) {
+          ASSERT_EQ(rj_vm_step(machine->get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+        }
+        ASSERT_FALSE(resident->is_halted());
+        ASSERT_NE(resident->pc, 0x1000u);
+        ASSERT_TRUE(resident->wait_counters().empty());
+        results[machine_index++] = cu(*machine)->read_vgpr(physical_result, 0);
+        for (unsigned i = 0; i < 32 && !resident->is_halted(); ++i) {
+          ASSERT_EQ(rj_vm_step(machine->get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+        }
+        ASSERT_TRUE(resident->is_halted());
+      }
+      EXPECT_EQ(results[0], results[1]);
+      if (destination == 1) {
+        EXPECT_EQ(results[0], 41u);
+      }
+      const uint32_t original_word = cu(original)->lds().read32(8);
+      EXPECT_EQ(cu(restored)->lds().read32(8), original_word);
+      if (destination == 1 || arch == "rdna4") {
+        EXPECT_EQ(original_word, destination == 1 ? 42u : 41u);
+      }
+    }
+  }
+}
+
+TEST(CheckpointTest, RestoresLogicalVgprBoundsUsedByDecodedInstructions) {
+  for (const char *profile : {"cdna1", "cdna2", "rdna3", "rdna3_5"}) {
+    SCOPED_TRACE(profile);
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", profile));
+    config::LoadedConfig source;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+    auto *cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    const bool cdna =
+        cu->arch() == rocjitsu::IsaFamily::Cdna1 || cu->arch() == rocjitsu::IsaFamily::Cdna2;
+    auto *wave = cu->dispatch_wf(0, 0x1000, 8, 16, cdna ? 64 : 32);
+    ASSERT_NE(wave, nullptr);
+    if (cu->arch() == rocjitsu::IsaFamily::Cdna2) {
+      wave->set_accum_vgpr_base(8);
+    }
+    auto decoder = Decoder::create(cu->arch());
+    ASSERT_NE(decoder, nullptr);
+    auto check_range = [&] {
+      EXPECT_EQ(wave->num_vgprs(), 16u);
+      const auto base = wave->vgpr_alloc().base;
+      wave->set_exec(1);
+      cu->write_vgpr(base + 40, 0, 0xbeef);
+      if (cdna) {
+        if (cu->arch() == rocjitsu::IsaFamily::Cdna2) {
+          EXPECT_EQ(wave->accum_vgpr_base(), 8u);
+        }
+        cu->write_vgpr(base, 0, 0x12345678);
+        auto read = decoder->decode_window(std::array<uint32_t, 1>{0x7e020328}); // v_mov_b32 v1,v40
+        auto write =
+            decoder->decode_window(std::array<uint32_t, 1>{0x7e500300}); // v_mov_b32 v40,v0
+        ASSERT_TRUE(read.succeeded() && write.succeeded());
+        ASSERT_TRUE(cu->execute_instruction(read.value().get(), *wave).succeeded());
+        EXPECT_EQ(cu->read_vgpr(base + 1, 0), 0x12345678u);
+        ASSERT_TRUE(cu->execute_instruction(write.value().get(), *wave).succeeded());
+      } else {
+        // Hold LDS contents constant to isolate the destination ownership check.
+        wave->set_lds_size(256);
+        wave->lds().write32(wave->lds_base(), 0x12345678);
+        cu->write_vgpr(base, 0, 0);
+        auto load = decoder->decode_window(
+            std::array<uint32_t, 2>{0xd8d80000u, 0x28000000u}); // ds_load_b32 v40,v0
+        ASSERT_TRUE(load.succeeded());
+        ASSERT_TRUE(cu->execute_instruction(load.value().get(), *wave).succeeded());
+        amdgpu::LocalMemPipeline pipeline;
+        ASSERT_EQ(pipeline.issue(load.value().release(), *wave), amdgpu::VmAccessOutcome::Complete);
+      }
+      EXPECT_EQ(cu->read_vgpr(base + 40, 0), 0xbeefu);
+    };
+    ASSERT_NO_FATAL_FAILURE(check_range());
+    test::ScopedTempFile checkpoint;
+    ASSERT_TRUE(checkpoint.initialize("checkpoint-vgpr-bounds-"));
+    ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *source.soc(), 0, source.engine_config,
+                                        source.cpu_dispatch_threads, {})
+                    .succeeded());
+    config::LoadedConfig restored;
+    ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
+    cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    wave = cu->wf(0);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_NO_FATAL_FAILURE(check_range());
+  }
+}
+
+TEST(CheckpointTest, RoundTripsCdna3SgprTailAliasesAndRoundedStorage) {
+  config::LoadedConfig source;
+  ASSERT_TRUE(
+      test::load_valid_config_from_string(functional_quantum_checkpoint_config(1, 1), source));
+  auto *cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *wave = cu->dispatch_wf(0, 0x1000, 8, 16);
+  ASSERT_NE(wave, nullptr);
+  wave->debug_write_sgpr(8, 0x13579bdf); // Above the request, inside the 16-dword allocation.
+  wave->set_vcc_raw(0x0123456789abcdefull);
+  wave->set_scratch_base(0x1111222233334444ull);
+  test::ScopedTempFile checkpoint;
+  ASSERT_TRUE(checkpoint.initialize("rocjitsu-sgpr-tail-"));
+  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *source.soc(), 0, source.engine_config,
+                                      source.cpu_dispatch_threads, {})
+                  .succeeded());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
+  auto *restored_wave = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+  ASSERT_NE(restored_wave, nullptr);
+  EXPECT_EQ(restored_wave->num_sgprs(), 8u);
+  EXPECT_EQ(restored_wave->debug_read_sgpr(8), 0x13579bdfu);
+  EXPECT_EQ(restored_wave->debug_read_sgpr(14), 0x89abcdefu);
+  EXPECT_EQ(restored_wave->vcc(), 0x0123456789abcdefull);
+  EXPECT_EQ(restored_wave->debug_read_sgpr(10), 0x33334444u);
+  EXPECT_EQ(restored_wave->scratch_base(), 0x1111222233334444ull);
+}
+
+TEST(CheckpointTest, RoundTripsCdna3LdsWindowDataAndReservation) {
+  config::LoadedConfig source;
+  ASSERT_TRUE(
+      test::load_valid_config_from_string(functional_quantum_checkpoint_config(1, 1), source));
+  auto *cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *wave = cu->dispatch_wf(0, 0x1000, 8, 16);
+  ASSERT_NE(wave, nullptr);
+  ASSERT_EQ(cu->allocate_lds(512), 0u);
+  const uint32_t base = cu->allocate_lds(512);
+  ASSERT_EQ(base, 512u);
+  wave->set_lds_base(base);
+  wave->set_lds_size(512);
+  wave->set_m0(UINT32_MAX);
+  wave->set_exec(1);
+  cu->lds().write32(base + 4, 0x01234567);
+  // Space allocated beyond the live window must remain reserved after restore.
+  ASSERT_EQ(cu->allocate_lds(512), 1024u);
+  cu->lds().write32(base + 512, 0x55555555);
+  test::ScopedTempFile checkpoint;
+  ASSERT_TRUE(checkpoint.initialize("rocjitsu-cdna3-lds-"));
+  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *source.soc(), 0, source.engine_config,
+                                      source.cpu_dispatch_threads, {})
+                  .succeeded());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
+  auto *out = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *w = out->wf(0);
+  ASSERT_NE(w, nullptr);
+  EXPECT_EQ(w->lds_base(), base);
+  EXPECT_EQ(w->lds_size(), 512u);
+  EXPECT_EQ(w->lds().read32(base + 4), 0x01234567u);
+  EXPECT_EQ(out->allocate_lds(512), 1536u);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna3);
+  // ds_write_b32 v0,v1, with lane 0 active.
+  const std::array<uint32_t, 2> encoding{0xd81a0000u, 0x00000100u};
+  auto store = [&](uint32_t offset) {
+    out->write_vgpr(w->vgpr_alloc().base, 0, offset);
+    out->write_vgpr(w->vgpr_alloc().base + 1, 0, 0x89abcdefu);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, encoding.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(std::string_view(inst->mnemonic()), "ds_write_b32");
+    ASSERT_TRUE(out->execute_instruction(inst.get(), *w).succeeded());
+    amdgpu::LocalMemPipeline pipeline;
+    ASSERT_EQ(pipeline.issue(inst.release(), *w), amdgpu::VmAccessOutcome::Complete);
+  };
+  store(508);
+  EXPECT_EQ(w->lds().read32(base + 508), 0x89abcdefu);
+  store(512);
+  EXPECT_EQ(w->lds().read32(base + 512), 0x55555555u);
+}
+
+TEST(CheckpointTest, RejectsActiveLegacyCdna3WaveWithUnknownLdsWindow) {
+  test::ScopedTempFile checkpoint;
+  ASSERT_TRUE(write_legacy_quantum_checkpoint(checkpoint, 1, 1, false, true));
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(config::restore_checkpoint(checkpoint.path(), diagnostic.emitter()).failed());
+  EXPECT_THAT(diagnostic.message(), ::testing::HasSubstr("without saved LDS state"));
 }
 
 TEST(CheckpointTest, RoundTripsGwsWaitLimits) {
@@ -4814,6 +6183,65 @@ TEST(CheckpointTest, SaveAndRestoreMemory) {
   EXPECT_TRUE(restored.soc()->xcd(0)->command_processor()->packed_tid());
 }
 
+TEST(CheckpointTest, Gfx115xGdsBytesStreamoutAndOrderedPositionRequireProcessRelease) {
+  config::LoadedConfig loaded;
+  auto config = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(config, R"("arch":"cdna3")", R"("arch":"rdna3_5")"));
+  ASSERT_TRUE(test::load_valid_config_from_string(config, loaded));
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3_5);
+  ASSERT_NE(decoder, nullptr);
+  test::ScopedTempFile checkpoint;
+  ASSERT_TRUE(checkpoint.initialize("rocjitsu-gfx115x-gds-"));
+  const auto save = [&] {
+    return config::save_checkpoint(checkpoint.path(), *loaded.soc(), 0, loaded.engine_config,
+                                   loaded.cpu_dispatch_threads, {});
+  };
+  struct Access {
+    const char *name;
+    uint32_t opcode;
+    uint32_t offsets;
+    uint32_t operands;
+    uint32_t m0;
+    bool modifies_state;
+  };
+  constexpr uint32_t window = (64u << 16) | 8;
+  for (const auto &access :
+       {Access{"read", 54, 0, 2, window, false}, Access{"store", 13, 0, 0x302, window, true},
+        Access{"streamout add", 122, 32, 0x300, window, true},
+        Access{"advance walker", 63, 0x310, 2, 0, true}}) {
+    SCOPED_TRACE(access.name);
+    ASSERT_TRUE(save().succeeded());
+    const auto original = read_binary_file(checkpoint.path());
+    auto *wf = cu->dispatch_wf(0, 0, 64, 16, 32);
+    ASSERT_NE(wf, nullptr);
+    constexpr uint32_t owner = 7;
+    wf->set_process_id(owner);
+    wf->set_exec(1);
+    wf->set_m0(access.m0);
+    const auto vgpr = wf->vgpr_alloc().base;
+    cu->write_vgpr(vgpr + 2, 0, 0);
+    cu->write_vgpr(vgpr + 3, 0, 0x12345678);
+    // The ordered-count request advances its cursor while adding zero to streamout.
+    const uint32_t words[] = {0xd8020000u | (access.opcode << 18) | access.offsets,
+                              access.operands};
+    auto inst = decoder->decode_window(words);
+    ASSERT_TRUE(inst.succeeded());
+    ASSERT_TRUE(cu->execute_instruction(inst.value().get(), *wf).succeeded());
+    amdgpu::LocalMemPipeline local;
+    ASSERT_EQ(local.issue(inst.value().release(), *wf), amdgpu::VmAccessOutcome::Complete);
+    wf->halt();
+    if (access.modifies_state) {
+      EXPECT_TRUE(save().failed());
+      EXPECT_EQ(read_binary_file(checkpoint.path()), original);
+    } else {
+      EXPECT_TRUE(save().succeeded());
+    }
+    cu->gws_device().release_process(owner);
+    EXPECT_TRUE(save().succeeded());
+  }
+}
+
 TEST(CheckpointTest, SaveAndRestoreLazySgprs) {
   constexpr uint32_t regs_per_wave = 112;
   config::LoadedConfig loaded;
@@ -4822,8 +6250,9 @@ TEST(CheckpointTest, SaveAndRestoreLazySgprs) {
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_EQ(cu->config().sgprs_per_wf, regs_per_wave);
   ASSERT_EQ(cu->num_wf_slots(), 10u);
-  for (uint32_t slot = 0; slot < 10; ++slot)
+  for (uint32_t slot = 0; slot < 10; ++slot) {
     ASSERT_NE(cu->dispatch_wf(slot, 0x1000, regs_per_wave, cu->config().vgprs_per_wf), nullptr);
+  }
   EXPECT_EQ(cu->sgpr_file().materialized_chunk_count(), 0u);
 
   test::ScopedTempFile checkpoint;
@@ -4838,15 +6267,17 @@ TEST(CheckpointTest, SaveAndRestoreLazySgprs) {
   EXPECT_EQ(zero_cu->sgpr_file().materialized_chunk_count(), 0u);
   for (uint32_t slot = 0; slot < 10; ++slot) {
     ASSERT_FALSE(zero_cu->wf(slot)->is_halted());
-    for (uint32_t reg = 0; reg < regs_per_wave; ++reg)
+    for (uint32_t reg = 0; reg < regs_per_wave; ++reg) {
       EXPECT_EQ(zero_cu->read_sgpr(zero_cu->wf(slot)->sgpr_alloc().base + reg), 0u);
+    }
   }
 
   // Slot 9 spans physical SGPRs 1008..1119, crossing the 4 KiB boundary.
   const uint32_t base = cu->wf(9)->sgpr_alloc().base;
   ASSERT_EQ(base, 1008u);
-  for (uint32_t reg = 0; reg < regs_per_wave; ++reg)
+  for (uint32_t reg = 0; reg < regs_per_wave; ++reg) {
     cu->write_sgpr(base + reg, 0xA5000000u + reg);
+  }
   ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 43, loaded.engine_config,
                                       loaded.cpu_dispatch_threads, {})
                   .succeeded());
@@ -4855,9 +6286,48 @@ TEST(CheckpointTest, SaveAndRestoreLazySgprs) {
   auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   for (uint32_t slot = 0; slot < 10; ++slot) {
     ASSERT_FALSE(restored_cu->wf(slot)->is_halted());
-    for (uint32_t reg = 0; reg < regs_per_wave; ++reg)
+    for (uint32_t reg = 0; reg < regs_per_wave; ++reg) {
       EXPECT_EQ(restored_cu->read_sgpr(restored_cu->wf(slot)->sgpr_alloc().base + reg),
                 slot == 9 ? 0xA5000000u + reg : 0u);
+    }
+  }
+}
+
+TEST(CheckpointTest, Cdna3AndCdna4RestorePerWaveVgprAllocationAndDescriptorBoundary) {
+  for (const char *arch : {"cdna3", "cdna4"}) {
+    SCOPED_TRACE(arch);
+    auto json = functional_quantum_checkpoint_config(7, 37);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+    config::LoadedConfig source;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+    auto *cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    constexpr std::array<std::pair<uint32_t, uint32_t>, 3> allocations{
+        {{48, 16}, {8, 32}, {24, 0}}};
+    for (uint32_t slot = 0; slot < allocations.size(); ++slot) {
+      const auto [total, base] = allocations[slot];
+      auto *wave = cu->dispatch_wf_at(slot, 0, 0x1000, 40, total);
+      ASSERT_NE(wave, nullptr);
+      wave->set_accum_vgpr_base(base);
+      cu->write_sgpr(wave->sgpr_alloc().base + 47, 0xa500u + slot);
+      cu->write_sgpr(wave->sgpr_alloc().base + 48, 0xb600u + slot);
+    }
+    test::ScopedTempFile file;
+    ASSERT_TRUE(file.initialize("rocjitsu-cdna-register-bounds-"));
+    ASSERT_TRUE(config::save_checkpoint(file.path(), *source.soc(), 0, source.engine_config,
+                                        source.cpu_dispatch_threads, {})
+                    .succeeded());
+    auto restored = config::restore_checkpoint(file.path(), {});
+    ASSERT_TRUE(restored.succeeded());
+    auto *restored_cu = restored.value().soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    for (uint32_t slot = 0; slot < allocations.size(); ++slot) {
+      const auto *wave = restored_cu->wf(slot);
+      ASSERT_NE(wave, nullptr);
+      EXPECT_EQ(wave->num_vgprs(), allocations[slot].first);
+      EXPECT_EQ(wave->accum_vgpr_base(), allocations[slot].second);
+      EXPECT_EQ(wave->num_sgprs(), 40u);
+      EXPECT_EQ(restored_cu->read_sgpr_storage(wave->sgpr_alloc().base + 47), 0xa500u + slot);
+      EXPECT_EQ(restored_cu->read_sgpr_storage(wave->sgpr_alloc().base + 48), 0u);
+    }
   }
 }
 
@@ -5003,6 +6473,7 @@ TEST(CheckpointTest, SaveAndRestoreRdnaWave64State) {
 
   auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf, 64);
   ASSERT_NE(wf, nullptr);
+  wf->set_sleep_wakeup(true);
   ASSERT_EQ(wf->wf_size(), 64u);
   wf->set_exec_raw(0xDEADBEEF0000000FULL);
   const uint32_t vgpr_base = wf->vgpr_alloc().base;
@@ -5047,6 +6518,10 @@ TEST(CheckpointTest, SaveAndRestoreRdnaWave64State) {
   ASSERT_NE(restored_cu, nullptr);
   auto *restored_wf = restored_cu->wf(0);
   ASSERT_NE(restored_wf, nullptr);
+  EXPECT_TRUE(restored_wf->sleep_wakeup());
+  restored_wf->issue_sleep_with_credit(64);
+  EXPECT_EQ(restored_wf->sleep_cycles(), 0u);
+  EXPECT_FALSE(restored_wf->sleep_wakeup());
   EXPECT_EQ(restored_wf->exec(), 0xDEADBEEF0000000FULL);
   EXPECT_EQ(restored_wf->exec_raw(), 0xDEADBEEF0000000FULL);
   EXPECT_EQ(restored_wf->kernel_wave_size(), 64u);
@@ -5058,6 +6533,546 @@ TEST(CheckpointTest, SaveAndRestoreRdnaWave64State) {
   EXPECT_EQ(restored_cu->read_vgpr(
                 restored_wf->vgpr_alloc().base + restored_cu->vgpr_allocation_block_size() - 1, 31),
             0x9ABC001Fu);
+}
+
+TEST(CheckpointTest, RestoresGfx10WaveAndLaunchAperturesIndependently) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, R"("arch":"cdna3")", R"("arch":"rdna1")"));
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna1);
+  ASSERT_NE(decoder, nullptr);
+  constexpr uint16_t bases = 15u | (31u << 11); // Full SH_MEM_BASES register.
+  const auto set = rdna1::build_sopk(rdna1::kSSetregB32, {.simm16 = bases, .sdst = 0});
+  const auto get = rdna1::build_sopk(rdna1::kSGetregB32, {.simm16 = bases, .sdst = 1});
+  std::unique_ptr<Instruction> setreg(decode_valid(*decoder, set.data()));
+  std::unique_ptr<Instruction> getreg(decode_valid(*decoder, get.data()));
+  ASSERT_NE(setreg, nullptr);
+  ASSERT_NE(getreg, nullptr);
+
+  for (bool ptr32 : {false, true}) {
+    SCOPED_TRACE(ptr32);
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
+    auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    const unsigned shift = ptr32 ? 16 : 48;
+    cu->set_apertures(1ull << shift, (1ull << shift) + 0xffff, 2ull << shift,
+                      (2ull << shift) + 0xffff, ptr32);
+    auto *wf = cu->dispatch_wf(0, 0, 32, 16);
+    ASSERT_NE(wf, nullptr);
+    cu->write_sgpr(wf->sgpr_alloc().base, 0x00060005);
+    ASSERT_TRUE(cu->execute_instruction(setreg.get(), *wf).succeeded());
+    ASSERT_TRUE(cu->execute_instruction(getreg.get(), *wf).succeeded());
+    ASSERT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 1), 0x00060005u);
+
+    // A later launch uses different apertures and the opposite pointer width.
+    const unsigned next_shift = ptr32 ? 48 : 16;
+    cu->set_apertures(8ull << next_shift, (8ull << next_shift) + 0xffff, 9ull << next_shift,
+                      (9ull << next_shift) + 0xffff, !ptr32);
+    test::ScopedTempFile checkpoint;
+    ASSERT_TRUE(checkpoint.initialize("rocjitsu-checkpoint-gfx10-apertures-"));
+    ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
+                                        loaded.cpu_dispatch_threads, {})
+                    .succeeded());
+    config::LoadedConfig restored;
+    ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
+    auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    auto *wave = restored_cu->wf(wf->wf_id());
+    ASSERT_NE(wave, nullptr);
+    restored_cu->write_sgpr(wave->sgpr_alloc().base + 1, 0);
+    ASSERT_TRUE(restored_cu->execute_instruction(getreg.get(), *wave).succeeded());
+    EXPECT_EQ(restored_cu->read_sgpr(wave->sgpr_alloc().base + 1), 0x00060005u);
+    EXPECT_EQ(wave->flat_pointer32(), ptr32);
+    EXPECT_TRUE(wave->use_wave_apertures());
+    EXPECT_EQ(wave->shared_aperture_limit(), (6ull << shift) + 0xffff);
+    EXPECT_EQ(wave->private_aperture_limit(), (5ull << shift) + 0xffff);
+
+    auto *next = restored_cu->dispatch_wf(1, 0, 32, 16);
+    ASSERT_NE(next, nullptr);
+    ASSERT_TRUE(restored_cu->execute_instruction(getreg.get(), *next).succeeded());
+    EXPECT_EQ(restored_cu->read_sgpr(next->sgpr_alloc().base + 1), 0x00080009u);
+    EXPECT_EQ(next->flat_pointer32(), !ptr32);
+    EXPECT_EQ(next->use_wave_apertures(), !ptr32);
+  }
+}
+
+TEST(CheckpointTest, RejectsPendingCdna2MemoryTrapWithWaitCheckingOff) {
+  auto json = functional_quantum_checkpoint_config(1, 1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, R"("arch":"cdna3")", R"("arch":"cdna2")"));
+  json.insert(1, R"("wait_checking":"off",)");
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *wave = cu->dispatch_wf(0, 0x1000, 32, 16);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(1);
+  wave->set_mode_raw(1u << 20);
+  ASSERT_EQ(cu->config().memory_wait_diagnostics, amdgpu::MemoryWaitDiagnostics::Off);
+  wave->complete_flat_memory_violation();
+  ASSERT_TRUE(wave->memory_trap_pending());
+  ASSERT_TRUE(wave->wait_counters().empty());
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-cdna2-pending-"));
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(config::save_checkpoint(file.path(), *loaded.soc(), 0, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, diagnostic.emitter())
+                  .failed());
+  EXPECT_NE(diagnostic.message().find("awaiting a memory trap"), std::string::npos);
+}
+
+TEST(CheckpointTest, RestoresGfx1151ShaderPerformanceCounters) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, R"("arch":"cdna3")", R"("arch":"rdna3_5")"));
+  config::LoadedConfig source;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+  auto *soc = source.soc();
+  auto *cu = soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  constexpr uint64_t pc = 0x4000;
+  soc->memory()->write32(pc, rdna3_5::build_sopp(rdna3_5::kSIncperflevelSopp, {.simm16 = 7})[0]);
+  auto *wave = cu->dispatch_wf(0, pc, 32, 16);
+  ASSERT_NE(wave, nullptr);
+  wave->set_status_raw(wave->status_raw() | amdgpu::Wavefront::kStatusPerfEnableMask);
+  cu->step();
+  ASSERT_EQ(cu->shader_perf_level(7), 1u);
+  test::ScopedTempFile checkpoint;
+  ASSERT_TRUE(checkpoint.initialize("rocjitsu-checkpoint-gfx1151-counters-"));
+  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *soc, 0, source.engine_config,
+                                      source.cpu_dispatch_threads, {})
+                  .succeeded());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
+  EXPECT_EQ(restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0)->performance_levels(),
+            cu->performance_levels());
+}
+
+TEST(CheckpointTest, RestoresGfx10IssueDelaysAndShaderCounters) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, R"("arch":"cdna3")", R"("arch":"rdna1")"));
+  config::LoadedConfig source;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+  auto *soc = source.soc();
+  auto *cu = soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  constexpr uint64_t first_pc = 0x4000, second_pc = 0x8000;
+  soc->memory()->write32(first_pc, rdna1::build_sopp(rdna1::kSIncperflevel, {.simm16 = 3})[0]);
+  soc->memory()->write32(first_pc + 4, rdna1::build_sopp(rdna1::kSNop, {.simm16 = 4})[0]);
+  const auto time = rdna1::build_smem(rdna1::kSMemtime, {.sdata = 4});
+  soc->memory()->write32(first_pc + 8, time[0]);
+  soc->memory()->write32(first_pc + 12, time[1]);
+  soc->memory()->write32(second_pc, rdna1::build_sopp(rdna1::kSSleep, {.simm16 = 1})[0]);
+  auto *first = cu->dispatch_wf(0, first_pc, 32, 16);
+  auto *second = cu->dispatch_wf(1, second_pc, 32, 16);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  first->set_status_raw(1u << 19); // STATUS.PERF_EN
+  for (unsigned i = 0; i < 3; ++i) {
+    cu->step();
+  }
+  ASSERT_EQ(first->pc, first_pc + 8);
+  ASSERT_GT(second->sleep_cycles(), 0u);
+  ASSERT_EQ(cu->shader_perf_level(3), 1u);
+  test::ScopedTempFile checkpoint;
+  ASSERT_TRUE(checkpoint.initialize("rocjitsu-checkpoint-gfx10-timing-"));
+  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *soc, 30, source.engine_config,
+                                      source.cpu_dispatch_threads, {})
+                  .succeeded());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
+  auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *restored_first = restored_cu->wf(first->wf_id());
+  auto *restored_second = restored_cu->wf(second->wf_id());
+  ASSERT_NE(restored_first, nullptr);
+  ASSERT_NE(restored_second, nullptr);
+  EXPECT_EQ(restored_cu->shader_perf_level(3), 1u);
+  EXPECT_EQ(restored_first->shader_cycles(), first->shader_cycles());
+  EXPECT_EQ(restored_second->sleep_cycles(), second->sleep_cycles());
+
+  // Follow both schedulers through the remaining NOP delay and MEMTIME writeback.
+  for (unsigned i = 0; i < 4; ++i) {
+    cu->step();
+    restored_cu->step();
+    EXPECT_EQ(restored_first->pc, first->pc);
+    EXPECT_EQ(restored_second->sleep_cycles(), second->sleep_cycles());
+  }
+  ASSERT_EQ(first->pc, first_pc + 16);
+  EXPECT_EQ(cu->read_sgpr(first->sgpr_alloc().base + 4), first->shader_cycles());
+  EXPECT_EQ(restored_cu->read_sgpr(restored_first->sgpr_alloc().base + 4),
+            cu->read_sgpr(first->sgpr_alloc().base + 4));
+}
+
+TEST(CheckpointTest, RestoresGfx10ClauseOwnershipAcrossWaveSlots) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, R"("arch":"cdna3")", R"("arch":"rdna1")"));
+  config::LoadedConfig source;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+  auto *soc = source.soc();
+  auto *cu = soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  constexpr uint64_t peer_pc = 0x6000, owner_pc = 0x7000;
+  const uint32_t move = rdna1::build_vop1(rdna1::kVMovB32Vop1, {.src0 = 129, .vdst = 1})[0];
+  const uint32_t nop = rdna1::build_sopp(rdna1::kSNop)[0];
+  soc->memory()->write32(peer_pc, nop);
+  soc->memory()->write32(peer_pc + 4, nop);
+  soc->memory()->write32(peer_pc + 8, move);
+  soc->memory()->write32(owner_pc, rdna1::build_sopp(rdna1::kSClause, {.simm16 = 2})[0]);
+  for (unsigned i = 1; i <= 3; ++i) {
+    soc->memory()->write32(owner_pc + 4 * i, move);
+  }
+  soc->memory()->write32(owner_pc + 16, nop);
+  auto *peer = cu->dispatch_wf(0, peer_pc, 32, 16);
+  auto *owner = cu->dispatch_wf(1, owner_pc, 32, 16);
+  ASSERT_NE(peer, nullptr);
+  ASSERT_NE(owner, nullptr);
+  cu->step();
+  cu->step();
+  ASSERT_EQ(owner->pc, owner_pc + 8);
+  ASSERT_EQ(peer->pc, peer_pc + 8);
+  test::ScopedTempFile checkpoint;
+  ASSERT_TRUE(checkpoint.initialize("rocjitsu-checkpoint-gfx10-clause-"));
+  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *soc, 2, source.engine_config,
+                                      source.cpu_dispatch_threads, {})
+                  .succeeded());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
+  auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *restored_peer = restored_cu->wf(peer->wf_id());
+  ASSERT_NE(restored_peer, nullptr);
+  // Slot zero attempts VALU first in each cycle. It must wait for the
+  // remaining two members of the other wave's acquired VALU clause.
+  for (unsigned i = 0; i < 2; ++i) {
+    restored_cu->step();
+    EXPECT_EQ(restored_peer->pc, peer_pc + 8);
+  }
+  restored_cu->step();
+  EXPECT_EQ(restored_peer->pc, peer_pc + 12);
+  EXPECT_EQ(restored_cu->read_vgpr(restored_peer->vgpr_alloc().base + 1, 0), 1u);
+}
+
+TEST(CheckpointTest, RestoresShaderOwnedGfx10Halt) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, R"("arch":"cdna3")", R"("arch":"rdna1")"));
+  config::LoadedConfig source;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+  auto *soc = source.soc();
+  auto *cu = soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  constexpr uint64_t pc = 0x5000;
+  soc->memory()->write32(pc, rdna1::build_sopp(rdna1::kSSethalt, {.simm16 = 1})[0]);
+  soc->memory()->write32(pc + 4, rdna1::build_sopk(rdna1::kSMovkI32, {.simm16 = 99, .sdst = 3})[0]);
+  auto *wf = cu->dispatch_wf(0, pc, 32, 16);
+  ASSERT_NE(wf, nullptr);
+  cu->step();
+  ASSERT_TRUE(wf->self_halted());
+  ASSERT_EQ(wf->pc, pc + 4);
+  test::ScopedTempFile checkpoint;
+  ASSERT_TRUE(checkpoint.initialize("rocjitsu-checkpoint-gfx10-halt-"));
+  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *soc, 1, source.engine_config,
+                                      source.cpu_dispatch_threads, {})
+                  .succeeded());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
+  auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *wave = restored_cu->wf(wf->wf_id());
+  ASSERT_NE(wave, nullptr);
+  ASSERT_TRUE(wave->self_halted());
+  EXPECT_TRUE(wave->debug_halted());
+  restored_cu->step();
+  EXPECT_EQ(wave->pc, pc + 4);
+  EXPECT_EQ(restored_cu->read_sgpr(wave->sgpr_alloc().base + 3), 0u);
+  constexpr uint16_t halt = 2u | (13u << 6); // STATUS.HALT.
+  const auto get = rdna1::build_sopk(rdna1::kSGetregB32, {.simm16 = halt, .sdst = 1});
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna1);
+  std::unique_ptr<Instruction> getreg(decode_valid(*decoder, get.data()));
+  ASSERT_NE(getreg, nullptr);
+  ASSERT_TRUE(restored_cu->execute_instruction(getreg.get(), *wave).succeeded());
+  EXPECT_EQ(restored_cu->read_sgpr(wave->sgpr_alloc().base + 1), 1u);
+}
+
+TEST(CheckpointTest, RejectsPendingGfx10WaitBeforeReplacingCheckpoint) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, R"("arch":"cdna3")", R"("arch":"rdna1")"));
+  config::LoadedConfig source;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+  auto *cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *wf = cu->dispatch_wf(0, 0, 32, 16);
+  ASSERT_NE(wf, nullptr);
+  test::ScopedTempFile checkpoint;
+  ASSERT_TRUE(checkpoint.initialize("rocjitsu-checkpoint-gfx10-wait-"));
+  const auto save = [&](uint64_t tick) {
+    return config::save_checkpoint(checkpoint.path(), *source.soc(), tick, source.engine_config,
+                                   source.cpu_dispatch_threads, {});
+  };
+  ASSERT_TRUE(save(0).succeeded());
+  const auto original = read_binary_file(checkpoint.path());
+  wf->wait_counters().increment(amdgpu::WaitCounterType::VMCNT);
+  EXPECT_TRUE(save(1).failed());
+  EXPECT_EQ(read_binary_file(checkpoint.path()), original);
+
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna1);
+  const auto wait = rdna1::build_sopk(rdna1::kSWaitcntVmcnt, {.simm16 = 0, .sdst = 125});
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, wait.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+  ASSERT_EQ(wf->state(), amdgpu::WfState::WAITCNT);
+  EXPECT_TRUE(save(2).failed());
+  EXPECT_EQ(read_binary_file(checkpoint.path()), original);
+}
+
+TEST(CheckpointTest, RestoresGfx10WorkgroupBarrierWithOneSurvivingWave) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, R"("arch":"cdna3")", R"("arch":"rdna1")"));
+  config::LoadedConfig source;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+  auto *soc = source.soc();
+  auto *cu = soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  constexpr uint64_t pc = 0x4000, peer_pc = 0x5000;
+  constexpr uint32_t dispatch = 17, group = 3;
+  constexpr uint16_t in_workgroup = 2u | (11u << 6); // STATUS.IN_WG
+  soc->memory()->write32(pc, rdna1::build_sopp(rdna1::kSBarrier)[0]);
+  soc->memory()->write32(
+      pc + 4, rdna1::build_sopk(rdna1::kSGetregB32, {.simm16 = in_workgroup, .sdst = 3})[0]);
+  soc->memory()->write32(peer_pc, rdna1::build_sopp(rdna1::kSEndpgm)[0]);
+  cu->begin_workgroup(dispatch, group, 2);
+  auto *wave = cu->dispatch_wf(group, pc, 32, 16);
+  auto *peer = cu->dispatch_wf(group, peer_pc, 32, 16);
+  ASSERT_NE(wave, nullptr);
+  ASSERT_NE(peer, nullptr);
+  wave->set_dispatch_id(dispatch);
+  peer->set_dispatch_id(dispatch);
+  const auto slot = wave->wf_id();
+  cu->step();
+  ASSERT_TRUE(peer->is_halted());
+  ASSERT_EQ(wave->state(), amdgpu::WfState::BARRIER);
+
+  test::ScopedTempFile checkpoint;
+  ASSERT_TRUE(checkpoint.initialize("rocjitsu-checkpoint-gfx10-barrier-"));
+  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *soc, 1, source.engine_config,
+                                      source.cpu_dispatch_threads, {})
+                  .succeeded());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
+  auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *survivor = restored_cu->wf(slot);
+  ASSERT_NE(survivor, nullptr);
+  EXPECT_EQ(survivor->state(), amdgpu::WfState::BARRIER);
+  restored_cu->step();
+  ASSERT_EQ(survivor->pc, pc + 8);
+  EXPECT_EQ(survivor->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(restored_cu->read_sgpr(survivor->sgpr_alloc().base + 3), 1u);
+}
+
+void check_restored_wakeup_group(std::string_view arch) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+  config::LoadedConfig original;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, original));
+  auto *cu = original.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *memory = original.soc()->memory();
+  constexpr uint32_t sleep_pc = 0x1000, wake_pc = 0x2000;
+  memory->write32(sleep_pc, 0xbf838000u);     // s_sleep forever
+  memory->write32(sleep_pc + 4, 0xbfb00000u); // s_endpgm
+  memory->write32(wake_pc, 0xbf800000u);      // s_nop
+  memory->write32(wake_pc + 4, 0xbfb40000u);  // s_wakeup
+  memory->write32(wake_pc + 8, 0xbfb00000u);
+  // Dispatch 1 is supplied directly, without advancing the CP.
+  for (const uint32_t dispatch : {1u, 12u}) {
+    cu->begin_workgroup(dispatch, 7, 2);
+    for (uint32_t ordinal = 0; ordinal < 2; ++ordinal) {
+      auto *w = cu->dispatch_wf(7, dispatch == 1 && ordinal == 1 ? wake_pc : sleep_pc, 106, 16);
+      ASSERT_NE(w, nullptr);
+      w->set_dispatch_id(dispatch);
+      w->set_queue_id(9);
+      w->set_wave_in_group(ordinal);
+    }
+  }
+  cu->step();
+  ASSERT_EQ(cu->wf(0)->sleep_cycles(), amdgpu::Wavefront::kSleepForever);
+  ASSERT_EQ(cu->wf(1)->pc, wake_pc + 4);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-wake-"));
+  ASSERT_TRUE(
+      config::save_checkpoint(file.path(), *original.soc(), 0, original.engine_config, 1, {})
+          .succeeded());
+  config::LoadedConfig copy;
+  ASSERT_TRUE(test::restore_valid_checkpoint(file.path(), copy));
+  auto *restored = copy.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_EQ(restored->wf(1)->dispatch_id(), 1u);
+  EXPECT_EQ(restored->wf(1)->queue_id(), 9u);
+  EXPECT_EQ(restored->wf(1)->wave_in_group(), 1u);
+  EXPECT_EQ(copy.soc()->xcd(0)->command_processor()->next_dispatch_id_for_topology(0, 1), 2u);
+  for (int i = 0; i < 4; ++i) {
+    restored->step();
+  }
+  EXPECT_TRUE(restored->wf(0)->is_halted());
+  EXPECT_TRUE(restored->wf(1)->is_halted());
+  EXPECT_EQ(restored->wf(2)->sleep_cycles(), amdgpu::Wavefront::kSleepForever);
+  EXPECT_EQ(restored->wf(3)->sleep_cycles(), amdgpu::Wavefront::kSleepForever);
+}
+
+TEST(CheckpointTest, Rdna4RestoreWakeDoesNotCrossIdenticalWorkgroupIds) {
+  check_restored_wakeup_group("rdna4");
+}
+
+TEST(CheckpointTest, Cdna5RestoreWakeDoesNotCrossIdenticalWorkgroupIds) {
+  check_restored_wakeup_group("cdna5");
+}
+
+TEST(CheckpointTest, RestoresGfx12SleepCreditAndRemainingDelay) {
+  for (const char *arch : {"rdna4", "cdna5"}) {
+    SCOPED_TRACE(arch);
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+    rj_vm_t *raw = nullptr;
+    ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+              ROCJITSU_STATUS_SUCCESS);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> source(raw, &rj_vm_destroy);
+    auto *soc = source->soc;
+    auto *xcd = soc->xcd(0);
+    auto *cu = xcd->shader_engine(0)->compute_unit(0);
+    constexpr uint64_t code = 0x4000;
+    using namespace amdhsa;
+    kernel_descriptor_t descriptor{};
+    descriptor.kernel_code_entry_byte_offset = sizeof(descriptor);
+    RJ_AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                       KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
+    soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&descriptor), sizeof(descriptor),
+                              code);
+    soc->memory()->write32(code + sizeof(descriptor), 0xbfa0ffffu); // s_branch to itself.
+    test::AqlQueue queue(soc->memory(), xcd->command_processor());
+    queue.dispatch(code, 64, 64);
+    int active = 0;
+    for (unsigned step = 0; step < 100 && !cu->has_active_wfs(); ++step) {
+      ASSERT_EQ(rj_vm_step(source.get(), &active), ROCJITSU_STATUS_SUCCESS);
+    }
+    auto *issuer = cu->wf(0);
+    auto *peer = cu->wf(1);
+    ASSERT_NE(issuer, nullptr);
+    ASSERT_NE(peer, nullptr);
+    ASSERT_FALSE(issuer->is_halted());
+    ASSERT_FALSE(peer->is_halted());
+    ASSERT_EQ(peer->barrier_state(1), 0u);
+    const uint32_t wake = 0xbfb40000u, sleep = 0xbf83007fu;
+    auto decoder = Decoder::create(cu->arch());
+    std::unique_ptr<Instruction> wakeup(decode_valid(*decoder, &wake));
+    std::unique_ptr<Instruction> sleep127(decode_valid(*decoder, &sleep));
+    ASSERT_NE(wakeup, nullptr);
+    ASSERT_NE(sleep127, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(wakeup.get(), *issuer).succeeded());
+    ASSERT_TRUE(peer->sleep_wakeup());
+    ASSERT_TRUE(cu->execute_instruction(sleep127.get(), *issuer).succeeded());
+    ASSERT_TRUE(cu->execute_instruction(sleep127.get(), *issuer).succeeded());
+    ASSERT_EQ(issuer->sleep_cycles(), 8128u);
+    issuer->tick_sleep();
+    test::ScopedTempFile file;
+    ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-sleep-credit-"));
+    ASSERT_EQ(rj_vm_save_checkpoint(source.get(), file.path().c_str(), 0), ROCJITSU_STATUS_SUCCESS);
+    rj_vm_t *restored_raw = nullptr;
+    ASSERT_EQ(rj_vm_restore_checkpoint(file.path().c_str(), &restored_raw),
+              ROCJITSU_STATUS_SUCCESS);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> copy(restored_raw, &rj_vm_destroy);
+    auto *restored = copy->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+    auto *credited = restored->wf(peer->wf_id());
+    ASSERT_NE(credited, nullptr);
+    EXPECT_EQ(restored->wf(issuer->wf_id())->sleep_cycles(), 8127u);
+    EXPECT_FALSE(restored->wf(issuer->wf_id())->sleep_wakeup());
+    EXPECT_TRUE(credited->sleep_wakeup());
+    ASSERT_TRUE(restored->execute_instruction(sleep127.get(), *credited).succeeded());
+    EXPECT_EQ(credited->sleep_cycles(), 0u);
+    EXPECT_FALSE(credited->sleep_wakeup());
+    ASSERT_TRUE(restored->execute_instruction(sleep127.get(), *credited).succeeded());
+    EXPECT_EQ(credited->sleep_cycles(), 8128u);
+  }
+}
+
+TEST(CheckpointTest, RejectsGfx12NamedBarrierAllocationBeforeReplacingFile) {
+  for (const char *arch : {"rdna4", "cdna5"}) {
+    SCOPED_TRACE(arch);
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+    config::LoadedConfig source;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+    auto *soc = source.soc();
+    auto *cu = soc->xcd(0)->shader_engine(0)->compute_unit(0);
+    test::ScopedTempFile file;
+    ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-named-barrier-"));
+    const auto save = [&] {
+      return config::save_checkpoint(file.path(), *soc, 0, source.engine_config, 1, {});
+    };
+    cu->begin_workgroup(12, 7, 2);
+    auto *first = cu->dispatch_wf(7, 0x1000, 106, 16);
+    auto *second = cu->dispatch_wf(7, 0x2000, 106, 16);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    first->set_dispatch_id(12);
+    second->set_dispatch_id(12);
+    ASSERT_TRUE(save().succeeded());
+    auto original = read_binary_file(file.path());
+    cu->begin_workgroup(12, 7, 2, 1);
+    EXPECT_TRUE(save().failed());
+    first->barrier_join(1);
+    EXPECT_TRUE(save().failed());
+    first->barrier_wait(1);
+    EXPECT_TRUE(save().failed());
+    EXPECT_EQ(read_binary_file(file.path()), original);
+  }
+}
+
+TEST(CheckpointTest, Rdna4RestoreBarrierPhaseWaitersAndSingleSurvivor) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, "cdna3", "rdna4"));
+  config::LoadedConfig original;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, original));
+  auto *cu = original.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto spawn = [&](uint32_t group) {
+    auto *wave = cu->dispatch_wf(group, 0x1000, 106, 16);
+    if (wave) {
+      wave->set_dispatch_id(8);
+      wave->set_process_id(3);
+      wave->set_queue_id(9);
+    }
+    return wave;
+  };
+  cu->begin_workgroup(8, 7, 2);
+  auto *first = spawn(7);
+  auto *second = spawn(7);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  EXPECT_TRUE(first->barrier_signal(-1, 0));
+  EXPECT_FALSE(second->barrier_signal(-1, 0));
+  first->barrier_wait(-1); // Consume the first generation's completion on one wave.
+  EXPECT_TRUE(first->barrier_signal(-1, 0)); // One signal in the next generation.
+  first->barrier_wait(-1);
+  ASSERT_EQ(first->state(), amdgpu::WfState::BARRIER);
+  ASSERT_TRUE(second->workgroup_barrier_complete());
+  cu->begin_workgroup(8, 9, 2);
+  auto *survivor = spawn(9);
+  auto *retired = spawn(9);
+  ASSERT_NE(survivor, nullptr);
+  ASSERT_NE(retired, nullptr);
+  retired->halt();
+  cu->begin_workgroup(8, 10, 1);
+  auto *single = spawn(10);
+  ASSERT_NE(single, nullptr);
+  const uint32_t single_slot = single->wf_id();
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-barrier-"));
+  ASSERT_TRUE(
+      config::save_checkpoint(file.path(), *original.soc(), 0, original.engine_config, 1, {})
+          .succeeded());
+  config::LoadedConfig copy;
+  ASSERT_TRUE(test::restore_valid_checkpoint(file.path(), copy));
+  auto *restored = copy.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *a = restored->wf(first->wf_id());
+  auto *b = restored->wf(second->wf_id());
+  EXPECT_EQ(a->process_id(), 3u);
+  EXPECT_EQ(a->queue_id(), 9u);
+  EXPECT_EQ(a->state(), amdgpu::WfState::BARRIER);
+  EXPECT_EQ(b->barrier_state(-1), 0x10021u);
+  EXPECT_TRUE(b->workgroup_barrier_complete());
+  b->barrier_wait(-1);
+  EXPECT_FALSE(b->workgroup_barrier_complete());
+  EXPECT_FALSE(b->barrier_signal(-1, 0));
+  EXPECT_EQ(a->state(), amdgpu::WfState::RUNNING);
+  EXPECT_TRUE(b->workgroup_barrier_complete());
+  EXPECT_EQ(a->barrier_state(-1), 0x21u);
+  EXPECT_TRUE(restored->wf(survivor->wf_id())->cu().in_multiwave_workgroup());
+  EXPECT_EQ(restored->wf(survivor->wf_id())->barrier_state(-1), 0x11u);
+  EXPECT_FALSE(restored->wf(single_slot)->cu().in_multiwave_workgroup());
 }
 
 TEST(CheckpointTest, SaveAndRestoreHwregState) {
@@ -5102,6 +7117,7 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   wf->set_wave_sched_mode_raw(kWaveSchedMode);
   wf->arm_setreg_vgpr_msb_hazard();
+  wf->set_sleep_cycles(amdgpu::Wavefront::kSleepForever);
   ASSERT_TRUE(wf->fp16_ovfl());
 
   test::ScopedTempFile checkpoint;
@@ -5136,6 +7152,7 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   EXPECT_EQ(restored_wf->status_raw(), kStatus);
   EXPECT_EQ(restored_wf->mode_raw(), amdgpu::Wavefront::FP16_OVFL_BIT);
   EXPECT_EQ(restored_wf->wave_sched_mode_raw(), kWaveSchedMode);
+  EXPECT_EQ(restored_wf->sleep_cycles(), amdgpu::Wavefront::kSleepForever);
   EXPECT_TRUE(restored_wf->setreg_vgpr_msb_hazard());
   EXPECT_TRUE(restored_wf->consume_setreg_vgpr_msb_hazard());
   EXPECT_FALSE(restored_wf->consume_setreg_vgpr_msb_hazard());
@@ -5180,8 +7197,9 @@ TEST(CheckpointTest, SaveAndRestoreCdnaBranchStack) {
 
   // A wave stopped inside a fork block: two pending entries, the newest in s[4:7].
   wf->set_cond_stack_ptr(2);
-  for (uint32_t i = 0; i < 4; ++i)
+  for (uint32_t i = 0; i < 4; ++i) {
     cu->write_sgpr(wf->sgpr_alloc().base + 4 + i, 0xC0DE0000u + i);
+  }
 
   test::ScopedTempFile checkpoint;
   ASSERT_TRUE(checkpoint.initialize("rocjitsu-checkpoint-"));
@@ -5195,15 +7213,71 @@ TEST(CheckpointTest, SaveAndRestoreCdnaBranchStack) {
   auto *restored_wf = restored_cu->wf(0);
   ASSERT_NE(restored_wf, nullptr);
   EXPECT_EQ(restored_wf->cond_stack_ptr(), 2u);
-  for (uint32_t i = 0; i < 4; ++i)
+  for (uint32_t i = 0; i < 4; ++i) {
     EXPECT_EQ(restored_cu->read_sgpr(restored_wf->sgpr_alloc().base + 4 + i), 0xC0DE0000u + i);
+  }
 }
 
-// The checkpoint record carries the architectural registers and the TTMPs but
-// none of the trap/debug state around them, so a wave captured mid-handler
-// would restore without the EXEC restore or the privileged STATUS write that
-// leaving the handler performs. Refusing beats resuming the application with
-// the trap handler's state installed.
+TEST(CheckpointTest, RejectsPausedAqlQueueUntilItsWavesResume) {
+  for (const char *arch : {"rdna2", "rdna3", "rdna3_5", "rdna4", "cdna5"}) {
+    SCOPED_TRACE(arch);
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    json.replace(json.find("cdna3"), 5, arch);
+    rj_vm_t *raw = nullptr;
+    ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+              ROCJITSU_STATUS_SUCCESS);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+    test::ScopedTempFile file;
+    ASSERT_TRUE(file.initialize("rocjitsu-runtime-queue-pause-"));
+    ASSERT_EQ(rj_vm_save_checkpoint(vm.get(), file.path().c_str(), 0), ROCJITSU_STATUS_SUCCESS);
+    const auto previous = read_binary_file(file.path());
+    auto *soc = vm->soc;
+    auto *xcd = soc->xcd(0);
+    auto *cu = xcd->shader_engine(0)->compute_unit(0);
+    auto *cp = xcd->command_processor();
+    amdhsa::kernel_descriptor_t descriptor{};
+    descriptor.kernel_code_entry_byte_offset = sizeof(descriptor);
+    descriptor.kernel_code_properties = amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32;
+    constexpr uint64_t kernel = 0x1000;
+    constexpr uint64_t start = kernel + sizeof(descriptor);
+    soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&descriptor), sizeof(descriptor),
+                              kernel);
+    soc->memory()->write32(start, 0xbf800000u);
+    soc->memory()->write32(start + 4,
+                           std::string_view(arch) == "rdna2" ? 0xbf810000u : 0xbfb00000u);
+    test::AqlQueue queue(soc->memory(), cp);
+    queue.dispatch(kernel, 32, 32);
+    auto step = [&]() {
+      int active = 0;
+      return rj_vm_step(vm.get(), &active);
+    };
+    for (unsigned i = 0; i < 80 && (!cu->wf(0) || cu->wf(0)->pc != start + 4); ++i) {
+      ASSERT_EQ(step(), ROCJITSU_STATUS_SUCCESS);
+    }
+    auto *wave = cu->wf(0);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_EQ(wave->pc, start + 4);
+    const auto update = [&](uint32_t percentage) {
+      return cp->update_queue(1, 0, test::AqlQueue::DEFAULT_RING_ADDR,
+                              test::AqlQueue::DEFAULT_RING_SIZE, percentage);
+    };
+    ASSERT_TRUE(update(0));
+    ASSERT_TRUE(wave->runtime_suspended());
+    EXPECT_EQ(rj_vm_save_checkpoint(vm.get(), file.path().c_str(), 0), ROCJITSU_STATUS_ERROR);
+    EXPECT_EQ(read_binary_file(file.path()), previous);
+    for (unsigned i = 0; i < 8; ++i) {
+      ASSERT_EQ(step(), ROCJITSU_STATUS_SUCCESS);
+    }
+    EXPECT_EQ(wave->pc, start + 4);
+    ASSERT_TRUE(update(100));
+    ASSERT_FALSE(wave->runtime_suspended());
+    EXPECT_EQ(rj_vm_save_checkpoint(vm.get(), file.path().c_str(), 0), ROCJITSU_STATUS_SUCCESS);
+  }
+}
+
+// Re-entering a handler requires its saved STATUS.PRIV, the interrupted EXEC
+// exposed through CWSR, and any pending debugger edit to that mask. Checkpoint
+// records omit this state and the debugger state needed to resume a stopped wave.
 TEST(CheckpointTest, RefusesToSaveTrappedOrDebuggerStoppedWaves) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
     "vm":{"arch":"cdna5"},
@@ -5276,15 +7350,340 @@ TEST(CheckpointTest, RefusesToSaveTrappedOrDebuggerStoppedWaves) {
   EXPECT_EQ(read_binary_file(checkpoint.path()), original_checkpoint);
   wf->set_debug_suspended(false);
 
-  // The runtime's own pause is not a debugger stop. A queue throttled to
-  // queue_percentage 0 carries none of the trap or debugger state the refusals
-  // above exist to protect, so it must stay checkpointable -- this is the one
-  // assertion that tells debug_stopped() apart from debug_paused().
   wf->set_runtime_suspended(true);
   EXPECT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 5, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, emit_error)
+                  .failed());
+  ASSERT_FALSE(diagnostics.empty());
+  EXPECT_EQ(diagnostics.back(), "Cannot checkpoint a wave suspended by its runtime queue");
+  EXPECT_EQ(read_binary_file(checkpoint.path()), original_checkpoint);
+  wf->set_runtime_suspended(false);
+  EXPECT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 6, loaded.engine_config,
                                       loaded.cpu_dispatch_threads, {})
                   .succeeded());
-  wf->set_runtime_suspended(false);
+}
+
+TEST(CheckpointTest, Rdna2RestoresAResidentWorkgroupBarrierAfterMemoryDrains) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, "cdna3", "rdna2"));
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+            ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+  auto *soc = vm->soc;
+  auto *xcd = soc->xcd(0);
+  auto *cu = xcd->shader_engine(0)->compute_unit(0);
+  using namespace amdhsa;
+  kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = sizeof(kd);
+  RJ_AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
+  constexpr uint64_t address = 0x1000;
+  constexpr uint32_t code[] = {
+      0x7e000500, // v_readfirstlane_b32 s0, v0
+      0xbf068000, // s_cmp_eq_u32 s0, 0
+      0xbf850001, // s_cbranch_scc1 barrier
+      0xbf8e0002, // s_sleep 2 (only the second wave)
+      0xbf8a0000, // barrier: s_barrier
+      0xbe8a0381, // s_mov_b32 s10, 1
+      0xbf8e0008, // s_sleep 8 (keep the waves resident after the barrier)
+      0xbf810000, // s_endpgm
+  };
+  soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), address);
+  soc->memory()->load_image(reinterpret_cast<const uint8_t *>(code), sizeof(code),
+                            address + sizeof(kd));
+  test::AqlQueue queue(soc->memory(), xcd->command_processor());
+  queue.dispatch(address, 64, 64);
+  int active = 0;
+  for (unsigned step = 0; step < 100 && !cu->has_active_wfs(); ++step) {
+    ASSERT_EQ(rj_vm_step(vm.get(), &active), ROCJITSU_STATUS_SUCCESS);
+  }
+  auto *first = cu->wf(0);
+  auto *second = cu->wf(1);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-rdna2-barrier-"));
+  const auto save = [&] { return rj_vm_save_checkpoint(vm.get(), file.path().c_str(), 0); };
+  ASSERT_EQ(save(), ROCJITSU_STATUS_SUCCESS);
+  const auto before_barrier = read_binary_file(file.path());
+  first->wait_counters().increment(amdgpu::WaitCounterType::VMCNT);
+  ASSERT_EQ(first->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(save(), ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(read_binary_file(file.path()), before_barrier);
+  first->wait_counters().decrement(amdgpu::WaitCounterType::VMCNT);
+
+  for (unsigned step = 0; step < 32 && first->state() != amdgpu::WfState::BARRIER; ++step) {
+    ASSERT_EQ(rj_vm_step(vm.get(), &active), ROCJITSU_STATUS_SUCCESS);
+  }
+  ASSERT_EQ(first->state(), amdgpu::WfState::BARRIER);
+  ASSERT_GT(second->sleep_cycles(), 0u);
+  ASSERT_EQ(save(), ROCJITSU_STATUS_SUCCESS);
+  rj_vm_t *raw_restored = nullptr;
+  ASSERT_EQ(rj_vm_restore_checkpoint(file.path().c_str(), &raw_restored), ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> restored(raw_restored, &rj_vm_destroy);
+  auto *restored_cu = restored->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *restored_first = restored_cu->wf(first->wf_id());
+  ASSERT_NE(restored_first, nullptr);
+  ASSERT_EQ(restored_first->state(), amdgpu::WfState::BARRIER);
+  for (unsigned step = 0; step < 256 && !restored_first->sleep_cycles(); ++step) {
+    ASSERT_EQ(rj_vm_step(restored.get(), &active), ROCJITSU_STATUS_SUCCESS);
+  }
+  EXPECT_EQ(restored_cu->read_sgpr(restored_first->sgpr_alloc().base + 10), 1u);
+
+  for (unsigned step = 0; step < 256 && !first->sleep_cycles(); ++step) {
+    ASSERT_EQ(rj_vm_step(vm.get(), &active), ROCJITSU_STATUS_SUCCESS);
+  }
+  ASSERT_GT(first->sleep_cycles(), 0u);
+  ASSERT_EQ(cu->read_sgpr(first->sgpr_alloc().base + 10), 1u);
+  EXPECT_EQ(save(), ROCJITSU_STATUS_SUCCESS);
+}
+
+TEST(CheckpointTest, Rdna2WaitsForAqlCompletionSignalsOnEveryXcd) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, "cdna3", "rdna2"));
+  ASSERT_TRUE(replace_exactly_once(json, "xcd0", "xcd[0:2]"));
+  constexpr uint64_t kernel = 0x1000;
+  constexpr uint64_t signal = 0x2000;
+  constexpr uint64_t signal_value = signal + 8;
+  for (bool signal_requested : {false, true}) {
+    SCOPED_TRACE(signal_requested);
+    rj_vm_t *raw = nullptr;
+    ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+              ROCJITSU_STATUS_SUCCESS);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+    ASSERT_EQ(vm->soc->num_xcds(), 2u);
+    auto *memory = vm->soc->memory();
+    // Only the second XCD owns this queue and its pending completion.
+    auto *owner = vm->soc->xcd(1);
+    auto *cu = owner->shader_engine(0)->compute_unit(0);
+    test::AqlQueue queue(memory, owner->command_processor());
+    amdhsa::kernel_descriptor_t kd{};
+    kd.kernel_code_entry_byte_offset = sizeof(kd);
+    constexpr uint32_t code[] = {0xbf8e0001, 0xbf810000}; // s_sleep 1; s_endpgm
+    memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kernel);
+    memory->load_image(reinterpret_cast<const uint8_t *>(code), sizeof(code), kernel + sizeof(kd));
+    memory->write64(signal_value, 1);
+
+    test::ScopedTempFile file;
+    ASSERT_TRUE(file.initialize("rocjitsu-rdna2-aql-completion-"));
+    const auto save = [&] { return rj_vm_save_checkpoint(vm.get(), file.path().c_str(), 0); };
+    ASSERT_EQ(save(), ROCJITSU_STATUS_SUCCESS);
+    const auto previous = read_binary_file(file.path());
+
+    hsa_kernel_dispatch_packet_t packet{};
+    packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    packet.setup = 1;
+    packet.grid_size_x = packet.workgroup_size_x = 64;
+    packet.grid_size_y = packet.grid_size_z = packet.workgroup_size_y = packet.workgroup_size_z = 1;
+    packet.kernel_object = kernel;
+    packet.completion_signal.handle = signal_requested ? signal : 0;
+    queue.submit(packet);
+    for (unsigned step = 0; step < 128 && (!cu->wf(0) || !cu->wf(0)->sleep_cycles()); ++step) {
+      ASSERT_EQ(rj_vm_step(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+    }
+    ASSERT_NE(cu->wf(0), nullptr);
+    ASSERT_GT(cu->wf(0)->sleep_cycles(), 0u);
+    ASSERT_EQ(memory->read64(signal_value), 1u);
+    if (signal_requested) {
+      EXPECT_EQ(save(), ROCJITSU_STATUS_ERROR);
+      EXPECT_EQ(read_binary_file(file.path()), previous);
+    } else {
+      EXPECT_EQ(save(), ROCJITSU_STATUS_SUCCESS);
+    }
+
+    const uint64_t expected = signal_requested ? 0 : 1;
+    for (unsigned step = 0;
+         step < 512 && (cu->has_active_wfs() || memory->read64(signal_value) != expected); ++step) {
+      ASSERT_EQ(rj_vm_step(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+    }
+    ASSERT_FALSE(cu->has_active_wfs());
+    ASSERT_EQ(memory->read64(signal_value), expected);
+    EXPECT_EQ(save(), ROCJITSU_STATUS_SUCCESS);
+  }
+}
+
+TEST(CheckpointTest, Rdna2WaitsForUnlaunchedAqlWorkgroupsBeforeSaving) {
+  const char *json = R"({"max_ticks":100000,"num_threads":1,"exec_mode":"functional",
+    "vm":{"arch":"rdna2"},
+    "topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},
+      {"name":"xcd0","type":"xcd","children":[
+        {"name":"l2","type":"l2_cache"},{"name":"cp","type":"command_processor"},
+        {"name":"se0","type":"shader_engine","children":[
+          {"name":"cu0","type":"compute_unit","config":[
+            {"key":"num_wf_slots","value":"1"},{"key":"functional_quantum","value":"1"}]}
+        ]}
+      ]}
+    ]}}})";
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &raw), ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+  auto *xcd = vm->soc->xcd(0);
+  auto *cu = xcd->shader_engine(0)->compute_unit(0);
+  ASSERT_EQ(cu->num_wf_slots(), 1u);
+  auto *memory = vm->soc->memory();
+  using namespace amdhsa;
+  kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = sizeof(kd);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+  constexpr uint64_t kernel = 0x1000;
+  constexpr uint32_t code[] = {
+      0x800aa900, // s_add_u32 s10, s0, 41 (marker 41 or 42 from workgroup X)
+      0xbf8e0001, // s_sleep 1
+      0xbf810000, // s_endpgm
+  };
+  memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kernel);
+  memory->load_image(reinterpret_cast<const uint8_t *>(code), sizeof(code), kernel + sizeof(kd));
+  test::AqlQueue queue(memory, xcd->command_processor());
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-rdna2-pending-workgroups-"));
+  const auto save = [&] { return rj_vm_save_checkpoint(vm.get(), file.path().c_str(), 0); };
+  ASSERT_EQ(save(), ROCJITSU_STATUS_SUCCESS);
+  const auto previous = read_binary_file(file.path());
+  queue.dispatch(kernel, 128, 64); // Two one-wave workgroups, no completion signal.
+
+  const auto reached_marker = [&](uint32_t expected) {
+    const auto *wave = cu->wf(0);
+    return wave && wave->sleep_cycles() && cu->read_sgpr(wave->sgpr_alloc().base + 10) == expected;
+  };
+  for (uint32_t marker : {41u, 42u}) {
+    for (unsigned step = 0; step < 256 && !reached_marker(marker); ++step) {
+      ASSERT_EQ(rj_vm_step(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+    }
+    ASSERT_TRUE(reached_marker(marker)) << marker;
+    if (marker == 41) {
+      EXPECT_EQ(save(), ROCJITSU_STATUS_ERROR);
+      EXPECT_EQ(read_binary_file(file.path()), previous);
+    } else {
+      EXPECT_EQ(save(), ROCJITSU_STATUS_SUCCESS);
+    }
+  }
+}
+
+TEST(CheckpointTest, Rdna2ChecksWorkgroupsInPeerAqlInboxBeforeSaving) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, "cdna3", "rdna2"));
+  ASSERT_TRUE(replace_exactly_once(json, "xcd0", "xcd[0:2]"));
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+            ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+  ASSERT_EQ(vm->soc->num_xcds(), 2u);
+  using Q = test::AqlQueue;
+  Q owner(vm->soc->memory(), vm->soc->xcd(0)->command_processor(), Q::DEFAULT_RING_ADDR,
+          Q::DEFAULT_RING_SIZE, Q::DEFAULT_READ_PTR_ADDR, Q::DEFAULT_WRITE_PTR_ADDR,
+          Q::DEFAULT_DOORBELL_ADDR, true);
+  auto *peer = vm->soc->xcd(1)->command_processor();
+  // Stop between fanout and the peer's next doorbell. Only its inbox holds the share.
+  const auto enqueue = [&](uint32_t grid_wgs) {
+    amdgpu::DispatchEntry shard{};
+    shard.dispatch_id = grid_wgs;
+    shard.queue_id = 1;
+    shard.kind = amdgpu::DispatchPacketKind::Kernel;
+    shard.fanout_peer = true;
+    shard.total_wgs = grid_wgs;
+    shard.apply_shard(amdgpu::XcdShard(1, 2));
+    peer->accept_fanout_shard(std::move(shard));
+  };
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-rdna2-aql-peer-inbox-"));
+  const auto save = [&](uint64_t tick) {
+    return rj_vm_save_checkpoint(vm.get(), file.path().c_str(), tick);
+  };
+  enqueue(1); // All work belongs to XCD0.
+  ASSERT_EQ(save(1), ROCJITSU_STATUS_SUCCESS);
+  const auto original = read_binary_file(file.path());
+  enqueue(2); // XCD1 must still launch one workgroup.
+  EXPECT_EQ(save(2), ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(read_binary_file(file.path()), original);
+}
+
+TEST(CheckpointTest, SparseRdna2WavesPreserveVgprBaseThroughAqlRestore) {
+  const char *json = R"({"max_ticks":100000,"num_threads":1,"exec_mode":"functional",
+    "vm":{"arch":"rdna2"},
+    "topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},
+      {"name":"xcd0","type":"xcd","children":[
+        {"name":"l2","type":"l2_cache"},{"name":"cp","type":"command_processor"},
+        {"name":"se0","type":"shader_engine","children":[
+          {"name":"cu0","type":"compute_unit","config":[
+            {"key":"functional_quantum","value":"1"},{"key":"vgprs_per_wf","value":"128"}]}
+        ]}
+      ]}
+    ]}}})";
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &raw), ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> original(raw, &rj_vm_destroy);
+  auto *xcd = raw->soc->xcd(0);
+  auto *cu = xcd->shader_engine(0)->compute_unit(0);
+  auto *memory = raw->soc->memory();
+  using namespace amdhsa;
+  kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = sizeof(kd);
+  RJ_AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
+  constexpr uint32_t code[] = {
+      0x7e000500, // v_readfirstlane_b32 s0, v0
+      0xbf068000, // s_cmp_eq_u32 s0, 0
+      0xbf850005, // s_cbranch_scc1 to s_endpgm (only wave 0 retires)
+      0xbe8a03c1, // s_mov_b32 s10, -1
+      0xbf8e0002, // s_sleep 2
+      0xb90a2805, // s_getreg_b32 s10, hwreg(HW_REG_GPR_ALLOC, 0, 6)
+      0xbf800000, // s_nop 0
+      0xbf8e0008, // s_sleep 8 (keep the results available to read)
+      0xbf810000, // s_endpgm
+  };
+  constexpr uint64_t kernel = 0x1000;
+  memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kernel);
+  memory->load_image(reinterpret_cast<const uint8_t *>(code), sizeof(code), kernel + sizeof(kd));
+  test::AqlQueue queue(memory, xcd->command_processor());
+  queue.dispatch(kernel, 96, 96); // One workgroup of three wave32s.
+  constexpr std::array slots{1u, 2u};
+  const auto ready = [&] {
+    return cu->wf(0) && cu->wf(0)->is_halted() && std::ranges::all_of(slots, [&](uint32_t slot) {
+             auto *w = cu->wf(slot);
+             return w && w->sleep_cycles() &&
+                    cu->read_sgpr(w->sgpr_alloc().base + 10) == UINT32_MAX;
+           });
+  };
+  for (unsigned step = 0; step < 128 && !ready(); ++step) {
+    ASSERT_EQ(rj_vm_step(raw, nullptr), ROCJITSU_STATUS_SUCCESS);
+  }
+  ASSERT_TRUE(ready());
+  ASSERT_EQ(cu->wf(1)->vgpr_alloc().base, 128u);
+  ASSERT_EQ(cu->wf(2)->vgpr_alloc().base, 256u);
+
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-rdna2-sparse-vgpr-base-"));
+  ASSERT_EQ(rj_vm_save_checkpoint(raw, file.path().c_str(), 0), ROCJITSU_STATUS_SUCCESS);
+  rj_vm_t *reloaded = nullptr;
+  ASSERT_EQ(rj_vm_restore_checkpoint(file.path().c_str(), &reloaded), ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> restored(reloaded, &rj_vm_destroy);
+  for (auto *vm : {original.get(), restored.get()}) {
+    SCOPED_TRACE(vm == original.get() ? "uninterrupted" : "restored");
+    auto *here = vm->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+    for (uint32_t slot : slots) {
+      ASSERT_NE(here->wf(slot), nullptr);
+      EXPECT_EQ(here->read_sgpr(here->wf(slot)->sgpr_alloc().base + 10), UINT32_MAX);
+    }
+    for (uint32_t slot : slots) {
+      SCOPED_TRACE(slot);
+      auto *wave = here->wf(slot);
+      const auto value = [&] { return here->read_sgpr(wave->sgpr_alloc().base + 10); };
+      for (unsigned step = 0; step < 1000 && !wave->is_halted() && value() == UINT32_MAX; ++step) {
+        ASSERT_EQ(rj_vm_step(vm, nullptr), ROCJITSU_STATUS_SUCCESS);
+      }
+      ASSERT_FALSE(wave->is_halted());
+      // The six-bit field encodes the base in groups of four VGPRs.
+      EXPECT_EQ(value(), slot == 1 ? 0x20u : 0x00u);
+      EXPECT_EQ(wave->vgpr_alloc().base, slot * 128u);
+      EXPECT_EQ(wave->sgpr_alloc().base, slot * here->sgpr_allocation_block_size());
+    }
+    // The free register block can be reused by a different wave slot.
+    auto *new_wave = here->dispatch_wf_at(3, 0, kernel + sizeof(kd), 16, 16, 32);
+    ASSERT_NE(new_wave, nullptr);
+    EXPECT_EQ(new_wave->sgpr_alloc().base, 0u);
+    EXPECT_EQ(new_wave->vgpr_alloc().base, 0u);
+  }
 }
 
 TEST(CheckpointTest, ReportsOpenAndWriteFailures) {
@@ -5319,6 +7718,730 @@ TEST(CheckpointTest, ReportsOpenAndWriteFailures) {
   EXPECT_EQ(rj_vm_save_checkpoint(vm.get(), "/dev/full", 0), ROCJITSU_STATUS_ERROR);
   EXPECT_EQ(rj_vm_save_checkpoint(vm.get(), (checkpoint.path() + "/checkpoint").c_str(), 0),
             ROCJITSU_STATUS_ERROR);
+}
+
+TEST(CheckpointTest, RejectsGdsContentsAndOrderedStateBeforeReplacingCheckpoint) {
+  config::LoadedConfig loaded;
+  auto config = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(config, R"("arch":"cdna3")", R"("arch":"rdna1")"));
+  ASSERT_TRUE(test::load_valid_config_from_string(config, loaded));
+  auto &device = *loaded.soc()->gws_device();
+  constexpr uint32_t process = 7;
+  test::ScopedTempFile checkpoint;
+  ASSERT_TRUE(checkpoint.initialize("rocjitsu-checkpoint-gds-"));
+  util::StringDiagnostic diagnostic;
+  const auto save = [&] {
+    return config::save_checkpoint(checkpoint.path(), *loaded.soc(), 0, loaded.engine_config,
+                                   loaded.cpu_dispatch_threads, diagnostic.emitter());
+  };
+
+  // Reading the implicit zero backing creates no state that needs persistence.
+  device.access_gds(rocjitsu::IsaFamily::Rdna1, process,
+                    [](amdgpu::Lds &gds) { EXPECT_EQ(gds.read32(8), 0u); });
+  ASSERT_TRUE(save().succeeded());
+  const auto original = read_binary_file(checkpoint.path());
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *wf = cu->dispatch_wf(0, 0, 32, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  wf->set_process_id(process);
+  wf->set_m0(32);
+  cu->write_vgpr(wf->vgpr_alloc().base, 0, 8);
+  cu->write_vgpr(wf->vgpr_alloc().base + 1, 0, 0xcafe1234);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna1);
+  const auto words = rdna1::build_ds(rdna1::kDsWriteB32, {.gds = 1, .addr = 0, .data0 = 1});
+  std::unique_ptr<Instruction> store(decode_valid(*decoder, words.data()));
+  ASSERT_TRUE(store);
+  ASSERT_TRUE(cu->execute_instruction(store.get(), *wf).succeeded());
+  amdgpu::LocalMemPipeline local;
+  ASSERT_EQ(local.issue(store.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+  wf->halt();
+  device.access_gds(rocjitsu::IsaFamily::Rdna1, process,
+                    [](amdgpu::Lds &gds) { EXPECT_EQ(gds.read32(8), 0xcafe1234u); });
+  EXPECT_TRUE(save().failed());
+  EXPECT_NE(diagnostic.message().find("GDS memory or ordered-count state"), std::string::npos);
+  EXPECT_EQ(read_binary_file(checkpoint.path()), original);
+  device.release_process(process);
+  EXPECT_TRUE(save().succeeded());
+
+  // A younger wave can queue on a walker before any GDS bytes are written.
+  EXPECT_FALSE(device.ordered_count(process, 1, 1, 0, 5, false, true).has_value());
+  EXPECT_TRUE(save().failed());
+  EXPECT_EQ(read_binary_file(checkpoint.path()), original);
+  device.reset_ordered_ids(process, 1);
+  EXPECT_TRUE(save().succeeded());
+
+  // A PM4 group can be placed before its first GDS access. Its next SGPR
+  // launch term also belongs to the ring and must survive any successful save.
+  EXPECT_EQ(device.reserve_ordered_ids(process, 2, 2), 0u);
+  EXPECT_TRUE(save().failed());
+  EXPECT_EQ(read_binary_file(checkpoint.path()), original);
+  device.reset_ordered_ids(process, 2);
+  EXPECT_TRUE(save().succeeded());
+}
+
+TEST(CheckpointTest, Rdna2RestoresOwnedLdsAndWaitsForSharedOrProcessScratchAllocations) {
+  using namespace rocjitsu::amdhsa;
+  for (const auto &[group_bytes, private_bytes, wgp] :
+       {std::tuple{1u, 0u, false}, std::tuple{1u, 0u, true}, std::tuple{0u, 16u, false},
+        std::tuple{0u, 0u, false}}) {
+    SCOPED_TRACE(testing::Message() << group_bytes << "/" << private_bytes << " WGP=" << wgp);
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", "rdna2"));
+    rj_vm_t *raw = nullptr;
+    ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+              ROCJITSU_STATUS_SUCCESS);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+    auto *soc = vm->soc;
+    auto *xcd = soc->xcd(0);
+    kernel_descriptor_t kd{};
+    kd.kernel_code_entry_byte_offset = sizeof(kd);
+    kd.group_segment_fixed_size = group_bytes;
+    kd.private_segment_fixed_size = private_bytes;
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, wgp);
+    constexpr uint64_t address = 0x1000;
+    constexpr uint32_t code[] = {0xbf8e0007, 0xbf810000}; // s_sleep 7; s_endpgm
+    soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), address);
+    soc->memory()->load_image(reinterpret_cast<const uint8_t *>(code), sizeof(code),
+                              address + sizeof(kd));
+    test::AqlQueue queue(soc->memory(), xcd->command_processor());
+    hsa_kernel_dispatch_packet_t pkt{};
+    pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    pkt.setup = 1;
+    pkt.workgroup_size_x = pkt.grid_size_x = 64;
+    pkt.workgroup_size_y = pkt.grid_size_y = 1;
+    pkt.workgroup_size_z = pkt.grid_size_z = 1;
+    pkt.kernel_object = address;
+    pkt.group_segment_size = group_bytes;
+    pkt.private_segment_size = private_bytes;
+    queue.submit(pkt);
+    auto *cu = xcd->shader_engine(0)->compute_unit(0);
+    int active = 0;
+    for (unsigned i = 0; i < 100 && !cu->has_active_wfs(); ++i) {
+      ASSERT_EQ(rj_vm_step(vm.get(), &active), ROCJITSU_STATUS_SUCCESS);
+    }
+    ASSERT_TRUE(cu->has_active_wfs());
+    auto *wf = cu->wf(0);
+    ASSERT_NE(wf, nullptr);
+    EXPECT_EQ(wf->lds_size(), group_bytes ? 1024u : 0u);
+    EXPECT_EQ(wf->scratch_lane_size(), private_bytes);
+    EXPECT_EQ(&wf->lds() != &cu->lds(), wgp);
+    test::ScopedTempFile checkpoint;
+    ASSERT_TRUE(checkpoint.initialize("rocjitsu-rdna2-resident-"));
+    ASSERT_TRUE(checkpoint.write("previous checkpoint"));
+    const auto original = read_binary_file(checkpoint.path());
+    if (group_bytes && !wgp) {
+      wf->lds().write32(wf->lds_base(), 0x51a7cafe);
+    }
+    if ((wgp && group_bytes) || private_bytes) {
+      EXPECT_EQ(rj_vm_save_checkpoint(vm.get(), checkpoint.path().c_str(), 0),
+                ROCJITSU_STATUS_ERROR);
+      EXPECT_EQ(read_binary_file(checkpoint.path()), original);
+    } else {
+      ASSERT_EQ(rj_vm_save_checkpoint(vm.get(), checkpoint.path().c_str(), 0),
+                ROCJITSU_STATUS_SUCCESS);
+      config::LoadedConfig restored;
+      ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
+      auto *wave = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+      ASSERT_NE(wave, nullptr);
+      ASSERT_EQ(wave->lds_size(), wf->lds_size());
+      if (group_bytes) {
+        EXPECT_EQ(wave->lds().read32(wave->lds_base()), 0x51a7cafeu);
+      }
+      EXPECT_EQ(wave->scratch_lane_size(), 0u);
+    }
+    for (unsigned i = 0; i < 2048 && cu->has_active_wfs(); ++i) {
+      ASSERT_EQ(rj_vm_step(vm.get(), &active), ROCJITSU_STATUS_SUCCESS);
+    }
+    ASSERT_FALSE(cu->has_active_wfs());
+    EXPECT_EQ(rj_vm_save_checkpoint(vm.get(), checkpoint.path().c_str(), 0),
+              ROCJITSU_STATUS_SUCCESS);
+  }
+}
+
+TEST(CheckpointTest, Rdna2ZeroSizeWorkgroupPreservesLdsAndScratchBaseRegisters) {
+  using namespace rocjitsu::amdhsa;
+  constexpr uint32_t scratch_lo = 0x89abcdef;
+  constexpr uint32_t scratch_hi = 0x12345678;
+  constexpr uint16_t full_field = 31u << 11;
+  constexpr uint64_t owner = 0x1000, follower = 0x2000;
+  for (const bool wgp : {false, true}) {
+    SCOPED_TRACE(wgp);
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", "rdna2"));
+    rj_vm_t *raw = nullptr;
+    ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+              ROCJITSU_STATUS_SUCCESS);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+    auto *soc = vm->soc;
+    auto *se = soc->xcd(0)->shader_engine(0);
+    test::AqlQueue queue(soc->memory(), soc->xcd(0)->command_processor());
+    const auto submit = [&](uint64_t addr, uint32_t group_bytes, uint32_t grid,
+                            std::span<const uint32_t> code) {
+      kernel_descriptor_t kd{};
+      kd.kernel_code_entry_byte_offset = sizeof(kd);
+      kd.group_segment_fixed_size = group_bytes;
+      RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, wgp);
+      soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
+      soc->memory()->load_image(reinterpret_cast<const uint8_t *>(code.data()), code.size_bytes(),
+                                addr + sizeof(kd));
+      queue.dispatch(addr, grid, 64);
+    };
+    constexpr uint32_t owner_code[] = {0xbf8e0001, 0xbf810000}; // s_sleep 1; s_endpgm
+    constexpr uint32_t follower_code[] = {
+        rdna2::build_sopk(rdna2::kSSetregImm32B32, {.simm16 = full_field | 20})[0],
+        scratch_lo,
+        rdna2::build_sopk(rdna2::kSSetregImm32B32, {.simm16 = full_field | 21})[0],
+        scratch_hi,
+        0xbf8e000f,
+        0xbf810000};
+    // Cover both CUs, so the follower starts with a nonzero allocation cursor in both modes.
+    submit(owner, 1024, 128, owner_code);
+    submit(follower, 0, 64, follower_code);
+    amdgpu::Wavefront *remaining = nullptr;
+    unsigned cu_index = 0;
+    int active = 0;
+    for (unsigned tick = 0; tick < 2048 && !remaining; ++tick) {
+      ASSERT_EQ(rj_vm_step(vm.get(), &active), ROCJITSU_STATUS_SUCCESS);
+      if (se->compute_unit(0)->num_wfs() + se->compute_unit(1)->num_wfs() != 1) {
+        continue;
+      }
+      for (unsigned index = 0; index < 2 && !remaining; ++index) {
+        auto *cu = se->compute_unit(index);
+        for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+          auto *wf = cu->wf(slot);
+          if (wf && !wf->is_halted() && !wf->lds_size() && wf->scratch_base() >> 32 == scratch_hi) {
+            remaining = wf;
+            cu_index = index;
+            break;
+          }
+        }
+      }
+    }
+    ASSERT_NE(remaining, nullptr);
+    ASSERT_EQ(&remaining->lds() != &se->compute_unit(cu_index)->lds(), wgp);
+    ASSERT_GT(remaining->lds_base(), 0u);
+    ASSERT_EQ(remaining->scratch_lane_size(), 0u);
+    const uint32_t lds_base = remaining->lds_base();
+    const auto read_bases = [&](amdgpu::Wavefront &wf) {
+      for (const auto &[id, expected] : {std::pair{6u, (lds_base / 256u) & 0xffu},
+                                         std::pair{20u, scratch_lo}, std::pair{21u, scratch_hi}}) {
+        uint32_t value = 0;
+        ASSERT_EQ(amdgpu::read_hwreg_field(wf, static_cast<uint16_t>(full_field | id), value),
+                  amdgpu::HwregAccessResult::Success);
+        EXPECT_EQ(value, expected);
+      }
+    };
+    ASSERT_NO_FATAL_FAILURE(read_bases(*remaining));
+    test::ScopedTempFile checkpoint;
+    ASSERT_TRUE(checkpoint.initialize("rocjitsu-rdna2-empty-allocation-"));
+    ASSERT_EQ(rj_vm_save_checkpoint(vm.get(), checkpoint.path().c_str(), 0),
+              ROCJITSU_STATUS_SUCCESS);
+    config::LoadedConfig restored;
+    ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
+    auto *post =
+        restored.soc()->xcd(0)->shader_engine(0)->compute_unit(cu_index)->wf(remaining->wf_id());
+    ASSERT_NE(post, nullptr);
+    EXPECT_EQ(post->lds_size(), 0u);
+    EXPECT_EQ(post->scratch_lane_size(), 0u);
+    EXPECT_EQ(post->lds_base(), lds_base);
+    EXPECT_EQ(post->scratch_base(), remaining->scratch_base());
+    ASSERT_NO_FATAL_FAILURE(read_bases(*post));
+  }
+}
+
+TEST(CheckpointTest, RefusesToSaveIndexedGdsUntilProcessRelease) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, "cdna3", "rdna2"));
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *wf = cu->dispatch_wf(0, 0, 64, 16, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_m0((128u << 16) | 4u);
+  cu->write_vgpr(wf->vgpr_alloc().base + 1, 0, 0x12345678u);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna2);
+  ASSERT_NE(decoder, nullptr);
+  amdgpu::LocalMemPipeline local;
+  const auto issue = [&](uint16_t opcode, uint64_t exec, uint32_t offset) {
+    wf->set_exec(exec);
+    cu->write_vgpr(wf->vgpr_alloc().base, 0, offset);
+    auto inst = decoder->decode_window(
+        rdna2::build_ds(opcode, {.gds = 1, .addr = 0, .data0 = 1, .vdst = 2}));
+    ASSERT_TRUE(inst.succeeded());
+    ASSERT_TRUE(cu->execute_instruction(inst.value().get(), *wf).succeeded());
+    ASSERT_EQ(local.issue(inst.value().release(), *wf), amdgpu::VmAccessOutcome::Complete);
+  };
+  test::ScopedTempFile checkpoint;
+  ASSERT_TRUE(checkpoint.initialize("rocjitsu-indexed-gds-"));
+  util::StringDiagnostic diagnostic;
+  const auto save = [&] {
+    return config::save_checkpoint(checkpoint.path(), *loaded.soc(), 0, loaded.engine_config,
+                                   loaded.cpu_dispatch_threads, diagnostic.emitter());
+  };
+  // Process zero keeps an untouched backing when the writer below releases its own.
+  ASSERT_NO_FATAL_FAILURE(issue(rdna2::kDsWriteB32, 0, 0)); // All lanes masked.
+  EXPECT_TRUE(save().succeeded()) << diagnostic.message();
+  ASSERT_NO_FATAL_FAILURE(issue(rdna2::kDsWriteB32, 1, 4)); // Beyond the four-byte window.
+  EXPECT_TRUE(save().succeeded()) << diagnostic.message();
+  cu->write_vgpr(wf->vgpr_alloc().base + 2, 0, 0xcccc);
+  ASSERT_NO_FATAL_FAILURE(issue(rdna2::kDsReadB32, 1, 0));
+  EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + 2, 0), 0u);
+  EXPECT_TRUE(save().succeeded()) << diagnostic.message();
+  const auto original = read_binary_file(checkpoint.path());
+
+  wf->set_process_id(7);
+  ASSERT_NO_FATAL_FAILURE(issue(rdna2::kDsWriteB32, 1, 0));
+  wf->halt();
+  EXPECT_TRUE(save().failed());
+  EXPECT_NE(diagnostic.message().find("indexed GDS data"), std::string::npos);
+  EXPECT_EQ(read_binary_file(checkpoint.path()), original);
+  cu->gws_device().release_process(7);
+  EXPECT_TRUE(save().succeeded()) << diagnostic.message();
+}
+
+TEST(CheckpointTest, PreservesGfx1030GdsOwnersAcrossAqlCheckpoint) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, "cdna3", "rdna2"));
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+            ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+  auto *soc = vm->soc;
+  auto *cp = soc->xcd(0)->command_processor();
+  amdhsa::kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = sizeof(kd);
+  constexpr uint32_t code[] = {0xbf8e007fu, 0xbe8a0381u, 0xbf810000u}; // sleep; mov s10, 1; endpgm
+  soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), 0x1000);
+  soc->memory()->load_image(reinterpret_cast<const uint8_t *>(code), sizeof(code),
+                            0x1000 + sizeof(kd));
+  using Q = test::AqlQueue;
+  Q first(soc->memory(), cp, Q::DEFAULT_RING_ADDR, Q::DEFAULT_RING_SIZE, Q::DEFAULT_READ_PTR_ADDR,
+          Q::DEFAULT_WRITE_PTR_ADDR, Q::DEFAULT_DOORBELL_ADDR, false, 1,
+          soc->internal_address_space(), 7);
+  constexpr uint64_t offset = 0x20000;
+  Q second(soc->memory(), cp, Q::DEFAULT_RING_ADDR + offset, Q::DEFAULT_RING_SIZE,
+           Q::DEFAULT_READ_PTR_ADDR + offset, Q::DEFAULT_WRITE_PTR_ADDR + offset,
+           Q::DEFAULT_DOORBELL_ADDR + offset, false, 2, soc->internal_address_space(), 8);
+  first.dispatch(0x1000, 64, 64);
+  second.dispatch(0x1000, 64, 64);
+  // Preserve the slot locations, rather than using the value under test to locate a restored wave.
+  std::array<std::pair<uint32_t, uint32_t>, 2> slots{};
+  auto *se = soc->xcd(0)->shader_engine(0);
+  unsigned found = 0;
+  for (unsigned step = 0; step < 100 && found != 2; ++step) {
+    int active = 0;
+    ASSERT_EQ(rj_vm_step(vm.get(), &active), ROCJITSU_STATUS_SUCCESS);
+    found = 0;
+    for (uint32_t c = 0; c < se->num_compute_units(); ++c) {
+      for (uint32_t i = 0; i < se->compute_unit(c)->num_wf_slots(); ++i) {
+        const auto *w = se->compute_unit(c)->wf(i);
+        if (w && !w->is_halted() && (w->process_id() == 7 || w->process_id() == 8)) {
+          slots[w->process_id() - 7] = {c, i};
+          ++found;
+        }
+      }
+    }
+  }
+  ASSERT_EQ(found, 2u);
+  test::ScopedTempFile checkpoint;
+  ASSERT_TRUE(checkpoint.initialize("rocjitsu-gds-owner-"));
+  ASSERT_EQ(rj_vm_save_checkpoint(vm.get(), checkpoint.path().c_str(), 0), ROCJITSU_STATUS_SUCCESS);
+  rj_vm_t *reloaded = nullptr;
+  ASSERT_EQ(rj_vm_restore_checkpoint(checkpoint.path().c_str(), &reloaded),
+            ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> restored(reloaded, &rj_vm_destroy);
+  auto *restored_se = restored->soc->xcd(0)->shader_engine(0);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna2);
+  ASSERT_NE(decoder, nullptr);
+  // Fetch the next scalar instruction through the restored queue owner's VM binding.
+  for (const auto &[c, i] : slots) {
+    auto *w = restored_se->compute_unit(c)->wf(i);
+    ASSERT_NE(w, nullptr);
+    w->set_sleep_cycles(0);
+    w->pc = 0x1000 + sizeof(kd) + 4;
+  }
+  for (uint32_t c = 0; c < restored_se->num_compute_units(); ++c) {
+    restored_se->compute_unit(c)->step();
+  }
+  const auto issue = [&](unsigned owner, bool write, uint32_t value) {
+    const auto [c, i] = slots[owner];
+    auto *cu = restored_se->compute_unit(c);
+    auto *w = cu->wf(i);
+    ASSERT_NE(w, nullptr);
+    EXPECT_EQ(w->process_id(), 7u + owner);
+    ASSERT_FALSE(w->is_halted());
+    EXPECT_EQ(cu->read_sgpr(w->sgpr_alloc().base + 10), 1u);
+    w->set_exec(1);
+    w->set_m0(4);
+    cu->write_vgpr(w->vgpr_alloc().base, 0, 0);
+    cu->write_vgpr(w->vgpr_alloc().base + 1, 0, write ? value : 0xfacefeedu);
+    const auto words = write ? rdna2::build_ds(rdna2::kDsWriteB32, {.gds = 1, .data0 = 1})
+                             : rdna2::build_ds(rdna2::kDsReadB32, {.gds = 1, .vdst = 1});
+    auto inst = decoder->decode_window(words);
+    ASSERT_TRUE(inst.succeeded());
+    ASSERT_TRUE(cu->execute_instruction(inst.value().get(), *w).succeeded());
+    amdgpu::LocalMemPipeline pipeline;
+    ASSERT_EQ(pipeline.issue(inst.value().release(), *w), amdgpu::VmAccessOutcome::Complete);
+    if (!write) {
+      EXPECT_EQ(cu->read_vgpr(w->vgpr_alloc().base + 1, 0), value);
+    }
+  };
+  issue(0, true, 0x12345678);
+  issue(1, false, 0);
+  issue(1, true, 0x87654321);
+  issue(0, false, 0x12345678);
+  restored_se->compute_unit(slots[0].first)->wf(slots[0].second)->halt();
+  restored->soc->gws_device()->release_process(7);
+  issue(1, false, 0x87654321);
+  restored_se->compute_unit(slots[1].first)->wf(slots[1].second)->halt();
+  restored->soc->gws_device()->release_process(8);
+  EXPECT_FALSE(restored->soc->gws_device()->has_gds_data());
+}
+
+TEST(CheckpointTest, PreservesGfx11AndCdnaWorkgroupMembership) {
+  for (const auto &[name, arch] : {std::pair{"rdna3", rocjitsu::IsaFamily::Rdna3},
+                                   std::pair{"rdna3_5", rocjitsu::IsaFamily::Rdna3_5},
+                                   std::pair{"cdna1", rocjitsu::IsaFamily::Cdna1},
+                                   std::pair{"cdna2", rocjitsu::IsaFamily::Cdna2},
+                                   std::pair{"cdna3", rocjitsu::IsaFamily::Cdna3},
+                                   std::pair{"cdna4", rocjitsu::IsaFamily::Cdna4}}) {
+    for (uint32_t size : {64u, 128u}) {
+      SCOPED_TRACE(testing::Message() << name << " work-items=" << size);
+      auto json = functional_quantum_checkpoint_config(1, 1);
+      ASSERT_TRUE(replace_exactly_once(json, "cdna3", name));
+      rj_vm_t *raw = nullptr;
+      ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+                ROCJITSU_STATUS_SUCCESS);
+      std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+      auto *soc = vm->soc;
+      auto *xcd = soc->xcd(0);
+      auto *cu = xcd->shader_engine(0)->compute_unit(0);
+      amdhsa::kernel_descriptor_t kd{};
+      kd.kernel_code_entry_byte_offset = sizeof(kd);
+      constexpr uint64_t address = 0x1000;
+      // s_sleep 64; s_branch -1 keeps one or two waves resident.
+      const bool gfx9 = arch_is_cdna_4_or_lower(arch);
+      const uint32_t kernel[] = {gfx9 ? 0xbf8e0040u : 0xbf830040u,
+                                 gfx9 ? 0xbf82ffffu : 0xbfa0ffffu};
+      soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), address);
+      soc->memory()->load_image(reinterpret_cast<const uint8_t *>(kernel), sizeof(kernel),
+                                address + sizeof(kd));
+      test::AqlQueue queue(soc->memory(), xcd->command_processor());
+      queue.dispatch(address, size, size);
+      int active = 0;
+      for (unsigned step = 0; step < 100 && !cu->has_active_wfs(); ++step) {
+        ASSERT_EQ(rj_vm_step(vm.get(), &active), ROCJITSU_STATUS_SUCCESS);
+      }
+      const auto decoder = Decoder::create(arch);
+      const uint32_t getreg = 0xb88202c2u; // s_getreg_b32 s2, hwreg(STATUS, 11, 1)
+      auto check = [&] {
+        for (unsigned slot = 0; slot < size / 64; ++slot) {
+          auto *wave = cu->wf(slot);
+          ASSERT_NE(wave, nullptr);
+          ASSERT_EQ(wave->wf_size(), 64u);
+          auto inst = decoder->decode(&getreg);
+          ASSERT_TRUE(inst.succeeded());
+          ASSERT_TRUE(cu->execute_instruction(inst.value().get(), *wave).succeeded());
+          EXPECT_EQ(wave->debug_read_sgpr(2), size > 64);
+        }
+      };
+      ASSERT_NO_FATAL_FAILURE(check());
+      test::ScopedTempFile file;
+      ASSERT_TRUE(file.initialize("rocjitsu-gfx11-workgroup-"));
+      ASSERT_EQ(rj_vm_save_checkpoint(vm.get(), file.path().c_str(), 0), ROCJITSU_STATUS_SUCCESS);
+      config::LoadedConfig restored;
+      ASSERT_TRUE(test::restore_valid_checkpoint(file.path(), restored));
+      cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+      ASSERT_NO_FATAL_FAILURE(check());
+    }
+  }
+}
+
+TEST(CheckpointTest, Gfx11PreservesAqlFlagsAndPrefetchDistanceInIbSts2) {
+  for (const auto &[name, arch] : {std::pair{"rdna3", rocjitsu::IsaFamily::Rdna3},
+                                   std::pair{"rdna3_5", rocjitsu::IsaFamily::Rdna3_5}}) {
+    SCOPED_TRACE(name);
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", name));
+    rj_vm_t *raw = nullptr;
+    ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+              ROCJITSU_STATUS_SUCCESS);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+    auto *soc = vm->soc;
+    auto *xcd = soc->xcd(0);
+    auto *cu = xcd->shader_engine(0)->compute_unit(0);
+    amdhsa::kernel_descriptor_t kd{};
+    kd.kernel_code_entry_byte_offset = sizeof(kd);
+    kd.compute_pgm_rsrc1 = (1u << amdhsa::COMPUTE_PGM_RSRC1_MEM_ORDERED_SHIFT) |
+                           (1u << amdhsa::COMPUTE_PGM_RSRC1_FWD_PROGRESS_SHIFT);
+    constexpr uint64_t address = 0x1000;
+    constexpr uint32_t code[] = {0x80148114u, 0xbfa0fffeu}; // increment s20, loop
+    soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), address);
+    soc->memory()->load_image(reinterpret_cast<const uint8_t *>(code), sizeof(code),
+                              address + sizeof(kd));
+    test::AqlQueue queue(soc->memory(), xcd->command_processor());
+    queue.dispatch(address, 64, 64);
+    int active = 0;
+    for (unsigned step = 0; step < 100 && !cu->has_active_wfs(); ++step) {
+      ASSERT_EQ(rj_vm_step(vm.get(), &active), ROCJITSU_STATUS_SUCCESS);
+    }
+    auto *wave = cu->wf(0);
+    ASSERT_NE(wave, nullptr);
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    const uint32_t expected = (arch == rocjitsu::IsaFamily::Rdna3 ? 0x602u : 0x502u) |
+                              (uint32_t{wave->wf_size() == 64} << 11);
+    const uint32_t prefetch = 0xbf840006u; // s_set_inst_prefetch_distance 2
+    auto set_distance = decoder->decode(&prefetch);
+    ASSERT_TRUE(set_distance.succeeded());
+    ASSERT_TRUE(cu->execute_instruction(set_distance.value().get(), *wave).succeeded());
+    const uint32_t getreg = 0xb884f81cu; // s_getreg_b32 s4, hwreg(IB_STS2)
+    auto check = [&] {
+      auto read = decoder->decode(&getreg);
+      ASSERT_TRUE(read.succeeded());
+      ASSERT_TRUE(cu->execute_instruction(read.value().get(), *wave).succeeded());
+      EXPECT_EQ(cu->read_sgpr(wave->sgpr_alloc().base + 4), expected);
+    };
+    ASSERT_NO_FATAL_FAILURE(check());
+    test::ScopedTempFile file;
+    ASSERT_TRUE(file.initialize("rocjitsu-gfx11-ib-sts2-"));
+    ASSERT_EQ(rj_vm_save_checkpoint(vm.get(), file.path().c_str(), 0), ROCJITSU_STATUS_SUCCESS);
+    rj_vm_t *copy = nullptr;
+    ASSERT_EQ(rj_vm_restore_checkpoint(file.path().c_str(), &copy), ROCJITSU_STATUS_SUCCESS);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> restored(copy, &rj_vm_destroy);
+    cu = restored->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+    wave = cu->wf(0);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_NO_FATAL_FAILURE(check());
+    const auto line = wave->pc & ~uint64_t{63};
+    uint32_t word;
+    auto &cache = cu->instruction_cache();
+    cache.invalidate_all();
+    const uint32_t reg = wave->sgpr_alloc().base + 20;
+    const auto initial = cu->read_sgpr(reg);
+    for (unsigned step = 0; step < 128 && cu->read_sgpr(reg) == initial; ++step) {
+      ASSERT_EQ(rj_vm_step(restored.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+    }
+    ASSERT_NE(cu->read_sgpr(reg), initial);
+    const auto access = wave->snapshot_vm_access();
+    const auto cached = [&](uint64_t addr) {
+      return cache.peek_word(addr, wave->process_id(), word) ||
+             (access && cache.peek_word(*access, addr, word));
+    };
+    ASSERT_TRUE(cached(line));
+    for (uint32_t i = 1; i <= 3; ++i) {
+      EXPECT_EQ(cached(line + 64u * i), i <= 2);
+    }
+  }
+}
+
+TEST(CheckpointTest, Rdna2AqlRegisterAllocationAndStickyExceptionsSurviveRestore) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, "cdna3", "rdna2"));
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+            ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+  auto *soc = vm->soc;
+  auto *xcd = soc->xcd(0);
+  auto *cu = xcd->shader_engine(0)->compute_unit(0);
+  amdhsa::kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = sizeof(kd);
+  constexpr uint64_t address = 0x1000;
+  constexpr uint32_t code[] = {0xbf8e007fu, 0xbf810000u}; // sleep; endpgm
+  soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), address);
+  soc->memory()->load_image(reinterpret_cast<const uint8_t *>(code), sizeof(code),
+                            address + sizeof(kd));
+  test::AqlQueue queue(soc->memory(), xcd->command_processor());
+  queue.dispatch(address, 64, 64);
+  int active = 0;
+  for (unsigned step = 0; step < 100 && !cu->has_active_wfs(); ++step) {
+    ASSERT_EQ(rj_vm_step(vm.get(), &active), ROCJITSU_STATUS_SUCCESS);
+  }
+  auto *wave = cu->wf(0);
+  ASSERT_NE(wave, nullptr);
+  const uint32_t descriptor_vgprs = wave->num_vgprs();
+  ASSERT_LT(descriptor_vgprs, 40u);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna2);
+  auto readlane =
+      decoder->decode_window(std::array<uint32_t, 2>{0xd7600004, 0x02010b28}); // s4,v40,5
+  ASSERT_TRUE(readlane.succeeded());
+  cu->write_vgpr(wave->vgpr_alloc().base, 5, 0x12345678);
+  cu->write_vgpr(wave->vgpr_alloc().base + 40, 5, 0xbeef);
+  ASSERT_TRUE(cu->execute_instruction(readlane.value().get(), *wave).succeeded());
+  ASSERT_EQ(cu->read_sgpr(wave->sgpr_alloc().base + 4), 0x12345678u);
+  cu->write_vgpr(wave->vgpr_alloc().base, 0, 0x7bff);
+  cu->write_vgpr(wave->vgpr_alloc().base + 1, 0, 0x7bff);
+  wave->set_exec(1);
+  auto add = decoder->decode_window(
+      rdna2::build_vop2(rdna2::kVAddF16Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 2}));
+  ASSERT_TRUE(add.succeeded());
+  ASSERT_TRUE(cu->execute_instruction(add.value().get(), *wave).succeeded());
+  ASSERT_EQ(wave->trapsts(), 0x28u);
+  // A small direct dispatch still has the CU's fixed SGPR storage, including s80.
+  auto *second = cu->dispatch_wf(1, address, 16, 16, 32);
+  ASSERT_NE(second, nullptr);
+  cu->write_sgpr(second->sgpr_alloc().base + 80, 0x56781234);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-rdna2-registers-"));
+  ASSERT_EQ(rj_vm_save_checkpoint(vm.get(), file.path().c_str(), 0), ROCJITSU_STATUS_SUCCESS);
+  const auto bytes = read_binary_file(file.path());
+  const auto *checkpoint = fb::GetSimulationCheckpoint(bytes.data());
+  ASSERT_NE(checkpoint->command_processor()->next_dispatch_ids(), nullptr);
+  for (const auto *saved : *checkpoint->compute_units()->Get(0)->wavefronts()) {
+    EXPECT_NE(saved->gfx10_resources(), nullptr);
+    EXPECT_TRUE(saved->num_sgprs().has_value());
+    EXPECT_EQ(saved->exceptions(), nullptr);
+  }
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(file.path(), restored));
+  cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  wave = cu->wf(0);
+  ASSERT_NE(wave, nullptr);
+  EXPECT_EQ(wave->num_vgprs(), descriptor_vgprs);
+  EXPECT_EQ(wave->trapsts(), 0x28u);
+  cu->write_sgpr(wave->sgpr_alloc().base + 4, 0);
+  ASSERT_TRUE(cu->execute_instruction(readlane.value().get(), *wave).succeeded());
+  EXPECT_EQ(cu->read_sgpr(wave->sgpr_alloc().base + 4), 0x12345678u);
+  second = cu->wf(1);
+  ASSERT_NE(second, nullptr);
+  EXPECT_EQ(second->num_sgprs(), 16u);
+  EXPECT_EQ(cu->read_sgpr(second->sgpr_alloc().base + 80), 0x56781234u);
+}
+
+TEST(CheckpointTest, Rdna2RestoresStandaloneAperturesAndRejectsExternalTrapResolvers) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, "cdna3", "rdna2"));
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *wave = cu->dispatch_wf(0, 0, 16, 16, 32);
+  ASSERT_NE(wave, nullptr);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-rdna2-frontend-"));
+  util::StringDiagnostic error;
+  const auto save = [&] {
+    return config::save_checkpoint(file.path(), *loaded.soc(), 0, loaded.engine_config,
+                                   loaded.cpu_dispatch_threads, error.emitter());
+  };
+  ASSERT_TRUE(save().succeeded());
+  wave->set_apertures(0x1234000000000000ULL, 0x12340000ffffffffULL, 0, 0, /*override_launch=*/true);
+  ASSERT_TRUE(save().succeeded()) << error.message();
+  const auto saved = read_binary_file(file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(file.path(), restored));
+  auto *restored_wave = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+  ASSERT_NE(restored_wave, nullptr);
+  EXPECT_EQ(restored_wave->shared_aperture_base(), wave->shared_aperture_base());
+  EXPECT_EQ(restored_wave->shared_aperture_limit(), wave->shared_aperture_limit());
+  uint32_t value = 0;
+  ASSERT_EQ(amdgpu::read_hwreg_field(*restored_wave, 15u | (31u << 11), value),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(value, 0x12340000u);
+
+  cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+    return amdgpu::ComputeUnitCore::TrapHandlerConfig{.tba = 0x87654300, .tma = 0x4000};
+  });
+  ASSERT_EQ(amdgpu::read_hwreg_field(*wave, 16u | (31u << 11), value),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(value << 8, 0x87654300u);
+  EXPECT_TRUE(save().failed());
+  EXPECT_NE(error.message().find("frontend callbacks"), std::string::npos);
+  EXPECT_EQ(read_binary_file(file.path()), saved);
+  cu->set_trap_handler_resolver({});
+  EXPECT_TRUE(save().succeeded());
+}
+
+TEST(CheckpointTest, ResidentWavesRequireAStandaloneAddressSpace) {
+  for (const char *arch : {"cdna1", "cdna2", "cdna3", "cdna4", "cdna5", "rdna1", "rdna2", "rdna3",
+                           "rdna3_5", "rdna4"}) {
+    SCOPED_TRACE(arch);
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
+    auto *soc = loaded.soc();
+    auto *wave = soc->xcd(0)->shader_engine(0)->compute_unit(0)->dispatch_wf(0, 0, 16, 16, 32);
+    ASSERT_NE(wave, nullptr);
+    test::ScopedTempFile file;
+    ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-process-mapping-"));
+    util::StringDiagnostic diagnostic;
+    const auto save = [&]() {
+      return config::save_checkpoint(file.path(), *soc, 0, loaded.engine_config,
+                                     loaded.cpu_dispatch_threads, diagnostic.emitter());
+    };
+    ASSERT_TRUE(save().succeeded());
+    const auto previous = read_binary_file(file.path());
+    wave->set_address_space(soc->gpu_vm().initialize_gart_address_space());
+    ASSERT_TRUE(wave->address_space());
+    wave->set_process_id(7);
+    EXPECT_TRUE(save().failed());
+    EXPECT_EQ(read_binary_file(file.path()), previous);
+    ASSERT_TRUE(soc->internal_address_space());
+    wave->set_address_space(soc->internal_address_space());
+    if (std::string_view(arch) == "rdna1") {
+      // RDNA1 resource records cannot preserve this wave's process ownership.
+      EXPECT_TRUE(save().failed());
+      EXPECT_EQ(read_binary_file(file.path()), previous);
+      continue;
+    }
+    ASSERT_TRUE(save().succeeded());
+    ASSERT_TRUE(test::restore_valid_checkpoint(file.path(), loaded));
+    soc = loaded.soc();
+    wave = soc->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+    ASSERT_NE(wave, nullptr);
+    EXPECT_EQ(wave->address_space(), soc->internal_address_space());
+  }
+}
+
+TEST(CheckpointTest, RejectsExternalRdna2BindingsAndRestoresStandaloneProcessZero) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, "cdna3", "rdna2"));
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *wave = cu->dispatch_wf(0, 0, 16, 16, 32);
+  ASSERT_NE(wave, nullptr);
+  const auto external = loaded.soc()->gpu_vm().initialize_gart_address_space();
+  ASSERT_TRUE(external);
+  wave->set_address_space(external);
+  wave->set_process_id(7);
+  test::ScopedTempFile checkpoint;
+  ASSERT_TRUE(checkpoint.initialize("rocjitsu-rdna2-process-zero-"));
+  ASSERT_TRUE(checkpoint.write("keep"));
+  const auto original = read_binary_file(checkpoint.path());
+  util::StringDiagnostic diagnostic;
+  const auto save = [&] {
+    return config::save_checkpoint(checkpoint.path(), *loaded.soc(), 0, loaded.engine_config,
+                                   loaded.cpu_dispatch_threads, diagnostic.emitter());
+  };
+  EXPECT_TRUE(save().failed());
+  EXPECT_NE(diagnostic.message().find("external or stale address space"), std::string::npos);
+  EXPECT_EQ(read_binary_file(checkpoint.path()), original);
+  wave->halt();
+  wave = cu->dispatch_wf_at(0, 0, 0, 16, 16, 32);
+  ASSERT_NE(wave, nullptr);
+  EXPECT_EQ(wave->process_id(), 0u);
+  EXPECT_FALSE(wave->address_space());
+  ASSERT_TRUE(save().succeeded());
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), loaded));
+  cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  wave = cu->wf(0);
+  ASSERT_NE(wave, nullptr);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna2);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_EQ(wave->process_id(), 0u);
+  wave->set_exec(1);
+  auto inst = decoder->decode_window(rdna2::build_ds(rdna2::kDsReadB32, {.gds = 1, .vdst = 1}));
+  ASSERT_TRUE(inst.succeeded());
+  ASSERT_TRUE(cu->execute_instruction(inst.value().get(), *wave).succeeded());
+  amdgpu::LocalMemPipeline pipeline;
+  EXPECT_EQ(pipeline.issue(inst.value().release(), *wave), amdgpu::VmAccessOutcome::Complete);
+  auto init = decoder->decode_window(rdna2::build_ds(rdna2::kDsGwsInit, {.gds = 1}));
+  ASSERT_TRUE(init.succeeded());
+  ASSERT_TRUE(cu->execute_instruction(init.value().get(), *wave).succeeded());
+  EXPECT_EQ(cu->gws_device().tracked_process_count(), 1u);
 }
 
 TEST(CheckpointTest, RefusesToSaveParkedGwsWave) {
@@ -5529,8 +8652,9 @@ TEST(CApiTest, AutoFunctionalDispatchBudgetAppliesToEveryGpu) {
   ASSERT_TRUE(test::load_valid_config_from_string(json, expected_config));
   const auto expected = expected_config.execution_threads.dispatch;
   ASSERT_EQ(expected.size(), handle->vm->num_socs());
-  for (uint32_t i = 0; i < handle->vm->num_socs(); ++i)
+  for (uint32_t i = 0; i < handle->vm->num_socs(); ++i) {
     EXPECT_EQ(handle->vm->soc(i)->dispatch_threads(), expected[i]) << "SoC " << i;
+  }
 }
 
 TEST(CApiTest, CreateAndDestroyFromString) {
@@ -5604,6 +8728,10 @@ TEST(CApiTest, ClockedDispatchStaysEventDriven) {
   EXPECT_EQ(handle->soc->dispatch_threads(), 1u);
   EXPECT_EQ(cp->dispatch_threads(), 1u);
 
+  for (const auto &link : handle->engine->topology().links()) {
+    EXPECT_EQ(link->exec_mode(), simdojo::ExecMode::CLOCKED) << link->src()->name();
+  }
+
   using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
@@ -5631,6 +8759,119 @@ TEST(CApiTest, ClockedDispatchStaysEventDriven) {
   ASSERT_NE(cu->wf(0), nullptr);
   EXPECT_EQ(cu->wf(0)->trace_inst_count_, 0u);
 }
+
+class LocalGfx10CheckpointTest : public testing::TestWithParam<const char *> {
+protected:
+  using Vm = std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)>;
+  Vm source{nullptr, &rj_vm_destroy};
+  Vm restored{nullptr, &rj_vm_destroy};
+  test::ScopedTempFile checkpoint;
+
+  void SetUp() override {
+    ASSERT_TRUE(checkpoint.initialize("rocjitsu-local-gfx10-checkpoint-"));
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", GetParam()));
+    rj_vm_t *raw = nullptr;
+    ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_LOCAL, &raw),
+              ROCJITSU_STATUS_SUCCESS);
+    source.reset(raw);
+  }
+
+  void restore() {
+    source.reset();
+    rj_vm_t *raw = nullptr;
+    ASSERT_EQ(rj_vm_restore_checkpoint(checkpoint.path().c_str(), &raw), ROCJITSU_STATUS_SUCCESS);
+    restored.reset(raw);
+  }
+};
+
+TEST_P(LocalGfx10CheckpointTest, IdleVmRestoresStandaloneAndCanReopenDevice) {
+  ASSERT_EQ(rj_vm_save_checkpoint(source.get(), checkpoint.path().c_str(), 0),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NO_FATAL_FAILURE(restore());
+  auto *driver = restored->vm->driver();
+  ASSERT_NE(driver, nullptr);
+  EXPECT_EQ(driver->local_process_id(), 0u);
+  ASSERT_EQ(rj_vm_save_checkpoint(restored.get(), checkpoint.path().c_str(), 1),
+            ROCJITSU_STATUS_SUCCESS);
+  uint32_t process = 0;
+  ASSERT_EQ(rj_vm_device_open(restored.get(), 0, &process), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(process, 0u);
+  auto *cu = restored->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_EQ(cu->num_wfs(), 0u);
+  auto *wf = cu->dispatch_wf(0, 0, 32, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_process_id(process);
+  // A fresh device open reinstalls the KFD trap writer and resolver.
+  EXPECT_EQ(wf->cu().trap_addresses().second, 0u);
+  ASSERT_TRUE(wf->cu().update_trap_address(/*memory=*/true, UINT64_MAX, 0xabcd00));
+  EXPECT_EQ(wf->cu().trap_addresses().second, 0xabcd00u);
+  wf->halt();
+  EXPECT_EQ(rj_vm_device_close(restored.get(), process), ROCJITSU_STATUS_SUCCESS);
+}
+
+TEST_P(LocalGfx10CheckpointTest, OrdinaryWaveResumesWithItsShaderState) {
+  constexpr uint64_t pc = 0x4000;
+  constexpr uint32_t m0 = 0x10203040;
+  source->soc->memory()->write32(pc, 0xbe83037c); // s_mov_b32 s3, m0
+  auto *cu = source->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *wf = cu->dispatch_wf(0, pc, 32, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_m0(m0);
+  const auto slot = wf->wf_id();
+  ASSERT_EQ(rj_vm_save_checkpoint(source.get(), checkpoint.path().c_str(), 1),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NO_FATAL_FAILURE(restore());
+  auto *restored_cu = restored->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *wave = restored_cu->wf(slot);
+  ASSERT_NE(wave, nullptr);
+  ASSERT_EQ(wave->pc, pc);
+  restored_cu->step();
+  EXPECT_EQ(wave->pc, pc + 4);
+  EXPECT_EQ(restored_cu->read_sgpr(wave->sgpr_alloc().base + 3), m0);
+}
+
+TEST_P(LocalGfx10CheckpointTest, ProcessOwnedWavePreservesLastCheckpoint) {
+  ASSERT_EQ(rj_vm_save_checkpoint(source.get(), checkpoint.path().c_str(), 0),
+            ROCJITSU_STATUS_SUCCESS);
+  const auto original = read_binary_file(checkpoint.path());
+  auto *cu = source->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *wave = cu->dispatch_wf(0, 0, 32, 16);
+  ASSERT_NE(wave, nullptr);
+  const uint32_t process = source->vm->driver()->local_process_id();
+  ASSERT_NE(process, 0u);
+  wave->set_process_id(process);
+  ASSERT_TRUE(wave->cu().update_trap_address(/*memory=*/true, UINT64_MAX, 0x123400));
+  ASSERT_EQ(wave->cu().trap_addresses().second, 0x123400u);
+  EXPECT_EQ(rj_vm_save_checkpoint(source.get(), checkpoint.path().c_str(), 1),
+            ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(read_binary_file(checkpoint.path()), original);
+}
+
+TEST_P(LocalGfx10CheckpointTest, OverridingAndClearingLocalCallbacksPreservesLastCheckpoint) {
+  auto save = [&](uint64_t tick) {
+    return rj_vm_save_checkpoint(source.get(), checkpoint.path().c_str(), tick);
+  };
+  ASSERT_EQ(save(0), ROCJITSU_STATUS_SUCCESS);
+  auto *cu = source->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto check_override = [&](auto setter, auto handler) {
+    const auto original = read_binary_file(checkpoint.path());
+    setter(handler);
+    EXPECT_EQ(save(1), ROCJITSU_STATUS_ERROR);
+    EXPECT_EQ(read_binary_file(checkpoint.path()), original);
+    setter(nullptr);
+    EXPECT_EQ(save(2), ROCJITSU_STATUS_SUCCESS);
+  };
+  using Cu = amdgpu::ComputeUnitCore;
+  check_override([&](Cu::TrapHandlerResolver cb) { cu->set_trap_handler_resolver(std::move(cb)); },
+                 [](const amdgpu::Wavefront &) { return Cu::TrapHandlerConfig{}; });
+  check_override([&](Cu::TrapAddressUpdater cb) { cu->set_trap_address_updater(std::move(cb)); },
+                 [](const amdgpu::Wavefront &, bool, uint64_t, uint64_t) { return true; });
+  check_override([&](Cu::SendmsgHandler cb) { cu->set_sendmsg_handler(std::move(cb)); },
+                 [](amdgpu::Wavefront &, uint32_t) { return true; });
+}
+
+INSTANTIATE_TEST_SUITE_P(Gfx10, LocalGfx10CheckpointTest, testing::Values("rdna1", "rdna2"));
 
 TEST(CApiTest, CheckpointRoundTrip) {
   // functional_dispatch_threads_config() pins "num_threads":1, which

@@ -9,10 +9,10 @@
 #pragma once
 
 #include "common/bits.h"
-#include "common/internal.h"
 #include "common/round_integral.h"
+#include "common/validation.h"
 #include "math/unary.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
 

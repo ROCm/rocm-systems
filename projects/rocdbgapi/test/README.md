@@ -71,7 +71,19 @@ add_dbgapi_unit_test(my_new_unit_test
   LIBS amd-dbgapi)
 ```
 
-Unit tests link `GTest::gtest_main` automatically.
+Unit tests link `GTest::gtest_main` automatically.  Use `amd-dbgapi-internal`
+when you need to reach internal symbols; otherwise link `amd-dbgapi`.
+
+A test must link exactly one of `amd-dbgapi` and `amd-dbgapi-internal`, never
+both.  `amd-dbgapi-internal` is a static archive that publicly defines
+`AMD_DBGAPI=AMD_DBGAPI_CALL`, so its API declarations carry no
+`dllimport`/`dllexport`, whereas `amd-dbgapi` uses the import decorations.
+Mixing them gives inconsistent decorations (and duplicate definitions).
+
+`amd-dbgapi-internal` is built differently from the public library: RTTI is
+on (GMock matchers need it) and `-Werror` is off, so a warning in a library
+source does not break test builds.  The public library is still built with
+`-fno-rtti` and `-Werror`.
 
 Optional knobs:
 

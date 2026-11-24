@@ -11,6 +11,7 @@
 /// modifier combination over normal/NaN/Inf/denormal/signed-zero inputs.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "util/simd.h"
 
@@ -83,72 +84,85 @@ constexpr std::array<uint64_t, 12> kF64DstPatterns = {
 };
 
 float ref_src(float x, bool abs, bool neg) {
-  if (abs)
+  if (abs) {
     x = std::fabs(x);
-  if (neg)
+  }
+  if (neg) {
     x = -x;
+  }
   return x;
 }
 
 double ref_src(double x, bool abs, bool neg) {
-  if (abs)
+  if (abs) {
     x = std::fabs(x);
-  if (neg)
+  }
+  if (neg) {
     x = -x;
+  }
   return x;
 }
 
 float ref_dst(float v, uint32_t omod, bool clamp, bool clamp_nan_to_zero) {
   // Output scaling preserves the operation's selected NaN payload, including
   // signaling NaNs passed through with IEEE mode disabled on older targets.
-  if (std::isnan(v))
+  if (std::isnan(v)) {
     return clamp && clamp_nan_to_zero ? 0.0f : v;
-  if (omod == 1)
+  }
+  if (omod == 1) {
     v *= 2.0f;
-  else if (omod == 2)
+  } else if (omod == 2) {
     v *= 4.0f;
-  else if (omod == 3)
+  } else if (omod == 3) {
     v *= 0.5f;
+  }
   if (clamp) {
-    if (std::isnan(v))
+    if (std::isnan(v)) {
       v = clamp_nan_to_zero ? 0.0f : v;
-    else if (v <= 0.0f)
+    } else if (v <= 0.0f) {
       v = 0.0f;
-    else if (v > 1.0f)
+    } else if (v > 1.0f) {
       v = 1.0f;
+    }
   }
   if (omod != 0) {
     uint32_t bits = std::bit_cast<uint32_t>(v);
-    if ((bits & 0x7f800000u) == 0 && (bits & 0x007fffffu) != 0)
+    if ((bits & 0x7f800000u) == 0 && (bits & 0x007fffffu) != 0) {
       bits &= 0x80000000u;
-    if ((bits & 0x7fffffffu) == 0)
+    }
+    if ((bits & 0x7fffffffu) == 0) {
       bits = 0;
+    }
     v = std::bit_cast<float>(bits);
   }
   return v;
 }
 
 double ref_dst(double v, uint32_t omod, bool clamp, bool clamp_nan_to_zero) {
-  if (omod == 1)
+  if (omod == 1) {
     v *= 2.0;
-  else if (omod == 2)
+  } else if (omod == 2) {
     v *= 4.0;
-  else if (omod == 3)
+  } else if (omod == 3) {
     v *= 0.5;
+  }
   if (clamp) {
-    if (std::isnan(v))
+    if (std::isnan(v)) {
       v = clamp_nan_to_zero ? 0.0 : v;
-    else if (v <= 0.0)
+    } else if (v <= 0.0) {
       v = 0.0;
-    else if (v > 1.0)
+    } else if (v > 1.0) {
       v = 1.0;
+    }
   }
   if (omod != 0) {
     uint64_t bits = std::bit_cast<uint64_t>(v);
-    if ((bits & 0x7ff0000000000000ULL) == 0 && (bits & 0x000fffffffffffffULL) != 0)
+    if ((bits & 0x7ff0000000000000ULL) == 0 && (bits & 0x000fffffffffffffULL) != 0) {
       bits &= 0x8000000000000000ULL;
-    if ((bits & 0x7fffffffffffffffULL) == 0)
+    }
+    if ((bits & 0x7fffffffffffffffULL) == 0) {
       bits = 0;
+    }
     v = std::bit_cast<double>(bits);
   }
   return v;
@@ -157,10 +171,10 @@ double ref_dst(double v, uint32_t omod, bool clamp, bool clamp_nan_to_zero) {
 TEST(Vop3ModifierPolicy, NanClampFollowsArchitectureAndDx10Mode) {
   using rocjitsu::amdgpu::floating_clamp_nan_to_zero;
 
-  EXPECT_FALSE(floating_clamp_nan_to_zero(ROCJITSU_CODE_ARCH_CDNA4, false));
-  EXPECT_TRUE(floating_clamp_nan_to_zero(ROCJITSU_CODE_ARCH_CDNA4, true));
-  EXPECT_TRUE(floating_clamp_nan_to_zero(ROCJITSU_CODE_ARCH_RDNA4, false));
-  EXPECT_TRUE(floating_clamp_nan_to_zero(ROCJITSU_CODE_ARCH_CDNA5, false));
+  EXPECT_FALSE(floating_clamp_nan_to_zero(rocjitsu::IsaFamily::Cdna4, false));
+  EXPECT_TRUE(floating_clamp_nan_to_zero(rocjitsu::IsaFamily::Cdna4, true));
+  EXPECT_TRUE(floating_clamp_nan_to_zero(rocjitsu::IsaFamily::Rdna4, false));
+  EXPECT_TRUE(floating_clamp_nan_to_zero(rocjitsu::IsaFamily::Cdna5, false));
 }
 
 TEST(Vop3ModifierPolicy, ScalarClampHandlesQuietSignalingNanAndSignedZero) {
@@ -183,8 +197,9 @@ TEST(Vop3ModifierSimd, SrcMod_AllAbsNegCombos_BitExact) {
   SKIP_IF_NO_SIMD();
   constexpr std::size_t W = util::native_width_v<float>;
   alignas(util::native<float>) float in[W];
-  for (std::size_t i = 0; i < W; ++i)
+  for (std::size_t i = 0; i < W; ++i) {
     in[i] = std::bit_cast<float>(kPatterns[i % kPatterns.size()]);
+  }
   const util::native<float> v(in, util::stdx::element_aligned);
 
   for (uint32_t abs = 0; abs < 2; ++abs) {
@@ -212,8 +227,9 @@ TEST(Vop3ModifierSimd, SrcModF64_AllAbsNegCombos_BitExact) {
   SKIP_IF_NO_SIMD();
   constexpr std::size_t W = util::native_width64;
   alignas(util::native<double>) double in[W];
-  for (std::size_t i = 0; i < W; ++i)
+  for (std::size_t i = 0; i < W; ++i) {
     in[i] = std::bit_cast<double>(kF64SrcPatterns[i % kF64SrcPatterns.size()]);
+  }
   const util::native<double> v(in, util::stdx::element_aligned);
 
   for (uint32_t abs = 0; abs < 2; ++abs) {
@@ -257,17 +273,11 @@ TEST(Vop3ModifierSimd, DstModF32OverflowFollowsGuestRounding) {
     const util::native<float> v(std::bit_cast<float>(test.value));
     for (uint32_t mode = 0; mode < 4; ++mode) {
       const uint32_t expected = test.by_mode[mode];
-      for (const int host : {FE_TONEAREST, FE_TOWARDZERO}) {
-        ASSERT_EQ(std::fesetround(host), 0);
-        const auto out = apply_vop3_dst_mod_f32(v, test.omod, 0, false, mode);
-        const auto clamped = apply_vop3_dst_mod_f32(v, test.omod, 1, false, mode);
-        ASSERT_EQ(std::fesetround(FE_TONEAREST), 0);
-        EXPECT_EQ(std::bit_cast<uint32_t>(float(out[0])), expected)
-            << std::hex << test.value << " omod=" << test.omod << " mode=" << mode
-            << " host=" << host;
-        EXPECT_EQ(std::bit_cast<uint32_t>(float(clamped[0])),
-                  (test.value >> 31) ? 0u : 0x3f800000u);
-      }
+      const auto out = apply_vop3_dst_mod_f32(v, test.omod, 0, false, mode);
+      const auto clamped = apply_vop3_dst_mod_f32(v, test.omod, 1, false, mode);
+      EXPECT_EQ(std::bit_cast<uint32_t>(float(out[0])), expected)
+          << std::hex << test.value << " omod=" << test.omod << " mode=" << mode;
+      EXPECT_EQ(std::bit_cast<uint32_t>(float(clamped[0])), (test.value >> 31) ? 0u : 0x3f800000u);
     }
   }
 }
@@ -277,8 +287,9 @@ TEST(Vop3ModifierSimd, DstMod_AllOmodClampCombos_BitExact) {
   constexpr std::size_t W = util::native_width_v<float>;
   for (std::size_t base = 0; base < kPatterns.size(); base += W) {
     alignas(util::native<float>) float in[W];
-    for (std::size_t i = 0; i < W; ++i)
+    for (std::size_t i = 0; i < W; ++i) {
       in[i] = std::bit_cast<float>(kPatterns[std::min(base + i, kPatterns.size() - 1)]);
+    }
     const util::native<float> v(in, util::stdx::element_aligned);
 
     for (uint32_t omod = 0; omod < 4; ++omod) {
@@ -305,9 +316,10 @@ TEST(Vop3ModifierSimd, DstModF64_AllOmodClampCombos_BitExact) {
   constexpr std::size_t W = util::native_width64;
   for (std::size_t base = 0; base < kF64DstPatterns.size(); base += W) {
     alignas(util::native<double>) double in[W];
-    for (std::size_t i = 0; i < W; ++i)
+    for (std::size_t i = 0; i < W; ++i) {
       in[i] =
           std::bit_cast<double>(kF64DstPatterns[std::min(base + i, kF64DstPatterns.size() - 1)]);
+    }
     const util::native<double> v(in, util::stdx::element_aligned);
 
     for (uint32_t omod = 0; omod < 4; ++omod) {

@@ -164,21 +164,10 @@ main(int argc, char *argv[])
     }
     const mem_mode_t mode = static_cast<mem_mode_t>(mode_raw);
 
-    /* Stat the input file to get its size and the filesystem block size. */
-    size_t file_size, block_size;
-    {
-        struct stat statbuf;
-        if (stat(in_path, &statbuf)) {
-            fprintf(stderr, "Could not stat %s (%s)\n", in_path, strerror(errno));
-            return EXIT_FAILURE;
-        }
-        file_size  = static_cast<size_t>(statbuf.st_size);
-        block_size = static_cast<size_t>(statbuf.st_blksize);
-        if (!is_power_of_two(block_size)) {
-            fprintf(stderr, "Block size is not a power of two (%zu)\n", block_size);
-            return EXIT_FAILURE;
-        }
-    }
+    /* Query file size and direct-I/O alignment. */
+    size_t file_size, io_alignment;
+    if (get_file_info(in_path, &file_size, &io_alignment))
+        return EXIT_FAILURE;
 
     if (0 == file_size) {
         fprintf(stderr, "Input file %s is empty\n", in_path);
@@ -186,7 +175,7 @@ main(int argc, char *argv[])
     }
 
     const size_t payload_size = (file_size < VMR_CAP) ? file_size : VMR_CAP;
-    const size_t alloc_size   = align_up(payload_size, block_size);
+    const size_t alloc_size   = align_up(payload_size, io_alignment);
 
     int             in_fd  = -1;
     int             out_fd = -1;

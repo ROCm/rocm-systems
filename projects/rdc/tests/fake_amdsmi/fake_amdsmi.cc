@@ -129,6 +129,9 @@ struct Config {
   std::vector<Rule> unfilled;       // SUCCESS without writing the outputs
   std::vector<Rule> delay;          // sleep ms before the call
   int64_t cper_count = -1;          // CPER entries to report, -1 = none
+  int64_t cper_length = -1;         // record_length of each CPER record, -1 = its size
+  int64_t cper_afid = -1;           // AF ID of each CPER record, -1 = none
+  int64_t cper_bytes = -1;          // CPER data bytes to report, -1 = those written
   std::vector<EventSpec> events;    // events delivered once
   int64_t events_count = -1;        // event count to report, -1 = events.size()
   int64_t num_freq = -1;            // levels in every clock frequency table, -1 = normal
@@ -136,6 +139,9 @@ struct Config {
   bool procs_grow = false;          // one more process on every process-list call
   bool counter_reset = false;       // accumulated counters restart when armed
   bool version_build_null = false;  // amdsmi_get_lib_version() build string is NULL
+  bool long_strings = false;        // ASIC info names fill their buffers, no NUL
+  uint32_t gfxclk_holes = 0;        // leading current_gfxclks[] entries not available
+  std::vector<uint16_t> gfxclks;    // current_gfxclks[] from the first, if not empty
 };
 
 std::mutex g_mutex;  // guards everything below that is not atomic
@@ -263,6 +269,28 @@ std::vector<Rule> parse_rules(const char* env, amdsmi_status_t dflt, int64_t las
   return rules;
 }
 
+// RDC_FAKE_GFXCLKS=mhz,...: current_gfxclks[] of amdsmi_get_gpu_metrics_info from the first
+// entry, each 0..65535; the entries after the list are not available.
+std::vector<uint16_t> parse_gfxclks(const char* v) {
+  std::vector<uint16_t> clks;
+  if (v == nullptr) return clks;
+  const std::string all(v);
+  size_t pos = 0;
+  while (pos <= all.size()) {
+    size_t end = all.find(',', pos);
+    if (end == std::string::npos) end = all.size();
+    clks.push_back(
+        static_cast<uint16_t>(parse_int("RDC_FAKE_GFXCLKS", all.substr(pos, end - pos), 0, 65535)));
+    pos = end + 1;
+  }
+  if (clks.size() > AMDSMI_MAX_NUM_GFX_CLKS) {
+    fprintf(stderr, "fake amd-smi: RDC_FAKE_GFXCLKS: more than %d clocks\n",
+            AMDSMI_MAX_NUM_GFX_CLKS);
+    abort();
+  }
+  return clks;
+}
+
 uint32_t env_u32(const char* name, uint32_t dflt, uint32_t lo, uint32_t hi) {
   const char* v = getenv(name);
   if (v == nullptr || *v == '\0') return dflt;
@@ -320,6 +348,9 @@ void load_config_locked() {
   c.unfilled = parse_rules("RDC_FAKE_UNFILLED", AMDSMI_STATUS_SUCCESS, last);
   c.delay = parse_rules("RDC_FAKE_DELAY_MS", AMDSMI_STATUS_SUCCESS, last, true);
   c.cper_count = env_int("RDC_FAKE_CPER_COUNT", -1, 0, 1 << 20);
+  c.cper_length = env_int("RDC_FAKE_CPER_LENGTH", -1, 0, 1 << 20);
+  c.cper_afid = env_int("RDC_FAKE_CPER_AFID", -1, 0, 1 << 30);
+  c.cper_bytes = env_int("RDC_FAKE_CPER_BYTES", -1, 0, 1 << 20);
   parse_events(getenv("RDC_FAKE_EVENTS"), &c);
   c.num_freq = env_int("RDC_FAKE_NUM_FREQ", -1, 0, AMDSMI_MAX_NUM_FREQUENCIES);
   c.procs = static_cast<uint32_t>(env_int("RDC_FAKE_PROCS", 0, 0, 1024));
@@ -331,6 +362,10 @@ void load_config_locked() {
     abort();
   }
   c.version_build_null = env_int("RDC_FAKE_VERSION_BUILD_NULL", 0, 0, 1) != 0;
+  c.long_strings = env_int("RDC_FAKE_LONG_STRINGS", 0, 0, 1) != 0;
+  c.gfxclk_holes =
+      static_cast<uint32_t>(env_int("RDC_FAKE_GFXCLK_HOLES", 0, 0, AMDSMI_MAX_NUM_GFX_CLKS));
+  c.gfxclks = parse_gfxclks(getenv("RDC_FAKE_GFXCLKS"));
   g_cfg = c;
   g_fail_once_fired.assign(g_cfg.fail_once.size(), false);
   memcpy(g_cper_hdr.signature, "CPER", 4);
@@ -596,6 +631,11 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   snprintf(info->market_name, sizeof(info->market_name), "Fake AMD Instinct GPU %u", p->gpu);
   snprintf(info->vendor_name, sizeof(info->vendor_name), "Advanced Micro Devices, Inc.");
   snprintf(info->asic_serial, sizeof(info->asic_serial), "FAKE%04X", p->gpu);
+  if (g_cfg.long_strings) {
+    // RDC_FAKE_LONG_STRINGS breaks the contract: amd-smi terminates these strings.
+    memset(info->market_name, 'M', sizeof(info->market_name));
+    memset(info->asic_serial, 'S', sizeof(info->asic_serial));
+  }
   info->vendor_id = 0x1002;
   info->subvendor_id = 0x1002;
   info->device_id = 0x74a1;
@@ -730,8 +770,12 @@ amdsmi_status_t amdsmi_get_gpu_activity(amdsmi_processor_handle processor_handle
   const FakeProc* p;
   if (auto st = enter(__func__, processor_handle, &p, info)) return done(st);
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
-  if (sentinel(__func__, p)) return fill_sentinel(info);
   memset(info, 0, sizeof(*info));
+  if (sentinel(__func__, p)) {
+    // amd-smi copies gpu_metrics' uint16_t marker into these uint32_t fields.
+    info->gfx_activity = info->umc_activity = info->mm_activity = UINT16_MAX;
+    return AMDSMI_STATUS_SUCCESS;
+  }
   info->gfx_activity = V(kGFX_ACTIVITY_PCT, p->gpu);
   info->umc_activity = V(kUMC_ACTIVITY_PCT, p->gpu);
   return AMDSMI_STATUS_SUCCESS;
@@ -742,7 +786,6 @@ amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_ha
   const FakeProc* p;
   if (auto st = enter(__func__, processor_handle, &p, gpu_busy_percent)) return done(st);
   if (gpu_busy_percent == nullptr) return AMDSMI_STATUS_INVAL;
-  if (sentinel(__func__, p)) return fill_sentinel(gpu_busy_percent);
   *gpu_busy_percent = V(kGFX_ACTIVITY_PCT, p->gpu);
   return AMDSMI_STATUS_SUCCESS;
 }
@@ -752,7 +795,6 @@ amdsmi_status_t amdsmi_get_clock_info(amdsmi_processor_handle processor_handle,
   const FakeProc* p;
   if (auto st = enter(__func__, processor_handle, &p, info)) return done(st);
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
-  if (sentinel(__func__, p)) return fill_sentinel(info);
   memset(info, 0, sizeof(*info));
   if (clk_type == AMDSMI_CLK_TYPE_GFX) {
     info->clk = V(kGFX_CLK_MHZ, p->gpu);
@@ -767,6 +809,8 @@ amdsmi_status_t amdsmi_get_clock_info(amdsmi_processor_handle processor_handle,
     info->min_clk = 100;
     info->max_clk = 1000;
   }
+  // amd-smi: the range is known, the current clock is not.
+  if (sentinel(__func__, p)) info->clk = UINT32_MAX;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -793,6 +837,8 @@ amdsmi_status_t amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
   f->frequency[0] = (mem ? 900 : 500) * mhz;
   f->frequency[1] = V(mem ? kMEM_CLK_MHZ : kGFX_CLK_MHZ, p->gpu) * mhz;
   f->frequency[2] = (mem ? 1300 : 2100) * mhz;
+  // amd-smi: no level is current, as for a power-gated clock domain.
+  if (sentinel(__func__, p)) f->current = UINT32_MAX;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -887,7 +933,14 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
     m.xgmi_read_data_acc[i] = acc * (p->gpu + 1) * (i + 1);
     m.xgmi_write_data_acc[i] = acc * (p->gpu + 1) * (i + 2);
   }
-  for (uint32_t i = 0; i < AMDSMI_MAX_NUM_GFX_CLKS; ++i) m.current_gfxclks[i] = m.current_gfxclk;
+  for (uint32_t i = 0; i < AMDSMI_MAX_NUM_GFX_CLKS; ++i) {
+    if (!g_cfg.gfxclks.empty()) {
+      m.current_gfxclks[i] = i < g_cfg.gfxclks.size() ? g_cfg.gfxclks[i] : UINT16_MAX;
+    } else {
+      m.current_gfxclks[i] = i < g_cfg.gfxclk_holes ? UINT16_MAX : m.current_gfxclk;
+    }
+  }
+  m.vcn_activity[0] = V(kVCN_ACTIVITY_PCT, p->gpu);  // one decoder, the others not available
   m.num_partition = static_cast<uint16_t>(g_cfg.parts);
   m.vram_max_bandwidth = 5300;
   m.pcie_nak_sent_count_acc = p->gpu;
@@ -1338,7 +1391,11 @@ amdsmi_status_t amdsmi_get_utilization_count(amdsmi_processor_handle processor_h
   const uint64_t t = now_ms();
   const uint64_t acc = counter_ms();
   for (uint32_t i = 0; i < count; ++i) {
-    utilization_counters[i].value = acc * (p->gpu + 1);
+    // As in amd-smi, the decoder activity is the average of the GPU metrics' VCN activities
+    // that are available, a percentage: here vcn_activity[0] alone. The other counters
+    // accumulate.
+    const bool decoder = utilization_counters[i].type == AMDSMI_COARSE_DECODER_ACTIVITY;
+    utilization_counters[i].value = decoder ? V(kVCN_ACTIVITY_PCT, p->gpu) : acc * (p->gpu + 1);
     utilization_counters[i].fine_value_count = 0;
   }
   *timestamp = t * 1000000;
@@ -1350,11 +1407,15 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
   const FakeProc* p;
   if (auto st = enter(__func__, processor_handle, &p, info)) return done(st);
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
+  // amd-smi starts every counter at UINT64_MAX and fills in what the GPU provides.
+  if (sentinel(__func__, p)) return fill_sentinel(info);
   memset(static_cast<void*>(info), 0, sizeof(*info));
   info->reference_timestamp = now_ms() * 1000;
   info->acc_counter = counter_ms();
   return AMDSMI_STATUS_SUCCESS;
 }
+
+static_assert(sizeof(amdsmi_cper_hdr_t) == 128, "README.md gives a CPER record as 128 bytes");
 
 amdsmi_status_t amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_handle,
                                             uint32_t severity_mask, char* cper_data,
@@ -1368,13 +1429,22 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_ha
   }
   (void)severity_mask;
   if (g_cfg.cper_count >= 0 && armed()) {
-    // RDC_FAKE_CPER_COUNT: report that many entries. Past the caller's capacity this breaks the
-    // contract (amd-smi stops there with AMDSMI_STATUS_MORE_DATA); header pointers are written
-    // only up to the capacity.
+    // RDC_FAKE_CPER_COUNT: report that many entries. As amd-smi, write each record that fits in
+    // both of the caller's buffers into cper_data, with a header pointer to it. Past that capacity
+    // this breaks the contract (amd-smi stops there with AMDSMI_STATUS_MORE_DATA).
     const uint64_t n = static_cast<uint64_t>(g_cfg.cper_count);
-    for (uint64_t i = 0; i < std::min(n, *entry_count); ++i) cper_hdrs[i] = &g_cper_hdr;
+    amdsmi_cper_hdr_t record = g_cper_hdr;
+    if (g_cfg.cper_length >= 0) record.record_length = static_cast<uint32_t>(g_cfg.cper_length);
+    const uint64_t fit = std::min({n, *entry_count, *buf_size / sizeof(record)});
+    for (uint64_t i = 0; i < fit; ++i) {
+      char* at = cper_data + i * sizeof(record);
+      memcpy(at, &record, sizeof(record));
+      cper_hdrs[i] = reinterpret_cast<amdsmi_cper_hdr_t*>(at);
+    }
     *entry_count = n;
-    *buf_size = 0;
+    // RDC_FAKE_CPER_BYTES: report fewer bytes than the records span, which amd-smi never does.
+    *buf_size =
+        g_cfg.cper_bytes >= 0 ? static_cast<uint64_t>(g_cfg.cper_bytes) : fit * sizeof(record);
     return AMDSMI_STATUS_SUCCESS;
   }
   *buf_size = 0;
@@ -1388,8 +1458,18 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
   if (cper_buffer == nullptr || afids == nullptr || num_afids == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  (void)buf_size;
-  *num_afids = 0;
+  // As amd-smi: the record's own length must fit in buf_size.
+  amdsmi_cper_hdr_t hdr;
+  if (buf_size < sizeof(hdr)) return AMDSMI_STATUS_UNEXPECTED_SIZE;
+  memcpy(&hdr, cper_buffer, sizeof(hdr));
+  if (hdr.record_length < sizeof(hdr) || hdr.record_length > buf_size) {
+    return AMDSMI_STATUS_UNEXPECTED_SIZE;
+  }
+  if (memcmp(hdr.signature, "CPER", 4) != 0) return AMDSMI_STATUS_UNEXPECTED_DATA;
+  // RDC_FAKE_CPER_AFID: one AF ID per record.
+  const uint32_t room = *num_afids;
+  *num_afids = g_cfg.cper_afid >= 0 ? 1 : 0;
+  if (*num_afids != 0 && room != 0) afids[0] = static_cast<uint64_t>(g_cfg.cper_afid);
   return AMDSMI_STATUS_SUCCESS;
 }
 

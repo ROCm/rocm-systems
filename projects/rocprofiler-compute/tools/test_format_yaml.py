@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from format_yaml import normalize_equation  # noqa: E402
+from format_yaml import check_file, normalize_equation  # noqa: E402
 
 
 class TestCriticalCorrectness:
@@ -136,6 +136,39 @@ class TestErrorHandling:
         assert normalize_equation("42") == "42"
         assert normalize_equation("x") == "x"
         assert normalize_equation("SUM()") == "SUM()"
+
+
+class TestMetricLibraryFiles:
+    """Metric library files: formula and peak_empirical are checked like panel
+    equations."""
+
+    def write_library_file(self, tmp_path, text):
+        path = tmp_path / "metric_library" / "gfx908" / "l2.yaml"
+        path.parent.mkdir(parents=True)
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_unformatted_formula_fails(self, tmp_path):
+        path = self.write_library_file(
+            tmp_path, "l2.ai:\n  formula: ( SUM( (a * 2) ) / SUM(b) )\n"
+        )
+        is_valid, issues = check_file(path)
+        assert not is_valid
+        assert "l2.ai.formula: equation needs normalization" in issues[0]
+
+    def test_formatted_formula_and_remove_list_pass(self, tmp_path):
+        path = self.write_library_file(
+            tmp_path,
+            "remove:\n  - l2.old\n"
+            "l2.ai:\n  formula: SUM(a) / SUM(b)\n"
+            "  peak_empirical: $L2Bw_empirical_peak\n",
+        )
+        assert check_file(path) == (True, [])
+
+    def test_fix_rewrites_formula(self, tmp_path):
+        path = self.write_library_file(tmp_path, "l2.ai:\n  formula: (a+b)\n")
+        check_file(path, fix=True)
+        assert path.read_text(encoding="utf-8") == "l2.ai:\n  formula: a + b\n"
 
 
 if __name__ == "__main__":

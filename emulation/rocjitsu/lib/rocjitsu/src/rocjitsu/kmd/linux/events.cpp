@@ -22,9 +22,12 @@ namespace rocjitsu {
 
 namespace {
 
+constexpr uint64_t kUnsignaledEventSlot = UINT64_MAX;
+
 void write_event_slot(void *page, size_t page_size, uint32_t event_id, uint64_t value) {
-  if (!page || event_id >= page_size / sizeof(uint64_t))
+  if (!page || event_id >= page_size / sizeof(uint64_t)) {
     return;
+  }
   auto *slots = static_cast<uint64_t *>(page);
   std::atomic_ref<uint64_t>(slots[event_id]).store(value, std::memory_order_release);
 }
@@ -32,31 +35,45 @@ void write_event_slot(void *page, size_t page_size, uint32_t event_id, uint64_t 
 } // namespace
 
 EventState::~EventState() {
-  if (backing_fd_ >= 0)
+  if (backing_fd_ >= 0) {
     libc_passthrough().close(backing_fd_);
+  }
 }
 
 void EventState::adopt_page(void *ptr, size_t size) {
   assert(ptr && "adopt_page called with null pointer");
   assert(size > 0 && "adopt_page called with zero size");
   std::lock_guard<std::mutex> lock(mutex_);
-  if (page_)
+  if (page_) {
     return;
+  }
   page_ = ptr;
   page_size_ = size;
-  for (const auto &[id, ev] : events_) {
-    if (ev.signaled)
-      write_event_slot(page_, page_size_, id, ev.event_age);
-  }
 }
 
 bool EventState::release_page(void *ptr) {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (page_ != ptr)
+  if (page_ != ptr) {
     return false;
+  }
   page_ = nullptr;
   page_size_ = 0;
   return true;
+}
+
+std::optional<size_t> EventState::page_size_if_base(const void *ptr) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return page_ == ptr && page_size_ != 0 ? std::optional<size_t>(page_size_) : std::nullopt;
+}
+
+bool EventState::overlaps_page(const void *ptr, size_t size) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!ptr || size == 0 || !page_ || page_size_ == 0) {
+    return false;
+  }
+  const auto address = reinterpret_cast<uintptr_t>(ptr);
+  const auto page = reinterpret_cast<uintptr_t>(page_);
+  return address <= page ? page - address < size : address - page < page_size_;
 }
 
 void EventState::activate_waiters(GpuEvent &event) {
@@ -76,38 +93,49 @@ bool EventState::has_signal_waiters(const GpuEvent &event) {
                      [](const EventWaiter *waiter) { return waiter->listen_for_signals; });
 }
 
-/// @brief Signal event(s) from the CP's interrupt callback.
-/// @details When event_id is non-zero, signals that specific event. When
-///          event_id is zero, broadcasts to all type-0 events — matching real
-///          KFD's kfd_signal_event_interrupt(pasid, partial_id=0, valid_id_bits=0).
-void EventState::signal_interrupt(uint32_t event_id) {
+void EventState::signal_event(GpuEvent &event) {
+  event.signaled = !event.auto_reset || !has_signal_waiters(event);
+  if (!(++event.event_age)) {
+    event.event_age = 2;
+  }
+  activate_waiters(event);
+}
+
+void EventState::signal_interrupt(uint32_t event_id, bool signal_mailbox_updated) {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (event_id == 0) {
-    for (auto &[id, ev] : events_) {
-      if (ev.event_type == 0) {
-        ev.signaled = !ev.auto_reset || !has_signal_waiters(ev);
-        if (!(++ev.event_age))
-          ev.event_age = 2;
-        write_event_slot(page_, page_size_, id, ev.event_age);
-        util::Logger::cp("SIGNAL_BROADCAST: event_id=", id, " age=", ev.event_age,
-                         " waiters=", ev.waiters.size());
-        activate_waiters(ev);
-      }
-    }
+  if (!page_) {
     return;
   }
-  auto it = events_.find(event_id);
-  if (it != events_.end() && it->second.event_type == 0) {
-    it->second.signaled = !it->second.auto_reset || !has_signal_waiters(it->second);
-    if (!(++it->second.event_age))
-      it->second.event_age = 2;
-    write_event_slot(page_, page_size_, event_id, it->second.event_age);
-    util::Logger::cp("SIGNAL_INTERRUPT: event_id=", event_id, " age=", it->second.event_age,
-                     " waiters=", it->second.waiters.size(), " page=", page_ ? "valid" : "null");
-    activate_waiters(it->second);
-  } else {
-    util::Logger::cp("SIGNAL_INTERRUPT_MISS: event_id=", event_id,
-                     " NOT FOUND or wrong type, events_.size()=", events_.size());
+  auto *slots = static_cast<uint64_t *>(page_);
+  auto event = events_.find(event_id);
+  if (event != events_.end() && event->second.event_type == KFD_IOC_EVENT_SIGNAL &&
+      event_id < page_size_ / sizeof(uint64_t)) {
+    const uint64_t previous = std::atomic_ref<uint64_t>(slots[event_id])
+                                  .exchange(kUnsignaledEventSlot, std::memory_order_acq_rel);
+    if (!signal_mailbox_updated || previous != kUnsignaledEventSlot) {
+      signal_event(event->second);
+      return;
+    }
+  }
+  // An absent, invalid, or unmarked context can still accompany other marked
+  // mailboxes. KFD falls back to scanning those slots.
+  for (auto &[id, pending] : events_) {
+    if (pending.event_type != KFD_IOC_EVENT_SIGNAL || id >= page_size_ / sizeof(uint64_t)) {
+      continue;
+    }
+    if (std::atomic_ref<uint64_t>(slots[id]).exchange(
+            kUnsignaledEventSlot, std::memory_order_acq_rel) != kUnsignaledEventSlot) {
+      signal_event(pending);
+    }
+  }
+}
+
+void EventState::notify_idle() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  for (auto &[id, event] : events_) {
+    if (event.event_type == KFD_IOC_EVENT_SIGNAL) {
+      signal_event(event);
+    }
   }
 }
 
@@ -115,11 +143,11 @@ bool EventState::signal_memory_fault(const MemoryFault &fault) {
   std::lock_guard<std::mutex> lock(mutex_);
   bool delivered = false;
   for (auto &[id, ev] : events_) {
-    if (ev.event_type != KFD_IOC_EVENT_MEMORY)
+    if (ev.event_type != KFD_IOC_EVENT_MEMORY) {
       continue;
-    // A memory-exception event is not a signal event: it carries no age slot in
-    // the shared page and the runtime does not poll it, it parks a thread in
-    // WAIT_EVENTS. Record the payload for that thread to collect and wake it.
+    }
+    // Memory-exception events have no GPU signal mailbox. WAIT_EVENTS carries
+    // their fault payload to the runtime's parked handler thread.
     ev.fault = fault;
     ev.signaled = !ev.auto_reset || !has_signal_waiters(ev);
     activate_waiters(ev);
@@ -133,8 +161,9 @@ void EventState::notify_closing() {
   std::lock_guard<std::mutex> lock(mutex_);
   closing_.store(true, std::memory_order_release);
   for (auto &[id, ev] : events_) {
-    for (auto *waiter : ev.waiters)
+    for (auto *waiter : ev.waiters) {
       waiter->cv->notify_one();
+    }
   }
 }
 
@@ -146,12 +175,14 @@ void EventState::signal_page_shutdown() {
   // pointer (and racing page_/page_size_). This is the same discipline the CP
   // interrupt path (signal_interrupt) uses to touch the mapping safely.
   std::lock_guard<std::mutex> lock(mutex_);
-  if (!page_)
+  if (!page_) {
     return;
+  }
   auto *slots = static_cast<uint64_t *>(page_);
   size_t count = page_size_ / sizeof(uint64_t);
-  for (size_t i = 0; i < count; ++i)
+  for (size_t i = 0; i < count; ++i) {
     std::atomic_ref<uint64_t>(slots[i]).store(KFD_SIGNAL_EVENT_LIMIT, std::memory_order_release);
+  }
 }
 
 /// @brief Release parked waiters without mutating any event or page state.
@@ -159,8 +190,9 @@ void EventState::begin_wait_cancel() {
   std::lock_guard<std::mutex> lock(mutex_);
   wait_cancelled_.store(true, std::memory_order_release);
   for (auto &[id, ev] : events_) {
-    for (auto *waiter : ev.waiters)
+    for (auto *waiter : ev.waiters) {
       waiter->cv->notify_one();
+    }
   }
 }
 
@@ -173,8 +205,9 @@ bool EventState::is_closing() const { return closing_.load(std::memory_order_acq
 
 int EventState::ensure_backing(size_t length, const std::function<int(size_t)> &create_backing) {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (backing_fd_ >= 0)
+  if (backing_fd_ >= 0) {
     return backing_fd_;
+  }
   backing_fd_ = create_backing(length);
   return backing_fd_;
 }
@@ -195,15 +228,6 @@ bool EventState::has_page() const {
   return page_ != nullptr;
 }
 
-bool EventState::overlaps_page(const void *addr, size_t length) const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (!page_ || page_size_ == 0 || length == 0)
-    return false;
-  const auto start = reinterpret_cast<uintptr_t>(addr);
-  const auto page = reinterpret_cast<uintptr_t>(page_);
-  return start <= page ? page - start < length : start - page < page_size_;
-}
-
 /// @brief Allocate a new KFD event and return its ID and slot index.
 int EventState::create_event(void *arg, uint32_t gpu_id) {
   assert(arg && "create_event called with null arg");
@@ -212,8 +236,9 @@ int EventState::create_event(void *arg, uint32_t gpu_id) {
 
   uint32_t max_slots = page_size_ > 0 ? static_cast<uint32_t>(page_size_ / sizeof(uint64_t))
                                       : KFD_SIGNAL_EVENT_LIMIT;
-  if (next_event_id_ >= std::min(max_slots, static_cast<uint32_t>(KFD_SIGNAL_EVENT_LIMIT)))
+  if (next_event_id_ >= std::min(max_slots, static_cast<uint32_t>(KFD_SIGNAL_EVENT_LIMIT))) {
     return -ENOSPC;
+  }
 
   GpuEvent ev{};
   ev.event_id = next_event_id_++;
@@ -222,6 +247,7 @@ int EventState::create_event(void *arg, uint32_t gpu_id) {
   ev.event_age = 1;
 
   events_[ev.event_id] = ev;
+  write_event_slot(page_, page_size_, ev.event_id, kUnsignaledEventSlot);
 
   args->event_id = ev.event_id;
   args->event_trigger_data = ev.event_id;
@@ -247,11 +273,12 @@ int EventState::destroy_event(void *arg) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto it = events_.find(args->event_id);
   if (it != events_.end()) {
-    for (auto *waiter : it->second.waiters)
+    for (auto *waiter : it->second.waiters) {
       waiter->cv->notify_one();
+    }
     events_.erase(it);
   }
-  write_event_slot(page_, page_size_, args->event_id, KFD_SIGNAL_EVENT_LIMIT);
+  write_event_slot(page_, page_size_, args->event_id, kUnsignaledEventSlot);
   return 0;
 }
 
@@ -266,13 +293,9 @@ int EventState::set_event(void *arg) {
                        " events_.size()=", events_.size());
     return -EINVAL;
   }
-  it->second.signaled = !it->second.auto_reset || !has_signal_waiters(it->second);
-  if (!(++it->second.event_age))
-    it->second.event_age = 2;
-  write_event_slot(page_, page_size_, args->event_id, it->second.event_age);
+  signal_event(it->second);
   util::Logger::cp("SET_EVENT: event_id=", args->event_id, " age=", it->second.event_age,
                    " waiters=", it->second.waiters.size());
-  activate_waiters(it->second);
   return 0;
 }
 
@@ -282,10 +305,10 @@ int EventState::reset_event(void *arg) {
   auto *args = static_cast<kfd_ioctl_reset_event_args *>(arg);
   std::lock_guard<std::mutex> lock(mutex_);
   auto it = events_.find(args->event_id);
-  if (it == events_.end())
+  if (it == events_.end()) {
     return -EINVAL;
+  }
   it->second.signaled = false;
-  write_event_slot(page_, page_size_, args->event_id, KFD_SIGNAL_EVENT_LIMIT);
   return 0;
 }
 
@@ -312,9 +335,10 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
   util::Logger::cp([&](auto &os) {
     os << "WAIT_EVENTS: pid=" << process_id << " num=" << args->num_events
        << " timeout=" << args->timeout << " wait_all=" << wait_all;
-    for (uint32_t i = 0; i < args->num_events && i < 4; ++i)
+    for (uint32_t i = 0; i < args->num_events && i < 4; ++i) {
       os << " ev[" << i << "]=" << ev_data[i].event_id
          << "(age=" << ev_data[i].signal_event_data.last_event_age << ")";
+    }
   });
 
   auto satisfied = [](const GpuEvent &ev, const kfd_event_data &ed) -> bool {
@@ -328,8 +352,9 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
   std::unique_lock<std::mutex> lock(mutex_);
 
   // A cancelled/closing call must not consume pending auto-reset signals.
-  if (closing_)
+  if (closing_) {
     return -EBADF;
+  }
   if (wait_cancelled_) {
     args->wait_result = KFD_IOC_WAIT_RESULT_TIMEOUT;
     return 0;
@@ -337,8 +362,9 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
 
   for (uint32_t i = 0; i < args->num_events; ++i) {
     auto it = events_.find(ev_data[i].event_id);
-    if (it == events_.end())
+    if (it == events_.end()) {
       continue;
+    }
     auto &ev = it->second;
     const bool activated = satisfied(ev, ev_data[i]);
     waiters[i] = {&my_cv, activated, !activated,
@@ -346,8 +372,9 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
                       ev_data[i].signal_event_data.last_event_age != 0};
     // Consume an already-pending auto-reset signal when this waiter takes it,
     // so a later legacy wait cannot steal it while a wait-all is still parked.
-    if (ev.auto_reset)
+    if (ev.auto_reset) {
       ev.signaled = false;
+    }
     // Even an initially satisfied entry must wake if its event is destroyed
     // while a wait-all call is still blocked on a different event.
     ev.waiters.push_back(&waiters[i]);
@@ -356,24 +383,28 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
   auto unregister_waiters = [&]() {
     for (uint32_t i = 0; i < args->num_events; ++i) {
       auto it = events_.find(ev_data[i].event_id);
-      if (it != events_.end())
+      if (it != events_.end()) {
         std::erase(it->second.waiters, &waiters[i]);
+      }
     }
   };
 
   auto is_ready = [&]() -> bool {
-    if (closing_ || wait_cancelled_)
+    if (closing_ || wait_cancelled_) {
       return true;
+    }
     bool all_satisfied = true;
     bool any_satisfied = false;
     for (uint32_t i = 0; i < args->num_events; ++i) {
       auto it = events_.find(ev_data[i].event_id);
-      if (it == events_.end())
+      if (it == events_.end()) {
         return true;
-      if (waiters[i].activated)
+      }
+      if (waiters[i].activated) {
         any_satisfied = true;
-      else
+      } else {
         all_satisfied = false;
+      }
     }
     return wait_all ? all_satisfied : any_satisfied;
   };
@@ -389,8 +420,9 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
 
   unregister_waiters();
 
-  if (closing_)
+  if (closing_) {
     return -EBADF;
+  }
 
   // Teardown released us early (begin_wait_cancel). Report a benign timeout rather
   // than -EBADF so the caller unwinds through the re-poll path it already has for a
@@ -416,22 +448,25 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
     all_ready &= waiters[i].activated;
   }
 
-  if (any_destroyed)
+  if (any_destroyed) {
     args->wait_result = KFD_IOC_WAIT_RESULT_FAIL;
-  else if (wait_all ? all_ready : any_ready)
+  } else if (wait_all ? all_ready : any_ready) {
     args->wait_result = KFD_IOC_WAIT_RESULT_COMPLETE;
-  else
+  } else {
     args->wait_result = KFD_IOC_WAIT_RESULT_TIMEOUT;
+  }
 
   // KFD copies event data only on completion. Advancing ages on a partial
   // wait-all timeout would make a retry forget signals it already observed.
   if (args->wait_result == KFD_IOC_WAIT_RESULT_COMPLETE) {
     for (uint32_t i = 0; i < args->num_events; ++i) {
-      if (!waiters[i].activated)
+      if (!waiters[i].activated) {
         continue;
+      }
       auto &ev = events_.find(ev_data[i].event_id)->second;
-      if (waiters[i].event_age_enabled)
+      if (waiters[i].event_age_enabled) {
         ev_data[i].signal_event_data.last_event_age = ev.event_age;
+      }
       if (ev.event_type == KFD_IOC_EVENT_MEMORY) {
         // The union member the runtime reads for this event type. Report the
         // address that faulted so the failure names its own cause.
@@ -442,8 +477,6 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
         exception.failure.NotPresent = ev.fault.not_present ? 1u : 0u;
         exception.failure.ReadOnly = ev.fault.read_only ? 1u : 0u;
       }
-      if (ev.auto_reset && !ev.signaled && ev.event_type == KFD_IOC_EVENT_SIGNAL)
-        write_event_slot(page_, page_size_, ev.event_id, KFD_SIGNAL_EVENT_LIMIT);
     }
   }
 
@@ -486,8 +519,9 @@ int SimulatedKfd::create_event_ioctl(KfdProcess &proc, void *arg) {
     uint64_t raw = static_cast<uint64_t>(args->event_page_offset);
     std::lock_guard<std::mutex> alock(proc.alloc_mutex_);
     auto it = proc.allocations_.find(raw >> 12);
-    if (it == proc.allocations_.end() || !it->second.host_ptr)
+    if (it == proc.allocations_.end() || !it->second.host_ptr) {
       it = proc.allocations_.find(raw);
+    }
     if (it != proc.allocations_.end() && it->second.host_ptr) {
       util::Logger::vm("CREATE_EVENT: adopted event page handle=", it->first, " ptr=0x", std::hex,
                        reinterpret_cast<uintptr_t>(it->second.host_ptr), " size=", std::dec,

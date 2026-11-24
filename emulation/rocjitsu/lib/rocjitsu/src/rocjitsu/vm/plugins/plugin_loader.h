@@ -80,7 +80,7 @@ public:
   /// cannot be added. An empty input string intentionally produces an empty group.
   /// The failure reason is sent to @p emit_error; omitting the emitter discards
   /// the message because FailureOr itself carries no diagnostic text.
-  /// Allocation, library, and foreign plugin exceptions still propagate to the caller.
+  /// Plugin accessors, factories, callbacks and destructors must not throw.
   static util::FailureOr<std::shared_ptr<ExecutionPluginGroup>>
   configure_plugin_group(const std::string &config_json, const std::string &plugin_dir = {},
                          util::DiagnosticEmitter emit_error = {});

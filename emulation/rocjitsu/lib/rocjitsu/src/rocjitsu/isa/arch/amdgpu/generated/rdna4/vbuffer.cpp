@@ -15,10 +15,12 @@ namespace rdna4 {
 
 namespace {
 uint32_t vbuffer_vaddr_bits(const VbufferMachineInst *inst) {
-  if (inst->idxen && inst->offen)
+  if (inst->idxen && inst->offen) {
     return 64;
-  if (inst->idxen || inst->offen)
+  }
+  if (inst->idxen || inst->offen) {
     return 32;
+  }
   return 0;
 }
 } // namespace
@@ -40,10 +42,16 @@ BufferLoadFormatXVbuffer::BufferLoadFormatXVbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_FORMAT_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -51,8 +59,9 @@ DecodeResult decodeBufferLoadFormatXVbuffer(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_format_x", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadFormatXVbuffer>(opcode);
 }
 } // namespace detail
@@ -74,10 +83,16 @@ BufferLoadFormatXyVbuffer::BufferLoadFormatXyVbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_FORMAT_XY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -85,8 +100,9 @@ DecodeResult decodeBufferLoadFormatXyVbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_format_xy", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadFormatXyVbuffer>(opcode);
 }
 } // namespace detail
@@ -108,10 +124,16 @@ BufferLoadFormatXyzVbuffer::BufferLoadFormatXyzVbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_FORMAT_XYZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -119,8 +141,9 @@ DecodeResult decodeBufferLoadFormatXyzVbuffer(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_format_xyz", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadFormatXyzVbuffer>(opcode);
 }
 } // namespace detail
@@ -142,10 +165,16 @@ BufferLoadFormatXyzwVbuffer::BufferLoadFormatXyzwVbuffer(const MachineInst *inst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_FORMAT_XYZW);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -153,8 +182,9 @@ DecodeResult decodeBufferLoadFormatXyzwVbuffer(const MachineInst *opcode,
                                                const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_format_xyzw", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadFormatXyzwVbuffer>(opcode);
 }
 } // namespace detail
@@ -177,9 +207,12 @@ BufferStoreFormatXVbuffer::BufferStoreFormatXVbuffer(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_FORMAT_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -187,8 +220,9 @@ DecodeResult decodeBufferStoreFormatXVbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_store_format_x", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreFormatXVbuffer>(opcode);
 }
 } // namespace detail
@@ -211,9 +245,12 @@ BufferStoreFormatXyVbuffer::BufferStoreFormatXyVbuffer(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_FORMAT_XY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -221,8 +258,9 @@ DecodeResult decodeBufferStoreFormatXyVbuffer(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_store_format_xy", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreFormatXyVbuffer>(opcode);
 }
 } // namespace detail
@@ -245,9 +283,12 @@ BufferStoreFormatXyzVbuffer::BufferStoreFormatXyzVbuffer(const MachineInst *inst
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_FORMAT_XYZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -255,8 +296,9 @@ DecodeResult decodeBufferStoreFormatXyzVbuffer(const MachineInst *opcode,
                                                const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_store_format_xyz", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreFormatXyzVbuffer>(opcode);
 }
 } // namespace detail
@@ -279,9 +321,12 @@ BufferStoreFormatXyzwVbuffer::BufferStoreFormatXyzwVbuffer(const MachineInst *in
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_FORMAT_XYZW);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -290,8 +335,9 @@ DecodeResult decodeBufferStoreFormatXyzwVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_store_format_xyzw",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreFormatXyzwVbuffer>(opcode);
 }
 } // namespace detail
@@ -313,10 +359,17 @@ BufferLoadD16FormatXVbuffer::BufferLoadD16FormatXVbuffer(const MachineInst *inst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_D16_FORMAT_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -325,16 +378,18 @@ DecodeResult decodeBufferLoadD16FormatXVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_load_d16_format_x",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadD16FormatXVbuffer>(opcode);
 }
 } // namespace detail
 
 void BufferLoadD16FormatXVbuffer::implicit_uses(RegisterSet &uses) const {
   Vbuffer::implicit_uses(uses);
-  if (auto r = vdata.to_register_ref())
+  if (auto r = vdata.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 BufferLoadD16FormatXyVbuffer::BufferLoadD16FormatXyVbuffer(const MachineInst *inst)
@@ -354,10 +409,17 @@ BufferLoadD16FormatXyVbuffer::BufferLoadD16FormatXyVbuffer(const MachineInst *in
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_D16_FORMAT_XY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -366,8 +428,9 @@ DecodeResult decodeBufferLoadD16FormatXyVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_load_d16_format_xy",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadD16FormatXyVbuffer>(opcode);
 }
 } // namespace detail
@@ -389,10 +452,17 @@ BufferLoadD16FormatXyzVbuffer::BufferLoadD16FormatXyzVbuffer(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_D16_FORMAT_XYZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -401,16 +471,18 @@ DecodeResult decodeBufferLoadD16FormatXyzVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_load_d16_format_xyz",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadD16FormatXyzVbuffer>(opcode);
 }
 } // namespace detail
 
 void BufferLoadD16FormatXyzVbuffer::implicit_uses(RegisterSet &uses) const {
   Vbuffer::implicit_uses(uses);
-  if (auto r = vdata.to_register_ref())
+  if (auto r = vdata.to_register_ref()) {
     uses.expand(RegisterRef{r->cls, static_cast<uint16_t>(r->index + 1), 1});
+  }
 }
 
 BufferLoadD16FormatXyzwVbuffer::BufferLoadD16FormatXyzwVbuffer(const MachineInst *inst)
@@ -430,10 +502,17 @@ BufferLoadD16FormatXyzwVbuffer::BufferLoadD16FormatXyzwVbuffer(const MachineInst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_D16_FORMAT_XYZW);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -442,8 +521,9 @@ DecodeResult decodeBufferLoadD16FormatXyzwVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_load_d16_format_xyzw",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadD16FormatXyzwVbuffer>(opcode);
 }
 } // namespace detail
@@ -465,10 +545,14 @@ BufferStoreD16FormatXVbuffer::BufferStoreD16FormatXVbuffer(const MachineInst *in
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   vdata.set_register_byte_mask(0x3);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_D16_FORMAT_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -477,8 +561,9 @@ DecodeResult decodeBufferStoreD16FormatXVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_store_d16_format_x",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreD16FormatXVbuffer>(opcode);
 }
 } // namespace detail
@@ -500,9 +585,13 @@ BufferStoreD16FormatXyVbuffer::BufferStoreD16FormatXyVbuffer(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_D16_FORMAT_XY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -511,8 +600,9 @@ DecodeResult decodeBufferStoreD16FormatXyVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_store_d16_format_xy",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreD16FormatXyVbuffer>(opcode);
 }
 } // namespace detail
@@ -534,9 +624,13 @@ BufferStoreD16FormatXyzVbuffer::BufferStoreD16FormatXyzVbuffer(const MachineInst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_D16_FORMAT_XYZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -545,8 +639,9 @@ DecodeResult decodeBufferStoreD16FormatXyzVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_store_d16_format_xyz",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreD16FormatXyzVbuffer>(opcode);
 }
 } // namespace detail
@@ -568,9 +663,13 @@ BufferStoreD16FormatXyzwVbuffer::BufferStoreD16FormatXyzwVbuffer(const MachineIn
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_D16_FORMAT_XYZW);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -579,8 +678,9 @@ DecodeResult decodeBufferStoreD16FormatXyzwVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_store_d16_format_xyzw",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreD16FormatXyzwVbuffer>(opcode);
 }
 } // namespace detail
@@ -602,12 +702,19 @@ BufferLoadU8Vbuffer::BufferLoadU8Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (!inst_.tfe)
+  flags_ |= CONDITIONAL_MEMORY_LANES;
+  if (!inst_.tfe) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -615,8 +722,9 @@ DecodeResult decodeBufferLoadU8Vbuffer(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_u8", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadU8Vbuffer>(opcode);
 }
 } // namespace detail
@@ -638,12 +746,19 @@ BufferLoadI8Vbuffer::BufferLoadI8Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (!inst_.tfe)
+  flags_ |= CONDITIONAL_MEMORY_LANES;
+  if (!inst_.tfe) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -651,8 +766,9 @@ DecodeResult decodeBufferLoadI8Vbuffer(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_i8", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadI8Vbuffer>(opcode);
 }
 } // namespace detail
@@ -674,12 +790,19 @@ BufferLoadU16Vbuffer::BufferLoadU16Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (!inst_.tfe)
+  flags_ |= CONDITIONAL_MEMORY_LANES;
+  if (!inst_.tfe) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_U16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -687,8 +810,9 @@ DecodeResult decodeBufferLoadU16Vbuffer(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_u16", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadU16Vbuffer>(opcode);
 }
 } // namespace detail
@@ -710,12 +834,19 @@ BufferLoadI16Vbuffer::BufferLoadI16Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (!inst_.tfe)
+  flags_ |= CONDITIONAL_MEMORY_LANES;
+  if (!inst_.tfe) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_I16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -723,8 +854,9 @@ DecodeResult decodeBufferLoadI16Vbuffer(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_i16", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadI16Vbuffer>(opcode);
 }
 } // namespace detail
@@ -746,12 +878,19 @@ BufferLoadB32Vbuffer::BufferLoadB32Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (!inst_.tfe)
+  flags_ |= CONDITIONAL_MEMORY_LANES;
+  if (!inst_.tfe) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -759,8 +898,9 @@ DecodeResult decodeBufferLoadB32Vbuffer(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_b32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadB32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -782,12 +922,19 @@ BufferLoadB64Vbuffer::BufferLoadB64Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (!inst_.tfe)
+  flags_ |= CONDITIONAL_MEMORY_LANES;
+  if (!inst_.tfe) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -795,8 +942,9 @@ DecodeResult decodeBufferLoadB64Vbuffer(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_b64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadB64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -818,12 +966,19 @@ BufferLoadB96Vbuffer::BufferLoadB96Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (!inst_.tfe)
+  flags_ |= CONDITIONAL_MEMORY_LANES;
+  if (!inst_.tfe) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -831,8 +986,9 @@ DecodeResult decodeBufferLoadB96Vbuffer(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_b96", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadB96Vbuffer>(opcode);
 }
 } // namespace detail
@@ -854,12 +1010,19 @@ BufferLoadB128Vbuffer::BufferLoadB128Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (!inst_.tfe)
+  flags_ |= CONDITIONAL_MEMORY_LANES;
+  if (!inst_.tfe) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -867,8 +1030,9 @@ DecodeResult decodeBufferLoadB128Vbuffer(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_b128", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadB128Vbuffer>(opcode);
 }
 } // namespace detail
@@ -891,10 +1055,13 @@ BufferStoreB8Vbuffer::BufferStoreB8Vbuffer(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   vdata.set_register_byte_mask(0x1);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -902,8 +1069,9 @@ DecodeResult decodeBufferStoreB8Vbuffer(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_store_b8", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreB8Vbuffer>(opcode);
 }
 } // namespace detail
@@ -926,10 +1094,13 @@ BufferStoreB16Vbuffer::BufferStoreB16Vbuffer(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   vdata.set_register_byte_mask(0x3);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -937,8 +1108,9 @@ DecodeResult decodeBufferStoreB16Vbuffer(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_store_b16", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreB16Vbuffer>(opcode);
 }
 } // namespace detail
@@ -961,9 +1133,12 @@ BufferStoreB32Vbuffer::BufferStoreB32Vbuffer(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -971,8 +1146,9 @@ DecodeResult decodeBufferStoreB32Vbuffer(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_store_b32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreB32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -995,9 +1171,12 @@ BufferStoreB64Vbuffer::BufferStoreB64Vbuffer(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -1005,8 +1184,9 @@ DecodeResult decodeBufferStoreB64Vbuffer(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_store_b64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreB64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1029,9 +1209,12 @@ BufferStoreB96Vbuffer::BufferStoreB96Vbuffer(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -1039,8 +1222,9 @@ DecodeResult decodeBufferStoreB96Vbuffer(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_store_b96", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreB96Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1063,9 +1247,12 @@ BufferStoreB128Vbuffer::BufferStoreB128Vbuffer(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -1073,8 +1260,9 @@ DecodeResult decodeBufferStoreB128Vbuffer(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_store_b128", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreB128Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1096,10 +1284,17 @@ BufferLoadD16U8Vbuffer::BufferLoadD16U8Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_D16_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -1107,16 +1302,18 @@ DecodeResult decodeBufferLoadD16U8Vbuffer(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_d16_u8", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadD16U8Vbuffer>(opcode);
 }
 } // namespace detail
 
 void BufferLoadD16U8Vbuffer::implicit_uses(RegisterSet &uses) const {
   Vbuffer::implicit_uses(uses);
-  if (auto r = vdata.to_register_ref())
+  if (auto r = vdata.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 BufferLoadD16I8Vbuffer::BufferLoadD16I8Vbuffer(const MachineInst *inst)
@@ -1136,10 +1333,17 @@ BufferLoadD16I8Vbuffer::BufferLoadD16I8Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_D16_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -1147,16 +1351,18 @@ DecodeResult decodeBufferLoadD16I8Vbuffer(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_d16_i8", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadD16I8Vbuffer>(opcode);
 }
 } // namespace detail
 
 void BufferLoadD16I8Vbuffer::implicit_uses(RegisterSet &uses) const {
   Vbuffer::implicit_uses(uses);
-  if (auto r = vdata.to_register_ref())
+  if (auto r = vdata.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 BufferLoadD16B16Vbuffer::BufferLoadD16B16Vbuffer(const MachineInst *inst)
@@ -1176,10 +1382,17 @@ BufferLoadD16B16Vbuffer::BufferLoadD16B16Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_D16_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -1187,16 +1400,18 @@ DecodeResult decodeBufferLoadD16B16Vbuffer(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_d16_b16", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadD16B16Vbuffer>(opcode);
 }
 } // namespace detail
 
 void BufferLoadD16B16Vbuffer::implicit_uses(RegisterSet &uses) const {
   Vbuffer::implicit_uses(uses);
-  if (auto r = vdata.to_register_ref())
+  if (auto r = vdata.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 BufferLoadD16HiU8Vbuffer::BufferLoadD16HiU8Vbuffer(const MachineInst *inst)
@@ -1216,10 +1431,17 @@ BufferLoadD16HiU8Vbuffer::BufferLoadD16HiU8Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_D16_HI_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -1227,16 +1449,18 @@ DecodeResult decodeBufferLoadD16HiU8Vbuffer(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_d16_hi_u8", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadD16HiU8Vbuffer>(opcode);
 }
 } // namespace detail
 
 void BufferLoadD16HiU8Vbuffer::implicit_uses(RegisterSet &uses) const {
   Vbuffer::implicit_uses(uses);
-  if (auto r = vdata.to_register_ref())
+  if (auto r = vdata.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 BufferLoadD16HiI8Vbuffer::BufferLoadD16HiI8Vbuffer(const MachineInst *inst)
@@ -1256,10 +1480,17 @@ BufferLoadD16HiI8Vbuffer::BufferLoadD16HiI8Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_D16_HI_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -1267,16 +1498,18 @@ DecodeResult decodeBufferLoadD16HiI8Vbuffer(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_d16_hi_i8", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadD16HiI8Vbuffer>(opcode);
 }
 } // namespace detail
 
 void BufferLoadD16HiI8Vbuffer::implicit_uses(RegisterSet &uses) const {
   Vbuffer::implicit_uses(uses);
-  if (auto r = vdata.to_register_ref())
+  if (auto r = vdata.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 BufferLoadD16HiB16Vbuffer::BufferLoadD16HiB16Vbuffer(const MachineInst *inst)
@@ -1296,10 +1529,17 @@ BufferLoadD16HiB16Vbuffer::BufferLoadD16HiB16Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_D16_HI_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -1307,16 +1547,18 @@ DecodeResult decodeBufferLoadD16HiB16Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_d16_hi_b16", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadD16HiB16Vbuffer>(opcode);
 }
 } // namespace detail
 
 void BufferLoadD16HiB16Vbuffer::implicit_uses(RegisterSet &uses) const {
   Vbuffer::implicit_uses(uses);
-  if (auto r = vdata.to_register_ref())
+  if (auto r = vdata.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 BufferStoreD16HiB8Vbuffer::BufferStoreD16HiB8Vbuffer(const MachineInst *inst)
@@ -1337,10 +1579,14 @@ BufferStoreD16HiB8Vbuffer::BufferStoreD16HiB8Vbuffer(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   vdata.set_register_byte_mask(0x4);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_D16_HI_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -1348,8 +1594,9 @@ DecodeResult decodeBufferStoreD16HiB8Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_store_d16_hi_b8", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreD16HiB8Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1372,10 +1619,14 @@ BufferStoreD16HiB16Vbuffer::BufferStoreD16HiB16Vbuffer(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   vdata.set_register_byte_mask(0xc);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_D16_HI_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -1383,8 +1634,9 @@ DecodeResult decodeBufferStoreD16HiB16Vbuffer(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_store_d16_hi_b16", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreD16HiB16Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1406,10 +1658,17 @@ BufferLoadD16HiFormatXVbuffer::BufferLoadD16HiFormatXVbuffer(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_D16_HI_FORMAT_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -1418,16 +1677,18 @@ DecodeResult decodeBufferLoadD16HiFormatXVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_load_d16_hi_format_x",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadD16HiFormatXVbuffer>(opcode);
 }
 } // namespace detail
 
 void BufferLoadD16HiFormatXVbuffer::implicit_uses(RegisterSet &uses) const {
   Vbuffer::implicit_uses(uses);
-  if (auto r = vdata.to_register_ref())
+  if (auto r = vdata.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 BufferStoreD16HiFormatXVbuffer::BufferStoreD16HiFormatXVbuffer(const MachineInst *inst)
@@ -1447,10 +1708,14 @@ BufferStoreD16HiFormatXVbuffer::BufferStoreD16HiFormatXVbuffer(const MachineInst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   vdata.set_register_byte_mask(0xc);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_D16_HI_FORMAT_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -1459,8 +1724,9 @@ DecodeResult decodeBufferStoreD16HiFormatXVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_store_d16_hi_format_x",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreD16HiFormatXVbuffer>(opcode);
 }
 } // namespace detail
@@ -1482,17 +1748,24 @@ BufferAtomicSwapB32Vbuffer::BufferAtomicSwapB32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_SWAP_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1500,8 +1773,9 @@ DecodeResult decodeBufferAtomicSwapB32Vbuffer(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_swap_b32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicSwapB32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1524,17 +1798,24 @@ BufferAtomicCmpswapB32Vbuffer::BufferAtomicCmpswapB32Vbuffer(const MachineInst *
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_CMPSWAP_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1543,8 +1824,9 @@ DecodeResult decodeBufferAtomicCmpswapB32Vbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_atomic_cmpswap_b32",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicCmpswapB32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1566,17 +1848,24 @@ BufferAtomicAddU32Vbuffer::BufferAtomicAddU32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_ADD_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1584,8 +1873,9 @@ DecodeResult decodeBufferAtomicAddU32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_add_u32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicAddU32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1607,17 +1897,24 @@ BufferAtomicSubU32Vbuffer::BufferAtomicSubU32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_SUB_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1625,8 +1922,9 @@ DecodeResult decodeBufferAtomicSubU32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_sub_u32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicSubU32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1648,17 +1946,24 @@ BufferAtomicSubClampU32Vbuffer::BufferAtomicSubClampU32Vbuffer(const MachineInst
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_SUB_CLAMP_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1667,8 +1972,9 @@ DecodeResult decodeBufferAtomicSubClampU32Vbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_atomic_sub_clamp_u32",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicSubClampU32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1690,17 +1996,24 @@ BufferAtomicMinI32Vbuffer::BufferAtomicMinI32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MIN_I32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1708,8 +2021,9 @@ DecodeResult decodeBufferAtomicMinI32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_min_i32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMinI32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1731,17 +2045,24 @@ BufferAtomicMinU32Vbuffer::BufferAtomicMinU32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MIN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1749,8 +2070,9 @@ DecodeResult decodeBufferAtomicMinU32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_min_u32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMinU32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1772,17 +2094,24 @@ BufferAtomicMaxI32Vbuffer::BufferAtomicMaxI32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MAX_I32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1790,8 +2119,9 @@ DecodeResult decodeBufferAtomicMaxI32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_max_i32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMaxI32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1813,17 +2143,24 @@ BufferAtomicMaxU32Vbuffer::BufferAtomicMaxU32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MAX_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1831,8 +2168,9 @@ DecodeResult decodeBufferAtomicMaxU32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_max_u32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMaxU32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1854,17 +2192,24 @@ BufferAtomicAndB32Vbuffer::BufferAtomicAndB32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_AND_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1872,8 +2217,9 @@ DecodeResult decodeBufferAtomicAndB32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_and_b32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicAndB32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1895,17 +2241,24 @@ BufferAtomicOrB32Vbuffer::BufferAtomicOrB32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_OR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1913,8 +2266,9 @@ DecodeResult decodeBufferAtomicOrB32Vbuffer(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_or_b32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicOrB32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1936,17 +2290,24 @@ BufferAtomicXorB32Vbuffer::BufferAtomicXorB32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_XOR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1954,8 +2315,9 @@ DecodeResult decodeBufferAtomicXorB32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_xor_b32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicXorB32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1977,17 +2339,24 @@ BufferAtomicIncU32Vbuffer::BufferAtomicIncU32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_INC_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1995,8 +2364,9 @@ DecodeResult decodeBufferAtomicIncU32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_inc_u32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicIncU32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2018,17 +2388,24 @@ BufferAtomicDecU32Vbuffer::BufferAtomicDecU32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_DEC_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2036,8 +2413,9 @@ DecodeResult decodeBufferAtomicDecU32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_dec_u32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicDecU32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2059,17 +2437,24 @@ BufferAtomicSwapB64Vbuffer::BufferAtomicSwapB64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_SWAP_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2077,8 +2462,9 @@ DecodeResult decodeBufferAtomicSwapB64Vbuffer(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_swap_b64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicSwapB64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2101,17 +2487,24 @@ BufferAtomicCmpswapB64Vbuffer::BufferAtomicCmpswapB64Vbuffer(const MachineInst *
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_CMPSWAP_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2120,8 +2513,9 @@ DecodeResult decodeBufferAtomicCmpswapB64Vbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_atomic_cmpswap_b64",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicCmpswapB64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2143,17 +2537,24 @@ BufferAtomicAddU64Vbuffer::BufferAtomicAddU64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_ADD_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2161,8 +2562,9 @@ DecodeResult decodeBufferAtomicAddU64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_add_u64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicAddU64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2184,17 +2586,24 @@ BufferAtomicSubU64Vbuffer::BufferAtomicSubU64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_SUB_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2202,8 +2611,9 @@ DecodeResult decodeBufferAtomicSubU64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_sub_u64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicSubU64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2225,17 +2635,24 @@ BufferAtomicMinI64Vbuffer::BufferAtomicMinI64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MIN_I64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2243,8 +2660,9 @@ DecodeResult decodeBufferAtomicMinI64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_min_i64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMinI64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2266,17 +2684,24 @@ BufferAtomicMinU64Vbuffer::BufferAtomicMinU64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MIN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2284,8 +2709,9 @@ DecodeResult decodeBufferAtomicMinU64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_min_u64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMinU64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2307,17 +2733,24 @@ BufferAtomicMaxI64Vbuffer::BufferAtomicMaxI64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MAX_I64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2325,8 +2758,9 @@ DecodeResult decodeBufferAtomicMaxI64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_max_i64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMaxI64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2348,17 +2782,24 @@ BufferAtomicMaxU64Vbuffer::BufferAtomicMaxU64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MAX_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2366,8 +2807,9 @@ DecodeResult decodeBufferAtomicMaxU64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_max_u64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMaxU64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2389,17 +2831,24 @@ BufferAtomicAndB64Vbuffer::BufferAtomicAndB64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_AND_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2407,8 +2856,9 @@ DecodeResult decodeBufferAtomicAndB64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_and_b64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicAndB64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2430,17 +2880,24 @@ BufferAtomicOrB64Vbuffer::BufferAtomicOrB64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_OR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2448,8 +2905,9 @@ DecodeResult decodeBufferAtomicOrB64Vbuffer(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_or_b64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicOrB64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2471,17 +2929,24 @@ BufferAtomicXorB64Vbuffer::BufferAtomicXorB64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_XOR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2489,8 +2954,9 @@ DecodeResult decodeBufferAtomicXorB64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_xor_b64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicXorB64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2512,17 +2978,24 @@ BufferAtomicIncU64Vbuffer::BufferAtomicIncU64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_INC_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2530,8 +3003,9 @@ DecodeResult decodeBufferAtomicIncU64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_inc_u64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicIncU64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2553,17 +3027,24 @@ BufferAtomicDecU64Vbuffer::BufferAtomicDecU64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_DEC_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2571,8 +3052,9 @@ DecodeResult decodeBufferAtomicDecU64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_dec_u64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicDecU64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2594,17 +3076,24 @@ BufferAtomicCondSubU32Vbuffer::BufferAtomicCondSubU32Vbuffer(const MachineInst *
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_COND_SUB_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2613,8 +3102,9 @@ DecodeResult decodeBufferAtomicCondSubU32Vbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_atomic_cond_sub_u32",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicCondSubU32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2636,17 +3126,24 @@ BufferAtomicMinNumF32Vbuffer::BufferAtomicMinNumF32Vbuffer(const MachineInst *in
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MIN_NUM_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2655,8 +3152,9 @@ DecodeResult decodeBufferAtomicMinNumF32Vbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_atomic_min_num_f32",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMinNumF32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2678,17 +3176,24 @@ BufferAtomicMaxNumF32Vbuffer::BufferAtomicMaxNumF32Vbuffer(const MachineInst *in
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MAX_NUM_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2697,8 +3202,9 @@ DecodeResult decodeBufferAtomicMaxNumF32Vbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_atomic_max_num_f32",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMaxNumF32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2720,17 +3226,24 @@ BufferAtomicAddF32Vbuffer::BufferAtomicAddF32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_ADD_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2738,8 +3251,9 @@ DecodeResult decodeBufferAtomicAddF32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_add_f32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicAddF32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2761,17 +3275,24 @@ BufferAtomicPkAddF16Vbuffer::BufferAtomicPkAddF16Vbuffer(const MachineInst *inst
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_PK_ADD_F16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2780,8 +3301,9 @@ DecodeResult decodeBufferAtomicPkAddF16Vbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_atomic_pk_add_f16",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicPkAddF16Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2803,17 +3325,24 @@ BufferAtomicPkAddBf16Vbuffer::BufferAtomicPkAddBf16Vbuffer(const MachineInst *in
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_PK_ADD_BF16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2822,8 +3351,9 @@ DecodeResult decodeBufferAtomicPkAddBf16Vbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_atomic_pk_add_bf16",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicPkAddBf16Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2845,10 +3375,16 @@ TbufferLoadFormatXVbuffer::TbufferLoadFormatXVbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_LOAD_FORMAT_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -2856,8 +3392,9 @@ DecodeResult decodeTbufferLoadFormatXVbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "tbuffer_load_format_x", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferLoadFormatXVbuffer>(opcode);
 }
 } // namespace detail
@@ -2879,10 +3416,16 @@ TbufferLoadFormatXyVbuffer::TbufferLoadFormatXyVbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_LOAD_FORMAT_XY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -2890,8 +3433,9 @@ DecodeResult decodeTbufferLoadFormatXyVbuffer(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "tbuffer_load_format_xy", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferLoadFormatXyVbuffer>(opcode);
 }
 } // namespace detail
@@ -2913,10 +3457,16 @@ TbufferLoadFormatXyzVbuffer::TbufferLoadFormatXyzVbuffer(const MachineInst *inst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_LOAD_FORMAT_XYZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -2924,8 +3474,9 @@ DecodeResult decodeTbufferLoadFormatXyzVbuffer(const MachineInst *opcode,
                                                const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "tbuffer_load_format_xyz", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferLoadFormatXyzVbuffer>(opcode);
 }
 } // namespace detail
@@ -2947,10 +3498,16 @@ TbufferLoadFormatXyzwVbuffer::TbufferLoadFormatXyzwVbuffer(const MachineInst *in
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_LOAD_FORMAT_XYZW);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -2959,8 +3516,9 @@ DecodeResult decodeTbufferLoadFormatXyzwVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("tbuffer_load_format_xyzw",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferLoadFormatXyzwVbuffer>(opcode);
 }
 } // namespace detail
@@ -2983,9 +3541,12 @@ TbufferStoreFormatXVbuffer::TbufferStoreFormatXVbuffer(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_STORE_FORMAT_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -2993,8 +3554,9 @@ DecodeResult decodeTbufferStoreFormatXVbuffer(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "tbuffer_store_format_x", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferStoreFormatXVbuffer>(opcode);
 }
 } // namespace detail
@@ -3017,9 +3579,12 @@ TbufferStoreFormatXyVbuffer::TbufferStoreFormatXyVbuffer(const MachineInst *inst
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_STORE_FORMAT_XY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -3027,8 +3592,9 @@ DecodeResult decodeTbufferStoreFormatXyVbuffer(const MachineInst *opcode,
                                                const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "tbuffer_store_format_xy", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferStoreFormatXyVbuffer>(opcode);
 }
 } // namespace detail
@@ -3051,9 +3617,12 @@ TbufferStoreFormatXyzVbuffer::TbufferStoreFormatXyzVbuffer(const MachineInst *in
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_STORE_FORMAT_XYZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -3062,8 +3631,9 @@ DecodeResult decodeTbufferStoreFormatXyzVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("tbuffer_store_format_xyz",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferStoreFormatXyzVbuffer>(opcode);
 }
 } // namespace detail
@@ -3086,9 +3656,12 @@ TbufferStoreFormatXyzwVbuffer::TbufferStoreFormatXyzwVbuffer(const MachineInst *
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_STORE_FORMAT_XYZW);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -3097,8 +3670,9 @@ DecodeResult decodeTbufferStoreFormatXyzwVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("tbuffer_store_format_xyzw",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferStoreFormatXyzwVbuffer>(opcode);
 }
 } // namespace detail
@@ -3120,10 +3694,17 @@ TbufferLoadD16FormatXVbuffer::TbufferLoadD16FormatXVbuffer(const MachineInst *in
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_LOAD_D16_FORMAT_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3132,16 +3713,18 @@ DecodeResult decodeTbufferLoadD16FormatXVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("tbuffer_load_d16_format_x",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferLoadD16FormatXVbuffer>(opcode);
 }
 } // namespace detail
 
 void TbufferLoadD16FormatXVbuffer::implicit_uses(RegisterSet &uses) const {
   Vbuffer::implicit_uses(uses);
-  if (auto r = vdata.to_register_ref())
+  if (auto r = vdata.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 TbufferLoadD16FormatXyVbuffer::TbufferLoadD16FormatXyVbuffer(const MachineInst *inst)
@@ -3161,10 +3744,17 @@ TbufferLoadD16FormatXyVbuffer::TbufferLoadD16FormatXyVbuffer(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_LOAD_D16_FORMAT_XY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3173,8 +3763,9 @@ DecodeResult decodeTbufferLoadD16FormatXyVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("tbuffer_load_d16_format_xy",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferLoadD16FormatXyVbuffer>(opcode);
 }
 } // namespace detail
@@ -3196,10 +3787,17 @@ TbufferLoadD16FormatXyzVbuffer::TbufferLoadD16FormatXyzVbuffer(const MachineInst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_LOAD_D16_FORMAT_XYZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3208,16 +3806,18 @@ DecodeResult decodeTbufferLoadD16FormatXyzVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("tbuffer_load_d16_format_xyz",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferLoadD16FormatXyzVbuffer>(opcode);
 }
 } // namespace detail
 
 void TbufferLoadD16FormatXyzVbuffer::implicit_uses(RegisterSet &uses) const {
   Vbuffer::implicit_uses(uses);
-  if (auto r = vdata.to_register_ref())
+  if (auto r = vdata.to_register_ref()) {
     uses.expand(RegisterRef{r->cls, static_cast<uint16_t>(r->index + 1), 1});
+  }
 }
 
 TbufferLoadD16FormatXyzwVbuffer::TbufferLoadD16FormatXyzwVbuffer(const MachineInst *inst)
@@ -3237,10 +3837,17 @@ TbufferLoadD16FormatXyzwVbuffer::TbufferLoadD16FormatXyzwVbuffer(const MachineIn
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe) {
+    flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_LOAD_D16_FORMAT_XYZW);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3249,8 +3856,9 @@ DecodeResult decodeTbufferLoadD16FormatXyzwVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("tbuffer_load_d16_format_xyzw",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferLoadD16FormatXyzwVbuffer>(opcode);
 }
 } // namespace detail
@@ -3272,10 +3880,14 @@ TbufferStoreD16FormatXVbuffer::TbufferStoreD16FormatXVbuffer(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   vdata.set_register_byte_mask(0x3);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_STORE_D16_FORMAT_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3284,8 +3896,9 @@ DecodeResult decodeTbufferStoreD16FormatXVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("tbuffer_store_d16_format_x",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferStoreD16FormatXVbuffer>(opcode);
 }
 } // namespace detail
@@ -3307,9 +3920,13 @@ TbufferStoreD16FormatXyVbuffer::TbufferStoreD16FormatXyVbuffer(const MachineInst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_STORE_D16_FORMAT_XY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3318,8 +3935,9 @@ DecodeResult decodeTbufferStoreD16FormatXyVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("tbuffer_store_d16_format_xy",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferStoreD16FormatXyVbuffer>(opcode);
 }
 } // namespace detail
@@ -3341,9 +3959,13 @@ TbufferStoreD16FormatXyzVbuffer::TbufferStoreD16FormatXyzVbuffer(const MachineIn
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_STORE_D16_FORMAT_XYZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3352,8 +3974,9 @@ DecodeResult decodeTbufferStoreD16FormatXyzVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("tbuffer_store_d16_format_xyz",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferStoreD16FormatXyzVbuffer>(opcode);
 }
 } // namespace detail
@@ -3375,9 +3998,13 @@ TbufferStoreD16FormatXyzwVbuffer::TbufferStoreD16FormatXyzwVbuffer(const Machine
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_STORE_D16_FORMAT_XYZW);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3386,8 +4013,9 @@ DecodeResult decodeTbufferStoreD16FormatXyzwVbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("tbuffer_store_d16_format_xyzw",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferStoreD16FormatXyzwVbuffer>(opcode);
 }
 } // namespace detail

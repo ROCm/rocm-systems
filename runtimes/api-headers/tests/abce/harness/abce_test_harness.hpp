@@ -169,6 +169,10 @@ struct RingOptions {
   // adapter uses). The callback form is also the one ThreadSanitizer can follow,
   // because it lets the harness annotate the engine's ordering.
   bool use_queue_ops = false;
+  // Optional ring writer (abce_ring_config_t::write).
+  abce_ring_write_fn_t write = nullptr;
+  void* write_user_data = nullptr;
+  bool readback_before_doorbell = false;
 };
 
 class FakeRing {
@@ -197,6 +201,9 @@ class FakeRing {
     }
     config.min_submission_size = options.min_submission_size;
     config.align64 = options.align64;
+    config.write = options.write;
+    config.write_user_data = options.write_user_data;
+    config.readback_before_doorbell = options.readback_before_doorbell;
     abce_ring_initialize(&config, &FakeRing::OnDoorbell, this, &ring_);
   }
 

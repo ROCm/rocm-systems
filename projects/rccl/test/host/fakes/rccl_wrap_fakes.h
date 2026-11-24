@@ -116,6 +116,8 @@ extern int64_t g_rcclParamHierarchicalReduceScatter;
 extern int64_t g_rcclParamCeAllReduce;
 extern int64_t g_rcclParamCeReduceScatter;
 extern int64_t g_rcclParamCeArStagingBytes;
+// rcclCeArNonRegCap, which ncclCeInit and taskAppend call. Fails loud until a test installs it.
+extern std::function<size_t(const struct ncclComm*)> g_rcclCeArNonRegCap;
 
 // checkHsaEnvSetting's HSA_* scratch validation (rccl_wrap.cc). g_lastHsaScratchEnv records the
 // hsaScratchEnv argument, which is the only proof the check read the environment at all.

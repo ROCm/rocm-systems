@@ -1099,9 +1099,8 @@ TEST_F(MemManagerMicrotest, SuspendImpl_JobReportsSetDeviceFailure) {
   jobs_[0].destructor(jobs_[0].job);
 }
 
-// Suspend deletes a job ncclMgmtTaskEnqueue already destroyed on rejecting it (Resume doesn't).
-// Pins AICOMRCCL-3038; a fix flips this pin.
-TEST_F(MemManagerMicrotest, Impl_KnownBug_RejectedJobIsDeletedTwiceBySuspend) {
+// ncclMgmtTaskEnqueue destroys a job it rejects, so neither caller may delete it again (AICOMRCCL-3038).
+TEST_F(MemManagerMicrotest, Impl_RejectedJobIsDeletedOnlyByTheEnqueue) {
   g_rearch = 1;
   g_deleteWatchKeeps = true;
   ScopedHook enqueue(g_mgmtEnqueue, [](ncclAsyncJob* job, ncclResult_t (*)(ncclAsyncJob*), void (*destructor)(void*)) {
@@ -1111,7 +1110,7 @@ TEST_F(MemManagerMicrotest, Impl_KnownBug_RejectedJobIsDeletedTwiceBySuspend) {
   });
   g_deleteWatchHits = 0;
   EXPECT_EQ(ncclCommSuspend_impl(comm_.get(), NCCL_SUSPEND_MEM), ncclInvalidArgument);
-  EXPECT_EQ(g_deleteWatchHits, 2);
+  EXPECT_EQ(g_deleteWatchHits, 1);
   std::free(const_cast<void*>(g_deleteWatchPtr));
 
   mgr_->released = 1;

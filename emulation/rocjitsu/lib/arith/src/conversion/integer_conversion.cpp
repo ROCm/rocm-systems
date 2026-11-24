@@ -5,9 +5,10 @@
 // Owns public entry points and their validation/dispatch policy.
 
 #include "conversion/integer_conversion.h"
-#include "common/internal.h"
+#include "common/validation.h"
+#include "common/wave_alignment.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_conversion.h"
 
 #include <stdint.h>
 
@@ -42,15 +43,17 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+  [[maybe_unused]] const auto level = rocjitsu::arith::wave_cpu_level(
+      flags, !Unsigned || !Packed || rocjitsu::arith::aligned_for_512(a[0]));
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V4) {
     rocjitsu::arith::integer_conversion_x86_64_v4<Unsigned, Packed>(exec_mask, mode, d[0], a[0],
                                                                     Packed ? b[0] : nullptr);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V3) {
     rocjitsu::arith::integer_conversion_x86_64_v3<Unsigned, Packed>(exec_mask, mode, d[0], a[0],
                                                                     Packed ? b[0] : nullptr);
     return RJ_ARITH_SUCCESS;

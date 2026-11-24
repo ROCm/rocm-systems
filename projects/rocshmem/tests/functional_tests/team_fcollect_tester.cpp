@@ -51,6 +51,8 @@ TEAM_FCOLLECT_DEF_GEN(unsigned short, ushort)
 TEAM_FCOLLECT_DEF_GEN(unsigned int, uint)
 TEAM_FCOLLECT_DEF_GEN(unsigned long, ulong)
 TEAM_FCOLLECT_DEF_GEN(unsigned long long, ulonglong)
+TEAM_FCOLLECT_DEF_GEN(__half, half)
+TEAM_FCOLLECT_DEF_GEN(__hip_bfloat16, bfloat16)
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -66,9 +68,9 @@ __global__ void TeamFcollectTest(int loop, int skip, long long int *start_time,
 
   rocshmem_wg_team_create_ctx(teams[wg_id], ctx_type, &ctx);
 
-  // In no-TDM build, rocshmem_query_tdm_lds_bytes() returns 0.
+  // Without an LDS-staged build (USE_LDS_STAGE/USE_TDM) this returns 0.
   extern __shared__ uint8_t tdm_lds[];
-  rocshmem_set_tdm_lds(tdm_lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
   int n_pes = rocshmem_ctx_n_pes(ctx);
   source_buf += wg_id * num_elems;
@@ -118,6 +120,12 @@ TeamFcollectTester<T1>::TeamFcollectTester(TesterArguments args)
       source_buf[i] = static_cast<T1>('a' + my_pe);
     }
   }
+  else if constexpr (std::is_same<T1, __half>::value ||
+                     std::is_same<T1, __hip_bfloat16>::value) {
+    for (int i = 0; i < total_elems; ++i) {
+      source_buf[i] = static_cast<T1>(3.5f + my_pe);
+    }
+  }
   else if constexpr (std::is_floating_point<T1>::value) {
     for (int i = 0; i < total_elems; ++i) {
       source_buf[i] = static_cast<T1>(3.14 + my_pe);
@@ -163,7 +171,7 @@ void TeamFcollectTester<T1>::preLaunchKernel() {
 template <typename T1>
 void TeamFcollectTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
                                           int loop, size_t size) {
-  size_t shared_bytes = rocshmem_query_tdm_lds_bytes();
+  size_t shared_bytes = rocshmem_query_lds_stage_bytes();
 
   int num_elems = size / sizeof(T1);
 
@@ -210,6 +218,10 @@ void TeamFcollectTester<T1>::verifyResults(size_t size) {
               std::is_same<T1, unsigned char>::value) {
           expected = static_cast<T1>('a' + pe);
         }
+        else if constexpr (std::is_same<T1, __half>::value ||
+                           std::is_same<T1, __hip_bfloat16>::value) {
+          expected = static_cast<T1>(3.5f + pe);
+        }
         else if constexpr (std::is_floating_point<T1>::value) {
           expected = static_cast<T1>(3.14 + pe);
         }
@@ -218,8 +230,14 @@ void TeamFcollectTester<T1>::verifyResults(size_t size) {
         }
         if (dest_buf[idx] != expected) {
           std::cerr << "Data validation error at idx " << idx << std::endl;
-          std::cerr << "PE " << my_pe << " Got " << dest_buf[idx]
-          << ", Expected " << expected << std::endl;
+          if constexpr (std::is_same<T1, __half>::value ||
+                        std::is_same<T1, __hip_bfloat16>::value) {
+            std::cerr << "PE " << my_pe << " Got " << static_cast<float>(dest_buf[idx])
+            << ", Expected " << static_cast<float>(expected) << std::endl;
+          } else {
+            std::cerr << "PE " << my_pe << " Got " << dest_buf[idx]
+            << ", Expected " << expected << std::endl;
+          }
           exit(-1);
         }
       }

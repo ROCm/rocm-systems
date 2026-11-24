@@ -265,7 +265,7 @@ def test_dpp_suppressed_compare_policy(profile, expected):
         (CdnaProfile(), 32, DppOpcodeRule.ALLOW),
         (CdnaProfile(), 64, DppOpcodeRule.ROW_SELECT_ONLY),
         (Cdna1Profile(), 64, DppOpcodeRule.ALLOW),
-        (Cdna2Profile(), 64, DppOpcodeRule.ALLOW),
+        (Cdna2Profile(), 64, DppOpcodeRule.ROW_SELECT_ONLY),
     ],
 )
 def test_cdna_64bit_input_dpp_rule(profile, src0_size_bits, expected):
@@ -324,10 +324,11 @@ def test_cdna3_and_4_lane_special_opcodes_do_not_accept_dpp(opcode):
     ],
 )
 def test_legacy_dpp_prohibition_tables(profile, opcode):
-    assert (
-        profile.dpp_opcode_rule('ENC_VOP1', opcode, src0_size_bits=64)
-        is DppOpcodeRule.FORBID
-    )
+    encoding = 'ENC_VOPC' if opcode.startswith(('V_CMP_', 'V_CMPX_')) else 'ENC_VOP1'
+    expected = DppOpcodeRule.FORBID
+    if isinstance(profile, Cdna2Profile) and encoding == 'ENC_VOP1' and 'F64' in opcode:
+        expected = DppOpcodeRule.ROW_SELECT_ONLY
+    assert profile.dpp_opcode_rule(encoding, opcode, src0_size_bits=64) is expected
 
 
 @pytest.mark.parametrize(
@@ -369,7 +370,8 @@ def test_legacy_dpp_prohibition_tables_do_not_match_nearby_legal_opcodes(
     ('profile', 'wave', 'row_bcast', 'row_xmask'),
     [
         (CdnaProfile(), True, True, False),
-        (Rdna1Profile(), True, True, False),
+        (Rdna1Profile(), False, False, True),
+        (Rdna2Profile(), False, False, True),
         (Rdna3Profile(), False, False, True),
         (Rdna4Profile(), False, False, True),
         (Cdna5Profile(), False, False, True),
@@ -546,11 +548,12 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     assert 'uint32_t descriptor_vgpr_count_granule_wave64 = 0;' in output
     assert 'MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;' in output
     assert (
-        'case ROCJITSU_CODE_ARCH_CDNA3:\n'
+        'case rocjitsu::IsaFamily::Cdna3:\n'
         '    return {\n'
         '        .supports_wgp_mode = false,\n'
         '        .mode_has_gpr_idx_en = true,\n'
         '        .descriptor_sgpr_count_encoded = true,\n'
+        '        .coincident_ds_ignores_data1 = true,\n'
         '        .uses_ttmp_workgroup_ids = false,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
         '        .float_dot_accumulation = FloatDotAccumulation::HostF32,\n'
@@ -567,11 +570,12 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '    };'
     ) in output
     assert (
-        'case ROCJITSU_CODE_ARCH_RDNA4:\n'
+        'case rocjitsu::IsaFamily::Rdna4:\n'
         '    return {\n'
         '        .supports_wgp_mode = true,\n'
         '        .mode_has_gpr_idx_en = false,\n'
         '        .descriptor_sgpr_count_encoded = false,\n'
+        '        .coincident_ds_ignores_data1 = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
         '        .float_dot_accumulation = FloatDotAccumulation::Gfx12,\n'
@@ -588,11 +592,12 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '    };'
     ) in output
     assert (
-        'case ROCJITSU_CODE_ARCH_CDNA5:\n'
+        'case rocjitsu::IsaFamily::Cdna5:\n'
         '    return {\n'
         '        .supports_wgp_mode = false,\n'
         '        .mode_has_gpr_idx_en = false,\n'
         '        .descriptor_sgpr_count_encoded = false,\n'
+        '        .coincident_ds_ignores_data1 = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = true,\n'
         '        .float_dot_accumulation = FloatDotAccumulation::HostF32,\n'
@@ -621,7 +626,7 @@ def test_isa_properties_codegen_uses_source_arch_for_custom_identity(tmp_path):
 
     output = emit_isa_properties(str(tmp_path), specs).read_text()
 
-    assert 'case ROCJITSU_CODE_ARCH_CDNA5:' in output
+    assert 'case rocjitsu::IsaFamily::Cdna5:' in output
     assert '.max_addressable_vgprs_per_wf = 1024,' in output
 
 
@@ -1673,3 +1678,22 @@ def test_unsplit_operand_retains_write_errors_and_checks_delegates(
         assert 'if (!is_writable())' in body
         assert 'InstructionExecutionError::UnsupportedOperandValue' in body
         assert 'throw ' not in body
+
+
+@pytest.mark.parametrize(
+    ('profile', 'clamp'),
+    [
+        (Cdna1Profile(), False),
+        (Cdna2Profile(), True),
+        (CdnaProfile(), True),
+        (Cdna4Profile(), False),
+        (Cdna5Profile(), False),
+        (Rdna1Profile(), False),
+        (Rdna2Profile(), True),
+        (Rdna3Profile(), False),
+        (Rdna3_5Profile(), False),
+        (Rdna4Profile(), False),
+    ],
+)
+def test_packed_u16_multiply_clamp(profile, clamp):
+    assert profile.packed_mul_lo_u16_clamp is clamp

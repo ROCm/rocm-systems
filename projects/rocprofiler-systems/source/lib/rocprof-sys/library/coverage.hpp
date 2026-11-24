@@ -59,7 +59,6 @@ struct code_coverage
     double operator()(Category _c = STANDARD) const;
     double get(Category _c = STANDARD) const { return (*this)(_c); }
 
-    int_set_t get_uncovered_addresses() const;
     str_set_t get_uncovered_modules() const;
     str_set_t get_uncovered_functions() const;
 

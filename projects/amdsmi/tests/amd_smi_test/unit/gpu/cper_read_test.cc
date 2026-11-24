@@ -26,6 +26,7 @@
 #include "amd_smi/impl/amd_smi_cper.h"
 #include "amd_smi/impl/amd_smi_cper_testing.h"
 #include "ras-decode/ras_decode_constants.h"
+#include "test_fixture_utils.h"
 
 namespace {
 
@@ -71,18 +72,11 @@ ssize_t FakeReadError(int, void*, size_t) {  // I/O failure
 
 // Sparse regular file: advertises `size` via st_size at no disk cost and passes
 // the S_ISREG guard, matching the debugfs node's "capacity in st_size" shape.
-// Fatal-asserts on setup failure, returning the path via out_path.
-void MakeSparseFile(off_t size, std::string* out_path) {
-  std::string tmpl = "/tmp/amdsmi_cper_cap_XXXXXX";
-  int fd = mkstemp(tmpl.data());
-  ASSERT_NE(fd, -1) << "failed to create temp file";
-  int rc = ftruncate(fd, size);
-  close(fd);
-  if (rc != 0) {
-    unlink(tmpl.c_str());
-    FAIL() << "failed to size temp file";
-  }
-  *out_path = tmpl;
+std::string MakeSparseFile(FakeSysfsTree& tree, off_t size) {
+  tree.WriteFile("cper_ring", "");
+  const std::string path = tree.root() + "/cper_ring";
+  EXPECT_EQ(truncate(path.c_str(), size), 0) << "failed to size temp file";
+  return path;
 }
 
 // Minimal single-record CPER blob the parser accepts: "CPER" signature,
@@ -109,19 +103,10 @@ std::vector<char> MakeRecordsBlob(size_t count) {
   return blob;
 }
 
-// Writes bytes to a fresh temp file, returning its path via out_path.
-// Fatal-asserts on setup failure.
-void WriteTempFile(const std::vector<char>& bytes, std::string* out_path) {
-  std::string tmpl = "/tmp/amdsmi_cper_rec_XXXXXX";
-  int fd = mkstemp(tmpl.data());
-  ASSERT_NE(fd, -1) << "failed to create temp file";
-  ssize_t written = write(fd, bytes.data(), bytes.size());
-  close(fd);
-  if (written != static_cast<ssize_t>(bytes.size())) {
-    unlink(tmpl.c_str());
-    FAIL() << "failed to write temp file";
-  }
-  *out_path = tmpl;
+// Writes bytes to a file in `tree` and returns its path.
+std::string WriteTempFile(FakeSysfsTree& tree, const std::vector<char>& bytes) {
+  tree.WriteFile("cper_records", std::string(bytes.begin(), bytes.end()));
+  return tree.root() + "/cper_records";
 }
 
 // Like CallCperByPath but with a caller-controlled buffer byte size and header
@@ -152,15 +137,13 @@ amdsmi_status_t CallCperSized(const char* path, uint64_t buf_bytes, uint64_t slo
 // Hits the same empty-ring success branch as the field case (large st_size,
 // read() returns 0) and must not abort the process.
 TEST(GpuUnit, CperReadZeroSizeFile) {
-  std::string tmpl = "/tmp/amdsmi_cper_zero_XXXXXX";
-  int fd = mkstemp(tmpl.data());
-  ASSERT_NE(fd, -1) << "failed to create temp file";
-  close(fd);  // leave it empty -> st_size == 0
+  FakeSysfsTree tree;
+  tree.WriteFile("cper_zero", "");  // empty -> st_size == 0
+  const std::string path = tree.root() + "/cper_zero";
 
   uint64_t entry_count = 99;  // sentinel; the call must overwrite both to 0
   uint64_t buf_size = 99;
-  amdsmi_status_t status = CallCperByPath(tmpl.c_str(), &entry_count, &buf_size);
-  unlink(tmpl.c_str());
+  amdsmi_status_t status = CallCperByPath(path.c_str(), &entry_count, &buf_size);
 
   EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(entry_count, 0u);
@@ -176,45 +159,37 @@ TEST(GpuUnit, CperReadZeroSizeFile) {
 // seam in CperEmptyRingAdvertisedCapacityShortRead to reproduce faithfully, and
 // why CperReadZeroSizeFile pins the st_size == 0 corner with a real read().
 TEST(GpuUnit, CperNonZeroFileRealReadHasNoRecords) {
-  std::string path;
-  MakeSparseFile(4096, &path);  // st_size == 4096, no payload written
-  ASSERT_FALSE(path.empty());
+  FakeSysfsTree tree;
+  const std::string path = MakeSparseFile(tree, 4096);  // st_size == 4096, no payload written
 
   uint64_t entry_count = 99;  // sentinels; the call must overwrite both to 0
   uint64_t buf_size = 99;
   amdsmi_status_t status = CallCperByPath(path.c_str(), &entry_count, &buf_size);
-  unlink(path.c_str());
 
   EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(entry_count, 0u);
   EXPECT_EQ(buf_size, 0u);
 }
 
-// Missing path -> NOT_SUPPORTED (stat() fails), no crash. Create then remove a
-// temp file so the path is guaranteed absent (no hardcoded path another process
-// might have created).
+// Missing path -> NOT_SUPPORTED (stat() fails), no crash. A never-created path in a
+// fresh tree is guaranteed absent.
 TEST(GpuUnit, CperReadMissingFile) {
-  std::string tmpl = "/tmp/amdsmi_cper_missing_XXXXXX";
-  int fd = mkstemp(tmpl.data());
-  ASSERT_NE(fd, -1) << "failed to create temp file";
-  close(fd);
-  unlink(tmpl.c_str());
+  FakeSysfsTree tree;
+  const std::string path = tree.root() + "/never_created";
 
-  amdsmi_status_t status = CallCperByPath(tmpl.c_str());
+  amdsmi_status_t status = CallCperByPath(path.c_str());
   EXPECT_EQ(status, AMDSMI_STATUS_NOT_SUPPORTED);
 }
 
 // Happy path: a well-formed single-record file parses to one entry. Guards the
 // read path against regressions in the empty/error handling around it.
 TEST(GpuUnit, CperParsesSingleRecord) {
-  std::string path;
-  WriteTempFile(MakeOneRecordBlob(), &path);
-  ASSERT_FALSE(path.empty());
+  FakeSysfsTree tree;
+  const std::string path = WriteTempFile(tree, MakeOneRecordBlob());
 
   uint64_t entry_count = 0;
   uint64_t buf_size = 0;
   amdsmi_status_t status = CallCperByPath(path.c_str(), &entry_count, &buf_size);
-  unlink(path.c_str());
 
   EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(entry_count, 1u);
@@ -227,13 +202,11 @@ TEST(GpuUnit, CperEmptyRingAdvertisedCapacityShortRead) {
   CperReadFnGuard guard;
   cper_set_read_fn_for_testing(&FakeReadZero);
 
-  std::string path;
-  MakeSparseFile(kRingCapacity, &path);
-  ASSERT_FALSE(path.empty());
+  FakeSysfsTree tree;
+  const std::string path = MakeSparseFile(tree, kRingCapacity);
   uint64_t entry_count = 99;
   uint64_t buf_size = 99;
   amdsmi_status_t status = CallCperByPath(path.c_str(), &entry_count, &buf_size);
-  unlink(path.c_str());
 
   EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(entry_count, 0u);
@@ -246,13 +219,11 @@ TEST(GpuUnit, CperPartialReadNoRecords) {
   CperReadFnGuard guard;
   cper_set_read_fn_for_testing(&FakeReadPartial);
 
-  std::string path;
-  MakeSparseFile(kRingCapacity, &path);
-  ASSERT_FALSE(path.empty());
+  FakeSysfsTree tree;
+  const std::string path = MakeSparseFile(tree, kRingCapacity);
   uint64_t entry_count = 99;
   uint64_t buf_size = 99;
   amdsmi_status_t status = CallCperByPath(path.c_str(), &entry_count, &buf_size);
-  unlink(path.c_str());
 
   EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(entry_count, 0u);
@@ -264,11 +235,9 @@ TEST(GpuUnit, CperReadErrorIsFileError) {
   CperReadFnGuard guard;
   cper_set_read_fn_for_testing(&FakeReadError);
 
-  std::string path;
-  MakeSparseFile(kRingCapacity, &path);
-  ASSERT_FALSE(path.empty());
+  FakeSysfsTree tree;
+  const std::string path = MakeSparseFile(tree, kRingCapacity);
   amdsmi_status_t status = CallCperByPath(path.c_str());
-  unlink(path.c_str());
 
   EXPECT_EQ(status, AMDSMI_STATUS_FILE_ERROR);
 }
@@ -276,9 +245,8 @@ TEST(GpuUnit, CperReadErrorIsFileError) {
 // A record larger than the caller's buffer yields OUT_OF_RESOURCES with nothing
 // copied and the out-params zeroed.
 TEST(GpuUnit, CperFirstRecordExceedsBufferOutOfResources) {
-  std::string path;
-  WriteTempFile(MakeOneRecordBlob(), &path);
-  ASSERT_FALSE(path.empty());
+  FakeSysfsTree tree;
+  const std::string path = WriteTempFile(tree, MakeOneRecordBlob());
 
   uint64_t entry_count = 0;
   uint64_t buf_size = 0;
@@ -287,7 +255,6 @@ TEST(GpuUnit, CperFirstRecordExceedsBufferOutOfResources) {
                 "test assumes a 64-byte buffer is smaller than one CPER record");
   amdsmi_status_t status =
       CallCperSized(path.c_str(), /*buf_bytes=*/64, /*slots=*/8, &entry_count, &buf_size);
-  unlink(path.c_str());
 
   EXPECT_EQ(status, AMDSMI_STATUS_OUT_OF_RESOURCES);
   EXPECT_EQ(entry_count, 0u);
@@ -297,9 +264,8 @@ TEST(GpuUnit, CperFirstRecordExceedsBufferOutOfResources) {
 // Two records with a buffer that fits only one: the first is copied and
 // MORE_DATA is returned with the partial entry_count/buf_size.
 TEST(GpuUnit, CperSecondRecordOverflowsBufferMoreData) {
-  std::string path;
-  WriteTempFile(MakeRecordsBlob(2), &path);
-  ASSERT_FALSE(path.empty());
+  FakeSysfsTree tree;
+  const std::string path = WriteTempFile(tree, MakeRecordsBlob(2));
 
   const uint64_t one_record = sizeof(amdsmi_cper_hdr_t);
   uint64_t entry_count = 0;
@@ -309,7 +275,6 @@ TEST(GpuUnit, CperSecondRecordOverflowsBufferMoreData) {
   // byte-buffer limit (not the slot count) is what trips.
   amdsmi_status_t status =
       CallCperSized(path.c_str(), one_record + 16, /*slots=*/8, &entry_count, &buf_size, &cursor);
-  unlink(path.c_str());
 
   EXPECT_EQ(status, AMDSMI_STATUS_MORE_DATA);
   EXPECT_EQ(entry_count, 1u);
@@ -321,16 +286,14 @@ TEST(GpuUnit, CperSecondRecordOverflowsBufferMoreData) {
 // not the byte buffer, is what trips. The first is copied and MORE_DATA is
 // returned with one entry and a non-zero buf_size.
 TEST(GpuUnit, CperSlotExhaustionMoreData) {
-  std::string path;
-  WriteTempFile(MakeRecordsBlob(2), &path);
-  ASSERT_FALSE(path.empty());
+  FakeSysfsTree tree;
+  const std::string path = WriteTempFile(tree, MakeRecordsBlob(2));
 
   uint64_t entry_count = 0;
   uint64_t buf_size = 0;
   uint64_t cursor = 0;
   amdsmi_status_t status = CallCperSized(path.c_str(), /*buf_bytes=*/8192, /*slots=*/1,
                                          &entry_count, &buf_size, &cursor);
-  unlink(path.c_str());
 
   EXPECT_EQ(status, AMDSMI_STATUS_MORE_DATA);
   EXPECT_EQ(entry_count, 1u);
@@ -351,9 +314,8 @@ TEST(GpuUnit, CperNextPageSkipsReturnedRecordLargerThanItsBuffer) {
   blob.resize(big.record_length, 0);
   const std::vector<char> small = MakeOneRecordBlob();
   blob.insert(blob.end(), small.begin(), small.end());
-  std::string path;
-  WriteTempFile(blob, &path);
-  ASSERT_FALSE(path.empty());
+  FakeSysfsTree tree;
+  const std::string path = WriteTempFile(tree, blob);
 
   std::vector<char> data(4096, 0);
   amdsmi_cper_hdr_t* hdr = nullptr;
@@ -367,7 +329,6 @@ TEST(GpuUnit, CperNextPageSkipsReturnedRecordLargerThanItsBuffer) {
   entry_count = 1;
   amdsmi_status_t second = amdsmi_get_gpu_cper_entries_by_path(
       path.c_str(), 0xFFFFFFFF, data.data(), &buf_size, &hdr, &entry_count, &cursor, 0);
-  unlink(path.c_str());
 
   EXPECT_EQ(first, AMDSMI_STATUS_MORE_DATA);
   EXPECT_EQ(second, AMDSMI_STATUS_SUCCESS);
@@ -378,9 +339,8 @@ TEST(GpuUnit, CperNextPageSkipsReturnedRecordLargerThanItsBuffer) {
 
 // Invalid arguments are rejected with OUT_OF_RESOURCES before any file read.
 TEST(GpuUnit, CperByPathRejectsInvalidArgs) {
-  std::string path;
-  WriteTempFile(MakeOneRecordBlob(), &path);
-  ASSERT_FALSE(path.empty());
+  FakeSysfsTree tree;
+  const std::string path = WriteTempFile(tree, MakeOneRecordBlob());
 
   std::vector<char> data(256, 0);
   std::vector<amdsmi_cper_hdr_t*> hdrs(4, nullptr);
@@ -444,8 +404,6 @@ TEST(GpuUnit, CperByPathRejectsInvalidArgs) {
   EXPECT_EQ(amdsmi_get_gpu_cper_entries_by_path(path.c_str(), mask, data.data(), &bs, hdrs.data(),
                                                 &ec, nullptr, 0),
             AMDSMI_STATUS_OUT_OF_RESOURCES);
-
-  unlink(path.c_str());
 }
 
 namespace {
@@ -1074,9 +1032,8 @@ TEST(GpuUnit, CperDecodeRejectsRecordLengthBelowHeader) {
 TEST(GpuUnit, CperByPathRejectsRecordLengthBelowHeader) {
   std::vector<char> blob = MakeOneRecordBlob();
   reinterpret_cast<amdsmi_cper_hdr_t*>(blob.data())->record_length = 4;
-  std::string path;
-  WriteTempFile(blob, &path);
-  ASSERT_FALSE(path.empty());
+  FakeSysfsTree tree;
+  const std::string path = WriteTempFile(tree, blob);
 
   constexpr char kGuard = static_cast<char>(0xAB);
   std::vector<char> cper_data(4096, kGuard);
@@ -1088,7 +1045,6 @@ TEST(GpuUnit, CperByPathRejectsRecordLengthBelowHeader) {
   amdsmi_status_t status = amdsmi_get_gpu_cper_entries_by_path(
       path.c_str(), 0xFFFFFFFF, cper_data.data(), &buf_size, cper_hdrs.data(), &entry_count,
       &cursor, /*product_serial=*/1234);
-  unlink(path.c_str());
 
   EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(entry_count, 0u);
@@ -1106,14 +1062,12 @@ TEST(GpuUnit, CperByPathRejectsSeverityWiderThanTheMask) {
   auto* hdr = reinterpret_cast<amdsmi_cper_hdr_t*>(blob.data());
   constexpr uint32_t kOutOfRangeSeverity = 200;
   std::memcpy(&hdr->error_severity, &kOutOfRangeSeverity, sizeof(kOutOfRangeSeverity));
-  std::string path;
-  WriteTempFile(blob, &path);
-  ASSERT_FALSE(path.empty());
+  FakeSysfsTree tree;
+  const std::string path = WriteTempFile(tree, blob);
 
   uint64_t entry_count = 0;
   uint64_t buf_size = 0;
   amdsmi_status_t status = CallCperByPath(path.c_str(), &entry_count, &buf_size);
-  unlink(path.c_str());
 
   EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(entry_count, 0u);
@@ -1126,9 +1080,8 @@ TEST(GpuUnit, CperByPathRejectsSeverityWiderThanTheMask) {
 TEST(GpuUnit, CperInjectSerialStopsAtRecordEnd) {
   std::vector<char> blob = MakeOneRecordBlob();
   reinterpret_cast<amdsmi_cper_hdr_t*>(blob.data())->sec_cnt = 64;
-  std::string path;
-  WriteTempFile(blob, &path);
-  ASSERT_FALSE(path.empty());
+  FakeSysfsTree tree;
+  const std::string path = WriteTempFile(tree, blob);
 
   constexpr char kGuard = static_cast<char>(0xAB);
   std::vector<char> cper_data(8192, kGuard);
@@ -1140,7 +1093,6 @@ TEST(GpuUnit, CperInjectSerialStopsAtRecordEnd) {
   amdsmi_status_t status = amdsmi_get_gpu_cper_entries_by_path(
       path.c_str(), 0xFFFFFFFF, cper_data.data(), &buf_size, cper_hdrs.data(), &entry_count,
       &cursor, /*product_serial=*/1234);
-  unlink(path.c_str());
 
   EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
   ASSERT_EQ(entry_count, 1u);

@@ -7,7 +7,7 @@
 
 #include "common/floating_point.h"
 #include "math/omod_reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 #include <bit>
 
 #include <algorithm>

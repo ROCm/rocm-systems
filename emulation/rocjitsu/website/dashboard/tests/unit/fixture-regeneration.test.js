@@ -28,8 +28,9 @@ test('default fixture includes an ended develop run with unexecuted cases for Re
   const interrupted = publication.runs.find((run) => run.publication.id === 'fictional-unfinished-develop');
   expect(interrupted).toBeDefined();
   expect(interrupted.publication.source.branch).toBe('develop');
-  expect(typeof interrupted.execution_summary.finished_at).toBe('string');
-  expect(Number.isFinite(Date.parse(interrupted.execution_summary.finished_at))).toBe(true);
+  expect(interrupted.execution_summary.finished_at).toBeNull();
+  expect(typeof interrupted.execution_summary.timestamp).toBe('string');
+  expect(Number.isFinite(Date.parse(interrupted.execution_summary.timestamp))).toBe(true);
   expect(interrupted.benchmark_results[0].status).toBe('completed');
   expect(interrupted.benchmark_results.slice(1).every((result) => result.status === 'failed'
     && result.exit_code === null && result.error === 'run interrupted before completion'

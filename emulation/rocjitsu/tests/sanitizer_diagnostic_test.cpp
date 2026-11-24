@@ -39,8 +39,9 @@ void expect_diagnosed_exit(const std::string &output, ChildExit child_exit,
       {
         std::fputs(output.c_str(), stderr);
         std::fflush(stderr);
-        if (child_exit == ChildExit::Abort)
+        if (child_exit == ChildExit::Abort) {
           std::abort();
+        }
         if (child_exit == ChildExit::Terminate) {
           // Destroying a joinable thread calls std::terminate(), which reports
           // through the C++ runtime's own handler before aborting.

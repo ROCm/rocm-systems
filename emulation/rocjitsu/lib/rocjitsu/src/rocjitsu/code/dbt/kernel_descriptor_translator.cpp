@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
@@ -42,7 +43,6 @@ static_assert(sizeof(KD) == 64, "AMDHSA kernel descriptor size changed");
 
 constexpr uint32_t kMaxVgprGranulatedField = 63;
 constexpr uint32_t kMaxSgprGranulatedField = 15;
-constexpr uint64_t kKernargPreloadSkipBytes = 256;
 constexpr uint16_t kScalarOperandTtmpBase = 108;
 constexpr uint16_t kTtmpRdna4GridYz = 7;
 constexpr uint16_t kTtmpRdna4GridX = 9;
@@ -51,81 +51,81 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
 // ISA-family helpers.
 // -----------------------------------------------------------------------------
 
-[[nodiscard]] bool arch_supports_wave_size(rj_code_arch_t arch, uint32_t wf) {
+[[nodiscard]] bool arch_supports_wave_size(rocjitsu::IsaFamily arch, uint32_t wf) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return supports_wave_size<cdna1::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return supports_wave_size<cdna2::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return supports_wave_size<cdna3::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return supports_wave_size<cdna4::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return supports_wave_size<rdna1::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return supports_wave_size<rdna2::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return supports_wave_size<rdna3::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return supports_wave_size<rdna3_5::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return supports_wave_size<rdna4::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return supports_wave_size<cdna5::Isa>(wf);
   default:
     return false;
   }
 }
 
-[[nodiscard]] uint32_t arch_default_wave_size(rj_code_arch_t arch) {
+[[nodiscard]] uint32_t arch_default_wave_size(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::Isa::WF_SIZE;
   default:
     return 64;
   }
 }
 
-[[nodiscard]] uint32_t arch_max_vgprs(rj_code_arch_t arch) {
+[[nodiscard]] uint32_t arch_max_vgprs(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     // gfx1250 extends each encoded VGPR operand with dynamic high-bank bits.
     // Descriptor validation must allow the complete addressable register
     // range even though its inherited RDNA base describes one 256-VGPR bank.
@@ -135,27 +135,27 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   }
 }
 
-[[nodiscard]] bool arch_has_accvgpr(rj_code_arch_t arch) {
+[[nodiscard]] bool arch_has_accvgpr(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return HasAccVgpr<cdna1::Isa>;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return HasAccVgpr<cdna2::Isa>;
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return HasAccVgpr<cdna3::Isa>;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return HasAccVgpr<cdna4::Isa>;
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return HasAccVgpr<rdna1::Isa>;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return HasAccVgpr<rdna2::Isa>;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return HasAccVgpr<rdna3::Isa>;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return HasAccVgpr<rdna3_5::Isa>;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return HasAccVgpr<rdna4::Isa>;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return HasAccVgpr<cdna5::Isa>;
   default:
     return false;
@@ -163,13 +163,16 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
 }
 
 [[nodiscard]] uint8_t choose_host_wavefront_size(uint8_t guest_wavefront_size,
-                                                 rj_code_arch_t host_arch) {
-  if (guest_wavefront_size == 64 && arch_supports_wave_size(host_arch, 64))
+                                                 rocjitsu::IsaFamily host_arch) {
+  if (guest_wavefront_size == 64 && arch_supports_wave_size(host_arch, 64)) {
     return 64;
-  if (guest_wavefront_size == 32 && arch_supports_wave_size(host_arch, 32))
+  }
+  if (guest_wavefront_size == 32 && arch_supports_wave_size(host_arch, 32)) {
     return 32;
-  if (arch_supports_wave_size(host_arch, 64))
+  }
+  if (arch_supports_wave_size(host_arch, 64)) {
     return 64;
+  }
   return static_cast<uint8_t>(arch_default_wave_size(host_arch));
 }
 
@@ -177,7 +180,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
 // Kernel descriptor field helpers.
 // -----------------------------------------------------------------------------
 
-[[nodiscard]] uint32_t user_sgpr_count(const KD &desc, rj_code_arch_t arch) {
+[[nodiscard]] uint32_t user_sgpr_count(const KD &desc, rocjitsu::IsaFamily arch) {
   return kernel_descriptor_user_sgpr_count(arch, desc);
 }
 
@@ -192,30 +195,26 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
                          kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)) {
     sgpr += 4;
   }
-  if (!has_dispatch_ptr(desc))
+  if (!has_dispatch_ptr(desc)) {
     return std::nullopt;
+  }
   return static_cast<uint16_t>(sgpr);
-}
-
-[[nodiscard]] bool uses_kernarg_preload_firmware_skip(rj_code_arch_t arch) {
-  // CDNA3/CDNA4 implement kernarg preloading through the legacy firmware
-  // compatibility window: old firmware enters at the descriptor entry and
-  // compatible firmware enters 256 bytes later. GFX1250 supports preloading in
-  // hardware but has one entry, exactly as specified by the descriptor.
-  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
 }
 
 [[nodiscard]] std::optional<uint32_t> kernarg_bytes_to_preserve(const KD &desc) {
   const uint32_t preload_length = kernarg_preload_length(desc);
-  if (preload_length == 0)
+  if (preload_length == 0) {
     return desc.kernarg_size;
+  }
 
   const uint32_t preload_offset = kernarg_preload_offset(desc);
-  if (preload_offset > std::numeric_limits<uint32_t>::max() - preload_length)
+  if (preload_offset > std::numeric_limits<uint32_t>::max() - preload_length) {
     return std::nullopt;
+  }
   const uint32_t preload_end_dwords = preload_offset + preload_length;
-  if (preload_end_dwords > std::numeric_limits<uint32_t>::max() / sizeof(uint32_t))
+  if (preload_end_dwords > std::numeric_limits<uint32_t>::max() / sizeof(uint32_t)) {
     return std::nullopt;
+  }
   const uint32_t preload_end_bytes = preload_end_dwords * static_cast<uint32_t>(sizeof(uint32_t));
 
   // KERNARG_PRELOAD_SPEC_LENGTH is the exact dword extent promised by the
@@ -225,9 +224,11 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   return std::max(desc.kernarg_size, preload_end_bytes);
 }
 
-[[nodiscard]] int16_t workgroup_id_sgpr(const KD &desc, uint32_t dimension, rj_code_arch_t arch) {
-  if (isa_properties(arch).uses_ttmp_workgroup_ids)
+[[nodiscard]] int16_t workgroup_id_sgpr(const KD &desc, uint32_t dimension,
+                                        rocjitsu::IsaFamily arch) {
+  if (isa_properties(arch).uses_ttmp_workgroup_ids) {
     return -1;
+  }
   const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
   const bool enabled[3] = {
       RJ_AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X) != 0,
@@ -241,26 +242,29 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   // workgroup IDs, so each enabled workgroup dimension still consumes one SGPR.
   uint32_t sgpr = user_sgpr_count(desc, arch);
   for (uint32_t i = 0; i < 3; ++i) {
-    if (!enabled[i])
+    if (!enabled[i]) {
       continue;
-    if (i == dimension)
+    }
+    if (i == dimension) {
       return static_cast<int16_t>(sgpr);
+    }
     ++sgpr;
   }
   return -1;
 }
 
-[[nodiscard]] bool uses_gfx90a_accum_offset(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-         arch == ROCJITSU_CODE_ARCH_CDNA4;
+[[nodiscard]] bool uses_gfx90a_accum_offset(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Cdna2 || arch == rocjitsu::IsaFamily::Cdna3 ||
+         arch == rocjitsu::IsaFamily::Cdna4;
 }
 
-[[nodiscard]] bool uses_gfx10_plus_rsrc3(rj_code_arch_t arch) {
+[[nodiscard]] bool uses_gfx10_plus_rsrc3(rocjitsu::IsaFamily arch) {
   return !arch_descriptor_encodes_sgpr_allocation(arch);
 }
 
 [[nodiscard]] std::optional<uint32_t>
-descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wavefront_size) {
+checked_descriptor_vgpr_granularity_for_wavefront(rocjitsu::IsaFamily arch,
+                                                  uint32_t wavefront_size) {
   // This is the AMDHSA kernel-descriptor encoding granularity for
   // COMPUTE_PGM_RSRC1.GRANULATED_WORKITEM_VGPR_COUNT, not the physical VGPR
   // allocation block from the ISA manuals. For example, RDNA3/RDNA4 manuals
@@ -280,21 +284,18 @@ descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wavefron
 
 [[nodiscard]] uint32_t register_count_to_granulated(uint32_t registers, uint32_t granularity) {
   granularity = std::max(granularity, 1u);
-  if (registers == 0)
+  if (registers == 0) {
     return 0;
+  }
   return (registers + granularity - 1) / granularity - 1;
 }
 
-[[nodiscard]] uint16_t accum_vgpr_base(const KD &desc, rj_code_arch_t guest_arch) {
-  if (!uses_gfx90a_accum_offset(guest_arch) || !arch_has_accvgpr(guest_arch))
+[[nodiscard]] uint16_t accum_vgpr_base(const KD &desc, rocjitsu::IsaFamily guest_arch) {
+  if (!uses_gfx90a_accum_offset(guest_arch) || !arch_has_accvgpr(guest_arch)) {
     return 0;
+  }
 
-  const uint32_t encoded =
-      RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
-  // The descriptor encoding is one less than the actual first AccVGPR offset:
-  // field value 0 means acc0 starts at unified VGPR index 4, value 1 means 8,
-  // and so on in groups of four registers.
-  return static_cast<uint16_t>((encoded + 1) * 4);
+  return static_cast<uint16_t>(kd::gfx90a_accum_vgpr_base(desc.compute_pgm_rsrc3));
 }
 
 [[nodiscard]] uint16_t ttmp_scalar_operand(uint16_t ttmp) {
@@ -315,13 +316,14 @@ void append_rdna4_salu_write(std::vector<uint32_t> &words, util::FailureOr<uint3
   // scalar producer/consumer dependencies; entry prologues bypass the normal
   // instruction-level HazardTracker, so serialize each injected scalar write
   // before the patcher appends the branch back to the original entry.
-  constexpr auto delay = build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4);
+  constexpr auto delay = build_s_delay_alu(kDelayAluSaluDep1, rocjitsu::IsaFamily::Rdna4);
   static_assert(delay.succeeded());
   words.push_back(delay.value());
 }
 
 void append_rdna4_workgroup_grid_prologue(std::vector<uint32_t> &words, const KD &desc,
-                                          rj_code_arch_t guest_arch, rj_code_arch_t host_arch) {
+                                          rocjitsu::IsaFamily guest_arch,
+                                          rocjitsu::IsaFamily host_arch) {
   const uint16_t shift16 = scalar_positive_inline_u32(16);
   const int16_t sgpr_wg_id_x = workgroup_id_sgpr(desc, 0, guest_arch);
   const int16_t sgpr_wg_id_y = workgroup_id_sgpr(desc, 1, guest_arch);
@@ -352,8 +354,9 @@ void append_rdna4_workgroup_grid_prologue(std::vector<uint32_t> &words, const KD
   }
 }
 
-[[nodiscard]] std::vector<uint32_t>
-build_kernel_entry_prologue(const KD &src, rj_code_arch_t guest_arch, rj_code_arch_t host_arch) {
+[[nodiscard]] std::vector<uint32_t> build_kernel_entry_prologue(const KD &src,
+                                                                rocjitsu::IsaFamily guest_arch,
+                                                                rocjitsu::IsaFamily host_arch) {
   std::vector<uint32_t> words;
 
   // Kernel-entry register initialization ABI notes:
@@ -370,8 +373,9 @@ build_kernel_entry_prologue(const KD &src, rj_code_arch_t guest_arch, rj_code_ar
   // - Scratch/private-segment initialization is descriptor-driven today. If a
   //   future target needs SGPR-based scratch setup, it should be appended here
   //   and represented in KdTranslation::prologue_words, not hidden in the patcher.
-  if (arch_is_cdna_4_or_lower(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch_is_cdna_4_or_lower(guest_arch) && host_arch == rocjitsu::IsaFamily::Rdna4) {
     append_rdna4_workgroup_grid_prologue(words, src, guest_arch, host_arch);
+  }
 
   return words;
 }
@@ -416,8 +420,9 @@ void append_descriptor_resource_error(KdTranslation &result, std::string message
 
 [[nodiscard]] uint32_t clamp_granulated(uint32_t value, uint32_t max_value, KdTranslation &result,
                                         const char *field_name) {
-  if (value <= max_value)
+  if (value <= max_value) {
     return value;
+  }
 
   append_descriptor_error(
       result, std::string(field_name) +
@@ -426,7 +431,7 @@ void append_descriptor_resource_error(KdTranslation &result, std::string message
 }
 
 [[nodiscard]] KdTranslation
-translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
+translate_one_descriptor(rocjitsu::IsaFamily guest_arch, rocjitsu::IsaFamily host_arch,
                          uint64_t descriptor_file_offset, std::string kernel_name,
                          uint64_t entry_text_offset, const KD &src,
                          const KernelDescriptorTranslationOptions &options) {
@@ -456,26 +461,30 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.target_user_sgpr_count = result.source_user_sgpr_count;
   result.source_has_kernarg_segment_ptr = has_kernarg_segment_ptr(src);
   result.has_kernarg_segment_ptr = result.source_has_kernarg_segment_ptr;
-  if (auto kernarg_sgpr = kernarg_segment_ptr_sgpr(src))
+  if (auto kernarg_sgpr = kernarg_segment_ptr_sgpr(src)) {
     result.kernarg_segment_ptr_sgpr = *kernarg_sgpr;
+  }
   // DBT does not consume the dispatch-packet pointer itself. The virtual-LDS
   // SGPR allocator still needs to know when CP initializes this ABI pair so it
   // does not permanently place the backing-buffer base over live source state.
   result.has_dispatch_ptr = has_dispatch_ptr(src);
-  if (auto dispatch_sgpr = dispatch_ptr_sgpr(src))
+  if (auto dispatch_sgpr = dispatch_ptr_sgpr(src)) {
     result.dispatch_ptr_sgpr = *dispatch_sgpr;
+  }
   result.workgroup_id_sgpr_x = workgroup_id_sgpr(src, 0, guest_arch);
   result.workgroup_id_sgpr_y = workgroup_id_sgpr(src, 1, guest_arch);
   result.workgroup_id_sgpr_z = workgroup_id_sgpr(src, 2, guest_arch);
   if (!isa_properties(guest_arch).uses_ttmp_workgroup_ids &&
       isa_properties(host_arch).uses_ttmp_workgroup_ids &&
-      RJ_AMDHSA_BITS_GET(src.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO))
+      RJ_AMDHSA_BITS_GET(src.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO)) {
     append_descriptor_error(result, "guest WORKGROUP_INFO is unsupported on TTMP-ID targets");
+  }
   if (RJ_AMDHSA_BITS_GET(src.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT) &&
       arch_appends_private_segment_wave_offset_sgpr(guest_arch) &&
-      !arch_appends_private_segment_wave_offset_sgpr(host_arch))
+      !arch_appends_private_segment_wave_offset_sgpr(host_arch)) {
     append_descriptor_error(result, "guest requires a private-segment wave-offset SGPR "
                                     "that the host launch does not provide");
+  }
   result.lds_overflow_workgroup_id_sgpr_x = result.workgroup_id_sgpr_x;
   result.lds_overflow_workgroup_id_sgpr_y = result.workgroup_id_sgpr_y;
   result.lds_overflow_workgroup_id_sgpr_z = result.workgroup_id_sgpr_z;
@@ -514,9 +523,9 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   // source count must be decoded with the guest granularity and re-encoded with
   // the host granularity.
   const auto guest_vgpr_granularity =
-      descriptor_vgpr_granularity_for_wavefront(guest_arch, result.guest_wavefront_size);
+      checked_descriptor_vgpr_granularity_for_wavefront(guest_arch, result.guest_wavefront_size);
   const auto host_vgpr_granularity =
-      descriptor_vgpr_granularity_for_wavefront(host_arch, result.host_wavefront_size);
+      checked_descriptor_vgpr_granularity_for_wavefront(host_arch, result.host_wavefront_size);
   if (!guest_vgpr_granularity || !host_vgpr_granularity) {
     append_descriptor_error(
         result, "guest or host architecture does not support the selected wavefront size");
@@ -561,8 +570,9 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   uint32_t required_vgprs = result.guest_vgpr_count;
   result.target_agpr_count = arch_has_accvgpr(host_arch) ? result.guest_agpr_count : 0;
   uint32_t required_vgpr_allocation = result.guest_vgpr_allocation_count;
-  if (arch_has_accvgpr(guest_arch) && !arch_has_accvgpr(host_arch) && result.accvgpr_base != 0)
+  if (arch_has_accvgpr(guest_arch) && !arch_has_accvgpr(host_arch) && result.accvgpr_base != 0) {
     required_vgprs = std::max(required_vgprs, result.accvgpr_base + result.guest_agpr_count);
+  }
   required_vgprs = std::max(required_vgprs, options.minimum_vgprs);
   if (arch_has_accvgpr(guest_arch) && arch_has_accvgpr(host_arch) &&
       uses_gfx90a_accum_offset(host_arch) && result.accvgpr_base != 0) {
@@ -575,7 +585,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
       }
     }
   }
-  if (host_arch == ROCJITSU_CODE_ARCH_CDNA1 && result.target_agpr_count != 0) {
+  if (host_arch == rocjitsu::IsaFamily::Cdna1 && result.target_agpr_count != 0) {
     // CDNA1 has no ACCUM_OFFSET. Reserve the larger independent VGPR/AGPR count.
     result.target_accvgpr_base = 0;
     required_vgpr_allocation = std::max(required_vgprs, result.target_agpr_count);
@@ -684,15 +694,17 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   // descriptor translation on overflow.
   const auto target_private_size =
       util::checked_add(src.private_segment_fixed_size, options.private_segment_fixed_size_addend);
-  if (!target_private_size)
+  if (!target_private_size) {
     append_descriptor_error(result, "private segment size plus lowering addend overflows 32 bits");
+  }
   result.target_private_size = target_private_size.value_or(0);
   result.uses_dynamic_stack = RJ_AMDHSA_BITS_GET(src.kernel_code_properties,
                                                  kd::KERNEL_CODE_PROPERTY_USES_DYNAMIC_STACK) != 0;
   const auto requested_lds_size_checked =
       util::checked_add(src.group_segment_fixed_size, options.group_segment_fixed_size_addend);
-  if (!requested_lds_size_checked)
+  if (!requested_lds_size_checked) {
     append_descriptor_error(result, "group segment size plus lowering addend overflows 32 bits");
+  }
   const uint32_t requested_lds_size = requested_lds_size_checked.value_or(0);
   if (options.virtualize_lds) {
     result.target_lds_size = 0;
@@ -740,15 +752,18 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
             result.user_sgpr_repair_count = static_cast<uint16_t>(repair_count);
           }
         }
-        if (result.workgroup_id_sgpr_x >= 0)
+        if (result.workgroup_id_sgpr_x >= 0) {
           result.lds_overflow_workgroup_id_sgpr_x =
               static_cast<int16_t>(result.workgroup_id_sgpr_x + 2);
-        if (result.workgroup_id_sgpr_y >= 0)
+        }
+        if (result.workgroup_id_sgpr_y >= 0) {
           result.lds_overflow_workgroup_id_sgpr_y =
               static_cast<int16_t>(result.workgroup_id_sgpr_y + 2);
-        if (result.workgroup_id_sgpr_z >= 0)
+        }
+        if (result.workgroup_id_sgpr_z >= 0) {
           result.lds_overflow_workgroup_id_sgpr_z =
               static_cast<int16_t>(result.workgroup_id_sgpr_z + 2);
+        }
       }
     } else if (result.kernarg_segment_ptr_sgpr + 2 > result.source_user_sgpr_count) {
       append_descriptor_error(
@@ -779,30 +794,30 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
 
 } // namespace
 
-Rsrc3Layout rsrc3_layout(rj_code_arch_t arch) {
+Rsrc3Layout rsrc3_layout(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return Rsrc3Layout::Reserved;
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     return Rsrc3Layout::Gfx9Accum;
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
     return Rsrc3Layout::Gfx10;
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return Rsrc3Layout::Gfx11;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return Rsrc3Layout::Gfx120;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return Rsrc3Layout::Gfx125;
   default:
     return Rsrc3Layout::Incompatible;
   }
 }
 
-bool rsrc3_carries_verbatim(rj_code_arch_t source_arch, rj_code_arch_t target_arch) {
+bool rsrc3_carries_verbatim(rocjitsu::IsaFamily source_arch, rocjitsu::IsaFamily target_arch) {
   // Every neighbouring pair is kept apart deliberately, because each disagrees
   // on bits the other reserves: a GFX11 or GFX12 word on a GFX10 target would
   // set INST_PREF_SIZE and IMAGE_OP, and a GFX125 word on a GFX120 target would
@@ -815,8 +830,8 @@ bool rsrc3_layout_has_shared_vgpr_count(Rsrc3Layout layout) {
   return layout == Rsrc3Layout::Gfx10 || layout == Rsrc3Layout::Gfx11;
 }
 
-KernelDescriptorTranslator::KernelDescriptorTranslator(rj_code_arch_t guest_arch,
-                                                       rj_code_arch_t host_arch)
+KernelDescriptorTranslator::KernelDescriptorTranslator(rocjitsu::IsaFamily guest_arch,
+                                                       rocjitsu::IsaFamily host_arch)
     : guest_arch_(guest_arch), host_arch_(host_arch) {}
 
 void KdTranslation::configure_skipped_stub() {
@@ -866,8 +881,9 @@ KernelDescriptorTranslator::translate_image(std::span<const uint8_t> image, uint
 std::optional<KdTranslation> KernelDescriptorTranslator::translate_descriptor(
     std::span<const uint8_t> image, uint64_t descriptor_file_offset, uint64_t entry_text_offset,
     const KernelDescriptorTranslationOptions &options) const {
-  if (descriptor_file_offset > image.size() || image.size() - descriptor_file_offset < sizeof(KD))
+  if (descriptor_file_offset > image.size() || image.size() - descriptor_file_offset < sizeof(KD)) {
     return std::nullopt;
+  }
 
   KD desc{};
   std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));

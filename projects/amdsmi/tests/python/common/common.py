@@ -21,6 +21,7 @@ Imported by every functional/unit leaf test and by all three runners
 """
 
 import contextlib
+import fnmatch
 import importlib.util
 import inspect
 import io
@@ -183,6 +184,26 @@ def cli_search_order(source_dir, prefer_install=False):
     return (source_dir, amdsmi_path)
 
 
+def amdsmi_interface_path(start_file: str) -> pathlib.Path:
+    """Return the ``amdsmi_interface.py`` source for tests that parse it as text.
+
+    A checkout carries it in ``py-interface/``; an install ships it inside the ``amdsmi``
+    package under ``share/amd_smi`` and has no ``py-interface`` directory. Priority follows
+    ``cli_search_order()``: a pinned install wins, otherwise the checkout does.
+    """
+    checkout = [
+        parent / "py-interface" / "amdsmi_interface.py"
+        for parent in pathlib.Path(start_file).resolve().parents
+    ]
+    installed = [pathlib.Path(amdsmi_path) / "amdsmi" / "amdsmi_interface.py"]
+    candidates = installed + checkout if amdsmi_path_is_explicit else checkout + installed
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    searched = "\n  ".join(str(candidate) for candidate in candidates)
+    raise FileNotFoundError(f"amdsmi_interface.py not found; searched:\n  {searched}")
+
+
 def generated_version_stub(version="0.0.0+source"):
     """Stub entry for the CLI's ``_version``, or empty when the real one resolves.
 
@@ -192,7 +213,9 @@ def generated_version_stub(version="0.0.0+source"):
     stub mapping, or into ``sys.modules`` directly -- it is empty whenever the
     real module is importable, so it never shadows a build. No test reads it.
     """
-    if importlib.util.find_spec("_version") is not None:
+    # find_spec raises ValueError on a sys.modules entry with no __spec__, which an
+    # earlier module's import-time stub leaves behind until its tearDownModule runs.
+    if "_version" in sys.modules or importlib.util.find_spec("_version") is not None:
         return {}
     return {"_version": fake_module("_version", __version__=version)}
 
@@ -452,7 +475,13 @@ def build_type_lists():
     link_types = []
     for member in amdsmi.AmdSmiLinkType:
         cond = PASS
-        if member.name in ["AMDSMI_LINK_TYPE_NOT_APPLICABLE", "AMDSMI_LINK_TYPE_UNKNOWN"]:
+        # NUMA and XNUMA only relate a NIC to a GPU, so the GPU nearest-search rejects them.
+        if member.name in [
+            "AMDSMI_LINK_TYPE_NOT_APPLICABLE",
+            "AMDSMI_LINK_TYPE_UNKNOWN",
+            "AMDSMI_LINK_TYPE_NUMA",
+            "AMDSMI_LINK_TYPE_XNUMA",
+        ]:
             cond = FAIL
         link_types.append((member.name, amdsmi.AmdSmiLinkType(member.value), cond))
 
@@ -756,19 +785,24 @@ def _parse_x_pattern(argv=None):
     return None
 
 
+def _filter_suite(suite, keep):
+    """Return a copy of *suite* holding only the tests whose id satisfies *keep*."""
+    filtered = unittest.TestSuite()
+    for test in suite:
+        if isinstance(test, unittest.TestSuite):
+            filtered.addTest(_filter_suite(test, keep))
+        elif keep(test.id()):
+            filtered.addTest(test)
+    return filtered
+
+
 def _filter_suite_exclude(suite, pattern):
     """Return a copy of *suite* with every test whose id contains *pattern* removed.
 
     unittest's ``-k`` can only include matching tests; this provides the inverse so
     callers can run everything except, e.g., the performance suites (``-x performance``).
     """
-    filtered = unittest.TestSuite()
-    for test in suite:
-        if isinstance(test, unittest.TestSuite):
-            filtered.addTest(_filter_suite_exclude(test, pattern))
-        elif pattern not in test.id():
-            filtered.addTest(test)
-    return filtered
+    return _filter_suite(suite, lambda test_id: pattern not in test_id)
 
 
 def run_test_dir(subdir, title, top_level_dir):
@@ -800,6 +834,15 @@ def run_test_dir(subdir, title, top_level_dir):
         pattern="test_*.py",
         top_level_dir=top_level_dir,
     )
+    # testNamePatterns is Python 3.7+; 3.6 ignores it and would run every test.
+    if k_pattern and sys.version_info < (3, 7):
+        suite = _filter_suite(
+            suite,
+            lambda test_id: (
+                test_id.startswith("unittest.loader.")
+                or fnmatch.fnmatchcase(test_id, f"*{k_pattern}*")
+            ),
+        )
 
     # -x/--exclude drops any test whose id contains the substring (the inverse of
     # -k), e.g. run everything but the perf suites with `-x performance`.
@@ -1464,11 +1507,25 @@ class Common:
             print(f"{status_msg}", flush=True)
         return status_ret
 
+    @classmethod
+    def for_unit_tests(cls, verbosity=None):
+        """A Common carrying only what the status helpers read, so no device is touched.
+
+        For tests that call the Python wrapper with the ctypes layer mocked: they have
+        no processors to enumerate but still want ``expect_status`` and ``status_sweep``.
+        *verbosity* defaults to the level parsed from the command line.
+        """
+        common = object.__new__(cls)
+        common.error_map = ERROR_MAP
+        common.verbose = verbose if verbosity is None else verbosity
+        common._status_failures = None
+        return common
+
     # TODO(amdsmi_team): migrate the suite off check_ret, which tolerates NOT_SUPPORTED,
     # NOT_YET_IMPLEMENTED and NO_HSMP_MSG_SUP for every call no matter what the caller
     # expected. test_set_gpu_power_profile & test_gpu_counter are the first conversions.
     @contextlib.contextmanager
-    def expect_status(self, msg, accept):
+    def expect_status(self, msg, accept=None, raises=None):
         """Judge one amdsmi call against the statuses the caller declares correct.
 
         Nothing is tolerated implicitly, unlike ``check_ret``: a status outside
@@ -1480,6 +1537,14 @@ class Common:
             with self.common.expect_status(msg, accept):
                 amdsmi.amdsmi_set_gpu_power_profile(gpu, 0, mask)
 
+        The Python wrapper rejects a bad argument with AmdSmiParameterException
+        before any C call, so no status exists to judge. Pass *raises* instead, the
+        exception type (or tuple of types) the call must raise; returning normally
+        or raising anything else fails::
+
+            with self.common.expect_status(msg, raises=amdsmi.AmdSmiParameterException):
+                amdsmi.amdsmi_set_npm_limit("not-a-node-handle", 100)
+
         An open ``status_sweep`` collects the failure and reports every one at
         the end. Without one, it is raised here.
 
@@ -1487,14 +1552,25 @@ class Common:
             msg (str): header printed above the verdict, and the name a sweep
                 reports the call under. Keep it specific.
             accept (str | list): every status treated as correct, as
-                ``AMDSMI_STATUS_*`` names or AmdSmiStatus members.
+                ``AMDSMI_STATUS_*`` names or AmdSmiStatus members. Pass
+                ``amdsmi.AmdSmiStatus.SUCCESS`` for a call that must succeed. Exactly
+                one of *accept* and *raises* is required.
+            raises (type | tuple): exception type(s) the call must raise, for a
+                call that is rejected before it has a status.
 
         Raises:
             AssertionError: when no sweep is open to collect the failure.
-            ValueError: when *accept* names a status outside AMDSMI_STATUS_*.
-            Exception: anything the block raised without a status code, which is
-                a bug in the test body rather than an API result.
+            ValueError: when *accept* names a status outside AMDSMI_STATUS_*, or
+                not exactly one of *accept* and *raises* is given.
+            Exception: with *accept*, anything the block raised without a status
+                code, which is a bug in the test body rather than an API result.
         """
+        if (accept is None) == (raises is None):
+            raise ValueError("expect_status needs exactly one of accept or raises")
+        if raises is not None:
+            with self._expect_exception(msg, raises):
+                yield
+            return
         outcome = self._new_status_outcome(msg, accept)
         try:
             yield
@@ -1505,6 +1581,36 @@ class Common:
         else:
             self._record_returned_status(outcome)
         self._print_status_outcome(outcome)
+        if outcome.failed:
+            self._note_status_failure(outcome)
+
+    @contextlib.contextmanager
+    def _expect_exception(self, msg, raises):
+        """``expect_status`` for a call judged by the exception type it raises."""
+        expected = raises if isinstance(raises, tuple) else (raises,)
+        outcome = types.SimpleNamespace(
+            msg=msg,
+            status_code=None,
+            status_name=None,
+            accepted=[exc.__name__ for exc in expected],
+            failed=False,
+            exception=None,
+        )
+        try:
+            yield
+        except expected as exc:
+            outcome.status_name = f"raised {type(exc).__name__}"
+        except Exception as exc:
+            outcome.status_name = f"raised {type(exc).__name__}"
+            outcome.failed = True
+            outcome.exception = exc
+        else:
+            outcome.status_name = "returned without raising"
+            outcome.failed = True
+        verdict = "TEST FAILURE" if outcome.failed else "TEST SUCCESS"
+        lines = [f"{msg}\n\t{verdict}, AMDSMI API {outcome.status_name}"]
+        lines += [f"\t              AMDSMI API Accepted {name}" for name in outcome.accepted]
+        self.print("\n".join(lines))
         if outcome.failed:
             self._note_status_failure(outcome)
 
@@ -1556,7 +1662,9 @@ class Common:
         plural = "call" if len(collected) == 1 else "calls"
         lines = [f"{len(collected)} {plural} did not return an accepted status:"]
         for out in collected:
-            lines.append(f"  {out.msg.strip().rstrip(':')} -> {out.status_code} {out.status_name}")
+            # An exception outcome has no status code, only what was raised.
+            got = " ".join(filter(None, (out.status_code, out.status_name)))
+            lines.append(f"  {out.msg.strip().rstrip(':')} -> {got}")
             lines.append(f"      accepted: {', '.join(out.accepted)}")
         return AssertionError("\n".join(lines))
 

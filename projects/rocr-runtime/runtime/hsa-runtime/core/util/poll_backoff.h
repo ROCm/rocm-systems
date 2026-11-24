@@ -30,13 +30,14 @@ namespace core {
 inline constexpr unsigned int kPollNapFloorUs = 20;
 
 // Ceiling (microseconds) for the polling-fallback nap. AsyncEventsLoop only
-// naps when the runtime has no interrupt-backed signal events at all
-// (g_use_interrupt_wait == false, e.g. the WSL/dxg thunk). Every signal is
-// polling-only there, so the only cost of a long nap is observation latency of
-// the napping wait itself. Where interrupts are available, AsyncEventsLoop must
-// not back off at all: a single EopEvent-less signal can force the shared
-// async-events thread into polling, and napping would delay the unrelated
-// interrupt-backed handlers batched onto that same thread.
+// naps up to this ceiling when the runtime has no interrupt-backed signal
+// events at all (g_use_interrupt_wait == false, e.g. the WSL/dxg thunk). Every
+// signal is polling-only there, so the only cost of a long nap is observation
+// latency of the napping wait itself. Where interrupts are available this
+// ceiling must not be used: an EopEvent-less signal can force the shared
+// async-events thread into polling, and a long nap would delay the unrelated
+// interrupt-backed handlers batched onto that same thread (AsyncEventsLoop
+// caps that case at 200us).
 //
 // BusyWaitSignal::WaitRelaxed with HSA_ENABLE_YIELDING_POLL=1 naps up to this
 // ceiling regardless of g_use_interrupt_wait: it runs on the waiting thread

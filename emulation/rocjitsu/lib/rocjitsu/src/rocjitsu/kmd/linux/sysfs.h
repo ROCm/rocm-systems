@@ -32,6 +32,7 @@ public:
     // Identification
     uint32_t gpu_id = 0;
     uint32_t gfx_target_version = 0;
+    [[nodiscard]] uint32_t clock_frequency_mhz() const;
     uint32_t vendor_id = 0x1002; // AMD
     uint32_t device_id = 0;
     uint32_t family_id = 0;
@@ -138,8 +139,9 @@ public:
 
   /// @brief Generate the sysfs topology directory for multiple GPUs.
   /// @param gpus Per-GPU configurations. Each gets its own topology node.
-  /// @param publish_peer_links Whether the GPU peers have qualified executable routes.
-  /// An explicit false writes zero P2P counts so libhsakmt cannot infer peers.
+  /// @param publish_peer_links Whether to publish legacy XGMI discovery metadata.
+  /// Explicit manifests leave this false even when their modeled local routes
+  /// execute; zero P2P counts prevent libhsakmt from inferring native XGMI.
   std::string generate(const std::vector<GpuInfo> &gpus, bool publish_peer_links = true);
 
   /// @brief Get the generated KFD topology path (empty if not yet generated).
@@ -175,7 +177,8 @@ private:
 
 /// @brief Convert a parsed KFD device config into generated sysfs GPU metadata.
 Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t num_xcc,
-                                    const config::PciDeviceConfig &pci = {});
+                                    const config::PciDeviceConfig &pci = {},
+                                    bool publish_peer_links = true);
 
 } // namespace rocjitsu
 

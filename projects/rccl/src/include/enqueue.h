@@ -31,6 +31,9 @@ int64_t ncclParamAllgathervEnable();
 int64_t ncclParamP2pLLThreshold();
 int64_t ncclParamChunkSize();
 int64_t ncclParamLaunchOrderImplicit();
+bool rcclP2pDirectApi(ncclFunc_t collAPI);
+bool rcclP2pTaskUsesCe(struct ncclComm* comm, ncclFunc_t collAPI, int peer);
+int rcclP2pTaskConnIndex(struct ncclComm* comm, ncclFunc_t collAPI, int peer);
 
 ncclResult_t ncclGroupJobLaunch(struct ncclIntruQueue<struct ncclAsyncJob, &ncclAsyncJob::next>* asyncJobsMain,
                                 volatile bool* groupAbortFlag);
@@ -40,6 +43,7 @@ ncclResult_t ncclTaskPreTuning(struct ncclComm* comm, struct ncclRawTaskQueue* r
 ncclResult_t ncclTaskPrepare(struct ncclComm* comm, ncclSimInfo_t* simInfo);
 
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize);
+ncclResult_t ncclEnqueueCommCheck(struct ncclComm* comm, const char* opName);
 ncclResult_t ncclEnqueueCheck(struct ncclInfo* info);
 ncclResult_t ncclPlannerSetCapturingGraph(struct ncclComm* comm, struct ncclInfo* info);
 ncclResult_t ncclLaunchPrepare(struct ncclComm* comm);
@@ -103,20 +107,24 @@ inline ncclResult_t rcclAddonLaunch(const struct ncclInfo& info, LaunchFn&& laun
   return result;
 }
 
-ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t* simInfo);
+ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool* needConnect, bool* needGenkDevComm,
+                              ncclSimInfo_t* simInfo);
 ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm);
 
 // Defined via NCCL_PARAM in enqueue.cc.
 int64_t ncclParamLaunchOrderImplicit();
 
 static inline size_t ncclFuncSendCount(ncclFunc_t func, int nRanks, size_t count) {
-  return func == ncclFuncReduceScatter ? nRanks * count : count;
+  if (func == ncclFuncReduceScatter || func == ncclFuncAlltoAll) return nRanks * count;
+  return count;
 }
 static inline size_t ncclFuncRecvCount(ncclFunc_t func, int nRanks, size_t count) {
-  return func == ncclFuncAllGather ? nRanks * count : count;
+  if (func == ncclFuncAllGather || func == ncclFuncAlltoAll) return nRanks * count;
+  return count;
 }
 rccl_static inline size_t ncclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count) {
-  return func == ncclFuncAllGather || func == ncclFuncReduceScatter ? nRanks * count : count;
+  if (func == ncclFuncAllGather || func == ncclFuncReduceScatter || func == ncclFuncAlltoAll) return nRanks * count;
+  return count;
 }
 // Match the public AllGather in-place convention: each rank's input aliases
 // its own slice of the aggregate receive buffer.

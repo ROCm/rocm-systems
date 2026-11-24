@@ -6,7 +6,7 @@
 
 #include "common/x86_64/alu_x86_64_v3.h"
 #include "math/rcp_iflag.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_math.h"
 
 #include <immintrin.h>
 #include <stdint.h>

@@ -32,13 +32,15 @@ namespace addr_calc {
 /// A load returns zero for a clear DWORD and a store skips it. Byte and halfword
 /// loads use one destination DWORD.
 inline void scalar_buffer_load_mask(ScalarMemState *state, int64_t offset, uint64_t bound) {
-  if (!state)
+  if (!state) {
     return;
+  }
   state->load_dword_mask = 0;
   for (uint32_t i = 0; i < state->num_dwords; ++i) {
     const int64_t part = offset + i * 4;
-    if (part >= 0 && static_cast<uint64_t>(part) < bound)
+    if (part >= 0 && static_cast<uint64_t>(part) < bound) {
       state->load_dword_mask |= 1u << i;
+    }
   }
 }
 
@@ -61,8 +63,9 @@ inline std::optional<uint64_t> scalar_buffer_address(Wavefront &wf, uint32_t sel
                                                      ScalarMemState *state, uint64_t align_mask,
                                                      uint64_t size_align_mask) {
   auto records = try_read_scalar_selector(wf, selector + 2);
-  if (!records)
+  if (!records) {
     return std::nullopt;
+  }
   const uint64_t stride = (base >> 48) & 0x3fff;
   scalar_buffer_load_mask(state, offset, (*records * (stride ? stride : 1)) & ~size_align_mask);
   const uint64_t address = buffer_virtual_address(base + offset) & ~align_mask;
@@ -108,44 +111,57 @@ std::optional<uint64_t> smem_calculate_address(const SmemInst &inst, amdgpu::Wav
                                                ScalarMemState *state = nullptr,
                                                bool check_negative_offset = false) {
   constexpr uint64_t kDwordMask = ~0x3ULL;
-  auto base = amdgpu::try_read_scalar_selector64(wf, inst.sbase * 2);
-  if (!base)
+  // SBASE names a pair. Scalar buffer bounds can reside in separate storage.
+  uint32_t base_selector = inst.sbase * 2;
+  if (base_selector <= kScalarSgprSelectorLast &&
+      wf.exceeds_rounded_sgpr_allocation(base_selector, 2)) {
+    base_selector = 0;
+  }
+  auto base = amdgpu::try_read_scalar_selector64(wf, base_selector);
+  if (!base) {
     return std::nullopt;
+  }
   *base &= kDwordMask;
 
   int64_t inst_offset = 0;
-  if (inst.imm)
+  if (inst.imm) {
     inst_offset = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
+  }
 
   uint64_t reg_offset = 0;
   if (inst.soffset_en || !inst.imm) {
     const uint32_t selector = inst.soffset_en ? inst.soffset : inst.offset & 0x7F;
     auto value = amdgpu::try_read_scalar_selector(wf, selector);
-    if (!value)
+    if (!value) {
       return std::nullopt;
+    }
     reg_offset = *value;
   }
-  if (smem_is_scratch_op(inst.op))
+  if (smem_is_scratch_op(inst.op)) {
     reg_offset *= 64;
+  }
   // Qualify the non-buffer rule before alignment, so compensating low bits
   // cannot turn a nonnegative raw offset into a warning.
   if (check_negative_offset && !gfx9_smem_is_buffer_op(inst.op) &&
-      inst_offset + static_cast<int64_t>(reg_offset) < 0)
+      inst_offset + static_cast<int64_t>(reg_offset) < 0) {
     wf.report_undefined_behavior("negative combined scalar-memory offset");
+  }
   inst_offset &= ~0x3LL;
   reg_offset &= kDwordMask;
   // A DWORD is in range only if all four bytes are, so round the bound down.
-  if (gfx9_smem_is_buffer_op(inst.op))
-    return scalar_buffer_address(wf, inst.sbase * 2, *base, inst_offset + reg_offset, state,
+  if (gfx9_smem_is_buffer_op(inst.op)) {
+    return scalar_buffer_address(wf, base_selector, *base, inst_offset + reg_offset, state,
                                  /*align_mask=*/3, /*size_align_mask=*/3);
+  }
   const uint64_t addr = *base + inst_offset + reg_offset;
   util::Logger::vm([&](auto &os) {
     static thread_local uint64_t smem_count = 0;
-    if (++smem_count <= 12 || (smem_count % 240) == 0)
+    if (++smem_count <= 12 || (smem_count % 240) == 0) {
       os << std::format("SMEM #{} op={} base={:#x} inst_off={:#x} reg_off={:#x} imm={} soff_en={} "
                         "addr={:#x} raw_off={}",
                         smem_count, inst.op, *base, inst_offset, reg_offset, inst.imm,
                         inst.soffset_en, addr, inst.offset);
+    }
   });
   return addr;
 }
@@ -160,33 +176,43 @@ template <typename DsInst>
 void ds_calculate_addresses(const DsInst &inst, amdgpu::Wavefront &wf, VectorMemState &d) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
+  if (d.gds) {
+    exec &= -exec;
+  }
   d.lane_mask = exec;
   d.exec_mask = exec;
   d.wf_size = wf.wf_size();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
+  const uint32_t ds_base = d.ds_base(wf.lds_base());
   uint32_t offset = (static_cast<uint32_t>(inst.offset1) << 8) | inst.offset0;
   RegisterAccess regs(cu);
-  auto addr_region = regs.read_vgpr_region(wf.vgpr_alloc().base + inst.addr, 1, exec);
+  uint32_t addr = wf.vgpr_alloc().base + inst.addr;
+  addr = wf.ds_source_vgpr(addr);
+  auto addr_region = regs.read_vgpr_region(addr, 1, exec);
   auto maybe_addresses = addr_region.lanes();
-  if (maybe_addresses.failed())
+  if (maybe_addresses.failed()) {
     return;
+  }
   const std::span<const uint32_t> addresses = maybe_addresses.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
-    d.per_lane_addr[lane] = addresses[lane] + offset + wf.lds_base();
+    }
+    d.per_lane_addr[lane] = ds_address(ds_base, addresses[lane], offset);
   }
   util::Logger::vm([&](auto &os) {
     static uint64_t ds_addr_count = 0;
-    if (++ds_addr_count > 100)
+    if (++ds_addr_count > 100) {
       return;
+    }
     os << std::format("DS addr: {} wg[{}] wf[{}] v{}+{:#x} lds_base={} is_load={}",
                       wf.cu().full_path(), wf.wg_id(), wf.wf_id(), inst.addr, offset, wf.lds_base(),
                       d.is_load);
     for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
-      if (!(d.lane_mask & (1ULL << ln)))
+      if (!(d.lane_mask & (1ULL << ln))) {
         continue;
+      }
       os << std::format(" L{}:{:#x}", ln, d.per_lane_addr[ln]);
     }
   });

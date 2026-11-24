@@ -6,11 +6,11 @@
 // SIMD kernels live in x86_64/, and bit-exact dot arithmetic lives in dot/.
 
 #include "common/float_formats.h"
-#include "common/internal.h"
 #include "common/packed16.h"
 #include "common/simd.h"
 #include "dot/dot.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
+#include "wmma/flags.h"
 #include "wmma/layout.h"
 
 #include <stdint.h>
@@ -39,10 +39,14 @@ int wmma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4) &&
-      rocjitsu::arith::is_exact(flags)) {
-    rocjitsu::arith::wmma_exact_x86_64_v4<Bf16, WaveSize, false, Packed>(
-        uint32_t(instruction_flags), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    if (rocjitsu::arith::is_exact(flags)) {
+      rocjitsu::arith::wmma_exact_x86_64_v4<Bf16, WaveSize, false, Packed>(
+          uint32_t(instruction_flags), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
+    } else {
+      rocjitsu::arith::wmma_loose_x86_64_v4<Bf16, WaveSize, false, Packed>(
+          uint32_t(instruction_flags), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
+    }
     return RJ_ARITH_SUCCESS;
   }
 #endif

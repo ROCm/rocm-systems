@@ -49,16 +49,19 @@ const std::string CONFIG_RDNA4_PATH = std::string(CONFIG_DIR) + "/gfx1201_r9700.
 [[nodiscard]] testing::AssertionResult
 config_json_with_num_threads(std::string &json, const std::string &path, uint32_t num_threads) {
   std::ifstream input(path);
-  if (!input.is_open())
+  if (!input.is_open()) {
     return testing::AssertionFailure() << "Failed to open config: " + path;
+  }
 
   json.clear();
   std::array<char, 4096> buffer;
-  while (input.read(buffer.data(), buffer.size()))
+  while (input.read(buffer.data(), buffer.size())) {
     json.append(buffer.data(), input.gcount());
+  }
   json.append(buffer.data(), input.gcount());
-  if (input.bad() || !input.eof())
+  if (input.bad() || !input.eof()) {
     return testing::AssertionFailure() << "Failed to read config: " << path;
+  }
 
   // Shipped configs indent top-level keys by two spaces; table entries are nested.
   const std::string field = "\n  \"num_threads\":";
@@ -67,15 +70,17 @@ config_json_with_num_threads(std::string &json, const std::string &path, uint32_
   const size_t field_pos = json.find(field);
   if (field_pos != std::string::npos) {
     const size_t value_end = json.find_first_of(",}\n", field_pos + field.size());
-    if (value_end == std::string::npos)
+    if (value_end == std::string::npos) {
       return testing::AssertionFailure() << "Unterminated num_threads field: " + path;
+    }
     json.replace(field_pos, value_end - field_pos, replacement);
     return testing::AssertionSuccess();
   }
 
   const size_t brace_pos = json.find('{');
-  if (brace_pos == std::string::npos)
+  if (brace_pos == std::string::npos) {
     return testing::AssertionFailure() << "Config is not a JSON object: " + path;
+  }
 
   json.insert(brace_pos + 1, replacement + ",");
   return testing::AssertionSuccess();
@@ -92,8 +97,9 @@ struct PartitionedTopology {
 util::FailureOr<PartitionedTopology>
 build_partitioned_topology(uint32_t num_threads, util::DiagnosticEmitter emit_error) {
   auto loaded_result = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, emit_error);
-  if (loaded_result.failed())
+  if (loaded_result.failed()) {
     return util::Result::failure();
+  }
   auto loaded = std::move(loaded_result).value();
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
@@ -101,11 +107,13 @@ build_partitioned_topology(uint32_t num_threads, util::DiagnosticEmitter emit_er
 
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  if (loaded.wire_links(engine->topology(), emit_error).failed())
+  if (loaded.wire_links(engine->topology(), emit_error).failed()) {
     return util::Result::failure();
+  }
   bool partitioned = amdgpu::partition_topology_by_xcds(engine->topology(), soc, num_threads);
-  if (engine->create(emit_error).failed())
+  if (engine->create(emit_error).failed()) {
     return util::Result::failure();
+  }
 
   return PartitionedTopology{std::move(loaded), soc, memory, std::move(engine), partitioned};
 }
@@ -115,11 +123,13 @@ void expect_subtree_partition(simdojo::Component *component, simdojo::PartitionI
   EXPECT_EQ(component->partition_id(), expected) << component->full_path();
 
   auto *composite = dynamic_cast<simdojo::CompositeComponent *>(component);
-  if (!composite)
+  if (!composite) {
     return;
+  }
 
-  for (const auto &child : composite->children())
+  for (const auto &child : composite->children()) {
     expect_subtree_partition(child.get(), expected);
+  }
 }
 
 TEST(PartitioningConfigTest, ReportsDirectoryReadFailure) {
@@ -233,8 +243,9 @@ constexpr Choice kAdditiveHelperChoices[] = {{1, 1, 0},  {1, 2, 0},  {1, 4, 0}, 
   util::FailureOr<config::ExecutionThreadAllocation> result =
       config::resolve_execution_threads(request, host_threads, xcds, dispatch_capacities,
                                         async_supported, choices, diagnostic.emitter(), clocked);
-  if (result.failed())
+  if (result.failed()) {
     return testing::AssertionFailure() << diagnostic.message();
+  }
   output = std::move(result).value();
   return testing::AssertionSuccess();
 }
@@ -377,8 +388,8 @@ TEST(ExecutionThreadBudgetTest, ConfigLoadingPropagatesInvalidAllocation) {
 }
 
 TEST(ExecutionThreadBudgetTest, AutomaticPlansStayWithinAffinityAndCapacity) {
-  for (uint32_t host : {0u, 1u, 2u, 3u, 4u, 7u, 8u, 16u, 24u, 32u, 64u, 128u})
-    for (uint32_t xcds : {1u, 2u, 3u, 4u, 7u, 8u, 16u, 32u})
+  for (uint32_t host : {0u, 1u, 2u, 3u, 4u, 7u, 8u, 16u, 24u, 32u, 64u, 128u}) {
+    for (uint32_t xcds : {1u, 2u, 3u, 4u, 7u, 8u, 16u, 32u}) {
       for (bool async : {false, true}) {
         const std::array capacities{2u, 36u};
         config::ExecutionThreadAllocation plan;
@@ -393,6 +404,8 @@ TEST(ExecutionThreadBudgetTest, AutomaticPlansStayWithinAffinityAndCapacity) {
         EXPECT_LE(used, std::max(host, 1u));
         EXPECT_LE(plan.engines, xcds);
       }
+    }
+  }
 }
 
 TEST(ExecutionThreadBudgetTest, MetadataMatchesBuiltTopology) {
@@ -486,9 +499,10 @@ TEST(ExecutionThreadBudgetTest, ShippedServerChoicesAndExplicitSerial) {
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config_from_string(json, loaded, 64));
   EXPECT_EQ(loaded.execution_threads.engines, 8u);
-  EXPECT_EQ(loaded.execution_threads.dispatch, (std::vector<uint32_t>{17}));
-  EXPECT_EQ(loaded.execution_threads.helpers, 8u);
-  EXPECT_EQ(loaded.async_resources->helpers(), 8u);
+  EXPECT_EQ(loaded.execution_threads.dispatch, (std::vector<uint32_t>{25}));
+  EXPECT_EQ(loaded.execution_threads.helpers, 0u);
+  ASSERT_NE(loaded.async_resources, nullptr);
+  EXPECT_EQ(loaded.async_resources->helpers(), 0u);
   json.insert(json.find('{') + 1, R"("cpu_dispatch_threads":1,"async_helper_threads":0,)");
   config::LoadedConfig serial;
   ASSERT_TRUE(test::load_valid_config_from_string(json, serial, 64));
@@ -518,8 +532,8 @@ TEST(ExecutionThreadBudgetTest, LaunchBudgetReplanesOnlyTheConfigItRewrites) {
   ASSERT_TRUE(test::load_valid_config_from_string(json, untouched, 64));
   EXPECT_EQ(untouched.cpu_thread_budget, 32u);
   EXPECT_EQ(untouched.execution_threads.engines, 8u);
-  EXPECT_EQ(untouched.execution_threads.dispatch, (std::vector<uint32_t>{17}));
-  EXPECT_EQ(untouched.execution_threads.helpers, 8u);
+  EXPECT_EQ(untouched.execution_threads.dispatch, (std::vector<uint32_t>{25}));
+  EXPECT_EQ(untouched.execution_threads.helpers, 0u);
 }
 
 TEST(ExecutionThreadBudgetTest, PresetsKeepSiblingTablesConsistent) {
@@ -554,8 +568,9 @@ TEST(ExecutionThreadBudgetTest, MultiGpuPresetsKeepSerialDefaultsAndAllowDispatc
     auto settings = std::move(settings_result).value();
     EXPECT_EQ(settings.request.engines, 1u);
     EXPECT_EQ(settings.request.dispatch, 1u);
-    for (auto choice : settings.choices)
+    for (auto choice : settings.choices) {
       EXPECT_EQ(choice.engines, 1u) << name;
+    }
     for (uint32_t budget = 1; budget <= 64; ++budget) {
       settings.request.budget = budget;
       config::ExecutionThreadAllocation plan;
@@ -594,11 +609,15 @@ TEST(ExecutionThreadBudgetTest, OlderCdnaPresetsUseDispatchWorkers) {
     ASSERT_TRUE(resolve_valid_execution_threads(serial, settings, 64));
     EXPECT_EQ(serial.engines, 1u);
     EXPECT_EQ(serial.dispatch, (std::vector<uint32_t>{1}));
-    settings.request.budget = 32;
-    config::ExecutionThreadAllocation parallel;
-    ASSERT_TRUE(resolve_valid_execution_threads(parallel, settings, 64));
-    EXPECT_EQ(parallel.engines, settings.xcds);
-    EXPECT_EQ(parallel.dispatch, (std::vector<uint32_t>{25 - parallel.engines}));
+    for (uint32_t budget : {32u, 64u}) {
+      settings.request.budget = budget;
+      config::ExecutionThreadAllocation parallel;
+      ASSERT_TRUE(resolve_valid_execution_threads(parallel, settings, 64));
+      EXPECT_EQ(parallel.engines, settings.xcds);
+      const uint32_t ceiling = settings.xcds == 1 ? 32 : 48;
+      const uint32_t total = std::min(budget, ceiling);
+      EXPECT_EQ(parallel.dispatch, (std::vector<uint32_t>{total + 1 - parallel.engines}));
+    }
   }
 }
 
@@ -633,9 +652,10 @@ TEST(ExecutionThreadBudgetTest, DisablingHelpersKeepsSynchronousServerGranules) 
     ASSERT_TRUE(settings_result.succeeded()) << settings_diagnostic.message();
     auto settings = std::move(settings_result).value();
     settings.request.helpers = 0;
-    for (Case c : {Case{1, 1, 1}, Case{2, 1, 2}, Case{4, cdna5 ? 1u : 2u, cdna5 ? 4u : 3u},
-                   Case{8, 2, 7}, Case{16, 8, 9}, Case{24, 8, 17}, Case{32, 8, cdna5 ? 25u : 17u},
-                   Case{40, 8, cdna5 ? 33u : 17u}, Case{48, 8, cdna5 ? 33u : 17u}}) {
+    for (Case c :
+         {Case{1, 1, 1}, Case{2, 1, 2}, Case{4, cdna5 ? 1u : 2u, cdna5 ? 4u : 3u}, Case{8, 2, 7},
+          Case{16, 8, 9}, Case{24, 8, 17}, Case{32, 8, 25}, Case{40, 8, cdna5 ? 33u : 25u},
+          Case{48, 8, 41}, Case{56, 8, cdna5 ? 49u : 41u}, Case{64, 8, cdna5 ? 57u : 41u}}) {
       SCOPED_TRACE(name);
       SCOPED_TRACE(c.budget);
       settings.request.budget = c.budget;
@@ -648,28 +668,32 @@ TEST(ExecutionThreadBudgetTest, DisablingHelpersKeepsSynchronousServerGranules) 
   }
 }
 
-TEST(ExecutionThreadBudgetTest, ServerPresetsAddHelpersWithoutDisplacingCpuWorkers) {
+TEST(ExecutionThreadBudgetTest, ServerPresetsDoNotReserveUnusedHelpers) {
   for (const char *name : {"gfx950_mi350x.json", "gfx950_mi350x_kmd.json", "gfx1250_mi455x.json"}) {
     SCOPED_TRACE(name);
     const bool cdna5 = std::string_view(name) == "gfx1250_mi455x.json";
-    const uint32_t max_cpu = cdna5 ? 40 : 24;
+    const uint32_t max_cpu = cdna5 ? 64u : 48u;
     util::StringDiagnostic settings_diagnostic;
     auto settings_result = config::load_execution_thread_settings(
         std::string(CONFIG_DIR) + "/" + name, rocjitsu::kEmbeddedSchema,
         settings_diagnostic.emitter());
     ASSERT_TRUE(settings_result.succeeded()) << settings_diagnostic.message();
     auto settings = std::move(settings_result).value();
+    ASSERT_FALSE(settings.choices.empty());
+    EXPECT_EQ(settings.choices.back().helpers, 0u);
     for (uint32_t affinity = 1; affinity <= 128; ++affinity) {
       config::ExecutionThreadAllocation plan;
       ASSERT_TRUE(resolve_valid_execution_threads(plan, settings, affinity));
       ASSERT_EQ(plan.dispatch.size(), 1u);
       const auto cpu = plan.engines + plan.dispatch[0] - 1;
       EXPECT_LE(cpu, std::min(affinity, max_cpu));
-      EXPECT_LE(cpu + plan.helpers, std::min(affinity, max_cpu + 8));
-      EXPECT_EQ(plan.helpers, affinity >= max_cpu + 8 ? 8u : 0u);
+      EXPECT_EQ(plan.helpers, 0u);
       if (affinity >= 24) {
         EXPECT_EQ(plan.engines, 8u);
-        const uint32_t expected_cpu = cdna5 && affinity >= 32 ? (affinity >= 40 ? 40 : 32) : 24;
+        uint32_t expected_cpu = std::min(affinity / 8 * 8, max_cpu);
+        if (!cdna5 && expected_cpu == 40) {
+          expected_cpu -= 8;
+        }
         EXPECT_EQ(cpu, expected_cpu);
       }
     }
@@ -680,8 +704,8 @@ TEST(ExecutionThreadBudgetTest, ServerPresetsAddHelpersWithoutDisplacingCpuWorke
     settings.request.budget = max_cpu + 8;
     config::ExecutionThreadAllocation helper_budget;
     ASSERT_TRUE(resolve_valid_execution_threads(helper_budget, settings, 128));
-    EXPECT_EQ(helper_budget.helpers, 8u);
-    settings.request.helpers = 0;
+    EXPECT_EQ(helper_budget.helpers, 0u);
+    settings.request.helpers = 8; // Explicit requests also remain inactive.
     config::ExecutionThreadAllocation disabled;
     ASSERT_TRUE(resolve_valid_execution_threads(disabled, settings, 128));
     EXPECT_EQ(disabled.engines, 8u);
@@ -713,8 +737,9 @@ TEST(XcdPartitioningTest, EightThreadsMapsEachCdna4XcdToItsOwnPartition) {
   ASSERT_EQ(topology.engine->topology().partitions().size(), 8u);
   ASSERT_EQ(topology.soc->num_xcds(), 8u);
 
-  for (uint32_t i = 0; i < topology.soc->num_xcds(); ++i)
+  for (uint32_t i = 0; i < topology.soc->num_xcds(); ++i) {
     expect_subtree_partition(topology.soc->xcd(i), i);
+  }
 }
 
 TEST(XcdPartitioningTest, FourThreadsDistributesCdna4XcdsRoundRobinWithoutSplits) {
@@ -727,8 +752,9 @@ TEST(XcdPartitioningTest, FourThreadsDistributesCdna4XcdsRoundRobinWithoutSplits
   ASSERT_EQ(topology.engine->topology().partitions().size(), 4u);
   ASSERT_EQ(topology.soc->num_xcds(), 8u);
 
-  for (uint32_t i = 0; i < topology.soc->num_xcds(); ++i)
+  for (uint32_t i = 0; i < topology.soc->num_xcds(); ++i) {
     expect_subtree_partition(topology.soc->xcd(i), i % 4);
+  }
 }
 
 TEST(XcdPartitioningTest, ClampPartitionCountUsesAllNonNullSocs) {
@@ -764,8 +790,9 @@ TEST(XcdPartitioningTest, ZeroPartitionsIsNoopWithoutManualPartitions) {
   EXPECT_FALSE(amdgpu::partition_topology_by_xcds(topology, soc, 0));
   EXPECT_TRUE(topology.partitions().empty());
   EXPECT_EQ(soc->partition_id(), simdojo::INVALID_PARTITION_ID);
-  for (uint32_t i = 0; i < soc->num_xcds(); ++i)
+  for (uint32_t i = 0; i < soc->num_xcds(); ++i) {
     EXPECT_EQ(soc->xcd(i)->partition_id(), simdojo::INVALID_PARTITION_ID);
+  }
 }
 
 TEST(XcdPartitioningTest, NoXcdsIsNoopWithoutManualPartitions) {
@@ -788,8 +815,9 @@ TEST(XcdPartitioningTest, SinglePartitionAssignsAllComponentsToZero) {
 
   ASSERT_TRUE(amdgpu::partition_topology_by_xcds(topology, soc, 1));
   ASSERT_EQ(topology.partitions().size(), 1u);
-  for (auto *component : topology.collect_all_components())
+  for (auto *component : topology.collect_all_components()) {
     EXPECT_EQ(component->partition_id(), 0u) << component->full_path();
+  }
 }
 
 TEST(XcdPartitioningTest, ThreeThreadsDistributesCdna4XcdsRoundRobinWithoutSplits) {
@@ -802,8 +830,9 @@ TEST(XcdPartitioningTest, ThreeThreadsDistributesCdna4XcdsRoundRobinWithoutSplit
   ASSERT_EQ(topology.engine->topology().partitions().size(), 3u);
   ASSERT_EQ(topology.soc->num_xcds(), 8u);
 
-  for (uint32_t i = 0; i < topology.soc->num_xcds(); ++i)
+  for (uint32_t i = 0; i < topology.soc->num_xcds(); ++i) {
     expect_subtree_partition(topology.soc->xcd(i), i % 3);
+  }
 }
 
 TEST(XcdPartitioningTest, SpanOverMultipleSocsUsesGlobalXcdIndex) {
@@ -826,8 +855,9 @@ TEST(XcdPartitioningTest, SpanOverMultipleSocsUsesGlobalXcdIndex) {
   uint32_t global_xcd_index = 0;
   for (auto *soc : socs) {
     ASSERT_EQ(soc->num_xcds(), 8u);
-    for (uint32_t i = 0; i < soc->num_xcds(); ++i, ++global_xcd_index)
+    for (uint32_t i = 0; i < soc->num_xcds(); ++i, ++global_xcd_index) {
       expect_subtree_partition(soc->xcd(i), global_xcd_index % 3);
+    }
   }
 }
 
@@ -849,8 +879,9 @@ TEST(XcdPartitioningTest, RejectsSocOutsideTopologyWithoutChangingPartitionState
   EXPECT_TRUE(topology.partitions().empty());
   for (SoC *soc : socs) {
     EXPECT_EQ(soc->partition_id(), simdojo::INVALID_PARTITION_ID);
-    for (uint32_t i = 0; i < soc->num_xcds(); ++i)
+    for (uint32_t i = 0; i < soc->num_xcds(); ++i) {
       EXPECT_EQ(soc->xcd(i)->partition_id(), simdojo::INVALID_PARTITION_ID);
+    }
   }
 }
 
@@ -864,8 +895,9 @@ TEST(XcdPartitioningTest, NonXcdComponentsStayOnPartitionZero) {
   EXPECT_EQ(topology.soc->partition_id(), 0u);
   EXPECT_EQ(topology.memory->partition_id(), 0u);
 
-  for (uint32_t i = 0; i < topology.soc->num_iods(); ++i)
+  for (uint32_t i = 0; i < topology.soc->num_iods(); ++i) {
     expect_subtree_partition(topology.soc->iod(i), 0);
+  }
 }
 
 TEST(XcdPartitioningTest, VmStepRejectsMultipleEnginePartitions) {
@@ -1044,18 +1076,18 @@ TEST(XcdPartitioningTest, LoaderResolvesZeroThreadsAcrossExtraGpuBuilds) {
 // than in a CI grep keeps every config covered as new ones are added.
 TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
   const std::set<std::string> kPinnedConfigs = {
-      "gfx950_mi350x_kmd_2gpu.json",
-      "gfx950_mi355x_kmd_2gpu.json",
-      "gfx1250_mi455x_kmd_4gpu.json",
-      "gfx1250_mi455x_kmd_2node_net.json",
+      "gfx950_mi350x_kmd_2gpu.json",      "gfx950_mi355x_kmd_2gpu.json",
+      "gfx1250_mi455x_kmd_4gpu.json",     "gfx1250_mi455x_kmd_2node_net.json",
+      "gfx1250_mi455x_4gpu_scaleup.json", "gfx1250_mi455x_kmd_4node_2gpu_if.json",
   };
   std::set<std::string> saw_pinned_configs;
   uint32_t configs_checked = 0;
 
   for (const std::filesystem::directory_entry &entry :
        std::filesystem::directory_iterator(CONFIG_DIR)) {
-    if (!entry.is_regular_file() || entry.path().extension() != ".json")
+    if (!entry.is_regular_file() || entry.path().extension() != ".json") {
       continue;
+    }
 
     std::ifstream input(entry.path());
     ASSERT_TRUE(input.is_open()) << entry.path();
@@ -1077,7 +1109,8 @@ TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
       // turns a pin of 0 -- which opts back into the default -- into 1 as
       // surely as a real pin does. At 64 the config has to carry the literal 1.
       config::LoadedConfig pinned;
-      if (entry.path().filename() == "gfx1250_mi455x_kmd_2node_net.json") {
+      if (entry.path().filename() == "gfx1250_mi455x_kmd_2node_net.json" ||
+          entry.path().filename() == "gfx1250_mi455x_kmd_4node_2gpu_if.json") {
         ASSERT_TRUE(test::load_valid_config_for_node(entry.path().string(), pinned, "node0",
                                                      /*host_threads=*/64));
       } else {
@@ -1097,24 +1130,32 @@ TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
   EXPECT_GT(configs_checked, 1u);
 }
 
-TEST(XcdPartitioningTest, CApiDefaultsToOnePartitionPerXcdAndRuns) {
-  rj_vm_t *raw_vm = nullptr;
-  testing::internal::CaptureStderr();
-  const rj_status_t status = rj_vm_create(CONFIG_PATH.c_str(), RJ_VM_MODE_DEFAULT, &raw_vm);
-  const std::string warning = testing::internal::GetCapturedStderr();
-  ASSERT_EQ(status, ROCJITSU_STATUS_SUCCESS);
-  ASSERT_NE(raw_vm, nullptr);
-  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
+TEST(XcdPartitioningTest, CApiDefaultsFollowExecutionThreadBudgetAndRuns) {
+  // The shipped allocation table shares the budget with dispatch workers; a
+  // two-CPU host gets one engine, not min(host CPUs, XCDs). Pin the budgets so
+  // both small CI runners and large developer machines exercise this rule.
+  for (const auto &[budget, engines] :
+       {std::pair{1u, 1u}, std::pair{2u, 1u}, std::pair{4u, 2u}, std::pair{16u, 8u}}) {
+    SCOPED_TRACE(budget);
+    std::string json;
+    ASSERT_TRUE(config_json_with_num_threads(json, CONFIG_PATH, 0));
+    json.insert(json.find('{') + 1, "\"cpu_thread_budget\":" + std::to_string(budget) + ",");
+    rj_vm_t *raw_vm = nullptr;
+    testing::internal::CaptureStderr();
+    const rj_status_t status = rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_vm);
+    const std::string warning = testing::internal::GetCapturedStderr();
+    ASSERT_EQ(status, ROCJITSU_STATUS_SUCCESS);
+    ASSERT_NE(raw_vm, nullptr);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
 
-  // Resolving the default is not a clamp, so it must not warn.
-  EXPECT_EQ(warning.find("num_threads clamped"), std::string::npos);
-  EXPECT_EQ(vm->engine_config.num_threads, amdgpu::default_xcd_partition_count(vm->soc));
-
-  ASSERT_NE(vm->soc, nullptr);
-  for (uint32_t i = 0; i < vm->soc->num_xcds(); ++i)
-    expect_subtree_partition(vm->soc->xcd(i), i % vm->engine_config.num_threads);
-
-  EXPECT_EQ(rj_vm_run(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+    EXPECT_EQ(warning.find("num_threads clamped"), std::string::npos);
+    EXPECT_EQ(vm->engine_config.num_threads, engines);
+    ASSERT_NE(vm->soc, nullptr);
+    for (uint32_t i = 0; i < vm->soc->num_xcds(); ++i) {
+      expect_subtree_partition(vm->soc->xcd(i), i % engines);
+    }
+    EXPECT_EQ(rj_vm_run(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+  }
 }
 
 TEST(XcdPartitioningTest, CApiClampsMultiGpuThreadsToTotalXcdCountAndRuns) {
@@ -1136,8 +1177,9 @@ TEST(XcdPartitioningTest, CApiClampsMultiGpuThreadsToTotalXcdCountAndRuns) {
     auto *soc = vm->vm->soc(gpu);
     ASSERT_NE(soc, nullptr);
     ASSERT_EQ(soc->num_xcds(), 8u);
-    for (uint32_t i = 0; i < soc->num_xcds(); ++i, ++global_xcd_index)
+    for (uint32_t i = 0; i < soc->num_xcds(); ++i, ++global_xcd_index) {
       expect_subtree_partition(soc->xcd(i), global_xcd_index % vm->engine_config.num_threads);
+    }
   }
 
   EXPECT_EQ(rj_vm_run(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);

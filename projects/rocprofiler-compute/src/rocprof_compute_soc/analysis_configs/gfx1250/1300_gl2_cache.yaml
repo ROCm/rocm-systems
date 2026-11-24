@@ -11,13 +11,7 @@
 Panel Config:
   id: 1300
   title: GL2 Cache
-  description: |-
-    GL2 Cache metrics for gfx1250. GL2 is the shared L2 cache consisting of
-    GL2A (arbiter) and GL2C (cache partitions). This panel covers GL2A
-    utilization, GL2C-EA stalls, latencies, and bandwidth by destination type.
-
   data source:
-
   - metric_table:
       id: 1301
       title: GL2A Processing

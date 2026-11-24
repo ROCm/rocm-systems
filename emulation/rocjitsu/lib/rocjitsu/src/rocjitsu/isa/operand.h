@@ -173,8 +173,9 @@ public:
   /// Validate encoding constraints deferred until the complete instruction is
   /// decoded. Literal sentinels may replace their provisional operands first.
   Result validate_encoding(const util::DiagnosticEmitter &emit_error = {}) const {
-    if (encoding_error_ == EncodingError::None) [[likely]]
+    if (encoding_error_ == EncodingError::None) [[likely]] {
       return Result::success();
+    }
     return emit_encoding_error(emit_error);
   }
 
@@ -316,6 +317,8 @@ public:
 
   /// @brief Assign the GFX12 VGPR high-bank role for this operand.
   void set_vgpr_msb_role(amdgpu::VgprMsbRole role) { vgpr_msb_role_ = role; }
+  void set_vopd_source() { vopd_source_ = true; }
+  [[nodiscard]] bool is_vopd_source() const { return vopd_source_; }
 
   /// @brief Return the GFX12 VGPR high-bank role for this operand.
   [[nodiscard]] amdgpu::VgprMsbRole vgpr_msb_role() const { return vgpr_msb_role_; }
@@ -324,20 +327,24 @@ public:
   /// @details Maps AMDGPU encoding ranges to a unified index space:
   ///   VGPRs 0-255, AccVGPRs 256-511. Only valid when is_vgpr() is true.
   [[nodiscard]] uint16_t unified_vgpr_index() const {
-    if (encoding_value_ >= 768)
+    if (encoding_value_ >= 768) {
       return static_cast<uint16_t>(encoding_value_ - 512);
-    if (encoding_value_ >= 512)
+    }
+    if (encoding_value_ >= 512) {
       return static_cast<uint16_t>(encoding_value_ - 256);
-    if (encoding_value_ >= 256)
+    }
+    if (encoding_value_ >= 256) {
       return static_cast<uint16_t>(encoding_value_ - 256);
+    }
     return static_cast<uint16_t>(encoding_value_);
   }
 
   /// @brief Decoded VGPR identity, with ACC in the unified 256+ register range.
   /// @details The current wave's MSB/GPR_IDX state is deliberately not applied here.
   [[nodiscard]] std::optional<RegisterRef> decoded_vgpr() const {
-    if (!decoded_vgpr_width_)
+    if (!decoded_vgpr_width_) {
       return std::nullopt;
+    }
     return RegisterRef{RegClass::VGPR, decoded_vgpr_index_, decoded_vgpr_width_};
   }
 
@@ -430,8 +437,9 @@ public:
   /// delegated operands). Kernels gate SIMD fast paths on this predicate; if
   /// any source/dest reports false, the kernel falls back to its scalar loop.
   virtual bool simd_capable() const {
-    if (delegate_)
+    if (delegate_) {
       return delegate_->simd_capable();
+    }
     return false;
   }
 
@@ -450,17 +458,20 @@ private:
       delegate_->read_lane_chunk(wf, lane_base, count, out);
       return;
     }
-    for (uint32_t i = 0; i < count; ++i)
+    for (uint32_t i = 0; i < count; ++i) {
       out[i] = read_lane(wf, lane_base + i);
+    }
   }
 
   /// @brief Apply masked write of `vals[0..count)` to lanes
   /// `[lane_base, lane_base + count)`. Bit `i` of `mask` enables lane `i`.
   virtual void write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
                                 const uint32_t *vals, uint64_t mask) const {
-    for (uint32_t i = 0; i < count; ++i)
-      if (mask & (1ULL << i))
+    for (uint32_t i = 0; i < count; ++i) {
+      if (mask & (1ULL << i)) {
         write_lane(wf, lane_base + i, vals[i]);
+      }
+    }
   }
 
 public:
@@ -515,6 +526,7 @@ protected:
   LaneInlineFloatFormat lane_inline_float_format_ : 2 = LaneInlineFloatFormat::F16;
   bool preserve_unwritten_bytes_ : 1 = false;
   EncodingError encoding_error_ = EncodingError::None;
+  bool vopd_source_ = false;
 
 private:
   // Private SIMD fast-path backend for RegisterAccess.
@@ -525,8 +537,9 @@ private:
   // as the operand-specific storage/notification backend for that facade.
 
   std::optional<uint32_t> simd_vgpr_base(const amdgpu::Wavefront &wf) const {
-    if (delegate_)
+    if (delegate_) {
       return delegate_->simd_vgpr_base(wf);
+    }
     return simd_vgpr_base_impl(wf);
   }
 
@@ -535,8 +548,9 @@ private:
   }
 
   amdgpu::ConstVgprStorage simd_vgpr_storage(const amdgpu::Wavefront &wf) const {
-    if (delegate_)
+    if (delegate_) {
       return delegate_->simd_vgpr_storage(wf);
+    }
     return simd_vgpr_storage_impl(wf);
   }
 
@@ -578,8 +592,9 @@ private:
   }
 
   amdgpu::ConstVgprStoragePair64 simd_vgpr_storage64(const amdgpu::Wavefront &wf) const {
-    if (delegate_)
+    if (delegate_) {
       return delegate_->simd_vgpr_storage64(wf);
+    }
     return simd_vgpr_storage64_impl(wf);
   }
 
@@ -682,8 +697,9 @@ private:
 /// decoded width.
 [[nodiscard]] inline RegisterRef wave_sized_register(const Operand &op, RegisterRef ref,
                                                      uint32_t wave_size) {
-  if (wave_size == 32 && ref.cls == RegClass::SGPR && op.is_wave_mask())
+  if (wave_size == 32 && ref.cls == RegClass::SGPR && op.is_wave_mask()) {
     ref.width = 1;
+  }
   return ref;
 }
 
@@ -775,8 +791,9 @@ private:
 class ScopedOperandDelegate {
 public:
   ScopedOperandDelegate(Operand &operand, Operand *delegate) noexcept {
-    if (!delegate)
+    if (!delegate) {
       return;
+    }
     operand_ = &operand;
     previous_ = operand.delegate();
     operand.set_delegate(delegate);
@@ -795,8 +812,9 @@ public:
 
 private:
   void restore() noexcept {
-    if (!operand_)
+    if (!operand_) {
       return;
+    }
     operand_->set_delegate(previous_);
     --active_count();
     operand_ = nullptr;

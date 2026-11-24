@@ -4,12 +4,12 @@
 // Always-true and always-false comparisons, including CMPX forms.
 // Owns public entry points and their validation/dispatch policy.
 
-// RDNA3 constant predicates follow rocjitsu execute_v_cmp_[ft]_* for results.
-// Floating exception reporting needs a separate RDNA3 model.
+// Constant predicates follow rocjitsu execute_v_cmp_[ft]_* for results.
+// Floating exception reporting is unsupported for these unsuffixed APIs.
 
-#include "common/internal.h"
+#include "common/validation.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_compare.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -33,7 +33,7 @@ int compare(uint64_t flags, Mask exec_mask, uint64_t mode, Mask *d, bool value, 
   const uint32_t known = floating ? RJ_ARITH_ALU_CLAMP | RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_ABS_B |
                                         RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_NEG_B |
                                         (bits == 16 ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B : 0)
-                                  : 0;
+                                  : (bits == 16 ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B : 0);
   const uint64_t fp = floating ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
                                      RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_IEEE_MODE
                                : 0;
@@ -758,4 +758,196 @@ int rj_arith_v_cmpx_t_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instr
     return error;
   }
   return compare(flags, exec_mask, instruction_flags, d, true, 64, true, trapsts);
+}
+
+// Write the Wave32 mask for false; inactive lane bits are zero.
+// Errors preserve outputs.
+int rj_arith_v_cmp_f_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                             uint32_t *d, const uint32_t *const *, const uint32_t *const *) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return compare(flags, exec_mask, instruction_flags, d, false, 16);
+}
+
+// Write the Wave32 mask for true; inactive lane bits are zero.
+// Errors preserve outputs.
+int rj_arith_v_cmp_t_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                             uint32_t *d, const uint32_t *const *, const uint32_t *const *) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return compare(flags, exec_mask, instruction_flags, d, true, 16);
+}
+
+// Write the Wave32 mask for false; inactive lane bits are zero.
+// Errors preserve outputs.
+int rj_arith_v_cmpx_f_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *d, const uint32_t *const *, const uint32_t *const *) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return compare(flags, exec_mask, instruction_flags, d, false, 16);
+}
+
+// Write the Wave32 mask for true; inactive lane bits are zero.
+// Errors preserve outputs.
+int rj_arith_v_cmpx_t_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *d, const uint32_t *const *, const uint32_t *const *) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return compare(flags, exec_mask, instruction_flags, d, true, 16);
+}
+
+// Write the Wave32 mask for false; inactive lane bits are zero.
+// Errors preserve outputs.
+int rj_arith_v_cmp_f_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                             uint32_t *d, const uint32_t *const *, const uint32_t *const *) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return compare(flags, exec_mask, instruction_flags, d, false, 16);
+}
+
+// Write the Wave32 mask for true; inactive lane bits are zero.
+// Errors preserve outputs.
+int rj_arith_v_cmp_t_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                             uint32_t *d, const uint32_t *const *, const uint32_t *const *) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return compare(flags, exec_mask, instruction_flags, d, true, 16);
+}
+
+// Write the Wave32 mask for false; inactive lane bits are zero.
+// Errors preserve outputs.
+int rj_arith_v_cmpx_f_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *d, const uint32_t *const *, const uint32_t *const *) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return compare(flags, exec_mask, instruction_flags, d, false, 16);
+}
+
+// Write the Wave32 mask for true; inactive lane bits are zero.
+// Errors preserve outputs.
+int rj_arith_v_cmpx_t_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *d, const uint32_t *const *, const uint32_t *const *) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return compare(flags, exec_mask, instruction_flags, d, true, 16);
+}
+
+// Write the Wave64 mask for false; inactive lane bits are zero.
+// Errors preserve outputs.
+int rj_arith_v_cmp_f_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                             uint64_t *d, const uint32_t *const *, const uint32_t *const *) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return compare(flags, exec_mask, instruction_flags, d, false, 16);
+}
+
+// Write the Wave64 mask for true; inactive lane bits are zero.
+// Errors preserve outputs.
+int rj_arith_v_cmp_t_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                             uint64_t *d, const uint32_t *const *, const uint32_t *const *) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return compare(flags, exec_mask, instruction_flags, d, true, 16);
+}
+
+// Write the Wave64 mask for false; inactive lane bits are zero.
+// Errors preserve outputs.
+int rj_arith_v_cmpx_f_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint64_t *d, const uint32_t *const *, const uint32_t *const *) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return compare(flags, exec_mask, instruction_flags, d, false, 16);
+}
+
+// Write the Wave64 mask for true; inactive lane bits are zero.
+// Errors preserve outputs.
+int rj_arith_v_cmpx_t_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint64_t *d, const uint32_t *const *, const uint32_t *const *) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return compare(flags, exec_mask, instruction_flags, d, true, 16);
+}
+
+// Write the Wave64 mask for false; inactive lane bits are zero.
+// Errors preserve outputs.
+int rj_arith_v_cmp_f_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                             uint64_t *d, const uint32_t *const *, const uint32_t *const *) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return compare(flags, exec_mask, instruction_flags, d, false, 16);
+}
+
+// Write the Wave64 mask for true; inactive lane bits are zero.
+// Errors preserve outputs.
+int rj_arith_v_cmp_t_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                             uint64_t *d, const uint32_t *const *, const uint32_t *const *) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return compare(flags, exec_mask, instruction_flags, d, true, 16);
+}
+
+// Write the Wave64 mask for false; inactive lane bits are zero.
+// Errors preserve outputs.
+int rj_arith_v_cmpx_f_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint64_t *d, const uint32_t *const *, const uint32_t *const *) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return compare(flags, exec_mask, instruction_flags, d, false, 16);
+}
+
+// Write the Wave64 mask for true; inactive lane bits are zero.
+// Errors preserve outputs.
+int rj_arith_v_cmpx_t_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint64_t *d, const uint32_t *const *, const uint32_t *const *) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return compare(flags, exec_mask, instruction_flags, d, true, 16);
 }

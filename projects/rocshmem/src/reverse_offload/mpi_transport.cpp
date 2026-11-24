@@ -337,6 +337,12 @@ static MPI_Datatype convertType(ro_net_types type) {
       return MPI_LONG_LONG;
     case RO_NET_SHORT:
       return MPI_SHORT;
+    case RO_NET_UNSIGNED_SHORT:
+      return MPI_UNSIGNED_SHORT;
+    case RO_NET_UNSIGNED_INT:
+      return MPI_UNSIGNED;
+    case RO_NET_UNSIGNED_LONG_LONG:
+      return MPI_UNSIGNED_LONG_LONG;
     case RO_NET_LONG_DOUBLE:
       return MPI_LONG_DOUBLE;
     case RO_NET_CHAR:
@@ -345,6 +351,9 @@ static MPI_Datatype convertType(ro_net_types type) {
       return MPI_SIGNED_CHAR;
     case RO_NET_UNSIGNED_CHAR:
       return MPI_UNSIGNED_CHAR;
+    case RO_NET_HALF:
+    case RO_NET_BFLOAT16:
+      LOG_ERROR_EXIT("proxy::mpi (half, bfloat) Type not supported with RO backend");
     default:
       LOG_ERROR_ABORT("proxy::mpi\tUnknown rocSHMEM type MPI conversion %d", type);
   }
@@ -453,7 +462,7 @@ void MPITransport::alltoall(void *dst, void *src, int size, int win_id,
   NET_CHECK(mpilib_ftable_.Type_size(mpi_type, &type_size));
 
   if (dst == src) {
-    LOG_ERROR_EXIT("IN_PLACE option not supported for alltoall in the RO rocSHMEM conduit");
+    LOG_ERROR_EXIT("IN_PLACE option not supported for alltoall in the RO rocSHMEM backend");
   }
 
   std::vector<MPI_Request> pe_req(pe_size);
@@ -501,7 +510,7 @@ void MPITransport::fcollect(void *dst, void *src, int size, int win_id,
   NET_CHECK(mpilib_ftable_.Type_size(mpi_type, &type_size));
 
   if (dst == src) {
-    LOG_ERROR_EXIT("IN_PLACE option not supported for fcollect in the RO rocSHMEM conduit");
+    LOG_ERROR_EXIT("IN_PLACE option not supported for fcollect in the RO rocSHMEM backend");
   }
 
   std::vector<MPI_Request> pe_req(pe_size);

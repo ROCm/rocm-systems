@@ -7,7 +7,7 @@
 
 #include "benchmark/sampling.h"
 #include "common/cpu.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <atomic>
 #include <chrono>
@@ -25,14 +25,18 @@ namespace rocjitsu::arith::test {
 enum class OperandLayout { Default, Float32Inputs, SignedIntegerInputs, DivisionScaling };
 
 // Stable storage: rows for different CPU/semantics configurations share inputs.
-// Eight VGPRs per operand cover every matrix layout, including gfx11 replication.
+// Sixteen VGPRs cover the K128 and 32-row matrix layouts, including gfx11 replication.
 // The constructor initializes corresponding lane groups identically for gfx11.
 class Operands {
 public:
-  uint32_t data[5][8][64] = {};
-  uint32_t initial_d[8][64] = {};
-  uint32_t *d[8];
-  const uint32_t *a[8], *b[8], *c[8], *index[8];
+  static constexpr int kRegisters = 16;
+  uint32_t data[5][kRegisters][64] = {};
+  uint32_t initial_d[kRegisters][64] = {};
+  uint32_t *d[kRegisters];
+  const uint32_t *a[kRegisters], *b[kRegisters], *c[kRegisters], *index[kRegisters];
+  // E8M0 scales of one, shared by A/B outside the timed arithmetic.
+  uint32_t scale_data[2][64];
+  const uint32_t *scale[2];
   uint32_t status = 0, condition32 = 0, literal = 0;
   uint64_t condition64 = 0;
   int wave = 32;

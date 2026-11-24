@@ -48,31 +48,40 @@ View the help menu of ``rocprof-sys-attach`` using the ``-h`` or ``--help`` opti
 .. code-block:: shell
 
    $ rocprof-sys-attach --help
-   Usage: rocprof-sys-attach -p <pid> [OPTIONS]
+   Usage: rocprof-sys-attach -p <pid>[,<pid>...] [OPTIONS]
 
-   Attach to a running process for profiling.
+   Attach to one or more running processes for profiling.
 
    Options:
-     -p <pid>             Process ID to attach to (required)
+     -p, --pid PID[,PID,...]
+                          Process ID(s) to attach to (required, repeatable;
+                          quote the list if it contains spaces)
      -o, --output PATH    Output path for profiling results
      -F, --format FORMAT[,FORMAT,...]
                           Output format(s): perfetto, rocpd
+     -d, --detach-after SECONDS
+                          Detach from all processes after SECONDS
+                          (non-interactive). When omitted, waits on stdin.
      -h, --help           Show this help message
 
+   Prerequisites:
+     Target processes must be started with ROCP_TOOL_ATTACH=1.
+     Appropriate ptrace permissions are also required.
+
    Environment variables:
-     ROCPROFSYS_OUTPUT_PATH       Output directory for profiling data
-     ROCPROFSYS_TRACE             Enable perfetto trace output
-     ROCPROFSYS_USE_ROCPD         Enable rocpd database output
      ROCPROF_ATTACH_TOOL_LIBRARY  Path to the tool library
 
-   Once attached, press ENTER to detach from the process.
+   Once attached, enter a session id to detach from that process, 'a' to
+   detach from all of them, or ENTER when only one session is left.
 
 Command-line options
 ----------------------------------------
 
-``-p <pid>`` (required)
-   The process ID of the running application to attach to. You can find the PID
-   using tools like ``ps``, ``pgrep``, or ``top``.
+``-p, --pid PID[,PID,...]`` (required)
+   The process ID(s) of the running application(s) to attach to. Multiple PIDs can be
+   given as a comma-separated list, by repeating the option, or both. A PID given more
+   than once is attached to only once. You can find the PID using tools like ``ps``,
+   ``pgrep``, or ``top``.
 
 ``-o, --output PATH``
    Specifies the directory for writing the output of the profiling results. If not specified, the
@@ -86,6 +95,13 @@ Command-line options
      visualized in the `Perfetto UI <https://ui.perfetto.dev>`_.
    * ``rocpd`` - Generates a RocPD SQLite database file (``.db``) for
      programmatic analysis.
+
+``-d, --detach-after SECONDS``
+   Detaches from all attached processes after ``SECONDS`` seconds, without waiting
+   for input (non-interactive). ``SECONDS`` must be a non-negative integer. The
+   timer starts once the attach to every process has been attempted. When this option
+   is omitted, ``rocprof-sys-attach`` waits for input at the session prompt (see
+   `Attaching to multiple processes`_).
 
 Basic usage
 ========================================
@@ -104,7 +120,8 @@ Basic usage
       $ rocprof-sys-attach -p 12345
 
 3. Wait for the desired profiling period you want to capture, then press ENTER to
-   detach and finalize the profiling data.
+   detach and finalize the profiling data. When attached to more than one process,
+   enter a session id or ``a`` instead (see `Attaching to multiple processes`_).
 
 Examples
 ========================================
@@ -175,12 +192,16 @@ Here is a complete workflow for attaching to a running GPU application:
    [rocprof-sys-attach] Output path: ./results
    [rocprof-sys-attach] Output format: perfetto rocpd
    [rocprof-sys-attach] Trying to attach to process 98765
-   [rocprof-sys-attach] Attached to process 98765. Press ENTER to detach.
+   [rocprof-sys-attach] Attached to process 98765 (session 1)
+
+   Active sessions:
+     [1] pid 98765
+   Enter a session id to detach, or 'a' to detach all:
 
    # Let the application run for the profiling period...
    # Press ENTER when ready to stop profiling
 
-   [rocprof-sys-attach] Detached from process 98765
+   [rocprof-sys-attach] Detached from process 98765 (session 1)
    [rocprof-sys-attach] Output written to: ./results
    [rocprof-sys-attach]   - Perfetto trace: perfetto-trace-98765.pftrace
    [rocprof-sys-attach]   - RocPD database: rocpd-98765.db
@@ -188,6 +209,40 @@ Here is a complete workflow for attaching to a running GPU application:
    # View the trace in Perfetto UI
    $ firefox https://ui.perfetto.dev
    # Drag and drop the .pftrace file to visualize
+
+Attaching to multiple processes
+========================================
+
+A single ``rocprof-sys-attach`` invocation can attach to several independent
+processes on the same machine. Each successfully attached process becomes a
+session with its own id:
+
+.. code-block:: shell-session
+
+   $ rocprof-sys-attach -p 101,102,103 -o ./results -F perfetto,rocpd
+
+   Active sessions:
+     [1] pid 101
+     [2] pid 102
+     [3] pid 103
+   Enter a session id to detach, or 'a' to detach all:
+
+At the prompt:
+
+* Enter a session id (for example, ``2``) to detach from that process only. The
+  other processes stay attached and keep being profiled.
+* Enter ``a`` to detach from all remaining processes.
+* Press ENTER to detach when only one session is left. With more than one session
+  left, ENTER only redisplays the list.
+* End of input (for example, ``Ctrl+D``) detaches from all remaining processes.
+
+If detaching from a process fails, its session stays in the list so you can retry.
+
+Each process writes its own output, named after its PID. Keep
+``ROCPROFSYS_USE_PID`` enabled (the default) when attaching to several processes;
+otherwise their output files can share a name and overwrite each other. ``rocprof-sys-attach``
+exits once the last session is detached, with a non-zero exit status if attaching
+to or detaching from any of the processes failed.
 
 Re-attaching to a process
 ========================================
@@ -200,23 +255,35 @@ timestamp directory.
 
    # First profiling session
    $ rocprof-sys-attach -p 98765 -o ./results -F perfetto
-   [rocprof-sys-attach] Attached to process 98765. Press ENTER to detach.
+   [rocprof-sys-attach] Attached to process 98765 (session 1)
+
+   Active sessions:
+     [1] pid 98765
+   Enter a session id to detach, or 'a' to detach all:
    # Press ENTER to detach
-   [rocprof-sys-attach] Detached from process 98765
+   [rocprof-sys-attach] Detached from process 98765 (session 1)
 
    # Second profiling session (same PID)
    $ rocprof-sys-attach -p 98765 -o ./results -F perfetto
-   [rocprof-sys-attach] Attached to process 98765. Press ENTER to detach.
+   [rocprof-sys-attach] Attached to process 98765 (session 1)
+
+   Active sessions:
+     [1] pid 98765
+   Enter a session id to detach, or 'a' to detach all:
    # Press ENTER to detach
-   [rocprof-sys-attach] Detached from process 98765
+   [rocprof-sys-attach] Detached from process 98765 (session 1)
 
 .. note::
 
-   Configuration settings (environment variables, output format, etc.) are
+   Configuration settings (environment variables, output path, etc.) are
    captured during the first attach and persist across re-attach sessions.
    Changing environment variables between sessions has no effect. To profile
    with different settings, restart the application.
 
+   The output format is the exception: each re-attach uses the formats selected
+   with ``-F`` (or ``ROCPROFSYS_TRACE`` / ``ROCPROFSYS_USE_ROCPD``) for that
+   attach, so one session can produce a RocPD database and the next a Perfetto
+   trace. A re-attach without ``-F`` keeps the formats of the previous session.
 Troubleshooting
 ========================================
 

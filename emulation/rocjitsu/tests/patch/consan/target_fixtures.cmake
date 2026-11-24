@@ -31,6 +31,43 @@ foreach(
                 set(_wave_size_options -mno-wavefrontsize64)
             endif()
         endif()
+        math(EXPR _barrier_max_below "${_wave_size} - 1")
+        math(EXPR _barrier_max_above "${_wave_size} + 1")
+        set(_barrier_cases
+            15
+            16
+            17
+            18
+            19
+            20
+            21
+            22
+            23
+            24
+            25
+            26
+            27
+            28
+            29
+            30
+            31
+            32
+            33
+            34
+            35
+            36
+            37
+            38
+            39
+            42
+            barrier-max${_barrier_max_below}
+            barrier-max${_wave_size}
+            barrier-max${_barrier_max_above}
+            no-barrier-max${_wave_size}
+        )
+        if(_gpu STREQUAL "gfx1250")
+            list(APPEND _barrier_cases 9 40 41)
+        endif()
         foreach(
             _case
             IN
@@ -48,6 +85,7 @@ foreach(
                 distant-entry
                 dense-sites
                 ${_names}
+                ${_barrier_cases}
         )
             set(_case_number ${_case})
             set(_layout_options)
@@ -76,6 +114,12 @@ foreach(
             elseif(_case STREQUAL "dense-sites")
                 set(_case_number 2)
                 set(_layout_options -DCONSAN_LDS_ACCESS_PAIRS=256)
+            elseif(_case MATCHES "^barrier-max([0-9]+)$")
+                set(_case_number 15)
+                set(_layout_options -DCONSAN_MAX_WORKGROUP=${CMAKE_MATCH_1})
+            elseif(_case STREQUAL "no-barrier-max${_wave_size}")
+                set(_case_number 1)
+                set(_layout_options -DCONSAN_MAX_WORKGROUP=${_wave_size})
             endif()
             set(_object ${_directory}/${_fixture_name}.o)
             set(_image ${_directory}/${_fixture_name}.hsaco)
@@ -132,6 +176,163 @@ foreach(
             )
             list(APPEND _target_fixtures ${_image})
         endforeach()
+        foreach(
+            _spec
+            IN
+            ITEMS
+                u16:16:0:0:0:0
+                i16:16:1:0:0:0
+                b64:64:0:0:0:0
+                b128:128:0:0:0:0
+                u16-high:16:0:1:0:0
+                i16-high:16:1:1:0:0
+                b64-high:64:0:1:0:0
+                b128-high:128:0:1:0:0
+                b128-alias:128:0:0:1:0
+                b64-collision:64:0:0:0:1
+                excluded-b8:8:0:0:0:0
+                excluded-b96:96:0:0:0:0
+                excluded-partial:17:0:0:0:0
+        )
+            string(REPLACE ":" ";" _parts ${_spec})
+            list(GET _parts 0 _name)
+            if(
+                NOT _gpu STREQUAL "gfx1250"
+                AND (
+                    _name STREQUAL "u16-high"
+                    OR _name STREQUAL "i16-high"
+                    OR _name STREQUAL "b128-high"
+                    OR _name STREQUAL "b64-collision"
+                )
+            )
+                continue()
+            endif()
+            list(GET _parts 1 _width)
+            list(GET _parts 2 _signed)
+            list(GET _parts 3 _high)
+            list(GET _parts 4 _alias)
+            list(GET _parts 5 _collision)
+            set(_object ${_directory}/width-${_name}.o)
+            set(_image ${_directory}/width-${_name}.hsaco)
+            add_custom_command(
+                OUTPUT ${_object}
+                COMMAND
+                    ${CMAKE_CXX_COMPILER_LAUNCHER} ${AMDCXX} -x
+                    assembler-with-cpp -P -target amdgcn-amd-amdhsa
+                    -mcpu=${_gpu} -mcode-object-version=5 ${_wave_size_options}
+                    -DCONSAN_TARGET="amdgcn-amd-amdhsa--${_gpu}"
+                    -DCONSAN_WAVE_SIZE=${_wave_size} -DCONSAN_LEGACY=${_legacy}
+                    -DCONSAN_GFX12=${_gfx12} -DCONSAN_WIDTH=${_width}
+                    -DCONSAN_SIGNED=${_signed} -DCONSAN_HIGH=${_high}
+                    -DCONSAN_ALIAS=${_alias} -DCONSAN_COLLISION=${_collision} -c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native_widths.s -o
+                    ${_object}
+                DEPENDS fixtures/native_widths.s ${AMDCXX}
+                VERBATIM
+            )
+            add_custom_command(
+                OUTPUT ${_image}
+                COMMAND
+                    ${ROCM_PATH}/lib/llvm/bin/ld.lld -shared ${_object} -o
+                    ${_image}
+                DEPENDS ${_object}
+                VERBATIM
+            )
+            list(APPEND _target_fixtures ${_image})
+        endforeach()
+        foreach(
+            _case
+            IN
+            ITEMS 1 2 3 4 5
+        )
+            if(NOT _gpu STREQUAL "gfx1250")
+                continue()
+            endif()
+            set(_object ${_directory}/mixed-${_case}.o)
+            set(_image ${_directory}/mixed-${_case}.hsaco)
+            add_custom_command(
+                OUTPUT ${_object}
+                COMMAND
+                    ${CMAKE_CXX_COMPILER_LAUNCHER} ${AMDCXX} -x
+                    assembler-with-cpp -P -target amdgcn-amd-amdhsa
+                    -mcpu=${_gpu} -mcode-object-version=5 ${_wave_size_options}
+                    -DCONSAN_TARGET="amdgcn-amd-amdhsa--${_gpu}"
+                    -DCONSAN_WAVE_SIZE=${_wave_size} -DCONSAN_LEGACY=${_legacy}
+                    -DCONSAN_GFX12=${_gfx12} -DCONSAN_MIXED=${_case} -c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/mixed_widths.s -o
+                    ${_object}
+                DEPENDS fixtures/mixed_widths.s ${AMDCXX}
+                VERBATIM
+            )
+            add_custom_command(
+                OUTPUT ${_image}
+                COMMAND
+                    ${ROCM_PATH}/lib/llvm/bin/ld.lld -shared ${_object} -o
+                    ${_image}
+                DEPENDS ${_object}
+                VERBATIM
+            )
+            list(APPEND _target_fixtures ${_image})
+        endforeach()
+        set(_group_cases
+            1
+            2
+            3
+            4
+            5
+            6
+        )
+        foreach(_case IN LISTS _group_cases)
+            set(_object ${_directory}/group-${_case}.o)
+            set(_image ${_directory}/group-${_case}.hsaco)
+            add_custom_command(
+                OUTPUT ${_object}
+                COMMAND
+                    ${CMAKE_CXX_COMPILER_LAUNCHER} ${AMDCXX} -x
+                    assembler-with-cpp -P -target amdgcn-amd-amdhsa
+                    -mcpu=${_gpu} -mcode-object-version=5 ${_wave_size_options}
+                    -DCONSAN_TARGET="amdgcn-amd-amdhsa--${_gpu}"
+                    -DCONSAN_WAVE_SIZE=${_wave_size} -DCONSAN_LEGACY=${_legacy}
+                    -DCONSAN_GFX12=${_gfx12} -DCONSAN_GROUP_CASE=${_case} -c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/workgroup_lds.s -o
+                    ${_object}
+                DEPENDS fixtures/workgroup_lds.s ${AMDCXX}
+                VERBATIM
+            )
+            add_custom_command(
+                OUTPUT ${_image}
+                COMMAND
+                    ${ROCM_PATH}/lib/llvm/bin/ld.lld -shared ${_object} -o
+                    ${_image}
+                DEPENDS ${_object}
+                VERBATIM
+            )
+            list(APPEND _target_fixtures ${_image})
+        endforeach()
+        set(_object ${_directory}/native-no-workgroup-id.o)
+        set(_image ${_directory}/native-no-workgroup-id.hsaco)
+        add_custom_command(
+            OUTPUT ${_object}
+            COMMAND
+                ${CMAKE_CXX_COMPILER_LAUNCHER} ${AMDCXX} -x assembler-with-cpp
+                -P -target amdgcn-amd-amdhsa -mcpu=${_gpu}
+                -mcode-object-version=5 ${_wave_size_options}
+                -DCONSAN_GROUP_BYTES=128 -DCONSAN_NO_WORKGROUP_ID=1
+                -DCONSAN_CASE=2 -DCONSAN_LEGACY=${_legacy}
+                -DCONSAN_GFX12=${_gfx12} -DCONSAN_WAVE_SIZE=${_wave_size}
+                -DCONSAN_TARGET="amdgcn-amd-amdhsa--${_gpu}" -c
+                ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native_lds.s -o ${_object}
+            DEPENDS fixtures/native_lds.s ${AMDCXX}
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${_image}
+            COMMAND
+                ${ROCM_PATH}/lib/llvm/bin/ld.lld -shared ${_object} -o ${_image}
+            DEPENDS ${_object}
+            VERBATIM
+        )
+        list(APPEND _target_fixtures ${_image})
     endforeach()
 endforeach()
 add_custom_target(consan_target_fixtures DEPENDS ${_target_fixtures})

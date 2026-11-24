@@ -4,10 +4,10 @@
 // Division operand rescaling and its per-lane scaling-condition output.
 // Owns public entry points and their validation/dispatch policy.
 
-#include "common/internal.h"
+#include "common/validation.h"
 #include "fp/div_scale_impl.h"
 #include "fp/float_output.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <stdint.h>
 
@@ -28,17 +28,14 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d, u
     }
   }
 
-  // The borrowed RDNA3 model covers unscaled results, not active OMOD.
+  // W7900 (gfx1100) captures match this model with active OMOD as well: the scaled value is
+  // rounded first, then OMOD overflows per the guest rounding and flushes denormals to zero.
   if (int error = rocjitsu::arith::validate(flags, mode & ~known,
                                             RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
                                                 RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
                                                 RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_ROUND_MASK |
                                                 (Rdna3 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0))) {
     return error;
-  }
-  if (Rdna3 && (mode & RJ_ARITH_ALU_OMOD_MASK) &&
-      (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
   if (!exec_mask) {
     *condition = 0;
@@ -196,10 +193,7 @@ int rj_arith_v_div_scale_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t in
                                  uint32_t *const *d, uint32_t *condition, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, (!(instruction_flags & RJ_ARITH_ALU_OMOD_MASK) || (flags & RJ_ARITH_FP_IEEE_MODE) ||
-              !(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))
-                 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
-                 : RJ_ARITH_SEMANTICS_LOOSE);
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -215,10 +209,7 @@ int rj_arith_v_div_scale_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  uint32_t *const *d, uint64_t *condition, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, (!(instruction_flags & RJ_ARITH_ALU_OMOD_MASK) || (flags & RJ_ARITH_FP_IEEE_MODE) ||
-              !(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))
-                 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
-                 : RJ_ARITH_SEMANTICS_LOOSE);
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -234,10 +225,7 @@ int rj_arith_v_div_scale_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t in
                                  uint32_t *const *d, uint32_t *condition, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, (!(instruction_flags & RJ_ARITH_ALU_OMOD_MASK) || (flags & RJ_ARITH_FP_IEEE_MODE) ||
-              !(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))
-                 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
-                 : RJ_ARITH_SEMANTICS_LOOSE);
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -253,10 +241,7 @@ int rj_arith_v_div_scale_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  uint32_t *const *d, uint64_t *condition, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, (!(instruction_flags & RJ_ARITH_ALU_OMOD_MASK) || (flags & RJ_ARITH_FP_IEEE_MODE) ||
-              !(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))
-                 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
-                 : RJ_ARITH_SEMANTICS_LOOSE);
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }

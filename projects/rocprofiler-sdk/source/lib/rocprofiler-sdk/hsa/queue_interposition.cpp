@@ -778,13 +778,16 @@ complete_signal_less_dispatch(kfd::signal_less_hub_t::proven&& proven)
                HSA_STATUS_SUCCESS;
     };
 
-    auto _emit = [&_payload](uint64_t start_ns, uint64_t end_ns) {
+    // the ring region the EOP record arrived on is the hardware pipe the kernel ran on
+    auto _emit = [&_payload, _pipe_id = static_cast<int32_t>(proven.region)](uint64_t start_ns,
+                                                                             uint64_t end_ns) {
         kernel_dispatch::emit_kernel_dispatch_record(_payload.tracing_data,
                                                      _payload.callback_record,
                                                      _payload.correlation_id,
                                                      _payload.tid,
                                                      start_ns,
-                                                     end_ns);
+                                                     end_ns,
+                                                     _pipe_id);
     };
 
     // Retires exactly once whatever the outcome, and even if a client callback
@@ -869,7 +872,11 @@ is_dispatch_packet(const rocprofiler_packet& pkt)
     if(_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) return true;
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
     if(_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
-        return pkt.ext_kernel_dispatch.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH;
+        return pkt.ext_kernel_dispatch.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x18
+               || pkt.ext_kernel_dispatch.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD
+#    endif
+            ;
 #endif
     return false;
 }
@@ -1214,7 +1221,11 @@ write_interceptor(Queue*                                queue,
         else if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
         {
             const auto& ext_packet = packets_arr[i].ext_kernel_dispatch;
-            if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+            if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x18
+               || ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD
+#    endif
+            )
             {
                 ++num_dispatch_packets;
             }
@@ -1360,7 +1371,11 @@ write_interceptor(Queue*                                queue,
             if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
             {
                 const auto& ext_packet = _packets[i].ext_kernel_dispatch;
-                if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+                if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x18
+                   || ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD
+#    endif
+                )
                     is_ext_kernel_dispatch = true;
             }
 #endif
@@ -1467,7 +1482,8 @@ write_interceptor(Queue*                                queue,
                                       .group_segment_size   = pkt_info.group_segment_size,
                                       .workgroup_size       = pkt_info.workgroup_size,
                                       .grid_size            = pkt_info.grid_size,
-                                      .reserved_padding     = {0}}};
+                                      .reserved_padding     = {0}},
+                                  ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE};
 
             {
                 auto tracer_data = _packet_data.callback_record;
@@ -1637,6 +1653,37 @@ write_interceptor(Queue*                                queue,
         });
 }
 
+// The CP retires a packet by resetting its slot header to INVALID, promptly, but it
+// may defer the read_dispatch_id write-back: on gfx1250 the read index can stop a
+// few packets short of a finished burst and stay there while the queue is idle. So
+// the window [read index, P) also counts as retired once every slot in it is
+// INVALID. A slot is reused only after the read index has passed it, and the doorbell
+// path invalidates only slots at or past next_scan_pos (== P at the snapshot), so an
+// INVALID header in the window is never an unconsumed packet. Walking back from the
+// newest packet stops at the first one still in flight.
+//
+// Precondition: caller holds state.drain_mu, so neither the ring nor real_rdid (both
+// owned by the runtime's queue) can be freed by a concurrent destroy under the loads.
+bool
+hw_queue_retired_locked(const QueueState& state, uint64_t submit_pos)
+{
+    const uint64_t _rdid = __atomic_load_n(state.real_rdid, __ATOMIC_ACQUIRE);
+    if(hw_queue_drained(_rdid, submit_pos)) return true;
+    // A window longer than the ring would alias slots; only the read index can decide it.
+    if(!state.ring_buf || submit_pos - _rdid > state.ring_size) return false;
+
+    for(uint64_t pos = submit_pos; pos > _rdid; --pos)
+    {
+        const auto* slot_base = static_cast<const char*>(state.ring_buf) +
+                                (((pos - 1) & state.ring_mask) * state.pkt_size);
+        const auto* hdr_ptr = reinterpret_cast<const volatile uint16_t*>(slot_base);
+
+        if((__atomic_load_n(hdr_ptr, __ATOMIC_ACQUIRE) & 0xFFu) !=
+           static_cast<unsigned>(HSA_PACKET_TYPE_INVALID))
+            return false;
+    }
+    return true;
+}
 }  // namespace
 
 // Precondition: caller holds state.drain_mu. gate_lock still orders the
@@ -1656,7 +1703,7 @@ wait_queue_hw_drained_locked(QueueState& state, uint64_t submit_pos, uint64_t de
 {
     if(!state.real_rdid) return true;
 
-    while(!hw_queue_drained(__atomic_load_n(state.real_rdid, __ATOMIC_ACQUIRE), submit_pos))
+    while(!hw_queue_retired_locked(state, submit_pos))
     {
         if(kfd::steady_now_ns() >= deadline_ns) return false;
         std::this_thread::sleep_for(std::chrono::microseconds{200});
@@ -1701,7 +1748,17 @@ drain_all_queues_hw(uint64_t deadline_ns)
         auto _lk = std::unique_lock<std::mutex>{_state->drain_mu};
         if(!_state->rdid_valid) continue;  // destroyed under the same lock; skip
         const uint64_t _P = close_admission_and_snapshot_locked(*_state);
-        wait_queue_hw_drained_locked(*_state, _P, deadline_ns);
+        if(wait_queue_hw_drained_locked(*_state, _P, deadline_ns)) continue;
+
+        // The shared budget ran out with packets still in flight on this queue. Not
+        // a loss by itself -- drain_for_teardown() reports any dispatch it strands --
+        // but it is where teardown spent the close budget.
+        ROCP_INFO << fmt::format(
+            "KFD dispatch-log: teardown HW drain of hsa_queue_t{{.id={}}} reached its deadline "
+            "before packets up to {} retired (read index {})",
+            _state->hsa_queue ? _state->hsa_queue->id : 0,
+            _P,
+            __atomic_load_n(_state->real_rdid, __ATOMIC_ACQUIRE));
     }
 }
 

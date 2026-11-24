@@ -216,6 +216,7 @@ static ncclResult_t ginAnvilDevices(int* ndev) {
 static ncclResult_t ginAnvilGetGinProperties(ncclGinProperties_t* ginProps) {
   ginProps->supportsStrongSignals = true;
   ginProps->supportsVASignals = true;
+  ginProps->barrierOptions = NCCL_GIN_BARRIER_DEFAULT;
   return ncclSuccess;
 }
 
@@ -296,7 +297,7 @@ static bool ginAnvilConnCheckEnabledFromEnv() {
 }
 
 static ncclResult_t ginAnvilConnect(void* ctx, void* handles[], int nranks, int rank, void* listenComm,
-                                    void** collComm) {
+                                    void** collComm, volatile uint32_t* /*abortFlag*/) {
   auto* ictx = (ginAnvilInitCtx*)ctx;
   auto* cctx = new ginAnvilCollCtx{};
   cctx->nranks = nranks;
@@ -383,7 +384,7 @@ static ncclResult_t ginAnvilRegMrSym(void* collComm, void* data, size_t size, in
     auto& refcount = bufferRegRefcount[data];
     if (refcount == 0) {
       int rc =
-        ncclGinAnvilIpcTableRegisterVmm(lsaSelfAddr, size, devr->lsaSelf, devr->lsaSize, (ptrdiff_t)devr->bigSize);
+        ncclGinAnvilIpcTableRegisterVmm(lsaSelfAddr, size, devr->lsaDomainSelf, devr->lsaDomainSize, (ptrdiff_t)devr->bigSize);
       if (rc != 0) {
         WARN("GIN anvil-sdma: IPC table register failed for %p (lsaSelf=%p) size %zu", data, lsaSelfAddr, size);
         bufferRegRefcount.erase(data);
@@ -413,7 +414,7 @@ static ncclResult_t ginAnvilRegMrSym(void* collComm, void* data, size_t size, in
     return ncclSystemError;
   }
   for (int pe = 0; pe < cctx->nranks; pe++) {
-    remote_vas_host[pe] = (uintptr_t)lsaSelfAddr + static_cast<ptrdiff_t>(pe - devr->lsaSelf) * stride;
+    remote_vas_host[pe] = (uintptr_t)lsaSelfAddr + static_cast<ptrdiff_t>(pe - devr->lsaDomainSelf) * stride;
   }
   if (hipMalloc(&mh->remote_vas_dev, sizeof(uintptr_t) * (size_t)cctx->nranks) != hipSuccess ||
       hipMemcpy(mh->remote_vas_dev, remote_vas_host, sizeof(uintptr_t) * (size_t)cctx->nranks, hipMemcpyHostToDevice) !=
@@ -505,7 +506,7 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
   struct ncclComm* comm = ctx->comm;
   struct ncclDevrState* devr = &comm->devrState;
   const int nRanks = ctx->nRanks;
-  const int lsaTeamSize = devr->lsaSize;
+  const int lsaTeamSize = devr->lsaTeamSize;
   const int rank = ctx->rank;
   constexpr int kMaxConnCheckRanks = gin_anvil::conn_check::kMaxConnCheckHostRanks;
   if (nRanks < 2) return ncclSuccess;
@@ -513,17 +514,17 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
     WARN("GIN anvil-sdma: conn-check supports at most %d ranks (got %d)", kMaxConnCheckRanks, nRanks);
     return ncclSystemError;
   }
-  // Conn-check collectives must use the LSA team (lsaRankList/lsaSelf/lsaSize),
+  // Conn-check collectives must use the LSA team (lsaTeamRankList/lsaTeamSelf/lsaTeamSize),
   // not the GIN team's ctx->rank/nRanks on comm->bootstrap. Under
   // NCCL_GIN_CONNECTION_RAIL those spaces differ: bootstrapAllGather writes
   // comm->nRanks entries and bootstrapBarrier addresses world ranks 0..nRanks-1.
   // An invalid team cannot be folded into setupState: that fold is itself an
-  // allgather over this team. lsaSize/lsaSelf are derived identically on every
+  // allgather over this team. lsaTeamSize/lsaTeamSelf are derived identically on every
   // rank by ncclDevrInit, so this bails on all ranks together.
-  if (lsaTeamSize < 1 || lsaTeamSize > kMaxConnCheckRanks || devr->lsaRankList == nullptr || devr->lsaSelf < 0 ||
-      devr->lsaSelf >= lsaTeamSize) {
+  if (lsaTeamSize < 1 || lsaTeamSize > kMaxConnCheckRanks || devr->lsaTeamRankList == nullptr || devr->lsaTeamSelf < 0 ||
+      devr->lsaTeamSelf >= lsaTeamSize) {
     WARN("GIN anvil-sdma: conn-check setup has invalid LSA team (rank %d, lsaSelf=%d, lsaSize=%d, lsaRankList=%p)",
-         rank, devr->lsaSelf, lsaTeamSize, (void*)devr->lsaRankList);
+         rank, devr->lsaTeamSelf, lsaTeamSize, (void*)devr->lsaTeamRankList);
     return ncclSystemError;
   }
   ncclResult_t ret = ncclSuccess;
@@ -550,7 +551,7 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
   int setupState = kSetupReady;
   if (!ginAnvilConnCheckEnabledFromEnv()) {
     setupState = kSetupBypass;
-  } else if (comm->globalGinSupport == NCCL_GIN_CONNECTION_RAIL || nRanks != devr->lsaSize ||
+  } else if (comm->globalGinSupport == NCCL_GIN_CONNECTION_RAIL || nRanks != devr->lsaTeamSize ||
              ctx->nSignals < nRanks) {
     setupState = kSetupSkip;
   }
@@ -571,13 +572,13 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
   }
 
   {
-  const int lsaTeamRank = devr->lsaSelf;
+  const int lsaTeamRank = devr->lsaTeamSelf;
   auto lsaAllgatherInts = [&](int* buf) -> ncclResult_t {
-    return bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaRankList, lsaTeamRank, lsaTeamSize, buf,
+    return bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaTeamRankList, lsaTeamRank, lsaTeamSize, buf,
                                        sizeof(int));
   };
   auto lsaBarrier = [&](int tag) -> ncclResult_t {
-    return bootstrapIntraNodeBarrier(comm->bootstrap, devr->lsaRankList, lsaTeamRank, lsaTeamSize, tag);
+    return bootstrapIntraNodeBarrier(comm->bootstrap, devr->lsaTeamRankList, lsaTeamRank, lsaTeamSize, tag);
   };
 
   std::fill_n(gathered, lsaTeamSize, -1);
@@ -621,11 +622,11 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
         INFO(NCCL_INIT,
              "GIN anvil-sdma: skipping LSA signal conn-check (NCCL_GIN_CONNECTION_RAIL, rank %d, "
              "ginRank=%d, lsaSelf=%d, nRanks=%d, lsaSize=%d)",
-             rank, rank, devr->lsaSelf, nRanks, devr->lsaSize);
-      } else if (nRanks != devr->lsaSize) {
+             rank, rank, devr->lsaTeamSelf, nRanks, devr->lsaTeamSize);
+      } else if (nRanks != devr->lsaTeamSize) {
         INFO(NCCL_INIT,
              "GIN anvil-sdma: skipping LSA signal conn-check (nRanks=%d != lsaSize=%d, rank %d)", nRanks,
-             devr->lsaSize, rank);
+             devr->lsaTeamSize, rank);
       } else {
         INFO(NCCL_INIT,
              "GIN anvil-sdma: skipping LSA signal conn-check (nSignals=%d < nRanks=%d, rank %d)",
@@ -786,16 +787,16 @@ static uintptr_t* ginAnvilBuildSignalPeerAddrs(void* base, int nRanks, int ginRa
 }
 
 // The signal peer table is indexed by GIN peer, but each entry is a slot in this
-// rank's LSA window. Returns the first GIN peer that is not the LSA team member in
+// rank's LSA window. Returns the first GIN peer that is not the LSA domain member in
 // the slot its entry points at, or -1 if every entry is a mapped peer.
 static int ginAnvilFirstSignalPeerOutsideLsa(const struct ncclComm* comm, int nRanks, int ginRank) {
   const struct ncclDevrState* devr = &comm->devrState;
   const long long ginStride =
     comm->globalGinSupport == NCCL_GIN_CONNECTION_RAIL ? comm->contiguousRanksPerHost : 1;
   for (int pe = 0; pe < nRanks; pe++) {
-    const int slot = devr->lsaSelf + (pe - ginRank);
+    const int slot = devr->lsaDomainSelf + (pe - ginRank);
     const long long worldPeer = comm->rank + (long long)(pe - ginRank) * ginStride;
-    if (devr->lsaRankList == nullptr || slot < 0 || slot >= devr->lsaSize || devr->lsaRankList[slot] != worldPeer) {
+    if (devr->lsaDomainRankList == nullptr || slot < 0 || slot >= devr->lsaDomainSize || devr->lsaDomainRankList[slot] != worldPeer) {
       return pe;
     }
   }
@@ -808,10 +809,10 @@ static ncclResult_t ginAnvilRegisterSignalSpan(struct ncclComm* comm, void* span
 
   const int outsidePeer = ginAnvilFirstSignalPeerOutsideLsa(comm, nRanks, ginRank);
   if (outsidePeer >= 0) {
-    WARN("GIN anvil-sdma: GIN peer %d is outside the LSA team of rank %d (ginRank=%d, ginRanks=%d, lsaSelf=%d, "
-         "lsaSize=%d). Anvil SDMA can only signal LSA team peers; set NCCL_LSA_TEAM_SIZE to cover the GIN team "
-         "or select another NCCL_GIN_TYPE.",
-         outsidePeer, comm->rank, ginRank, nRanks, devr->lsaSelf, devr->lsaSize);
+    WARN("GIN anvil-sdma: GIN peer %d is outside the LSA domain of rank %d (ginRank=%d, ginRanks=%d, "
+         "lsaDomainSelf=%d, lsaDomainSize=%d). Anvil SDMA can only signal LSA domain peers; select another "
+         "NCCL_GIN_TYPE.",
+         outsidePeer, comm->rank, ginRank, nRanks, devr->lsaDomainSelf, devr->lsaDomainSize);
     return ncclInvalidUsage;
   }
 
@@ -897,7 +898,7 @@ static ncclResult_t ginAnvilBindContextSignals(ginAnvilGinCtx* ctx, int contextI
   INFO(NCCL_INIT,
        "GIN anvil-sdma: bound LSA signals context=%d slot=%d signals=%p bytes=%zu rank=%d lsaSelf=%d lsaSize=%d "
        "stride=%zu remote[0]=%#lx remote[self]=%#lx",
-       contextId, signalSlot, lsaSelf, bytes, ctx->rank, devr->lsaSelf, devr->lsaSize, (size_t)devr->bigSize,
+       contextId, signalSlot, lsaSelf, bytes, ctx->rank, devr->lsaDomainSelf, devr->lsaDomainSize, (size_t)devr->bigSize,
        (unsigned long)remote0, (unsigned long)remoteSelf);
 
   return ncclSuccess;

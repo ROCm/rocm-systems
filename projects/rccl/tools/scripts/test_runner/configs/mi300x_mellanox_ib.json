@@ -340,6 +340,11 @@
           "name": "GdrFlush_RepeatedFlushBurst",
           "description": "50-iteration GPU recv+flush burst over the dma-buf scratchpad; an intermittent QP async-fatal would surface as a non-success flush. The whole burst must stay clean.",
           "test_filter": "GdrFlushTest.RepeatedFlush_NoFaultBurst"
+        },
+        {
+          "name": "GdrFlush_ScratchpadWriteRoundTrip",
+          "description": "The chained flush must write the host sentinel into the RO=0 scratchpad and read it back. Dropping the write leaves the scratchpad zero.",
+          "test_filter": "GdrFlushTest.ScratchpadWrite_RoundTripsSentinel"
         }
       ]
     },
@@ -397,7 +402,13 @@
         }
       ]
     },
-    "net_transport_eth_multinode": {
+    "net_ib_gdr_flush_cast": {
+      "extends": "net_ib_gdr_flush",
+      "env_variables": {
+        "NCCL_NET": "ib-cast",
+        "NCCL_GDR_FLUSH_DISABLE": "0"
+      }
+    },    "net_transport_eth_multinode": {
       "extends": "default",
       "is_gtest": true,
       "binary": "rccl-UnitTestsMPI",
@@ -1084,6 +1095,11 @@
           "test_filter": "P2pMaxNchannels*"
         },
         {
+          "name": "P2pCeChannelCap",
+          "description": "Copy Engine P2P channel, connection, step-size, and shared-stream policies",
+          "test_filter": "P2pCeChannelCapTests.*"
+        },
+        {
           "name": "RcclAlltoAllDecision",
           "description": "AlltoAll dispatch decision unit tests (DDA, CE, pivot selection)",
           "test_filter": "RcclAlltoAllDecision.*"
@@ -1384,6 +1400,9 @@
         {"name": "Recorder.VerifyMultithread", "description": "Recorder multithreaded verification", "test_filter": "Recorder.VerifyMultithread"},
         {"name": "Recorder.RedOpRecordJson", "description": "Recorder RedOp record JSON output", "test_filter": "Recorder.RedOpRecordJson"},
         {"name": "Recorder.RedOpRecordBinary", "description": "Recorder RedOp record binary output", "test_filter": "Recorder.RedOpRecordBinary"},
+        {"name": "Recorder.LogLevelNonNumeric", "description": "Recorder rejects non-numeric log levels without throwing and keeps the default", "test_filter": "Recorder.LogLevelNonNumeric", "timeout": 60},
+        {"name": "Recorder.LogLevelNumeric", "description": "Recorder accepts a numeric log level and writes named-call records", "test_filter": "Recorder.LogLevelNumeric", "timeout": 60},
+        {"name": "Recorder.LogLevelNumericSuffixRejected", "description": "Recorder rejects numeric log levels with trailing characters and keeps the default", "test_filter": "Recorder.LogLevelNumericSuffixRejected", "timeout": 60},
         {"name": "IbvSymbolsEnv.DefaultLoadsLibrary", "description": "NCCL_IBVERBS_LIB unset loads default libibverbs", "test_filter": "IbvSymbolsEnv.DefaultLoadsLibrary"},
         {"name": "IbvSymbolsEnv.EnvOverrideValidSoname", "description": "NCCL_IBVERBS_LIB override to a valid soname is honored", "test_filter": "IbvSymbolsEnv.EnvOverrideValidSoname"},
         {"name": "IbvSymbolsEnv.BogusPathFallsBackToDefault", "description": "NCCL_IBVERBS_LIB bogus path falls back to default libibverbs", "test_filter": "IbvSymbolsEnv.BogusPathFallsBackToDefault"},
@@ -3826,6 +3845,14 @@
           "test_filter": "DdaIpcMPI_IndexData.ReduceScatter*"
         },
         {
+          "name": "DDA_IpcCommLifecycle_8Ranks",
+          "description": "DDA IPC must come up, with no HIP error pending, on communicators created after another one is destroyed; needs cuMem, which is cached per process",
+          "test_filter": "DdaIpcMPI_CommLifecycle.*",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1"
+          }
+        },
+        {
           "name": "HostApi_DenseAllToAllPutSignal_8Ranks",
           "description": "Dense all-to-all put/signal over the copy engine on 8 ranks; the uneven profile can split batches into chunks, which the 2-rank Host API suites never reach",
           "test_filter": "HostApiTest.DenseAllToAllPutSignal",
@@ -5579,6 +5606,12 @@
       "name": "GDR Flush Flag - 4 QPs split (2-Node, 2-Rank)",
       "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1",
       "config": "net_ib_gdr_flush_flag_4qps_split",
+      "enabled": true
+    },
+    {
+      "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank) (IB-CAST)",
+      "description": "Whitebox coverage of the NET/IB GDR flush: dma-buf and peermem RO=0 scratchpad fence, feature-disabled fallback, and repeated-flush burst",
+      "config": "net_ib_gdr_flush_cast",
       "enabled": true
     },
     {

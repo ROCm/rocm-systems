@@ -12,7 +12,7 @@
 #include "common/registers.h"
 #include "common/semantics.h"
 #include "common/wave.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <algorithm>
 #include <cstring>
@@ -21,6 +21,18 @@
 #include <stdint.h>
 
 namespace rocjitsu::arith::test {
+
+// Some dual wrappers retain numeric-only Compatibility even when the ordinary
+// instruction also reports causes. Adapt the reference without weakening status assertions.
+template <typename Ordinary> auto numeric_compatibility_reference(Ordinary ordinary) {
+  return [ordinary](uint64_t flags, auto... args) {
+    if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+      flags =
+          (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+    }
+    return ordinary(flags, args...);
+  };
+}
 
 // VOPD arithmetic is defined to match its ordinary instruction. Those APIs
 // have independent numerical tests; this checks decoding restrictions, old-D

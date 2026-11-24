@@ -40,6 +40,7 @@
  */
 
 #include <hip/hip_runtime.h>
+#include <hip/hip_version.h>
 
 #include <cstdlib>
 
@@ -142,19 +143,29 @@ __device__ void rocshmem_query_thread(int *provided) {
 #endif
 }
 
-__device__ size_t rocshmem_query_tdm_lds_bytes() {
-#if ROCSHMEM_TDM_ENABLED
-  return tdm::lds_bytes_for_tile(constmem.tdm_tile_bytes);
+__device__ size_t rocshmem_query_lds_stage_bytes() {
+#if ROCSHMEM_LDS_STAGE_ENABLED
+  return lds_stage::lds_bytes_for_tile(constmem.lds_stage_tile_bytes);
 #else
   return 0;
 #endif
 }
 
-__device__ void rocshmem_set_tdm_lds([[maybe_unused]] void *lds,
-                                     [[maybe_unused]] size_t lds_bytes) {
-#if ROCSHMEM_TDM_ENABLED
-  tdm::set_lds(lds, lds_bytes);
+// Deprecated: Use rocshmem_query_lds_stage_bytes() instead
+__device__ size_t rocshmem_query_tdm_lds_bytes() {
+  return rocshmem_query_lds_stage_bytes();
+}
+
+__device__ void rocshmem_set_lds_stage([[maybe_unused]] void *lds,
+                                       [[maybe_unused]] size_t lds_bytes) {
+#if ROCSHMEM_LDS_STAGE_ENABLED
+  lds_stage::set_lds(lds, lds_bytes);
 #endif
+}
+
+// Deprecated: Use rocshmem_set_lds_stage() instead
+__device__ void rocshmem_set_tdm_lds(void *lds, size_t lds_bytes) {
+  rocshmem_set_lds_stage(lds, lds_bytes);
 }
 
 __device__ void rocshmem_wg_finalize() {}
@@ -1322,8 +1333,8 @@ __device__ __forceinline__ void direct_destroy_ctx(rocshmem_ctx_t *ctx) {
 
 __device__ int rocshmem_wg_ctx_create(long options, rocshmem_ctx_t *ctx) {
   LOGD_API("device::wg_ctx_create (options=%ld)", options);
-#if ROCSHMEM_TDM_ENABLED
-  tdm::set_lds(nullptr, 0);
+#if ROCSHMEM_LDS_STAGE_ENABLED
+  lds_stage::set_lds(nullptr, 0);
 #endif
   bool result{true};
   if (get_flat_block_id() == 0) {
@@ -1842,9 +1853,9 @@ __global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
                                                            const void *source,
                                                            size_t size) {
   // rocSHMEM owns this launch (see alltoallmem_on_stream in host.cpp), so it
-  // can safely claim the kernel's whole dynamic LDS for the TDM fast path
+  // can safely claim the kernel's whole dynamic LDS for the LDS-staged copy fast path
   extern __shared__ uint8_t lds[];
-  rocshmem_set_tdm_lds(lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(lds, rocshmem_query_lds_stage_bytes());
   rocshmem_ctx_alltoall_wg<char>(ROCSHMEM_CTX_DEFAULT, team, (char *) dest,
                                  (const char *) source, (int) size);
 }
@@ -1887,9 +1898,9 @@ __global__ ATTR_NO_INLINE void rocshmem_broadcastmem_kernel(
     rocshmem_team_t team, void *dest, const void *source, size_t nelems,
     int pe_root) {
   // rocSHMEM owns this launch (see broadcastmem_on_stream in host.cpp), so it
-  // can safely claim the kernel's whole dynamic LDS for the TDM fast path --
+  // can safely claim the kernel's whole dynamic LDS for the LDS-staged copy fast path --
   extern __shared__ uint8_t lds[];
-  rocshmem_set_tdm_lds(lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(lds, rocshmem_query_lds_stage_bytes());
   rocshmem_broadcast_wg<char>(ROCSHMEM_CTX_DEFAULT, team, (char *) dest, (const char *) source,
                               (int) nelems, pe_root);
 }
@@ -1899,10 +1910,10 @@ __global__ ATTR_NO_INLINE void rocshmem_getmem_kernel(void *dest,
                                                       size_t nelems, int pe) {
   // rocSHMEM owns this launch (see putmem_on_stream/getmem_on_stream in
   // host.cpp), so it can safely claim the kernel's whole dynamic LDS for the
-  // TDM fast path -- this is the same opt-in rocshmem_set_tdm_lds() API any
+  // LDS-staged copy fast path -- this is the same opt-in rocshmem_set_lds_stage() API any
   // user kernel would call, just wired up internally here.
   extern __shared__ uint8_t lds[];
-  rocshmem_set_tdm_lds(lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(lds, rocshmem_query_lds_stage_bytes());
   // Use work-group collective getmem with default context
   rocshmem_getmem_wg(dest, source, nelems, pe);
 }
@@ -1911,7 +1922,7 @@ __global__ ATTR_NO_INLINE void rocshmem_putmem_kernel(void *dest,
                                                       const void *source,
                                                       size_t nelems, int pe) {
   extern __shared__ uint8_t lds[];
-  rocshmem_set_tdm_lds(lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(lds, rocshmem_query_lds_stage_bytes());
   // Use work-group collective putmem with default context
   rocshmem_putmem_wg(dest, source, nelems, pe);
 }
@@ -1920,7 +1931,7 @@ __global__ ATTR_NO_INLINE void rocshmem_putmem_signal_kernel(
     void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe) {
   extern __shared__ uint8_t lds[];
-  rocshmem_set_tdm_lds(lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(lds, rocshmem_query_lds_stage_bytes());
   // Use work-group collective putmem_signal with default context
   rocshmem_putmem_signal_wg(dest, source, nelems, sig_addr, signal, sig_op, pe);
 }
@@ -3132,7 +3143,9 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team, int src_pe,
   RMA_SIGNAL_SUFFIX_DEF(uint32_t, uint32, SUFFIX)              \
   RMA_SIGNAL_SUFFIX_DEF(uint64_t, uint64, SUFFIX)              \
   RMA_SIGNAL_SUFFIX_DEF(size_t, size, SUFFIX)                  \
-  RMA_SIGNAL_SUFFIX_DEF(ptrdiff_t, ptrdiff, SUFFIX)
+  RMA_SIGNAL_SUFFIX_DEF(ptrdiff_t, ptrdiff, SUFFIX)            \
+  RMA_SIGNAL_SUFFIX_DEF(__half, half, SUFFIX)                  \
+  RMA_SIGNAL_SUFFIX_DEF(__hip_bfloat16, bfloat16, SUFFIX)
 
 RMA_SIGNAL_GEN(_wg)
 RMA_SIGNAL_GEN()
@@ -3150,8 +3163,19 @@ INT_REDUCTION_GEN(int)
 INT_REDUCTION_GEN(short)
 INT_REDUCTION_GEN(long)
 INT_REDUCTION_GEN(long long)
+INT_REDUCTION_GEN(char)
+INT_REDUCTION_GEN(signed char)
+INT_REDUCTION_GEN(unsigned char)
+INT_REDUCTION_GEN(unsigned short)
+INT_REDUCTION_GEN(unsigned int)
+INT_REDUCTION_GEN(unsigned long)
+INT_REDUCTION_GEN(unsigned long long)
 FLOAT_REDUCTION_GEN(float)
 FLOAT_REDUCTION_GEN(double)
+FLOAT_REDUCTION_GEN(__half)
+#if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
+FLOAT_REDUCTION_GEN(__hip_bfloat16)
+#endif
 // long double reduction fails. hipcc/device may not support long double.
 // so disable it for now.
 // FLOAT_REDUCTION_GEN(long double)
@@ -3170,6 +3194,8 @@ RMA_GEN(unsigned short)
 RMA_GEN(unsigned int)
 RMA_GEN(unsigned long)
 RMA_GEN(unsigned long long)
+RMA_GEN(__half)
+RMA_GEN(__hip_bfloat16)
 
 AMO_STANDARD_GEN(int)
 AMO_STANDARD_GEN(long)
@@ -3206,13 +3232,37 @@ WAIT_GEN(long long)
 WAIT_GEN(unsigned int)
 WAIT_GEN(unsigned long)
 WAIT_GEN(unsigned long long)
+WAIT_GEN(__half)
+WAIT_GEN(__hip_bfloat16)
 
 INT_REDUCTION_DEF_GEN(int, int)
 INT_REDUCTION_DEF_GEN(short, short)
 INT_REDUCTION_DEF_GEN(long, long)
 INT_REDUCTION_DEF_GEN(long long, longlong)
+INT_REDUCTION_DEF_GEN(char, char)
+INT_REDUCTION_DEF_GEN(signed char, schar)
+INT_REDUCTION_DEF_GEN(unsigned int, uint)
+INT_REDUCTION_DEF_GEN(unsigned char, uchar)
+INT_REDUCTION_DEF_GEN(unsigned short, ushort)
+INT_REDUCTION_DEF_GEN(unsigned long, ulong)
+INT_REDUCTION_DEF_GEN(unsigned long long, ulonglong)
+INT_REDUCTION_DEF_GEN(int8_t, int8)
+INT_REDUCTION_DEF_GEN(int16_t, int16)
+INT_REDUCTION_DEF_GEN(int32_t, int32)
+INT_REDUCTION_DEF_GEN(int64_t, int64)
+INT_REDUCTION_DEF_GEN(uint8_t, uint8)
+INT_REDUCTION_DEF_GEN(uint16_t, uint16)
+INT_REDUCTION_DEF_GEN(uint32_t, uint32)
+INT_REDUCTION_DEF_GEN(uint64_t, uint64)
+INT_REDUCTION_DEF_GEN(size_t, size)
+INT_REDUCTION_DEF_GEN(ptrdiff_t, ptrdiff)
+
 FLOAT_REDUCTION_DEF_GEN(float, float)
 FLOAT_REDUCTION_DEF_GEN(double, double)
+FLOAT_REDUCTION_DEF_GEN(__half, half)
+#if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
+FLOAT_REDUCTION_DEF_GEN(__hip_bfloat16, bfloat16)
+#endif
 // long double reduction fails. hipcc/device may not support long double.
 // so disable it for now.
 // FLOAT_REDUCTION_DEF_GEN(long double, longdouble)
@@ -3241,6 +3291,8 @@ RMA_DEF_GEN(uint32_t, uint32)
 RMA_DEF_GEN(uint64_t, uint64)
 RMA_DEF_GEN(size_t, size)
 RMA_DEF_GEN(ptrdiff_t, ptrdiff)
+RMA_DEF_GEN(__half, half)
+RMA_DEF_GEN(__hip_bfloat16, bfloat16)
 
 AMO_STANDARD_DEF_GEN(int, int)
 AMO_STANDARD_DEF_GEN(long, long)
@@ -3292,15 +3344,37 @@ WAIT_DEF_GEN(unsigned short, ushort)
 WAIT_DEF_GEN(unsigned int, uint)
 WAIT_DEF_GEN(unsigned long, ulong)
 WAIT_DEF_GEN(unsigned long long, ulonglong)
+WAIT_DEF_GEN(int8_t, int8)
+WAIT_DEF_GEN(int16_t, int16)
+WAIT_DEF_GEN(int32_t, int32)
+WAIT_DEF_GEN(int64_t, int64)
+WAIT_DEF_GEN(uint8_t, uint8)
+WAIT_DEF_GEN(uint16_t, uint16)
+WAIT_DEF_GEN(uint32_t, uint32)
 WAIT_DEF_GEN(uint64_t, uint64)
+WAIT_DEF_GEN(size_t, size)
+WAIT_DEF_GEN(ptrdiff_t, ptrdiff)
+WAIT_DEF_GEN(__half, half)
+WAIT_DEF_GEN(__hip_bfloat16, bfloat16)
 
 INT_REDUCTION_ON_STREAM_KERNEL_GEN(int, int)
 INT_REDUCTION_ON_STREAM_KERNEL_GEN(long, long)
 INT_REDUCTION_ON_STREAM_KERNEL_GEN(long long, longlong)
 INT_REDUCTION_ON_STREAM_KERNEL_GEN(short, short)
+INT_REDUCTION_ON_STREAM_KERNEL_GEN(char, char)
+INT_REDUCTION_ON_STREAM_KERNEL_GEN(signed char, schar)
+INT_REDUCTION_ON_STREAM_KERNEL_GEN(unsigned char, uchar)
+INT_REDUCTION_ON_STREAM_KERNEL_GEN(unsigned short, ushort)
+INT_REDUCTION_ON_STREAM_KERNEL_GEN(unsigned int, uint)
+INT_REDUCTION_ON_STREAM_KERNEL_GEN(unsigned long, ulong)
+INT_REDUCTION_ON_STREAM_KERNEL_GEN(unsigned long long, ulonglong)
 
 FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(float, float)
 FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(double, double)
+FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(__half, half)
+#if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
+FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(__hip_bfloat16, bfloat16)
+#endif
 // clang-format on
 
 }  // namespace rocshmem

@@ -54,8 +54,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { python-version: '3.6',  container: 'python:3.6-slim-bullseye' }
-          - { python-version: '3.7',  container: 'python:3.7-slim-bullseye' }
+          - { python-version: '3.6',  container: 'python:3.6-slim-bullseye@sha256:2cfebc27956e6a55f78606864d91fe527696f9e32a724e6f9702b5f9602d0474' }
+          - { python-version: '3.7',  container: 'python:3.7-slim-bullseye@sha256:603879aeff06df23f0d392a19f7ce02aa85e14e6b4d25fd9647b116e0cb93467' }
           - { python-version: '3.8',  container: '' }
           - { python-version: '3.9',  container: '' }
           - { python-version: '3.10', container: '' }

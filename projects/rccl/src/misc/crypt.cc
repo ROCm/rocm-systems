@@ -363,16 +363,15 @@ static ncclResult_t cryptInitLib() {
     }
     ncclCryptOpenSsl.pfn_SSL_CTX_clear_options(contexts[i], SSL_OP_ALLOW_NO_DHE_KEX);
   }
-  ncclCryptOpenSsl.pfn_SSL_CTX_set_verify(ncclCryptClientCtx, SSL_VERIFY_PEER, nullptr);
-  ncclCryptOpenSsl.pfn_SSL_CTX_set_verify(ncclCryptServerCtx, SSL_VERIFY_NONE, nullptr);
-  // RCCL: every connection derives its session from the PSK, so tickets are never used. A
-  // client that only writes (bootstrapSend, the unidirectional ring) never reads them,
-  // and closing a TCP socket with unread data sends RST and drops its unsent bytes.
+  // Bootstrap connections are not resumed, and an unread TLS 1.3 session ticket can cause the
+  // client to reset a send-only connection before the server finishes receiving its payload.
   if (ncclCryptOpenSsl.pfn_SSL_CTX_set_num_tickets(ncclCryptServerCtx, 0) != 1) {
-    WARN("ncclCrypt: disabling OpenSSL TLS session tickets failed");
+    WARN("ncclCrypt: disabling TLS session tickets failed");
     ret = ncclSystemError;
     goto fail;
   }
+  ncclCryptOpenSsl.pfn_SSL_CTX_set_verify(ncclCryptClientCtx, SSL_VERIFY_PEER, nullptr);
+  ncclCryptOpenSsl.pfn_SSL_CTX_set_verify(ncclCryptServerCtx, SSL_VERIFY_NONE, nullptr);
   ncclCryptOpenSsl.pfn_SSL_CTX_set_psk_use_session_callback(ncclCryptClientCtx, cryptPskUseSession);
   ncclCryptOpenSsl.pfn_SSL_CTX_set_psk_find_session_callback(ncclCryptServerCtx, cryptPskFindSession);
   ncclCryptLibReady = true;

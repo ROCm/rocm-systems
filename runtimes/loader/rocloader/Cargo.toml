@@ -17,7 +17,6 @@ crate-type = ["rlib"]
 
 [dependencies]
 rocddi.workspace = true
-rocelf = { path = "../rocelf" }
 
 [lints.rust]
 missing_docs = "deny"

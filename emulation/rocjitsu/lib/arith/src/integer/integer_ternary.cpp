@@ -5,9 +5,10 @@
 // Owns public entry points and their validation/dispatch policy.
 
 #include "integer/integer_ternary.h"
-#include "common/internal.h"
+#include "common/validation.h"
+#include "common/wave_alignment.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_integer.h"
 
 #include <stdint.h>
 
@@ -36,6 +37,9 @@ uint32_t evaluate(uint32_t a, uint32_t b, uint32_t c) {
   }
   if constexpr (Op == rocjitsu::arith::IntegerTernary::XorAdd) {
     return (a ^ b) + c;
+  }
+  if constexpr (Op == rocjitsu::arith::IntegerTernary::Mad) {
+    return a * b + c;
   }
   if constexpr (Op == rocjitsu::arith::IntegerTernary::Lerp) {
     // Per-byte rounding follows rocjitsu's vector_alu.py LERP implementation.
@@ -67,14 +71,16 @@ int ternary(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+  [[maybe_unused]] const auto level =
+      rocjitsu::arith::wave_cpu_level(flags, rocjitsu::arith::aligned_for_512(a[0]));
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V4) {
     rocjitsu::arith::integer_ternary_x86_64_v4<Op>(exec_mask, d[0], a[0], b[0], c[0]);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V3) {
     rocjitsu::arith::integer_ternary_x86_64_v3<Op>(exec_mask, d[0], a[0], b[0], c[0]);
     return RJ_ARITH_SUCCESS;
   }
@@ -347,4 +353,28 @@ int rj_arith_v_lerp_u8_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode, ui
     return error;
   }
   return ternary_wave64<rocjitsu::arith::IntegerTernary::Lerp>(flags, exec_mask, mode, d, a, b, c);
+}
+
+// Multiply and add full 32-bit operands modulo 2^32; CLAMP is ignored.
+int rj_arith_v_mad_u32_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
+                           const uint32_t *const *a, const uint32_t *const *b,
+                           const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return ternary<rocjitsu::arith::IntegerTernary::Mad>(flags, exec_mask, mode, d, a, b, c);
+}
+
+// Multiply and add full 32-bit operands modulo 2^32; CLAMP is ignored.
+int rj_arith_v_mad_u32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
+                           const uint32_t *const *a, const uint32_t *const *b,
+                           const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return ternary_wave64<rocjitsu::arith::IntegerTernary::Mad>(flags, exec_mask, mode, d, a, b, c);
 }

@@ -194,7 +194,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                 </tr>
                 <tr>
                     <td>--kernel-replay-beta-enabled [BOOL]</td>
-                    <td>(beta) Acknowledge that --replay-mode kernel is a beta feature. Required when --replay-mode kernel is specified. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-kernel-replay-rocprofv3.html">Read more...</a></td>
+                    <td>(beta) Acknowledge that --replay-mode kernel is a beta feature. Required when --replay-mode kernel is specified, and rejected on its own because it does not select kernel replay. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-kernel-replay-rocprofv3.html">Read more...</a></td>
                 </tr>
                 <tr>
                     <th rowspan="4">Post-processing tracing</th>
@@ -238,11 +238,11 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                 <tr>
                     <th rowspan="5">Filtering</th>
                     <td>--kernel-include-regex REGULAR_EXPRESSION</td>
-                    <td>Filters counter-collection and thread-trace data to include the kernels matching the specified regular expression. Non-matching kernels are excluded. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/kernel-naming-filtering.html#kernel-filtering">kernel filtering</a></td>
+                    <td>Filters counter-collection, thread-trace data and kernel replay to include the kernels matching the specified regular expression. Non-matching kernels are excluded, and with --replay-mode kernel they run once without replay. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/kernel-naming-filtering.html#kernel-filtering">kernel filtering</a></td>
                 </tr>
                 <tr>
                     <td>--kernel-exclude-regex REGULAR_EXPRESSION</td>
-                    <td>Filters counter-collection and thread-trace data to exclude the kernels matching the specified regular expression. It is applied after --kernel-include-regex option. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/kernel-naming-filtering.html#kernel-filtering">kernel filtering</a></td>
+                    <td>Filters counter-collection, thread-trace data and kernel replay to exclude the kernels matching the specified regular expression. It is applied after --kernel-include-regex option. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/kernel-naming-filtering.html#kernel-filtering">kernel filtering</a></td>
                 </tr>
                 <tr>
                     <td>--kernel-iteration-range KERNEL_ITERATION_RANGE [KERNEL_ITERATION_RANGE …]</td>

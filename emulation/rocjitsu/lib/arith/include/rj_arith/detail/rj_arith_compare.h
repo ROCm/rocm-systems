@@ -32,6 +32,11 @@ extern "C" {
 // lanes contribute, after DPP filtering. RDNA3 entry points take
 // trapsts; mode 3 FP status reporting is unsupported, even with empty
 // EXEC. Both architectures support exact predicate results in mode 2.
+// gfx12 Compatibility with CLAMP preserves the legacy wave-wide reporting gate:
+// causes accumulate only when an active selected operand is nonfinite. Then all
+// participating lanes contribute, including finite denormal pairs elsewhere in
+// a Wave64. Without CLAMP, Compatibility leaves status unused. Reporting calls
+// require valid status storage; numeric-only calls leave it unused.
 // IEEE_MODE and output flushing do not affect predicate results. Loose mode
 // leaves optional architectural state unchanged on both architectures.
 int rj_arith_v_cmp_eq_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
@@ -1161,6 +1166,42 @@ int rj_arith_v_cmpx_t_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instr
                               uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                               uint32_t *trapsts);
 
+// Constant I16/U16 predicates ignore both input values and halfword selectors.
+// F writes zero; T writes EXEC after DPP filtering. CMPX returns replacement EXEC.
+// Output storage is required; input pointers may be null. Errors preserve outputs.
+int rj_arith_v_cmp_f_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                             uint32_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmp_f_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                             uint64_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmp_f_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                             uint32_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmp_f_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                             uint64_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmp_t_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                             uint32_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmp_t_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                             uint64_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmp_t_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                             uint32_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmp_t_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                             uint64_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmpx_f_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmpx_f_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint64_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmpx_f_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmpx_f_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint64_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmpx_t_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmpx_t_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint64_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmpx_t_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmpx_t_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint64_t *d, const uint32_t *const *a, const uint32_t *const *b);
+
 // RDNA3 constant integer comparisons. F writes zero; T writes participating
 // EXEC after DPP filtering. CMP produces the condition mask; CMPX produces
 // replacement EXEC in d. A/B values are ignored and their pointers may be null.
@@ -1554,8 +1595,9 @@ constexpr uint32_t RJ_ARITH_CLASS_POS_INF = 1U << 9;
 // Supports loose and empirical-exact semantics, independently of denormal
 // controls and guest IEEE mode. CLAMP is accepted and ignored.
 // Host FP controls are never changed; arithmetic may raise sticky host flags.
-// Gfx11 mode 3 is unsupported pending qualification of CLASS FP status. Other
-// modes retain exact masks. Gfx12 mode 3 succeeds with no FP-status output:
+// Unsuffixed APIs reject mode 3 pending qualification of CLASS FP status.
+// This also applies to the gfx908/gfx90a/gfx1010/gfx1030/gfx1150 adapters;
+// Compatibility retains classification masks. Gfx12 mode 3 succeeds without FP status:
 // observed gfx1201 CLASS does not raise flags, including for signaling NaNs.
 int rj_arith_v_cmp_class_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *d, const uint32_t *const *a, const uint32_t *const *b);
@@ -1617,6 +1659,759 @@ int rj_arith_v_cmpx_class_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t i
 int rj_arith_v_cmpx_class_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                         uint64_t instruction_flags, uint64_t *d,
                                         const uint32_t *const *a, const uint32_t *const *b);
+
+// Gfx1150 predicates retain the unsuffixed numeric mask, VGPR layout and
+// instruction controls. DX10_CLAMP_OFF is additionally accepted. Compatibility
+// accumulates INVALID only with that flag set: CLAMP signals on any NaN,
+// otherwise only signaling NaNs contribute. No INPUT_DENORM is produced.
+// Numeric-only modes leave status unused; mode 3 is unsupported. All input reads
+// finish before mask/status stores. Constants need inputs only when reporting
+// Compatibility status with DX10_CLAMP_OFF; empty EXEC needs no inputs.
+// This preserves the existing emulator model, without new empirical qualification.
+int rj_arith_v_cmp_f_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_f_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint64_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_lt_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_lt_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_eq_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_eq_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_le_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_le_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_gt_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_gt_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_lg_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_lg_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_ge_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_ge_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_o_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_o_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint64_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_u_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_u_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint64_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_nge_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nge_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nlg_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nlg_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_ngt_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_ngt_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nle_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nle_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_neq_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_neq_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nlt_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nlt_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_t_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_t_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint64_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmpx_f_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_f_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_lt_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_lt_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_eq_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_eq_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_le_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_le_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_gt_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_gt_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_lg_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_lg_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_ge_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_ge_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_o_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_o_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_u_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_u_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_nge_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nge_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint64_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nlg_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nlg_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint64_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_ngt_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_ngt_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint64_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nle_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nle_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint64_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_neq_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_neq_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint64_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nlt_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nlt_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint64_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_t_f16_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_t_f16_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_f_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_f_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint64_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_lt_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_lt_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_eq_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_eq_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_le_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_le_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_gt_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_gt_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_lg_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_lg_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_ge_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_ge_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_o_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_o_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint64_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_u_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_u_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint64_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_nge_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nge_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nlg_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nlg_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_ngt_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_ngt_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nle_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nle_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_neq_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_neq_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nlt_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nlt_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_t_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_t_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint64_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmpx_f_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_f_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_lt_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_lt_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_eq_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_eq_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_le_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_le_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_gt_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_gt_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_lg_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_lg_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_ge_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_ge_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_o_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_o_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_u_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_u_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_nge_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nge_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint64_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nlg_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nlg_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint64_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_ngt_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_ngt_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint64_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nle_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nle_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint64_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_neq_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_neq_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint64_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nlt_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nlt_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint64_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_t_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_t_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_f_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_f_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint64_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_lt_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_lt_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_eq_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_eq_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_le_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_le_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_gt_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_gt_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_lg_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_lg_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_ge_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_ge_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmp_o_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_o_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint64_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_u_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_u_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint64_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_nge_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nge_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nlg_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nlg_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_ngt_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_ngt_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nle_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nle_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_neq_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_neq_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nlt_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_nlt_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmp_t_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmp_t_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint64_t *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_cmpx_f_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_f_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_lt_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_lt_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_eq_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_eq_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_le_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_le_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_gt_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_gt_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_lg_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_lg_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_ge_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_ge_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint64_t *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *trapsts);
+int rj_arith_v_cmpx_o_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_o_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_u_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_u_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_nge_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nge_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint64_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nlg_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nlg_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint64_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_ngt_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_ngt_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint64_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nle_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nle_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint64_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_neq_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_neq_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint64_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nlt_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_nlt_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint64_t *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+int rj_arith_v_cmpx_t_f64_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_cmpx_t_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint64_t *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
 
 #ifdef __cplusplus
 } // extern "C"

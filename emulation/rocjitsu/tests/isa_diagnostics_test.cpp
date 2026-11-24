@@ -3,6 +3,7 @@
 
 #include "cdna5_sim_test_common.h"
 #include "compute_unit_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
@@ -39,16 +40,16 @@ namespace {
 using namespace rocjitsu;
 using namespace rocjitsu::amdgpu;
 
-class IsaDiagnosticsTest : public ::testing::TestWithParam<rj_code_arch_t> {
+class IsaDiagnosticsTest : public ::testing::TestWithParam<rocjitsu::IsaFamily> {
 protected:
   void SetUp() override { ASSERT_NO_FATAL_FAILURE(create()); }
 
-  void create(uint32_t wave_size = 0, unsigned helpers = 0) {
+  void create(uint32_t wave_size = 0, unsigned helpers = 0, unsigned vgprs = 256) {
     ComputeUnitCore::Config config{};
     config.arch = GetParam();
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 128;
-    config.vgprs_per_wf = 256;
+    config.vgprs_per_wf = vgprs;
     config.lds_size_kb = 64;
     config.async_resources = std::make_shared<matrix_coexecution::ExecutionResources>(helpers);
     wf = nullptr;
@@ -56,7 +57,7 @@ protected:
         rocjitsu::test::initialize_compute_unit(cu, "isa_test_cu", config, &memory, &l2));
     decoder = Decoder::create(GetParam());
     ASSERT_NE(decoder, nullptr);
-    wf = cu->dispatch_wf(7, 0x100000, 106, 256, wave_size);
+    wf = cu->dispatch_wf(7, 0x100000, 106, vgprs, wave_size);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(~uint64_t{0});
     wf->debug_write_sgpr(0, 0x4000);
@@ -66,57 +67,68 @@ protected:
   }
 
   bool gfx12() const {
-    return GetParam() == ROCJITSU_CODE_ARCH_RDNA4 || GetParam() == ROCJITSU_CODE_ARCH_CDNA5;
+    return GetParam() == rocjitsu::IsaFamily::Rdna4 || GetParam() == rocjitsu::IsaFamily::Cdna5;
   }
 
   bool vopd() const {
-    return gfx12() || GetParam() == ROCJITSU_CODE_ARCH_RDNA3 ||
-           GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5;
+    return gfx12() || GetParam() == rocjitsu::IsaFamily::Rdna3 ||
+           GetParam() == rocjitsu::IsaFamily::Rdna3_5;
   }
 
   std::array<uint32_t, 2> smem(int32_t immediate, bool buffer = false, uint16_t load_op = 0) {
     uint32_t bits = static_cast<uint32_t>(immediate);
-    if (GetParam() == ROCJITSU_CODE_ARCH_CDNA5)
+    if (GetParam() == rocjitsu::IsaFamily::Cdna5) {
       return cdna5::build_smem(buffer ? 16 : load_op,
                                {.sdata = 16, .ioffset = bits & 0xffffff, .soffset = 4});
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4)
+    }
+    if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
       return rdna4::build_smem(buffer ? 16 : load_op,
                                {.sdata = 16, .ioffset = bits & 0xffffff, .soffset = 4});
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3)
+    }
+    if (GetParam() == rocjitsu::IsaFamily::Rdna3) {
       return rdna3::build_smem(buffer ? 8 : load_op,
                                {.sdata = 16, .offset = bits & 0x1fffff, .soffset = 4});
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5)
+    }
+    if (GetParam() == rocjitsu::IsaFamily::Rdna3_5) {
       return rdna3_5::build_smem(buffer ? 8 : load_op,
                                  {.sdata = 16, .offset = bits & 0x1fffff, .soffset = 4});
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA1)
+    }
+    if (GetParam() == rocjitsu::IsaFamily::Rdna1) {
       return rdna1::build_smem(buffer ? 8 : load_op,
                                {.sdata = 16, .offset = bits & 0x1fffff, .soffset = 4});
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA2)
+    }
+    if (GetParam() == rocjitsu::IsaFamily::Rdna2) {
       return rdna2::build_smem(buffer ? 8 : load_op,
                                {.sdata = 16, .offset = bits & 0x1fffff, .soffset = 4});
-    if (GetParam() == ROCJITSU_CODE_ARCH_CDNA1)
+    }
+    if (GetParam() == rocjitsu::IsaFamily::Cdna1) {
       return cdna1::build_smem(
           buffer ? 8 : load_op,
           {.sdata = 16, .soffset_en = 1, .imm = 1, .offset = bits & 0x1fffff, .soffset = 4});
-    if (GetParam() == ROCJITSU_CODE_ARCH_CDNA2)
+    }
+    if (GetParam() == rocjitsu::IsaFamily::Cdna2) {
       return cdna2::build_smem(
           buffer ? 8 : load_op,
           {.sdata = 16, .soffset_en = 1, .imm = 1, .offset = bits & 0x1fffff, .soffset = 4});
+    }
     return cdna4::build_smem(
         buffer ? 8 : load_op,
         {.sdata = 16, .soffset_en = 1, .imm = 1, .offset = bits & 0x1fffff, .soffset = 4});
   }
 
   std::array<uint32_t, 2> packed(uint16_t op, uint8_t neg, uint8_t neg_hi) {
-    if (GetParam() == ROCJITSU_CODE_ARCH_CDNA5)
+    if (GetParam() == rocjitsu::IsaFamily::Cdna5) {
       return cdna5::build_vop3p(
           op, {.vdst = 64, .neg_hi = neg_hi, .src0 = 256, .src1 = 288, .src2 = 320, .neg = neg});
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4)
+    }
+    if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
       return rdna4::build_vop3p(
           op, {.vdst = 64, .neg_hi = neg_hi, .src0 = 256, .src1 = 288, .src2 = 320, .neg = neg});
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5)
+    }
+    if (GetParam() == rocjitsu::IsaFamily::Rdna3_5) {
       return rdna3_5::build_vop3p(
           op, {.vdst = 64, .neg_hi = neg_hi, .src0 = 256, .src1 = 288, .src2 = 320, .neg = neg});
+    }
     return rdna3::build_vop3p(
         op, {.vdst = 64, .neg_hi = neg_hi, .src0 = 256, .src1 = 288, .src2 = 320, .neg = neg});
   }
@@ -141,9 +153,38 @@ protected:
   Wavefront *wf = nullptr;
 };
 
+TEST_P(IsaDiagnosticsTest, PackedWideningScaleSelectorAndRegisterOverlap) {
+  if (GetParam() != rocjitsu::IsaFamily::Cdna5) {
+    GTEST_SKIP();
+  }
+  ASSERT_NO_FATAL_FAILURE(create(32, 0, 512));
+  for (uint16_t op : {cdna5::kVCvtScalePk8F32Fp8Vop3, cdna5::kVCvtScalePk8F32Bf8Vop3,
+                      cdna5::kVCvtScalePk8F32Fp4Vop3, cdna5::kVCvtScalePk16F32Fp6Vop3}) {
+    const bool fp8 = op == cdna5::kVCvtScalePk8F32Fp8Vop3 || op == cdna5::kVCvtScalePk8F32Bf8Vop3;
+    for (uint8_t sel = 0; sel < 16; ++sel) {
+      execute(cdna5::build_vop3(op, {.vdst = 8, .opsel = sel, .src0 = 256, .src1 = 260}),
+              fp8 && sel >= 12, "v_cvt_scale_");
+    }
+  }
+  auto check = [&](uint8_t dst, uint16_t src, uint16_t scale, unsigned warnings) {
+    execute(cdna5::build_vop3(cdna5::kVCvtScalePk16F32Fp6Vop3,
+                              {.vdst = dst, .src0 = src, .src1 = scale}),
+            warnings, "v_cvt_scale_");
+  };
+  check(8, 256 + 6, 0, 1);        // End of the data tuple overlaps v8.
+  check(8, 256, 256 + 23, 1);     // Scale aliases the last destination.
+  check(8, 256 + 5, 256 + 24, 0); // Both sources are adjacent.
+  check(8, 256, 8, 0);            // s8 and v8 are distinct.
+  wf->set_vgpr_msb_mode(1u << 2); // SRC1 in bank 1.
+  check(8, 256, 256 + 8, 0);      // Same encoded index, different banks.
+  check(252, 256 + 16, 256, 1);   // v[252:267] overlaps v256.
+  wf->set_exec(0);
+  check(252, 256 + 16, 256, 0);
+}
+
 TEST_P(IsaDiagnosticsTest, ScalarLoadOffsetBoundaryAndCdna5Exception) {
   wf->debug_write_sgpr(4, 0);
-  execute(smem(-4), GetParam() == ROCJITSU_CODE_ARCH_CDNA5 ? 0 : 1, "s_load_");
+  execute(smem(-4), GetParam() == rocjitsu::IsaFamily::Cdna5 ? 0 : 1, "s_load_");
   execute(smem(0), 0, "s_load_");
   wf->debug_write_sgpr(4, 4);
   execute(smem(-4), 0, "s_load_");
@@ -168,15 +209,17 @@ TEST_P(IsaDiagnosticsTest, ScalarLoadUnalignedOffsetBoundary) {
                                    std::pair{-3, 4u}, std::pair{-4, 3u}}) {
     wf->debug_write_sgpr(4, offset);
     execute(smem(immediate),
-            GetParam() != ROCJITSU_CODE_ARCH_CDNA5 && immediate + static_cast<int64_t>(offset) < 0,
+            GetParam() != rocjitsu::IsaFamily::Cdna5 &&
+                immediate + static_cast<int64_t>(offset) < 0,
             "s_load_");
   }
 }
 
 TEST_P(IsaDiagnosticsTest, CdnaScalarStoreRuleExcludesBufferStores) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA1 && GetParam() != ROCJITSU_CODE_ARCH_CDNA2 &&
-      GetParam() != ROCJITSU_CODE_ARCH_CDNA3 && GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna1 && GetParam() != rocjitsu::IsaFamily::Cdna2 &&
+      GetParam() != rocjitsu::IsaFamily::Cdna3 && GetParam() != rocjitsu::IsaFamily::Cdna4) {
     GTEST_SKIP();
+  }
   for (uint16_t op : std::array<uint16_t, 6>{16, 17, 18, 24, 25, 26}) {
     const bool buffer = op >= 24;
     wf->debug_write_sgpr(4, 0);
@@ -187,26 +230,29 @@ TEST_P(IsaDiagnosticsTest, CdnaScalarStoreRuleExcludesBufferStores) {
 }
 
 TEST_P(IsaDiagnosticsTest, ScalarByteAndHalfwordOffsets) {
-  if (!gfx12())
+  if (!gfx12()) {
     GTEST_SKIP();
+  }
   for (auto [op, size] : {std::pair{9u, 1u}, std::pair{11u, 2u}}) {
     wf->debug_write_sgpr(4, 0);
     execute(smem(-static_cast<int32_t>(size), false, op),
-            GetParam() == ROCJITSU_CODE_ARCH_CDNA5 ? 0 : 1, "s_load_");
+            GetParam() == rocjitsu::IsaFamily::Cdna5 ? 0 : 1, "s_load_");
     wf->debug_write_sgpr(4, size);
     execute(smem(-static_cast<int32_t>(size), false, op), 0, "s_load_");
   }
 }
 
 TEST_P(IsaDiagnosticsTest, CountsSuppressedReports) {
-  for (unsigned i = 0; i < 20; ++i)
+  for (unsigned i = 0; i < 20; ++i) {
     wf->report_undefined_behavior("test restriction");
+  }
   EXPECT_EQ(cu->isa_diagnostic_count(), 20u);
 }
 
 TEST_P(IsaDiagnosticsTest, MfmaBroadcastBlockBoundary) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA3 && GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna3 && GetParam() != rocjitsu::IsaFamily::Cdna4) {
     GTEST_SKIP();
+  }
   // The 16x16x1 instruction processes four blocks; 16x16x4 processes one.
   for (auto [opcode, max_cbsz] : {std::pair{cdna4::kVMfmaF3216x16x14bF32Vop3pMfma, 2u},
                                   std::pair{cdna4::kVMfmaF3216x16x4F32Vop3pMfma, 0u},
@@ -227,15 +273,17 @@ TEST_P(IsaDiagnosticsTest, MfmaBroadcastBlockBoundary) {
 }
 
 TEST_P(IsaDiagnosticsTest, ReservedMfmaBroadcastControlsStayInsideWave) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna4) {
     GTEST_SKIP();
+  }
   EXPECT_EQ(permute_a_lane(63, 7, 7), 63u);
   EXPECT_LT(permute_a_lane(63, 2, 7), 64u);
 }
 
 TEST_P(IsaDiagnosticsTest, CrossRegionScalarPairsReportUndefinedBehavior) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna4) {
     GTEST_SKIP();
+  }
   execute(cdna4::build_sop2(cdna4::kSCselectB64Sop2, {.ssrc0 = 128, .ssrc1 = 129, .sdst = 123}), 1,
           "s_cselect_b64");
   const std::array<uint32_t, 1> setpc{0xBE801D6Bu}; // vcc_hi cannot start a pair.
@@ -245,16 +293,18 @@ TEST_P(IsaDiagnosticsTest, CrossRegionScalarPairsReportUndefinedBehavior) {
 }
 
 TEST_P(IsaDiagnosticsTest, MfmaF64IgnoresBroadcastFields) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA3 && GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna3 && GetParam() != rocjitsu::IsaFamily::Cdna4) {
     GTEST_SKIP();
+  }
   execute(cdna4::build_vop3p_mfma(cdna4::kVMfmaF6416x16x4F64Vop3pMfma,
                                   {.vdst = 32, .cbsz = 7, .src0 = 256, .src1 = 258, .src2 = 128}),
           0, "v_mfma_");
 }
 
 TEST_P(IsaDiagnosticsTest, MfmaFormatSelectorsAreNotBroadcastGroups) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna4) {
     GTEST_SKIP();
+  }
   auto words = cdna4::build_vop3p_mfma(
       cdna4::kVMfmaF3216x16x128F8f6f4Vop3pMfma,
       {.vdst = 64, .cbsz = 4, .src0 = 256, .src1 = 288, .src2 = 128, .blgp = 4});
@@ -262,22 +312,25 @@ TEST_P(IsaDiagnosticsTest, MfmaFormatSelectorsAreNotBroadcastGroups) {
 }
 
 TEST_P(IsaDiagnosticsTest, TransposeLoadsRequireFullOrEmptyEffectiveExec) {
-  if (!gfx12())
+  if (!gfx12()) {
     GTEST_SKIP();
+  }
   for (uint32_t wave_size : {32u, 64u}) {
-    if (wave_size == 64 && GetParam() == ROCJITSU_CODE_ARCH_CDNA5)
+    if (wave_size == 64 && GetParam() == rocjitsu::IsaFamily::Cdna5) {
       continue;
+    }
     ASSERT_NO_FATAL_FAILURE(create(wave_size));
     ASSERT_NE(wf, nullptr);
     const uint64_t full = ~uint64_t{0} >> (64 - wave_size);
     std::vector<uint16_t> ops;
-    if (GetParam() == ROCJITSU_CODE_ARCH_CDNA5)
+    if (GetParam() == rocjitsu::IsaFamily::Cdna5) {
       ops = {cdna5::kGlobalLoadTr16B128Vglobal, cdna5::kGlobalLoadTr8B64Vglobal,
              cdna5::kGlobalLoadTr4B64Vglobal, cdna5::kGlobalLoadTr6B96Vglobal};
-    else
+    } else {
       ops = {rdna4::kGlobalLoadTrB128Vglobal, rdna4::kGlobalLoadTrB64Vglobal};
+    }
     for (uint16_t op : ops) {
-      const auto words = GetParam() == ROCJITSU_CODE_ARCH_CDNA5
+      const auto words = GetParam() == rocjitsu::IsaFamily::Cdna5
                              ? cdna5::build_vglobal(op, {.saddr = 0, .vdst = 16, .vaddr = 0})
                              : rdna4::build_vglobal(op, {.saddr = 0, .vdst = 16, .vaddr = 0});
       for (uint64_t exec : {uint64_t{0}, full, ~uint64_t{0}, uint64_t{1}, full >> 1}) {
@@ -289,8 +342,9 @@ TEST_P(IsaDiagnosticsTest, TransposeLoadsRequireFullOrEmptyEffectiveExec) {
 }
 
 TEST_P(IsaDiagnosticsTest, Cdna4LdsTransposeLoadsRequireFullOrEmptyExec) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna4) {
     GTEST_SKIP();
+  }
   for (uint16_t op : {cdna4::kDsReadB64TrB4Ds, cdna4::kDsReadB96TrB6Ds, cdna4::kDsReadB64TrB8Ds,
                       cdna4::kDsReadB64TrB16Ds}) {
     const auto words = cdna4::build_ds(op, {.addr = 0, .vdst = 16});
@@ -306,14 +360,16 @@ TEST_P(IsaDiagnosticsTest, Cdna4LdsTransposeLoadsRequireFullOrEmptyExec) {
 }
 
 TEST_P(IsaDiagnosticsTest, Cdna4LdsTransposeChecksCombinedAddressOnce) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna4) {
     GTEST_SKIP();
+  }
   for (uint16_t op : {cdna4::kDsReadB64TrB4Ds, cdna4::kDsReadB64TrB8Ds, cdna4::kDsReadB64TrB16Ds}) {
     for (auto [address, offset, warnings] :
          {std::array{0u, 4u, 1u}, std::array{4u, 4u, 0u}, std::array{0u, 264u, 0u},
           std::array{4u, 256u, 1u}, std::array{0u, 8u, 0u}}) {
-      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
         wf->debug_write_vgpr(0, lane, lane * 64 + address);
+      }
       execute(cdna4::build_ds(op, {.offset0 = static_cast<uint8_t>(offset),
                                    .offset1 = static_cast<uint8_t>(offset >> 8),
                                    .addr = 0,
@@ -324,8 +380,9 @@ TEST_P(IsaDiagnosticsTest, Cdna4LdsTransposeChecksCombinedAddressOnce) {
 }
 
 TEST_P(IsaDiagnosticsTest, Cdna4LdsTransposeReportsLateActiveLaneAndIssuingLocation) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna4) {
     GTEST_SKIP();
+  }
   wf->debug_write_vgpr(0, 63, 4);
   const auto words = cdna4::build_ds(cdna4::kDsReadB64TrB16Ds, {.addr = 0, .vdst = 16});
   testing::internal::CaptureStderr();
@@ -347,18 +404,22 @@ TEST_P(IsaDiagnosticsTest, Cdna4LdsTransposeReportsLateActiveLaneAndIssuingLocat
 }
 
 TEST_P(IsaDiagnosticsTest, Cdna4PackedB96AddressAlignmentRemainsUnqualified) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna4) {
     GTEST_SKIP();
-  for (uint8_t offset : {4, 8, 12, 16, 32})
+  }
+  for (uint8_t offset : {4, 8, 12, 16, 32}) {
     execute(cdna4::build_ds(cdna4::kDsReadB96TrB6Ds, {.offset0 = offset, .addr = 0, .vdst = 17}), 0,
             "ds_read_b96_tr_b6");
+  }
 }
 
 TEST_P(IsaDiagnosticsTest, Cdna4LdsTransposeWarningPreservesMemoryRequests) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna4) {
     GTEST_SKIP();
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  }
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     wf->debug_write_vgpr(0, lane, lane * 64);
+  }
   struct Read {
     uint16_t opcode;
     TransposeKind transpose;
@@ -384,14 +445,16 @@ TEST_P(IsaDiagnosticsTest, Cdna4LdsTransposeWarningPreservesMemoryRequests) {
     EXPECT_EQ(data->lane_mask, ~uint64_t{0});
     EXPECT_EQ(data->exec_mask, ~uint64_t{0});
     EXPECT_EQ(data->elem_size * data->num_elems, read.bytes);
-    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       EXPECT_EQ(data->per_lane_addr[lane], lane * 64 + 4 + wf->lds_base());
+    }
   }
 }
 
 TEST_P(IsaDiagnosticsTest, Cdna5LdsTransposeDoesNotInheritCdna4Restrictions) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA5)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna5) {
     GTEST_SKIP();
+  }
   for (uint16_t op : {cdna5::kDsLoadTr4B64Vds, cdna5::kDsLoadTr6B96Vds, cdna5::kDsLoadTr8B64Vds,
                       cdna5::kDsLoadTr16B128Vds}) {
     for (uint64_t exec : {uint64_t{0}, uint64_t{1}, uint64_t{0xffffffff}}) {
@@ -402,8 +465,9 @@ TEST_P(IsaDiagnosticsTest, Cdna5LdsTransposeDoesNotInheritCdna4Restrictions) {
 }
 
 TEST_P(IsaDiagnosticsTest, MigratedMfmaReportsItsIssuingPc) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna4) {
     GTEST_SKIP();
+  }
   ASSERT_NO_FATAL_FAILURE(create(64, 2));
   const uint64_t pc = wf->pc;
   // Migrated MFMAs stay on the issuer, preserving each diagnostic PC.
@@ -414,14 +478,16 @@ TEST_P(IsaDiagnosticsTest, MigratedMfmaReportsItsIssuingPc) {
                                                 .src0 = 256,
                                                 .src1 = 288,
                                                 .src2 = 128});
-    for (unsigned word = 0; word < 2; ++word)
+    for (unsigned word = 0; word < 2; ++word) {
       memory.write32(pc + i * 8 + word * 4, words[word]);
+    }
   }
   memory.write32(pc + 16, cdna4::build_sopp(cdna4::kSBranchSopp, {.simm16 = 0xffff})[0]);
   const auto submitted = async_execution::stats.mma;
   testing::internal::CaptureStderr();
-  for (unsigned i = 0; i < 4 && wf->pc < pc + 16; ++i)
+  for (unsigned i = 0; i < 4 && wf->pc < pc + 16; ++i) {
     cu->step();
+  }
   cu->step(); // Drain at the branch before inspecting the result.
   const std::string output = testing::internal::GetCapturedStderr();
   EXPECT_EQ(async_execution::stats.mma, submitted);
@@ -432,10 +498,11 @@ TEST_P(IsaDiagnosticsTest, MigratedMfmaReportsItsIssuingPc) {
 }
 
 TEST_P(IsaDiagnosticsTest, IuModifiersPreserveSignednessAndFloatModifiers) {
-  if (!vopd())
+  if (!vopd()) {
     GTEST_SKIP();
+  }
   ASSERT_NO_FATAL_FAILURE(create(32));
-  const bool cdna5_target = GetParam() == ROCJITSU_CODE_ARCH_CDNA5;
+  const bool cdna5_target = GetParam() == rocjitsu::IsaFamily::Cdna5;
   const uint16_t wmma =
       cdna5_target ? cdna5::kVWmmaI3216x16x64Iu8Vop3p : rdna4::kVWmmaI3216x16x16Iu8Vop3p;
   const char *wmma_name = cdna5_target ? "v_wmma_i32_16x16x64_iu8" : "v_wmma_i32_16x16x16_iu8";
@@ -444,37 +511,45 @@ TEST_P(IsaDiagnosticsTest, IuModifiersPreserveSignednessAndFloatModifiers) {
         std::pair{rdna4::kVDot8I32Iu4Vop3p, "v_dot8_i32_iu4"}, std::pair{wmma, wmma_name}}) {
     // CDNA5's explicit undefined-modifier rule names DOT4 and WMMA, not DOT8.
     const bool qualified = !cdna5_target || op != cdna5::kVDot8I32Iu4Vop3p;
-    for (uint8_t neg : {0, 1, 2, 3})
+    for (uint8_t neg : {0, 1, 2, 3}) {
       execute(packed(op, neg, 0), 0, name);
+    }
     execute(packed(op, 4, 0), qualified, name);
-    for (uint8_t neg_hi : {1, 2, 4})
+    for (uint8_t neg_hi : {1, 2, 4}) {
       execute(packed(op, 3, neg_hi), qualified, name);
+    }
   }
-  if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4) {
+  if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
     execute(packed(rdna4::kVWmmaI3216x16x32Iu4Vop3p, 4, 4), 1, "v_wmma_i32_16x16x32_iu4");
     execute(packed(rdna4::kVSwmmacI3216x16x32Iu8Vop3p, 4, 4), 0, "v_swmmac_i32_16x16x32_iu8");
   }
-  if (cdna5_target)
+  if (cdna5_target) {
     execute(packed(cdna5::kVSwmmacI3216x16x128Iu8Vop3p, 4, 4), 0, "v_swmmac_i32_16x16x128_iu8");
+  }
   // Floating packed-math operands retain their defined sign modifiers.
-  if (cdna5_target)
+  if (cdna5_target) {
     execute(packed(cdna5::kVPkAddF16Vop3p, 4, 4), 0, "v_pk_add_");
-  else
+  } else {
     execute(packed(rdna4::kVDot2F32F16Vop3p, 4, 4), 0, "v_dot2_");
-  if (!cdna5_target)
+  }
+  if (!cdna5_target) {
     execute(packed(rdna4::kVWmmaF3216x16x16F16Vop3p, 4, 4), 0, "v_wmma_");
+  }
   wf->set_exec(0);
   execute(packed(wmma, 4, 0), 0, "v_wmma_");
 }
 
 TEST_P(IsaDiagnosticsTest, ScalarDataAlignmentHasNarrowTargetAndOperandScope) {
-  if (!vopd())
+  if (!vopd()) {
     GTEST_SKIP();
+  }
   const auto mov = [&](uint8_t dst, uint8_t src) {
-    if (GetParam() == ROCJITSU_CODE_ARCH_CDNA5)
+    if (GetParam() == rocjitsu::IsaFamily::Cdna5) {
       return cdna5::build_sop1(cdna5::kSMovB64Sop1, {.ssrc0 = src, .sdst = dst});
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4)
+    }
+    if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
       return rdna4::build_sop1(rdna4::kSMovB64Sop1, {.ssrc0 = src, .sdst = dst});
+    }
     return rdna3::build_sop1(rdna3::kSMovB64Sop1, {.ssrc0 = src, .sdst = dst});
   };
   execute(mov(16, 2), 0, "s_mov_b64");
@@ -485,10 +560,11 @@ TEST_P(IsaDiagnosticsTest, ScalarDataAlignmentHasNarrowTargetAndOperandScope) {
 }
 
 TEST_P(IsaDiagnosticsTest, ScalarLoadTupleAndBufferDescriptorAlignment) {
-  if (!gfx12())
+  if (!gfx12()) {
     GTEST_SKIP();
+  }
   const auto load = [&](uint16_t op, uint8_t dst, uint8_t base) {
-    return GetParam() == ROCJITSU_CODE_ARCH_CDNA5
+    return GetParam() == rocjitsu::IsaFamily::Cdna5
                ? cdna5::build_smem(op, {.sbase = base, .sdata = dst, .soffset = 4})
                : rdna4::build_smem(op, {.sbase = base, .sdata = dst, .soffset = 4});
   };
@@ -504,8 +580,9 @@ TEST_P(IsaDiagnosticsTest, ScalarLoadTupleAndBufferDescriptorAlignment) {
 }
 
 TEST_P(IsaDiagnosticsTest, PermlaneGroupWidthUsesScalarValueOnce) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA5)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna5) {
     GTEST_SKIP();
+  }
   const auto idx_gen = [](uint16_t width_src) {
     return cdna5::build_vop3(cdna5::kVPermlaneIdxGenB32Vop3,
                              {.vdst = 16, .src0 = 256, .src1 = width_src});
@@ -544,8 +621,9 @@ std::array<uint32_t, 3> vopd_pair(uint8_t x, uint8_t y, uint16_t x0, uint8_t x1,
 }
 
 TEST_P(IsaDiagnosticsTest, VopdBanksHonorSharedSourcesAndIgnoredPorts) {
-  if (!vopd())
+  if (!vopd()) {
     GTEST_SKIP();
+  }
   ASSERT_NO_FATAL_FAILURE(create(32));
   constexpr uint8_t mul = 3, mov = 8;
   execute(vopd_pair(mul, mul, 256, 1, 258, 2), 0, "v_dual_");
@@ -564,8 +642,9 @@ TEST_P(IsaDiagnosticsTest, VopdBanksHonorSharedSourcesAndIgnoredPorts) {
 }
 
 TEST_P(IsaDiagnosticsTest, VopdSrc2ParityAndScalarBudget) {
-  if (!vopd())
+  if (!vopd()) {
     GTEST_SKIP();
+  }
   ASSERT_NO_FATAL_FAILURE(create(32));
   constexpr uint8_t fmac = 0, fmaak = 1, fmamk = 2, mul = 3, mov = 8;
   // FMAMK's second VGPR uses SRC2, not SRC1.
@@ -574,7 +653,7 @@ TEST_P(IsaDiagnosticsTest, VopdSrc2ParityAndScalarBudget) {
   execute(vopd_pair(fmamk, fmamk, 256, 1, 258, 2), 0, "v_dual_");
   execute(vopd_pair(fmamk, fmamk, 256, 1, 258, 1), !gfx12(), "v_dual_");
   // CDNA5 does not establish the older implicit-accumulator SRC2 rule.
-  execute(vopd_pair(fmamk, fmac, 256, 1, 258, 2), GetParam() != ROCJITSU_CODE_ARCH_CDNA5,
+  execute(vopd_pair(fmamk, fmac, 256, 1, 258, 2), GetParam() != rocjitsu::IsaFamily::Cdna5,
           "v_dual_");
   execute(vopd_pair(fmaak, mul, 0, 1, 2, 2), 1, "v_dual_");
   execute(vopd_pair(fmaak, mul, 0, 1, 0, 2), 0, "v_dual_");
@@ -583,13 +662,15 @@ TEST_P(IsaDiagnosticsTest, VopdSrc2ParityAndScalarBudget) {
 }
 
 TEST_P(IsaDiagnosticsTest, VopdScalarBudgetQualifiesSpecialAndImplicitReads) {
-  if (!vopd())
+  if (!vopd()) {
     GTEST_SKIP();
+  }
   ASSERT_NO_FATAL_FAILURE(create(32));
   constexpr uint8_t fmaak = 1, mov = 8, cndmask = 9;
-  for (uint16_t selector : {126, 127, 253})
+  for (uint16_t selector : {126, 127, 253}) {
     execute(vopd_pair(fmaak, mov, 0, 1, selector, 2), gfx12(), "v_dual_");
-  const bool implicit_vcc = GetParam() != ROCJITSU_CODE_ARCH_CDNA5;
+  }
+  const bool implicit_vcc = GetParam() != rocjitsu::IsaFamily::Cdna5;
   execute(vopd_pair(cndmask, cndmask, 0, 1, 2, 2), implicit_vcc, "v_dual_");
   execute(vopd_pair(cndmask, cndmask, 0, 1, 0, 2), 0, "v_dual_");
   execute(vopd_pair(fmaak, cndmask, 106, 1, 106, 2), 0, "v_dual_");
@@ -597,8 +678,9 @@ TEST_P(IsaDiagnosticsTest, VopdScalarBudgetQualifiesSpecialAndImplicitReads) {
 }
 
 TEST_P(IsaDiagnosticsTest, VopdDependenciesRemainUnqualified) {
-  if (!vopd())
+  if (!vopd()) {
     GTEST_SKIP();
+  }
   ASSERT_NO_FATAL_FAILURE(create(32));
   // RDNA4's broad restriction conflicts with LLVM's single-cycle pairing rule.
   execute(vopd_pair(3, 3, 258, 1, 320, 2), 0, "v_dual_");
@@ -607,8 +689,9 @@ TEST_P(IsaDiagnosticsTest, VopdDependenciesRemainUnqualified) {
 }
 
 TEST_P(IsaDiagnosticsTest, VopdRdna4CompilerAntidependencyRemainsSilent) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP();
+  }
   ASSERT_NO_FATAL_FAILURE(create(32));
   // The FP16 smoke emits MOV v10,v25 :: ADD v95,0,v10.
   const std::array<uint32_t, 2> words{0xca200119, 0x0a5e1480};
@@ -616,8 +699,9 @@ TEST_P(IsaDiagnosticsTest, VopdRdna4CompilerAntidependencyRemainsSilent) {
 }
 
 TEST_P(IsaDiagnosticsTest, Vopd3BanksRespectWidthAndExplicitScalarSelect) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA5)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna5) {
     GTEST_SKIP();
+  }
   using test::cdna5::make_vopd3_pair;
   using test::cdna5::VopdOp;
   test::cdna5::VopdSlot x{VopdOp::FmaF32, 256, 1, 2, 64};
@@ -637,8 +721,9 @@ TEST_P(IsaDiagnosticsTest, Vopd3BanksRespectWidthAndExplicitScalarSelect) {
 }
 
 TEST_P(IsaDiagnosticsTest, Vopd3F64SourcesCheckBothBanksOnEachPort) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA5)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna5) {
     GTEST_SKIP();
+  }
   using test::cdna5::make_vopd3_pair;
   using test::cdna5::VopdOp;
   test::cdna5::VopdSlot x{VopdOp::FmaF64, 256, 4, 8, 64};
@@ -672,8 +757,9 @@ TEST_P(IsaDiagnosticsTest, Vopd3F64SourcesCheckBothBanksOnEachPort) {
 }
 
 TEST_P(IsaDiagnosticsTest, Vopd3MovesUseSeparatePortsWithSameBankSources) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA5)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna5) {
     GTEST_SKIP();
+  }
   // The small FP8 smoke emits MOV v32,v4 :: MOV v18,v24 in VOPD3 form.
   // Both sources use bank 0; Y still uses SRC2, as it does in VOPD.
   const std::array<uint32_t, 3> words{0xcf208104, 0x00000118, 0x12000020};
@@ -681,9 +767,9 @@ TEST_P(IsaDiagnosticsTest, Vopd3MovesUseSeparatePortsWithSameBankSources) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Architectures, IsaDiagnosticsTest,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                           ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
-                                           ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                                           ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                                           ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5));
+                         ::testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                           rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4,
+                                           rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                                           rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                           rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5));
 } // namespace

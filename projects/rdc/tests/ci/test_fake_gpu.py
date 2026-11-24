@@ -16,9 +16,11 @@ Environment:
   RDC_TEST_TIME_FACTOR  multiplies every timeout and wait, for sanitizer builds
                         (default 1)
 
-rdcd allows one instance per host (it locks /var/run/rdcd.lock as root and
-/tmp/rdcd.lock otherwise), so this module refuses to run while another rdcd
-holds that lock. RDC CI runs it in its own pytest invocation.
+rdcd allows one root instance and one of the other users per host (it locks
+/var/run/rdcd.lock as root and /tmp/rdcd.lock otherwise, and a non-root rdcd
+also stops for a root rdcd whose lock file it can read), so this module refuses
+to run while an rdcd holds a lock that would stop it. RDC CI runs it in its own
+pytest invocation.
 """
 
 import fcntl
@@ -28,6 +30,7 @@ import re
 import shutil
 import signal
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -43,8 +46,8 @@ REQUIRE = os.environ.get("RDC_CI_REQUIRE_FAKE") == "1"
 FACTOR = float(os.environ.get("RDC_TEST_TIME_FACTOR", "1"))
 FAKE_NAME = "librdc_fake_amdsmi.so"
 NUM_GPUS = 4
-DMON_FIELDS = [100, 101, 200, 201, 300, 500, 501, 502]
-# rdcd refuses to start while either lock is held (it takes the first as root).
+DMON_FIELDS = [100, 101, 200, 201, 300, 500, 501, 502, 504]
+# The lock files of a root rdcd and of any other rdcd; see _rdcd_lock_problem().
 RDCD_LOCKS = ("/var/run/rdcd.lock", "/tmp/rdcd.lock")
 
 # Faults that crash rdcd on this tree, with the code path at fault. Each case
@@ -64,12 +67,13 @@ UNREACHED_APIS = {
     "amdsmi_set_gpu_clk_limit": "rdci config has no --host option",
     "amdsmi_set_gpu_perf_level": "rdci config has no --host option",
     "amdsmi_reset_gpu": "policy reset action needs a breached threshold",
-    "amdsmi_stop_gpu_event_notification": "rdci offers no notification event field",
 }
 
-# A failing amdsmi_init() makes rdcd hang, then crash on SIGTERM; the rdcd
-# start/stop fix adds that case. amdsmi_shut_down() has no failure to inject.
-LIFECYCLE_APIS = {"amdsmi_init", "amdsmi_shut_down"}
+# test_fake_gpu_session.py fails amdsmi_init(). amdsmi_shut_down() has no failure
+# to inject. rdcd calls amdsmi_stop_gpu_event_notification() only when it stops,
+# for the GPU events of a job (rdci offers no event field to unwatch), and only
+# logs a failure there.
+LIFECYCLE_APIS = {"amdsmi_init", "amdsmi_shut_down", "amdsmi_stop_gpu_event_notification"}
 
 
 def _missing(what):
@@ -89,15 +93,23 @@ def _first_file(*paths):
 def _rdcd_lock_problem(path, takes_it):
     """Why rdcd could not start because of lock file `path` (None if it could).
 
-    Mirrors rdcd: it refuses to start if either lock file is locked, then takes
-    its own (/var/run/rdcd.lock as root, /tmp/rdcd.lock otherwise).
+    Mirrors rdcd: a root rdcd takes /var/run/rdcd.lock and ignores /tmp/rdcd.lock;
+    any other rdcd stops if it can read /var/run/rdcd.lock and it is locked, then
+    takes /tmp/rdcd.lock. rdcd takes only a writable regular file of its own user
+    with one link.
     """
-    if not os.path.exists(path):
+    if not os.path.lexists(path):
         return None
+    if takes_it:
+        info = os.lstat(path)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_nlink != 1:
+            return f"{path} is not a regular file of this user with one link"
+        if not os.access(path, os.W_OK):
+            return f"{path} is not writable"
     try:
-        fd = os.open(path, os.O_RDONLY)
-    except PermissionError:
-        fd = None  # rdcd cannot read it either and does not count it as locked
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    except (PermissionError, FileNotFoundError):
+        fd = None  # unreadable, or a link to nothing: not counted as locked, as by rdcd
     if fd is not None:
         try:
             query = struct.pack("hhqqi", fcntl.F_RDLCK, os.SEEK_SET, 0, 0, 0)
@@ -108,8 +120,6 @@ def _rdcd_lock_problem(path, takes_it):
             os.close(fd)
         if locked:
             return f"another rdcd holds {path}"
-    if takes_it and not os.access(path, os.W_OK):
-        return f"{path} belongs to another user"
     return None
 
 
@@ -125,8 +135,12 @@ def tools():
     for path, what in ((rdcd, "rdcd"), (rdci, "rdci"), (fake, FAKE_NAME)):
         if path is None:
             _missing(what)
-    for lock in RDCD_LOCKS:
-        problem = _rdcd_lock_problem(lock, takes_it=(lock == RDCD_LOCKS[0]) == (os.geteuid() == 0))
+    if os.geteuid() == 0:
+        checks = [(RDCD_LOCKS[0], True)]
+    else:
+        checks = [(RDCD_LOCKS[0], False), (RDCD_LOCKS[1], True)]
+    for lock, takes_it in checks:
+        problem = _rdcd_lock_problem(lock, takes_it)
         if problem:
             pytest.fail(f"{problem}; rdcd cannot start until that is resolved")
     return rdcd, rdci, fake
@@ -740,3 +754,20 @@ def test_runtime_files_do_not_contain_the_fake():
     for path in binaries:
         with open(path, "rb") as f:
             assert b"RDC_FAKE_" not in f.read(), f"{path} references the fake"
+
+
+# ---------------------------------------------------------------------------
+# Stress: long loops, run only with RDC_TEST_STRESS=1
+# ---------------------------------------------------------------------------
+@pytest.mark.stress
+def test_rdcd_start_watch_stop_loop(tools, tmp_path):
+    """rdcd starts, serves a watch and stops cleanly 50 times in a row."""
+    for i in range(50):
+        run = tmp_path / f"run{i}"
+        run.mkdir()
+        d = Rdcd(tools, run).start()
+        try:
+            d.ok("dmon", "-e", ",".join(str(f) for f in DMON_FIELDS), "-i", "0", "-c", "1")
+        finally:
+            code = d.stop()
+        assert code == 0, f"run {i}: rdcd exited with {code}\n{d.output()}"

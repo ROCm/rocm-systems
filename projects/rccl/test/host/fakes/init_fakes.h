@@ -33,6 +33,7 @@
 #include "rocshmem_fakes.h"      // the rocSHMEM host API
 #endif
 #include "strongstream_stubs.h"  // src/misc/strongstream.cc
+#include "search_fakes.h"        // src/graph/search.cc own entry points
 #include "topo_stubs.h"          // src/graph/*.cc
 #include "transport_stubs.h"     // src/transport/*.cc + src/plugin/net.cc
 #include "transport_net_ib_fakes.h"  // src/transport/net_ib
@@ -42,6 +43,8 @@ struct ncclComm;
 
 // ncclNetInit/ncclNetInitFromParent live in init-test.cc: they need the full ncclComm/ncclNet_t layout.
 extern ncclResult_t g_ncclNetInitResult;
+// ncclCuMemHostEnable() return value (src/misc/rocmwrap.cc fake); reset to 0.
+extern int g_cuMemHostEnable;
 
 void InstallCommAllocSuccess();
 

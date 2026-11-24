@@ -157,7 +157,6 @@ struct __CudaFatBinaryWrapper {
 };
 
 // Forward declarations
-hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_params,
                                   hipStream_t hStream, void** kernelParams, void** extra,
                                   hipEvent_t startEvent, hipEvent_t stopEvent,
@@ -166,21 +165,6 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
                                   uint64_t prevGridSum = 0, uint64_t allGridSum = 0,
                                   uint32_t firstDevice = 0,
                                   const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr);
-
-// ================================================================================================
-static bool isCompatibleCodeObject(const std::string& codeobj_target_id, const char* device_name) {
-  // Workaround for device name mismatch.
-  // Device name may contain feature strings delimited by '+', e.g.
-  // gfx900+xnack. Currently HIP-Clang does not include feature strings
-  // in code object target id in fat binary. Therefore drop the feature
-  // strings from device name before comparing it with code object target id.
-  const char* feature_loc = std::strchr(device_name, '+');
-  if (feature_loc == nullptr) {
-    return codeobj_target_id == device_name;
-  }
-  return codeobj_target_id.compare(0, std::string::npos, device_name,
-                                    feature_loc - device_name) == 0;
-}
 
 // ================================================================================================
 void** __hipRegisterFatBinary(const void* data) {
@@ -255,7 +239,7 @@ void __hipRegisterVar(void** modules,       // The device modules containing cod
                       int global) {         // Unknown, always 0
   auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Variable,
-                                   size, 0, 0, fat_binary_modules);
+                                   size, fat_binary_modules);
   hipError_t err = PlatformState::Instance().StatCO().RegisterGlobalVar(var, var_ptr);
   guarantee((err == hipSuccess), "Cannot register Static Global Var, error:%d", err);
 }
@@ -269,7 +253,7 @@ void __hipRegisterSurface(
     int type, int ext) {
   auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Surface,
-                                   sizeof(surfaceReference), 0, 0, fat_binary_modules);
+                                   sizeof(surfaceReference), fat_binary_modules);
   hipError_t err = PlatformState::Instance().StatCO().RegisterGlobalVar(var, var_ptr);
   guarantee((err == hipSuccess), "Cannot register Static Glbal Var, err:%d", err);
 }
@@ -300,7 +284,8 @@ void __hipRegisterManagedVar(
     ::memcpy(*pointer, init_value, size);
   } else {
     HIP_INIT_VOID();
-    hipError_t status = ihipMallocManaged(pointer, size, align, 0);
+    hipError_t status = ihipMallocManaged(pointer, size, align, /*use_host_ptr=*/false,
+                                         ManagedMemOwner::kModuleVariable);
     var_ptr->SetManagedVarMapped(true);
     if (status == hipSuccess) {
       hip::Stream* stream = hip::getNullStream();
@@ -328,7 +313,7 @@ void __hipRegisterTexture(
     int type, int norm, int ext) {
   auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Texture,
-                                   sizeof(textureReference), 0, 0, fat_binary_modules);
+                                   sizeof(textureReference), fat_binary_modules);
   hipError_t err = PlatformState::Instance().StatCO().RegisterGlobalVar(var, var_ptr);
   guarantee((err == hipSuccess), "Cannot register Static Global Var, status: %d", err);
 }
@@ -513,7 +498,7 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
     HIP_RETURN(hipErrorInvalidHandle);
   }
 
-  hipDeviceProp_t prop = {0};
+  hipDeviceProp_t prop = {};
   HIP_RETURN_ONFAIL(ihipGetDeviceProperties(&prop, dev_id));
 
   if (blockSize > prop.maxThreadsPerMultiProcessor) {
@@ -556,7 +541,7 @@ namespace hip_impl {
 static hipError_t clusterDimensions(dim3& dimensions, const hipLaunchConfig_t& launchConfig,
                                     const device::Kernel::WorkGroupInfo& wrkGrpInfo,
                                     const amd::device::Info& deviceInfo) {
-  int numAttr = 0;
+  unsigned int numAttr = 0;
   const size_t* infoClusterSize = wrkGrpInfo.clusterSize_;
 
   dimensions = {std::numeric_limits<uint32_t>::max(), std::numeric_limits<uint32_t>::max(),
@@ -954,7 +939,6 @@ hipError_t hipOccupancyMaxActiveClusters(int* numClusters, const void* f,
                                          const hipLaunchConfig_t* config) {
   HIP_INIT_API(hipOccupancyMaxActiveClusters, numClusters, f, config);
   dim3 clusterDim;
-  dim3 gridDim;
   int totalClusterSize;
   const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
   hipFunction_t func;

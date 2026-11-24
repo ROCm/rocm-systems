@@ -250,7 +250,17 @@ hsa_status_t ImageManagerGfx12::CalculateImageSizeAndAlignment(
   }
 
   size_t rowPitch   = (out.bpp >> 3) * out.pitch;
-  size_t slicePitch = rowPitch * out.height;
+  // A gfx12 linear surface carries two pitches: 'pitch' is the 128-byte-aligned row pitch reported
+  // to clients, while slices are sized on the 256-byte-aligned 'pitchForSlice'. The two agree only
+  // where addrlib trims the slice padding, which it does for a non-3D surface holding a single
+  // slice (addrlib3's CanTrimLinearPadding) - anywhere else the stride between slices is addrlib's
+  // own sliceSize rather than rowPitch * height, so mirror that predicate to stay in step with it.
+  // In the trimmed case sliceSize is instead the data extent rounded up to the 256-byte block, and
+  // the HSA default slice pitch is rowPitch * height, so keep computing it that way there.
+  const bool slice_padding_trimmed =
+      (desc.geometry != HSA_EXT_IMAGE_GEOMETRY_3D) && (out.numSlices <= 1);
+  size_t slicePitch = slice_padding_trimmed ? rowPitch * out.height
+                                            : static_cast<size_t>(out.sliceSize);
   if (desc.geometry != HSA_EXT_IMAGE_GEOMETRY_1DB &&
       image_data_layout == HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR &&
       ((image_data_row_pitch && (rowPitch != image_data_row_pitch)) ||

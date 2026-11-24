@@ -80,8 +80,14 @@ e.g. build RCCL-Tests using CMake for `gfx90a`, `gfx942` and `gfx1200`. e.g.,
     ```shell
     $ cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="/path/to/mpi;/path/to/rocm" -DUSE_MPI=ON -DBUILD_LOCAL_GPU_TARGET_ONLY=ON ..
     ```
+* `LOCAL_GPU_ONLY=1` is the Makefile equivalent, and `install.sh` exposes it as `-l|--local_gpu_only`. e.g.,
+    ```shell
+    $ make LOCAL_GPU_ONLY=1 MPI=1 MPI_HOME=/path/to/mpi NCCL_HOME=/opt/rocm
+    $ ./install.sh -l -m --mpi_home /path/to/mpi
+    ```
+    An explicitly specified `GPU_TARGETS` takes precedence over `LOCAL_GPU_ONLY=1`.
 
-`-DBUILD_LOCAL_GPU_TARGET_ONLY` will not work with `docker build`-based setups, as the docker build engine is unable to query the local GPU architecture. Please use `-DGPU_TARGETS` for CMake-based builds or `GPU_TARGETS` for Makefile-based builds when building RCCL-Tests using a Dockerfile and `docker build`.
+`-DBUILD_LOCAL_GPU_TARGET_ONLY` and `LOCAL_GPU_ONLY=1` will not work with `docker build`-based setups, as the docker build engine is unable to query the local GPU architecture. Please use `-DGPU_TARGETS` for CMake-based builds or `GPU_TARGETS` for Makefile-based builds when building RCCL-Tests using a Dockerfile and `docker build`.
 
 ## Usage
 
@@ -216,7 +222,7 @@ All tests support the same set of arguments :
 
 ### Running multiple operations in parallel
 
-RCCL Tests allow to partition the set of GPUs into smaller sets, each executing the same operation in parallel. 
+RCCL Tests allow to partition the set of GPUs into smaller sets, each executing the same operation in parallel.
 To split the GPUs, RCCL will compute a "color" for each rank, based on the `NCCL_TESTS_SPLIT` environment variable, then all ranks
 with the same color will end up in the same group. The resulting group is printed next to each GPU at the beginning of the test.
 
@@ -233,6 +239,17 @@ Here are a few examples:
 - `NCCL_TESTS_SPLIT="AND 0x1"` or `NCCL_TESTS_SPLIT="MOD 2"`: Run two operations, each operation using every other rank.
 
 Note that the reported bandwidth is per group, hence to get the total bandwidth used by all groups, one must multiply by the number of groups.
+
+### Hierarchical alltoall over two GIN backends
+
+`alltoall_perf -R 2 -D 5` creates two DevComms on the same communicator: one on the Anvil SDMA GIN backend for intra-node (LSA) peers, and one on a network GIN backend for all other peers. CTA 0 drives the network DevComm and the remaining `-V` − 1 CTAs drive Anvil SDMA, so `-V` must be at least 2. `--gin_resource_sharing` applies to the network DevComm only; the SDMA DevComm stays GPU-locked, because every SDMA CTA flushes every peer. It needs a CMake build with `-DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM_GIN=ON`, and both backends active on the communicator: leave `NCCL_GIN_TYPE` unset. When either backend is not active on the communicator, the test prints `# SKIP` and exits successfully.
+
+- `RCCL_TESTS_A2A_HIER_NET_GIN_TYPE=<type>` selects the network backend (default: `2`, PROXY).
+- `RCCL_TESTS_A2A_HIER_GROUP_SIZE=<n>` splits each node's ranks into groups of `n` consecutive local ranks and sends to local peers in other groups over the network backend, so a single node moves data on both backends. Default: `0` (all local peers use Anvil SDMA).
+
+```shell
+mpirun -np 8 -x RCCL_TESTS_A2A_HIER_GROUP_SIZE=4 ./build/alltoall_perf -b 1M -e 1G -f 2 -g 1 -R 2 -D 5 -V 16 -c 1
+```
 
 ## Unit tests
 

@@ -2,13 +2,15 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Bare amd-smi missing-driver tests."""
+"""Bare amd-smi driver version, package row and missing-driver tests."""
 
 import importlib.util
+import io
 import os
 import sys
 import types
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from common.common import cli_search_order, find_cli_dir, stub_modules_at_import
@@ -22,6 +24,16 @@ _DRIVER_INFO = {
     "driver_name": "amdgpu",
     "driver_date": "2026/09/16 00:00",
     "driver_version": "6.19.14.31400000",
+    "driver_kernel_version": "6.19.14",
+    "amdgpu_driver_version": "31400000",
+    "driver_build_version": "2370381",
+    "driver_full_version": "6.19.14.31400000-2370381",
+    "driver_package": "amdgpu-dkms",
+}
+_NO_PACKAGE = {
+    "driver_build_version": "N/A",
+    "driver_full_version": "6.19.14.31400000",
+    "driver_package": "N/A",
 }
 
 
@@ -30,12 +42,12 @@ class _LibraryError(Exception):
         return "not supported"
 
 
-def _project_root() -> Path:
-    return Path(__file__).resolve().parents[4]
+def _cli_file(relative_path: str) -> Path:
+    return Path(_CLI_DIR or "") / relative_path
 
 
 def _load_module(relative_path: str, module_name: str) -> types.ModuleType:
-    spec = importlib.util.spec_from_file_location(module_name, _project_root() / relative_path)
+    spec = importlib.util.spec_from_file_location(module_name, _cli_file(relative_path))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -49,7 +61,6 @@ def _load_default_module() -> types.ModuleType:
     interface = types.SimpleNamespace(
         amdsmi_get_rocm_version=lambda: (True, "10.1.0"),
         amdsmi_get_processor_handles=lambda: ["gpu0"],
-        amdsmi_get_gpu_driver_info=lambda _gpu: _DRIVER_INFO,
         amdsmi_get_fw_info=_raise,
         amdsmi_get_gpu_vbios_info=_raise,
         amdsmi_get_gpu_metrics_info=_raise,
@@ -79,7 +90,7 @@ def _load_default_module() -> types.ModuleType:
         {"amdsmi": amdsmi, "_version": version_metadata, "amdsmi_helpers": helpers_module}
     )
     try:
-        return _load_module("amdsmi_cli/subcommands/default.py", "default_driver_under_test")
+        return _load_module("subcommands/default.py", "default_driver_under_test")
     finally:
         restore()
 
@@ -102,6 +113,7 @@ def _run_default() -> dict:
     commands.helpers = types.SimpleNamespace(
         is_amdgpu_initialized=lambda: True,
         check_required_groups=lambda: None,
+        get_gpu_driver_info=lambda _gpu: _DRIVER_INFO,
         get_gpu_id_from_device_handle=lambda _gpu: 0,
         get_apu_memory_type_and_name=lambda _gpu, _gpu_id: (0, "VRAM"),
         convert_SI_unit=lambda value, _unit: value,
@@ -126,18 +138,93 @@ def _run_default_without_amdgpu(gpus_without_driver: list) -> dict:
     return commands.logger.output
 
 
+def _banner_lines(driver_info: object) -> list:
+    """The version header the real logger prints for `driver_info`."""
+    helpers_module = types.ModuleType("amdsmi_helpers")
+    helpers_module.AMDSMIHelpers = type("AMDSMIHelpers", (), {})
+    restore = stub_modules_at_import({"amdsmi_helpers": helpers_module})
+    try:
+        module = _load_module("amdsmi_logger.py", "logger_driver_under_test")
+    finally:
+        restore()
+    logger = module.AMDSMILogger(helpers=types.SimpleNamespace(os_info=lambda: "Linux Baremetal"))
+    payload = {
+        "version_info": {
+            "amd-smi": "27.2.0",
+            "amdgpu version": driver_info,
+            "kernel version": "6.8.0-124-generic",
+            "fw pldm version": "N/A",
+            "vbios version": "N/A",
+            "rocm version": (True, "10.3.0"),
+        },
+        "gpu_info_list": [],
+        "processes": [],
+    }
+    stdout = io.StringIO()
+    with redirect_stdout(stdout):
+        logger.print_default_output(payload)
+    return stdout.getvalue().splitlines()
+
+
+def _row(lines: list, label: str) -> str:
+    """The header row that starts with `label`, or "" when it was not printed."""
+    return next((line for line in lines if line.startswith(f"| {label}")), "")
+
+
 class TestDefaultDriverHeader(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        root = _project_root()
-        for relative_path in ("amdsmi_cli/subcommands/default.py", "amdsmi_cli/amdsmi_logger.py"):
-            if not (root / relative_path).is_file():
-                raise unittest.SkipTest(f"amd-smi CLI source not found at {root / relative_path}")
+        if not _CLI_DIR:
+            raise unittest.SkipTest("amd-smi CLI directory not found")
+        for relative_path in ("subcommands/default.py", "amdsmi_logger.py"):
+            if not _cli_file(relative_path).is_file():
+                raise unittest.SkipTest(f"amd-smi CLI file not found: {_cli_file(relative_path)}")
 
     def test_default_payload_uses_driver_info(self) -> None:
         output = _run_default()
         self.assertEqual(output["version_info"]["amdgpu version"], _DRIVER_INFO)
         self.assertNotIn("amdgpu dkms version", output["version_info"])
+
+    def test_banner_shows_build_and_package_row_below_the_version(self) -> None:
+        lines = _banner_lines(_DRIVER_INFO)
+        version_index = lines.index(_row(lines, "amdgpu Version:"))
+
+        self.assertIn(" 6.19.14.31400000-2370381 ", lines[version_index])
+        self.assertRegex(lines[version_index + 1], r"^\| amdgpu Package:    amdgpu-dkms +\|$")
+        self.assertEqual(len(lines[version_index + 1]), len(lines[version_index]))
+        self.assertTrue(lines[version_index + 2].startswith("| ROCm Version:"))
+
+    def test_banner_shows_kmod_package(self) -> None:
+        lines = _banner_lines(
+            {
+                **_DRIVER_INFO,
+                "driver_full_version": "6.16.13-2412345",
+                "driver_package": "amdgpu-kmod",
+            }
+        )
+
+        self.assertIn(" 6.16.13-2412345 ", _row(lines, "amdgpu Version:"))
+        self.assertRegex(_row(lines, "amdgpu Package:"), r"^\| amdgpu Package:    amdgpu-kmod +\|$")
+
+    def test_banner_hides_package_row_without_a_package(self) -> None:
+        lines = _banner_lines({**_DRIVER_INFO, **_NO_PACKAGE})
+
+        self.assertIn(" 6.19.14.31400000 ", _row(lines, "amdgpu Version:"))
+        self.assertEqual(_row(lines, "amdgpu Package:"), "")
+
+    def test_banner_uses_os_kernel_when_the_module_has_no_version(self) -> None:
+        lines = _banner_lines({**_DRIVER_INFO, **_NO_PACKAGE, "driver_full_version": "N/A"})
+
+        self.assertEqual(_row(lines, "amdgpu Version:"), "")
+        self.assertEqual(_row(lines, "amdgpu Package:"), "")
+        self.assertIn(" 6.8.0-124-generic ", _row(lines, "OS kernel Version:"))
+
+    def test_banner_uses_os_kernel_when_driver_info_is_unavailable(self) -> None:
+        lines = _banner_lines("N/A")
+
+        self.assertEqual(_row(lines, "amdgpu Version:"), "")
+        self.assertEqual(_row(lines, "amdgpu Package:"), "")
+        self.assertIn(" 6.8.0-124-generic ", _row(lines, "OS kernel Version:"))
 
     def test_missing_amdgpu_with_a_gpu_present_names_the_driver(self) -> None:
         with self.assertRaises(Exception) as ctx:

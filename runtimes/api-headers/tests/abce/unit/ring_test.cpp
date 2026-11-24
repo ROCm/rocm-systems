@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "abce_test_harness.hpp"
@@ -69,6 +70,78 @@ TEST_P(Ring, AcquiredRegionIsZeroedEvenOverDirtyRingMemory) {
     ASSERT_EQ(buffer[byte_idx], 0) << "byte " << byte_idx
                                    << " leaked stale ring content into a builder's zeroed buffer";
   ASSERT_EQ(abce_ring_release(fake.ring(), &reservation), ABCE_STATUS_OK);
+}
+
+// A ring with a writer (a device-memory ring behind a write-combined BAR) is not
+// zeroed on acquire; each region is written once, whole, through the writer.
+struct RingWrite {
+  size_t offset;
+  size_t src_bytes;
+  size_t dst_bytes;
+};
+
+void RecordAndWriteRegion(void* user_data, char* dst, const void* src, size_t src_bytes,
+                          size_t dst_bytes) {
+  auto* writes = static_cast<std::pair<char*, std::vector<RingWrite>>*>(user_data);
+  writes->second.push_back({static_cast<size_t>(dst - writes->first), src_bytes, dst_bytes});
+  if (src_bytes != 0) std::memcpy(dst, src, src_bytes);
+  std::memset(dst + src_bytes, 0, dst_bytes - src_bytes);
+}
+
+TEST_P(Ring, AWriterReplacesZeroingAndWritesEveryRegionWhole) {
+  std::pair<char*, std::vector<RingWrite>> writes{nullptr, {}};
+  RingOptions options;
+  options.size_bytes = 256;
+  options.align64 = true;
+  options.write = &RecordAndWriteRegion;
+  options.write_user_data = &writes;
+  options.readback_before_doorbell = true;
+  FakeRing fake(WithBackend(options));
+  writes.first = fake.base();
+  std::memset(fake.base(), 0xab, fake.size_bytes());
+
+  uint32_t reserve_bytes = 0;
+  ASSERT_EQ(abce_ring_padded_size(fake.ring(), 40, &reserve_bytes), ABCE_STATUS_OK);
+  ASSERT_EQ(reserve_bytes, 64u);
+  abce_ring_reservation_t reservation{};
+  char* buffer = nullptr;
+  ASSERT_EQ(abce_ring_acquire(fake.ring(), reserve_bytes, &reservation, &buffer), ABCE_STATUS_OK);
+  EXPECT_EQ(static_cast<uint8_t>(buffer[0]), 0xabu) << "acquire zeroed a ring that has a writer";
+  const std::vector<uint8_t> payload(40, 0x5a);
+  abce_ring_fill(fake.ring(), buffer, payload.data(), payload.size(), reserve_bytes);
+  ASSERT_EQ(abce_ring_release(fake.ring(), &reservation), ABCE_STATUS_OK);
+  EXPECT_EQ(static_cast<uint8_t>(buffer[39]), 0x5au);
+  EXPECT_EQ(buffer[40], 0) << "the pad tail must be NOPs";
+  EXPECT_EQ(buffer[63], 0);
+
+  AcquireAndRelease(fake, 128, 0x11);   // cursor at 192
+  const size_t writes_before_wrap = writes.second.size();
+  AcquireAndRelease(fake, 128, 0x22);   // straddles the end: [192, 256) becomes padding
+  ASSERT_GT(writes.second.size(), writes_before_wrap);
+  const RingWrite& padding = writes.second[writes_before_wrap];
+  EXPECT_EQ(padding.offset, 192u);
+  EXPECT_EQ(padding.src_bytes, 0u);
+  EXPECT_EQ(padding.dst_bytes, 64u);
+  EXPECT_EQ(fake.base()[192], 0) << "wrap padding must be written as NOPs through the writer";
+}
+
+// A readback stays inside the region it orders, whatever its size and
+// alignment: the first region here is a single 4-byte NOP at the ring base.
+// Without a writer, wrap padding and cancel read back their region too.
+TEST_P(Ring, AReadbackStaysInsideEveryRegionWithoutAWriter) {
+  RingOptions options;
+  options.size_bytes = 256;
+  options.readback_before_doorbell = true;
+  FakeRing fake(WithBackend(options));
+  AcquireAndRelease(fake, 4, 0x11);    // [0, 4)
+  AcquireAndRelease(fake, 244, 0x22);  // [4, 248)
+  abce_ring_reservation_t reservation{};
+  char* buffer = nullptr;
+  // 12 bytes would straddle the end, so [248, 256) is published as padding first.
+  ASSERT_EQ(abce_ring_acquire(fake.ring(), 12, &reservation, &buffer), ABCE_STATUS_OK);
+  EXPECT_EQ(reservation.start, 256u);
+  ASSERT_EQ(abce_ring_cancel(fake.ring(), &reservation), ABCE_STATUS_OK);
+  EXPECT_EQ(fake.doorbell_history(), (std::vector<uint64_t>{4, 248, 256, 268}));
 }
 
 TEST_P(Ring, AttachingToAQueueInUseSeedsTheCursorsFromItsWritePointer) {
