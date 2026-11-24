@@ -8,6 +8,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added `amdsmi_is_gpu_apu()` to identify the integrated GPU of an APU**.  
+  - Available in C, Python, and Rust. It reports the amdgpu driver's own classification and returns `AMDSMI_STATUS_NOT_SUPPORTED`, including on WSL, rather than guessing. `amd-smi` now uses it to choose the memory pool it reports for an APU.
+
 - **Added ``amd-smi metric --nic --rdma [idx]`` and the Python ``amdsmi_get_nic_rdma_port_statistics()``**.  
   - Prints the RDMA hardware counters of each RDMA port of an AI-NIC. The Python function returns a dictionary of counter name to value.
 
