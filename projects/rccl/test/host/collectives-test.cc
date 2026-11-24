@@ -1371,8 +1371,8 @@ TEST_F(CollectivesMicrotest, AllGather_DdaArmsLaunchAsAddons) {
   ExpectAddonArms({{RCCL_DDA_FABRIC_LL, "ncclAllGatherDdaFabricLL"},
                    {RCCL_DDA_FABRIC_LL128, "ncclAllGatherDdaFabricLL128"},
                    {RCCL_DDA_FABRIC_VMM, "ncclAllGatherDdaFabric"},
-                   {RCCL_DDA_IPC, "ncclAllGatherDdaIpc"},
-                  }, [&] { return AllGather(); }, ncclNumOps, "AllGather");
+                   {RCCL_DDA_IPC, "ncclAllGatherDdaIpc"}},
+                  [&] { return AllGather(); }, ncclNumOps, "AllGather");
 }
 
 TEST_F(CollectivesMicrotest, AllGather_DdaArmsRunInsideAProfilerEvent) {
@@ -1380,8 +1380,8 @@ TEST_F(CollectivesMicrotest, AllGather_DdaArmsRunInsideAProfilerEvent) {
   ExpectAddonArms({{RCCL_DDA_FABRIC_LL, "ncclAllGatherDdaFabricLL"},
                    {RCCL_DDA_FABRIC_LL128, "ncclAllGatherDdaFabricLL128"},
                    {RCCL_DDA_FABRIC_VMM, "ncclAllGatherDdaFabric"},
-                   {RCCL_DDA_IPC, "ncclAllGatherDdaIpc"},
-                  }, [&] { return AllGather(); }, ncclNumOps, "AllGather");
+                   {RCCL_DDA_IPC, "ncclAllGatherDdaIpc"}},
+                  [&] { return AllGather(); }, ncclNumOps, "AllGather");
 }
 
 TEST_F(CollectivesMicrotest, AllGather_FailedPrologueSkipsTheAddon) {
@@ -1438,15 +1438,15 @@ TEST_F(CollectivesMicrotest, AllGather_CheckModeDivertsAddonsButKeepsDirect) {
 
 TEST_F(CollectivesMicrotest, Broadcast_DdaArmsLaunchAsAddons) {
   ExpectAddonArms({{RCCL_DDA_FABRIC_LL, "ncclBroadcastDdaFabricLL"},
-                   {RCCL_DDA_FABRIC_LL128, "ncclBroadcastDdaFabricLL128"},
-                  }, [&] { return Broadcast(); }, ncclNumOps, "Broadcast");
+                   {RCCL_DDA_FABRIC_LL128, "ncclBroadcastDdaFabricLL128"}},
+                  [&] { return Broadcast(); }, ncclNumOps, "Broadcast");
 }
 
 TEST_F(CollectivesMicrotest, Broadcast_DdaArmsRunInsideAProfilerEvent) {
   ScopedHook<bool()> pluginLoaded{g_profilerPluginLoaded, []() { return true; }};
   ExpectAddonArms({{RCCL_DDA_FABRIC_LL, "ncclBroadcastDdaFabricLL"},
-                   {RCCL_DDA_FABRIC_LL128, "ncclBroadcastDdaFabricLL128"},
-                  }, [&] { return Broadcast(); }, ncclNumOps, "Broadcast");
+                   {RCCL_DDA_FABRIC_LL128, "ncclBroadcastDdaFabricLL128"}},
+                  [&] { return Broadcast(); }, ncclNumOps, "Broadcast");
 }
 
 TEST_F(CollectivesMicrotest, Broadcast_DdaLaunchReceivesRoot) {
@@ -1886,11 +1886,8 @@ TEST_F(CollectivesMicrotest, AlltoAll_DdaArmsLaunchAsAddons) {
   ExpectAddonArms({{RCCL_DDA_FABRIC_LL, "ncclAllToAllDdaFabricLL"},
                    {RCCL_DDA_FABRIC_LL128, "ncclAllToAllDdaFabricLL128"},
                    {RCCL_DDA_FABRIC_VMM, "ncclAllToAllDdaFabric"},
-                   {RCCL_DDA_IPC, "ncclAllToAllDdaIpc"},
-#if defined(ENABLE_ROCSHMEM_GIN)
-                   {RCCL_A2A_GIN_SDMA, "ncclAllToAllGinSdma"},
-#endif
-                  }, [&] { return AlltoAll(); }, ncclNumOps, "AlltoAll");
+                   {RCCL_DDA_IPC, "ncclAllToAllDdaIpc"}},
+                  [&] { return AlltoAll(); }, ncclNumOps, "AlltoAll");
 }
 
 TEST_F(CollectivesMicrotest, AlltoAll_DdaArmsRunInsideAProfilerEvent) {
@@ -1899,11 +1896,8 @@ TEST_F(CollectivesMicrotest, AlltoAll_DdaArmsRunInsideAProfilerEvent) {
   ExpectAddonArms({{RCCL_DDA_FABRIC_LL, "ncclAllToAllDdaFabricLL"},
                    {RCCL_DDA_FABRIC_LL128, "ncclAllToAllDdaFabricLL128"},
                    {RCCL_DDA_FABRIC_VMM, "ncclAllToAllDdaFabric"},
-                   {RCCL_DDA_IPC, "ncclAllToAllDdaIpc"},
-#if defined(ENABLE_ROCSHMEM_GIN)
-                   {RCCL_A2A_GIN_SDMA, "ncclAllToAllGinSdma"},
-#endif
-                  }, [&] { return AlltoAll(); }, ncclNumOps, "AlltoAll");
+                   {RCCL_DDA_IPC, "ncclAllToAllDdaIpc"}},
+                  [&] { return AlltoAll(); }, ncclNumOps, "AlltoAll");
 }
 
 TEST_F(CollectivesMicrotest, AlltoAll_CheckModeDivertsDda) {
@@ -1963,11 +1957,8 @@ TEST_F(CollectivesMicrotest, AllReduce_DdaArmsLaunchAsAddons) {
   ExpectAddonArms({{RCCL_DDA_FABRIC_LL, "ncclAllReduceDdaFabricLL"},
                    {RCCL_DDA_FABRIC_LL128, "ncclAllReduceDdaFabricLL128"},
                    {RCCL_DDA_FABRIC_VMM, "ncclAllReduceDdaFabric"},
-                   {RCCL_DDA_IPC, "ncclAllReduceDdaIpc"},
-#if defined(ENABLE_ROCSHMEM_GIN)
-                   {RCCL_GIN_SDMA, "ncclAllReduceGinSdma"},
-#endif
-                  }, [&] { return AllReduce(); }, ncclProd, "AllReduce");
+                   {RCCL_DDA_IPC, "ncclAllReduceDdaIpc"}},
+                  [&] { return AllReduce(); }, ncclProd, "AllReduce");
 }
 
 TEST_F(CollectivesMicrotest, AllReduce_DdaArmsRunInsideAProfilerEvent) {
@@ -1975,11 +1966,8 @@ TEST_F(CollectivesMicrotest, AllReduce_DdaArmsRunInsideAProfilerEvent) {
   ExpectAddonArms({{RCCL_DDA_FABRIC_LL, "ncclAllReduceDdaFabricLL"},
                    {RCCL_DDA_FABRIC_LL128, "ncclAllReduceDdaFabricLL128"},
                    {RCCL_DDA_FABRIC_VMM, "ncclAllReduceDdaFabric"},
-                   {RCCL_DDA_IPC, "ncclAllReduceDdaIpc"},
-#if defined(ENABLE_ROCSHMEM_GIN)
-                   {RCCL_GIN_SDMA, "ncclAllReduceGinSdma"},
-#endif
-                  }, [&] { return AllReduce(); }, ncclProd, "AllReduce");
+                   {RCCL_DDA_IPC, "ncclAllReduceDdaIpc"}},
+                  [&] { return AllReduce(); }, ncclProd, "AllReduce");
 }
 
 // The decision's DDA cap (a re-routed call's, else none) reaches the fabric AllReduce launcher of each arm.
@@ -2109,8 +2097,8 @@ TEST_F(CollectivesMicrotest, ReduceScatter_DdaArmsLaunchAsAddons) {
   ExpectAddonArms({{RCCL_DDA_FABRIC_LL, "ncclReduceScatterDdaFabricLL"},
                    {RCCL_DDA_FABRIC_LL128, "ncclReduceScatterDdaFabricLL128"},
                    {RCCL_DDA_FABRIC_VMM, "ncclReduceScatterDdaFabric"},
-                   {RCCL_DDA_IPC, "ncclReduceScatterDdaIpc"},
-                  }, [&] { return ReduceScatter(); }, ncclMin, "ReduceScatter");
+                   {RCCL_DDA_IPC, "ncclReduceScatterDdaIpc"}},
+                  [&] { return ReduceScatter(); }, ncclMin, "ReduceScatter");
 }
 
 TEST_F(CollectivesMicrotest, ReduceScatter_DdaArmsRunInsideAProfilerEvent) {
@@ -2119,8 +2107,8 @@ TEST_F(CollectivesMicrotest, ReduceScatter_DdaArmsRunInsideAProfilerEvent) {
   ExpectAddonArms({{RCCL_DDA_FABRIC_LL, "ncclReduceScatterDdaFabricLL"},
                    {RCCL_DDA_FABRIC_LL128, "ncclReduceScatterDdaFabricLL128"},
                    {RCCL_DDA_FABRIC_VMM, "ncclReduceScatterDdaFabric"},
-                   {RCCL_DDA_IPC, "ncclReduceScatterDdaIpc"},
-                  }, [&] { return ReduceScatter(); }, ncclMin, "ReduceScatter");
+                   {RCCL_DDA_IPC, "ncclReduceScatterDdaIpc"}},
+                  [&] { return ReduceScatter(); }, ncclMin, "ReduceScatter");
 }
 
 TEST_F(CollectivesMicrotest, ReduceScatter_CheckModeDivertsAddons) {
