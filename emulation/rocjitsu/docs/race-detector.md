@@ -348,6 +348,22 @@ the affected bytes, and LDS races are tracked per byte.
 
 ## How it works
 
+### Workgroup lifetime
+
+Participating waves share ownership of their workgroup's race detector. Each
+wave's plugin state holds an aliasing pointer to its detector-owned history.
+Halting or cancelling a wave releases that pointer and its instruction trace,
+but surviving peers keep all histories, including those of ended waves.
+Ending a wave does not establish LDS ordering with its peers.
+
+The last wave to halt or be cancelled releases the detector. Cleanup does not
+depend on successful workgroup completion, so setup rollback and dispatch
+cancellation release it as well. Destroying resident wave slots also releases
+their ownership. Kernel names and recorded report summaries have a separate
+plugin lifetime and remain available after a detector is released.
+
+### Event lifetime
+
 Every in-flight memory operation has an **event** that goes through the
 following lifecycle:
 
