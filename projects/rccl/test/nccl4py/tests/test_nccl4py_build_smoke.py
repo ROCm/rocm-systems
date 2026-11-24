@@ -18,7 +18,7 @@ import subprocess
 
 import pytest
 
-CPU_SMOKE_TESTS = ("tests/test_rocm_extensions.py",)
+CPU_SMOKE_TESTS = ("tests/test_rocm_extensions.py", "tests/test_encryption.py")
 
 GPU_SMOKE_TESTS = ("tests/test_shim_surface.py", "tests/test_group_window.py")
 
