@@ -4,6 +4,8 @@
 #include "rocm_smi/rocm_smi_cpu_link.h"
 
 #include <cerrno>
+#include <cstdio>
+#include <cstring>
 #include <map>
 #include <memory>
 
@@ -17,8 +19,19 @@ int DiscoverGpuCpuLinks(uint32_t gpu_kfd_node_indx, std::vector<GpuCpuLink>* out
   std::map<uint32_t, std::shared_ptr<IOLink>> neighbors;
   int ret = DiscoverIOLinksPerNode(gpu_kfd_node_indx, &neighbors);
   if (ret != 0) {
+    fprintf(stderr,
+            "[CPU_LINK_DEBUG] DiscoverIOLinksPerNode(node=%u) failed: errno=%d (%s), "
+            "neighbors_found_before_failure=%zu\n",
+            gpu_kfd_node_indx, ret, strerror(ret), neighbors.size());
     return ret;
   }
+
+  fprintf(stderr, "[CPU_LINK_DEBUG] node=%u has %zu io_link neighbor(s): [", gpu_kfd_node_indx,
+          neighbors.size());
+  for (const auto& kv : neighbors) {
+    fprintf(stderr, "%u(type=%d) ", kv.first, static_cast<int>(kv.second->type()));
+  }
+  fprintf(stderr, "]\n");
 
   for (const auto& kv : neighbors) {
     uint32_t node_to = kv.first;
@@ -33,6 +46,11 @@ int DiscoverGpuCpuLinks(uint32_t gpu_kfd_node_indx, std::vector<GpuCpuLink>* out
     if (gpu_id_ret == ENOENT) {
       // No gpu_id file at all: node_to is a CPU, not a GPU.
     } else if (gpu_id_ret != 0) {
+      fprintf(stderr,
+              "[CPU_LINK_DEBUG] ReadKFDGpuId(node=%u, neighbor node_to=%u, link_type=%d) failed: "
+              "errno=%d (%s)\n",
+              gpu_kfd_node_indx, node_to, static_cast<int>(link->type()), gpu_id_ret,
+              strerror(gpu_id_ret));
       return gpu_id_ret;
     } else if (node_to_gpu_id != 0) {
       continue;  // GPU peer, not a CPU node
@@ -40,6 +58,9 @@ int DiscoverGpuCpuLinks(uint32_t gpu_kfd_node_indx, std::vector<GpuCpuLink>* out
 
     out->push_back(GpuCpuLink{node_to, link->type()});
   }
+
+  fprintf(stderr, "[CPU_LINK_DEBUG] node=%u resolved %zu CPU link(s)\n", gpu_kfd_node_indx,
+          out->size());
 
   return 0;
 }
