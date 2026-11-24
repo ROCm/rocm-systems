@@ -102,7 +102,7 @@ int run(int argc, char **argv) {
   if (argc < 5) {
     std::cerr
         << "Usage: consan_hsa_runner ORIGINAL ENTRY LAUNCHES MODE "
-           "[--baseline] "
+           "[--baseline] [--application-dispatch] "
            "[--bad-geometry] [--profiling] [--reuse-signal] [--target GPU] [--wave-size N] "
            "[--threads N] [--test-statistics] [--batch-barrier-and|--batch-barrier-or] "
            "[--separate-barrier] [--high-lane] [--workgroups N] [--amd-signals]\n"
@@ -161,6 +161,7 @@ int run(int argc, char **argv) {
   std::string_view target = "gfx1100";
   uint32_t threads = 64, wave_size = 32, workgroups = 1;
   bool baseline = false, bad_geometry = false, profiling = false, reuse_signal = false;
+  bool application_dispatch = false;
   bool test_statistics = false, separate_barrier = false, high_lane = false, amd_signals = false;
   uint16_t barrier_type = 0;
   for (int index = 5; index < argc; ++index) {
@@ -169,6 +170,8 @@ int run(int argc, char **argv) {
       high_lane = true;
     } else if (option == "--baseline") {
       baseline = true;
+    } else if (option == "--application-dispatch") {
+      application_dispatch = true;
     } else if (option == "--bad-geometry") {
       bad_geometry = true;
     } else if (option == "--profiling") {
@@ -214,6 +217,9 @@ int run(int argc, char **argv) {
                                 2u);
   const size_t output_bytes = output_words * sizeof(uint32_t);
   if (baseline && (bad_geometry || profiling || reuse_signal || test_statistics || barrier_type)) {
+    return 3;
+  }
+  if (application_dispatch && (barrier_type || separate_barrier || reuse_signal || bad_geometry)) {
     return 3;
   }
   if (separate_barrier && (!barrier_type || !bad_geometry)) {
@@ -377,7 +383,7 @@ int run(int argc, char **argv) {
       result = 21;
       break;
     }
-    const uint64_t packet_count = barrier_type ? 2 : 1;
+    const uint64_t packet_count = barrier_type || application_dispatch ? 2 : 1;
     const uint64_t write_index = hsa_queue_add_write_index_relaxed(queue, packet_count);
     auto *packet = static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address) +
                    (write_index & (queue->size - 1));
@@ -390,7 +396,7 @@ int run(int argc, char **argv) {
     packet->group_segment_size = group_bytes;
     packet->kernel_object = kernel;
     packet->kernarg_address = arguments;
-    packet->completion_signal = signal;
+    packet->completion_signal = application_dispatch ? hsa_signal_t{} : signal;
     const uint16_t header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
                             (1u << HSA_PACKET_HEADER_BARRIER) |
                             (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
@@ -406,6 +412,16 @@ int run(int argc, char **argv) {
               ? uint16_t{HSA_PACKET_TYPE_INVALID}
               : barrier_type | (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
                     (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    }
+    if (application_dispatch) {
+      // This application-owned barrier supplies its host wait while the original
+      // dispatch has null completion, matching the application tools profile.
+      auto *barrier = reinterpret_cast<hsa_barrier_and_packet_t *>(queue->base_address) +
+                      ((write_index + 1) & (queue->size - 1));
+      std::memset(barrier, 0, sizeof(*barrier));
+      barrier->completion_signal = signal;
+      const uint16_t barrier_header = (header & ~uint16_t{0xff}) | HSA_PACKET_TYPE_BARRIER_AND;
+      __atomic_store_n(&barrier->header, barrier_header, __ATOMIC_RELEASE);
     }
     // Host wall time includes simulator/driver work and completion forwarding;
     // it is not a profiling timestamp from the GPU.

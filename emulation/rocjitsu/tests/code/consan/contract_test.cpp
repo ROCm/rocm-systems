@@ -396,6 +396,24 @@ TEST(ConSanExecutionTraceContract, OwnsBoundaryFactsAndPlansEveryWorkgroupRow) {
   }
 }
 
+TEST(ConSanExecutionTraceContract, TargetCapabilitiesBoundTraceWaveModes) {
+  for (const TargetProfile &target : kNativeLdsTargets) {
+    for (const uint32_t wave : {32u, 64u}) {
+      SCOPED_TRACE(target.name);
+      SCOPED_TRACE(wave);
+      Manifest manifest = trace_example();
+      manifest.target = target.id;
+      manifest.wave_size = wave;
+      manifest.entry.workgroup_id_scalar =
+          target.id == 1201 || target.id == 1250 ? kWorkgroupIdTtmp9Selector : 15u;
+      EXPECT_EQ(validate_manifest(manifest).succeeded(), supports_execution_trace(target, wave));
+    }
+    TargetProfile disabled = target;
+    disabled.execution_trace = false;
+    EXPECT_FALSE(supports_execution_trace(disabled, target.default_wave_size));
+  }
+}
+
 TEST(ConSanExecutionTraceContract, ProfilesAndBoundaryMappingsCannotBeInterchanged) {
   Manifest manifest = trace_example();
   manifest.options = mvp_options_digest();

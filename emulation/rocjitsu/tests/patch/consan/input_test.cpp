@@ -131,6 +131,77 @@ TEST(ConSanInput, MissingEntryAndAdditionalKernelHaveDistinctDiagnostics) {
   EXPECT_EQ(error.message, "ConSan requires a single-kernel code object; found 2 kernels");
 }
 
+TEST(ConSanInputTrace, RejectsVgprOnlyMfmaAndSmfmacWithoutProvenSpacing) {
+  for (const test::TargetMode mode : {test::TargetMode{.target = "gfx942", .wave_size = 64},
+                                      test::TargetMode{.target = "gfx950", .wave_size = 64}}) {
+    SCOPED_TRACE(mode.target);
+    const TargetProfile &target = *target_profile(mode.target);
+    const std::vector<uint8_t> original =
+        test::read_fixture(test::target_fixture_path(mode, "group-1"));
+    ASSERT_FALSE(original.empty());
+    InputError error;
+    const FailureOr<InputProgram> control = build_image_entry_program(
+        original, target, "lds_producer_consumer", error, {}, ScopeKind::ExecutionTrace);
+    ASSERT_TRUE(control.succeeded()) << error.message;
+    ASSERT_EQ(kernel_descriptor_user_sgpr_count(target.arch, control.value().kernel.descriptor),
+              15u);
+    ASSERT_NE(RJ_AMDHSA_BITS_GET(control.value().kernel.descriptor.compute_pgm_rsrc2,
+                                 amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X),
+              0u);
+    const uint16_t sparse_opcode = target.arch == IsaFamily::Cdna3
+                                       ? cdna4::kVSmfmacF3216x16x32F16Vop3pMfma
+                                       : cdna4::kVSmfmacF3216x16x64Bf16Vop3pMfma;
+    for (const uint16_t opcode : {cdna4::kVMfmaF3216x16x16F16Vop3pMfma, sparse_opcode}) {
+      SCOPED_TRACE(opcode);
+      const std::array<uint32_t, 2> words =
+          cdna4::build_vop3p_mfma(opcode, {.vdst = 0, .src0 = 256, .src1 = 256, .src2 = 256});
+      const std::unique_ptr<Decoder> decoder =
+          Decoder::create(default_isa_target_registry(), target.public_id);
+      ASSERT_NE(decoder, nullptr);
+      const DecodeResult decoded = decoder->decode_window(words);
+      ASSERT_TRUE(decoded.succeeded());
+      ASSERT_TRUE(decoded.value()->is_mfma());
+      for (int index = 0; index < decoded.value()->num_src_operands(); ++index) {
+        const std::optional<RegisterRef> reg =
+            decoded.value()->src_operand(index)->to_register_ref();
+        if (reg) {
+          ASSERT_NE(reg->cls, RegClass::ACC_VGPR);
+          if (reg->cls == RegClass::VGPR)
+            ASSERT_LE(reg->index + reg->width, control.value().original_vgprs);
+        }
+      }
+      for (int index = 0; index < decoded.value()->num_dst_operands(); ++index) {
+        const std::optional<RegisterRef> reg =
+            decoded.value()->dst_operand(index)->to_register_ref();
+        ASSERT_TRUE(reg.has_value());
+        ASSERT_EQ(reg->cls, RegClass::VGPR);
+        ASSERT_LE(reg->index + reg->width, control.value().original_vgprs);
+      }
+      std::vector<uint8_t> image = original;
+      const size_t entry =
+          control.value().text_file_offset + control.value().kernel.entry_text_offset;
+      const std::array<uint32_t, 3> body = {words[0], words[1], 0xbf810000u};
+      ASSERT_LE(entry + sizeof(body), image.size());
+      std::memcpy(image.data() + entry, body.data(), sizeof(body));
+      EXPECT_TRUE(build_image_entry_program(image, target, "lds_producer_consumer", error, {},
+                                            ScopeKind::ExecutionTrace)
+                      .failed());
+      EXPECT_EQ(error.code, InputErrorCode::UnsupportedInstruction) << error.message;
+      EXPECT_EQ(error.text_offset, control.value().kernel.entry_text_offset);
+      EXPECT_EQ(error.message, "execution tracing requires proven MFMA/SMFMAC register spacing");
+      const std::array<std::string_view, 1> entries = {"lds_producer_consumer"};
+      const FailureOr<PreparationResult> preparation =
+          prepare_image_best_effort(image, target, entries, error, ScopeKind::ExecutionTrace);
+      ASSERT_TRUE(preparation.succeeded()) << error.message;
+      ASSERT_EQ(preparation.value().entries.size(), 1u);
+      EXPECT_FALSE(preparation.value().entries.front().instrumented);
+      EXPECT_EQ(preparation.value().entries.front().reason.code,
+                InputErrorCode::UnsupportedInstruction);
+      EXPECT_FALSE(preparation.value().artifact);
+    }
+  }
+}
+
 #ifdef CONSAN_MULTI_ENTRY_FIXTURE
 TEST(ConSanInputImage, QualifiesDistinctEntriesWithoutExtractingTheirImage) {
   std::ifstream file(CONSAN_MULTI_ENTRY_FIXTURE, std::ios::binary);

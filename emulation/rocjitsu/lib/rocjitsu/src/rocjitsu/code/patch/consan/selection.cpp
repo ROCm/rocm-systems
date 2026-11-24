@@ -217,7 +217,12 @@ FailureOr<PreparationResult> prepare_image_best_effort(std::span<const uint8_t> 
     if (artifact.succeeded()) {
       result.artifact = std::move(artifact.value());
     } else {
-      if (error.code != InputErrorCode::UnsupportedControlTransferRange)
+      // Individual ISA qualification already succeeded. Only recovery-marked
+      // callable capability failures may retry a late UnsupportedInstruction;
+      // native preservation uses the same code and must remain a hard failure.
+      if (error.code != InputErrorCode::UnsupportedControlTransferRange &&
+          !(error.code == InputErrorCode::UnsupportedInstruction &&
+            error.recovery == InputErrorRecovery::NativeCallableCapability))
         return Result::failure();
       std::vector<std::string_view> accepted;
       for (EntryPreparation &entry : result.entries) {
@@ -231,7 +236,9 @@ FailureOr<PreparationResult> prepare_image_best_effort(std::span<const uint8_t> 
           result.artifact = std::move(candidate.value());
           continue;
         }
-        if (candidate_error.code != InputErrorCode::UnsupportedControlTransferRange) {
+        if (candidate_error.code != InputErrorCode::UnsupportedControlTransferRange &&
+            !(candidate_error.code == InputErrorCode::UnsupportedInstruction &&
+              candidate_error.recovery == InputErrorRecovery::NativeCallableCapability)) {
           error = std::move(candidate_error);
           return Result::failure();
         }

@@ -25,6 +25,7 @@ public:
   uint32_t elf_machine;
   uint32_t default_wave_size;
   bool wave64;
+  bool execution_trace = false;
 
   bool operator==(const TargetProfile &) const = default;
 };
@@ -36,35 +37,40 @@ inline constexpr std::array kNativeLdsTargets = {
                   .public_id = ROCJITSU_CODE_TARGET_GFX942,
                   .elf_machine = EF_AMDGPU_MACH_AMDGCN_GFX942,
                   .default_wave_size = 64,
-                  .wave64 = true},
+                  .wave64 = true,
+                  .execution_trace = true},
     TargetProfile{.id = 950,
                   .name = "gfx950",
                   .arch = rocjitsu::IsaFamily::Cdna4,
                   .public_id = ROCJITSU_CODE_TARGET_GFX950,
                   .elf_machine = EF_AMDGPU_MACH_AMDGCN_GFX950,
                   .default_wave_size = 64,
-                  .wave64 = true},
+                  .wave64 = true,
+                  .execution_trace = true},
     TargetProfile{.id = 1100,
                   .name = "gfx1100",
                   .arch = rocjitsu::IsaFamily::Rdna3,
                   .public_id = ROCJITSU_CODE_TARGET_GFX1100,
                   .elf_machine = EF_AMDGPU_MACH_AMDGCN_GFX1100,
                   .default_wave_size = 32,
-                  .wave64 = true},
+                  .wave64 = true,
+                  .execution_trace = true},
     TargetProfile{.id = 1201,
                   .name = "gfx1201",
                   .arch = rocjitsu::IsaFamily::Rdna4,
                   .public_id = ROCJITSU_CODE_TARGET_GFX1201,
                   .elf_machine = EF_AMDGPU_MACH_AMDGCN_GFX1201,
                   .default_wave_size = 32,
-                  .wave64 = true},
+                  .wave64 = true,
+                  .execution_trace = true},
     TargetProfile{.id = 1250,
                   .name = "gfx1250",
                   .arch = rocjitsu::IsaFamily::Cdna5,
                   .public_id = ROCJITSU_CODE_TARGET_GFX1250,
                   .elf_machine = EF_AMDGPU_MACH_AMDGCN_GFX1250,
                   .default_wave_size = 32,
-                  .wave64 = false},
+                  .wave64 = false,
+                  .execution_trace = true},
 };
 
 static_assert(std::ranges::none_of(kNativeLdsTargets, [](const TargetProfile &target) {
@@ -91,6 +97,10 @@ inline constexpr const TargetProfile *target_profile(std::string_view name) {
 
 inline constexpr bool supports_wave(const TargetProfile &target, uint32_t wave_size) {
   return wave_size == target.default_wave_size || (target.wave64 && wave_size == 64);
+}
+
+inline constexpr bool supports_execution_trace(const TargetProfile &target, uint32_t wave_size) {
+  return target.execution_trace && supports_wave(target, wave_size);
 }
 
 inline constexpr bool uses_split_workgroup_barrier(rocjitsu::IsaFamily arch) {

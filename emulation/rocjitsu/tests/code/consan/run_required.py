@@ -106,6 +106,7 @@ LOOP_CASES = (
 
 def required_names():
     names = {
+        'ConSanPrepareCli.TraceCapabilityCoverage',
         'ConSanPrefillHarness.Guards',
         'ConSanConfigure.EnvironmentOnlySdk',
         'ConSanRuntimeIntegration.Guards',
@@ -153,6 +154,7 @@ def required_names():
         'ConSanAnalysis.Wave64WorkgroupsKeepHighLanesAndRejectOnlyInvalidPartialWaveMasks',
     }
     for gpu, wave_size in MODES:
+        names.add(f'ConSanTargetApplicationSim.{gpu}.wave{wave_size}')
         for case in (*BARRIER_CASES, *LOOP_CASES):
             names.add(f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.{case}')
         for groups in (1, 4, 16):

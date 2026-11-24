@@ -417,22 +417,49 @@ matches deliberately remain native. The new profile has a distinct options and
 selection digest. Existing artifacts/captures must be regenerated after a producer
 contract change; runtime and offline decoding reject mismatched contracts.
 
-This profile admits gfx1250 wave32 selected entries with zero private segment,
-a closed direct CFG, recognizable terminal instructions, an enabled original
-workgroup-X input, and the shared SBI preservation/resource checks. Natural
-loops and zero LDS are supported. Calls, indirect control flow, guest PC
-introspection and VGPR deallocation remain outside this profile. Entry/exit boundary mappings are
-separate from LDS access sites; a trace manifest has no LDS sites.
+This profile admits the explicitly qualified target/wave combinations below.
+Selected entries require zero private segment, a closed direct CFG, recognizable
+terminal instructions, an enabled original workgroup-X input, and the shared SBI
+preservation/resource checks. Natural loops and zero LDS are supported. Calls,
+indirect control flow, guest PC introspection and VGPR deallocation remain outside
+this profile. Entry/exit boundary mappings are separate from LDS access sites; a
+trace manifest has no LDS sites.
+
+The target capabilities admit gfx942/gfx950 wave64, gfx1100/gfx1201 wave32 or
+wave64, and gfx1250 wave32. Each uses its own compiled probe image and native
+workgroup-X entry input: an SGPR on gfx942/gfx950/gfx1100, TTMP9 on gfx1201/gfx1250.
+`ConSanTargetApplicationSim.<target>.wave<wave>` executes original and instrumented
+workgroup output oracles, validates every entry/exit row including a partial last
+wave, and analyzes the closed capture again without original/prepared paths.
+The same original baseline also checks application LDS captures for each listed
+mode, requiring nonempty observations and independent replay. These tests
+establish simulator coverage for the listed capabilities, not
+physical-device qualification. Unknown targets and unsupported wave modes remain
+rejected.
+
+Trace preparation rejects MFMA/SMFMAC producers until callable register spacing
+is proven, including CDNA3/4 forms using only ordinary VGPR operands. Best-effort
+preparation retains those kernels natively with an owning skip reason.
+
+CDNA5 uses the shared bounded callable policy for dense F16 WMMA and decoded
+TRANS producers. Unknown matrix families and packed-permute adjacency produce a
+typed unsupported-instruction reason. The shared DBI check remains object-wide,
+so an unsupported unselected sibling can conservatively leave selected entries
+native too. Invalid callbacks, ABI or preservation plans remain hard errors.
+Entry-prologue and callback branches that exceed a representable branch range
+use the same typed capacity fallback as other trampolines; malformed coordinates
+remain hard errors. `--require-all` rejects either coverage gap before publication.
 
 Selected dispatches require complete 1D workgroups, up to 512 groups, and retain
 the original required workgroup shape and metadata flat bound. Extended-format-3
 selected packets require unit cluster sizes in every dimension: TTMP9 supplies
 a cluster coordinate for nonunit clusters and cannot identify a unique report
 row. Native dispatches retain support for nonunit clusters. A GPU probe uses
-snapshots of original VGPR0 lane zero and TTMP9 to identify local wave and
-workgroup. Every expected row must contain its own serial, entry, flattened row,
-workgroup, local wave and exactly one entry plus one exit observation. The host
-initializes these counters to zero; it does not synthesize probe execution.
+snapshots of original VGPR0 lane zero and the target's workgroup-X input to
+identify local wave and workgroup. Every expected row must contain its own serial,
+entry, flattened row, workgroup, local wave and exactly one entry plus one exit
+observation. The host initializes these counters to zero; it does not synthesize
+probe execution.
 
 Application trace accepts original kernargs only when pointer-info proves a
 known HSA allocation, a nonnull equal host/agent base, and the full argument

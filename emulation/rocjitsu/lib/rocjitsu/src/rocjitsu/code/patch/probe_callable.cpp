@@ -135,6 +135,20 @@ bool may_require_cdna5_valu_spacing(const Instruction &inst) {
          inst.mnemonic().starts_with("v_wmma_") || inst.mnemonic().starts_with("v_swmmac_");
 }
 
+bool is_unsupported_cdna5_valu_producer(const Instruction &inst) {
+  return may_require_cdna5_valu_spacing(inst) &&
+         inst.amdgpu_operation() != amdgpu::Operation::V_WMMA_F32_16X16X32_F16 &&
+         !inst.is_transcendental();
+}
+
+bool requires_cdna5_valu_follower(const Instruction &inst) {
+  // These gfx1250/1251 permutes need an immediately issuing safe VALU.
+  // https://github.com/llvm/llvm-project/commit/0c8e5777423c2e657d7e5c61b2cc812253f9b3ec
+  const std::string_view mnemonic = inst.mnemonic();
+  return mnemonic == "v_perm_pk16_b4_u4" || mnemonic == "v_perm_pk16_b6_u4" ||
+         mnemonic == "v_perm_pk16_b8_u4";
+}
+
 RegisterSet arg_registers(const ProbeAbi &abi) {
   RegisterSet regs;
   if (!is_valid_probe_abi(abi) || abi.num_arg_vgprs == 0) {

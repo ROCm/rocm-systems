@@ -27,6 +27,12 @@ struct ResolvedProbeSymbol;
 /// @details Includes scaled matrix families without MATRIX_REGISTER_ACCESSES.
 [[nodiscard]] bool may_require_cdna5_valu_spacing(const Instruction &inst);
 
+/// @brief Whether a CDNA5 producer exceeds the bounded callable spacing policy.
+[[nodiscard]] bool is_unsupported_cdna5_valu_producer(const Instruction &inst);
+
+/// @brief Whether a CDNA5 packed permute requires an immediately issuing VALU.
+[[nodiscard]] bool requires_cdna5_valu_follower(const Instruction &inst);
+
 /// @brief The return-link rule a verified probe body conforms to.
 ///
 /// @details Names only how the body returns. The registers a convention

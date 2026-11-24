@@ -39,6 +39,9 @@
 #ifndef MK_TRACE_EXIT_STRESS
 #define MK_TRACE_EXIT_STRESS 0
 #endif
+#ifndef MK_UNKNOWN_MATRIX_C
+#define MK_UNKNOWN_MATRIX_C 0
+#endif
 .amdgcn_target "amdgcn-amd-amdhsa--gfx1250"
 
 .macro wait_all
@@ -155,6 +158,12 @@ mk_b:
 .type mk_c,@function
 .p2align 8
 mk_c:
+#if MK_UNKNOWN_MATRIX_C
+  v_wmma_f32_16x16x32_bf16 v[24:31], v[8:15], v[16:23], v[24:31]
+  .rept 4
+  v_nop
+  .endr
+#endif
 #if MK_UNSUPPORTED_C
   v_xor_b32 v12, 1, v0
 #endif
@@ -227,6 +236,8 @@ mk_c:
 #if MK_ENTRY_MASK & 4
 #if MK_NATIVE_SCALAR
   descriptor mk_c, 4, 16, 8, 0
+#elif MK_UNKNOWN_MATRIX_C
+  descriptor mk_c, 24, 24, 32, 64
 #elif MK_EXTENDED_ABI
   descriptor mk_c, 24, 24, 32, 64, 68
 #else
@@ -329,7 +340,11 @@ amdhsa.kernels:
     .private_segment_fixed_size: 0
 #endif
     .sgpr_count: 24
+#if MK_UNKNOWN_MATRIX_C
+    .vgpr_count: 32
+#else
     .vgpr_count: MK_NATIVE_VGPRS
+#endif
 #endif
     .wavefront_size: 32
     .max_flat_workgroup_size: 64
