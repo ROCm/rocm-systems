@@ -89,9 +89,9 @@ Panel Config:
         unit: Unit
       metric:
         Wave Life:
-          avg: SUM(SQG_WAVE_CYCLES_sum) / SUM(SQ_WAVES_sum)
-          min: MIN(SQG_WAVE_CYCLES_sum / SQ_WAVES_sum)
-          max: MAX(SQG_WAVE_CYCLES_sum / SQ_WAVES_sum)
+          avg: SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_WAVES_sum)
+          min: MIN(SQ_WAVE_CYCLES_sum / SQ_WAVES_sum)
+          max: MAX(SQ_WAVE_CYCLES_sum / SQ_WAVES_sum)
           unit: Cycles
   - metric_table:
       id: 705

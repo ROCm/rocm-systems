@@ -17,6 +17,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed MI200 profiling collecting the L2-Fabric write counters twice under two names, which took one extra profiling pass.
 
+* Fixed gfx1201 Wavefront Occupancy, Memory Chart occupancy and Wavefront Life reading far above the real wave count.
+
 ### Upcoming changes
 
 ### Known issues
