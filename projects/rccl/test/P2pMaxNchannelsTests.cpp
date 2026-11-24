@@ -523,10 +523,11 @@ TEST(P2pMaxNchannelsSingleNodeTests, Gfx950_SingleNode8Rank_MloPartFitsPeersInOn
                 int  peers;
                 int  expectedPerPeer;
             } cases[] = {
-                // divUp(8 peers, 2) = 4; 64 halves twice before 16*4 stops exceeding the pool.
-                {true, 8, 16},
-                // divUp(2 peers, 2) = 1, so a workload declaring few peers keeps the whole pool.
-                {true, 2, 64},
+                // divUp(8 peers, 2) = 4; 64 halves three times before 8*4 stops filling the pool.
+                {true, 8, 8},
+                // divUp(2 peers, 2) = 1; one round of 64 fills the pool, so it halves once.
+                // Gather and send/recv still place 64 parts (p2pnChannelsPerPeerBase).
+                {true, 2, 32},
                 // Gate off: a whole-device comm keeps what it had, peer count notwithstanding.
                 {false, 8, 64},
             };
@@ -541,6 +542,8 @@ TEST(P2pMaxNchannelsSingleNodeTests, Gfx950_SingleNode8Rank_MloPartFitsPeersInOn
                 ASSERT_EQ(fixture.computeP2pChannels(&p2pnChannels), ncclSuccess);
                 EXPECT_EQ(p2pnChannels, 64) << "the peer count must not move the pool";
                 EXPECT_EQ(fixture.comm->p2pnChannelsPerPeer, c.expectedPerPeer)
+                    << "hasMloPart=" << c.mloPart << " peers=" << c.peers;
+                EXPECT_EQ(fixture.comm->p2pnChannelsPerPeerBase, 64)
                     << "hasMloPart=" << c.mloPart << " peers=" << c.peers;
             }
         });

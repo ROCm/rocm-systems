@@ -84,7 +84,9 @@ static int DefaultEffectiveP2pBatchEnable(struct ncclComm*) { return 0; }
 std::function<int(struct ncclComm*)> g_rcclEffectiveP2pBatchEnable = DefaultEffectiveP2pBatchEnable;
 
 // enqueue.cc's answer for every task outside multi-node AINIC Scatter.
-static int DefaultP2pTaskParts(struct ncclComm* comm, ncclFunc_t, int) { return comm->p2pnChannelsPerPeer; }
+static int DefaultP2pTaskParts(struct ncclComm* comm, ncclFunc_t collAPI, int) {
+  return rcclP2pPartCount(comm, collAPI);
+}
 std::function<int(struct ncclComm*, ncclFunc_t, int)> g_rcclP2pTaskParts = DefaultP2pTaskParts;
 static bool DefaultP2pTaskUsesCe(struct ncclComm*, ncclFunc_t, int) { return false; }
 std::function<bool(struct ncclComm*, ncclFunc_t, int)> g_rcclP2pTaskUsesCe = DefaultP2pTaskUsesCe;

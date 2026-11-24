@@ -1198,7 +1198,9 @@ TEST_F(PathsP2pChannelsMicrotest, P2pChannels_MloPartSingleNodeFitsThePeersInOne
     Compute();
 
     EXPECT_EQ(64, comm_->p2pnChannels) << mloPart;
-    EXPECT_EQ(mloPart ? 32 : 64, comm_->p2pnChannelsPerPeer) << mloPart;  // 32 doubled; 2 rounds fit 32 each
+    // 32 doubled; 2 rounds of 32 exactly fill the pool, which >= halves once more.
+    EXPECT_EQ(mloPart ? 16 : 64, comm_->p2pnChannelsPerPeer) << mloPart;
+    EXPECT_EQ(64, comm_->p2pnChannelsPerPeerBase) << mloPart;
   }
 }
 

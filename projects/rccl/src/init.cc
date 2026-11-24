@@ -1962,7 +1962,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     bool ll128Enabled;
     char hostname[128];
     int p2pnChannelsPerPeer;
-    int p2pnChannelsPerPeerBase;
     int p2pMaxPeers;
     float minNetBw;
     int localNetDeviceCount;
@@ -2555,7 +2554,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   allGather3Data[rank].treeCompact = ncclParamTreeCompact() ? 1 : 0;
   (void)getHostName(allGather3Data[rank].hostname, sizeof(allGather3Data[rank].hostname), '\0');
   allGather3Data[rank].p2pnChannelsPerPeer = comm->p2pnChannelsPerPeer;
-  allGather3Data[rank].p2pnChannelsPerPeerBase = comm->p2pnChannelsPerPeerBase;
   allGather3Data[rank].p2pMaxPeers = comm->p2pMaxPeers;
 
   allGather3Data[rank].localNetDeviceCount = localNetDeviceCount;
@@ -2771,9 +2769,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
     comm->maxTreePattern = std::max(comm->maxTreePattern, allGather3Data[i].graphInfo[NCCL_ALGO_TREE].pattern);
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, allGather3Data[i].p2pnChannelsPerPeer);
-    // Base is what gather and send/recv use per peer. Taking the min with the stride keeps every rank on the
-    // same halved-or-not decision, so a pair never disagrees on its part count.
-    comm->p2pnChannelsPerPeerBase = std::min(comm->p2pnChannelsPerPeerBase, allGather3Data[i].p2pnChannelsPerPeerBase);
     comm->p2pMaxPeers = std::max(comm->p2pMaxPeers, allGather3Data[i].p2pMaxPeers);
     comm->minNetBw = std::min(comm->minNetBw, allGather3Data[i].minNetBw);
   }
