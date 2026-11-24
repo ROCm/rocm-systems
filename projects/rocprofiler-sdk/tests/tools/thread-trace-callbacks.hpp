@@ -54,6 +54,14 @@
 
 namespace Callbacks
 {
+inline size_t
+context_count()
+{
+    const auto* value = std::getenv("ATT_NUM_CONTEXTS");
+    auto        count = value ? std::strtoul(value, nullptr, 10) : 1ul;
+    return count > 0 ? count : 1ul;
+}
+
 void
 tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
                               rocprofiler_user_data_t*,

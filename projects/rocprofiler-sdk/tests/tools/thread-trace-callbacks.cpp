@@ -38,6 +38,7 @@ namespace Callbacks
 rocprofiler_thread_trace_decoder_id_t decoder{};
 std::atomic<size_t>                   latency{0};
 std::atomic<bool>                     has_sdata{false};
+std::atomic<bool>                     has_payload{false};
 std::atomic<bool>                     has_excess_detail{false};
 ExecMaskCheck                         exec_mask_check{};
 
@@ -77,6 +78,8 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
 {
     assert(shader_data.start_timestamp.gpu_clock <= shader_data.end_timestamp.gpu_clock);
     assert(shader_data.start_timestamp.system_clock <= shader_data.end_timestamp.system_clock);
+    if(shader_data.data && shader_data.data_size != 0)
+        has_payload.store(true, std::memory_order_relaxed);
 
     auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
                     void*                                          trace_events,
@@ -123,6 +126,9 @@ init(bool enable_exec_mask_check)
 void
 finalize(void* /* tool_data */)
 {
+    if(context_count() > 1 && !has_payload.load(std::memory_order_relaxed))
+        throw std::runtime_error("Missing raw ATT data in many-context test");
+
     const char* env_args   = std::getenv("ATT_NODETAIL");
     const bool  extra_args = env_args ? std::stoi(env_args) != 0 : false;
 
