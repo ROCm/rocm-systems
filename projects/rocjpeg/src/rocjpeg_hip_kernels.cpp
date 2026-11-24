@@ -423,8 +423,11 @@ __device__ __forceinline__ void LoadYUVSamples(uint32_t layout, uint32_t x_phase
 
     if (kOddCrop && layout == YUV_LAYOUT_YUYV && x_phase) {
         uint32_t l0_idx = y * src_y_row_pair_stride + (x << 4);
+        // Without the block's second row (has_row1 false), its samples are not stored, so the first source row is read
+        // again instead of a row that can lie past the end of the decoded surface.
+        uint32_t l1_idx = l0_idx + (has_row1 ? src_y_stride : 0);
         LoadYUYVRowOddLeft(&src_y_image[l0_idx], num_pixels, y0, u0, v0);
-        LoadYUYVRowOddLeft(&src_y_image[l0_idx + src_y_stride], num_pixels, y1, u1, v1);
+        LoadYUYVRowOddLeft(&src_y_image[l1_idx], num_pixels, y1, u1, v1);
         return;
     }
     if (layout == YUV_LAYOUT_YUYV) {
