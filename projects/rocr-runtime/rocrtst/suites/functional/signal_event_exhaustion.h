@@ -75,12 +75,19 @@ class SignalEventExhaustionTest : public TestBase {
   // Process CPU time as a percentage of wall time over the given interval.
   static double ProcessCpuPercent(int ms);
 
+  // Destroys the queue and signals; shared by Close() and the skip paths.
+  void ReleaseResources();
+
+  // Skips the test after SetUp() has initialized the runtime.
+  void SkipAfterInit(const char* reason);
+
   std::vector<hsa_signal_t> held_;  // only hold KFD event slots
   std::vector<std::unique_ptr<Target>> targets_;
   std::vector<Target*> handlers_;  // targets with a registered async handler
   Target helper_;                  // created before exhaustion, never completed
   hsa_queue_t* queue_;
   uint32_t first_event_id_;
+  uint64_t timestamp_frequency_;
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_SIGNAL_EVENT_EXHAUSTION_H_
