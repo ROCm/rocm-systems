@@ -4,7 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Tests for datamover/dataMover.h: every pair of endpoint spaces, the fan-out
+// Tests for datamover/dataMover.h: every pair of endpoint spaces except a direct
+// LDS -> LDS move (SDMA is covered by TestDataMoverSdma.cpp), the fan-out
 // rule for multiple sources/destinations, and several backend chains. A chain
 // whose DMA links are not compiled for the device under test still runs the
 // test through its vector fallback; the DMA-only chains skip instead, so they
@@ -89,7 +90,7 @@ __global__ void kGlobalToGlobal(MoveArgs a, uint32_t firstWave, uint32_t nWaves)
     const uint32_t w = threadIdx.x / dm::waveSize();
     if (w < firstWave || w >= firstWave + nWaves) return;
     const dm::Team team = dm::Team::waves(firstWave, nWaves);
-    M mover = ChainInit<M>::make(lds, a.ldsBytes);
+    M mover = ChainInit<M>::make(lds + a.ldsOff, a.ldsBytes);  // ldsOff skews the staging base
     mover.move(team, dm::memSet<dm::Space::Global, kMaxSrcs>(a.src, a.nSrcs),
                dm::memSet<dm::Space::Global, kMaxDsts>(a.dst, a.nDsts), a.bytes);
   }
@@ -121,7 +122,7 @@ __global__ void kViaRegs(MoveArgs a) {
   const dm::Team team = dm::Team::block();
   M mover = ChainInit<M>::make(nullptr, 0);
   dm::RegTile<kDmPacks, 2> t0;
-  dm::RegTile<kDmPacks, 2> t1{};
+  dm::RegTile<kDmPacks, 2> t1;  // deliberately uninitialized: the R->R leg must not read it
   mover.move(team, dm::global(a.src[0], a.src[1]), t0, a.bytes);
   mover.move(team, t0, t1, a.bytes);
   mover.move(team, t1, dm::global(a.dst[0], a.dst[1], a.dst[2], a.dst[3]), a.bytes);
@@ -231,11 +232,13 @@ protected:
   }
 
   template<class M>
-  void runGlobalToGlobal(const DmCase& c, uint32_t stagingBytes, uint32_t firstWave = 0, uint32_t nWaves = 0) {
+  void runGlobalToGlobal(const DmCase& c, uint32_t stagingBytes, uint32_t firstWave = 0, uint32_t nWaves = 0,
+                         uint32_t stagingSkew = 0) {
     MoveArgs a = prepare(c, c.nSrcs, c.nDsts);
     a.ldsBytes = stagingBytes;
+    a.ldsOff = stagingSkew;
     if (nWaves == 0) nWaves = kDmBlock / waveSize_ - firstWave;
-    kGlobalToGlobal<M><<<1, kDmBlock, stagingBytes>>>(a, firstWave, nWaves);
+    kGlobalToGlobal<M><<<1, kDmBlock, stagingBytes + stagingSkew>>>(a, firstWave, nWaves);
     syncAndCheck();
     verify(c, fanOutMap(c.nSrcs, c.nDsts), "G->G");
   }
@@ -359,7 +362,7 @@ DM_CHAIN_SUITES(DmDefault, dm::DefaultMover);
 //  DMA-only chains: no fallback, so a pass proves the engine moved the data.
 // ---------------------------------------------------------------------------
 
-#define DM_DMA_ONLY_SUITE(NAME, CHAIN, SUPPORTED)                                                           \
+#define DM_DMA_ONLY_SUITE(NAME, CHAIN, SUPPORTED, MATCHED_ALIGNMENT)                                      \
   class NAME##Test : public DataMoverChain<CHAIN> {                                                         \
   protected:                                                                                                \
     void SetUp() override {                                                                                 \
@@ -367,21 +370,45 @@ DM_CHAIN_SUITES(DmDefault, dm::DefaultMover);
       if (!(SUPPORTED)) GTEST_SKIP() << #CHAIN " is not available on this device";                          \
     }                                                                                                       \
   };                                                                                                        \
-  TEST_P(NAME##Test, Staged) { runGlobalToGlobal<CHAIN>(GetParam(), kStagingBytes); }                       \
-  TEST_P(NAME##Test, SubTeam) { runGlobalToGlobal<CHAIN>(GetParam(), kStagingBytes / 2, 1, 2); }            \
+  TEST_P(NAME##Test, Staged) {                                                                              \
+    if ((MATCHED_ALIGNMENT) && !stagedAligned(GetParam())) GTEST_SKIP() << "declined: needs 16-byte alignment"; \
+    runGlobalToGlobal<CHAIN>(GetParam(), kStagingBytes);                                                    \
+  }                                                                                                         \
+  TEST_P(NAME##Test, SubTeam) {                                                                             \
+    if ((MATCHED_ALIGNMENT) && !stagedAligned(GetParam())) GTEST_SKIP() << "declined: needs 16-byte alignment"; \
+    runGlobalToGlobal<CHAIN>(GetParam(), kStagingBytes / 2, 1, 2);                                          \
+  }                                                                                                         \
   INSTANTIATE_TEST_SUITE_P(Gamut, NAME##Test, ::testing::ValuesIn(globalGamut()), dmCaseName);              \
   class NAME##LdsTest : public NAME##Test {};                                                               \
-  TEST_P(NAME##LdsTest, RoundTrip) { runViaLds<CHAIN>(GetParam()); }                                        \
+  TEST_P(NAME##LdsTest, RoundTrip) {                                                                        \
+    if ((MATCHED_ALIGNMENT) && !ldsMatched(GetParam())) GTEST_SKIP() << "declined: alignments differ mod 16"; \
+    runViaLds<CHAIN>(GetParam());                                                                           \
+  }                                                                                                         \
   INSTANTIATE_TEST_SUITE_P(Gamut, NAME##LdsTest, ::testing::ValuesIn(ldsGamut()), dmCaseName)
 
-DM_DMA_ONLY_SUITE(DmTdmOnly, TdmOnly, tdm::IsTdmCopySupported(0));
-DM_DMA_ONLY_SUITE(DmAsyncOnly, AsyncOnly, async::IsTdmCopySupported(0));
+// The async-to-LDS mover declines pairs whose global and LDS sides differ modulo
+// 16 bytes (staged Global -> Global: both global sides 16-byte aligned); a chain
+// without a fallback would trap on them, so those cases are skipped here and
+// covered by the chains with a vector fallback above.
+inline bool stagedAligned(const DmCase& c) { return c.srcOff % 16 == 0 && c.dstOff % 16 == 0; }
+inline bool ldsMatched(const DmCase& c) { return (c.srcOff - c.dstOff) % 16 == 0; }
+
+DM_DMA_ONLY_SUITE(DmTdmOnly, TdmOnly, tdm::IsTdmCopySupported(0), false);
+DM_DMA_ONLY_SUITE(DmAsyncOnly, AsyncOnly, async::IsTdmCopySupported(0), true);
 
 // A team of waves 1-2 of the block, with the other waves idle.
 class DmSubTeamTest : public DataMoverBase {};
 
 TEST_F(DmSubTeamTest, VectorWaves1to2) {
   runGlobalToGlobal<VecChain>(DmCase{70001, 3, 3, 2, 4, "sub_team"}, 0, 1, 2);
+}
+
+// A staging window that is not 16-byte aligned: the async-to-LDS link must
+// decline the staged copy and the chain falls back to vector (on any target).
+class DmStagingSkewTest : public DataMoverBase {};
+
+TEST_F(DmStagingSkewTest, AsyncChainFallsBack) {
+  runGlobalToGlobal<AsyncChain>(DmCase{65536, 0, 0, 1, 1, "skewed_staging"}, kStagingBytes, 0, 0, /*stagingSkew=*/1);
 }
 
 }  // namespace RcclUnitTesting

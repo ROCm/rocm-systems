@@ -11,8 +11,9 @@
 /// backend that
 ///   1. is compiled for the current target (kSupported),
 ///   2. can move between the two endpoint spaces (handles<S, D>(), compile time),
-///   3. accepts this particular move (accepts<S, D>(team, bytes), runtime;
-///      e.g. SDMA only above a size threshold, LDS DMA only with staging space).
+///   3. accepts this particular move (accepts<S, D>(team, src, dst, bytes),
+///      runtime; e.g. SDMA only above a size threshold, LDS DMA only with
+///      staging space, async-to-LDS only when the pointers' alignments allow).
 /// Steps 1-2 prune the chain at compile time, so a chain written once compiles
 /// for every target in a multi-arch build: on gfx950 the TDM and async-LDS
 /// links simply vanish. The last eligible backend must accept; if it does not,
@@ -51,6 +52,25 @@
 /// move() is issue() + wait(). Neither synchronizes the team: other threads see
 /// the results after the caller's barrier. The mover object carries per-thread
 /// completion state, so issue and wait through the same object.
+///
+///   Backend        who issues           what wait() does
+///   VectorMover    every team thread    nothing: the thread's own loads/stores are ordered by the compiler
+///   TdmMover       every team wave      the calling wave drains TENSORcnt (per-wave counter)
+///   AsyncLdsMover  every team wave      the calling wave drains ASYNCcnt (per-wave counter)
+///   SdmaMover      team rank 0          rank 0 polls its completion ticket, then a system-scope acquire
+///
+/// Sources: an engine other than the issuing lanes' own loads (TDM, async-LDS,
+/// SDMA) reads Global sources from memory. Global data written by CUs, including
+/// by an earlier VectorMover move or by the calling wave itself, must be
+/// complete and released before issue(): the writers execute __threadfence()
+/// and then the team synchronizes. The mover does not do this, to avoid a cache
+/// writeback on every call. Lds sources written by the calling wave are ordered
+/// by issue(); Lds data written by other waves needs the team barrier.
+///
+/// wait() is local completion: the data is in place for this GPU. Publishing it
+/// to another agent (a peer GPU, a NIC, another kernel polling a flag) needs a
+/// release by the publisher after wait() and the team barrier, and an acquire by
+/// the consumer; the mover does not do that.
 #pragma once
 
 #include "dmCore.h"
@@ -89,10 +109,10 @@ struct DataMover<B, Rest...> {
     constexpr Space D = Endpoint<Dst>::space;
     if constexpr (eligible<S, D>()) {
       if constexpr (!DataMover<Rest...>::template anyEligible<S, D>()) {
-        if (!head.template accepts<S, D>(t, bytes)) __builtin_trap();
+        if (!head.template accepts<S, D>(t, src, dst, bytes)) __builtin_trap();
         head.issue(t, src, dst, bytes);
       } else {
-        if (head.template accepts<S, D>(t, bytes)) head.issue(t, src, dst, bytes);
+        if (head.template accepts<S, D>(t, src, dst, bytes)) head.issue(t, src, dst, bytes);
         else tail.issue(t, src, dst, bytes);
       }
     } else if constexpr (DataMover<Rest...>::template anyEligible<S, D>()) {

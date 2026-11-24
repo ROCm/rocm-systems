@@ -252,7 +252,10 @@ DM_INLINE void regToReg(const Team& t, const RegTile<NPS, NS>& src, RegTile<NPD,
       for (int i = 0; i < NP; ++i) {
         const uint32_t n = packBytes<NP, 1>(t, i, bytes);
         if (n == 0) break;
-        dst.v[d][i] = n == kPackBytes ? src.v[s][i] : mergeBytes(dst.v[d][i], src.v[s][i], n);
+        // A partial pack is zero past `bytes`, as loadTile() leaves it; the
+        // destination's previous contents are never read (they may be
+        // uninitialized).
+        dst.v[d][i] = n == kPackBytes ? src.v[s][i] : mergeBytes(u32x4{0, 0, 0, 0}, src.v[s][i], n);
       }
     }
   }
@@ -272,8 +275,8 @@ struct VectorMover {
   static constexpr bool handles() {
     return true;
   }
-  template <Space S, Space D>
-  DM_INLINE bool accepts(const Team&, size_t) const {
+  template <Space S, Space D, class Src, class Dst>
+  DM_INLINE bool accepts(const Team&, const Src&, const Dst&, size_t) const {
     return true;
   }
 

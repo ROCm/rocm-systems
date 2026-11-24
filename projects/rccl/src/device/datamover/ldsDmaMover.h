@@ -19,6 +19,14 @@
 /// each wave drives its own engine and its own counter, so wait() drains only
 /// the calling wave's operations. Every member wave must call wait().
 ///
+/// Ordering: an Lds source written by other waves needs the caller's barrier
+/// before issue(); the calling wave's own LDS writes are ordered by issue().
+/// A Global source written by CUs must be complete and released before issue()
+/// (__threadfence() by the writers, then the team barrier): the engines read
+/// memory and are not ordered with the wave's earlier stores.
+/// After wait(), other waves see an Lds or Global destination after the
+/// caller's barrier.
+///
 /// Global -> Global double-buffers each wave's window: while the stores of
 /// chunk j drain from one half, the load of chunk j+1 fills the other, and a
 /// single counter-zero wait per chunk covers both the RAW edge (load j+1 before
@@ -34,14 +42,21 @@ namespace rccl {
 namespace dm {
 
 // ---- engines: one global<->LDS leg per call, issued by a whole wave --------
+// The engines' LDS traffic is invisible to the compiler, so every issue and wait
+// is bracketed by a compiler fence: no lane's ds_* access may be moved across it
+// (the same rule tdmReduce.h follows).
 
 struct TdmEngine {
   static constexpr bool kSupported = TDM_SUPPORTED;
+  // Any global/LDS alignment is correct (tdmCopy.h: alignment is a throughput
+  // concern for the one-way TDM transfers).
+  static constexpr bool kNeedsMatchedAlignment = false;
 
   template <CachePolicy cp>
   DM_INLINE static void load([[maybe_unused]] uintptr_t global, [[maybe_unused]] uintptr_t lds,
                               [[maybe_unused]] size_t n) {
 #if TDM_SUPPORTED
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);
     tdm::asyncLoadToLDS<SyncPolicy::Async, cp>(reinterpret_cast<const uint8_t*>(global),
                                                reinterpret_cast<uint8_t*>(lds), n);
 #endif
@@ -50,6 +65,7 @@ struct TdmEngine {
   DM_INLINE static void store([[maybe_unused]] uintptr_t lds, [[maybe_unused]] uintptr_t global,
                                [[maybe_unused]] size_t n) {
 #if TDM_SUPPORTED
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);
     tdm::asyncStoreFromLDS<SyncPolicy::Async, cp>(reinterpret_cast<const uint8_t*>(lds),
                                                   reinterpret_cast<uint8_t*>(global), n);
 #endif
@@ -57,17 +73,23 @@ struct TdmEngine {
   DM_INLINE static void wait() {
 #if TDM_SUPPORTED
     tdm::tdmWait();
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);
 #endif
   }
 };
 
 struct AsyncLdsEngine {
   static constexpr bool kSupported = ASYNC_COPY_SUPPORTED;
+  // warpAsyncCopy peels against the global pointer only and assumes the LDS side
+  // shares its alignment (asyncCopy.h), so each global/LDS pair must agree
+  // modulo 16 bytes; otherwise the chain falls through to the next backend.
+  static constexpr bool kNeedsMatchedAlignment = true;
 
   template <CachePolicy cp>
   DM_INLINE static void load([[maybe_unused]] uintptr_t global, [[maybe_unused]] uintptr_t lds,
                               [[maybe_unused]] size_t n) {
 #if ASYNC_COPY_SUPPORTED
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);
     ::asyncLoadToLDS<SyncPolicy::Async, cp>(reinterpret_cast<const uint8_t*>(global),
                                             reinterpret_cast<uint8_t*>(lds), n);
 #endif
@@ -76,6 +98,7 @@ struct AsyncLdsEngine {
   DM_INLINE static void store([[maybe_unused]] uintptr_t lds, [[maybe_unused]] uintptr_t global,
                                [[maybe_unused]] size_t n) {
 #if ASYNC_COPY_SUPPORTED
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);
     ::asyncStoreFromLDS<SyncPolicy::Async, cp>(reinterpret_cast<const uint8_t*>(lds),
                                                reinterpret_cast<uint8_t*>(global), n);
 #endif
@@ -83,6 +106,7 @@ struct AsyncLdsEngine {
   DM_INLINE static void wait() {
 #if ASYNC_COPY_SUPPORTED
     asyncWait<0>();
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);
 #endif
   }
 };
@@ -110,11 +134,19 @@ struct LdsDmaMover {
            (S == Space::Lds && D == Space::Global);
   }
 
-  template <Space S, Space D>
-  DM_INLINE bool accepts(const Team& t, size_t) const {
+  template <Space S, Space D, class Src, class Dst>
+  DM_INLINE bool accepts(const Team& t, const Src& src, const Dst& dst, size_t) const {
     if (!t.wholeWaves()) return false;
-    if constexpr (S == Space::Global && D == Space::Global) return windowBytes(t) >= 2 * kGrain;
-    else return true;
+    if constexpr (S == Space::Global && D == Space::Global) {
+      if (windowBytes(t) < 2 * kGrain) return false;
+      // Windows are staging + multiples of 256, so the staging base fixes their
+      // alignment; the async helper needs it to match the 16-byte-aligned globals.
+      if constexpr (Engine::kNeedsMatchedAlignment) {
+        if (staging & kAlignMask) return false;
+      }
+    }
+    if constexpr (Engine::kNeedsMatchedAlignment) return matchedAlignment<S, D>(src, dst);
+    return true;
   }
 
   template <class Src, class Dst>
@@ -124,6 +156,10 @@ struct LdsDmaMover {
     static_assert(Engine::kSupported, "this LDS DMA engine is not available for the target being compiled");
     static_assert(handles<S::space, D::space>(), "LdsDmaMover moves only Global<->Lds and Global->Global");
     const int fan = detail::fanOut(src, dst);
+
+    // Lds -> Global: this wave's own ds_store data must be complete before the
+    // engine reads the LDS (other waves' writes need the caller's barrier).
+    if constexpr (S::space == Space::Lds) __threadfence_block();
 
     size_t lo, n;
     waveSlice(t, bytes, lo, n);
@@ -150,6 +186,33 @@ struct LdsDmaMover {
   }
 
 private:
+  static constexpr uintptr_t kAlignMask = 15;
+
+  // Every (source, destination) pair the move will touch keeps one alignment
+  // modulo 16 on both sides of each engine leg. Wave slices and staging chunks
+  // are multiples of kGrain, so checking the base pointers suffices. Global ->
+  // Global stages through 256-byte-aligned LDS windows, so both global sides
+  // must themselves be 16-byte aligned.
+  template <Space S, Space D, class Src, class Dst>
+  DM_INLINE static bool matchedAlignment(const Src& src, const Dst& dst) {
+    if (src.n <= 0 || dst.n % src.n != 0) return true;  // fanOut() traps on this shape
+    const int fan = dst.n / src.n;
+#pragma unroll
+    for (int s = 0; s < Src::kMax; ++s) {
+      if (s >= src.n) break;
+#pragma unroll
+      for (int d = 0; d < Dst::kMax; ++d) {
+        if (!detail::fedBy(d, s, fan)) continue;
+        if constexpr (S == Space::Global && D == Space::Global) {
+          if ((src.addr[s] | dst.addr[d]) & kAlignMask) return false;
+        } else {
+          if ((src.addr[s] ^ dst.addr[d]) & kAlignMask) return false;
+        }
+      }
+    }
+    return true;
+  }
+
   // Per-wave staging window: a multiple of two half-windows of kGrain bytes.
   DM_INLINE uint32_t windowBytes(const Team& t) const {
     return (stagingBytes / t.nWaves()) & ~(2 * kGrain - 1);

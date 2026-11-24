@@ -478,6 +478,7 @@ if(BUILD_TESTS)
         device/GinAnvilIpcDevice_test.cpp
         device/GinRocshmemGdaTemplate_test.cpp
         device/GinAnvilSdmaTemplate_test.cpp
+        device/TestDataMoverSdma.cpp
       )
     endif()
 
@@ -1388,6 +1389,10 @@ if(BUILD_TESTS)
       ${CMAKE_CURRENT_SOURCE_DIR}/device/GinRocshmemGdaTemplate_test.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilSdmaTemplate_test.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/device/sdma/anvil_stub_quiet_count.cpp
+      # The data-mover tests instantiate SdmaMover, which references the stub's
+      # cross-TU __device__ call log.
+      ${CMAKE_CURRENT_SOURCE_DIR}/device/TestDataMover.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/device/TestDataMoverSdma.cpp
       PROPERTIES COMPILE_OPTIONS "${RCCL_TEST_GPU_RDC_COMPILE_OPTIONS}")
     # Device-link the fixtures binary (-fgpu-rdc --hip-link) so the cross-TU
     # __device__ g_sdmaStubQuietCount resolves.
