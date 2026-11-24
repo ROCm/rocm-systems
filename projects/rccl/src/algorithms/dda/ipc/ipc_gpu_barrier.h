@@ -33,11 +33,20 @@ __device__ __forceinline__ uint32_t cas(uint32_t* addr, uint32_t compare, uint32
 #endif
 }
 
+// Abort poll is gfx1250 only; on gfx942/gfx950 it costs every DDA IPC launch. FabricGpuBarrier shares these waits.
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+constexpr bool kDdaWaitPollsAbort = true;
+#else
+constexpr bool kDdaWaitPollsAbort = false;
+#endif
+
 template <std::memory_order Sem>
 __device__ __forceinline__ bool putFlag(uint32_t* addr, DdaKernelParams params) {
   int spins = 0;
   while (cas<Sem>(addr, 0, 1) != 0) {
-    if (params.abortSpinTick(spins)) return false;
+    if constexpr (kDdaWaitPollsAbort) {
+      if (params.abortSpinTick(spins)) return false;
+    }
   }
   return true;
 }
@@ -46,7 +55,9 @@ template <std::memory_order Sem>
 __device__ __forceinline__ bool waitFlag(uint32_t* addr, DdaKernelParams params) {
   int spins = 0;
   while (cas<Sem>(addr, 1, 0) != 1) {
-    if (params.abortSpinTick(spins)) return false;
+    if constexpr (kDdaWaitPollsAbort) {
+      if (params.abortSpinTick(spins)) return false;
+    }
   }
   return true;
 }
@@ -122,7 +133,7 @@ public:
     if constexpr (hasPreviousMemAccess) {
       __syncthreads();
     }
-    if (threadIdx.x < NRANKS && !aborted_) {
+    if (threadIdx.x < NRANKS && (!kDdaWaitPollsAbort || !aborted_)) {
       auto peerRank = threadIdx.x;
       bool signaled = false;
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
@@ -139,7 +150,7 @@ public:
           arrived = allMailboxes_[selfRank_].waitFlagWithMemFence(peerRank, blockIdx.x, params_);
         }
       }
-      aborted_ = __any(!arrived);
+      if constexpr (kDdaWaitPollsAbort) aborted_ = __any(!arrived);
     }
     if constexpr (hasSubsequentMemAccess) {
       __syncthreads();
@@ -155,6 +166,7 @@ private:
   // which all sit in wave 0: once any of them gives up a barrier on abort, the
   // block signals no later barrier, so a late peer cannot pair its earlier flag
   // with this block's next one and read data this rank never finished producing.
+  // Used only where kDdaWaitPollsAbort is set (gfx1250); unused on gfx942/gfx950.
   bool aborted_{false};
 
   __host__ IpcGpuBarrier(int nRanks, int nBlocks, int selfRank, const std::array<DeviceMailbox, NRANKS>& allMailboxes,
