@@ -1,17 +1,42 @@
 .. meta::
-    :description: ROCm Compute Profiler performance model: System Speed-of-Light (RDNA)
-    :keywords: ROCm Compute Profiler, RDNA, gfx115x, system speed of light
+    :description: ROCm Compute Profiler performance model: System Speed-of-Light (RDNA3-RDNA4)
+    :keywords: ROCm Compute Profiler, RDNA, RDNA3.5, RDNA4, gfx115x, gfx1201, system speed of light
 
 .. _sys-sol-rdna:
 
-=====================
+*********************
 System Speed-of-Light
-=====================
+*********************
 
-This section details the System Speed-of-Light metrics for RDNA3.5 (gfx115x) with the
-shipped gfx115x analysis configuration. System Speed-of-Light is a high-level summary of workload performance. It highlights the most important
-metrics for how your workload is performing on the target GPU, so you can spot
-bottlenecks before diving into block-specific panels.
+The page lists the System Speed-of-Light metrics for RDNA3.5 (gfx115x) and
+RDNA4 (gfx1201). System Speed-of-Light is a high-level summary of workload
+performance. It highlights the most important metrics for how your workload
+is performing on the target GPU, so you can spot bottlenecks before diving
+into block-specific panels.
+
+For AMD Instinct GPUs (CDNA-CDNA4), see :doc:`../cdna/system-speed-of-light`.
+
+.. warning::
+
+   Theoretical peaks use the maximum clock frequency reported for the GPU (for
+   example via ``rocminfo``). That may not match sustained clocks under your
+   workload.
+
+.. tab-set::
+
+   .. tab-item:: RDNA3.5 (gfx115x)
+
+      .. jinja:: sys-sol-gfx115x
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: RDNA4 (gfx1201)
+      :selected:
+
+      .. jinja:: rdna4-sys-sol-gfx1201
+         :file: _templates/metrics_table.j2
+
+RDNA3.5 metrics
+===============
 
 The ``VALU FLOPs`` rows use aggregate VALU instruction counters, which include FP16,
 FP32, and FP64 contributions together. Wave Matrix Multiply-Accumulate (WMMA) instructions follow a separate Instruction Set Architecture (ISA)
@@ -90,21 +115,81 @@ ceiling is one peak transfer per cycle, scaled by instance count and
 * SQC (scalar data cache and instruction cache): One 64-byte Texture Cache (TC) request per
   cycle per SQC instance -- ``$sqc_per_gpu * 64 B/cycle * $max_sclk``
 
-.. Note::
+RDNA4 metrics
+=============
 
-  * For AMD Instinct GPUs (CDNA-CDNA4), see :doc:`../cdna/system-speed-of-light`.
-  * Other gfx115x metric tables follow the RDNA3 hierarchy under :doc:`rdna-performance-model` (nested under :doc:`shader-engine` as :doc:`spi`, :doc:`wgp`, :doc:`gl0-cache`, :doc:`gl1-cache`; then :doc:`gl2-cache`, :doc:`gcea`, :doc:`command-processor`, :doc:`grbm`).
+``VALU Issue Rate`` and ``FP64 VALU Issue Rate`` count instruction issues per
+second. They include integer and floating-point issues and do not report FLOPs
+or a percentage of a FLOP peak. Wave Matrix Multiply-Accumulate (WMMA)
+instructions have their own metric, ``WMMA FLOPs (F16->F32 16x16x16)``.
 
-.. warning::
+Wavefronts and issue accounting
+-------------------------------
 
-   Theoretical peaks use the maximum clock frequency reported for the GPU (for
-   example via ``rocminfo``). That may not match sustained clocks under your
-   workload.
+RDNA4 supports both wave32 (wavefront size 32: primary execution mode) and wave64 (wavefront size 64).
+The wavefront size is fixed per kernel at compile time. The profiler reads
+``$wave_size`` from the hardware specs reported by ``rocminfo``, but a given
+kernel can be compiled for the other size.
 
-.. tab-set::
+The ``WMMA FLOPs`` metric counts 8192 FLOPs per WMMA instruction, the work of one
+16x16x16 multiply-accumulate. The counter increments once per vec32, so a wave64
+WMMA counts twice. The counter does not separate FP16, BF16, FP8, and BF8 WMMA.
+The metric compares with 1024 FLOPs/CU/cycle. Treat that conversion and the
+percentage of peak as approximations.
 
-  .. tab-item:: RDNA3.5 (gfx115x)
-      :selected:
+Dual-issue VALU (VOPD)
+----------------------
 
-      .. jinja:: sys-sol-gfx115x
-         :file: _templates/metrics_table.j2
+RDNA4 keeps the dual-issue VALU path of RDNA3. A pair of independent VALU
+operations can be encoded into a single instruction and issued together in the
+same cycle. The RDNA4 ISA refers to this encoding as Vector Operation - Dual (VOPD).
+Hardware accepts the pairing only when register, opcode, and operand constraints
+are satisfied, and the compiler emits VOPD when those constraints hold.
+
+The issue-rate metrics count instructions, so a dual-issued pair is one issue.
+They are not compared with the FP32 FMA ceiling.
+
+Scaling and clocks
+------------------
+
+``$cu_per_gpu`` is the total CU count of the installed GPU, not the WGP count.
+The full Navi 48 die (Radeon RX 9070 XT) has 64 CUs in 32 WGPs. The Radeon RX 9070
+has 56 CUs. HIP reports WGPs as multiprocessors. Peak FLOPs scale with CUs.
+``$max_sclk`` is the shader clock in MHz from profiler system specs.
+
+Bandwidth and cache metrics
+---------------------------
+
+The memory hierarchy runs GL0 (TCP) -> GL1 write-combining buffer -> GL2 -> MALL (Infinity Cache) -> VRAM.
+Metrics that have a peak use one transfer per cycle per instance, scaled by instance
+count and ``$max_sclk``.
+
+* Scalar data cache: One 64-byte request per cycle per SQC instance, so the peak is
+  ``$sqc_per_gpu * 64 B/cycle * $max_sclk``.
+
+The gfx1201 Speed-of-Light panel has no ``GL0 Cache BW (TCP Cache)``,
+``Instruction Cache BW``, or ``GL1 Cache Hit Rate`` metric:
+
+* The counters give no access size for ``GL0 Cache BW (TCP Cache)`` and ``Instruction Cache BW``.
+* The GL1 write-combining buffer has no hit or miss counter.
+
+Counter availability depends on the installed ROCm profiler backend. If a
+requested WMMA counter is missing, profiling diagnostics identify it. A
+diagnostic can suggest the corresponding instruction or cycle counter only when
+that peer counter was requested and appeared in the same profiling pass. The two
+raw counters have different units and cannot replace each other.
+
+Do not subtract WMMA issues from the Speed-of-Light VALU metrics to infer FP32
+FLOPs, and do not combine those counts into an independent instruction total.
+The roofline metrics subtract WMMA by design, as an estimate described in
+:ref:`rdna4-roofline`.
+
+``Wavefront Occupancy`` and WGP ``Wave Life`` use ``SQ_WAVE_CYCLES``, which follows
+the number of live waves. ROCm Compute Profiler 3.11 (ROCm 10.3) used
+``SQG_WAVE_CYCLES``, which read far above the true wave count on the Radeon RX 9070.
+``Wavefront Occupancy`` is still an estimate. The occupancy peak is not validated,
+and measured wave counts can exceed the application launch geometry. Do not infer
+exact resident-wave counts, shader cycles, or occupancy limits from these values.
+
+WGP ``SQ_INST_CYCLES_VALU`` counts the cycles needed to execute VALU operations.
+It is not elapsed GPU time, a FLOP count, or a utilization percentage.

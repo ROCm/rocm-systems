@@ -107,6 +107,12 @@ Ensure ROCm is installed and follow the steps:
 
 For detailed installation instructions, refer to :doc:`/install/core-install`.
 
+.. note::
+
+   On gfx115x (RDNA3.5) and gfx1201 (RDNA4), set the performance level to
+   ``STABLE_STD`` before collecting counters. This requires sudo access. See
+   :ref:`profiling power-gating requirements <profile-rdna-power-gating>`.
+
 .. _profile-quickstart:
 
 Profiling
@@ -148,7 +154,10 @@ https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute/s
 What happens during profiling?
 ------------------------------
 
-The application runs multiple times to collect all required performance counters; it executes multiple times during profiling. Roofline analysis runs automatically unless you select blocks with ``-b`` or ``--set`` that do not include the roofline block (block 4).
+The application runs multiple times to collect all required performance counters;
+it executes multiple times during profiling. On architectures with roofline
+benchmark support, roofline analysis runs automatically unless you select blocks
+with ``-b`` or ``--set`` that do not include the roofline block (block 4).
 
 After profiling, the generated files can be found inside:
 
@@ -158,7 +167,7 @@ After profiling, the generated files can be found inside:
 
 For detailed information on all profiling options, refer to :doc:`../how-to/profile/mode`.
 
-During the profiling phase, roofline microbenchmarks also run to collect
+On architectures with roofline support, roofline microbenchmarks also run to collect
 hardware peak data (saved as ``roofline.csv``). To generate roofline HTML
 charts from this data, run ``rocprof-compute analyze`` on the output directory.
 For detailed information on roofline analysis, refer to :ref:`Standalone roofline <standalone-roofline>`.

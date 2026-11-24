@@ -15,6 +15,7 @@ On Instinct GPUs, the profiler often separates the metrics into Command Processo
 Fetcher (CPF) and Command Processor Compute (CPC). The gfx115x analysis panels
 emphasize CPC and ME (Micro Engine) activity, including utilization,
 interface utilization, stall cycles, memory requests, and instruction cache.
+gfx1201 has no CPC panel. Select the architecture tab on each table.
 
 For the complete CDNA architecture overview and the CPF and CPC metric tabs across AMD Instinct MI-Series GPUs, see
 :doc:`../cdna/command-processor` under CDNA-CDNA4.
@@ -33,6 +34,10 @@ CPC utilization
       .. jinja:: rdna115x-cpc-utilization-gfx115x
          :file: _templates/metrics_table.j2
 
+   .. tab-item:: RDNA4 (gfx1201)
+
+      gfx1201 has no CPC panel.
+
 CPC interface utilization
 -------------------------
 
@@ -43,6 +48,10 @@ CPC interface utilization
 
       .. jinja:: rdna115x-cpc-interface-utilization-gfx115x
          :file: _templates/metrics_table.j2
+
+   .. tab-item:: RDNA4 (gfx1201)
+
+      gfx1201 has no CPC panel.
 
 Micro Engine (ME) stall cycles
 -------------------------------
@@ -55,6 +64,10 @@ Micro Engine (ME) stall cycles
       .. jinja:: rdna115x-mec-stall-cycles-gfx115x
          :file: _templates/metrics_table.j2
 
+   .. tab-item:: RDNA4 (gfx1201)
+
+      gfx1201 has no CPC panel.
+
 CPC memory requests
 -------------------
 
@@ -66,6 +79,10 @@ CPC memory requests
       .. jinja:: rdna115x-cpc-memory-requests-gfx115x
          :file: _templates/metrics_table.j2
 
+   .. tab-item:: RDNA4 (gfx1201)
+
+      gfx1201 has no CPC panel.
+
 Micro Engine (ME) instruction cache
 ------------------------------------
 
@@ -76,3 +93,7 @@ Micro Engine (ME) instruction cache
 
       .. jinja:: rdna115x-mec-instruction-cache-gfx115x
          :file: _templates/metrics_table.j2
+
+   .. tab-item:: RDNA4 (gfx1201)
+
+      gfx1201 has no CPC panel.
