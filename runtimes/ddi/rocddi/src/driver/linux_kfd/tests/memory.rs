@@ -2413,6 +2413,226 @@ fn concurrent_hardware_loss_observers_all_receive_the_sticky_loss() {
     );
 }
 
+fn hardware_diagnostic_owner(
+    payload: [u64; 4],
+    observed_calls: Arc<Mutex<Vec<&'static str>>>,
+) -> Shared<LossEvent> {
+    let signaled = AtomicBool::new(true);
+    let reset_errno = AtomicU32::new(errno::EIO as u32);
+    let kfd = shared(connection::Kfd::with_hook(
+        File::open("/dev/null").unwrap(),
+        Arc::new(move |call| {
+            match call {
+                connection::Call::CreateEvent(args) => {
+                    assert_eq!(args.auto_reset, 0);
+                    args.event_id = if args.event_type == uapi::HW_EXCEPTION {
+                        19
+                    } else {
+                        assert_eq!(args.event_type, uapi::MEMORY_EXCEPTION);
+                        20
+                    };
+                }
+                connection::Call::Wait(args, event) if event.event_id == 19 => {
+                    observed_calls.lock().unwrap().push("hardware poll");
+                    assert_eq!((args.count, args.timeout), (1, 0));
+                    event.payload = payload;
+                    args.result = if signaled.load(Ordering::Acquire) {
+                        uapi::WAIT_COMPLETE
+                    } else {
+                        uapi::WAIT_TIMEOUT
+                    };
+                }
+                connection::Call::ResetEvent(args) => {
+                    assert_eq!(args.event_id, 19);
+                    observed_calls.lock().unwrap().push("hardware reset");
+                    let errno = reset_errno.swap(0, Ordering::AcqRel);
+                    if errno != 0 {
+                        return Err(io::Error::from_raw_os_error(i32::try_from(errno).unwrap()));
+                    }
+                    signaled.store(false, Ordering::Release);
+                }
+                connection::Call::Wait(_, event) if event.event_id == 20 => {
+                    observed_calls.lock().unwrap().push("memory poll");
+                    return Err(io::Error::from_raw_os_error(errno::EIO));
+                }
+                connection::Call::DestroyEvent(_) => {}
+                _ => panic!("unexpected hardware diagnostic native operation"),
+            }
+            Ok(())
+        }),
+    ));
+    LossEvent::create(kfd).unwrap()
+}
+
+#[test]
+fn hardware_diagnostics_retain_native_payload_through_failed_rearm() {
+    let payload = [
+        u64::from_ne_bytes([7, 0, 0, 0, 0x33, 0, 0xed, 0xfe]),
+        u64::from_ne_bytes([2, 0, 0, 0, 42, 0, 0, 0]),
+        0x0123_4567_89ab_cdef,
+        0xfedc_ba98_7654_3210,
+    ];
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let owner = hardware_diagnostic_owner(payload, calls.clone());
+    let mut subscriber = LossEvent::subscribe(&owner).unwrap();
+    // Activation can observe while both lifecycle guards are held. It must
+    // only capture owned data and preserve reset/loss behavior there.
+    let bindings = VmBindings::new();
+    {
+        let _runtime = owner.kfd.runtime_guard().unwrap();
+        let _bindings = bindings.bindings.lock().unwrap();
+        assert_eq!(owner.check().unwrap_err().kind(), ErrorKind::DeviceLost);
+    }
+    assert_eq!(*calls.lock().unwrap(), ["hardware poll", "hardware reset"]);
+    assert_eq!(subscriber.cursor.load(Ordering::Acquire), 0);
+    assert!(owner.observed.lock().unwrap().hardware_needs_reset);
+    let record = subscriber.poll_record().unwrap().unwrap();
+    assert!(owner.observed.try_lock().is_ok());
+    assert_eq!(record.sequence, 1);
+    let native = record.hardware_exception.unwrap();
+    assert_eq!(native.payload, payload);
+    assert_eq!(native.gpu_id, 42);
+    assert_eq!(native.reset_type, 7);
+    assert_eq!(native.reset_cause, 0xfeed_0033);
+    assert!(native.memory_lost);
+    let DeviceEvent::GpuHardwareException(portable) = record.event else {
+        panic!("hardware record changed event kind");
+    };
+    assert_eq!(portable.scope, GpuResetScope::Other);
+    assert_eq!(portable.cause, GpuResetCause::Other);
+    assert!(portable.memory_lost);
+    let mut output = Vec::new();
+    record.write_hardware_exception(&mut output).unwrap();
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        format!(
+            "[rocddi] KFD hardware exception delivery: sequence=1 payload=[{:#018x}, {:#018x}, 0x0123456789abcdef, 0xfedcba9876543210] gpu_id=42 reset_type=7 reset_cause=4276944947 memory_lost=true\n",
+            payload[0], payload[1],
+        )
+    );
+    owner.register_identity(42, [42; 16]).unwrap();
+    let mut late = LossEvent::subscribe(&owner).unwrap();
+    let replay = late.poll_record().unwrap().unwrap();
+    assert_eq!(replay.sequence, record.sequence);
+    assert_eq!(replay.hardware_exception, record.hardware_exception);
+    let DeviceEvent::GpuHardwareException(portable) = replay.event else {
+        panic!("retained hardware record changed event kind");
+    };
+    assert_eq!(portable.endpoint_id, Some([42; 16]));
+    assert_eq!(*calls.lock().unwrap(), ["hardware poll", "hardware reset"]);
+    assert_eq!(
+        subscriber
+            .poll_record()
+            .err()
+            .unwrap()
+            .native_status()
+            .and_then(crate::NativeStatus::errno_code),
+        Some(errno::EIO)
+    );
+    assert!(!owner.observed.lock().unwrap().hardware_needs_reset);
+    assert!(owner.has_latched_loss());
+    assert_eq!(
+        *calls.lock().unwrap(),
+        [
+            "hardware poll",
+            "hardware reset",
+            "hardware reset",
+            "hardware poll",
+            "memory poll",
+        ]
+    );
+}
+
+#[test]
+fn hardware_diagnostic_output_requires_exact_opt_in() {
+    const CHILD: &str = "ROCDDI_HARDWARE_DIAGNOSTIC_TEST_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        let fixture = Fixture::new([]);
+        fixture.hardware.store(1, Ordering::Release);
+        fixture.vm.check().unwrap();
+        let mut first = fixture.vm.subscribe_events().unwrap();
+        assert!(matches!(
+            first.poll().unwrap(),
+            Some(DeviceEvent::GpuHardwareException(_))
+        ));
+        assert_eq!(first.poll().unwrap(), None);
+        let mut late = fixture.vm.subscribe_events().unwrap();
+        assert!(matches!(
+            late.poll().unwrap(),
+            Some(DeviceEvent::GpuHardwareException(_))
+        ));
+        fixture.lost.store(true, Ordering::Release);
+        assert!(matches!(
+            first.poll().unwrap(),
+            Some(DeviceEvent::GpuMemoryFault(_))
+        ));
+        return;
+    }
+    for value in [
+        None,
+        Some(""),
+        Some("0"),
+        Some("true"),
+        Some("01"),
+        Some("1 "),
+        Some("1"),
+    ] {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+        child
+            .args([
+                "hardware_diagnostic_output_requires_exact_opt_in",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(CHILD, "1")
+            .env_remove("ROCDDI_HSA_QUEUE_DIAGNOSTICS");
+        if let Some(value) = value {
+            child.env("ROCDDI_HSA_QUEUE_DIAGNOSTICS", value);
+        }
+        let output = child.output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        if value == Some("1") {
+            assert_eq!(
+                stderr,
+                format!(
+                    "[rocddi] KFD hardware exception delivery: sequence=1 payload=[{:#018x}, {:#018x}, 0x0000000000000000, 0x0000000000000000] gpu_id=42 reset_type=1 reset_cause=1 memory_lost=false\n",
+                    u64::from_ne_bytes([1, 0, 0, 0, 1, 0, 0, 0]),
+                    42_u64 << 32,
+                ).repeat(2)
+            );
+        } else {
+            assert!(stderr.is_empty(), "value={value:?}: {stderr}");
+        }
+    }
+}
+
+#[test]
+fn inherited_hardware_subscription_rejects_before_observation_lock() {
+    let owner = shared(LossEvent {
+        kfd: shared(connection::Kfd::new(
+            File::open("/dev/null").unwrap(),
+            crate::os::ProcessIdentity::with_pid_for_test(std::process::id().wrapping_add(1)),
+        )),
+        hardware_event_id: AtomicU32::new(19),
+        memory_event_id: AtomicU32::new(20),
+        hardware_destroy_uncertain: AtomicBool::new(false),
+        memory_destroy_uncertain: AtomicBool::new(false),
+        observed: Mutex::new(ObservedEvents::new().unwrap()),
+        host_aliases: Mutex::new(Vec::new()),
+        lost: AtomicBool::new(false),
+    });
+    let mut subscription = KfdEventSubscription {
+        owner: owner.clone(),
+        cursor: shared(AtomicU64::new(0)),
+    };
+    let _held = owner.observed.lock().unwrap();
+    assert_eq!(
+        subscription.poll().unwrap_err().kind(),
+        ErrorKind::Unsupported
+    );
+}
+
 #[test]
 fn memory_fault_reaches_each_subscriber_without_inventing_device_loss() {
     let fixture = Fixture::new([]);

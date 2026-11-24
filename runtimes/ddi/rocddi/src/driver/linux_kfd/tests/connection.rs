@@ -938,6 +938,12 @@ fn hardware_exception_poll_uses_persistent_events_and_decodes_payload() {
         assert_eq!(
             kfd.hardware_exception(19).unwrap(),
             (wait_result == uapi::WAIT_COMPLETE).then_some(HardwareException {
+                payload: [
+                    u64::from_ne_bytes([0, 0, 0, 0, 1, 0, 0, 0]),
+                    u64::from_ne_bytes([memory_lost, 0, 0, 0, 0x78, 0x56, 0x34, 0x12]),
+                    0,
+                    0,
+                ],
                 gpu_id: 0x1234_5678,
                 reset_type: 0,
                 memory_lost: memory_lost != 0,

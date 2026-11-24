@@ -995,6 +995,7 @@ impl Kfd {
     ) -> io::Result<Option<HardwareException>> {
         self.poll_exception(event_id).map(|event| {
             event.map(|event| HardwareException {
+                payload: event.payload,
                 gpu_id: payload_u32(&event, 3),
                 reset_type: payload_u32(&event, 0),
                 memory_lost: payload_u32(&event, 2) != 0,
@@ -1021,6 +1022,8 @@ impl Kfd {
 /// Decoded hardware exception reported by KFD.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct HardwareException {
+    /// Exact owned words from the successful native event poll.
+    pub(super) payload: [u64; 4],
     /// Native GPU that reported the exception.
     pub(super) gpu_id: u32,
     /// Native reset scope encoding.

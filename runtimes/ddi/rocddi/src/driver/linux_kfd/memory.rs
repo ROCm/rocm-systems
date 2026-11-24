@@ -478,6 +478,39 @@ struct ObservedEvent {
     gpu_id: u32,
     /// Decoded device exception payload.
     event: DeviceEvent,
+    /// Owned native hardware payload captured before portable normalization.
+    hardware_exception: Option<connection::HardwareException>,
+}
+
+impl ObservedEvent {
+    fn report_hardware_exception(&self) {
+        if self.hardware_exception.is_some()
+            && std::env::var_os("ROCDDI_HSA_QUEUE_DIAGNOSTICS").as_deref()
+                == Some(std::ffi::OsStr::new("1"))
+        {
+            // Best-effort diagnostics must not change event delivery errors.
+            let _ = self.write_hardware_exception(&mut io::stderr().lock());
+        }
+    }
+
+    fn write_hardware_exception(&self, output: &mut impl io::Write) -> io::Result<()> {
+        let Some(exception) = self.hardware_exception else {
+            return Ok(());
+        };
+        writeln!(
+            output,
+            "[rocddi] KFD hardware exception delivery: sequence={} payload=[{:#018x}, {:#018x}, {:#018x}, {:#018x}] gpu_id={} reset_type={} reset_cause={} memory_lost={}",
+            self.sequence,
+            exception.payload[0],
+            exception.payload[1],
+            exception.payload[2],
+            exception.payload[3],
+            exception.gpu_id,
+            exception.reset_type,
+            exception.reset_cause,
+            exception.memory_lost,
+        )
+    }
 }
 
 impl ObservedEvents {
@@ -499,7 +532,12 @@ impl ObservedEvents {
             .map(|(_, id)| *id)
     }
 
-    fn record(&mut self, gpu_id: u32, event: DeviceEvent) -> Result<(), Error> {
+    fn record(
+        &mut self,
+        gpu_id: u32,
+        event: DeviceEvent,
+        hardware_exception: Option<connection::HardwareException>,
+    ) -> Result<(), Error> {
         let next = self.next_sequence.checked_add(1).ok_or_else(|| {
             error(
                 ErrorKind::ResourceExhausted,
@@ -510,6 +548,7 @@ impl ObservedEvents {
             sequence: self.next_sequence,
             gpu_id,
             event,
+            hardware_exception,
         })?;
         self.next_sequence = next;
         Ok(())
@@ -583,12 +622,12 @@ impl KfdEventSubscription {
         }
     }
 
-    fn take_record(&self, records: &mut ObservedEvents) -> Option<DeviceEvent> {
+    fn take_record(&self, records: &mut ObservedEvents) -> Option<ObservedEvent> {
         let seen = self.cursor.load(Ordering::Acquire);
-        let record = *records.events.iter().find(|event| event.sequence > seen)?;
+        let mut record = *records.events.iter().find(|event| event.sequence > seen)?;
         self.cursor.store(record.sequence, Ordering::Release);
         let endpoint_id = records.endpoint_id(record.gpu_id);
-        let event = match record.event {
+        record.event = match record.event {
             DeviceEvent::GpuMemoryFault(mut fault) => {
                 fault.endpoint_id = endpoint_id;
                 DeviceEvent::GpuMemoryFault(fault)
@@ -599,10 +638,19 @@ impl KfdEventSubscription {
             }
         };
         records.prune();
-        Some(event)
+        Some(record)
     }
 
     pub(crate) fn poll(&mut self) -> Result<Option<DeviceEvent>, Error> {
+        // The owned record outlives the observation guard. Operation checks can
+        // capture it under lifecycle locks; only subscriber delivery prints it.
+        Ok(self.poll_record()?.map(|record| {
+            record.report_hardware_exception();
+            record.event
+        }))
+    }
+
+    fn poll_record(&mut self) -> Result<Option<ObservedEvent>, Error> {
         self.owner
             .kfd
             .check_process()
@@ -839,6 +887,7 @@ impl LossEvent {
                         _ => GpuResetCause::Other,
                     },
                 }),
+                Some(exception),
             )?;
             if exception.memory_lost {
                 self.lost.store(true, Ordering::Release);
@@ -881,6 +930,7 @@ impl LossEvent {
                         _ => GpuMemoryFaultCause::Other,
                     },
                 }),
+                None,
             )?;
             records.memory_needs_reset = true;
             self.kfd
