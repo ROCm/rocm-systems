@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <string_view>
+
 #include "../../dbi_test_util.h"
 #include "barrier_oracle.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
@@ -135,4 +137,77 @@ inline bool lds_output_matches(const FaultMutationContext &source, uint64_t sele
   return std::memcmp(bytes + guest, replacement.data(), replacement.size()) == 0;
 }
 
+struct LdsFormCase {
+  rj_code_target_id_t target;
+  uint32_t machine;
+  IsaFamily arch;
+  std::string_view form;
+  std::array<uint32_t, 2> words;
+};
+
+inline std::vector<uint8_t> make_lds_form_elf(const LdsFormCase &fixture, bool banked = false,
+                                              bool wave32 = false) {
+  std::vector<uint32_t> words;
+  if (banked)
+    words.push_back(cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1})[0]);
+  words.insert(words.end(), fixture.words.begin(), fixture.words.end());
+  words.push_back(fixture.arch == IsaFamily::Cdna3 || fixture.arch == IsaFamily::Cdna4
+                      ? 0xbf810000u
+                      : 0xbfb00000u);
+  std::vector<uint8_t> image = make_amdgpu_kernel_elf(words, 0, 3, fixture.machine, banked ? 16 : 3,
+                                                      3, false, false, false, false, wave32);
+  image[EI_DATA] = ELFDATA2LSB;
+  image[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+  return image;
+}
+inline bool lds_form_output_matches(const FaultMutationContext &source, const LdsFormCase &fixture,
+                                    uint64_t offset, uint32_t reg,
+                                    std::span<const uint8_t> output) {
+  const Section &original = *source.source().text_sections().front();
+  const auto *raw = reinterpret_cast<const uint8_t *>(original.data());
+  if (offset > original.size() || original.size() - offset < 8)
+    return false;
+  std::vector<uint8_t> old(raw + offset, raw + offset + 8), replacement = old;
+  replacement[4] = static_cast<uint8_t>(reg);
+  const std::array<ExpectedReplacement, 1> edits = {
+      ExpectedReplacement{.offset = offset, .expected = old, .replacement = replacement}};
+  const std::optional<std::vector<uint8_t>> expected =
+      expected_replacement_image(source.source(), edits, fixture.arch);
+  if (!expected || !std::ranges::equal(*expected, output))
+    return false;
+  const FaultMutationContext mutant(output);
+  if (!mutant.source().is_valid() || mutant.source().target_id() != fixture.target ||
+      mutant.source().text_sections().size() != 1 || !descriptors_preserved(source, mutant))
+    return false;
+  const Section &text = *mutant.source().text_sections().front();
+  const std::optional<uint64_t> guest = lds_emitted_guest(text, offset, fixture.target);
+  if (!guest || *guest > text.size() || text.size() - *guest < 12)
+    return false;
+  std::unique_ptr<Decoder> decoder = Decoder::create(default_isa_target_registry(), fixture.target);
+  if (!decoder || !branch_reaches(*decoder, text, offset, *guest) ||
+      !branch_reaches(*decoder, text, *guest + 8, offset + 8))
+    return false;
+  const auto *bytes = reinterpret_cast<const uint8_t *>(text.data());
+  if (std::memcmp(bytes + *guest, replacement.data(), 8) != 0)
+    return false;
+  std::array<uint32_t, 2> actual = {};
+  std::memcpy(actual.data(), bytes + *guest, 8);
+  const DecodeResult before = decoder->decode_window(fixture.words, offset);
+  const DecodeResult after = decoder->decode_window(actual, *guest);
+  if (before.failed() || after.failed() || before.value()->mnemonic() != fixture.form ||
+      after.value()->mnemonic() != fixture.form || !after.value()->src_operand(0) ||
+      after.value()->src_operand(0)->encoding_value() != static_cast<int>(reg) ||
+      before.value()->num_src_operands() != after.value()->num_src_operands() ||
+      before.value()->num_dst_operands() != after.value()->num_dst_operands())
+    return false;
+  for (int i = 1; i < before.value()->num_src_operands(); ++i)
+    if (before.value()->src_operand(i)->encoding_value() !=
+        after.value()->src_operand(i)->encoding_value())
+      return false;
+  for (int i = 0; i < before.value()->num_dst_operands(); ++i)
+    if (before.value()->dst_operand(i)->encoding_value() !=
+        after.value()->dst_operand(i)->encoding_value())
+      return false;
+  return true;
+}
 } // namespace rocjitsu::test

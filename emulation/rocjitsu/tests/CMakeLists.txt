@@ -1368,6 +1368,8 @@ rj_add_gtest_tests(rocjitsu_text_edit_tests)
 add_executable(
     rocjitsu_fault_injection_tests
     patch/fault_injection/drop_barrier_test.cpp
+    patch/fault_injection/b96_lds_test.cpp
+    patch/fault_injection/scalar_two_lds_test.cpp
     patch/fault_injection/lds_wrong_address_test.cpp
     patch/fault_injection/cdna_lds_wrong_address_test.cpp
 )
@@ -1416,6 +1418,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(
         rocjitsu_fault_mutation_cli_tests
         patch/fault_injection/mutation_cli_test.cpp
+        patch/fault_injection/b96_lds_cli_test.cpp
+        patch/fault_injection/scalar_two_lds_cli_test.cpp
         patch/fault_injection/lds_cli_test.cpp
         patch/fault_injection/cdna_lds_cli_test.cpp
     )

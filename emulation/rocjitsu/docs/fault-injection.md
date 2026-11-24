@@ -105,7 +105,7 @@ Generic mechanics and recipe semantics have separate responsibilities:
 | Feature | Status and main boundary | References |
 | --- | --- | --- |
 | Complete barrier Drop | Implemented for the target/wave forms below. Removes one logical barrier: an ordered two-member signal/wait pair or one true full-barrier instruction. A half-pair is never a singleton. | [`StaticBarrier` / family policy](../lib/rocjitsu/src/rocjitsu/code/analysis/static_barriers.h), [qualification](../lib/rocjitsu/src/rocjitsu/code/analysis/static_barriers.cpp), [analysis regressions](../tests/analysis/static_barriers_test.cpp), [Drop regressions](../tests/patch/fault_injection/drop_barrier_test.cpp) |
-| LDS wrong address | Implemented for gfx1200/gfx1201 wave32/wave64 `ds_store_b32`/`ds_load_b32`, gfx942/gfx950 wave64 `ds_write_b32`/`ds_write_b128`, and gfx1250 wave32 `ds_store_b32`/`ds_load_b32` in the direct, independently owned CFG profile. Replaces only the address VGPR with an explicitly supplied, distinct, allocated VGPR. Other LDS forms and targets remain follow-up work. | [LDS API](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h), [library tests](../tests/patch/fault_injection/lds_wrong_address_test.cpp), [CLI tests](../tests/patch/fault_injection/lds_cli_test.cpp) |
+| LDS wrong address | Implements scalar b32/b64/b96/b128 loads and stores on gfx1200/gfx1201 wave32/wave64, gfx942/gfx950 wave64, and gfx1250 wave32. Also admits b32/b64 two-address and stride64 families on gfx1200/gfx1201/gfx942/gfx950. Replaces only the address VGPR with an explicitly supplied, distinct, allocated VGPR in the direct, independently owned CFG profile. See the exact LDS matrix below. Other forms and targets remain follow-up work. | [LDS API](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h), [library tests](../tests/patch/fault_injection/lds_wrong_address_test.cpp), [CLI tests](../tests/patch/fault_injection/lds_cli_test.cpp) |
 | Exact and logical-ordinal selection | An exact kernel name chooses one inventory; an exact context-bound handle takes precedence over the zero-based logical ordinal. Invalid exact requests fail without fallback. Ordinal zero chooses the first barrier by first-member offset, or the first LDS instruction by source offset. There is no race ranking or legacy physical-index adapter. | [`DropBarrierSelector`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h), [`select_drop_barrier`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp), [`LdsSelector`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h) and [`select_lds_wrong_address`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.cpp), [selection regressions](../tests/patch/fault_injection/drop_barrier_test.cpp) |
 | Multiple kernels in one text section | Limited support for independent sibling kernels. Discovery checks all entries before exposing one exact kernel's inventory; shared blocks, calls, aliased entries, and unresolved owners are rejected. | [`FaultMutationContext`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.h), [ownership analysis](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.cpp), [sibling preservation tests](../tests/patch/fault_injection/drop_barrier_test.cpp) |
 | Shared DBI instruction replacement | Consumed through `InstrumentationKind::ReplaceWithInst`. One transaction replaces complete source instructions through trampolines. Drop supplies one 4-byte NOP body for each qualified 4-byte barrier member. This does not widen observational trampoline-anchor admission. | [Instrumentor contract](../lib/rocjitsu/src/rocjitsu/code/patch/instrumentor.h), [DBI design](dbi-design.md), [transaction tests](../tests/patch/checked_text_edits_test.cpp), [replacement tests](../tests/patch/instrumentor_replacement_test.cpp) |
@@ -147,9 +147,9 @@ targets and ten target/wave combinations:
 | CDNA4 | gfx950 | 64 | Full `s_barrier` singleton, workgroup |
 
 The table above describes Drop only. `lds_wrong_address_capabilities()` separately
-reports linked LDS profiles: gfx1200/gfx1201 wave32/wave64 `ds_store_b32`/`ds_load_b32`,
-gfx942/gfx950 wave64 `ds_write_b32`/`ds_write_b128`, and gfx1250 wave32
-`ds_store_b32`/`ds_load_b32`, restricted to independently owned direct CFGs.
+reports the exact LDS matrix below: scalar b32/b64/b96/b128 loads and stores on
+all five concrete targets, plus b32/b64 two-address and stride64 families on
+gfx1200/gfx1201/gfx942/gfx950, restricted to independently owned direct CFGs.
 CDNA GDS encodings are excluded; the ACC data selector is preserved.
 A target is omitted if its decoder or binding is not linked. Other targets,
 waves, and DS forms are not advertised by this recipe; the Drop table does not
@@ -223,6 +223,22 @@ must decode completely and satisfy the shared source checks before discovery
 can return an inventory. Detailed admission and diagnostics are in
 the [source context](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.cpp)
 and [shared Instrumentor contract](../lib/rocjitsu/src/rocjitsu/code/patch/instrumentor.h).
+
+The LDS address profiles cover these exact instruction families:
+
+| Concrete target | Waves | Scalar forms | Two-address forms |
+| --- | --- | --- | --- |
+| gfx1200, gfx1201 | 32, 64 | `ds_load_b32/b64/b96/b128`, `ds_store_b32/b64/b96/b128` | `ds_load_2addr_b32/b64`, `ds_store_2addr_b32/b64`, `ds_load_2addr_stride64_b32/b64`, `ds_store_2addr_stride64_b32/b64` |
+| gfx942, gfx950 | 64 | `ds_read_b32/b64/b96/b128`, `ds_write_b32/b64/b96/b128` | `ds_read2_b32/b64`, `ds_write2_b32/b64`, `ds_read2st64_b32/b64`, `ds_write2st64_b32/b64` |
+| gfx1250 | 32 | `ds_load_b32/b64/b96/b128`, `ds_store_b32/b64/b96/b128` | None; these forms require split relocation outside this profile. |
+
+A slash-separated width suffix denotes each named form, for example
+`ds_load_b32/b64` denotes `ds_load_b32` and `ds_load_b64`. This is 72 concrete
+target/form profiles, expanded to 104 target/wave/form capabilities. Only the
+address VGPR selector changes; the two offsets, stride semantics, data and
+destination tuples, and CDNA ACC bit are preserved. CDNA3/4 GDS instructions
+remain excluded. gfx1250 requires a statically proven address bank and checks
+the replacement selector against that bank's allocated register window.
 
 The LDS inventory contains complete, reachable instructions of the admitted forms in
 the kernel; clause members are not advertised. It does not require a
@@ -501,7 +517,7 @@ qualification claim.
 
 The [Drop CLI tests](../tests/patch/fault_injection/mutation_cli_test.cpp) exercise
 all ten Drop rows above using the built executable. The [LDS CLI tests](../tests/patch/fault_injection/lds_cli_test.cpp)
-cover the bounded LDS profile. These tests compare library and CLI bytes, decode
+cover the bounded LDS profile. The [b96 library](../tests/patch/fault_injection/b96_lds_test.cpp), [b96 CLI](../tests/patch/fault_injection/b96_lds_cli_test.cpp), [scalar/two-address library](../tests/patch/fault_injection/scalar_two_lds_test.cpp), and [scalar/two-address CLI](../tests/patch/fault_injection/scalar_two_lds_cli_test.cpp) suites exercise the additional widths and forms, including RDNA4 wave32. These tests compare library and CLI bytes, decode
 selected instructions, reparse mutants and check preservation and rejection
 paths; the Drop tests also cover sibling kernels and I/O paths. The
 symbol-boundary test checks the actual executable for runtime and execution
@@ -509,7 +525,7 @@ provider dependencies. To run the focused suites:
 
 ```bash
 ctest --test-dir emulation/rocjitsu/build --show-only \
-  -R 'FaultMutationCli|FaultDropBarrier|FaultLds|CdnaLds|CheckedTextEdits'
+  -R 'FaultMutationCli|FaultDropBarrier|FaultLds|CheckedTextEdits|B96Lds|ScalarTwoLds|CdnaLds'
 ctest --test-dir emulation/rocjitsu/build --output-on-failure --no-tests=error \
-  -R 'FaultMutationCli|FaultDropBarrier|FaultLds|CdnaLds|CheckedTextEdits'
+  -R 'FaultMutationCli|FaultDropBarrier|FaultLds|CheckedTextEdits|B96Lds|ScalarTwoLds|CdnaLds'
 ```

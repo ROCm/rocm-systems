@@ -137,7 +137,7 @@ TEST_P(CdnaLds, CatalogRegisterAndAllocationBoundary) {
   EXPECT_TRUE(std::ranges::equal(source.image(), image));
 }
 
-TEST_P(CdnaLds, UnsupportedReadAndTruncatedExtentAreNotAdmitted) {
+TEST_P(CdnaLds, ReadIsAdmittedAndTruncatedExtentIsRejected) {
   const test::CdnaLdsTarget &row = GetParam();
   // llvm-mc gfx942/gfx950: ds_read_b32 v0,v2 offset:4.
   std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(
@@ -150,8 +150,21 @@ TEST_P(CdnaLds, UnsupportedReadAndTruncatedExtentAreNotAdmitted) {
   const FailureOr<LdsInventory> inventory =
       discover_lds_wrong_address(source, "test_kernel", error);
   ASSERT_TRUE(inventory.succeeded()) << error.message;
-  ASSERT_EQ(inventory.value().sites().size(), 1u);
-  EXPECT_EQ(inventory.value().sites()[0].offset, 8u);
+  ASSERT_EQ(inventory.value().sites().size(), 2u);
+  EXPECT_EQ(inventory.value().sites()[0].offset, 0u);
+  EXPECT_EQ(inventory.value().sites()[0].form, "ds_read_b32");
+  EXPECT_EQ(inventory.value().sites()[1].offset, 8u);
+  EXPECT_EQ(inventory.value().sites()[1].form, "ds_write_b128");
+  const test::LdsFormCase read_case = {.target = row.target,
+                                       .machine = row.elf_machine,
+                                       .arch = row.arch,
+                                       .form = "ds_read_b32",
+                                       .words = {0xd86c0004u, 0x00000002u}};
+  const FailureOr<LdsSelection> selection = select_lds_wrong_address(inventory.value(), {}, error);
+  ASSERT_TRUE(selection.succeeded()) << error.message;
+  const FailureOr<LdsResult> mutant = apply_lds_wrong_address(source, selection.value(), 10, error);
+  ASSERT_TRUE(mutant.succeeded()) << error.message;
+  EXPECT_TRUE(test::lds_form_output_matches(source, read_case, 0, 10, mutant.value().image));
   image = test::make_amdgpu_kernel_elf({0xd81a0004u}, 0, 3, row.elf_machine, 3, 3);
   image[EI_DATA] = ELFDATA2LSB;
   image[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;

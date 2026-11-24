@@ -6,6 +6,7 @@
 #include "rocjitsu/code/file_io.h"
 #include "rocjitsu/code/patch/fault_injection/lds_wrong_address.h"
 #include "scoped_temp.h"
+#include "two_address_fixture.h"
 
 #include <gtest/gtest.h>
 
@@ -310,6 +311,67 @@ TEST_F(FaultLdsCli, Gfx1200InvalidRequestsDoNotPublishOutput) {
     command.insert(command.end(), extra.begin(), extra.end());
     EXPECT_NE(run(command), 0);
     EXPECT_FALSE(std::filesystem::exists(output_));
+  }
+}
+
+TEST_F(FaultLdsCli, TwoAddressExactOrdinalAndLibraryAgree) {
+  for (const test::TwoAddressTarget &target : test::kTwoAddressTargets) {
+    for (bool wave32 : {false, true}) {
+      if (target.cdna && wave32)
+        continue;
+      SCOPED_TRACE(static_cast<int>(target.target));
+      SCOPED_TRACE(wave32);
+      const uint32_t allocation = wave32 ? 32 : 16;
+      const std::vector<uint8_t> image = test::make_two_address_elf(target, wave32);
+      write_source(image);
+      const FaultMutationContext context(image);
+      FaultMutationError error;
+      const FailureOr<LdsInventory> inventory =
+          discover_lds_wrong_address(context, "test_kernel", error);
+      ASSERT_TRUE(inventory.succeeded()) << error.message;
+      ASSERT_EQ(inventory.value().sites().size(), 2u);
+      std::vector<std::string> command = args();
+      command.push_back("--list");
+      ASSERT_EQ(run(command), 0);
+      for (size_t ordinal = 0; ordinal < 2; ++ordinal) {
+        SCOPED_TRACE(ordinal);
+        const FailureOr<LdsSelection> selection = select_lds_wrong_address(
+            inventory.value(), {.exact = std::nullopt, .ordinal = ordinal}, error);
+        ASSERT_TRUE(selection.succeeded());
+        EXPECT_EQ(selection.value().site().offset, ordinal * 8);
+        for (uint32_t replacement : {6u, allocation - 1}) {
+          const FailureOr<LdsResult> result =
+              apply_lds_wrong_address(context, selection.value(), replacement, error);
+          ASSERT_TRUE(result.succeeded()) << error.message;
+          for (const std::vector<std::string> &selector :
+               {std::vector<std::string>{"--ordinal", std::to_string(ordinal)},
+                std::vector<std::string>{"--exact", std::to_string(ordinal * 8), "--ordinal",
+                                         "999"}}) {
+            command = args();
+            command.insert(command.end(), {"--output", output_.string(), "--address-vgpr",
+                                           std::to_string(replacement)});
+            command.insert(command.end(), selector.begin(), selector.end());
+            ASSERT_EQ(run(command), 0);
+            const std::vector<uint8_t> emitted = read();
+            EXPECT_EQ(emitted, result.value().image);
+            EXPECT_TRUE(test::two_address_output_matches(context, target, ordinal * 8, replacement,
+                                                         emitted));
+            ASSERT_TRUE(std::filesystem::remove(output_));
+          }
+        }
+      }
+      for (const std::vector<std::string> &extra :
+           {std::vector<std::string>{"--exact", "4", "--ordinal", "0", "--address-vgpr", "6"},
+            std::vector<std::string>{}, std::vector<std::string>{"--address-vgpr", "2"},
+            std::vector<std::string>{"--address-vgpr", std::to_string(allocation)},
+            std::vector<std::string>{"--address-vgpr", "256"}}) {
+        command = args();
+        command.insert(command.end(), {"--output", output_.string()});
+        command.insert(command.end(), extra.begin(), extra.end());
+        EXPECT_NE(run(command), 0);
+        EXPECT_FALSE(std::filesystem::exists(output_));
+      }
+    }
   }
 }
 
