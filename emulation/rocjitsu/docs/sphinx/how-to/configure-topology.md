@@ -97,10 +97,10 @@ matrix handlers execute synchronously and all shipped presets use zero helpers. 
 
 `cpu_thread_budget` is a ceiling for engines, retained dispatch workers and shared MMA helpers:
 E + sum(D - 1) + H. Its default is process affinity and the target allocation
-table. Desktop and older CDNA presets stop at 24 engine/dispatch threads.
-The single-GPU gfx950 and gfx1250 presets use eight engines. gfx950 adds
-24 dispatch workers at budget 32 and gfx1250 adds 40 at budget 48.
-A positive budget overrides affinity. The selector picks the largest fitting
+table. The single-GPU gfx942 and gfx950 presets use up to 48 execution threads,
+and gfx1250 uses up to 64. See the
+[preferred allocations](../../configuration.md#thread-accounting-and-preferred-allocations)
+for per-target granules. A positive budget overrides affinity. The selector picks the largest fitting
 entry in `thread_allocations`; it leaves unused budget between granules.
 Explicit E/D/H knobs take priority and may exceed the automatic budget. A config
 without a table uses serial defaults for unspecified knobs.
