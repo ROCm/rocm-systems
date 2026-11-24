@@ -361,9 +361,6 @@ collectables files, every top-level value is an equation.
 - Left as written: the formatter does not parse per-channel templates such as
   `TCC_HIT[::_1]`. A cell without a value is written `None`.
 
-In metric library files the formatter also fills each metric `description` to 88
-columns ([description rules](./src/rocprof_compute_soc/metric_library/README.md#descriptions)).
-
 The formatter reports each equation that it cannot parse, such as one with an
 unknown character, an unmatched parenthesis or a missing operand. The report gives
 the key of the equation and the parser message. The formatter leaves the equation

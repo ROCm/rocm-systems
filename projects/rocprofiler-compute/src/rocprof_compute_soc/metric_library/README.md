@@ -81,8 +81,6 @@ A description says what the metric counts, following these rules:
 9. **Spelling and grammar.** Correct English spelling and grammar.
 10. **Characters.** Plain ASCII (`->` for an arrow, no trademark mark), ending with a
     period.
-11. **Layout.** Filled to 88 columns, on the `description:` line when it fits there. The
-    `yaml-format-fix` pre-commit hook (`tools/format_yaml.py --fix`) does this.
 
 ## Sets
 

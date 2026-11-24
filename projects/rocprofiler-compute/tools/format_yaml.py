@@ -3,13 +3,11 @@
 # SPDX-License-Identifier:  MIT
 
 """Write the metric equations of the panel configs, panel collectables and metric
-library YAML files in one form, which CONTRIBUTING.md describes, and fill the
-metric library descriptions to 88 columns."""
+library YAML files in one form, which CONTRIBUTING.md describes."""
 
 import argparse
 import re
 import sys
-import textwrap
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
@@ -55,16 +53,6 @@ EQUATION_KEYS = {
     "formula",
     "peak_empirical",
 }
-
-# Path pattern of the metric library files, whose metric descriptions are filled to
-# DESCRIPTION_WIDTH columns
-DESCRIPTION_FILE_PATTERN = "metric_library/gfx"
-DESCRIPTION_WIDTH = 88
-
-# A metric's description line and the folded lines that continue it
-DESCRIPTION_RE = re.compile(
-    r"^  description:(?: >-\n(?:    .*\n)+| .*\n)", re.MULTILINE
-)
 
 # Key of the column titles of a metric_table. The titles use the equation keys, but
 # they are not equations.
@@ -227,35 +215,6 @@ def _apply_fixes(content: str, fixes: List[Tuple[str, str]]) -> str:
     return result
 
 
-def format_description(text: str) -> str:
-    """Return the description line of a metric with text filled to DESCRIPTION_WIDTH
-    columns: on the key line when it fits there, otherwise as a folded block."""
-    text = " ".join(text.split())
-    if not text:
-        return "  description: ''\n"
-    line = f"  description: {text}\n"
-    fits = len(line) <= DESCRIPTION_WIDTH + 1
-    if fits and yaml.safe_load(line) == {"description": text}:
-        return line
-    lines = textwrap.wrap(
-        text,
-        DESCRIPTION_WIDTH,
-        initial_indent="    ",
-        subsequent_indent="    ",
-        break_long_words=False,
-        break_on_hyphens=False,
-    )
-    return "  description: >-\n" + "".join(f"{line}\n" for line in lines)
-
-
-def fill_descriptions(content: str) -> str:
-    """Return the metric library YAML text with every description filled."""
-    return DESCRIPTION_RE.sub(
-        lambda m: format_description(yaml.safe_load(m.group(0))["description"] or ""),
-        content,
-    )
-
-
 def check_file(
     path: Path, fix: bool = False, show_diff: bool = False
 ) -> Tuple[bool, List[str]]:
@@ -290,18 +249,9 @@ def check_file(
                 format_issues.append(f"    - {value}")
                 format_issues.append(f"    + {normalized}")
 
-    fixed = _apply_fixes(content, fixes)
-    if DESCRIPTION_FILE_PATTERN in str(path):
-        filled = fill_descriptions(fixed)
-        if filled != fixed:
-            format_issues.append(
-                f"  descriptions need filling to {DESCRIPTION_WIDTH} columns"
-            )
-        fixed = filled
-
-    if fix and fixed != content:
+    if fix and fixes:
         with open(path, "w", encoding="utf-8") as f:
-            f.write(fixed)
+            f.write(_apply_fixes(content, fixes))
         format_issues = []
 
     issues = parse_errors + format_issues
@@ -310,8 +260,7 @@ def check_file(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="YAML metric equation and description formatter for "
-        "rocprofiler-compute"
+        description="YAML metric equation formatter for rocprofiler-compute"
     )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true", help="Check without modifying")
