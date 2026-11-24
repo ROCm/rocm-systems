@@ -392,25 +392,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${Python3_EXECUTABLE} -B
             ${CMAKE_CURRENT_SOURCE_DIR}/corpus/test-run-corpus-tests.py -v
     )
-    add_test(
-        NAME VfioGuestRunUnitTest
-        COMMAND
-            ${Python3_EXECUTABLE} -B
-            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_run_vfio_guest.py -v
-    )
-    add_test(
-        NAME RcclScaleoutRunUnitTest
-        COMMAND
-            ${Python3_EXECUTABLE} -B
-            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_run_rccl_scaleout.py -v
-    )
-    add_test(
-        NAME RcclPodEmulatedNodeUnitTest
-        COMMAND
-            ${Python3_EXECUTABLE} -B
-            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_run_rccl_pod_emulated_node.py
-            -v
-    )
 endif()
 
 add_test(
@@ -419,23 +400,6 @@ add_test(
 )
 if(NOT ROCJITSU_ENABLE_VFIO)
     set_tests_properties(RocjitsuVfioCapabilityCheck PROPERTIES WILL_FAIL TRUE)
-endif()
-
-if(ROCJITSU_ENABLE_VFIO)
-    # Alias validation runs before binding and checks that the selected-node
-    # effective config is removed when the VFIO process exits.
-    add_test(
-        NAME RocjitsuVfioRepeatedSocketsRejectAliases
-        COMMAND
-            ${Python3_EXECUTABLE} -B
-            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_vfio_cli.py
-            $<TARGET_FILE:rocjitsu_bin>
-            ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fabric_node_projection.json
-    )
-    set_tests_properties(
-        RocjitsuVfioRepeatedSocketsRejectAliases
-        PROPERTIES TIMEOUT 15
-    )
 endif()
 
 add_test(
@@ -873,22 +837,12 @@ endif()
 if(ROCJITSU_ENABLE_VFIO)
     target_sources(
         rocjitsu_tests
-        PRIVATE
-            vmm/bus_plan_test.cpp
-            vmm/guest_region_map_test.cpp
-            vmm/vfio_user_client.cpp
-            vmm/vfio_device_host_test.cpp
+        PRIVATE vmm/bus_plan_test.cpp vmm/guest_region_map_test.cpp
     )
     target_link_libraries(
         rocjitsu_tests
         PRIVATE rocjitsu_vmm_vfu libvfio-user::libvfio-user
     )
-    # Keep the fault in the host's final link: the wrapper replaces one
-    # vfu_run_ctx result after the library has answered a client request.
-    target_link_options(rocjitsu_tests PRIVATE "LINKER:--wrap=vfu_run_ctx")
-    # Serving now builds a whole machine, so a test that drives the server end to
-    # end needs a real config rather than a synthesized one.
-    rj_add_test_path(rocjitsu_tests RJ_VFU_TEST_CONFIG_PATH "${CMAKE_SOURCE_DIR}/configs/gfx1250_mi455x.json")
 endif()
 if(RJ_ENABLE_EXPENSIVE_CHECKS)
     target_sources(
@@ -5694,4 +5648,16 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             "include(\"rocjitsu_tests.token.cmake\")\n"
         )
     endif()
+endif()
+
+set(ROCJITSU_SYSTEM_CTS_DIR
+    ""
+    CACHE PATH
+    "System CTS directory from rocjitsu-test-corpus"
+)
+if(ROCJITSU_SYSTEM_CTS_DIR)
+    if(NOT ROCJITSU_ENABLE_VFIO)
+        message(FATAL_ERROR "The system CTS requires ROCJITSU_ENABLE_VFIO=ON")
+    endif()
+    add_subdirectory("${ROCJITSU_SYSTEM_CTS_DIR}" system-cts)
 endif()

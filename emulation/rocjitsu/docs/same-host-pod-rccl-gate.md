@@ -50,18 +50,20 @@ fallback does not satisfy this requirement.
 
 ## Run this gate
 
-Run both controllers from `emulation/rocjitsu` in the `rocm-systems` checkout;
-they resolve `scripts/` relative to the working directory. Use a fresh, short
+The commands below use paths relative to `emulation/rocjitsu` in the
+`rocm-systems` checkout. The controllers locate their helper scripts beside
+their entry points. Use a fresh, short
 `--output` path under `/tmp` because the daemon socket paths live below it.
 Use `configs/gfx1250_mi455x_kmd_4node_2gpu_if.json` with
 `scripts/run-rccl-pod-vfio.py` and `scripts/run-rccl-pod-emulated.py`. The
 current controllers require exactly four nodes with two GPUs each, even though
 the gate's topology contract allows at least two GPUs per node. They reject a
-larger shape rather than selecting a subset. The [guest artifact recipe](../tests/guest/README.md#build-and-pack-the-guest-payloads)
-identifies the external QEMU, driver, kernel, firmware, ROCm, and RCCL inputs,
-packages the guest payload, and gives the current-build VFIO command. Supply
-matching local artifacts before using that command. Run the equivalent
-emulated KFD mode from the same directory with the current binaries:
+larger shape rather than selecting a subset. The corpus Release checks select
+each MI455X node and run the eight-rank workload in both modes. Use
+`--case helios` with the corpus pytest entry point to repeat these checks
+locally. Build the QEMU and driver base and the two workload images with the
+[guest build recipe](https://github.com/ROCm/rocjitsu-test-corpus/blob/99320c65ea55b4a1e916523ea7784fd26445d9a1/corpus/system-cts/guest/README.md).
+The emulated KFD controller accepts the current binaries directly.
 
 ```sh
 python3 scripts/run-rccl-pod-emulated.py \
@@ -135,7 +137,7 @@ all three hashes for every rank in both modes.
 
 For VFIO, capture the same map and hashes **inside each guest** after each
 rank has loaded its libraries and before it exits. Add the probe to the staged
-copy of `tests/guest/rccl_pod_init` after it starts both ranks. Its `$!` values
+copy of `corpus/system-cts/guest/rccl_pod_init` after it starts both ranks. Its `$!` values
 identify subshells, so find the two rank processes by matching `/proc/*/exe`
 to `/opt/rocjitsu/bin/hip_rccl_gfx1250_test`; poll until each map contains all
 three libraries. Use `/tmp` for temporary files inside the guest, then print

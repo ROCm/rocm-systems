@@ -693,3 +693,25 @@ destructor if the engine is still built.
 [7] G. Karypis and V. Kumar, "A Fast and High Quality Multilevel Scheme for
     Partitioning Irregular Graphs," *SIAM Journal on Scientific Computing*,
     vol. 20, no. 1, pp. 359-392, 1998.
+
+## Peer memory transfers
+
+Simdojo owns the component graph, port directions, links and event delivery.
+A model can declare a concrete `Message` with a static protocol name and add
+`TypedPort` instances for its inputs and outputs. The topology checks the two
+directions, name, message type and availability of specialized ports before
+connecting them. A model of a different protocol can supply its own message
+and handler. The link determines when each hop arrives.
+
+The rocjitsu `PeerMemoryFabric` component models a routed request and reply.
+KFD retains bytes in a buffer object's shared file mapping. VFIO resolves a
+peer BAR grant and retains a mapping of the owning GPU's VRAM file. Both put
+the resulting `RetainedBackingRange` and the owner GPU ID on the request.
+
+For example, two GPU virtual addresses can map the same four bytes of an
+IPC-exported buffer. Both views carry the same `BackingStoreId` and file
+offset. `BackingLineVersions` uses those coordinates so a write through one
+alias makes an earlier read through the other ineligible for a cache fill.
+The read still returns the bytes it captured. A queued write also retains
+the original mapping. If the requester unmaps and reuses the address before
+the target admits that write, the grant and VM checks reject the old request.

@@ -206,11 +206,17 @@ def parse_args() -> argparse.Namespace:
         "rocjitsu",
         "config",
         "driver-module",
-        "driver-package",
         "rank-binary",
         "output",
     ):
         parser.add_argument("--" + name, type=Path, required=True)
+    provenance = parser.add_mutually_exclusive_group(required=True)
+    provenance.add_argument("--driver-package", type=Path)
+    provenance.add_argument(
+        "--driver-source",
+        type=Path,
+        help="Source archive used to build the guest driver",
+    )
     parser.add_argument("--timeout", type=int, default=5400)
     parser.add_argument("--mcast-group", default="239.192.14.1")
     return parser.parse_args()
@@ -226,7 +232,7 @@ def run(args: argparse.Namespace) -> dict:
             "rocjitsu",
             "config",
             "driver_module",
-            "driver_package",
+            "driver_source" if args.driver_source else "driver_package",
             "rank_binary",
         )
     }
@@ -262,7 +268,7 @@ def run(args: argparse.Namespace) -> dict:
             )
             command = [
                 sys.executable,
-                "scripts/run-vfio-guest.py",
+                str(Path(__file__).resolve().with_name("run-vfio-guest.py")),
                 "--qemu",
                 str(inputs["qemu"]),
                 "--kernel",

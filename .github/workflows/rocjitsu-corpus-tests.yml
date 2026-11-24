@@ -81,6 +81,9 @@ jobs:
     # and --init. Use the image user with sudo, a Python venv, and tini below.
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      # ARC maps a named job volume to writable storage for RCCL's per-rank proxy pools.
+      volumes:
+        - rocjitsu-shm-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.name }}:/dev/shm
       env:
         DEBIAN_FRONTEND: noninteractive
     continue-on-error: ${{ matrix.allow_failure }}
@@ -186,6 +189,8 @@ jobs:
     steps:
       - name: Install base dependencies
         run: |
+          sudo -n chmod 1777 /dev/shm
+          df -h /dev/shm
           sudo -n apt-get -o Acquire::Retries=5 update
           sudo -n DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
             build-essential \
@@ -218,6 +223,15 @@ jobs:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
           ref: ${{ github.event.inputs.corpus_ref || env.ROCJITSU_DBT_CORPUS_REF }}
           path: rocjitsu-test-corpus
+          persist-credentials: false
+
+      - name: Checkout VFIO system CTS
+        if: matrix.name == 'release'
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ROCm/rocjitsu-test-corpus
+          ref: 99320c65ea55b4a1e916523ea7784fd26445d9a1
+          path: rocjitsu-vfio-corpus
           persist-credentials: false
 
       - name: Set up Python
@@ -431,12 +445,12 @@ jobs:
             )
           fi
           if [[ "${{ matrix.name }}" == release ]]; then
-            # Exercise stock-driver peer grants in the required Linux lane.
-            CMAKE_CONFIG_FLAGS+=(-DROCJITSU_ENABLE_VFIO=ON)
-          fi
-
-          if [[ "${{ matrix.name }}" == release ]]; then
-            CMAKE_CONFIG_FLAGS+=(-DRJ_INSTALL_TESTS=ON)
+            CMAKE_CONFIG_FLAGS+=(
+              -DROCJITSU_ENABLE_VFIO=ON
+              "-DROCJITSU_SYSTEM_CTS_DIR=${GITHUB_WORKSPACE}/rocjitsu-vfio-corpus/corpus/system-cts"
+              "-DROCJITSU_CTS_GUEST_INPUTS=${RUNNER_TEMP}/vfio-cts/images/inputs.json"
+              -DRJ_INSTALL_TESTS=ON
+            )
           fi
 
           CXXFLAGS=""
@@ -462,15 +476,6 @@ jobs:
           cmake --build "${ROCJITSU_BUILD_DIR}" -j
           echo "built=true" >> "${GITHUB_OUTPUT}"
 
-          if [[ "${{ matrix.name }}" == release ]]; then
-            VFIO_DISCOVERY="$(ctest --test-dir "${ROCJITSU_BUILD_DIR}" -N -R '^Vfio(TargetGrants|DeviceHost)')"
-            echo "${VFIO_DISCOVERY}"
-            if ! [[ "${VFIO_DISCOVERY}" =~ Total[[:space:]]Tests:[[:space:]][1-9][0-9]* ]]; then
-              echo "VFIO peer tests were not registered" >&2
-              exit 1
-            fi
-          fi
-
           CTEST_SELECTION=()
           if [[ -n "${TEST_REGEX}" ]]; then
             CTEST_SELECTION=(-R "${TEST_REGEX}")
@@ -479,6 +484,7 @@ jobs:
           ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
             "${CTEST_SELECTION[@]}" \
             -E "${EXCLUDED_TESTS}" \
+            -LE '^system-cts$' \
             --output-on-failure \
             -j
 
@@ -491,6 +497,12 @@ jobs:
 
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
+
+      - name: Run corpus VFIO transport and launcher checks
+        if: matrix.name == 'release'
+        uses: ./rocjitsu-vfio-corpus/.github/actions/test-vfio-transport
+        with:
+          build-dir: ${{ env.ROCJITSU_BUILD_DIR }}
 
       - name: Test installed fault-injection CLI
         if: matrix.name == 'release'
@@ -650,6 +662,13 @@ jobs:
             --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
             "${ROCM_SDK_DEVICE_PACKAGES[@]}"
           rocm-sdk init
+
+      - name: Run corpus VFIO guests and the Helios MI455X cluster
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' && steps.install_corpus_dependencies.outcome == 'success' }}
+        uses: ./rocjitsu-vfio-corpus/.github/actions/test-vfio-workloads
+        with:
+          rocjitsu: ${{ env.ROCJITSU_SOURCE_DIR }}
+          build-dir: ${{ env.ROCJITSU_BUILD_DIR }}
 
       - name: Run amdisa tests
         if: matrix.name == 'release'
