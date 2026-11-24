@@ -267,7 +267,9 @@ def lower_sema_block(block: SemaBlock, ctx: LoweringContext | None = None) -> st
                 wrapped.append(f'  {vcc_write}')
             return '\n'.join(wrapped)
         wrapped.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-        wrapped.append('    if (!(exec & (1ULL << lane))) continue;')
+        wrapped.extend(
+            ('    if (!(exec & (1ULL << lane))) {', '      continue;', '    }')
+        )
         for line in body_lines:
             wrapped.append('  ' + line)
         wrapped.append('  }')
@@ -447,16 +449,17 @@ def _lower_assign(node: SemaNode, ctx: LoweringContext) -> list[str]:
             rhs = _lower_expr(rhs_node, ctx)
             ind = _indent(ctx)
             lines = [
-                f'{ind}if ({rhs})',
+                f'{ind}if ({rhs}) {{',
                 f'{ind}  {ctx.vcc_var} |= (1ULL << {idx});',
             ]
             if ctx.clear_false_lane_mask_writes:
                 lines.extend(
                     [
-                        f'{ind}else',
+                        f'{ind}}} else {{',
                         f'{ind}  {ctx.vcc_var} &= ~(1ULL << {idx});',
                     ]
                 )
+            lines.append(f'{ind}}}')
             return lines
         if arr.kind == SemaNodeKind.ID and arr.id_name in ('MEM', 'LDS'):
             idx = _lower_expr(lhs_node.children[1], ctx)
@@ -496,23 +499,13 @@ def _lower_if(node: SemaNode, ctx: LoweringContext) -> list[str]:
     lines: list[str] = []
     inner_ctx = _nested_context(ctx)
 
-    if len(children) == 2:
-        cond = _lower_expr(children[0], ctx)
-        body_lines = _lower_stmt(children[1], inner_ctx)
-        if len(body_lines) == 1:
-            lines.append(f'{_indent(ctx)}if ({cond})')
-            lines.append(body_lines[0])
-        else:
-            lines.append(f'{_indent(ctx)}if ({cond}) {{')
-            lines.extend(body_lines)
-            lines.append(f'{_indent(ctx)}}}')
-    elif len(children) == 3:
+    if len(children) in (2, 3):
         cond = _lower_expr(children[0], ctx)
         lines.append(f'{_indent(ctx)}if ({cond}) {{')
         lines.extend(_lower_stmt(children[1], inner_ctx))
-        lines.append(f'{_indent(ctx)}}} else {{')
-        lines.extend(_lower_stmt(children[2], inner_ctx))
-        lines.append(f'{_indent(ctx)}}}')
+        if len(children) == 3:
+            lines.append(f'{_indent(ctx)}}} else {{')
+            lines.extend(_lower_stmt(children[2], inner_ctx))
     else:
         # Multi-branch: treat as if/elif chain (pairs of cond, body)
         for i in range(0, len(children) - 1, 2):
@@ -523,8 +516,7 @@ def _lower_if(node: SemaNode, ctx: LoweringContext) -> list[str]:
         if len(children) % 2 == 1:
             lines.append(f'{_indent(ctx)}}} else {{')
             lines.extend(_lower_stmt(children[-1], inner_ctx))
-        lines.append(f'{_indent(ctx)}}}')
-
+    lines.append(f'{_indent(ctx)}}}')
     return lines
 
 

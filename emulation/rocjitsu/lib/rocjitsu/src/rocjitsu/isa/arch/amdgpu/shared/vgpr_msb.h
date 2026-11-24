@@ -58,8 +58,9 @@ using VgprMsbBanks = std::array<std::optional<uint8_t>, VGPR_MSB_ROLE_COUNT>;
 [[nodiscard]] constexpr std::optional<uint8_t> vgpr_msb_bank_for_role(std::optional<uint8_t> value,
                                                                       VgprMsbRole role) {
   const auto index = vgpr_msb_role_index(role);
-  if (!value || !index)
+  if (!value || !index) {
     return std::nullopt;
+  }
   return static_cast<uint8_t>((*value >> (2 * *index)) & 0x3u);
 }
 
@@ -103,16 +104,18 @@ inline void apply_vgpr_msb_mode_write(VgprMsbBanks &banks, uint16_t hwreg,
   constexpr std::array<uint8_t, VGPR_MSB_ROLE_COUNT> mode_bit_offset = {14, 16, 18, 12};
   const HwregSlice slice = decode_hwreg_slice(hwreg);
   const uint16_t begin = slice.begin;
-  if (slice.id != MODE_HWREG || begin >= 32)
+  if (slice.id != MODE_HWREG || begin >= 32) {
     return;
+  }
   const uint16_t width = std::min<uint16_t>(slice.width, static_cast<uint16_t>(32 - begin));
   const uint16_t end = static_cast<uint16_t>(begin + width);
 
   for (size_t role = 0; role < banks.size(); ++role) {
     const uint16_t field_begin = mode_bit_offset[role];
     const uint16_t field_end = static_cast<uint16_t>(field_begin + 2);
-    if (begin >= field_end || field_begin >= end)
+    if (begin >= field_end || field_begin >= end) {
       continue;
+    }
     if (!value) {
       banks[role] = std::nullopt;
       continue;
@@ -125,8 +128,9 @@ inline void apply_vgpr_msb_mode_write(VgprMsbBanks &banks, uint16_t hwreg,
       banks[role] = static_cast<uint8_t>((*value >> source_bit) & 0x3u);
       continue;
     }
-    if (!banks[role])
+    if (!banks[role]) {
       continue;
+    }
     uint8_t bank = *banks[role];
     for (uint16_t mode_bit = overlap_begin; mode_bit < overlap_end; ++mode_bit) {
       const uint8_t field_bit = static_cast<uint8_t>(mode_bit - field_begin);
@@ -142,10 +146,12 @@ inline void apply_vgpr_msb_mode_write(VgprMsbBanks &banks, uint16_t hwreg,
 [[nodiscard]] inline VgprMsbBanks unpack_vgpr_msb_banks(std::optional<uint8_t> value) {
   VgprMsbBanks banks;
   banks.fill(std::nullopt);
-  if (!value)
+  if (!value) {
     return banks;
-  for (size_t role = 0; role < banks.size(); ++role)
+  }
+  for (size_t role = 0; role < banks.size(); ++role) {
     banks[role] = static_cast<uint8_t>((*value >> (2 * role)) & 0x3u);
+  }
   return banks;
 }
 
@@ -153,8 +159,9 @@ inline void apply_vgpr_msb_mode_write(VgprMsbBanks &banks, uint16_t hwreg,
 [[nodiscard]] inline std::optional<uint8_t> pack_vgpr_msb_banks(const VgprMsbBanks &banks) {
   uint8_t value = 0;
   for (size_t role = 0; role < banks.size(); ++role) {
-    if (!banks[role])
+    if (!banks[role]) {
       return std::nullopt;
+    }
     value = static_cast<uint8_t>(value | (*banks[role] << (2 * role)));
   }
   return value;

@@ -72,8 +72,9 @@ public:
     tag->admission_generation = generation;
     tag->dirty = true;
     tag->coherence = simdojo::CoherenceState::MODIFIED;
-    for (const auto &[offset, size] : dirty_ranges)
+    for (const auto &[offset, size] : dirty_ranges) {
       cache.mark_dirty_bytes(line_address, offset, size, vmid);
+    }
   }
 
   static void store_prepared_clean_line(L2Cache &cache, uint64_t line_address,
@@ -162,8 +163,9 @@ public:
   }
 
   static bool cache_access_available(L2Cache &cache) {
-    if (!cache.maintenance_mutex_.try_lock_shared())
+    if (!cache.maintenance_mutex_.try_lock_shared()) {
       return false;
+    }
     cache.maintenance_mutex_.unlock_shared();
     return true;
   }
@@ -188,11 +190,13 @@ public:
 
   static bool cache_access_available(L1ScalarCache &cache) {
     auto gate = DeviceCacheCoherence::try_acquire_l1_access(cache.registered_domain_.get());
-    if (cache.registered_domain_ && !gate.owns_lock())
+    if (cache.registered_domain_ && !gate.owns_lock()) {
       return false;
+    }
     const bool available = cache.maintenance_mutex_.try_lock();
-    if (available)
+    if (available) {
       cache.maintenance_mutex_.unlock();
+    }
     return available;
   }
 
@@ -219,11 +223,13 @@ public:
 
   static bool cache_access_available(L1VectorCache &cache) {
     auto gate = DeviceCacheCoherence::try_acquire_l1_access(cache.registered_domain_.get());
-    if (cache.registered_domain_ && !gate.owns_lock())
+    if (cache.registered_domain_ && !gate.owns_lock()) {
       return false;
+    }
     const bool available = cache.maintenance_mutex_.try_lock();
-    if (available)
+    if (available) {
       cache.maintenance_mutex_.unlock();
+    }
     return available;
   }
 };
@@ -238,16 +244,18 @@ public:
   [[nodiscard]] uint64_t backing_id() const noexcept override { return kBackingId; }
 
   [[nodiscard]] bool read(uint64_t offset, std::span<std::byte> result) noexcept override {
-    if (!contains(offset, result.size()))
+    if (!contains(offset, result.size())) {
       return false;
+    }
     std::copy_n(bytes_.begin() + (offset - kBaseOffset), result.size(), result.begin());
     return true;
   }
 
   [[nodiscard]] bool write(uint64_t offset, std::span<const std::byte> data) noexcept override {
     ++write_attempts;
-    if (!contains(offset, data.size()) || write_attempts == fail_on_attempt)
+    if (!contains(offset, data.size()) || write_attempts == fail_on_attempt) {
       return false;
+    }
     std::copy(data.begin(), data.end(), bytes_.begin() + (offset - kBaseOffset));
     return true;
   }
@@ -258,8 +266,9 @@ public:
 
 private:
   [[nodiscard]] bool contains(uint64_t offset, size_t size) const noexcept {
-    if (offset < kBaseOffset)
+    if (offset < kBaseOffset) {
       return false;
+    }
     const uint64_t relative = offset - kBaseOffset;
     return relative <= bytes_.size() && size <= bytes_.size() - relative;
   }
@@ -307,10 +316,11 @@ public:
     simdojo::CacheTag *tag = nullptr;
     ASSERT_TRUE(cache.cache_.lookup(line_address, &tag, vmid));
     const uint64_t bit = uint64_t{1} << (offset % 64);
-    if (valid)
+    if (valid) {
       tag->valid_bytes[offset / 64] |= bit;
-    else
+    } else {
       tag->valid_bytes[offset / 64] &= ~bit;
+    }
   }
 
   static void store_dirty_line(MemorySideCache &cache, uint64_t line_address,
@@ -351,8 +361,9 @@ public:
     const bool resident = cache.cache_.lookup(line_address, &tag, 0);
     ready.arrive_and_wait();
     release.arrive_and_wait();
-    if (!resident)
+    if (!resident) {
       return;
+    }
     cache.cache_.write_line(line_address, data.data(), 0, static_cast<uint32_t>(data.size()), 0);
     tag->coherence = simdojo::CoherenceState::MODIFIED;
     cache.mark_line_dirty(*tag);
@@ -369,8 +380,9 @@ public:
   }
 
   static bool exclusive_maintenance_queued(MemorySideCache &cache) {
-    if (!cache.access_gate_.try_lock_shared())
+    if (!cache.access_gate_.try_lock_shared()) {
       return true;
+    }
     cache.access_gate_.unlock_shared();
     return false;
   }
@@ -458,8 +470,9 @@ public:
 
   rocjitsu::amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
                                                   rocjitsu::amdgpu::VmAccessKind) const override {
-    if (size == 0 || address > size_ || size > size_ - address)
+    if (size == 0 || address > size_ || size > size_ - address) {
       return {.outcome = rocjitsu::amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    }
     const uint64_t contiguous_bytes =
         translation_span_ == 0
             ? size_ - address
@@ -501,8 +514,9 @@ public:
 
   rocjitsu::amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
                                                   rocjitsu::amdgpu::VmAccessKind) const override {
-    if (size == 0 || address > size_ || size > size_ - address)
+    if (size == 0 || address > size_ || size > size_ - address) {
       return {.outcome = rocjitsu::amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    }
     return {
         .outcome = rocjitsu::amdgpu::VmAccessOutcome::Complete,
         .translation = {.domain = rocjitsu::amdgpu::VmMemoryDomain::System,
@@ -525,10 +539,12 @@ public:
   rocjitsu::amdgpu::VmAccessOutcome read(rocjitsu::amdgpu::VmMemoryDomain domain, uint64_t address,
                                          std::span<std::byte> bytes) override {
     ++read_calls;
-    if (read_outcome != rocjitsu::amdgpu::VmAccessOutcome::Complete)
+    if (read_outcome != rocjitsu::amdgpu::VmAccessOutcome::Complete) {
       return read_outcome;
-    if (domain != rocjitsu::amdgpu::VmMemoryDomain::System || !contains(address, bytes.size()))
+    }
+    if (domain != rocjitsu::amdgpu::VmMemoryDomain::System || !contains(address, bytes.size())) {
       return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
+    }
     std::ranges::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(),
                         bytes.begin());
     return rocjitsu::amdgpu::VmAccessOutcome::Complete;
@@ -537,16 +553,21 @@ public:
   rocjitsu::amdgpu::VmAccessOutcome write(rocjitsu::amdgpu::VmMemoryDomain domain, uint64_t address,
                                           std::span<const std::byte> bytes) override {
     ++write_calls;
-    if (before_write)
+    if (before_write) {
       before_write();
-    if (write_calls == fail_on_write_call)
+    }
+    if (write_calls == fail_on_write_call) {
       return fail_write_outcome;
-    if (write_outcome != rocjitsu::amdgpu::VmAccessOutcome::Complete)
+    }
+    if (write_outcome != rocjitsu::amdgpu::VmAccessOutcome::Complete) {
       return write_outcome;
-    if (address == failing_write_address)
+    }
+    if (address == failing_write_address) {
       return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
-    if (domain != rocjitsu::amdgpu::VmMemoryDomain::System || !contains(address, bytes.size()))
+    }
+    if (domain != rocjitsu::amdgpu::VmMemoryDomain::System || !contains(address, bytes.size())) {
       return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
+    }
     std::ranges::copy(bytes, bytes_.begin() + static_cast<std::ptrdiff_t>(address));
     return rocjitsu::amdgpu::VmAccessOutcome::Complete;
   }
@@ -555,26 +576,30 @@ public:
                                                   uint64_t address, uint32_t width,
                                                   const AtomicMutation &mutation) override {
     ++atomic_calls;
-    if (atomic_outcome != rocjitsu::amdgpu::VmAccessOutcome::Complete)
+    if (atomic_outcome != rocjitsu::amdgpu::VmAccessOutcome::Complete) {
       return atomic_outcome;
+    }
     if (domain != rocjitsu::amdgpu::VmMemoryDomain::System || !contains(address, width) ||
-        (width != sizeof(uint32_t) && width != sizeof(uint64_t)))
+        (width != sizeof(uint32_t) && width != sizeof(uint64_t))) {
       return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
+    }
     mutation(std::span<std::byte>(bytes_.data() + address, width));
     return rocjitsu::amdgpu::VmAccessOutcome::Complete;
   }
 
   template <typename T> void store(uint64_t address, T value) {
     ASSERT_TRUE(contains(address, sizeof(value)));
-    if (contains(address, sizeof(value)))
+    if (contains(address, sizeof(value))) {
       std::memcpy(bytes_.data() + address, &value, sizeof(value));
+    }
   }
 
   template <typename T> T load(uint64_t address) const {
     T value{};
     EXPECT_TRUE(contains(address, sizeof(value)));
-    if (contains(address, sizeof(value)))
+    if (contains(address, sizeof(value))) {
       std::memcpy(&value, bytes_.data() + address, sizeof(value));
+    }
     return value;
   }
 
@@ -1751,8 +1776,9 @@ TEST(DeviceCacheCoherenceTest, WritebackMaintenancePublishesMemorySideBeforeL2Di
         rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
   }
   EXPECT_EQ(memory.read8(kAddress + kDirtyOffset - 1), 0x11u);
-  for (uint32_t byte = 0; byte < kDirtyBytes; ++byte)
+  for (uint32_t byte = 0; byte < kDirtyBytes; ++byte) {
     EXPECT_EQ(memory.read8(kAddress + kDirtyOffset + byte), 0x22u);
+  }
   EXPECT_EQ(memory.read8(kAddress + kDirtyOffset + kDirtyBytes), 0x11u);
 }
 
@@ -2131,8 +2157,9 @@ TEST(DeviceCacheCoherenceTest, CheckedGroupPreparedFailurePreservesDirtyState) {
   for (size_t failure = 0; failure < messages.size(); ++failure) {
     auto gate = std::make_shared<VmTransferEffectGate>();
     reported_gate = gate;
-    if (failure == 1)
+    if (failure == 1) {
       gate->revoke();
+    }
     owner->fail_on_attempt = failure == 2 ? 1 : 0;
     const auto resolve = [&](uint32_t, uint32_t, uint64_t address, size_t size) {
       return PreparedCanonicalWritebackTestAccess::make(
@@ -2571,8 +2598,9 @@ void check_group_prepared_rejects_distinct_va_canonical_overlap(bool separate_do
                                                  102, 24, dirty_range);
     auto owner = std::make_shared<PreparedBackingOwner>();
     std::vector<DeviceCacheDomain> domains{{first_domain, 11}};
-    if (separate_domains)
+    if (separate_domains) {
       domains.push_back({second_domain, 12});
+    }
     const uint64_t first_epoch = first_domain->current_epoch();
     const uint64_t second_epoch = second_domain->current_epoch();
     size_t resolver_calls = 0;
@@ -3330,8 +3358,9 @@ TEST(DeviceCacheCoherenceTest, ScopedWitnessRefusesMissingStaleOrUnretainedDirty
                     EXPECT_EQ(size, L2Cache::LINE_SIZE);
                     EXPECT_EQ(identity, 102u);
                     EXPECT_EQ(generation, 24u);
-                    if (invalid == 0)
+                    if (invalid == 0) {
                       return std::nullopt;
+                    }
                     CanonicalLineWitness witness{
                         .gpu_id = gpu_id,
                         .vmid = vmid,
@@ -3342,10 +3371,11 @@ TEST(DeviceCacheCoherenceTest, ScopedWitnessRefusesMissingStaleOrUnretainedDirty
                         .backing_id = PreparedBackingOwner::kBackingId,
                         .backing_offset = PreparedBackingOwner::kBaseOffset + L2Cache::LINE_SIZE,
                         .retention = std::make_shared<int>(1)};
-                    if (invalid == 1)
+                    if (invalid == 1) {
                       ++witness.admission_generation;
-                    else
+                    } else {
                       witness.retention.reset();
+                    }
                     return witness;
                   });
         },
@@ -3541,10 +3571,11 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedRevokedSecondGateRetainsDirtyBatch) 
   auto second_gate = std::make_shared<VmTransferEffectGate>();
   // The coordinator sorts gates by this comparator. Revoke the gate acquired
   // second so the first permit has already been taken before the refusal.
-  if (std::less<std::shared_ptr<VmTransferEffectGate>>{}(first_gate, second_gate))
+  if (std::less<std::shared_ptr<VmTransferEffectGate>>{}(first_gate, second_gate)) {
     second_gate->revoke();
-  else
+  } else {
     first_gate->revoke();
+  }
   size_t resolver_calls = 0;
   const auto resolve = [&](uint32_t, uint32_t vmid, uint64_t address, size_t line_size) {
     ++resolver_calls;
@@ -3755,12 +3786,13 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedRejectsOtherLineByteChangeDuringBatc
               if (resolver_calls == 1) {
                 std::array<uint8_t, L2Cache::LINE_SIZE> replacement{};
                 replacement.fill(0x7c);
-                if (first)
+                if (first) {
                   L2CacheTestAccess::replace_prepared_dirty_line_bytes(second_l2, kSecondAddress,
                                                                        replacement, kVmid);
-                else
+                } else {
                   L2CacheTestAccess::replace_prepared_dirty_line_bytes(first_l2, kFirstAddress,
                                                                        replacement, kVmid);
+                }
               }
               const size_t backing_offset = first ? 0 : L2Cache::LINE_SIZE;
               return PreparedCanonicalWritebackTestAccess::make(
@@ -4119,8 +4151,9 @@ void run_cross_l2_atomic_benchmark(std::string_view name, bool same_address) {
   constexpr uint64_t kBase = 0x800000;
   constexpr uint64_t kOperations = static_cast<uint64_t>(kThreads) * kIterations;
 
-  for (uint32_t tid = 0; tid < kThreads; ++tid)
+  for (uint32_t tid = 0; tid < kThreads; ++tid) {
     memory.write32(kBase + static_cast<uint64_t>(tid) * L2Cache::LINE_SIZE, 0);
+  }
 
   std::barrier ready(kThreads + 1);
   std::barrier start(kThreads + 1);
@@ -4138,8 +4171,9 @@ void run_cross_l2_atomic_benchmark(std::string_view name, bool same_address) {
       start.arrive_and_wait();
       for (uint32_t iteration = 0; iteration < kIterations; ++iteration) {
         if (l2->atomic_rmw(target, sizeof(uint32_t), increment_u32) !=
-            rocjitsu::amdgpu::VmAccessOutcome::Complete)
+            rocjitsu::amdgpu::VmAccessOutcome::Complete) {
           failed_operations.fetch_add(1, std::memory_order_relaxed);
+        }
       }
       done.arrive_and_wait();
     });
@@ -4150,8 +4184,9 @@ void run_cross_l2_atomic_benchmark(std::string_view name, bool same_address) {
   start.arrive_and_wait();
   done.arrive_and_wait();
   const auto end = std::chrono::steady_clock::now();
-  for (auto &worker : workers)
+  for (auto &worker : workers) {
     worker.join();
+  }
   EXPECT_EQ(failed_operations.load(std::memory_order_relaxed), 0u);
 
   if (same_address) {
@@ -4186,9 +4221,10 @@ void run_atomic_hierarchy_benchmark(std::string_view name, uint32_t hierarchy_co
   constexpr uint32_t kIterations = 100'000;
   memory.write32(kAddr, 0);
   const auto begin = std::chrono::steady_clock::now();
-  for (uint32_t i = 0; i < kIterations; ++i)
+  for (uint32_t i = 0; i < kIterations; ++i) {
     ASSERT_EQ(l2s.front()->atomic_rmw(kAddr, sizeof(uint32_t), increment_u32),
               rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  }
   const auto end = std::chrono::steady_clock::now();
 
   EXPECT_EQ(memory.read32(kAddr), kIterations);
@@ -4207,8 +4243,9 @@ void run_scalar_l1_hit_benchmark() {
   l1.load(kAddr, 1, &value);
 
   const auto begin = std::chrono::steady_clock::now();
-  for (uint32_t i = 0; i < kIterations; ++i)
+  for (uint32_t i = 0; i < kIterations; ++i) {
     l1.load(kAddr, 1, &value);
+  }
   const auto end = std::chrono::steady_clock::now();
 
   EXPECT_EQ(value, 17u);
@@ -4228,8 +4265,9 @@ void run_vector_l1_hit_benchmark() {
   l1.load(addrs, 1, sizeof(uint32_t), 1, value.data(), Mtype::RW, false, false, 1);
 
   const auto begin = std::chrono::steady_clock::now();
-  for (uint32_t i = 0; i < kIterations; ++i)
+  for (uint32_t i = 0; i < kIterations; ++i) {
     l1.load(addrs, 1, sizeof(uint32_t), 1, value.data(), Mtype::RW, false, false, 1);
+  }
   const auto end = std::chrono::steady_clock::now();
 
   uint32_t observed = 0;
@@ -4255,8 +4293,9 @@ void run_invalidate_range_benchmark(std::string_view name, uint32_t lines, uint3
   std::chrono::steady_clock::duration elapsed{};
   uint64_t refill_checksum = 0;
   uint64_t expected_refill_checksum = 0;
-  for (uint32_t line = 0; line < lines; ++line)
+  for (uint32_t line = 0; line < lines; ++line) {
     expected_refill_checksum += static_cast<uint8_t>(line + 0x40);
+  }
   expected_refill_checksum *= iterations;
 
   for (uint32_t iteration = 0; iteration < iterations; ++iteration) {
@@ -4294,8 +4333,9 @@ public:
   ScopedFd(const ScopedFd &) = delete;
   ScopedFd &operator=(const ScopedFd &) = delete;
   ~ScopedFd() {
-    if (fd_ >= 0)
+    if (fd_ >= 0) {
       close(fd_);
+    }
   }
 
   int get() const { return fd_; }
@@ -4310,8 +4350,9 @@ public:
   ScopedMapping(const ScopedMapping &) = delete;
   ScopedMapping &operator=(const ScopedMapping &) = delete;
   ~ScopedMapping() {
-    if (address_ != MAP_FAILED)
+    if (address_ != MAP_FAILED) {
       munmap(address_, size_);
+    }
   }
 
   uint8_t *data() const { return static_cast<uint8_t *>(address_); }
@@ -4580,8 +4621,9 @@ TEST(DeviceCacheCoherenceTest, FailedMemorySideEvictionRestoresDirtyVictimForRet
   physical->store(kAddress, kInitial);
   GpuMemory memory("memory");
   rocjitsu::amdgpu::GpuVm gpu_vm;
-  for (uint32_t way = 0; way <= MemorySideCache::ASSOCIATIVITY; ++way)
+  for (uint32_t way = 0; way <= MemorySideCache::ASSOCIATIVITY; ++way) {
     ASSERT_TRUE(gpu_vm.register_translated(kFirstVmid + way, translator, physical));
+  }
 
   HbmController hbm("hbm", &memory, &gpu_vm);
   auto coherence = std::make_shared<rocjitsu::amdgpu::DeviceCacheCoherence>();
@@ -4803,8 +4845,9 @@ protected:
   static constexpr uint32_t kSentinel = 0xdeadbeef;
 
   void SetUp() override {
-    for (size_t i = 0; i < backing_.size(); ++i)
+    for (size_t i = 0; i < backing_.size(); ++i) {
       backing_[i] = static_cast<uint8_t>(i * 17 + 3);
+    }
     address_space_ = adapter_.register_address_space(
         kVmid, {.page_table = &process_.page_table_,
                 .page_table_mutex = &process_.page_table_mutex_,
@@ -4831,8 +4874,9 @@ protected:
 
   void expect_words(const std::array<uint32_t, 16> &words, uint32_t count, size_t offset = 0) {
     EXPECT_EQ(std::memcmp(words.data(), backing_.data() + offset, count * sizeof(uint32_t)), 0);
-    for (uint32_t i = count; i < words.size(); ++i)
+    for (uint32_t i = count; i < words.size(); ++i) {
       EXPECT_EQ(words[i], kSentinel);
+    }
   }
 
   std::array<uint8_t, 8192> backing_{};
@@ -4852,8 +4896,9 @@ protected:
   void SetUp() override {
     ScalarRamBatchTest::SetUp();
     vector_.set_gpu_vm(&vm_);
-    for (size_t i = 0; i < values_.size(); ++i)
+    for (size_t i = 0; i < values_.size(); ++i) {
       values_[i] = 0x10203000u + static_cast<uint32_t>(i);
+    }
   }
   void reset_bytes() {
     vector_.invalidate_all();
@@ -4881,15 +4926,17 @@ TEST_F(VectorRamBatchTest, SwizzledMasksDuplicatesAndBoundariesMatchOrdinaryStor
           SCOPED_TRACE(offset);
           SCOPED_TRACE(partial);
           std::array<uint64_t, 64> addresses;
-          for (size_t lane = 0; lane < addresses.size(); ++lane)
+          for (size_t lane = 0; lane < addresses.size(); ++lane) {
             addresses[lane] = kBase + offset + lane * unit;
+          }
           addresses[3] = addresses[2];
           const uint64_t lanes = partial ? 0x7fff00ffff00ffffull : UINT64_MAX;
           const std::array<uint64_t, 4> masks{lanes, lanes & 0x5555555555555555ull,
                                               lanes & 0x3333333333333333ull, lanes};
           std::span<const uint64_t> element_masks;
-          if (partial)
+          if (partial) {
             element_masks = masks;
+          }
           std::array<uint8_t, 8192> ordinary;
           std::array<uint8_t, sizeof(values_)> ordinary_read{};
           uint64_t ordinary_transactions = 0;
@@ -4991,8 +5038,9 @@ TEST_F(VectorRamBatchTest, OwnerPolicySourceAliasAndDirtyRefusalsHaveNoEffects) 
 TEST_F(VectorRamBatchTest, FirstRequestKeepsDirtyPrefixAndLaterFlushContents) {
   map(Owner::DriverSealedRam, Mtype::RW);
   std::array<uint64_t, 8> addresses;
-  for (size_t lane = 0; lane < addresses.size(); ++lane)
+  for (size_t lane = 0; lane < addresses.size(); ++lane) {
     addresses[lane] = kBase + lane * 4;
+  }
   std::array<uint8_t, L2Cache::LINE_SIZE> dirty;
   dirty.fill(0xa5);
   for (const Mtype policy : {Mtype::UC, Mtype::RW}) {
@@ -5006,10 +5054,11 @@ TEST_F(VectorRamBatchTest, FirstRequestKeepsDirtyPrefixAndLaterFlushContents) {
                               reinterpret_cast<const uint8_t *>(values_.data()), policy, false, 8,
                               kVmid, 32, 0, {}, 4, allow),
                 Outcome::Complete);
-      if (!allow)
+      if (!allow) {
         ordinary_before_flush = backing_;
-      else
+      } else {
         EXPECT_EQ(backing_, ordinary_before_flush);
+      }
       ASSERT_EQ(l2_.flush_all(), Outcome::Complete);
       if (!allow) {
         ordinary_after_flush = backing_;
@@ -5061,18 +5110,21 @@ TEST_F(VectorRamBatchTest, StrictSubextentFailuresRetainExactWrittenPrefix) {
   for (const uint32_t kind : {0u, 1u, 2u}) {
     for (const bool allow : {false, true}) {
       map(Owner::DriverSealedRam, Mtype::UC, kind == 0 ? 10 : 8192);
-      if (kind == 1)
+      if (kind == 1) {
         process_.page_table_[kBase >> rocjitsu::KfdProcess::kPageShift].host_extents = {
             {backing_.data(), 6, 0, Owner::DriverSealedRam},
             {backing_.data() + 6, 58, 6, Owner::DriverSealedRam}};
-      if (kind == 2)
+      }
+      if (kind == 2) {
         process_.page_table_[kBase >> rocjitsu::KfdProcess::kPageShift].host_extents = {
             {backing_.data(), 64, 0, Owner::DriverSealedRam},
             {backing_.data() + 8, 8, 8, Owner::DriverSealedRam}};
+      }
       reset_bytes();
       std::array<uint64_t, 8> addresses;
-      for (size_t i = 0; i < addresses.size(); ++i)
+      for (size_t i = 0; i < addresses.size(); ++i) {
         addresses[i] = kBase + i * 4;
+      }
       const uint64_t before = l2_.backing_write_transactions();
       EXPECT_EQ(vector_.store(addresses.data(), 255, 4, 1,
                               reinterpret_cast<const uint8_t *>(values_.data()), Mtype::UC, false,
@@ -5113,8 +5165,9 @@ TEST_F(VectorRamBatchTest, AdmissionPinsPageTableUntilMappingGuardAllowsCommit) 
     std::this_thread::yield();
   }
   const bool writable = request_mutex->try_lock();
-  if (writable)
+  if (writable) {
     request_mutex->unlock();
+  }
   const bool unchanged = backing_ == before;
   mapping.unlock();
   worker.join();
@@ -5164,8 +5217,9 @@ TEST(VectorRamBatch, UnknownBackendAddsNoOptionalQueriesOrRepeatedStoreEffects) 
     VmAccessOutcome write(VmMemoryDomain, uint64_t address,
                           std::span<const std::byte> bytes) override {
       stores.emplace_back(address, bytes.size());
-      if (stores.size() == 5 && result != VmAccessOutcome::Complete)
+      if (stores.size() == 5 && result != VmAccessOutcome::Complete) {
         return result;
+      }
       std::copy(bytes.begin(), bytes.end(), backing.begin() + address);
       return VmAccessOutcome::Complete;
     }
@@ -5202,17 +5256,19 @@ TEST(VectorRamBatch, UnknownBackendAddsNoOptionalQueriesOrRepeatedStoreEffects) 
       const size_t complete = outcome == VmAccessOutcome::Complete ? 8 : 4;
       const size_t attempts = outcome == VmAccessOutcome::Complete ? 8 : 5;
       ASSERT_EQ(physical->stores.size(), attempts);
-      for (size_t index = 0; index < attempts; ++index)
+      for (size_t index = 0; index < attempts; ++index) {
         EXPECT_EQ(physical->stores[index], (std::pair<uint64_t, size_t>{64 + index * 4, 4}));
+      }
       EXPECT_EQ(std::memcmp(physical->backing.data() + 64, values.data(), complete * 4), 0);
       EXPECT_TRUE(std::ranges::all_of(std::span(physical->backing).subspan(64 + complete * 4),
                                       [](std::byte value) { return value == std::byte{0}; }));
       EXPECT_EQ(l2.backing_write_transactions(), attempts);
       EXPECT_EQ(policy->optional_attempts, 0u);
-      if (!allow)
+      if (!allow) {
         ordinary_queries = policy->queries;
-      else
+      } else {
         EXPECT_EQ(policy->queries, ordinary_queries);
+      }
     }
   }
 }
@@ -5348,10 +5404,11 @@ TEST_F(ScalarRamBatchTest, AlignmentLineAndPageCrossingsKeepOriginalChunks) {
       const uint64_t before = l2_.backing_read_transactions();
       ASSERT_EQ(l1_.load(kBase + offset, 8, words.data(), kVmid, allow), Outcome::Complete);
       expect_words(words, 8, offset);
-      if (!allow)
+      if (!allow) {
         original_reads = l2_.backing_read_transactions() - before;
-      else
+      } else {
         EXPECT_EQ(l2_.backing_read_transactions() - before, original_reads);
+      }
     }
   }
 }
@@ -5559,10 +5616,11 @@ TEST(ScalarRamBatch, UnknownEligibilityAddsNoPolicyOrBackingObservations) {
     ASSERT_EQ(l1.load(64, words.size(), words.data(), 7, allow), VmAccessOutcome::Complete);
     EXPECT_EQ(physical->read_calls, 8u);
     EXPECT_EQ(translator->optional_attempts, 0u);
-    if (!allow)
+    if (!allow) {
       original_translations = translator->translations;
-    else
+    } else {
       EXPECT_EQ(translator->translations, original_translations);
+    }
   }
 }
 
@@ -5573,12 +5631,14 @@ TEST(ScalarRamBatch, CustomTransportKeepsEachReadEffectAndIncompletePrefix) {
     Outcome read(rocjitsu::amdgpu::VmMemoryDomain, uint64_t address,
                  std::span<std::byte> bytes) override {
       reads.emplace_back(address, bytes.size());
-      if (reads.size() == 5 && incomplete != Outcome::Complete)
+      if (reads.size() == 5 && incomplete != Outcome::Complete) {
         return incomplete;
+      }
       const uint32_t value = 0x12340000 + static_cast<uint32_t>(reads.size());
       EXPECT_EQ(bytes.size(), sizeof(value));
-      if (bytes.size() != sizeof(value))
+      if (bytes.size() != sizeof(value)) {
         return Outcome::Malformed;
+      }
       std::memcpy(bytes.data(), &value, bytes.size());
       return Outcome::Complete;
     }
@@ -5613,10 +5673,12 @@ TEST(ScalarRamBatch, CustomTransportKeepsEachReadEffectAndIncompletePrefix) {
       const size_t completed = outcome == Outcome::Complete ? 8 : 4;
       const size_t attempts = outcome == Outcome::Complete ? 8 : 5;
       ASSERT_EQ(physical->reads.size(), attempts);
-      for (size_t i = 0; i < attempts; ++i)
+      for (size_t i = 0; i < attempts; ++i) {
         EXPECT_EQ(physical->reads[i], (std::pair<uint64_t, size_t>{64 + i * 4, 4}));
-      for (size_t i = 0; i < words.size(); ++i)
+      }
+      for (size_t i = 0; i < words.size(); ++i) {
         EXPECT_EQ(words[i], i < completed ? 0x12340001u + i : 0xdeadbeefu);
+      }
       EXPECT_EQ(l2.backing_read_transactions(), attempts);
     }
   }
@@ -5853,11 +5915,12 @@ TEST_F(L1CacheMtypeTest, NewRequestsReusePolicyWithoutPageTableLocks) {
     vector_cache.set_gpu_vm(&gpu_vm_);
     uint32_t observed = 0;
     auto load = [&] {
-      if (vector)
+      if (vector) {
         return vector_cache.load(&kAddr, /*lane_mask=*/1, sizeof(observed), /*num_elems=*/1,
                                  reinterpret_cast<uint8_t *>(&observed), Mtype::RW,
                                  /*non_temporal=*/false, /*request_l1_bypass=*/false,
                                  /*wf_size=*/1, kVmid);
+      }
       return scalar_cache.load(kAddr, 1, &observed, kVmid);
     };
     ASSERT_EQ(load(), rocjitsu::amdgpu::VmAccessOutcome::Complete);
@@ -6071,29 +6134,33 @@ TEST(L2CacheTest, FullLineStoresSkipBackingReads) {
       std::array<uint64_t, kLanes> addrs{};
       std::array<uint32_t, kLanes> values{};
       std::array<uint32_t, kLanes> actual{};
-      for (uint32_t lane = 0; lane < kLanes; ++lane)
+      for (uint32_t lane = 0; lane < kLanes; ++lane) {
         addrs[lane] = kAddr + lane * sizeof(uint32_t);
+      }
 
       for (uint32_t iteration = 0; iteration < 2; ++iteration) {
-        for (uint32_t lane = 0; lane < kLanes; ++lane)
+        for (uint32_t lane = 0; lane < kLanes; ++lane) {
           values[lane] = 0x12340000 + iteration * kLanes + lane;
+        }
         const auto *bytes = reinterpret_cast<const uint8_t *>(values.data());
         const uint64_t reads_before = l2.backing_read_transactions();
-        if (through_l1)
+        if (through_l1) {
           l1.store(addrs.data(), /*lane_mask=*/kLaneMask, sizeof(uint32_t), /*num_elems=*/1, bytes,
                    mtype, /*non_temporal=*/false, /*wf_size=*/kLanes);
-        else
+        } else {
           l2.write(kAddr, bytes, sizeof(values), mtype);
+        }
         EXPECT_EQ(l2.backing_read_transactions(), reads_before);
         memory.read_block(
             kAddr, std::span<uint8_t>(reinterpret_cast<uint8_t *>(actual.data()), sizeof(actual)));
         EXPECT_EQ(actual, values);
-        if (through_l1)
+        if (through_l1) {
           l1.load(addrs.data(), /*lane_mask=*/kLaneMask, sizeof(uint32_t), /*num_elems=*/1,
                   reinterpret_cast<uint8_t *>(actual.data()), mtype,
                   /*non_temporal=*/false, /*request_l1_bypass=*/false, /*wf_size=*/kLanes);
-        else
+        } else {
           l2.read(kAddr, reinterpret_cast<uint8_t *>(actual.data()), sizeof(actual), mtype);
+        }
         EXPECT_EQ(actual, values);
       }
     }
@@ -6122,8 +6189,9 @@ TEST(L2CacheTest, TransactionPolicySplitsRequestsWithoutChangingCacheGeometry) {
             std::array<uint32_t, 64 * 4> source{}, result{};
             for (uint32_t lane = 0; lane < lanes; ++lane) {
               addresses[lane] = base + (reverse ? lanes - 1 - lane : lane) * width;
-              for (uint32_t word = 0; word < elements; ++word)
+              for (uint32_t word = 0; word < elements; ++word) {
                 source[elements * lane + word] = 100 * lane + word;
+              }
             }
             const uint64_t mask = (uint64_t{1} << lanes) - 1;
             const uint64_t expected =
@@ -6171,8 +6239,9 @@ TEST(L2CacheTest, PermutedLanesPublishAndReadOneContiguousTransaction) {
             const uint32_t offset = (index ^ permutation) * width;
             addresses[lane] = kAddress + offset;
             mask |= uint64_t{1} << lane;
-            for (uint32_t byte = 0; byte < width; ++byte)
+            for (uint32_t byte = 0; byte < width; ++byte) {
               expected[offset + byte] = source[lane * width + byte] = lane + byte;
+            }
           }
           ASSERT_EQ(l1.store(addresses.data(), mask, sizeof(uint32_t), width / sizeof(uint32_t),
                              source.data(), Mtype::UC, false, 64),
@@ -6185,10 +6254,12 @@ TEST(L2CacheTest, PermutedLanesPublishAndReadOneContiguousTransaction) {
                             result.data(), Mtype::UC, false, true, 64),
                     rocjitsu::amdgpu::VmAccessOutcome::Complete);
           EXPECT_EQ(l2.backing_read_transactions(), 1u);
-          for (uint32_t lane = 0; lane < 64; ++lane)
-            for (uint32_t byte = 0; byte < width; ++byte)
+          for (uint32_t lane = 0; lane < 64; ++lane) {
+            for (uint32_t byte = 0; byte < width; ++byte) {
               EXPECT_EQ(result[lane * width + byte],
                         mask & (uint64_t{1} << lane) ? source[lane * width + byte] : 0xcd);
+            }
+          }
         }
       }
     }
@@ -6281,12 +6352,15 @@ TEST(L2CacheTest, SeededLaneTransfersMatchIndependentByteAndTransactionOracles) 
           }
           std::ranges::shuffle(std::span(order).first(wave_size), random);
           uint64_t mask = (uint64_t{random()} << 32) | random();
-          if (wave_size == 32)
+          if (wave_size == 32) {
             mask &= 0xffffffff;
-          if (trial % 8 == 0)
+          }
+          if (trial % 8 == 0) {
             mask = wave_size == 64 ? ~uint64_t{0} : uint64_t{0xffffffff};
-          if (trial == 31)
+          }
+          if (trial == 31) {
             mask = 0;
+          }
           std::array<uint64_t, 64> addresses{};
           std::array<uint8_t, 64 * 16> source{}, loaded{}, expected_load{};
           std::array<uint8_t, kBytes> expected_store{}, actual{}, read_source{};
@@ -6294,16 +6368,18 @@ TEST(L2CacheTest, SeededLaneTransfersMatchIndependentByteAndTransactionOracles) 
           expected_store.fill(0xa5);
           loaded.fill(0xcd);
           expected_load.fill(0xcd);
-          for (size_t byte = 0; byte < read_source.size(); ++byte)
+          for (size_t byte = 0; byte < read_source.size(); ++byte) {
             read_source[byte] = static_cast<uint8_t>(random());
+          }
           // The reference visits individual requested bytes, independently of
           // lane grouping, gathering, scattering, and cache-line geometry.
           for (uint32_t lane = 0; lane < wave_size; ++lane) {
             addresses[lane] = kBase + offsets[order[lane]];
             for (uint32_t byte = 0; byte < width; ++byte) {
               source[lane * width + byte] = static_cast<uint8_t>(random());
-              if (!(mask & (uint64_t{1} << lane)))
+              if (!(mask & (uint64_t{1} << lane))) {
                 continue;
+              }
               const size_t at = addresses[lane] - kBase + byte;
               ASSERT_LT(at, kBytes);
               requested[at] = true;
@@ -6312,19 +6388,24 @@ TEST(L2CacheTest, SeededLaneTransfersMatchIndependentByteAndTransactionOracles) 
             }
           }
           uint64_t active_address = kBase;
-          for (uint32_t lane = 0; lane < wave_size; ++lane)
+          for (uint32_t lane = 0; lane < wave_size; ++lane) {
             if (mask & (uint64_t{1} << lane)) {
               active_address = addresses[lane];
               break;
             }
-          for (uint32_t lane = 0; lane < wave_size; ++lane)
-            if (!(mask & (uint64_t{1} << lane)))
+          }
+          for (uint32_t lane = 0; lane < wave_size; ++lane) {
+            if (!(mask & (uint64_t{1} << lane))) {
               addresses[lane] = trial % 2 ? active_address : UINT64_MAX;
+            }
+          }
           uint64_t expected_transactions = 0;
-          for (size_t byte = 0; byte < requested.size(); ++byte)
+          for (size_t byte = 0; byte < requested.size(); ++byte) {
             if (requested[byte] &&
-                (byte == 0 || !requested[byte - 1] || (kBase + byte) % policy.bytes() == 0))
+                (byte == 0 || !requested[byte - 1] || (kBase + byte) % policy.bytes() == 0)) {
               ++expected_transactions;
+            }
+          }
 
           GpuMemory memory("memory", policy);
           L2Cache l2("l2");
@@ -6374,14 +6455,16 @@ TEST(L2CacheTest, PartialOverlapWithEarlierActiveLaneMatchesByteOrder) {
         expected_store = actual;
         loaded.fill(0xcd);
         expected_load = loaded;
-        for (size_t byte = 0; byte < read_source.size(); ++byte)
+        for (size_t byte = 0; byte < read_source.size(); ++byte) {
           read_source[byte] = static_cast<uint8_t>(byte ^ 0x5a);
+        }
         for (uint32_t lane = 0; lane < addresses.size(); ++lane) {
           addresses[lane] = kBase + 5 + offsets[lane];
           for (uint32_t byte = 0; byte < width; ++byte) {
             source[lane * width + byte] = static_cast<uint8_t>(lane * 31 + byte);
-            if (!(mask & (uint64_t{1} << lane)))
+            if (!(mask & (uint64_t{1} << lane))) {
               continue;
+            }
             const size_t at = addresses[lane] - kBase + byte;
             ASSERT_LT(at, expected_store.size());
             expected_store[at] = source[lane * width + byte];
@@ -6456,8 +6539,9 @@ TEST(L2CacheTest, FullLineStorePublishesDirtyEviction) {
   std::array<uint8_t, L2Cache::LINE_SIZE> replacement{};
   dirty.fill(0x55);
   replacement.fill(0xaa);
-  for (uint32_t way = 0; way < L2Cache::ASSOCIATIVITY; ++way)
+  for (uint32_t way = 0; way < L2Cache::ASSOCIATIVITY; ++way) {
     l2.writeback_line(kAddr + way * kSetStride, dirty.data());
+  }
 
   const uint64_t destination = kAddr + L2Cache::ASSOCIATIVITY * kSetStride;
   const uint64_t reads_before = l2.backing_read_transactions();
@@ -6479,21 +6563,24 @@ TEST(L2CacheTest, FullLineStoreEvictsDirtyLineUnderItsOwningVmid) {
   std::array<uint8_t, GpuMemory::PAGE_SIZE> page_b{};
   rocjitsu::KfdProcess process_a(kVmidA), process_b(kVmidB);
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
-  for (uint32_t way = 0; way < pages_a.size(); ++way)
+  for (uint32_t way = 0; way < pages_a.size(); ++way) {
     process_a.map_pages(kAddr + way * kSetStride, pages_a[way].data(), pages_a[way].size());
+  }
   process_b.map_pages(kAddr, page_b.data(), page_b.size());
-  for (auto *process : {&process_a, &process_b})
+  for (auto *process : {&process_a, &process_b}) {
     memory.register_process(process == &process_a ? kVmidA : kVmidB, &process->page_table_,
                             &process->page_table_mutex_, process->page_table_generation(),
                             process->page_table_request_mutex());
+  }
   L2Cache l2("l2");
   l2.set_backing_memory(&memory);
   l2.set_gpu_vm(&memory.gpu_vm());
   std::array<uint8_t, L2Cache::LINE_SIZE> dirty{}, replacement{}, actual{};
   dirty.fill(0x55);
   replacement.fill(0xaa);
-  for (uint32_t way = 0; way < pages_a.size(); ++way)
+  for (uint32_t way = 0; way < pages_a.size(); ++way) {
     l2.writeback_line(kAddr + way * kSetStride, dirty.data(), Mtype::RW, kVmidA);
+  }
   EXPECT_EQ(pages_a[0][0], 0u);
   const uint64_t reads_before = l2.backing_read_transactions();
   // The same GPU VA misses because the store belongs to a different process.
@@ -6543,8 +6630,9 @@ TEST(L2CacheTest, UnalignedVectorStoreSkipsBackingReads) {
   initial.fill(0xa5);
   memory.write_block(kAddr, initial);
   std::array<uint8_t, 2 * L2Cache::LINE_SIZE> values{};
-  for (uint32_t i = 0; i < values.size(); ++i)
+  for (uint32_t i = 0; i < values.size(); ++i) {
     values[i] = static_cast<uint8_t>(i);
+  }
   std::array<uint8_t, 3 * L2Cache::LINE_SIZE> expected = initial;
   std::ranges::copy(values, expected.begin() + sizeof(uint32_t));
   const uint64_t addrs[] = {kAddr + sizeof(uint32_t)};
@@ -6577,15 +6665,17 @@ TEST(L2CacheThreadingTest, ConcurrentDifferentSetWritesArePreserved) {
       for (uint32_t i = 0; i < kLinesPerThread; ++i) {
         const uint64_t addr =
             kBase + (static_cast<uint64_t>(i) * kThreads + tid) * L2Cache::LINE_SIZE;
-        for (uint32_t b = 0; b < line.size(); ++b)
+        for (uint32_t b = 0; b < line.size(); ++b) {
           line[b] = static_cast<uint8_t>((tid << 4) ^ i ^ b);
+        }
         l2.write(addr, line.data(), line.size());
       }
     });
   }
 
-  for (auto &worker : workers)
+  for (auto &worker : workers) {
     worker.join();
+  }
 
   std::array<uint8_t, L2Cache::LINE_SIZE> expected{};
   std::array<uint8_t, L2Cache::LINE_SIZE> actual{};
@@ -6593,8 +6683,9 @@ TEST(L2CacheThreadingTest, ConcurrentDifferentSetWritesArePreserved) {
     for (uint32_t i = 0; i < kLinesPerThread; ++i) {
       const uint64_t addr =
           kBase + (static_cast<uint64_t>(i) * kThreads + tid) * L2Cache::LINE_SIZE;
-      for (uint32_t b = 0; b < expected.size(); ++b)
+      for (uint32_t b = 0; b < expected.size(); ++b) {
         expected[b] = static_cast<uint8_t>((tid << 4) ^ i ^ b);
+      }
       l2.read(addr, actual.data(), actual.size());
       EXPECT_EQ(actual, expected) << "addr=0x" << std::hex << addr;
     }
@@ -6625,14 +6716,16 @@ TEST(L2CacheThreadingTest, ConcurrentSameSetAccessesPreserveLines) {
         line.fill(static_cast<uint8_t>((tid << 4) ^ iteration));
         l2.write(addr, line.data(), line.size());
         l2.read(addr, actual.data(), actual.size());
-        if (actual != line)
+        if (actual != line) {
           mismatches.fetch_add(1, std::memory_order_relaxed);
+        }
       }
     });
   }
 
-  for (auto &worker : workers)
+  for (auto &worker : workers) {
     worker.join();
+  }
 
   EXPECT_EQ(mismatches.load(std::memory_order_relaxed), 0u);
 }
@@ -6662,14 +6755,16 @@ TEST(L2CacheThreadingTest, ConcurrentAtomicRmwSameLineIsSerialized) {
               std::memcpy(&value, line + offset, sizeof(value));
               ++value;
               std::memcpy(line + offset, &value, sizeof(value));
-            }) != rocjitsu::amdgpu::VmAccessOutcome::Complete)
+            }) != rocjitsu::amdgpu::VmAccessOutcome::Complete) {
           failed_operations.fetch_add(1, std::memory_order_relaxed);
+        }
       }
     });
   }
 
-  for (auto &worker : workers)
+  for (auto &worker : workers) {
     worker.join();
+  }
 
   EXPECT_EQ(failed_operations.load(std::memory_order_relaxed), 0u);
   EXPECT_EQ(memory.read32(kTarget), kThreads * kIterations);
@@ -6705,14 +6800,16 @@ TEST(L2CacheThreadingTest, CrossL2AtomicRmwSameAddressIsSerialized) {
               std::memcpy(&value, line + offset, sizeof(value));
               ++value;
               std::memcpy(line + offset, &value, sizeof(value));
-            }) != rocjitsu::amdgpu::VmAccessOutcome::Complete)
+            }) != rocjitsu::amdgpu::VmAccessOutcome::Complete) {
           failed_operations.fetch_add(1, std::memory_order_relaxed);
+        }
       }
     });
   }
 
-  for (auto &worker : workers)
+  for (auto &worker : workers) {
     worker.join();
+  }
 
   EXPECT_EQ(failed_operations.load(std::memory_order_relaxed), 0u);
   EXPECT_EQ(memory.read32(kTarget), kThreads * kIterations);
@@ -6739,17 +6836,21 @@ TEST(L2CacheThreadingTest, BatchedAndIndividualAtomicsShareCoherence) {
     start.arrive_and_wait();
     for (uint32_t batch = 0; batch < kBatches; ++batch) {
       auto boundary = coherence->acquire_atomic_boundary();
-      for (uint32_t lane = 0; lane < kLanes; ++lane)
+      for (uint32_t lane = 0; lane < kLanes; ++lane) {
         if (l2a.atomic_rmw(boundary, kTarget, sizeof(uint32_t), increment, 0, std::nullopt) !=
-            rocjitsu::amdgpu::VmAccessOutcome::Complete)
+            rocjitsu::amdgpu::VmAccessOutcome::Complete) {
           ++failures;
+        }
+      }
     }
   });
   start.arrive_and_wait();
-  for (uint32_t i = 0; i < kBatches * kLanes; ++i)
+  for (uint32_t i = 0; i < kBatches * kLanes; ++i) {
     if (l2b.atomic_rmw(kTarget, sizeof(uint32_t), increment) !=
-        rocjitsu::amdgpu::VmAccessOutcome::Complete)
+        rocjitsu::amdgpu::VmAccessOutcome::Complete) {
       ++failures;
+    }
+  }
   batched.join();
   EXPECT_EQ(failures.load(), 0u);
   EXPECT_EQ(memory.read32(kTarget), 2 * kBatches * kLanes);
@@ -6830,14 +6931,16 @@ TEST(L2CacheThreadingTest, CrossL2AtomicRmwAliasedVasIsSerialized) {
                   ++value;
                   std::memcpy(line + offset, &value, sizeof(value));
                 },
-                vmid) != rocjitsu::amdgpu::VmAccessOutcome::Complete)
+                vmid) != rocjitsu::amdgpu::VmAccessOutcome::Complete) {
           failed_operations.fetch_add(1, std::memory_order_relaxed);
+        }
       }
     });
   }
 
-  for (auto &worker : workers)
+  for (auto &worker : workers) {
     worker.join();
+  }
 
   EXPECT_EQ(failed_operations.load(std::memory_order_relaxed), 0u);
   uint32_t actual = 0;
@@ -6909,14 +7012,16 @@ TEST(L2CacheThreadingTest, CrossL2AtomicRmwDistinctSharedMappingsIncludesDirtyWr
   std::thread first_atomic([&] {
     start.arrive_and_wait();
     if (l2a.atomic_rmw(kVaA + kOffset, sizeof(uint32_t), increment, kVmidA) !=
-        rocjitsu::amdgpu::VmAccessOutcome::Complete)
+        rocjitsu::amdgpu::VmAccessOutcome::Complete) {
       failed_operations.fetch_add(1, std::memory_order_relaxed);
+    }
   });
   std::thread second_atomic([&] {
     start.arrive_and_wait();
     if (l2b.atomic_rmw(kVaB + kOffset, sizeof(uint32_t), increment, kVmidB) !=
-        rocjitsu::amdgpu::VmAccessOutcome::Complete)
+        rocjitsu::amdgpu::VmAccessOutcome::Complete) {
       failed_operations.fetch_add(1, std::memory_order_relaxed);
+    }
   });
   start.arrive_and_wait();
 
@@ -7113,16 +7218,18 @@ TEST(DeviceCacheCoherenceTest, ConcurrentScalarLoadsTrackRepeatedAtomicEpochs) {
     std::unique_lock lock(start_mutex);
     self_ready = true;
     start_cv.notify_all();
-    if (!start_cv.wait_for(lock, std::chrono::seconds(1), [&] { return peer_ready; }))
+    if (!start_cv.wait_for(lock, std::chrono::seconds(1), [&] { return peer_ready; })) {
       synchronization_failed.store(true, std::memory_order_relaxed);
+    }
   };
 
   std::thread atomic([&] {
     wait_for_peer(atomic_ready, scalar_ready);
     for (uint32_t iteration = 0; iteration < kAtomicIterations; ++iteration) {
       if (atomic_l2.atomic_rmw(kAddr, sizeof(uint32_t), increment_u32) !=
-          rocjitsu::amdgpu::VmAccessOutcome::Complete)
+          rocjitsu::amdgpu::VmAccessOutcome::Complete) {
         atomic_failed.store(true, std::memory_order_relaxed);
+      }
       std::this_thread::yield();
     }
   });
@@ -7132,8 +7239,9 @@ TEST(DeviceCacheCoherenceTest, ConcurrentScalarLoadsTrackRepeatedAtomicEpochs) {
     for (uint32_t iteration = 0; iteration < kLoadIterations; ++iteration) {
       uint32_t observed = 0;
       scalar_l1.load(kAddr, /*num_dwords=*/1, &observed);
-      if (observed < previous || observed > kAtomicIterations)
+      if (observed < previous || observed > kAtomicIterations) {
         nonmonotonic_load.store(true, std::memory_order_relaxed);
+      }
       previous = observed;
       std::this_thread::yield();
     }
@@ -7214,8 +7322,9 @@ TEST(L2CacheTest, LinkedPortAtomicRmwRefreshesStaleMemorySideAlias) {
   simdojo::Link msc_hbm_link(/*id=*/0, msc.req_port(), hbm.cpl_port(), /*latency=*/0);
   simdojo::Link l2a_msc_link(/*id=*/1, l2a.req_port(), l2a_msc_port, /*latency=*/0);
   simdojo::Link l2b_msc_link(/*id=*/2, l2b.req_port(), l2b_msc_port, /*latency=*/0);
-  for (simdojo::Link *link : {&msc_hbm_link, &l2a_msc_link, &l2b_msc_link})
+  for (simdojo::Link *link : {&msc_hbm_link, &l2a_msc_link, &l2b_msc_link}) {
     link->set_exec_mode(simdojo::ExecMode::FUNCTIONAL);
+  }
   msc.req_port()->set_link(&msc_hbm_link);
   hbm.cpl_port()->set_link(&msc_hbm_link);
   l2a.req_port()->set_link(&l2a_msc_link);
@@ -7340,8 +7449,9 @@ TEST(L2CacheThreadingTest, ConcurrentFlushAllPreservesDirtyWritebacks) {
         for (uint32_t i = 0; i < kLinesPerThread; ++i) {
           const uint64_t addr =
               kBase + (static_cast<uint64_t>(i) * kWriterThreads + tid) * L2Cache::LINE_SIZE;
-          for (uint32_t b = 0; b < line.size(); ++b)
+          for (uint32_t b = 0; b < line.size(); ++b) {
             line[b] = static_cast<uint8_t>((tid << 5) ^ iteration ^ i ^ b);
+          }
           l2.writeback_line(addr, line.data());
         }
         std::this_thread::yield();
@@ -7351,16 +7461,18 @@ TEST(L2CacheThreadingTest, ConcurrentFlushAllPreservesDirtyWritebacks) {
 
   std::thread flusher([&] {
     start.arrive_and_wait();
-    while (active_writers.load(std::memory_order_acquire) < kWriterThreads)
+    while (active_writers.load(std::memory_order_acquire) < kWriterThreads) {
       std::this_thread::yield();
+    }
     for (uint32_t i = 0; i < 4; ++i) {
       l2.flush_all();
       std::this_thread::yield();
     }
   });
 
-  for (auto &worker : workers)
+  for (auto &worker : workers) {
     worker.join();
+  }
   flusher.join();
 
   l2.flush_all();
@@ -7371,8 +7483,9 @@ TEST(L2CacheThreadingTest, ConcurrentFlushAllPreservesDirtyWritebacks) {
     for (uint32_t i = 0; i < kLinesPerThread; ++i) {
       const uint64_t addr =
           kBase + (static_cast<uint64_t>(i) * kWriterThreads + tid) * L2Cache::LINE_SIZE;
-      for (uint32_t b = 0; b < expected.size(); ++b)
+      for (uint32_t b = 0; b < expected.size(); ++b) {
         expected[b] = static_cast<uint8_t>((tid << 5) ^ (kIterations - 1) ^ i ^ b);
+      }
       memory.read_block(addr, std::span<uint8_t>(actual));
       EXPECT_EQ(actual, expected) << "addr=0x" << std::hex << addr;
     }
@@ -8519,8 +8632,9 @@ TEST(ControlledCacheBackingTest, ConcurrentReadersSurvivePolicyRetirementAndVmid
       probes.fetch_add(1, std::memory_order_relaxed);
     }
   });
-  while (probes.load(std::memory_order_acquire) == 0)
+  while (probes.load(std::memory_order_acquire) == 0) {
     std::this_thread::yield();
+  }
   for (int attempt = 0; attempt < 100; ++attempt) {
     EXPECT_TRUE(vm.protect_controlled_cache_backing(handle, kAddress, 4));
     vm.retire_controlled_cache_backing(handle, kAddress, 4);
@@ -8560,9 +8674,10 @@ TEST(ControlledCacheBackingTest, DirtyVictimEvictionRetainsLineAndReplacementOrd
   ASSERT_EQ(l2.writeback_line(kAddress, dirty.data(), 16, 1, Mtype::RW, kVmid),
             VmAccessOutcome::Complete);
   const std::array<uint8_t, 1> clean{0x31};
-  for (uint32_t way = 1; way < L2Cache::ASSOCIATIVITY; ++way)
+  for (uint32_t way = 1; way < L2Cache::ASSOCIATIVITY; ++way) {
     ASSERT_TRUE(l2.try_fill_peer_cached(kAddress + way * kSetSpan, clean, kVmid, kGeneration,
                                         access->cache_identity()));
+  }
   ASSERT_FALSE(
       l2.try_fill_peer_cached(kCandidate, clean, kVmid, kGeneration, access->cache_identity()));
   uint8_t observed = 0;
@@ -8612,9 +8727,10 @@ TEST(ControlledCacheBackingTest, MemorySideDirtyVictimRefusalKeepsReplacementOrd
   MemorySideCacheTestAccess::store_prepared_dirty_line(memory_side, kAddress, dirty, kVmid,
                                                        access->cache_identity(), kGeneration);
   const std::array<uint8_t, 1> clean{0x31};
-  for (uint32_t way = 1; way < MemorySideCache::ASSOCIATIVITY; ++way)
+  for (uint32_t way = 1; way < MemorySideCache::ASSOCIATIVITY; ++way) {
     ASSERT_TRUE(memory_side.try_fill_peer_cached(kAddress + way * kSetSpan, clean, kVmid,
                                                  kGeneration, access->cache_identity()));
+  }
   ASSERT_FALSE(memory_side.try_fill_peer_cached(kCandidate, clean, kVmid, kGeneration,
                                                 access->cache_identity()));
   uint8_t observed = 0;
@@ -8667,9 +8783,10 @@ TEST(ControlledCacheBackingTest, StaleDirtyVictimsDoNotStallControlledBacking) {
     L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, l2_dirty, kVmid, identity,
                                                  generation, kDirtyRanges);
     const std::array<uint8_t, 1> clean{0x31};
-    for (uint32_t way = 1; way < L2Cache::ASSOCIATIVITY; ++way)
+    for (uint32_t way = 1; way < L2Cache::ASSOCIATIVITY; ++way) {
       ASSERT_TRUE(l2.try_fill_peer_cached(kAddress + way * kL2SetSpan, clean, kVmid, kGeneration,
                                           access->cache_identity()));
+    }
     uint8_t observed = 0;
     EXPECT_EQ(l2.read(kL2Candidate, &observed, 1, Mtype::RW, kVmid), VmAccessOutcome::Complete);
     EXPECT_FALSE(L2CacheTestAccess::resident(l2, kAddress, kVmid));
@@ -8685,9 +8802,10 @@ TEST(ControlledCacheBackingTest, StaleDirtyVictimsDoNotStallControlledBacking) {
     msc_dirty.fill(0x6b);
     MemorySideCacheTestAccess::store_prepared_dirty_line(memory_side, kAddress, msc_dirty, kVmid,
                                                          identity, generation);
-    for (uint32_t way = 1; way < MemorySideCache::ASSOCIATIVITY; ++way)
+    for (uint32_t way = 1; way < MemorySideCache::ASSOCIATIVITY; ++way) {
       ASSERT_TRUE(memory_side.try_fill_peer_cached(kAddress + way * kMscSetSpan, clean, kVmid,
                                                    kGeneration, access->cache_identity()));
+    }
     EXPECT_EQ(memory_side.read(kMscCandidate, &observed, 1, kVmid), VmAccessOutcome::Complete);
     EXPECT_FALSE(MemorySideCacheTestAccess::line_is_resident(memory_side, kAddress, kVmid));
     EXPECT_EQ(physical->write_calls, 0u);
@@ -8714,9 +8832,10 @@ TEST(PeerCacheTest, DirtyVictimRefusalPreservesTagAndReplacementOrder) {
   L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, dirty, kVmid, kIdentity, kGeneration,
                                                kDirtyRanges);
   EXPECT_FALSE(l2.try_fill_peer_cached(kAddress, clean, kVmid, kGeneration, kIdentity));
-  for (uint32_t way = 1; way < L2Cache::ASSOCIATIVITY; ++way)
+  for (uint32_t way = 1; way < L2Cache::ASSOCIATIVITY; ++way) {
     ASSERT_TRUE(
         l2.try_fill_peer_cached(kAddress + way * kL2SetSpan, clean, kVmid, kGeneration, kIdentity));
+  }
   const uint64_t l2_candidate = kAddress + L2Cache::ASSOCIATIVITY * kL2SetSpan;
   EXPECT_FALSE(l2.try_fill_peer_cached(l2_candidate, clean, kVmid, kGeneration, kIdentity));
   EXPECT_FALSE(l2.try_fill_peer_cached(l2_candidate, clean, kVmid, kGeneration, kIdentity));
@@ -8730,9 +8849,10 @@ TEST(PeerCacheTest, DirtyVictimRefusalPreservesTagAndReplacementOrder) {
   MemorySideCacheTestAccess::store_prepared_dirty_line(memory_side, kAddress, dirty, kVmid,
                                                        kIdentity, kGeneration);
   EXPECT_FALSE(memory_side.try_fill_peer_cached(kAddress, clean, kVmid, kGeneration, kIdentity));
-  for (uint32_t way = 1; way < MemorySideCache::ASSOCIATIVITY; ++way)
+  for (uint32_t way = 1; way < MemorySideCache::ASSOCIATIVITY; ++way) {
     ASSERT_TRUE(memory_side.try_fill_peer_cached(kAddress + way * kMemorySideSetSpan, clean, kVmid,
                                                  kGeneration, kIdentity));
+  }
   const uint64_t memory_side_candidate =
       kAddress + MemorySideCache::ASSOCIATIVITY * kMemorySideSetSpan;
   EXPECT_FALSE(memory_side.try_fill_peer_cached(memory_side_candidate, clean, kVmid, kGeneration,
@@ -8788,8 +8908,9 @@ TEST(GpuMemoryTest, BlockAccessHandlesPageBoundaries) {
   constexpr uint64_t kAddr = 0x3ff0;
   std::array<uint8_t, 64> input{};
   std::array<uint8_t, 64> output{};
-  for (uint32_t i = 0; i < input.size(); ++i)
+  for (uint32_t i = 0; i < input.size(); ++i) {
     input[i] = static_cast<uint8_t>(i * 3);
+  }
 
   memory.write_block(kAddr, std::span<const uint8_t>(input));
   memory.read_block(kAddr, std::span<uint8_t>(output));
@@ -8830,14 +8951,16 @@ TEST(L2DiagnosticCounters, JoinedTotalsCoverDistributedAndSharedLines) {
           const uint64_t address = distributed ? (thread + i * kThreads) * L2Cache::LINE_SIZE : 0;
           for (const auto policy : {Mtype::RW, Mtype::UC}) {
             if (l2.write(address, reinterpret_cast<const uint8_t *>(&value), sizeof(value), policy,
-                         7) != VmAccessOutcome::Complete)
+                         7) != VmAccessOutcome::Complete) {
               succeeded.store(false, std::memory_order_relaxed);
+            }
           }
         }
       });
     }
-    for (auto &worker : workers)
+    for (auto &worker : workers) {
       worker.join();
+    }
     ASSERT_TRUE(succeeded.load(std::memory_order_relaxed));
     EXPECT_EQ(l2.write_count(), kThreads * kOperations);
     EXPECT_EQ(l2.backing_write_transactions(), 2u * kThreads * kOperations);
@@ -8866,8 +8989,9 @@ TEST(L2DiagnosticCounters, ReentrantQueriesKeepAttemptAndSuccessBoundaries) {
                                   const AtomicMutation &mutation) override {
       observe();
       std::array<std::byte, sizeof(uint32_t)> bytes{};
-      if (width != bytes.size())
+      if (width != bytes.size()) {
         return VmAccessOutcome::Malformed;
+      }
       mutation(bytes);
       return VmAccessOutcome::Complete;
     }
@@ -8914,8 +9038,9 @@ TEST(TranslatedLocalCache, ExactHandlePtePolicyAndFabricBoundaryRefetchOwnerData
     VmTranslationResult translate(uint64_t address, std::size_t size,
                                   VmAccessKind access) const override {
       if (address >= 4096 || size == 0 || size > 4096 - address ||
-          (access != VmAccessKind::Read && access != VmAccessKind::Write))
+          (access != VmAccessKind::Read && access != VmAccessKind::Write)) {
         return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+      }
       return {.outcome = VmAccessOutcome::Complete,
               .translation = {.domain = VmMemoryDomain::Local,
                               .address = backing_base + address,
@@ -8939,8 +9064,9 @@ TEST(TranslatedLocalCache, ExactHandlePtePolicyAndFabricBoundaryRefetchOwnerData
     VmAccessOutcome read(VmMemoryDomain domain, uint64_t address,
                          std::span<std::byte> result) override {
       if (domain != VmMemoryDomain::Local || address > bytes_.size() ||
-          result.size() > bytes_.size() - address)
+          result.size() > bytes_.size() - address) {
         return VmAccessOutcome::Faulted;
+      }
       ++reads;
       std::memcpy(result.data(), bytes_.data() + address, result.size());
       return VmAccessOutcome::Complete;
@@ -8948,8 +9074,9 @@ TEST(TranslatedLocalCache, ExactHandlePtePolicyAndFabricBoundaryRefetchOwnerData
     VmAccessOutcome write(VmMemoryDomain domain, uint64_t address,
                           std::span<const std::byte> source) override {
       if (domain != VmMemoryDomain::Local || address > bytes_.size() ||
-          source.size() > bytes_.size() - address)
+          source.size() > bytes_.size() - address) {
         return VmAccessOutcome::Faulted;
+      }
       std::memcpy(bytes_.data() + address, source.data(), source.size());
       domain_->publish_local_backing_write(address, source.size());
       return VmAccessOutcome::Complete;

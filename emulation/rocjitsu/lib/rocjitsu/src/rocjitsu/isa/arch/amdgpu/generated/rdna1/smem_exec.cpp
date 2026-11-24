@@ -27,8 +27,9 @@ namespace rdna1 {
 
 void SLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 1u);
-  if (!dst_register)
+  if (!dst_register) {
     return;
+  }
   std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 1;
@@ -38,16 +39,18 @@ void SLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, false);
   auto address = smem_calculate_address(inst_, wf, d.get());
-  if (!address)
+  if (!address) {
     return;
+  }
   d->addr = *address;
   set_data(std::move(d));
 }
 
 void SLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 2u);
-  if (!dst_register)
+  if (!dst_register) {
     return;
+  }
   std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 2;
@@ -57,16 +60,18 @@ void SLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, false);
   auto address = smem_calculate_address(inst_, wf, d.get());
-  if (!address)
+  if (!address) {
     return;
+  }
   d->addr = *address;
   set_data(std::move(d));
 }
 
 void SLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 4u);
-  if (!dst_register)
+  if (!dst_register) {
     return;
+  }
   std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 4;
@@ -76,16 +81,18 @@ void SLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, false);
   auto address = smem_calculate_address(inst_, wf, d.get());
-  if (!address)
+  if (!address) {
     return;
+  }
   d->addr = *address;
   set_data(std::move(d));
 }
 
 void SLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 8u);
-  if (!dst_register)
+  if (!dst_register) {
     return;
+  }
   std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 8;
@@ -95,16 +102,18 @@ void SLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, false);
   auto address = smem_calculate_address(inst_, wf, d.get());
-  if (!address)
+  if (!address) {
     return;
+  }
   d->addr = *address;
   set_data(std::move(d));
 }
 
 void SLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 16u);
-  if (!dst_register)
+  if (!dst_register) {
     return;
+  }
   std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 16;
@@ -114,16 +123,18 @@ void SLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, false);
   auto address = smem_calculate_address(inst_, wf, d.get());
-  if (!address)
+  if (!address) {
     return;
+  }
   d->addr = *address;
   set_data(std::move(d));
 }
 
 void SScratchLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 1u);
-  if (!dst_register)
+  if (!dst_register) {
     return;
+  }
   std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 1;
@@ -133,16 +144,18 @@ void SScratchLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, false);
   auto address = smem_calculate_address(inst_, wf, d.get());
-  if (!address)
+  if (!address) {
     return;
+  }
   d->addr = *address;
   set_data(std::move(d));
 }
 
 void SScratchLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 2u);
-  if (!dst_register)
+  if (!dst_register) {
     return;
+  }
   std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 2;
@@ -152,16 +165,18 @@ void SScratchLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, false);
   auto address = smem_calculate_address(inst_, wf, d.get());
-  if (!address)
+  if (!address) {
     return;
+  }
   d->addr = *address;
   set_data(std::move(d));
 }
 
 void SScratchLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 4u);
-  if (!dst_register)
+  if (!dst_register) {
     return;
+  }
   std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 4;
@@ -171,16 +186,18 @@ void SScratchLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, false);
   auto address = smem_calculate_address(inst_, wf, d.get());
-  if (!address)
+  if (!address) {
     return;
+  }
   d->addr = *address;
   set_data(std::move(d));
 }
 
 void SBufferLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 1u);
-  if (!dst_register)
+  if (!dst_register) {
     return;
+  }
   std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 1;
@@ -190,16 +207,18 @@ void SBufferLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, false);
   auto address = smem_calculate_address(inst_, wf, d.get());
-  if (!address)
+  if (!address) {
     return;
+  }
   d->addr = *address;
   set_data(std::move(d));
 }
 
 void SBufferLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 2u);
-  if (!dst_register)
+  if (!dst_register) {
     return;
+  }
   std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 2;
@@ -209,16 +228,18 @@ void SBufferLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, false);
   auto address = smem_calculate_address(inst_, wf, d.get());
-  if (!address)
+  if (!address) {
     return;
+  }
   d->addr = *address;
   set_data(std::move(d));
 }
 
 void SBufferLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 4u);
-  if (!dst_register)
+  if (!dst_register) {
     return;
+  }
   std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 4;
@@ -228,16 +249,18 @@ void SBufferLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, false);
   auto address = smem_calculate_address(inst_, wf, d.get());
-  if (!address)
+  if (!address) {
     return;
+  }
   d->addr = *address;
   set_data(std::move(d));
 }
 
 void SBufferLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 8u);
-  if (!dst_register)
+  if (!dst_register) {
     return;
+  }
   std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 8;
@@ -247,16 +270,18 @@ void SBufferLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, false);
   auto address = smem_calculate_address(inst_, wf, d.get());
-  if (!address)
+  if (!address) {
     return;
+  }
   d->addr = *address;
   set_data(std::move(d));
 }
 
 void SBufferLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 16u);
-  if (!dst_register)
+  if (!dst_register) {
     return;
+  }
   std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 16;
@@ -266,8 +291,9 @@ void SBufferLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, false);
   auto address = smem_calculate_address(inst_, wf, d.get());
-  if (!address)
+  if (!address) {
     return;
+  }
   d->addr = *address;
   set_data(std::move(d));
 }
@@ -290,8 +316,9 @@ void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->num_dwords = 1;
   d->is_load = false;
   auto addr = smem_calculate_address(inst_, wf, d.get());
-  if (!addr)
+  if (!addr) {
     return;
+  }
   d->addr = *addr;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
@@ -303,8 +330,9 @@ void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->num_dwords = 1;
   d->is_load = false;
   auto addr = smem_calculate_address(inst_, wf, d.get());
-  if (!addr)
+  if (!addr) {
     return;
+  }
   d->addr = *addr;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));

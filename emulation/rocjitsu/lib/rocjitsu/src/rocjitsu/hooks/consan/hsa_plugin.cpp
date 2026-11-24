@@ -11,7 +11,9 @@
 #include "rocjitsu/hooks/consan/testing.h"
 #include "util/diagnostic.h"
 
+#include <algorithm>
 #include <atomic>
+#include <bit>
 #include <cerrno>
 #include <chrono>
 #include <condition_variable>
@@ -22,6 +24,7 @@
 #include <fcntl.h>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <sys/random.h>
 #include <sys/stat.h>
 #include <thread>
@@ -62,15 +65,24 @@ struct Signal {
   bool pending = false;
 };
 
+struct EntryBinding {
+  EntryKey key = 0;
+  EntryDisposition disposition = EntryDisposition::Native;
+  EntryFacts binding;
+  hsa_executable_symbol_t symbol = {};
+  uint64_t kernel_object = 0;
+  uint32_t kernarg_alignment = 0;
+  std::shared_ptr<const Manifest> facts;
+};
+
 // Admitted code/binding across launches, retained through executable lifetime.
 // Launch snapshots lease the immutable facts independently of this object.
 struct Module {
   hsa_executable_t executable{};
   hsa_agent_t agent{};
-  hsa_executable_symbol_t symbol{};
-  uint64_t kernel_object = 0;
   LoadedArtifact artifact;
-  std::shared_ptr<const Manifest> facts;
+  std::shared_ptr<const ImageFacts> facts;
+  std::vector<EntryBinding> entries;
 };
 
 // Persistent backing capacity, not a launch's effective report length. A lease
@@ -90,14 +102,20 @@ struct Launch {
   void *wrapper = nullptr;
   void *context = nullptr;
   uint32_t slot = 0;
+  bool native = false;
+  // Protected by Runtime::mutex_. Admission can observe GPU completion while
+  // the observer still owns a wait on the application's original signal.
+  bool native_completion_visible = false;
+  std::shared_ptr<const Module> module;
   std::unique_ptr<DispatchLifecycle> lifecycle;
 };
 
 class Runtime {
 public:
   Runtime(const CoreApiTable &core, const AmdExtTable &amd, const char *artifacts,
-          const char *capture)
-      : core_(core), amd_{}, artifact_path_(artifacts), capture_path_(capture) {
+          const char *capture, const Digest &expected_profile)
+      : core_(core), amd_{}, artifact_path_(artifacts), capture_path_(capture),
+        expected_profile_(expected_profile) {
     std::memcpy(&amd_, &amd, kAmdTablePrefixBytes);
   }
 
@@ -157,7 +175,8 @@ public:
     {
       std::lock_guard lock(mutex_);
       const std::unordered_map<uint64_t, Blob>::iterator found = readers_.find(reader.handle);
-      if (closed_ || module_ever_ || loading_ || found == readers_.end())
+      if (closed_ || status_ != RuntimeStatus::Success || module_ever_ || loading_ ||
+          found == readers_.end())
         return reject_locked("load requires a tracked original reader and one admitted module");
       original = found->second;
       loading_ = true;
@@ -165,15 +184,15 @@ public:
     auto module = std::make_shared<Module>();
     util::StringDiagnostic artifact_diagnostic;
     const std::string target = agent_target(agent);
-    FailureOr<LoadedArtifact> artifact =
-        load_artifact(artifact_path_, *original, target, artifact_diagnostic.emitter());
+    FailureOr<LoadedArtifact> artifact = load_artifact(
+        artifact_path_, *original, target, expected_profile_, artifact_diagnostic.emitter());
     if (artifact.failed()) {
       std::lock_guard lock(mutex_);
       loading_ = false;
       return reject_locked(artifact_diagnostic.message());
     }
     module->artifact = std::move(artifact.value());
-    module->facts = std::make_shared<const Manifest>(module->artifact.manifest);
+    module->facts = std::make_shared<const ImageFacts>(std::move(module->artifact.facts));
     module->executable = executable;
     module->agent = agent;
     hsa_code_object_reader_t prepared{};
@@ -198,53 +217,90 @@ public:
   }
 
   hsa_status_t freeze(hsa_executable_t executable, const char *options) {
-    hsa_status_t status = core_.hsa_executable_freeze_fn(executable, options);
-    if (status != HSA_STATUS_SUCCESS)
-      return status;
     std::shared_ptr<Module> module;
     {
       std::lock_guard lock(mutex_);
-      if (!module_ || module_->executable.handle != executable.handle || closed_)
-        return reject_locked("freeze has no admitted ConSan module");
+      if (!module_ || module_->executable.handle != executable.handle || closed_ ||
+          status_ != RuntimeStatus::Success)
+        return reject_locked("freeze has no active admitted ConSan module");
       module = module_;
     }
-    // LLVM AMDHSA's .amdhsa_kernel convention, already required by shared
-    // metadata admission; arbitrary descriptor symbol naming is not admitted.
-    const std::string symbol = module->facts->entry.name + ".kd";
-    hsa_executable_symbol_t resolved_symbol{};
-    uint64_t kernel_object = 0;
-    status = core_.hsa_executable_get_symbol_by_name_fn(executable, symbol.c_str(), &module->agent,
-                                                        &resolved_symbol);
-    uint32_t kernarg = 0, group = 0, private_bytes = 0;
-    if (status == HSA_STATUS_SUCCESS)
-      status = core_.hsa_executable_symbol_get_info_fn(
-          resolved_symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernel_object);
-    if (status == HSA_STATUS_SUCCESS)
-      status = core_.hsa_executable_symbol_get_info_fn(
-          resolved_symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &kernarg);
-    if (status == HSA_STATUS_SUCCESS)
-      status = core_.hsa_executable_symbol_get_info_fn(
-          resolved_symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &group);
-    if (status == HSA_STATUS_SUCCESS)
-      status = core_.hsa_executable_symbol_get_info_fn(
-          resolved_symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE, &private_bytes);
-    // Freeze validates resources before any dispatch geometry is available.
-    const std::optional<rocjitsu::KernargExtensionLayout> wrapper =
-        rocjitsu::make_kernarg_extension_layout(module->facts->entry.original_kernarg_bytes,
-                                                kContextPointerPayloads);
+    // HSA may retain or partially freeze the prepared storage even on failure.
+    // The local lease pins it while external HSA work runs without our mutex.
+    hsa_status_t status = core_.hsa_executable_freeze_fn(executable, options);
+    if (status != HSA_STATUS_SUCCESS) {
+      std::lock_guard lock(mutex_);
+      module->entries.clear();
+      fail_locked(RuntimeStatus::InvalidFacts, "HSA refused to freeze the matched prepared image");
+      return status;
+    }
+    // Validate resources without inventing geometry, then publish all entry
+    // bindings together before any dispatch can use them.
+    std::vector<EntryBinding> bindings;
+    std::set<uint64_t> objects;
+    std::set<uint64_t> symbols;
+    bool valid = true;
+    for (const ImageEntryFacts &entry : module->facts->entries) {
+      EntryBinding binding = {.key = entry.key,
+                              .disposition = entry.disposition,
+                              .binding = entry.binding,
+                              .symbol = {},
+                              .kernel_object = 0,
+                              .kernarg_alignment = 0,
+                              .facts = {}};
+      const std::string symbol = entry.binding.name + ".kd";
+      status = core_.hsa_executable_get_symbol_by_name_fn(executable, symbol.c_str(),
+                                                          &module->agent, &binding.symbol);
+      uint32_t kernarg = 0, group = 0, private_bytes = 0;
+      if (status == HSA_STATUS_SUCCESS)
+        status = core_.hsa_executable_symbol_get_info_fn(
+            binding.symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &binding.kernel_object);
+      if (status == HSA_STATUS_SUCCESS)
+        status = core_.hsa_executable_symbol_get_info_fn(
+            binding.symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &kernarg);
+      if (status == HSA_STATUS_SUCCESS)
+        status = core_.hsa_executable_symbol_get_info_fn(
+            binding.symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_ALIGNMENT,
+            &binding.kernarg_alignment);
+      if (status == HSA_STATUS_SUCCESS)
+        status = core_.hsa_executable_symbol_get_info_fn(
+            binding.symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &group);
+      if (status == HSA_STATUS_SUCCESS)
+        status = core_.hsa_executable_symbol_get_info_fn(
+            binding.symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE, &private_bytes);
+      uint32_t expected_kernarg = entry.binding.original_kernarg_bytes;
+      if (entry.selected) {
+        binding.facts = std::shared_ptr<const Manifest>(module->facts, &*entry.selected);
+        const std::optional<rocjitsu::KernargExtensionLayout> wrapper =
+            rocjitsu::make_kernarg_extension_layout(entry.binding.original_kernarg_bytes,
+                                                    kContextPointerPayloads);
+        if (!wrapper) {
+          valid = false;
+          break;
+        }
+        expected_kernarg = wrapper->wrapper_size;
+      }
+      if (status != HSA_STATUS_SUCCESS || binding.symbol.handle == 0 ||
+          binding.kernel_object == 0 || !objects.insert(binding.kernel_object).second ||
+          !symbols.insert(binding.symbol.handle).second || kernarg != expected_kernarg ||
+          !std::has_single_bit(binding.kernarg_alignment) ||
+          binding.kernarg_alignment < entry.binding.kernarg_alignment ||
+          group != entry.binding.prepared_group_bytes ||
+          private_bytes != entry.binding.prepared_private_bytes) {
+        valid = false;
+        break;
+      }
+      bindings.push_back(std::move(binding));
+    }
     std::lock_guard lock(mutex_);
-    // Symbol queries run outside the lock. Finish or executable destruction may
-    // have revoked this admission before the binding and workers are installed.
-    if (closed_ || module_ != module)
+    // Queries call external HSA functions, so lifetime admission is rechecked.
+    if (closed_ || status_ != RuntimeStatus::Success || module_ != module)
       return reject_locked("freeze admission ended during HSA symbol queries");
-    if (status != HSA_STATUS_SUCCESS || !wrapper || kernel_object == 0 ||
-        kernarg != wrapper->wrapper_size || group != module->facts->entry.prepared_group_bytes ||
-        private_bytes != module->facts->entry.prepared_private_bytes)
-      return reject_locked("loaded HSA symbol/resources do not match prepared facts");
-    module->symbol = resolved_symbol;
-    module->kernel_object = kernel_object;
-    if (!started_ && !start_locked(module->facts))
+    if (!valid || bindings.size() != module->facts->entries.size())
+      return reject_locked("loaded HSA symbols/resources do not match complete image facts");
+    if (!started_ && !start_locked(*module->facts))
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    module->entries = std::move(bindings);
     return HSA_STATUS_SUCCESS;
   }
 
@@ -252,14 +308,24 @@ public:
                            void *value) {
     {
       std::lock_guard lock(mutex_);
-      if (module_ && symbol.handle == module_->symbol.handle && value != nullptr) {
-        if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE) {
-          std::memcpy(value, &module_->facts->entry.original_kernarg_bytes, sizeof(uint32_t));
-          return HSA_STATUS_SUCCESS;
-        }
-        if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_ALIGNMENT) {
-          std::memcpy(value, &module_->facts->entry.kernarg_alignment, sizeof(uint32_t));
-          return HSA_STATUS_SUCCESS;
+      if (module_ && value != nullptr) {
+        for (const EntryBinding &entry : module_->entries) {
+          if (symbol.handle != entry.symbol.handle)
+            continue;
+          // ROCR's v5 API alignment is independent of the metadata note.
+          // Forward that query instead of projecting the note's alignment.
+          const uint32_t *original = nullptr;
+          if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE)
+            original = &entry.binding.original_kernarg_bytes;
+          else if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE)
+            original = &entry.binding.original_group_bytes;
+          else if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE)
+            original = &entry.binding.original_private_bytes;
+          if (original != nullptr) {
+            std::memcpy(value, original, sizeof(uint32_t));
+            return HSA_STATUS_SUCCESS;
+          }
+          break;
         }
       }
     }
@@ -360,8 +426,10 @@ public:
   int drain() {
     std::unique_lock lock(mutex_);
     const uint64_t target = statistics_.submitted;
-    if (!condition_.wait_for(lock, std::chrono::seconds(30),
-                             [&] { return processed_ >= target; })) {
+    const uint64_t native_target = statistics_.native_submitted;
+    if (!condition_.wait_for(lock, std::chrono::seconds(30), [&] {
+          return processed_ >= target && statistics_.native_completed >= native_target;
+        })) {
       fail_locked(RuntimeStatus::PendingCompletion,
                   "drain has no completion/copy proof; GPU resources remain retained");
       return static_cast<int>(status_);
@@ -394,7 +462,8 @@ public:
     (void)drain();
     {
       std::lock_guard lock(mutex_);
-      if (processed_ != statistics_.submitted || active_gpu_)
+      if (processed_ != statistics_.submitted ||
+          statistics_.native_completed != statistics_.native_submitted || active_gpu_)
         return static_cast<int>(status_);
       stop_ = true;
       condition_.notify_all();
@@ -430,7 +499,8 @@ public:
   bool abandon_unload() {
     {
       std::lock_guard lock(mutex_);
-      if (active_gpu_ || processed_ != statistics_.submitted)
+      if (active_gpu_ || processed_ != statistics_.submitted ||
+          statistics_.native_completed != statistics_.native_submitted)
         return false;
       status_ = RuntimeStatus::InvalidTransition;
       closed_ = stop_ = true;
@@ -564,14 +634,14 @@ private:
            size <= info.sizeInBytes - (address - base);
   }
 
-  bool start_locked(std::shared_ptr<const Manifest> facts) {
+  bool start_locked(const ImageFacts &facts) {
     if (!find_pool_locked()) {
       fail_locked(RuntimeStatus::InvalidFacts, "CPU fine-grained kernarg pool unavailable");
       return false;
     }
     CaptureHeader header;
-    header.manifest = *facts;
-    const FailureOr<std::vector<uint8_t>> encoded_facts = encode_manifest(*facts);
+    header.image = facts;
+    const FailureOr<std::vector<uint8_t>> encoded_facts = encode_image_facts(facts);
     if (encoded_facts.failed()) {
       fail_locked(RuntimeStatus::InvalidFacts, "cannot encode capture facts");
       return false;
@@ -750,144 +820,196 @@ private:
       // before allocating resources or exposing any packet to HSA.
       const std::unordered_map<uint64_t, Signal>::iterator signal =
           signals_.find(packet.completion_signal.handle);
+      if (active_gpu_ && !pending_.empty()) {
+        const std::shared_ptr<Launch> &active = pending_.back();
+        if (active->native && core_.hsa_signal_load_scacquire_fn(active->original) == 0) {
+          active->native_completion_visible = true;
+          active_gpu_ = false;
+        }
+      }
+      const EntryBinding *binding = nullptr;
+      if (module_) {
+        for (const EntryBinding &candidate : module_->entries) {
+          if (candidate.kernel_object == packet.kernel_object) {
+            binding = &candidate;
+            break;
+          }
+        }
+      }
       if (packet.setup != 1 || closed_ || status_ != RuntimeStatus::Success ||
-          statistics_.submitted >= CaptureLimits{}.executions || !module_ ||
-          packet.kernel_object != module_->kernel_object || active_gpu_ ||
-          signal == signals_.end() || !signal->second.dedicated || signal->second.used ||
+          statistics_.submitted + statistics_.native_submitted >= CaptureLimits{}.executions ||
+          binding == nullptr || active_gpu_ || signal == signals_.end() ||
+          !signal->second.dedicated || signal->second.used ||
           core_.hsa_signal_load_scacquire_fn(packet.completion_signal) != 1) {
         reject_packet_locked(
             packet,
             "packet violates binding, single-queue/nonoverlap or dedicated-signal requirements");
         return;
       }
-      const Manifest &facts = *module_->facts;
-      const LaunchDimensions dimensions{
+      const LaunchDimensions dimensions = {
           {packet.grid_size_x, packet.grid_size_y, packet.grid_size_z},
           {packet.workgroup_size_x, packet.workgroup_size_y, packet.workgroup_size_z}};
-      const FailureOr<LaunchLayout> layout =
-          plan_launch(facts, dimensions, packet.group_segment_size, packet.private_segment_size);
-      if (layout.failed() ||
-          !host_arguments_locked(packet.kernarg_address, facts.entry.original_kernarg_bytes)) {
-        reject_packet_locked(
-            packet,
-            "unsupported geometry/segments or non-fine-grained original kernarg allocation");
-        return;
-      }
-      const uint64_t capture_bytes =
-          48 + 144 + uint64_t{facts.entry.original_kernarg_bytes} + layout.value().report_bytes;
-      if (capture_bytes > CaptureLimits{}.file_bytes - planned_capture_bytes_) {
-        reject_packet_locked(packet, "capture budget exhausted before submission");
-        return;
-      }
-      // Prepare sufficient idle report capacity and per-launch wrapper/context
-      // plus proxy signal. Rollback owns all unsubmitted acquisitions.
-      for (size_t index = 0; index < slots_.size(); ++index) {
-        if (!slots_[index].leased) {
-          launch->slot = static_cast<uint32_t>(index + 1);
-          break;
-        }
-      }
-      if (launch->slot == 0 && slots_.size() < 16) {
-        ReportSlot slot;
-        slot.capacity = layout.value().report_bytes;
-        if (allocate_locked(slot.capacity, &slot.memory)) {
-          const auto free = [this](void *memory) {
-            (void)amd_.hsa_amd_memory_pool_free_fn(memory);
-          };
-          std::unique_ptr<void, decltype(free)> uninstalled(slot.memory, free);
-          slots_.push_back(slot);
-          (void)uninstalled.release();
-          launch->slot = static_cast<uint32_t>(slots_.size());
-        }
-      }
-      if (launch->slot == 0) {
-        reject_packet_locked(packet,
-                             "report allocation/backlog admission failed before submission");
-        return;
-      }
-      ReportSlot &slot = slots_[launch->slot - 1];
-      const bool reused = slot.generation != 0 && slot.capacity >= layout.value().report_bytes;
-      if (slot.capacity < layout.value().report_bytes) {
-        void *replacement = nullptr;
-        if (!allocate_locked(layout.value().report_bytes, &replacement)) {
-          reject_packet_locked(packet, "report growth allocation failed before submission");
+      launch->module = module_;
+      if (binding->disposition == EntryDisposition::Native) {
+        const EntryFacts &entry = binding->binding;
+        const uint16_t acquire = (packet.header >> HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) & 3;
+        const uint16_t release_scope =
+            (packet.header >> HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE) & 3;
+        if (dimensions.grid != dimensions.workgroup || dimensions.workgroup[0] == 0 ||
+            dimensions.workgroup[0] > entry.maximum_workgroup_size ||
+            dimensions.workgroup[1] != 1 || dimensions.workgroup[2] != 1 ||
+            packet.private_segment_size != entry.original_private_bytes ||
+            packet.group_segment_size < entry.original_group_bytes ||
+            packet.group_segment_size > 65536 || acquire != HSA_FENCE_SCOPE_SYSTEM ||
+            release_scope != HSA_FENCE_SCOPE_SYSTEM ||
+            (reinterpret_cast<uintptr_t>(packet.kernarg_address) % binding->kernarg_alignment) !=
+                0 ||
+            !host_arguments_locked(packet.kernarg_address, entry.original_kernarg_bytes)) {
+          reject_packet_locked(packet,
+                               "native packet violates original ABI or controlled launch profile");
           return;
         }
-        // Only an unleased slot reaches here: completion and an independent
-        // snapshot already permit replacement. Keep the old allocation on failure.
-        (void)amd_.hsa_amd_memory_pool_free_fn(slot.memory);
-        slot.memory = replacement;
-        slot.capacity = layout.value().report_bytes;
+        launch->native = true;
+        launch->original = packet.completion_signal;
+        pending_.push_back(launch);
+        signal->second.used = signal->second.pending = true;
+        active_gpu_ = true;
+        ++statistics_.native_submitted;
+        (void)rollback.release();
+        condition_.notify_all();
+      } else {
+        const Manifest &facts = *binding->facts;
+        const FailureOr<LaunchLayout> layout =
+            plan_launch(facts, dimensions, packet.group_segment_size, packet.private_segment_size);
+        if (layout.failed() ||
+            (reinterpret_cast<uintptr_t>(packet.kernarg_address) % binding->kernarg_alignment) !=
+                0 ||
+            !host_arguments_locked(packet.kernarg_address, facts.entry.original_kernarg_bytes)) {
+          reject_packet_locked(
+              packet,
+              "unsupported geometry/segments or non-fine-grained original kernarg allocation");
+          return;
+        }
+        const uint64_t capture_bytes =
+            48 + 144 + uint64_t{facts.entry.original_kernarg_bytes} + layout.value().report_bytes;
+        if (capture_bytes > CaptureLimits{}.file_bytes - planned_capture_bytes_) {
+          reject_packet_locked(packet, "capture budget exhausted before submission");
+          return;
+        }
+        // Prepare sufficient idle report capacity and per-launch wrapper/context
+        // plus proxy signal. Rollback owns all unsubmitted acquisitions.
+        for (size_t index = 0; index < slots_.size(); ++index) {
+          if (!slots_[index].leased) {
+            launch->slot = static_cast<uint32_t>(index + 1);
+            break;
+          }
+        }
+        if (launch->slot == 0 && slots_.size() < 16) {
+          ReportSlot slot;
+          slot.capacity = layout.value().report_bytes;
+          if (allocate_locked(slot.capacity, &slot.memory)) {
+            const auto free = [this](void *memory) {
+              (void)amd_.hsa_amd_memory_pool_free_fn(memory);
+            };
+            std::unique_ptr<void, decltype(free)> uninstalled(slot.memory, free);
+            slots_.push_back(slot);
+            (void)uninstalled.release();
+            launch->slot = static_cast<uint32_t>(slots_.size());
+          }
+        }
+        if (launch->slot == 0) {
+          reject_packet_locked(packet,
+                               "report allocation/backlog admission failed before submission");
+          return;
+        }
+        ReportSlot &slot = slots_[launch->slot - 1];
+        const bool reused = slot.generation != 0 && slot.capacity >= layout.value().report_bytes;
+        if (slot.capacity < layout.value().report_bytes) {
+          void *replacement = nullptr;
+          if (!allocate_locked(layout.value().report_bytes, &replacement)) {
+            reject_packet_locked(packet, "report growth allocation failed before submission");
+            return;
+          }
+          // Only an unleased slot reaches here: completion and an independent
+          // snapshot already permit replacement. Keep the old allocation on failure.
+          (void)amd_.hsa_amd_memory_pool_free_fn(slot.memory);
+          slot.memory = replacement;
+          slot.capacity = layout.value().report_bytes;
+        }
+        slot.leased = true;
+        if (slot.generation == UINT32_MAX || (reinterpret_cast<uintptr_t>(slot.memory) % 64) != 0 ||
+            !allocate_locked(layout.value().wrapper_bytes, &launch->wrapper) ||
+            !allocate_locked(kContextBytes, &launch->context) ||
+            core_.hsa_signal_create_fn(1, 0, nullptr, &launch->proxy) != HSA_STATUS_SUCCESS) {
+          reject_packet_locked(packet, "wrapper/context/proxy allocation failed before submission");
+          return;
+        }
+        const uint64_t serial = statistics_.submitted + 1;
+        const FailureOr<TransportImage> transport = initialize_transport(
+            facts, dimensions, layout.value().group_bytes, layout.value().private_bytes, serial,
+            reinterpret_cast<uint64_t>(slot.memory));
+        if (transport.failed()) {
+          reject_packet_locked(packet,
+                               "canonical transport initialization failed before submission");
+          return;
+        }
+        std::memcpy(slot.memory, transport.value().report.data(), transport.value().report.size());
+        std::memcpy(launch->context, transport.value().context.data(), kContextBytes);
+        std::span<uint8_t> wrapper =
+            std::span(static_cast<uint8_t *>(launch->wrapper), layout.value().wrapper_bytes);
+        const std::optional<rocjitsu::KernargExtensionLayout> kernarg =
+            rocjitsu::make_kernarg_extension_layout(facts.entry.original_kernarg_bytes,
+                                                    kContextPointerPayloads);
+        const uint64_t context_pointer = reinterpret_cast<uint64_t>(launch->context);
+        const std::array<rocjitsu::KernargExtensionPayloadWrite, 1> payloads = {
+            {{.data = &context_pointer, .size = sizeof(context_pointer)}}};
+        if (!kernarg || !rocjitsu::write_kernarg_extension_wrapper(
+                            wrapper, *kernarg, packet.kernarg_address,
+                            reinterpret_cast<uint64_t>(packet.kernarg_address), payloads)) {
+          reject_packet_locked(packet, "kernarg wrapper initialization failed before submission");
+          return;
+        }
+        // Bind execution identity and original arguments to an empty report
+        // envelope. Lifecycle admission does not itself submit the HSA packet.
+        CapturedExecution envelope;
+        envelope.serial = serial;
+        envelope.entry_key = binding->key;
+        envelope.dimensions = dimensions;
+        envelope.group_bytes = layout.value().group_bytes;
+        envelope.private_bytes = layout.value().private_bytes;
+        envelope.storage_slot = launch->slot;
+        envelope.storage_generation = ++slot.generation;
+        envelope.completion = 0;
+        envelope.context = transport.value().context;
+        envelope.arguments.assign(wrapper.begin(),
+                                  wrapper.begin() + facts.entry.original_kernarg_bytes);
+        launch->original = packet.completion_signal;
+        launch->lifecycle =
+            std::make_unique<DispatchLifecycle>(binding->facts, std::move(envelope));
+        if (launch->lifecycle->submitted() != RuntimeStatus::Success) {
+          reject_packet_locked(packet,
+                               "dispatch ownership initialization failed before submission");
+          return;
+        }
+        packet.kernarg_address = launch->wrapper;
+        packet.completion_signal = launch->proxy;
+        packet.group_segment_size = layout.value().group_bytes;
+        packet.private_segment_size = layout.value().private_bytes;
+        constexpr uint16_t fences = (3u << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                                    (3u << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+        packet.header = (packet.header & ~fences) |
+                        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+        pending_.push_back(launch);
+        signal->second.used = signal->second.pending = true;
+        active_gpu_ = true;
+        ++statistics_.submitted;
+        planned_capture_bytes_ += capture_bytes;
+        if (reused)
+          ++statistics_.reused;
+        (void)rollback.release();
+        condition_.notify_all();
       }
-      slot.leased = true;
-      if (slot.generation == UINT32_MAX || (reinterpret_cast<uintptr_t>(slot.memory) % 64) != 0 ||
-          !allocate_locked(layout.value().wrapper_bytes, &launch->wrapper) ||
-          !allocate_locked(kContextBytes, &launch->context) ||
-          core_.hsa_signal_create_fn(1, 0, nullptr, &launch->proxy) != HSA_STATUS_SUCCESS) {
-        reject_packet_locked(packet, "wrapper/context/proxy allocation failed before submission");
-        return;
-      }
-      const uint64_t serial = statistics_.submitted + 1;
-      const FailureOr<TransportImage> transport = initialize_transport(
-          facts, dimensions, layout.value().group_bytes, layout.value().private_bytes, serial,
-          reinterpret_cast<uint64_t>(slot.memory));
-      if (transport.failed()) {
-        reject_packet_locked(packet, "canonical transport initialization failed before submission");
-        return;
-      }
-      std::memcpy(slot.memory, transport.value().report.data(), transport.value().report.size());
-      std::memcpy(launch->context, transport.value().context.data(), kContextBytes);
-      std::span<uint8_t> wrapper =
-          std::span(static_cast<uint8_t *>(launch->wrapper), layout.value().wrapper_bytes);
-      const std::optional<rocjitsu::KernargExtensionLayout> kernarg =
-          rocjitsu::make_kernarg_extension_layout(facts.entry.original_kernarg_bytes,
-                                                  kContextPointerPayloads);
-      const uint64_t context_pointer = reinterpret_cast<uint64_t>(launch->context);
-      const std::array<rocjitsu::KernargExtensionPayloadWrite, 1> payloads = {
-          {{.data = &context_pointer, .size = sizeof(context_pointer)}}};
-      if (!kernarg || !rocjitsu::write_kernarg_extension_wrapper(
-                          wrapper, *kernarg, packet.kernarg_address,
-                          reinterpret_cast<uint64_t>(packet.kernarg_address), payloads)) {
-        reject_packet_locked(packet, "kernarg wrapper initialization failed before submission");
-        return;
-      }
-      // Bind execution identity and original arguments to an empty report
-      // envelope. Lifecycle admission does not itself submit the HSA packet.
-      CapturedExecution envelope;
-      envelope.serial = serial;
-      envelope.dimensions = dimensions;
-      envelope.group_bytes = layout.value().group_bytes;
-      envelope.private_bytes = layout.value().private_bytes;
-      envelope.storage_slot = launch->slot;
-      envelope.storage_generation = ++slot.generation;
-      envelope.completion = 0;
-      envelope.context = transport.value().context;
-      envelope.arguments.assign(wrapper.begin(),
-                                wrapper.begin() + facts.entry.original_kernarg_bytes);
-      launch->original = packet.completion_signal;
-      launch->lifecycle = std::make_unique<DispatchLifecycle>(module_->facts, std::move(envelope));
-      if (launch->lifecycle->submitted() != RuntimeStatus::Success) {
-        reject_packet_locked(packet, "dispatch ownership initialization failed before submission");
-        return;
-      }
-      packet.kernarg_address = launch->wrapper;
-      packet.completion_signal = launch->proxy;
-      packet.group_segment_size = layout.value().group_bytes;
-      packet.private_segment_size = layout.value().private_bytes;
-      constexpr uint16_t fences = (3u << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-                                  (3u << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-      packet.header = (packet.header & ~fences) |
-                      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-                      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-      pending_.push_back(launch);
-      signal->second.used = signal->second.pending = true;
-      active_gpu_ = true;
-      ++statistics_.submitted;
-      planned_capture_bytes_ += capture_bytes;
-      if (reused)
-        ++statistics_.reused;
-      (void)rollback.release();
-      condition_.notify_all();
     }
     std::atomic_thread_fence(std::memory_order_release);
     // This is the HSA packet writer, not the collector's capture-file writer.
@@ -906,9 +1028,22 @@ private:
         launch = pending_.front();
       }
       const hsa_signal_value_t observed = core_.hsa_signal_wait_scacquire_fn(
-          launch->proxy, HSA_SIGNAL_CONDITION_LT, 1, 1000000, HSA_WAIT_STATE_BLOCKED);
+          launch->native ? launch->original : launch->proxy, HSA_SIGNAL_CONDITION_LT, 1, 1000000,
+          HSA_WAIT_STATE_BLOCKED);
       if (observed != 0)
         continue; // A timeout/fault is never completion/visibility proof.
+      if (launch->native) {
+        std::lock_guard lock(mutex_);
+        signals_[launch->original.handle].pending = false;
+        // Admission may already have observed this completion and published
+        // another launch. Keep that launch's nonoverlap guard intact.
+        if (!launch->native_completion_visible)
+          active_gpu_ = false;
+        ++statistics_.native_completed;
+        pending_.pop_front();
+        condition_.notify_all();
+        continue;
+      }
       {
         std::lock_guard lock(mutex_);
         const RuntimeStatus status = launch->lifecycle->observe(true, true, [&] {
@@ -996,6 +1131,7 @@ private:
   CoreApiTable core_;
   AmdExtTable amd_;
   std::string artifact_path_, capture_path_, partial_path_;
+  Digest expected_profile_{};
   std::mutex mutex_;
   std::mutex finish_mutex_;
   std::condition_variable condition_;
@@ -1142,7 +1278,31 @@ bool install(HsaApiTable *table) {
     diagnostic("RJ_CONSAN_ARTIFACT_DIR and RJ_CONSAN_CAPTURE_PATH are required");
     return false;
   }
-  runtime = std::make_unique<Runtime>(core, amd, artifacts, capture);
+  const char *profile = std::getenv("RJ_CONSAN_SELECTION_PROFILE");
+  Digest expected_profile{};
+  if (profile == nullptr || std::strlen(profile) != expected_profile.size() * 2) {
+    diagnostic("RJ_CONSAN_SELECTION_PROFILE must contain a 64-digit expected profile");
+    return false;
+  }
+  const auto hex_digit = [](char value) -> int {
+    if (value >= '0' && value <= '9')
+      return value - '0';
+    if (value >= 'a' && value <= 'f')
+      return value - 'a' + 10;
+    if (value >= 'A' && value <= 'F')
+      return value - 'A' + 10;
+    return -1;
+  };
+  for (size_t index = 0; index < expected_profile.size(); ++index) {
+    const int high = hex_digit(profile[index * 2]);
+    const int low = hex_digit(profile[index * 2 + 1]);
+    if (high < 0 || low < 0) {
+      diagnostic("RJ_CONSAN_SELECTION_PROFILE contains a non-hexadecimal digit");
+      return false;
+    }
+    expected_profile[index] = static_cast<uint8_t>((high << 4) | low);
+  }
+  runtime = std::make_unique<Runtime>(core, amd, artifacts, capture, expected_profile);
   CoreApiTable &patched = *table->core_;
   patched.hsa_code_object_reader_create_from_memory_fn = reader_memory;
   patched.hsa_code_object_reader_create_from_file_fn = reader_file;

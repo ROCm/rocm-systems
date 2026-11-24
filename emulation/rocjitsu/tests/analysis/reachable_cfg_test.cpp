@@ -5,6 +5,8 @@
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
@@ -497,6 +499,55 @@ TEST_F(ReachableCfg, DiscoversIndirectTargetAcrossMalformedGap) {
   EXPECT_EQ(successors(consumer), (std::vector<uint64_t>{24}));
   // Concrete edges remain subject to consumer-side completeness/return analysis.
   EXPECT_EQ(consumer.successor_issue(), Issue::IndirectControlFlow);
+  expect_inverse_edges(result.value());
+}
+
+TEST_F(ReachableCfg, RelativeScalarDestinationInvalidatesRecoveredPcBuilder) {
+  const std::array<uint32_t, 1> relative =
+      cdna4::build_sop1(cdna4::kSMovreldB32Sop1, {.ssrc0 = 0, .sdst = 0});
+  const std::vector<uint32_t> words = {build_s_getpc_b64(8, kArch).value(),
+                                       build_s_add_u32(8, 8, 255, kArch).value(),
+                                       24,
+                                       build_s_addc_u32(9, 9, 128, kArch).value(),
+                                       relative[0],
+                                       build_s_setpc_b64(8, kArch).value(),
+                                       kInvalid,
+                                       kEnd};
+  const FailureOr<Blocks> result = build_reachable(words);
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const BasicBlock *consumer = nullptr;
+  for (const std::unique_ptr<BasicBlock> &block : result.value()) {
+    if (block->terminator() && block->terminator()->src_loc() == 20)
+      consumer = block.get();
+  }
+  ASSERT_NE(consumer, nullptr);
+  EXPECT_TRUE(consumer->static_indirect_call_fixups().empty());
+  EXPECT_EQ(consumer->successor_issue(), Issue::IndirectControlFlow);
+}
+
+TEST_F(ReachableCfg, DroppedOutOfSectionTargetMakesRetainedFixupIncomplete) {
+  std::vector<uint32_t> words(129, kNop);
+  words[0] = conditional(7); // 0 -> 32.
+  for (uint32_t offset : {4u, 32u}) {
+    const size_t index = offset / sizeof(uint32_t);
+    words[index] = build_s_getpc_b64(8, kArch).value();
+    words[index + 1] = build_s_add_u32(8, 8, 255, kArch).value();
+    words[index + 2] = (offset == 4 ? 512u : 4096u) - offset - 4;
+    words[index + 3] = build_s_addc_u32(9, 9, 128, kArch).value();
+    words[index + 4] = branch(static_cast<int16_t>((64 - offset - 20) / 4));
+  }
+  words[16] = build_s_setpc_b64(8, kArch).value();
+  words[128] = kEnd;
+  const FailureOr<Blocks> result = build_reachable(words);
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const BasicBlock *consumer = nullptr;
+  for (const std::unique_ptr<BasicBlock> &block : result.value())
+    if (block->start_offset() == 64)
+      consumer = block.get();
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(consumer->static_indirect_call_fixups().front().source_target_offset, 512u);
+  EXPECT_TRUE(consumer->static_indirect_call_fixups().front().source_incomplete);
   expect_inverse_edges(result.value());
 }
 
