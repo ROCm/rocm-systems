@@ -18,8 +18,8 @@ env:
     }}
   AIS_PKG_TYPE: ${{ inputs.platform == 'ubuntu' && 'DEB' || 'RPM' }}
   AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
-  # Code coverage report only vetted to work for amdclang++ on Ubuntu
-  AIS_USE_CODE_COVERAGE: ${{ inputs.cxx_compiler == 'amdclang++' && inputs.platform == 'ubuntu' && inputs.generate_coverage }}
+  # Collect coverage on the Ubuntu ROCm nightly build with amdclang++.
+  AIS_USE_CODE_COVERAGE: ${{ inputs.rocm_version == 'nightly' && inputs.cxx_compiler == 'amdclang++' && inputs.platform == 'ubuntu' && inputs.generate_coverage }}
   AIS_HIP_ARCHITECTURES: gfx950;gfx1201;gfx1200;gfx1101;gfx1100;gfx1030;gfx942;gfx90a;gfx908
 
 on:
