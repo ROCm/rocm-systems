@@ -13223,7 +13223,9 @@ TEST(ArithBridgeTest, CdnaBitPacking) {
                            ((ieee || arch == rocjitsu::IsaFamily::Cdna5) ? 0x7e01U : 0x7c01U);
               } else {
                 const int shift = (lane & 3) * 8;
-                const uint32_t byte = op == 2 ? 1 : modifiers ? 0 : 2;
+                const uint32_t byte = op == 2     ? (arch == rocjitsu::IsaFamily::Cdna3 ? 2 : 1)
+                                      : modifiers ? 0
+                                                  : 2;
                 expected = (0xabcdef12U & ~(0xffU << shift)) | (byte << shift);
               }
               EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, lane), expected);
@@ -17652,14 +17654,16 @@ TEST(ArithBridgeTest, CdnaNativeF64ModeBoundaries) {
 TEST(ArithBridgeTest, ConversionStrictExactAcceptancePerArchitecture) {
   const uint32_t inputs[] = {0u, 1u, 0xffffffffu, 0x7fffffffu};
   const uint32_t expected[] = {0u, 0x3f800000u, 0xbf800000u, 0x4f000000u};
-  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna4,
-                    rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna5}) {
+  for (auto arch :
+       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna3,
+        rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5}) {
     for (bool strict : {false, true}) {
       ArithmeticPolicy policy{};
       if (strict) {
         policy.semantics = ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
       }
-      const unsigned lanes = arch == rocjitsu::IsaFamily::Cdna3 ? 64 : 32;
+      const unsigned lanes =
+          (arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4) ? 64 : 32;
       BridgeFixture fixture(arch, lanes, policy);
       ASSERT_FALSE(::testing::Test::HasFatalFailure());
       fixture.wave->set_exec(0xf);
@@ -17678,21 +17682,82 @@ TEST(ArithBridgeTest, ConversionStrictExactAcceptancePerArchitecture) {
       case rocjitsu::IsaFamily::Cdna3:
         words = cdna3::build_vop1(cdna3::kVCvtF32I32Vop1, {.src0 = 256, .vdst = 1});
         break;
+      case rocjitsu::IsaFamily::Cdna4:
+        words = cdna4::build_vop1(cdna4::kVCvtF32I32Vop1, {.src0 = 256, .vdst = 1});
+        break;
       default:
         words = cdna5::build_vop1(cdna5::kVCvtF32I32Vop1, {.src0 = 256, .vdst = 1});
         break;
       }
       auto instruction = fixture.decoder->decode_window(words);
       ASSERT_TRUE(instruction.succeeded());
-      const bool rdna = arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna4;
+      const bool qualified = arch == rocjitsu::IsaFamily::Rdna3 ||
+                             arch == rocjitsu::IsaFamily::Rdna4 ||
+                             arch == rocjitsu::IsaFamily::Cdna3;
       const bool success =
           fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded();
       SCOPED_TRACE(::testing::Message() << "arch " << int(arch) << " strict " << strict);
-      EXPECT_EQ(success, !strict || rdna);
+      EXPECT_EQ(success, !strict || qualified);
       for (unsigned lane = 0; lane < 4; ++lane) {
         EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 1, lane),
                   success ? expected[lane] : 0xdeadbeefu);
       }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaPkaccumAndFp64StrictExactAcceptance) {
+  for (auto arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
+    for (bool strict : {false, true}) {
+      for (bool clamp : {false, true}) {
+        ArithmeticPolicy policy{};
+        if (strict) {
+          policy.semantics = ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+        }
+        BridgeFixture f(arch, 64, policy);
+        f.wave->set_exec(1);
+        f.wave->set_mode_raw(0xf0);                 // RNE, denormals kept
+        f.cu->write_vgpr(f.base(), 0, 0x3fc00000U); // 1.5f
+        f.cu->write_vgpr(f.base() + 1, 0, 1U);
+        f.cu->write_vgpr(f.base() + 2, 0, 0x11223344U);
+        const auto words =
+            arch == rocjitsu::IsaFamily::Cdna3
+                ? cdna3::build_vop3(cdna3::kVCvtPkaccumU8F32Vop3,
+                                    {.vdst = 2, .clamp = uint8_t(clamp), .src0 = 256, .src1 = 257})
+                : cdna4::build_vop3(cdna4::kVCvtPkaccumU8F32Vop3,
+                                    {.vdst = 2, .clamp = uint8_t(clamp), .src0 = 256, .src1 = 257});
+        auto inst = f.decoder->decode_window(words);
+        ASSERT_TRUE(inst.succeeded());
+        const bool qualified = arch == rocjitsu::IsaFamily::Cdna3 && !clamp;
+        const bool ok = f.cu->execute_instruction(inst.value().get(), *f.wave).succeeded();
+        EXPECT_EQ(ok, !strict || qualified);
+        EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0), !ok ? 0x11223344U
+                                                    : arch == rocjitsu::IsaFamily::Cdna3
+                                                        ? 0x11220244U
+                                                        : 0x11220144U);
+      }
+
+      ArithmeticPolicy policy{};
+      if (strict) {
+        policy.semantics = ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+      }
+      BridgeFixture f(arch, 64, policy);
+      f.wave->set_exec(1);
+      f.wave->set_mode_raw(0xf0);
+      f.cu->write_vgpr(f.base(), 0, 0U);
+      f.cu->write_vgpr(f.base() + 1, 0, 0x7ff00000U); // +Inf
+      f.cu->write_vgpr(f.base() + 2, 0, 0xdeadbeefU);
+      f.cu->write_vgpr(f.base() + 3, 0, 0xdeadbeefU);
+      const auto fract_words =
+          arch == rocjitsu::IsaFamily::Cdna3
+              ? cdna3::build_vop1(cdna3::kVFractF64Vop1, {.src0 = 256, .vdst = 2})
+              : cdna4::build_vop1(cdna4::kVFractF64Vop1, {.src0 = 256, .vdst = 2});
+      auto fract_inst = f.decoder->decode_window(fract_words);
+      ASSERT_TRUE(fract_inst.succeeded());
+      const bool ok = f.cu->execute_instruction(fract_inst.value().get(), *f.wave).succeeded();
+      EXPECT_EQ(ok, !strict || arch == rocjitsu::IsaFamily::Cdna3);
+      EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0), ok ? 0U : 0xdeadbeefU);
+      EXPECT_EQ(f.cu->read_vgpr(f.base() + 3, 0), ok ? 0xfff80000U : 0xdeadbeefU);
     }
   }
 }

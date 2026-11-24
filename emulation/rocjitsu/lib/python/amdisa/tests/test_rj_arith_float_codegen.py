@@ -23,20 +23,21 @@ from amdisa.codegen.execute.rj_arith_float import (
 from rj_arith_headers import public_headers
 
 # Expected architecture routing of the shared entry points. RDNA3 owns the unsuffixed
-# entries and RDNA4 the _gfx12 entries; both accept bit-exact semantics. The remaining
-# architectures must reach a suffixed loose-only wrapper. These are spelled out rather than
-# imported from the generator so that changing its map fails these tests.
+# entries, RDNA4 the _gfx12 entries, and CDNA3 (gfx942) the _gfx942 entries; all three
+# accept bit-exact semantics. The remaining architectures must reach a suffixed loose-only
+# wrapper. These are spelled out rather than imported from the generator so that changing
+# its map fails these tests.
 CONVERSION_SUFFIX = {
     'rdna3': '',
     'rdna4': '_gfx12',
-    'cdna1': '_gfx942',
-    'cdna2': '_gfx942',
+    'cdna1': '_gfx950',
+    'cdna2': '_gfx950',
     'cdna3': '_gfx942',
-    'cdna4': '_gfx942',
+    'cdna4': '_gfx950',
     'cdna5': '_gfx1250',
-    'rdna1': '_gfx942',
-    'rdna2': '_gfx942',
-    'rdna3_5': '_gfx942',
+    'rdna1': '_gfx950',
+    'rdna2': '_gfx950',
+    'rdna3_5': '_gfx950',
 }
 
 # Byte and nibble conversions predate the per-architecture split: every architecture shares
@@ -59,7 +60,7 @@ FMA64_SUFFIX = {
     'rdna3': '',
     'rdna4': '_gfx12',
     'cdna3': '_gfx942',
-    'cdna4': '_gfx942',
+    'cdna4': '_gfx950',
     'cdna5': '_gfx1250',
     'cdna1': '_gfx942',
     'cdna2': '_gfx942',
@@ -836,7 +837,11 @@ def test_fp64_binary_arithmetic_adapter(arch):
             )
             arch_suffix = '_gfx12' if arch in ('rdna4', 'cdna5') else ''
             if name in ('V_ADD_F64', 'V_MUL_F64') and arch.startswith('cdna'):
-                arch_suffix = '_gfx1250' if arch == 'cdna5' else '_gfx942'
+                arch_suffix = (
+                    '_gfx1250'
+                    if arch == 'cdna5'
+                    else '_gfx950' if arch == 'cdna4' else '_gfx942'
+                )
             api = 'rj_arith_' + name.lower()
             for wave in (32, 64):
                 assert api + f'_w{wave}' + arch_suffix + ',' in body
@@ -1691,10 +1696,18 @@ def test_cdna_byte_accumulator_keeps_legacy_policy(arch):
     body = gen_bit_pack(
         context(arch, 'V_CVT_PKACCUM_U8_F32', ['d'], ['a', 'b'], is_vop3=True)
     )
-    assert 'rj_arith_v_cvt_pkaccum_u8_f32_w64' in body
     assert 'd, a, b, d' in body
-    assert 'fp_round_mode' not in body
-    assert 'RJ_ARITH_ALU_' not in body
+    if arch == 'cdna3':
+        assert 'rj_arith_v_cvt_pkaccum_u8_f32_w64_gfx942' in body
+        assert 'fp_round_mode_f32' in body
+        assert 'RJ_ARITH_FP_FLUSH_INPUT_DENORMALS' in body
+        assert 'RJ_ARITH_ALU_ABS_A' in body
+        assert 'RJ_ARITH_ALU_OMOD_2' in body
+        assert 'RJ_ARITH_ALU_CLAMP' in body
+    else:
+        assert 'rj_arith_v_cvt_pkaccum_u8_f32_w64,' in body
+        assert 'fp_round_mode' not in body
+        assert 'RJ_ARITH_ALU_' not in body
 
 
 @pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
@@ -1750,10 +1763,7 @@ def test_cdna_half_conversion_layout_and_sdwa(arch):
         output = name.split('_')[-2]
         for vop3 in (False, True):
             body = gen_conversion16(context(arch, name, ['dst'], ['src'], is_vop3=vop3))
-            suffix = (
-                '_gfx12' if arch == 'cdna5' else '_gfx942' if output != 'F32' else ''
-            )
-            assert 'rj_arith_' + name.lower() + '_w64' + suffix in body
+            assert_routes_to(body, 'rj_arith_' + name.lower(), CONVERSION_SUFFIX[arch])
             assert ('execute_conversion16_sdwa' in body) == (
                 arch != 'cdna5' and not vop3
             )
@@ -2021,12 +2031,13 @@ def test_cdna_nan_quieting_adapters(arch):
         gen_float_binary32,
     )
 
+    unary64_suffix = '_gfx950' if arch == 'cdna4' else '_gfx942'
     for name in ('TRUNC', 'CEIL', 'RNDNE', 'FLOOR', 'FRACT', 'FREXP_MANT'):
         body = gen_float_unary64(
             context(arch, f'V_{name}_F64', ['d'], ['a'], is_vop3=True)
         )
         for lanes in (32, 64):
-            assert f'rj_arith_v_{name.lower()}_f64_w{lanes}_gfx942,' in body
+            assert f'rj_arith_v_{name.lower()}_f64_w{lanes}{unary64_suffix},' in body
     body = gen_float_binary32(
         context(arch, 'V_LDEXP_F32', ['d'], ['a', 'b'], is_vop3=True)
     )

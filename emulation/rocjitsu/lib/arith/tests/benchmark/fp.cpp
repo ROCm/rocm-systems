@@ -250,6 +250,66 @@ void add_fp(std::vector<Benchmark> &cases) {
   add(cases, "fp", "v_fmac_f64_w64_gfx942", [](Operands &r, uint64_t flags) {
     return rj_arith_v_fmac_f64_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
   });
+  add(cases, "fp", "v_fmac_f64_w32_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_fmac_f64_w32_gfx950(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_fmac_f64_w64_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_fmac_f64_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_add_f64_w32_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_add_f64_w32_gfx950(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_add_f64_w64_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_add_f64_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_mul_f64_w32_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_mul_f64_w32_gfx950(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_mul_f64_w64_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_mul_f64_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_fma_f64_w32_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_fma_f64_w32_gfx950(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_fma_f64_w64_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_fma_f64_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_trunc_f64_w32_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_trunc_f64_w32_gfx950(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "fp", "v_trunc_f64_w64_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_trunc_f64_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "fp", "v_ceil_f64_w32_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_ceil_f64_w32_gfx950(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "fp", "v_ceil_f64_w64_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_ceil_f64_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "fp", "v_rndne_f64_w32_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_rndne_f64_w32_gfx950(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "fp", "v_rndne_f64_w64_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_rndne_f64_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "fp", "v_floor_f64_w32_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_floor_f64_w32_gfx950(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "fp", "v_floor_f64_w64_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_floor_f64_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "fp", "v_fract_f64_w32_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_fract_f64_w32_gfx950(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "fp", "v_fract_f64_w64_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_fract_f64_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "fp", "v_frexp_mant_f64_w32_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_frexp_mant_f64_w32_gfx950(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "fp", "v_frexp_mant_f64_w64_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_frexp_mant_f64_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
+  });
   add(cases, "fp", "v_fmac_f64_w32_gfx1250", [](Operands &r, uint64_t flags) {
     return rj_arith_v_fmac_f64_w32_gfx1250(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
   });

@@ -2044,9 +2044,17 @@ void VDivFixupLegacyF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtPkaccumU8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::arith::execute_byte_pack(wf, rj_arith_v_cvt_pkaccum_u8_f32_w32,
-                                   rj_arith_v_cvt_pkaccum_u8_f32_w64, wf.cu().arithmetic_flags(), 0,
-                                   vdst, src0, src1, vdst);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (!(wf.fp_denorm_mode_f32() & 1)) {
+    flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_byte_pack(wf, rj_arith_v_cvt_pkaccum_u8_f32_w32_gfx942,
+                                   rj_arith_v_cvt_pkaccum_u8_f32_w64_gfx942, flags, modifiers, vdst,
+                                   src0, src1, vdst);
 }
 
 void VMadU32U16Vop3::execute_impl(amdgpu::Wavefront &wf) {

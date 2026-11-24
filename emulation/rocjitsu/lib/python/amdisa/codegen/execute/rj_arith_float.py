@@ -83,30 +83,30 @@ NORMALIZED_NAMES = {
 }
 
 # Architecture suffix of the shared conversion entry points. RDNA3 owns the unsuffixed
-# entries and RDNA4 the _gfx12 entries; both accept bit-exact semantics. CDNA and gfx1250
-# call loose-only entries until their captures are reviewed per instruction. RDNA1, RDNA2
-# and RDNA3.5 share the CDNA loose-only wrapper because none of them has a capture yet.
+# entries, RDNA4 the _gfx12 entries, and CDNA3 (gfx942) the MI300X-calibrated _gfx942
+# entries; all three accept bit-exact semantics. CDNA1/2/4, RDNA1/2/3.5, and gfx1250
+# call loose-only entries until their captures are reviewed per instruction.
 CONVERSION_ARCH_SUFFIX = {
     'rdna3': '',
     'rdna4': '_gfx12',
-    'cdna1': '_gfx942',
-    'cdna2': '_gfx942',
+    'cdna1': '_gfx950',
+    'cdna2': '_gfx950',
     'cdna3': '_gfx942',
-    'cdna4': '_gfx942',
+    'cdna4': '_gfx950',
     'cdna5': '_gfx1250',
-    'rdna1': '_gfx942',
-    'rdna2': '_gfx942',
-    'rdna3_5': '_gfx942',
+    'rdna1': '_gfx950',
+    'rdna2': '_gfx950',
+    'rdna3_5': '_gfx950',
 }
 
-# Architecture suffix of the FP64 FMA entry points. RDNA2 has no capture yet, so it
-# calls the loose-only _gfx10 entry rather than the shared RDNA3 one.
+# Architecture suffix of the FP64 FMA entry points. RDNA2 and CDNA4 have no captures
+# yet, so they call loose-only _gfx10 and _gfx950 entries respectively.
 FMA64_ARCH_SUFFIX = {
     'rdna2': '_gfx10',
     'rdna3': '',
     'rdna4': '_gfx12',
     'cdna3': '_gfx942',
-    'cdna4': '_gfx942',
+    'cdna4': '_gfx950',
     'cdna5': '_gfx1250',
 }
 
@@ -608,7 +608,7 @@ def gen_float_unary64(ctx: ExecuteContext) -> str | None:
         'V_FRACT_F64',
         'V_FREXP_MANT_F64',
     }:
-        api += '_gfx942'
+        api += '_gfx950' if arch == 'cdna4' else '_gfx942'
     wave64 = (
         'nullptr'
         if arch == 'cdna5' and mnemonic in CDNA_MATH_F64
@@ -654,8 +654,6 @@ def gen_packed_conversion(ctx: ExecuteContext) -> str | None:
         return None
     if len(dst) != 1 or len(src) != 2:
         return None
-    # RDNA entries accept bit-exact semantics; CDNA entries stay loose-only until their
-    # captures are reviewed.
     api = 'rj_arith_' + mnemonic.lower() + CONVERSION_ARCH_SUFFIX[arch]
     lines = ['  uint64_t flags = wf.cu().arithmetic_flags();']
     if mnemonic == 'V_CVT_PK_RTZ_F16_F32':
@@ -701,7 +699,6 @@ def gen_normalized(ctx: ExecuteContext) -> str | None:
     if len(dst) != 1 or len(src) != (2 if packed else 1):
         return None
     # Packed-half forms have RDNA4-specific entries; the other RDNA forms share one entry.
-    # CDNA entries stay loose-only until their captures are reviewed.
     api = 'rj_arith_' + mnemonic.lower()
     if packed and half and arch == 'rdna4':
         api += '_gfx12'
@@ -902,7 +899,7 @@ def gen_conversion32(ctx: ExecuteContext) -> str | None:
     to_float = mnemonic in ('V_CVT_F32_I32', 'V_CVT_F32_U32')
     fixed_round = mnemonic in ('V_CVT_NEAREST_I32_F32', 'V_CVT_FLOOR_I32_F32')
     reports = not to_float and not fixed_round
-    # Fixed-rounding forms share one RDNA entry; CDNA entries stay loose-only.
+    # Fixed-rounding forms share one RDNA entry.
     api = 'rj_arith_' + mnemonic.lower()
     if not (fixed_round and arch == 'rdna4'):
         api += CONVERSION_ARCH_SUFFIX[arch]
@@ -1487,6 +1484,21 @@ def gen_bit_pack(ctx: ExecuteContext) -> str | None:
     if mnemonic == 'V_CVT_PKACCUM_U8_F32' and arch in ('cdna3', 'cdna4'):
         if not is_vop3 or len(dst) != 1 or len(src) != 2:
             return None
+        if arch == 'cdna3':
+            return '\n'.join(
+                [
+                    '  uint64_t flags = wf.cu().arithmetic_flags();',
+                    '  if (!(wf.fp_denorm_mode_f32() & 1)) flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;',
+                    '  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;',
+                    '  const uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
+                    '      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |',
+                    '      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |',
+                    '      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
+                    '  amdgpu::arith::execute_byte_pack(wf, rj_arith_v_cvt_pkaccum_u8_f32_w32_gfx942,',
+                    '      rj_arith_v_cvt_pkaccum_u8_f32_w64_gfx942, flags, modifiers,',
+                    f'      {dst[0]}, {src[0]}, {src[1]}, {dst[0]});',
+                ]
+            )
         return '\n'.join(
             [
                 '  amdgpu::arith::execute_byte_pack(wf, rj_arith_v_cvt_pkaccum_u8_f32_w32,',
@@ -1503,7 +1515,6 @@ def gen_bit_pack(ctx: ExecuteContext) -> str | None:
     half = mnemonic == 'V_PACK_B32_F16'
     if len(dst) != 1 or len(src) != (2 if half else 3):
         return None
-    # Byte packing and the CDNA PACK entries stay loose-only until their captures are reviewed.
     api = 'rj_arith_' + mnemonic.lower() + CONVERSION_ARCH_SUFFIX[arch]
     lines = ['  uint64_t flags = wf.cu().arithmetic_flags();']
     denorm = 'fp_denorm_mode_f16_f64' if half else 'fp_denorm_mode_f32'
@@ -1549,7 +1560,11 @@ def gen_float_binary64(ctx: ExecuteContext) -> str | None:
         return None
     api = 'rj_arith_' + mnemonic.lower()
     if arch.startswith('cdna') and mnemonic in {'V_ADD_F64', 'V_MUL_F64'}:
-        api += '_gfx1250' if arch == 'cdna5' else '_gfx942'
+        api += (
+            '_gfx1250'
+            if arch == 'cdna5'
+            else '_gfx950' if arch == 'cdna4' else '_gfx942'
+        )
     elif arch in ('rdna4', 'cdna5') and mnemonic in {'V_ADD_F64', 'V_MUL_F64'}:
         api += '_gfx12'
     if arch in ('cdna3', 'cdna4') and mnemonic in SELECTION_F64[arch] | {'V_LDEXP_F64'}:
