@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "ph_ctx.hpp"
+#include "ph_future.hpp"
 
 #include "profiler-hub/cpp/storage.hpp"
 #include "profiler-hub/cpp/writer.hpp"
@@ -12,6 +13,8 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <vector>
@@ -334,6 +337,63 @@ TEST_F(ph_ctx_test, get_track_samples_returns_empty_for_non_pmc_track)
 
     const auto samples = ctx.get_track_samples(tracks.tracks[0].id, 0, 0);
     EXPECT_EQ(samples.list_size, 0U);
+}
+
+TEST_F(ph_ctx_test, trim_trace_replaces_existing_output_and_leaves_no_partial_file)
+{
+    auto writer = make_writer();
+    seed_track_with_two_events(*writer);
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    const std::string trimmed = m_db_path + ".trimmed.db";
+    std::ofstream{ trimmed } << "previous output";
+
+    {
+        ph_ctx ctx{ m_db_path };
+        ctx.load();
+        ASSERT_EQ(ctx.trim_trace(1000, 2000, trimmed.c_str(), nullptr),
+                  PH_RESULT_SUCCESS);
+    }
+    EXPECT_FALSE(std::filesystem::exists(trimmed + ".partial"));
+
+    {
+        ph_ctx trimmed_ctx{ trimmed };
+        trimmed_ctx.load();
+        const auto tracks = trimmed_ctx.get_track_list();
+        ASSERT_EQ(tracks.list_size, 1U);
+        EXPECT_EQ(trimmed_ctx.get_track_events(tracks.tracks[0].id, 0, 0).list_size, 1U);
+    }
+    std::filesystem::remove(trimmed);
+}
+
+TEST_F(ph_ctx_test, cancelled_trim_trace_keeps_existing_output)
+{
+    auto writer = make_writer();
+    seed_track_with_two_events(*writer);
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    const std::string trimmed = m_db_path + ".trimmed.db";
+    std::ofstream{ trimmed } << "previous output";
+
+    ph_future future{ nullptr, nullptr };
+    ASSERT_EQ(future.cancel(), PH_RESULT_SUCCESS);
+    {
+        ph_ctx ctx{ m_db_path };
+        ctx.load();
+        EXPECT_EQ(ctx.trim_trace(1000, 2000, trimmed.c_str(), &future),
+                  PH_RESULT_CANCELLED);
+    }
+    EXPECT_FALSE(std::filesystem::exists(trimmed + ".partial"));
+
+    {
+        std::ifstream     input{ trimmed };
+        const std::string content{ std::istreambuf_iterator<char>{ input },
+                                   std::istreambuf_iterator<char>{} };
+        EXPECT_EQ(content, "previous output");
+    }
+    std::filesystem::remove(trimmed);
 }
 
 #if PROFILER_HUB_ENABLE_ROCPD_V2
