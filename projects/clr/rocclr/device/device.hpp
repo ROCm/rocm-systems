@@ -889,6 +889,18 @@ class Memory {
   //! Read the size
   size_t size() const { return size_; }
 
+  //! Gets the size and alignment this device requires for an image's own memory, before any
+  //! padding the runtime adds. Returns false if none were recorded, e.g. for buffers, and for views
+  //! and interop images, which don't own their memory.
+  bool getImageMemoryRequirements(size_t* size, size_t* alignment) const {
+    if (imageMemReqSize_ == 0) {
+      return false;
+    }
+    *size = imageMemReqSize_;
+    *alignment = imageMemReqAlignment_;
+    return true;
+  }
+
   //! Gets the owner Memory instance
   amd::Memory* owner() const { return owner_; }
 
@@ -1067,7 +1079,17 @@ class Memory {
 
   size_t size_;  //!< Memory size
 
+  //! Records the values returned by getImageMemoryRequirements(). Called by the device backend
+  //! when an image allocates its own memory.
+  void setImageMemoryRequirements(size_t size, size_t alignment) {
+    imageMemReqSize_ = size;
+    imageMemReqAlignment_ = alignment;
+  }
+
  private:
+  size_t imageMemReqSize_ = 0;       //!< Size this device requires for an image's memory
+  size_t imageMemReqAlignment_ = 0;  //!< Alignment this device requires for an image's memory
+
   //! Disable default copy constructor
   Memory& operator=(const Memory&) = delete;
 

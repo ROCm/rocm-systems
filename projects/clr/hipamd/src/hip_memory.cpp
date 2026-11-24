@@ -5158,6 +5158,9 @@ hipError_t ihipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* m
   if (mipmap == nullptr) {
     return hipErrorInvalidHandle;
   }
+  if (device < 0 || static_cast<size_t>(device) >= g_devices.size()) {
+    return hipErrorInvalidDevice;
+  }
 
   cl_mem cl_mem_obj = reinterpret_cast<cl_mem>(mipmap->data);
   if (is_valid(cl_mem_obj) == false) {
@@ -5169,9 +5172,17 @@ hipError_t ihipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* m
     return hipErrorInvalidValue;
   }
 
-  memoryRequirements->alignment = image->getAlignment();
-  memoryRequirements->size = image->getSize();
+  // The values are per device; read them from the device the mipmapped array was created on.
+  amd::Device* amd_device = g_devices[image->getUserData().deviceId]->devices()[0];
+  device::Memory* device_memory = image->getDeviceMemory(*amd_device, false);
+  size_t size = 0;
+  size_t alignment = 0;
+  if (device_memory == nullptr || !device_memory->getImageMemoryRequirements(&size, &alignment)) {
+    return hipErrorNotSupported;
+  }
 
+  memoryRequirements->size = size;
+  memoryRequirements->alignment = alignment;
   return hipSuccess;
 }
 

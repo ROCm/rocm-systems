@@ -489,6 +489,9 @@ texture:
   Unit_hipMipmappedArrayGetMemoryRequirements_Negative_Parameters:
     <<: *level_default
     tags: [image]
+  Unit_hipMipmappedArrayGetMemoryRequirements_Positive_Basic:
+    <<: *level_default
+    tags: [mipmap, image]
   Unit_hipNormalizedFloatValueTex_CheckModes:
     <<: *level_default
     tags: [image]
