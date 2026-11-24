@@ -304,15 +304,17 @@ public:
     }
   }
 
+  static constexpr bool is_idle(int state) { return state == kIdle || state == kIdleSleeping; }
+
   void wait() {
-    if (state_.load(std::memory_order_acquire) == kIdle) {
+    if (is_idle(state_.load(std::memory_order_acquire))) {
       if (stats_) [[unlikely]]
         stats_->wait_ready.fetch_add(1, std::memory_order_relaxed);
       return;
     }
     const unsigned spins = completion_spin_count();
     for (unsigned i = 0; i != spins; ++i) {
-      if (state_.load(std::memory_order_acquire) == kIdle) {
+      if (is_idle(state_.load(std::memory_order_acquire))) {
         if (stats_) [[unlikely]]
           stats_->wait_spun.fetch_add(1, std::memory_order_relaxed);
         return;
@@ -331,7 +333,7 @@ public:
     }
   }
 
-  bool ready() const { return state_.load(std::memory_order_acquire) == kIdle; }
+  bool ready() const { return is_idle(state_.load(std::memory_order_acquire)); }
   void pin(const std::vector<int> &cpus) {
 #if defined(__linux__)
     cpu_set_t set;
