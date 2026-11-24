@@ -53,9 +53,18 @@ inline bool candidate(const Instruction &inst) {
 // Reject non-MFMA encodings on CDNA4, and non-candidates in the CDNA5 allowlist.
 // This is only a hint: decoded eligibility remains authoritative.
 inline bool encoding_may_be_candidate(rocjitsu::IsaFamily arch, uint32_t word) {
-  if (arch == rocjitsu::IsaFamily::Cdna4)
-    // VOP3P_MFMA, including the scaled-MFMA extension prefix.
-    return word >> 23 == 423;
+  if (arch == rocjitsu::IsaFamily::Cdna4) {
+    // VOP3P with a candidate MFMA opcode, or the scaled-MFMA prefix (44). Other
+    // VOP3P (e.g. v_fma_mix_f32) shares the encoding and would only build and
+    // look up rejected plans.
+    constexpr uint64_t kLow = (uint64_t{1} << 44) | (uint64_t{1} << 45) | (uint64_t{1} << 46) |
+                              (uint64_t{1} << 53) | (uint64_t{1} << 55);
+    constexpr uint64_t kHigh = (uint64_t{1} << (76 - 64)) | (uint64_t{1} << (77 - 64)) |
+                               (uint64_t{1} << (84 - 64)) | (uint64_t{1} << (85 - 64)) |
+                               (uint64_t{0xff} << (112 - 64));
+    const uint32_t opcode = (word >> 16) & 0x7f;
+    return word >> 23 == 423 && ((opcode < 64 ? kLow >> opcode : kHigh >> (opcode - 64)) & 1);
+  }
   if (arch != rocjitsu::IsaFamily::Cdna5)
     return true;
   const uint32_t opcode = word >> 16;
@@ -148,7 +157,7 @@ inline bool safe_inline(const Instruction &inst) {
   // Explicitly exclude instructions with hidden EXEC, MODE, cache, scheduling,
   // register-allocation or cross-lane register-index side effects.
   if (inline_operation_kind(operation) != InlineOperationKind::Arithmetic &&
-      operation != Operation::S_MOVK_I32)
+      operation != Operation::S_MOVK_I32 && operation != Operation::S_ADDK_I32)
     return false;
   for (int i = 0; i != inst.num_dst_operands(); ++i) {
     const auto *op = inst.dst_operand(i);

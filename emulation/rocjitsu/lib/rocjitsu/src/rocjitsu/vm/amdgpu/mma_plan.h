@@ -27,7 +27,8 @@
 
 namespace rocjitsu::amdgpu::mma_plan {
 
-inline constexpr unsigned kMaxSteps = 32;
+// Long enough for unrolled K steps with their epilogues; joins use helper slots, not steps.
+inline constexpr unsigned kMaxSteps = 64;
 inline constexpr unsigned kSlots = async_execution::kMaxPendingMma;
 inline constexpr unsigned kMaxChain = matrix_coexecution::Helper::kMaxChain;
 static_assert(kSlots <= 8, "wait masks are one byte");
@@ -86,6 +87,7 @@ inline bool pure_alu(const Instruction &inst) {
   if (inst.is_memory_op() || inst.is_waitcnt() || inst.data())
     return false;
   return operation == Operation::S_SETPRIO || operation == Operation::S_MOVK_I32 ||
+         operation == Operation::S_ADDK_I32 ||
          async_mma_policy::inline_operation_kind(operation) ==
              async_mma_policy::InlineOperationKind::Arithmetic;
 }
