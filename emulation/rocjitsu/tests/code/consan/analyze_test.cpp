@@ -2093,6 +2093,7 @@ TEST_F(ConSanAnalysis, ReaderOwnedEvidenceAndRenderedSemanticReplayAreDeterminis
   ASSERT_TRUE(b.succeeded());
   EXPECT_EQ(a.value(), b.value());
   EXPECT_EQ(render_analysis(a.value()), render_analysis(b.value()));
+  EXPECT_NE(render_analysis(a.value()).find("\"lds_analysis\":\"performed\""), std::string::npos);
   EXPECT_NE(render_analysis(a.value()).find("kernel\\\"\\\\\\u000a"), std::string::npos);
 }
 
