@@ -1239,7 +1239,7 @@ TEST(HostDispatchLogMicrotest, TheReportPathDoesNotMoveTheLogs)
     EXPECT_FALSE(std::filesystem::path(std::string(kDefaultLogDirectory)).is_absolute());
 }
 
-// ── prepareLogDirectory ─────────────────────────────────────────────
+// ── preparePrivateDirectory ─────────────────────────────────────────
 
 TEST(HostDispatchLogMicrotest, ANewLogDirectoryIsCreatedPrivateToThisUser)
 {
@@ -1249,7 +1249,7 @@ TEST(HostDispatchLogMicrotest, ANewLogDirectoryIsCreatedPrivateToThisUser)
     const ScopedDir dir("rccl-host-dispatch-logdir");
     const std::string logs = (std::filesystem::path(dir.path()) / "run.logs").string();
 
-    EXPECT_FALSE(prepareLogDirectory(logs).has_value());
+    EXPECT_FALSE(preparePrivateDirectory(logs).has_value());
 
     ASSERT_TRUE(std::filesystem::is_directory(logs));
     EXPECT_EQ(std::filesystem::status(logs).permissions(),
@@ -1264,7 +1264,7 @@ TEST(HostDispatchLogMicrotest, MissingParentsOfTheLogDirectoryAreMade)
     const std::string logs =
         (std::filesystem::path(dir.path()) / "a" / "b" / "run.logs").string();
 
-    EXPECT_FALSE(prepareLogDirectory(logs).has_value());
+    EXPECT_FALSE(preparePrivateDirectory(logs).has_value());
     EXPECT_TRUE(std::filesystem::is_directory(logs));
 }
 
@@ -1274,9 +1274,9 @@ TEST(HostDispatchLogMicrotest, ADirectoryThisUserAlreadyOwnsIsReused)
     // own directory from the first. Refusing that would turn every repeat run console-only.
     const ScopedDir dir("rccl-host-dispatch-logdir");
     const std::string logs = (std::filesystem::path(dir.path()) / "run.logs").string();
-    ASSERT_FALSE(prepareLogDirectory(logs).has_value());
+    ASSERT_FALSE(preparePrivateDirectory(logs).has_value());
 
-    EXPECT_FALSE(prepareLogDirectory(logs).has_value());
+    EXPECT_FALSE(preparePrivateDirectory(logs).has_value());
 }
 
 TEST(HostDispatchLogMicrotest, ALogDirectoryThatIsASymlinkIsRefused)
@@ -1289,7 +1289,7 @@ TEST(HostDispatchLogMicrotest, ALogDirectoryThatIsASymlinkIsRefused)
     const std::filesystem::path logs = std::filesystem::path(dir.path()) / "run.logs";
     std::filesystem::create_directory_symlink(elsewhere, logs);
 
-    const std::optional<std::string> problem = prepareLogDirectory(logs.string());
+    const std::optional<std::string> problem = preparePrivateDirectory(logs.string());
     ASSERT_TRUE(problem.has_value());
     EXPECT_NE(problem->find("symbolic link"), std::string::npos) << *problem;
 }
@@ -1300,7 +1300,7 @@ TEST(HostDispatchLogMicrotest, ALogDirectoryThatIsAFileIsRefused)
     const std::filesystem::path logs = std::filesystem::path(dir.path()) / "run.logs";
     std::ofstream(logs.string(), std::ios::binary) << "not a directory";
 
-    const std::optional<std::string> problem = prepareLogDirectory(logs.string());
+    const std::optional<std::string> problem = preparePrivateDirectory(logs.string());
     ASSERT_TRUE(problem.has_value());
     EXPECT_NE(problem->find("not a directory"), std::string::npos) << *problem;
 }
@@ -1313,7 +1313,7 @@ TEST(HostDispatchLogMicrotest, ALogDirectoryThatCannotBeMadeIsRefusedWithItsReas
     const std::filesystem::path blocked = std::filesystem::path(dir.path()) / "blocked";
     std::ofstream(blocked.string(), std::ios::binary) << "not a directory";
 
-    const std::optional<std::string> problem = prepareLogDirectory((blocked / "run.logs").string());
+    const std::optional<std::string> problem = preparePrivateDirectory((blocked / "run.logs").string());
 
     ASSERT_TRUE(problem.has_value());
     EXPECT_FALSE(problem->empty());
@@ -1732,6 +1732,30 @@ TEST(HostDispatchCoverageMicrotest, ABinaryThatLeftNoProfilesIsPassedOverSilentl
     // The one binary that ran, merged and exported, then the lcov version sniff and union.
     EXPECT_EQ(llvm.commands().size(), 4u);
     EXPECT_EQ(mergedTracefile(dir.path()).find("NeverRan"), std::string::npos);
+}
+
+TEST(HostDispatchCoverageMicrotest, ABinaryDirectoryThatIsASymlinkIsNotExportedThrough)
+{
+    // In a shared profile directory another user can plant <binary>/ first; the export writes
+    // merged.profdata and coverage.lcov there, so it must not follow a link to wherever it points.
+    const ScopedUnset exportOn("RCCL_HOST_COVERAGE_EXPORT");
+    const ScopedDir dir("rccl-host-dispatch-coverage");
+    seedProfiles(dir.path(), "/build/elsewhere", 1);
+    std::filesystem::create_directory_symlink(
+        std::filesystem::path(dir.path()) / "elsewhere",
+        std::filesystem::path(dir.path()) / "rccl-UnitTestsMicroPlanted");
+    seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroInit", 1);
+    FakeLlvm llvm;
+
+    writeMergedCoverage(dir.path(),
+                        {"/build/rccl-UnitTestsMicroPlanted", "/build/rccl-UnitTestsMicroInit"},
+                        llvm.command());
+
+    for (const std::string &command : llvm.commands()) {
+        EXPECT_EQ(command.find("Planted"), std::string::npos) << command;
+    }
+    EXPECT_NE(mergedTracefile(dir.path()).find("SF:/src/rccl-UnitTestsMicroInit.cc"),
+              std::string::npos);
 }
 
 TEST(HostDispatchCoverageMicrotest, AFailedMergeDropsOnlyThatBinary)
@@ -2636,7 +2660,7 @@ TEST(HostDispatchSchedulerMicrotest, APlantedLogSymlinkIsNotTruncatedThroughToIt
 {
     // The first part of a binary truncates its log so a re-run does not append to the last
     // one's. Through a symlink someone else planted, that truncation lands on their target --
-    // the destructive half of the hazard prepareLogDirectory() covers, and the one that still
+    // the destructive half of the hazard preparePrivateDirectory() covers, and the one that still
     // applies when the caller named a log directory this process did not create.
     const ScopedDir dir("rccl-host-dispatch-scheduler");
     const std::filesystem::path target = std::filesystem::path(dir.path()) / "precious";

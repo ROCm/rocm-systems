@@ -923,20 +923,10 @@ std::string resolveLogDirectory(const char *override_)
     return std::string_view(override_) == "-" ? std::string() : std::string(override_);
 }
 
-// Make *directory* ready to hold the children's logs, or say why it cannot be trusted with them.
-std::optional<std::string> prepareLogDirectory(const std::string &directory)
+// Why an existing *directory* cannot be trusted with this process's output, or nullopt if it can:
+// in a shared parent such as /tmp, another user can create it first and plant symlinks in it.
+std::optional<std::string> untrustedDirectoryReason(const std::string &directory)
 {
-    const fs::path path{directory};
-    if (path.has_parent_path() && !path.parent_path().empty()) {
-        std::error_code ec;
-        fs::create_directories(path.parent_path(), ec);
-    }
-    if (mkdir(directory.c_str(), 0700) == 0) {
-        return std::nullopt;
-    }
-    if (errno != EEXIST) {
-        return std::string(std::strerror(errno));
-    }
     struct stat info {};
     if (lstat(directory.c_str(), &info) != 0) {
         return std::string(std::strerror(errno));
@@ -951,6 +941,24 @@ std::optional<std::string> prepareLogDirectory(const std::string &directory)
         return fmt::format("it belongs to uid {}, not to this process", info.st_uid);
     }
     return std::nullopt;
+}
+
+// Make *directory* ready to hold this process's output (the children's logs or profiles), or say
+// why it cannot be trusted with it.
+std::optional<std::string> preparePrivateDirectory(const std::string &directory)
+{
+    const fs::path path{directory};
+    if (path.has_parent_path() && !path.parent_path().empty()) {
+        std::error_code ec;
+        fs::create_directories(path.parent_path(), ec);
+    }
+    if (mkdir(directory.c_str(), 0700) == 0) {
+        return std::nullopt;
+    }
+    if (errno != EEXIST) {
+        return std::string(std::strerror(errno));
+    }
+    return untrustedDirectoryReason(directory);
 }
 
 size_t resolveParallelism(const char *request, size_t fallbackJobs)
@@ -1015,12 +1023,17 @@ pid_t spawnChild(const std::string &path, const std::vector<std::string> &args,
     argv.push_back(nullptr);
 
     const std::vector<std::string> strip = gtestVariablesToStrip();
-    const std::string profile = childProfileFile(path);
+    std::string profile = childProfileFile(path);
     if (!profile.empty()) {
         // The profile runtime creates this directory only for some patterns (those with %m),
         // so a child given a plain %p one would otherwise fail to write its profile.
-        std::error_code ec;
-        fs::create_directories(fs::path(profile).parent_path(), ec);
+        const std::string profileDir = fs::path(profile).parent_path().string();
+        if (const std::optional<std::string> problem = preparePrivateDirectory(profileDir)) {
+            fmt::print(stderr, "host-test-dispatch: cannot use {}: {} -- {} will not write a"
+                               " coverage profile\n",
+                       profileDir, *problem, path);
+            profile = "/dev/null";
+        }
     }
     const pid_t parent = getpid();
 
@@ -1510,6 +1523,15 @@ void writeMergedCoverage(const std::string &directory, const std::vector<std::st
     std::vector<std::pair<std::string, std::vector<std::string>>> pending;
     for (const std::string &binary : binaries) {
         const fs::path binaryDir = fs::path(directory) / fs::path(binary).filename();
+        // The export writes merged.profdata and coverage.lcov here; never through a directory
+        // someone else could have filled with symlinks.
+        if (const std::optional<std::string> problem =
+                untrustedDirectoryReason(binaryDir.string());
+            problem && fs::exists(fs::symlink_status(binaryDir))) {
+            fmt::print(stderr, "host-test-dispatch: not exporting coverage from {}: {}\n",
+                       binaryDir.string(), *problem);
+            continue;
+        }
         std::vector<std::string> profiles = profilesIn(binaryDir.string());
         if (!profiles.empty()) {
             pending.emplace_back(binary, std::move(profiles));
@@ -2012,7 +2034,7 @@ int main(int argc, char **argv)
     std::string logDir =
         resolveLogDirectory(std::getenv(std::string(kLogDirectoryEnv).c_str()));
     if (!logDir.empty()) {
-        if (const std::optional<std::string> problem = prepareLogDirectory(logDir)) {
+        if (const std::optional<std::string> problem = preparePrivateDirectory(logDir)) {
             fmt::print(stderr, "host-test-dispatch: cannot use {}: {} -- the binaries will"
                                " print to the console instead\n",
                        logDir, *problem);
