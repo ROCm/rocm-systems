@@ -275,6 +275,7 @@ foreach(
         integer_ordering
         class
         float_equality
+        float_gfx908
         float_ordered
         float_gfx1150
         float_unordered

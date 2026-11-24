@@ -2222,7 +2222,7 @@ def gen_float_binary16(ctx: ExecuteContext) -> str | None:
     ):
         return None
     api = 'rj_arith_' + mnemonic.lower()
-    if mnemonic in GFX10_BINARY_F16:
+    if mnemonic in BINARY_ARITHMETIC_F16 - {'V_LDEXP_F16'}:
         # RDNA3 owns the unsuffixed F16 ADD/SUB/SUBREV/MUL entries and RDNA4 the _gfx12 entries;
         # both accept bit-exact semantics. CDNA3/CDNA4, gfx1250 and RDNA2 call loose-only entries
         # until their captures are reviewed per instruction.
