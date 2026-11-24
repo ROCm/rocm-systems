@@ -456,6 +456,7 @@ class SharedPool {
     std::atomic<int> awake{0};
     unsigned base = 0;
     unsigned count = 0;
+    unsigned active_rank = 0;
   };
   struct Slot {
     Helper helper;
@@ -585,6 +586,8 @@ public:
         assert(share <= 64);
         shards_[d].base = next;
         shards_[d].count = share;
+        if (share)
+          shards_[d].active_rank = active_shards_++;
         shards_[d].free.store(share == 64 ? ~uint64_t{0} : (uint64_t{1} << share) - 1,
                               std::memory_order_relaxed);
         for (unsigned b = 0; b != share; ++b, ++next) {
@@ -602,6 +605,8 @@ public:
         const unsigned share = std::min(64u, count - next);
         shards_[s].base = next;
         shards_[s].count = share;
+        if (share)
+          shards_[s].active_rank = active_shards_++;
         shards_[s].free.store(share == 64 ? ~uint64_t{0} : (uint64_t{1} << share) - 1,
                               std::memory_order_relaxed);
         for (unsigned b = 0; b != share; ++b, ++next)
@@ -689,14 +694,13 @@ private:
   }
 
   Slot *try_claim(unsigned cap, bool local_only) {
-    if (!helpers_enabled() || num_shards_ == 0)
-      return nullptr;
-    if (cap != kUnlimited && claimed() >= cap)
+    if (!helpers_enabled() || num_shards_ == 0 || cap == 0)
       return nullptr;
     // Bound claims and fall back inline on a miss: one load detects an
     // exhausted local shard, and after two failed CAS attempts the chain runs
-    // on the issuer. Dedicated local claims touch only the issuer's own LLC
-    // shard — zero cross-CCD cache-line traffic.
+    // on the issuer. Dedicated and shard-budgeted local claims touch only the
+    // issuer's own LLC shard — zero cross-CCD cache-line traffic.
+    const bool unlimited = cap >= slots_.size();
     static thread_local const uint32_t issuer_hash =
         static_cast<uint32_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
     const unsigned start = preferred_helper_start(issuer_hash, slots_.size());
@@ -715,10 +719,29 @@ private:
       const uint64_t w = shards_[s].awake_mask.load(std::memory_order_relaxed);
       return w ? claim_shard(s, w, start) : nullptr;
     };
+    // Finite-budget local-only claims enforce a per-shard cap whose sum across
+    // active shards equals `cap`, avoiding cross-CCD shard scans on every claim.
+    if (forbid_remote && !unlimited && has_local && active_shards_ > 0 && cap >= active_shards_) {
+      const Shard &ls = shards_[size_t(local_d)];
+      const unsigned local_cap = std::min(
+          ls.count, cap / active_shards_ + (ls.active_rank < cap % active_shards_ ? 1u : 0u));
+      const unsigned local_claimed =
+          ls.count - unsigned(std::popcount(ls.free.load(std::memory_order_relaxed)));
+      if (local_claimed >= local_cap)
+        return nullptr;
+      if (Slot *slot = claim_warm_in(unsigned(local_d)))
+        return record(slot, true);
+      if (ls.awake.load(std::memory_order_relaxed) < int(local_cap))
+        if (Slot *slot = claim_shard(unsigned(local_d), ~uint64_t{0}, start))
+          return record(slot, false);
+      return nullptr;
+    }
+    if (!unlimited && claimed() >= cap)
+      return nullptr;
     if (has_local) {
       if (Slot *slot = claim_warm_in(unsigned(local_d)))
         return record(slot, true);
-      if (cap == kUnlimited || awake() < cap)
+      if (unlimited || awake() < cap)
         if (Slot *slot = claim_shard(unsigned(local_d), ~uint64_t{0}, start))
           return record(slot, false);
     }
@@ -731,7 +754,7 @@ private:
       if (Slot *slot = claim_warm_in(unsigned(s)))
         return record(slot, true);
     }
-    if (cap != kUnlimited && awake() >= cap)
+    if (!unlimited && awake() >= cap)
       return nullptr;
     for (size_t s = 0; s != num_shards_; ++s) {
       if (int(s) == local_d)
@@ -747,6 +770,7 @@ private:
   CacheDomains domains_;
   bool multi_domain_ = false;
   size_t num_shards_ = 0;
+  unsigned active_shards_ = 0;
   std::unique_ptr<Shard[]> shards_;
   std::vector<std::unique_ptr<Slot>> slots_;
   PoolStats stats_storage_{};

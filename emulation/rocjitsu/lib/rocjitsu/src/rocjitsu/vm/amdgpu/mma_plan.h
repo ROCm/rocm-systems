@@ -972,6 +972,8 @@ public:
     entry_pc_ = other.entry_pc_;
     seq_ = other.seq_;
     member_offset_ = other.member_offset_;
+    slot_of_job_ = other.slot_of_job_;
+    job_of_slot_ = other.job_of_slot_;
     access_ = other.access_;
     failure_ = std::move(other.failure_);
     return *this;
@@ -991,6 +993,7 @@ public:
     cap_ = cap;
     track_access_ = track_access;
     slot_of_job_.fill(kNoSlot);
+    job_of_slot_.fill(kNoSlot);
     inherited_ = active_;
     filtered = false;
     if (!active_)
@@ -1093,6 +1096,7 @@ public:
     seq_[slot] = next_seq_++;
     member_offset_[slot] = uint8_t(start_member);
     slot_of_job_[plan_job] = uint8_t(slot);
+    job_of_slot_[slot] = uint8_t(plan_job);
     active_ |= JobMask{1} << slot;
     if (track_access_ && !access_dirty_) {
       const Access &job = job_access(slot);
@@ -1122,6 +1126,10 @@ public:
             entry_pc_[slot] + plans_[slot]->steps[heads_[slot]->member_step[idx]].offset;
         failure_ = Failure{std::string(inst.mnemonic()), pc, error};
       }
+      const uint8_t retired_job = job_of_slot_[slot];
+      if (retired_job != kNoSlot && slot_of_job_[retired_job] == slot)
+        slot_of_job_[retired_job] = kNoSlot;
+      job_of_slot_[slot] = kNoSlot;
       active_ &= ~(JobMask{1} << slot);
       inherited_ &= ~(JobMask{1} << slot);
       mask &= mask - 1;
@@ -1206,6 +1214,7 @@ private:
   mutable bool access_dirty_ = false;
   uint64_t next_seq_ = 0;
   std::array<uint8_t, kMaxJobs> slot_of_job_{};
+  std::array<uint8_t, kMaxJobs> job_of_slot_{};
   std::array<matrix_coexecution::SharedPool::Ticket, kMaxJobs> tickets_{};
   std::array<const Step *, kMaxJobs> heads_{};
   std::array<const Plan *, kMaxJobs> plans_{};

@@ -919,4 +919,92 @@ TEST(MmaPlanTest, SingleMultiOpChainWithIssuerOverlapIsAccepted) {
   EXPECT_EQ(p.alu, 8u);
 }
 
+TEST(MmaPlanTest, WithinBlockReusedSlotClearsRetiredJobMapping) {
+  // Job 0 occupies slot 0, finishes, and is reaped when independent job 1
+  // reuses slot 0. A later planned wait for job 0 must not falsely wait on job 1.
+  matrix_coexecution::SharedPool pool(1);
+  std::atomic<bool> job0_done{false};
+  std::atomic<bool> release_job1{false};
+  MockJobInstruction inst0("mock_mfma_0", [](Instruction &, void *ctx) {
+    static_cast<std::atomic<bool> *>(ctx)->store(true, std::memory_order_release);
+  });
+  MockJobInstruction inst1("mock_mfma_1", [](Instruction &, void *ctx) {
+    auto *gate = static_cast<std::atomic<bool> *>(ctx);
+    while (!gate->load(std::memory_order_acquire))
+      std::this_thread::yield();
+  });
+  plan::Plan p;
+  p.accept = true;
+  p.steps.resize(2);
+  p.job_accesses.resize(2);
+  p.steps[0].kind = plan::StepKind::Offload;
+  p.steps[0].job = 0;
+  p.steps[0].members = 1;
+  p.steps[0].chain[0] = &inst0;
+  p.steps[0].member_step[0] = 0;
+  p.job_accesses[0].writes.set(0);
+  p.steps[1].kind = plan::StepKind::Offload;
+  p.steps[1].job = 1;
+  p.steps[1].members = 1;
+  p.steps[1].chain[0] = &inst1;
+  p.steps[1].member_step[0] = 1;
+  p.job_accesses[1].writes.set(8);
+
+  plan::PendingJobs pending(&pool);
+  std::array<plan::JobMask, plan::kMaxSteps> rwait, fwait;
+  bool filtered = false;
+  (void)pending.begin_block(p, kPc, matrix_coexecution::SharedPool::kUnlimited, rwait, fwait,
+                            filtered);
+  const auto no_fill = [](matrix_coexecution::SnapshotBuffer &) { return nullptr; };
+
+  ASSERT_TRUE(pending.submit(0, p.steps[0], &job0_done, no_fill));
+  ASSERT_EQ(pending.slots_of(plan::JobMask{1} << 0), plan::JobMask{1} << 0);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (!job0_done.load(std::memory_order_acquire) &&
+         std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  ASSERT_TRUE(job0_done.load(std::memory_order_acquire));
+
+  // Submitting job 1 reaps completed job 0 and reuses physical slot 0.
+  bool submitted = false;
+  while (!submitted && std::chrono::steady_clock::now() < deadline) {
+    submitted = pending.submit(1, p.steps[1], &release_job1, no_fill, [] { return false; },
+                               /*bounded_wait=*/false);
+    if (!submitted)
+      std::this_thread::yield();
+  }
+  ASSERT_TRUE(submitted);
+  EXPECT_EQ(pending.slots_of(plan::JobMask{1} << 0), 0u);
+  EXPECT_EQ(pending.slots_of(plan::JobMask{1} << 1), plan::JobMask{1} << 0);
+
+  release_job1.store(true, std::memory_order_release);
+  ASSERT_TRUE(pending.drain());
+  EXPECT_EQ(pending.slots_of(plan::JobMask{1} << 1), 0u);
+}
+
+TEST(MmaPlanTest, LocalOnlyFiniteCapRespectsBudget) {
+  // With 16 helpers across <= 8 CCDs and cap=8, cap >= active_shards_ exercises
+  // the strictly shard-local budget path (zero cross-CCD shard scans) and never
+  // exceeds cap.
+  matrix_coexecution::SharedPool pool(16);
+  EXPECT_FALSE(pool.claim(0, /*local_only=*/true));
+  std::vector<matrix_coexecution::SharedPool::Ticket> held;
+  for (unsigned i = 0; i != 16; ++i) {
+    auto t = pool.claim(8, /*local_only=*/true);
+    if (!t)
+      break;
+    held.push_back(t);
+  }
+  EXPECT_GE(held.size(), 1u);
+  EXPECT_LE(held.size(), 8u);
+  EXPECT_LE(pool.claimed(), 8u);
+  MockJobInstruction inst("mock_mfma", [](Instruction &, void *) {});
+  for (auto t : held) {
+    Instruction *ptr = &inst;
+    matrix_coexecution::SharedPool::start(t, &ptr, 1, nullptr);
+    ASSERT_TRUE(pool.finish(t).succeeded());
+  }
+  EXPECT_EQ(pool.claimed(), 0u);
+}
+
 } // namespace
