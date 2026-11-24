@@ -195,6 +195,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         )
     endif()
     add_dependencies(rocjitsu_kmd rocjitsu_memory)
+    if(ROCJITSU_BUILD_EMBED_LIBRARY)
+        install(
+            TARGETS rocjitsu_memory
+            RUNTIME
+                DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/rocjitsu-embed
+                COMPONENT rocjitsu-embed
+        )
+    endif()
     install(
         TARGETS rocjitsu_memory
         RUNTIME DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/rocjitsu

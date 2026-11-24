@@ -422,12 +422,13 @@ jobs:
             CMAKE_CONFIG_FLAGS+=(-DCMAKE_CXX_COMPILER="${ROCM_PATH}/lib/llvm/bin/amdclang++")
           fi
 
-          # ConSan has explicit required coverage in the Release and GCC lanes.
+          # Cover ConSan and the side-by-side embedding library with Clang and GCC.
           if [[ "${{ matrix.name }}" == release || "${{ matrix.name }}" == ubsan-gcc ]]; then
             CMAKE_CONFIG_FLAGS+=(
               -DRJ_BUILD_CONSAN_COMPILER=ON
               -DRJ_BUILD_CONSAN_RUNTIME=ON
               -DRJ_BUILD_CONSAN_ANALYZER=ON
+              -DROCJITSU_BUILD_EMBED_LIBRARY=ON
             )
           fi
           if [[ "${{ matrix.name }}" == release ]]; then
