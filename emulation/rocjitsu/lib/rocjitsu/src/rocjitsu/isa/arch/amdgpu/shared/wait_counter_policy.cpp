@@ -66,16 +66,18 @@ std::string_view wait_counter_name(WaitCounterKind counter, WaitcntModel model) 
 [[nodiscard]] util::FailureOr<uint32_t>
 WaitCounterPolicy::maximum_dependency_wait(rocjitsu::IsaFamily arch, WaitCounterKind counter) {
   const auto model = waitcnt_model(arch);
-  if (model.failed())
+  if (model.failed()) {
     return util::Result::failure();
+  }
   return maximum_dependency_wait(model.value(), counter);
 }
 
 [[nodiscard]] util::FailureOr<std::optional<uint32_t>>
 WaitCounterPolicy::counter_no_wait_value(rocjitsu::IsaFamily arch, WaitCounterKind counter) {
   const auto model = waitcnt_model(arch);
-  if (model.failed())
+  if (model.failed()) {
     return util::Result::failure();
+  }
   if (uses_legacy_waitcnt(model.value())) {
     switch (counter) {
     case WaitCounterKind::Load:
@@ -127,21 +129,24 @@ bool WaitCounterPolicy::is_gfx10_sopk_wait(const Instruction &inst, rocjitsu::Is
 util::FailureOr<std::optional<WaitFields>>
 WaitCounterPolicy::executed_wait_fields(const Instruction &inst, rocjitsu::IsaFamily arch,
                                         const WaitFields &executed_limits) {
-  if (is_gfx10_sopk_wait(inst, arch))
+  if (is_gfx10_sopk_wait(inst, arch)) {
     return executed_limits;
+  }
   return explicit_wait_fields(inst, arch);
 }
 
 [[nodiscard]] util::FailureOr<std::optional<WaitFields>>
 WaitCounterPolicy::explicit_wait_fields(const Instruction &inst, rocjitsu::IsaFamily arch) {
   const auto model = waitcnt_model(arch);
-  if (model.failed())
+  if (model.failed()) {
     return util::Result::failure();
+  }
   WaitFields fields;
   auto operand_value = [&](int index) -> std::optional<uint32_t> {
     const Operand *op = inst.src_operand(index);
-    if (!op)
+    if (!op) {
       return std::nullopt;
+    }
     return static_cast<uint32_t>(op->encoding_value());
   };
   auto set_field = [&](WaitCounterKind counter, uint32_t value) {
@@ -149,8 +154,9 @@ WaitCounterPolicy::explicit_wait_fields(const Instruction &inst, rocjitsu::IsaFa
     if (no_wait) {
       // Only the counter field participates; upper SIMM16 bits are ignored.
       value &= *no_wait;
-      if (value < *no_wait)
+      if (value < *no_wait) {
         fields[counter_index(counter)] = value;
+      }
     }
   };
 
@@ -160,15 +166,17 @@ WaitCounterPolicy::explicit_wait_fields(const Instruction &inst, rocjitsu::IsaFa
     // RDNA4's compatibility S_WAITCNT is S_WAIT_IDLE regardless of SIMM16.
     for (size_t counter_idx = 0; counter_idx < kWaitCounterCount; ++counter_idx) {
       const auto counter = static_cast<WaitCounterKind>(counter_idx);
-      if (counter_no_wait_value(arch, counter).value())
+      if (counter_no_wait_value(arch, counter).value()) {
         set_field(counter, 0);
+      }
     }
     return fields;
   }
   if (uses_legacy_waitcnt(model.value()) && operation == Operation::S_WAITCNT) {
     const auto value = operand_value(0);
-    if (!value)
+    if (!value) {
       return std::nullopt;
+    }
     const LegacyWaitcnt wait = decode_legacy_waitcnt(*value, arch);
     set_field(WaitCounterKind::Load, wait.vmcnt);
     set_field(WaitCounterKind::Exp, wait.expcnt);
@@ -179,8 +187,9 @@ WaitCounterPolicy::explicit_wait_fields(const Instruction &inst, rocjitsu::IsaFa
   if ((has_legacy_vscnt(model.value()) && operation == Operation::S_WAITCNT_DEPCTR) ||
       (!uses_legacy_waitcnt(model.value()) && operation == Operation::S_WAIT_ALU)) {
     const auto value = operand_value(0);
-    if (!value)
+    if (!value) {
       return std::nullopt;
+    }
     set_field(WaitCounterKind::VaVdst, depctr_field(*value, 12, 4));
     set_field(WaitCounterKind::VmVsrc, depctr_field(*value, 2, 3));
     return fields;
@@ -190,50 +199,55 @@ WaitCounterPolicy::explicit_wait_fields(const Instruction &inst, rocjitsu::IsaFa
     const bool sopk_wait =
         operation == Operation::S_WAITCNT_VMCNT || operation == Operation::S_WAITCNT_VSCNT ||
         operation == Operation::S_WAITCNT_EXPCNT || operation == Operation::S_WAITCNT_LGKMCNT;
-    if (!sopk_wait)
+    if (!sopk_wait) {
       return std::nullopt;
+    }
     const auto selector = operand_value(0);
     const auto imm = operand_value(1);
-    if (!selector || !imm)
+    if (!selector || !imm) {
       return std::nullopt;
-    if (!scalar_selector_is_null(arch, *selector))
+    }
+    if (!scalar_selector_is_null(arch, *selector)) {
       return std::nullopt;
+    }
     const uint32_t value = *imm;
-    if (operation == Operation::S_WAITCNT_VMCNT)
+    if (operation == Operation::S_WAITCNT_VMCNT) {
       set_field(WaitCounterKind::Load, value);
-    else if (operation == Operation::S_WAITCNT_VSCNT)
+    } else if (operation == Operation::S_WAITCNT_VSCNT) {
       set_field(WaitCounterKind::Store, value);
-    else if (operation == Operation::S_WAITCNT_EXPCNT)
+    } else if (operation == Operation::S_WAITCNT_EXPCNT) {
       set_field(WaitCounterKind::Exp, value);
-    else
+    } else {
       set_field(WaitCounterKind::Ds, value);
+    }
     return fields;
   }
 
   const auto value = operand_value(0);
-  if (!value)
+  if (!value) {
     return std::nullopt;
-  if (operation == Operation::S_WAIT_LOADCNT)
+  }
+  if (operation == Operation::S_WAIT_LOADCNT) {
     set_field(WaitCounterKind::Load, *value);
-  else if (operation == Operation::S_WAIT_STORECNT)
+  } else if (operation == Operation::S_WAIT_STORECNT) {
     set_field(WaitCounterKind::Store, *value);
-  else if (operation == Operation::S_WAIT_DSCNT)
+  } else if (operation == Operation::S_WAIT_DSCNT) {
     set_field(WaitCounterKind::Ds, *value);
-  else if (operation == Operation::S_WAIT_KMCNT)
+  } else if (operation == Operation::S_WAIT_KMCNT) {
     set_field(WaitCounterKind::Km, *value);
-  else if (operation == Operation::S_WAIT_SAMPLECNT)
+  } else if (operation == Operation::S_WAIT_SAMPLECNT) {
     set_field(WaitCounterKind::Sample, *value);
-  else if (operation == Operation::S_WAIT_BVHCNT)
+  } else if (operation == Operation::S_WAIT_BVHCNT) {
     set_field(WaitCounterKind::Bvh, *value);
-  else if (operation == Operation::S_WAIT_EXPCNT)
+  } else if (operation == Operation::S_WAIT_EXPCNT) {
     set_field(WaitCounterKind::Exp, *value);
-  else if (operation == Operation::S_WAIT_XCNT)
+  } else if (operation == Operation::S_WAIT_XCNT) {
     set_field(WaitCounterKind::X, *value);
-  else if (operation == Operation::S_WAIT_ASYNCCNT)
+  } else if (operation == Operation::S_WAIT_ASYNCCNT) {
     set_field(WaitCounterKind::Async, *value);
-  else if (operation == Operation::S_WAIT_TENSORCNT)
+  } else if (operation == Operation::S_WAIT_TENSORCNT) {
     set_field(WaitCounterKind::Tensor, *value);
-  else if (operation == Operation::S_WAIT_LOADCNT_DSCNT) {
+  } else if (operation == Operation::S_WAIT_LOADCNT_DSCNT) {
     set_field(WaitCounterKind::Load, (*value >> 8u) & 0x3fu);
     set_field(WaitCounterKind::Ds, *value & 0x3fu);
   } else if (operation == Operation::S_WAIT_STORECNT_DSCNT) {

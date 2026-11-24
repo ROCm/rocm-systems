@@ -95,8 +95,9 @@ struct RegAllocation {
   uint32_t count = 0; ///< Number of registers allocated.
 
   [[nodiscard]] constexpr bool contains(uint32_t physical_base, uint32_t physical_count = 1) const {
-    if (physical_count == 0 || physical_base < base)
+    if (physical_count == 0 || physical_base < base) {
       return false;
+    }
     const uint32_t offset = physical_base - base;
     return offset < count && physical_count <= count - offset;
   }
@@ -160,8 +161,9 @@ public:
   }
 
   bool exceeds_rounded_sgpr_allocation(uint32_t index, uint32_t width = 1) const {
-    if (!arch_is_cdna_4_or_lower(cu().arch()))
+    if (!arch_is_cdna_4_or_lower(cu().arch())) {
       return false;
+    }
     const auto count = rounded_sgpr_count(num_sgprs_, cu().sgprs_per_wf());
     return !RegAllocation{0, count}.contains(index, width);
   }
@@ -201,8 +203,9 @@ public:
     }
     const bool was_runnable = !is_halted() && !debug_paused();
     status_raw_ = val;
-    if (was_runnable != (!is_halted() && !debug_paused()))
+    if (was_runnable != (!is_halted() && !debug_paused())) {
       update_activity_counts(!is_halted(), was_runnable);
+    }
   }
 
   uint32_t ib_sts2_gfx11() const { return ib_sts2_gfx11_ | (uint32_t(wf_size() == 64) << 11); }
@@ -287,8 +290,9 @@ public:
   /// @brief Return the two-bit VGPR high-bank selector for an operand role.
   uint32_t vgpr_msb_for_role(VgprMsbRole role) const {
     const unsigned field = static_cast<unsigned>(role);
-    if (field > static_cast<unsigned>(VgprMsbRole::Dst))
+    if (field > static_cast<unsigned>(VgprMsbRole::Dst)) {
       return 0;
+    }
     // The zero field for None precedes Src0/Src1/Src2/Dst. Padding the byte
     // with that field makes every role one shift without a selector switch.
     return ((uint32_t{vgpr_msb_mode_} << 2) >> (field * 2)) & 3u;
@@ -368,8 +372,9 @@ public:
 
   /// @brief Share the dispatch-scoped VM snapshot with this wave.
   void set_vm_access(util::IntrusiveSharedPtr<const GpuVmAccessSnapshot> access) {
-    if (access && !execution_root_access_)
+    if (access && !execution_root_access_) {
       execution_root_access_ = access;
+    }
     vm_access_ = std::move(access);
   }
   [[nodiscard]] bool same_execution_root(const GpuVmAccess &access) const {
@@ -394,8 +399,9 @@ public:
   /// @brief Address of this instruction in the GPU VM. PM4 indirect branches
   /// leave a raw PC, while DRM maps the high half at sign-extended addresses.
   uint64_t vm_instruction_pc() const {
-    if (!drm_shader_addresses_ || pc < (uint64_t{1} << 47))
+    if (!drm_shader_addresses_ || pc < (uint64_t{1} << 47)) {
       return pc;
+    }
     const unsigned bits = cu().arch() == rocjitsu::IsaFamily::Cdna5 ? 57 : 48;
     return (pc >> (bits - 1)) == 1 ? pc | (~uint64_t{0} << bits) : pc;
   }
@@ -755,8 +761,9 @@ public:
   MemoryWaitScoreboard *memory_wait_scoreboard() const { return memory_wait_scoreboard_.get(); }
   MemoryWaitScoreboard &ensure_memory_wait_scoreboard() {
     assert(memory_wait_checks_enabled_ && "memory wait checking is disabled");
-    if (!memory_wait_scoreboard_)
+    if (!memory_wait_scoreboard_) {
       memory_wait_scoreboard_ = std::make_unique<MemoryWaitScoreboard>(memory_wait_shadow_);
+    }
     return *memory_wait_scoreboard_;
   }
 
@@ -777,8 +784,9 @@ public:
   /// counters use their no-wait values, even if a previous wait used them.
   void wait_for(WaitTarget target) {
     wait_target_ = target;
-    if (!wait_satisfied())
+    if (!wait_satisfied()) {
       set_state(WfState::WAITCNT);
+    }
   }
 
   /// Wait for every modeled memory pipeline, including stores and async DMA.
@@ -857,8 +865,9 @@ public:
   void set_state(WfState s) {
     const bool was_active = !is_halted();
     state_ = s;
-    if (was_active != !is_halted())
+    if (was_active != !is_halted()) {
       update_activity_counts(was_active, was_active && !debug_paused());
+    }
   }
 
   /// @brief Check whether this wavefront slot is halted.
@@ -919,8 +928,9 @@ public:
 
   /// EXEC words actually written by this instruction, even when the values agree.
   std::optional<RegisterRef> instruction_exec_write() const {
-    if (!exec_written_words_)
+    if (!exec_written_words_) {
       return std::nullopt;
+    }
     return RegisterRef{RegClass::EXEC, static_cast<uint16_t>(exec_written_words_ == 2),
                        static_cast<uint8_t>(exec_written_words_ == 3 ? 2 : 1)};
   }
@@ -943,8 +953,9 @@ public:
 
   /// @brief Write a trap temporary register (TTMP0-15).
   void set_ttmp(uint32_t idx, uint32_t val) {
-    if (idx < 16)
+    if (idx < 16) {
       ttmp_[idx] = val;
+    }
   }
 
   void delay_nop_issue(uint32_t extra_cycles) {
@@ -982,15 +993,17 @@ public:
   }
   void issue_sleep_with_credit(uint32_t delay) {
     // A failed S_SLEEP_VAR operand read must leave its one-shot credit intact.
-    if (instruction_execution_failed())
+    if (instruction_execution_failed()) {
       return;
+    }
     sleep_cycles_ = sleep_wakeup_ ? 0 : delay;
     sleep_wakeup_ = false;
   }
   static constexpr uint32_t kSleepForever = UINT32_MAX;
   void tick_sleep() {
-    if (sleep_cycles_ != kSleepForever)
+    if (sleep_cycles_ != kSleepForever) {
       --sleep_cycles_;
+    }
   }
   bool shader_can_write_ttmp() const {
     return in_trap_handler() || (status_raw() & kStatusPrivMask);
@@ -1002,8 +1015,9 @@ public:
                        arch != rocjitsu::IsaFamily::Cdna2 && arch != rocjitsu::IsaFamily::Cdna3 &&
                        arch != rocjitsu::IsaFamily::Cdna4;
     if (fatal) {
-      if (uses_separate_trap_ctrl() && !in_trap_handler())
+      if (uses_separate_trap_ctrl() && !in_trap_handler()) {
         return;
+      }
       set_status_raw(halt ? status_raw() | kStatusFatalHaltMask
                           : status_raw() & ~kStatusFatalHaltMask);
     } else {
@@ -1084,8 +1098,9 @@ public:
   /// Sample the exception enable at completion; save the resume PC at trap entry.
   void complete_flat_memory_violation() {
     trapsts_ |= 1u << 8;
-    if ((mode_raw() & (1u << 20)) && !in_trap_handler())
+    if ((mode_raw() & (1u << 20)) && !in_trap_handler()) {
       pending_memory_trap_ = MemoryTrapDelivery::TrapShaderOnly;
+    }
   }
   /// A scratch B64 atomic raises an unmaskable aperture violation at VMEM completion.
   void request_unmaskable_memory_trap() { pending_memory_trap_ = MemoryTrapDelivery::Unmaskable; }
@@ -1096,8 +1111,9 @@ public:
   /// @brief Accept MEM_VIOL on an RDNA2 memory instruction's completion bus.
   void record_rdna2_memory_violation() {
     trapsts_ |= 1u << 8;
-    if (mode_raw() & kRdna2MemoryViolationEnable)
+    if (mode_raw() & kRdna2MemoryViolationEnable) {
       set_state(WfState::MEMORY_TRAP);
+    }
   }
 
   /// @brief EXCP causes raised by the instruction currently executing.
@@ -1122,10 +1138,12 @@ public:
   void set_debug_halted(bool v) {
     const bool was_runnable = !is_halted() && !debug_paused();
     debug_halted_ = v;
-    if (v)
+    if (v) {
       clause_remaining_ = 0;
-    if (was_runnable != (!is_halted() && !debug_paused()))
+    }
+    if (was_runnable != (!is_halted() && !debug_paused())) {
       update_activity_counts(!is_halted(), was_runnable);
+    }
   }
 
   /// @brief Whether KFD has temporarily suspended this wave's queue.
@@ -1135,8 +1153,9 @@ public:
   void set_debug_suspended(bool v) {
     const bool was_runnable = !is_halted() && !debug_paused();
     debug_suspended_ = v;
-    if (was_runnable != (!is_halted() && !debug_paused()))
+    if (was_runnable != (!is_halted() && !debug_paused())) {
       update_activity_counts(!is_halted(), was_runnable);
+    }
   }
   /// @brief Runtime-suspended: the queue's queue_percentage went to zero.
   /// @details A separate reason from the debugger's, because the two overlap.
@@ -1146,8 +1165,9 @@ public:
   void set_runtime_suspended(bool v) {
     const bool was_runnable = !is_halted() && !debug_paused();
     runtime_suspended_ = v;
-    if (was_runnable != (!is_halted() && !debug_paused()))
+    if (was_runnable != (!is_halted() && !debug_paused())) {
       update_activity_counts(!is_halted(), was_runnable);
+    }
   }
 
   /// @brief Whether a *debugger* currently holds this wave stopped.
@@ -1162,11 +1182,13 @@ public:
 
   /// @brief Whether any reason currently keeps this wave from being issued.
   bool debug_paused() const {
-    if (debug_stopped() || runtime_suspended_)
+    if (debug_stopped() || runtime_suspended_) {
       return true;
+    }
     const uint32_t status = status_raw();
-    if (!(status & (kStatusHaltMask | kStatusFatalHaltMask)))
+    if (!(status & (kStatusHaltMask | kStatusFatalHaltMask))) {
       return false;
+    }
     return (status & kStatusFatalHaltMask) || (!in_trap_handler_ && !(status & kStatusPrivMask));
   }
   bool memory_trap_pending() const { return pending_memory_trap_ != MemoryTrapDelivery::None; }
@@ -1240,8 +1262,9 @@ public:
   /// The PC is advanced past the s_trap by the caller (issue_instruction), so
   /// the saved PC points just after the trap, matching the ROCr trap handler.
   void debug_trap(uint32_t trap_id) {
-    if (supports_sleep_wakeup_credit())
+    if (supports_sleep_wakeup_credit()) {
       set_sleep_cycles(0);
+    }
     trap_id_ = trap_id;
     set_debug_halted(true);
     single_step_ = false;
@@ -1319,10 +1342,11 @@ public:
   /// ENDING until the memory pipeline completes the outstanding work.
   void end(EndReason reason = EndReason::Normal) {
     end_reason_ = reason;
-    if (wait_counters_.empty())
+    if (wait_counters_.empty()) {
       halt();
-    else
+    } else {
       set_state(WfState::ENDING);
+    }
   }
 
   /// @brief Log instruction count at end for trace/debug.
@@ -1398,8 +1422,9 @@ public:
     gws_wait_seq_ = 0;
     gws_wait_steps_ = 0;
     gws_wait_progress_ = 0;
-    if (memory_wait_scoreboard_)
+    if (memory_wait_scoreboard_) {
       memory_wait_scoreboard_->clear();
+    }
     wait_counters_ = {};
     end_reason_ = EndReason::None;
     wait_target_ = {};
@@ -1409,8 +1434,9 @@ public:
     clause_remaining_ = 0;
     clause_kind_ = 0;
     set_state(WfState::HALTED);
-    for (auto &t : ttmp_)
+    for (auto &t : ttmp_) {
       t = 0;
+    }
     trapsts_ = 0;
     pending_alu_causes_ = 0;
     lds_source_read_ = {};
@@ -1525,10 +1551,11 @@ private:
     return pair.backed_words ? read_backed_sgpr_pair(pair) : pair.local;
   }
   void write_sgpr_pair(SgprPair &pair, uint64_t value) {
-    if (pair.backed_words)
+    if (pair.backed_words) {
       write_backed_sgpr_pair(pair, value);
-    else
+    } else {
       pair.local = value;
+    }
   }
   uint64_t read_backed_sgpr_pair(const SgprPair &pair) const;
   void write_backed_sgpr_pair(SgprPair &pair, uint64_t value);
@@ -1626,13 +1653,15 @@ public:
     return slot < plugin_states_.size() && plugin_states_[slot] != nullptr;
   }
   void set_plugin_state(uint32_t slot, std::unique_ptr<WavefrontState> s) {
-    if (plugin_states_.size() <= slot)
+    if (plugin_states_.size() <= slot) {
       plugin_states_.resize(slot + 1);
+    }
     plugin_states_[slot] = std::move(s);
   }
   void clear_plugin_state(uint32_t slot) {
-    if (slot < plugin_states_.size())
+    if (slot < plugin_states_.size()) {
       plugin_states_[slot].reset();
+    }
   }
 
 private:
@@ -1706,15 +1735,17 @@ inline uint32_t apply_gpr_idx(const Wavefront &wf, uint32_t vgpr_off, VgprMsbRol
   const bool cdna2 = wf.cu().arch() == rocjitsu::IsaFamily::Cdna2;
   // Relative indexing applies to architectural VGPRs. Accumulator selectors
   // retain their register number, including on ACCVGPR_MOV/READ/WRITE.
-  if (cdna2 && vgpr_off >= ACC_VGPR_OFFSET)
+  if (cdna2 && vgpr_off >= ACC_VGPR_OFFSET) {
     return vgpr_off;
+  }
   const uint32_t offset = wf.gpr_idx_en() && gpr_idx_role_enabled(wf.gpr_idx_mode(), role)
                               ? vgpr_off + wf.gpr_idx_offset()
                               : vgpr_off;
   // MI200 §3.6.1 redirects an out-of-allocation source to v0.
   if (cdna2 && role != VgprMsbRole::Dst && role != VgprMsbRole::None &&
-      (offset >= ACC_VGPR_OFFSET || !wf.unified_vgpr_range_is_allocated(offset, 1)))
+      (offset >= ACC_VGPR_OFFSET || !wf.unified_vgpr_range_is_allocated(offset, 1))) {
     return 0;
+  }
   return offset;
 }
 

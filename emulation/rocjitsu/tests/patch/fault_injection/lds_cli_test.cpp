@@ -49,19 +49,22 @@ protected:
   int run(std::vector<std::string> args) {
     args.insert(args.begin(), cli_);
     std::vector<char *> argv;
-    for (std::string &arg : args)
+    for (std::string &arg : args) {
       argv.push_back(arg.data());
+    }
     argv.push_back(nullptr);
     const pid_t pid = fork();
     if (pid == 0) {
       execv(argv[0], argv.data());
       _exit(127);
     }
-    if (pid < 0)
+    if (pid < 0) {
       return -1;
+    }
     int status = 0;
-    if (waitpid(pid, &status, 0) != pid || !WIFEXITED(status))
+    if (waitpid(pid, &status, 0) != pid || !WIFEXITED(status)) {
       return -1;
+    }
     return WEXITSTATUS(status);
   }
   std::vector<std::string> args() const {
@@ -321,8 +324,9 @@ TEST_F(FaultLdsCli, Gfx1200InvalidRequestsDoNotPublishOutput) {
 TEST_F(FaultLdsCli, TwoAddressExactOrdinalAndLibraryAgree) {
   for (const test::TwoAddressTarget &target : test::kTwoAddressTargets) {
     for (bool wave32 : {false, true}) {
-      if (target.cdna && wave32)
+      if (target.cdna && wave32) {
         continue;
+      }
       SCOPED_TRACE(static_cast<int>(target.target));
       SCOPED_TRACE(wave32);
       const uint32_t allocation = wave32 ? 32 : 16;
@@ -391,8 +395,9 @@ std::vector<SubwordCliCase> subword_cli_cases() {
         std::span<const test::LdsFormCase>(test::kRemainingSubwordCases)}) {
     for (const test::LdsFormCase &fixture : fixtures) {
       cases.push_back({.fixture = fixture, .wave32 = false});
-      if (fixture.arch == IsaFamily::Rdna4)
+      if (fixture.arch == IsaFamily::Rdna4) {
         cases.push_back({.fixture = fixture, .wave32 = true});
+      }
     }
   }
   return cases;

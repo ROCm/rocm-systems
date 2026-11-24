@@ -50,22 +50,26 @@ protected:
 
   void check_workgroup_barrier(std::span<const uint32_t> code, std::array<uint32_t, 2> expected) {
     constexpr uint64_t pc = 0x1000;
-    for (size_t i = 0; i < code.size(); ++i)
+    for (size_t i = 0; i < code.size(); ++i) {
       memory.write32(pc + i * 4, code[i]);
+    }
     cu->begin_workgroup(0, 0, 2);
     wave->pc = pc;
     auto *peer = cu->dispatch_wf(0, pc, 106, 16);
     ASSERT_NE(peer, nullptr);
     const std::array waves{wave, peer};
     std::array<uint32_t, 2> results{0xffffffffu, 0xffffffffu};
-    for (auto *member : waves)
+    for (auto *member : waves) {
       cu->write_sgpr(member->sgpr_alloc().base, 0xffffffffu);
+    }
     for (unsigned tick = 0; tick < 64 && !cu->is_idle(); ++tick) {
       cu->step();
       // Wave retirement releases and clears its registers. Capture s0 at ENDPGM.
-      for (size_t i = 0; i < waves.size(); ++i)
-        if (!waves[i]->is_halted() && waves[i]->pc == pc + code.size_bytes() - sizeof(uint32_t))
+      for (size_t i = 0; i < waves.size(); ++i) {
+        if (!waves[i]->is_halted() && waves[i]->pc == pc + code.size_bytes() - sizeof(uint32_t)) {
           results[i] = cu->read_sgpr(waves[i]->sgpr_alloc().base);
+        }
+      }
     }
     EXPECT_TRUE(wave->is_halted());
     EXPECT_TRUE(peer->is_halted());
@@ -82,8 +86,9 @@ protected:
 
   void set_mode(uint32_t mode) {
     // GFX11.5 has a selectable IEEE arithmetic mode. GFX12 uses IEEE NaN propagation.
-    if (GetParam() == rocjitsu::IsaFamily::Rdna3_5)
+    if (GetParam() == rocjitsu::IsaFamily::Rdna3_5) {
       mode |= amdgpu::Wavefront::IEEE_BIT;
+    }
     wave->set_mode_raw(mode);
   }
 };

@@ -20,8 +20,9 @@ namespace rocjitsu::test {
 
 inline uint32_t checked_encoding(const FailureOr<uint32_t> &encoding) {
   EXPECT_TRUE(encoding.succeeded());
-  if (encoding.failed())
+  if (encoding.failed()) {
     return 0;
+  }
   return encoding.value();
 }
 
@@ -33,14 +34,16 @@ constexpr uint32_t kMov = 0xbe800081u;
 inline std::vector<uint32_t> make_barrier_words(const DropTargetRow &row) {
   // RDNA3 generated test_encodings.h: s_waitcnt and full s_barrier differ
   // from CDNA. Offset 4/16 barriers surround unchanged waits and s_mov_b32.
-  if (row.arch == IsaFamily::Rdna3)
+  if (row.arch == IsaFamily::Rdna3) {
     return {0xbf890000u, 0xbfbd0000u, kMov,
             0xbf890000u, 0xbfbd0000u, checked_encoding(build_s_endpgm(row.arch))};
+  }
   const uint32_t wait = row.split ? kWaitDscnt : 0xbf8c0000u;
-  if (row.split)
+  if (row.split) {
     return {wait,  kSignal, kMov,
             kWait, wait,    kSignal,
             kMov,  kWait,   checked_encoding(build_s_endpgm(row.arch))};
+  }
   return {wait, 0xbf8a0000u, kMov, wait, 0xbf8a0000u, checked_encoding(build_s_endpgm(row.arch))};
 }
 
@@ -49,8 +52,9 @@ inline std::vector<uint8_t> make_barrier_elf_for_target(const DropTargetRow &row
                                                         bool siblings = false) {
   constexpr uint32_t kSecondEntryByteOffset = 256;
   const IsaTargetBinding *binding = default_isa_target_registry().find_target(row.target);
-  if (!binding)
+  if (!binding) {
     return {};
+  }
   if (siblings) {
     const std::vector<uint32_t> body = words;
     words.resize(kSecondEntryByteOffset / sizeof(uint32_t),
@@ -72,12 +76,14 @@ inline std::vector<uint8_t> make_barrier_elf_for_target(const DropTargetRow &row
       scan_kernel_descriptors(image, text.sectionOffset(), text.size(), text.sectionHeaderIndex());
   for (const KernelDescriptorInfo &kernel : descriptors) {
     amdhsa::kernel_descriptor_t descriptor = kernel.descriptor;
-    if (row.wave_size == 32)
+    if (row.wave_size == 32) {
       descriptor.kernel_code_properties |= amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32;
-    else
+    } else {
       descriptor.kernel_code_properties &= ~amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32;
-    if (siblings && kernel.kernel_name == "test_kernel1")
+    }
+    if (siblings && kernel.kernel_name == "test_kernel1") {
       descriptor.kernel_code_entry_byte_offset += kSecondEntryByteOffset;
+    }
     std::memcpy(image.data() + kernel.descriptor_file_offset, &descriptor, sizeof(descriptor));
   }
   return image;

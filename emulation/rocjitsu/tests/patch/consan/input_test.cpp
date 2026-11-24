@@ -254,8 +254,9 @@ protected:
     const util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, kTarget.arch);
     ASSERT_TRUE(maybe_nop.succeeded());
     const uint32_t nop = maybe_nop.value();
-    for (uint32_t offset = sizeof(uint32_t); offset < first_size; offset += sizeof(uint32_t))
+    for (uint32_t offset = sizeof(uint32_t); offset < first_size; offset += sizeof(uint32_t)) {
       std::memcpy(patched.data() + anchor + offset, &nop, sizeof(nop));
+    }
     CodeObjectPatcher patcher(source);
     ASSERT_TRUE(patcher.replace_text(patched));
     image = std::move(patcher).emit();
@@ -667,8 +668,9 @@ TEST_F(ConSanInputFixture, LdsAccessOrderAtAJoinIncludesEveryPredecessor) {
     words[first + 4] = join_branch.value();
     std::memcpy(words.data() + first + 6, text.data() + read, 8);
     words[first + 8] = terminator.value();
-    if (high_access)
+    if (high_access) {
       std::memcpy(words.data() + first + 10, text.data() + write, 8);
+    }
     words[first + 12] = backward_branch.value();
     CodeObjectPatcher patcher(source);
     ASSERT_TRUE(patcher.replace_text(

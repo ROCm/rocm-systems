@@ -98,8 +98,9 @@ constexpr TrapInterruptSite classify_pre_gfx12_trap_interrupt_site(rocjitsu::Isa
                                                                    uint32_t payload_move,
                                                                    uint32_t delay) {
   constexpr uint32_t kSNop0 = 0xBF800000u;
-  if (delay != kSNop0)
+  if (delay != kSNop0) {
     return TrapInterruptSite::Unknown;
+  }
 
   uint32_t profiling_move = 0;
   uint32_t exception_move = 0;
@@ -125,10 +126,12 @@ constexpr TrapInterruptSite classify_pre_gfx12_trap_interrupt_site(rocjitsu::Isa
     return TrapInterruptSite::Unknown;
   }
 
-  if (payload_move == profiling_move)
+  if (payload_move == profiling_move) {
     return TrapInterruptSite::Profiling;
-  if (payload_move == exception_move)
+  }
+  if (payload_move == exception_move) {
     return TrapInterruptSite::QueueException;
+  }
   return TrapInterruptSite::Unknown;
 }
 
@@ -143,9 +146,10 @@ struct IpcHandleKey {
 struct IpcHandleKeyHash {
   size_t operator()(const IpcHandleKey &key) const {
     size_t hash_value = std::hash<uint32_t>{}(key.words[0]);
-    for (int idx = 1; idx < 4; idx++)
+    for (int idx = 1; idx < 4; idx++) {
       hash_value ^= std::hash<uint32_t>{}(key.words[idx]) + 0x9e3779b9 + (hash_value << 6) +
                     (hash_value >> 2);
+    }
     return hash_value;
   }
 };
@@ -402,8 +406,9 @@ public:
 
     void report_memory_fault(uint32_t vmid, uint64_t addr,
                              amdgpu::MemoryFaultCause cause) override {
-      if (process_ != nullptr && process_->process_id() == vmid)
+      if (process_ != nullptr && process_->process_id() == vmid) {
         driver_->report_memory_fault(process_, addr, gpu_id_, cause);
+      }
     }
 
   private:
@@ -997,9 +1002,11 @@ private:
 
   /// @brief Get the ordinal (0-based index) for a gpu_id. Returns 0 if not found.
   uint32_t gpu_ordinal(uint32_t gpu_id) const {
-    for (uint32_t i = 0; i < gpus_.size(); ++i)
-      if (gpus_[i].gpu_id == gpu_id)
+    for (uint32_t i = 0; i < gpus_.size(); ++i) {
+      if (gpus_[i].gpu_id == gpu_id) {
         return i;
+      }
+    }
     return 0;
   }
 

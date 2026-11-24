@@ -17,8 +17,9 @@ namespace rocjitsu::kmd {
 
 uint64_t keeper_ipc_namespace() {
   struct stat info {};
-  if (host_call(libc_passthrough().stat, ::stat, "/proc/self/ns/ipc", &info) != 0)
+  if (host_call(libc_passthrough().stat, ::stat, "/proc/self/ns/ipc", &info) != 0) {
     return 0;
+  }
   return info.st_ino;
 }
 
@@ -42,10 +43,12 @@ int send_keeper_descriptor(int socket, const void *data, size_t size, int fd, co
   do {
     sent = host_call(libc_passthrough().sendmsg, ::sendmsg, socket, &message, MSG_NOSIGNAL | flags);
   } while (sent < 0 && errno == EINTR);
-  if (sent == static_cast<long>(size + payload_size))
+  if (sent == static_cast<long>(size + payload_size)) {
     return 0;
-  if (sent >= 0)
+  }
+  if (sent >= 0) {
     errno = EIO;
+  }
   return -1;
 }
 
@@ -70,32 +73,38 @@ long receive_keeper_descriptor(int socket, void *data, size_t size, int &fd, int
                          flags | MSG_CMSG_CLOEXEC);
   } while (received < 0 && errno == EINTR);
   fd = -1;
-  if (sender_pid)
+  if (sender_pid) {
     *sender_pid = -1;
-  if (missing_descriptor)
+  }
+  if (missing_descriptor) {
     *missing_descriptor = false;
+  }
   unsigned descriptors = 0;
-  if (received < 0)
+  if (received < 0) {
     return received;
+  }
   for (auto *header = CMSG_FIRSTHDR(&message); header; header = CMSG_NXTHDR(&message, header)) {
-    if (header->cmsg_level != SOL_SOCKET)
+    if (header->cmsg_level != SOL_SOCKET) {
       continue;
+    }
     if (sender_pid && header->cmsg_type == SCM_CREDENTIALS &&
         header->cmsg_len == CMSG_LEN(sizeof(ucred))) {
       ucred credentials{};
       std::memcpy(&credentials, CMSG_DATA(header), sizeof(credentials));
       *sender_pid = credentials.pid;
     }
-    if (header->cmsg_type != SCM_RIGHTS)
+    if (header->cmsg_type != SCM_RIGHTS) {
       continue;
+    }
     const auto count = (header->cmsg_len - CMSG_LEN(0)) / sizeof(int);
     for (size_t index = 0; index < count; ++index) {
       int incoming;
       std::memcpy(&incoming, CMSG_DATA(header) + index * sizeof(int), sizeof(incoming));
-      if (++descriptors == 1)
+      if (++descriptors == 1) {
         fd = incoming;
-      else
+      } else {
         host_close_fd(incoming);
+      }
     }
   }
   // A full receiving fd table drops SCM_RIGHTS but preserves the request bytes.

@@ -316,8 +316,9 @@ protected:
       EXPECT_EQ(regs.read_lane(*operand, 0), *raw_carrier);
       std::array<uint32_t, 3> values{};
       regs.read_chunk(*operand, 0, values.size(), values.data());
-      for (uint32_t value : values)
+      for (uint32_t value : values) {
         EXPECT_EQ(value, *raw_carrier);
+      }
     }
     ASSERT_NO_FATAL_FAILURE(
         expect_execution(words, literal ? 12u : 8u, operation.mnemonic, expected));

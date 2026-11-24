@@ -43,8 +43,9 @@ protected:
                        /*override_launch=*/true);
   }
   void TearDown() override {
-    if (wf_)
+    if (wf_) {
       wf_->halt();
+    }
   }
   void write_vector(unsigned reg, uint32_t word, unsigned lane = 0) {
     cu_->write_vgpr(wf_->vgpr_alloc().base + reg, lane, word);
@@ -143,8 +144,9 @@ TEST_F(Rdna4MemoryTest, UpperWave64DsRunEndsAtPartialDword) {
     EXPECT_EQ(wf_->lds().read32(lane * 4), 0x11223344u);
     EXPECT_EQ(read_vector(4, lane), 0xaabbccddu);
   }
-  for (unsigned lane = 48; lane < 63; ++lane)
+  for (unsigned lane = 48; lane < 63; ++lane) {
     EXPECT_EQ(read_vector(4, lane), 0x55667700u + lane);
+  }
   // gfx12 stores retain individual bytes. Loads require a whole dword.
   EXPECT_EQ(wf_->lds().read32(63 * 4), 0x1122773fu);
   EXPECT_EQ(read_vector(4, 63), 0u);
@@ -333,8 +335,9 @@ TEST_F(Rdna4MemoryTest, TransposeReadsOnlyItsAddressLanesAndWritesTheWholeWave) 
         ASSERT_TRUE(cu_->execute_instruction(inst.value().get(), *wf_).succeeded());
         const auto reads = vgpr_read_events(*seen);
         ASSERT_EQ(reads.size(), scalar_base ? 1u : 2u);
-        for (const auto &read : reads)
+        for (const auto &read : reads) {
           EXPECT_EQ(read.lane_mask, address_lanes);
+        }
         ASSERT_NE(inst.value()->data(), nullptr);
         EXPECT_EQ(inst.value()->data_as<VectorMemState>()->lane_mask, live);
         for (unsigned lane : {0u, wave_size - 1}) {
@@ -359,8 +362,9 @@ TEST_F(Rdna4MemoryTest, GlobalTransposeAllocatesOnlyTheReturnedWaveWords) {
     wf_ = cu_->dispatch_wf(0, pc, 106, 32, wave_size);
     ASSERT_NE(wf_, nullptr);
     wf_->set_exec(wave_size == 64 ? UINT64_MAX : UINT32_MAX);
-    for (unsigned word = 0; word < 256; ++word)
+    for (unsigned word = 0; word < 256; ++word) {
       memory_.write32(0x20000 + word * 4, word + 1);
+    }
     for (unsigned lane = 0; lane < wave_size; ++lane) {
       write_vector(2, 0x20000 + 16 * lane, lane);
       write_vector(3, 0, lane);
@@ -370,8 +374,9 @@ TEST_F(Rdna4MemoryTest, GlobalTransposeAllocatesOnlyTheReturnedWaveWords) {
       for (unsigned overflow : {0u, 1u}) {
         SCOPED_TRACE(testing::Message() << wave_size << ' ' << width << ' ' << overflow);
         const unsigned dst = 32 - output_words + overflow;
-        for (unsigned reg = dst; reg < dst + width; ++reg)
+        for (unsigned reg = dst; reg < dst + width; ++reg) {
           write_vector(reg, sentinel);
+        }
         const std::array<uint32_t, 3> words{op, dst, 2u};
         auto decoded = decoder_->decode(words.data());
         ASSERT_TRUE(decoded.succeeded());

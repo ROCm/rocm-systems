@@ -11,8 +11,9 @@
 namespace {
 
 bool write(const std::filesystem::path &path, std::span<const uint8_t> bytes) {
-  if (!std::in_range<std::streamsize>(bytes.size()))
+  if (!std::in_range<std::streamsize>(bytes.size())) {
     return false;
+  }
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
   file.write(reinterpret_cast<const char *>(bytes.data()),
              static_cast<std::streamsize>(bytes.size()));
@@ -91,23 +92,26 @@ int run(int argc, char **argv) {
   }
   constexpr std::string_view kHex = "0123456789abcdef";
   std::cout << "selection_profile=";
-  for (const uint8_t byte : artifact.value().facts.selection_profile)
+  for (const uint8_t byte : artifact.value().facts.selection_profile) {
     std::cout << kHex[byte >> 4] << kHex[byte & 15];
+  }
   std::cout << '\n';
   for (const rocjitsu::consan::ImageEntryFacts &entry : artifact.value().facts.entries) {
     std::cout << "entry=" << entry.binding.name << " key=" << entry.key
               << " disposition=" << (entry.selected ? "selected" : "native") << '\n';
-    if (!entry.selected)
+    if (!entry.selected) {
       continue;
+    }
     const rocjitsu::consan::Manifest &manifest = *entry.selected;
     std::cout << "prepared_bytes=" << manifest.prepared.bytes << " sites=" << manifest.sites.size()
               << " entry_offset=" << manifest.entry.prepared_entry_offset
               << " sgprs=" << manifest.entry.prepared_sgprs
               << " vgprs=" << manifest.entry.prepared_vgprs << '\n';
-    for (const rocjitsu::consan::SiteFacts &site : manifest.sites)
+    for (const rocjitsu::consan::SiteFacts &site : manifest.sites) {
       std::cout << "site=" << site.id << " original=" << site.original_offset
                 << " guest=" << site.prepared_guest_offset << " probe=" << site.probe_offset
                 << " probe_bytes=" << site.probe_size << '\n';
+    }
   }
   return 0;
 }
