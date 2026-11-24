@@ -409,7 +409,7 @@ FailureOr<uint32_t> lds_race_row_stride(size_t sites, InputError &error, bool ha
   return static_cast<uint32_t>(stride);
 }
 
-Result validate_lds_race_accesses(const InputProgram &program, const PreparedArtifact &artifact,
+Result validate_lds_race_accesses(const InputProgram &program, const Manifest &manifest,
                                   std::span<BasicBlock *const> blocks,
                                   std::span<const uint8_t> prepared_text, InputError &error) {
   std::set<uint64_t> barrier_offsets;
@@ -425,7 +425,7 @@ Result validate_lds_race_accesses(const InputProgram &program, const PreparedArt
         access_offsets.insert(instruction.src_loc());
     }
   std::set<uint64_t> expected_barriers;
-  for (const BarrierFacts &barrier : artifact.manifest.barriers) {
+  for (const BarrierFacts &barrier : manifest.barriers) {
     expected_barriers.insert(barrier.prepared_signal);
     expected_barriers.insert(barrier.prepared_wait);
     if (std::memcmp(program.image.data() + program.text_file_offset + barrier.original_signal,
@@ -436,9 +436,9 @@ Result validate_lds_race_accesses(const InputProgram &program, const PreparedArt
   }
   if (barrier_offsets != expected_barriers)
     return reject(error, "final reachable barrier multiplicity differs from original");
-  if (access_offsets.size() != artifact.manifest.sites.size())
+  if (access_offsets.size() != manifest.sites.size())
     return reject(error, "final reachable guest access multiplicity differs from original");
-  for (const SiteFacts &site : artifact.manifest.sites)
+  for (const SiteFacts &site : manifest.sites)
     if (!access_offsets.contains(site.prepared_guest_offset) ||
         std::memcmp(program.image.data() + program.text_file_offset + site.original_offset,
                     prepared_text.data() + site.prepared_guest_offset, 8) != 0)

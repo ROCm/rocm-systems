@@ -3,7 +3,13 @@
 
 # A leaf dependency for all three ConSan stages. Do not add compiler, ISA,
 # simulator or live HSA dependencies here.
-add_library(rocjitsu_consan_contract STATIC contract.cpp capture.cpp)
+add_library(
+    rocjitsu_consan_contract
+    STATIC
+    contract.cpp
+    capture.cpp
+    image/facts.cpp
+)
 target_include_directories(
     rocjitsu_consan_contract
     PUBLIC

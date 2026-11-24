@@ -33,6 +33,7 @@ enum class HwregState : uint8_t {
   IbSts2Gfx11,
   IbDbgGfx11,
   HwId1Gfx11,
+  HwId2Gfx11,
   GprAllocGfx11,
   LdsAllocGfx11,
   StatePrivGfx12,
@@ -353,7 +354,7 @@ constexpr HwregDescriptor RDNA3_HWREGS[] = {
     {20, "SHADER_FLAT_SCRATCH_LO", HwregState::FlatScratchLo, HwregWritePolicy::Privileged},
     {21, "SHADER_FLAT_SCRATCH_HI", HwregState::FlatScratchHi, HwregWritePolicy::Privileged},
     {23, "HW_ID1", HwregState::HwId1Gfx11, HwregWritePolicy::ReadOnly},
-    {24, "HW_ID2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {24, "HW_ID2", HwregState::HwId2Gfx11, HwregWritePolicy::ReadOnly},
     {25, "POPS_PACKER", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {26, "SCHED_MODE", HwregState::WaveSchedMode, HwregWritePolicy::ReadOnly},
     {27, "PERF_SNAPSHOT_DATA", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -367,7 +368,9 @@ constexpr HwregDescriptor RDNA4_HWREGS[] = {
     {1, "WAVE_MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "WAVE_STATUS", HwregState::Status, HwregWritePolicy::ReadOnly},
     {4, "WAVE_STATE_PRIV", HwregState::StatePrivGfx12, HwregWritePolicy::Privileged},
-    {5, "WAVE_GPR_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    // GFX12 keeps GFX11's GPR_ALLOC layout (gc_12_0_0 SQ_WAVE_GPR_ALLOC), and
+    // its CWSR handler sizes the VGPR save from VGPR_SIZE exactly as on GFX11.
+    {5, "WAVE_GPR_ALLOC", HwregState::GprAllocGfx11, HwregWritePolicy::ReadOnly},
     {6, "WAVE_LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {10, "PERF_SNAPSHOT_DATA", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {11, "PERF_SNAPSHOT_PC_LO", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -382,7 +385,7 @@ constexpr HwregDescriptor RDNA4_HWREGS[] = {
     // The RDNA4 manual omits SE_ID and DP_RATE, but gc_12_0_0 SQ_WAVE_HW_ID1
     // keeps GFX11's layout and gfx1201 reports both there.
     {23, "WAVE_HW_ID1", HwregState::HwId1Gfx11, HwregWritePolicy::ReadOnly},
-    {24, "WAVE_HW_ID2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {24, "WAVE_HW_ID2", HwregState::HwId2Gfx11, HwregWritePolicy::ReadOnly},
     {28, "IB_STS2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {29, "SHADER_CYCLES_LO", HwregState::ShaderCyclesLoGfx12, HwregWritePolicy::ReadOnly},
     {30, "SHADER_CYCLES_HI", HwregState::ShaderCyclesHiGfx12, HwregWritePolicy::ReadOnly},
@@ -522,12 +525,13 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     raw_value = wf.mode_raw();
     return HwregAccessResult::Success;
   case HwregState::Gfx11Status:
+    // IDLE[28] tells a host reader that a wave has nothing in flight. The wave
+    // executing this S_GETREG never is, so it reads 0 (gfx1100 and gfx1201).
     raw_value = (wf.status_raw() & ~((7u << 9) | (1u << 12) | (1u << 16) | (1u << 28))) |
                 field_value(wf.exec() == 0, 9, 1) | field_value(wf.vcc_mask() == 0, 10, 1) |
                 field_value(wf.cu().in_multiwave_workgroup(), 11, 1) |
                 field_value(wf.state() == WfState::BARRIER, 12, 1) |
-                field_value(!wf.is_halted(), 16, 1) |
-                field_value(wf.wait_counters().empty(), 28, 1);
+                field_value(!wf.is_halted(), 16, 1);
     return HwregAccessResult::Success;
   case HwregState::GprAllocGfx11: {
     // The GFX11 CWSR handler interprets VGPR_SIZE+1 in units of four
@@ -548,6 +552,12 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     return HwregAccessResult::Success;
   case HwregState::HwId1Gfx11:
     raw_value = rdna3_4_hw_id1_raw(wf);
+    return HwregAccessResult::Success;
+  case HwregState::HwId2Gfx11:
+    // Every rocjitsu wave comes from a compute queue, which a MEC (ME_ID 1 or
+    // 2) services; gfx1100 and gfx1201 report ME_ID 1 for HIP queues. Compute
+    // waves have no graphics state context, so STATE_ID is zero.
+    raw_value = field_value(1, 8, 2);
     return HwregAccessResult::Success;
   case HwregState::IbStsGfx11: {
     const auto &counters = wf.wait_counters();
@@ -576,15 +586,15 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
          wf.cu().arch() == rocjitsu::IsaFamily::Cdna5)) {
       // SCC, user priority and HALT are in STATE_PRIV on GFX12. Derive the
       // live STATUS fields instead of exposing their legacy backing bits.
+      // IDLE[28] stays 0 for the reading wave, as for GFX11 above.
       constexpr uint32_t external_bits =
           (1u << 8) | (1u << 14) | (1u << 18) | (1u << 23) | (0xfu << 24) | (1u << 30);
-      raw_value =
-          (raw_value & external_bits) | field_value(wf.in_trap_handler(), 5, 1) |
-          field_value(wf.cu().trap_message_address(0x85) != 0, 6, 1) |
-          field_value(wf.exec() == 0, 9, 1) | field_value(wf.vcc_mask() == 0, 10, 1) |
-          field_value(wf.cu().in_multiwave_workgroup(), 11, 1) |
-          field_value(wf.trap_barrier_complete(), 15, 1) | field_value(!wf.is_halted(), 16, 1) |
-          field_value(wf.wait_counters().empty(), 28, 1) | field_value(wf.wf_size() == 64, 29, 1);
+      raw_value = (raw_value & external_bits) | field_value(wf.in_trap_handler(), 5, 1) |
+                  field_value(wf.cu().trap_message_address(0x85) != 0, 6, 1) |
+                  field_value(wf.exec() == 0, 9, 1) | field_value(wf.vcc_mask() == 0, 10, 1) |
+                  field_value(wf.cu().in_multiwave_workgroup(), 11, 1) |
+                  field_value(wf.trap_barrier_complete(), 15, 1) |
+                  field_value(!wf.is_halted(), 16, 1) | field_value(wf.wf_size() == 64, 29, 1);
     } else {
       constexpr uint32_t dynamic_bits = (1u << 6) | (7u << 9) | (1u << 12) | (1u << 16);
       raw_value = (raw_value & ~dynamic_bits) | ((wf.cu().trap_addresses().first != 0) << 6) |
@@ -767,6 +777,7 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
   case HwregState::IbSts2Gfx11:
   case HwregState::IbDbgGfx11:
   case HwregState::HwId1Gfx11:
+  case HwregState::HwId2Gfx11:
   case HwregState::IbStsGfx11:
   case HwregState::PcLo:
   case HwregState::PcHi:
@@ -1001,6 +1012,16 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
   if (desc->state == HwregState::HwId1Gfx11 &&
       ((field_intersects(decoded, 29, 3) && wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5) ||
        !rdna3_4_hw_id1_location_fits(wf, decoded))) {
+    value = 0;
+    return HwregAccessResult::Unsupported;
+  }
+
+  // RocJITsu does not map queues onto hardware queue slots, allocate
+  // workgroup slots, or keep a hardware VMID per wave: QUEUE_ID[3:0],
+  // PIPE_ID[5:4], WG_ID[20:16] and VM_ID[27:24] have no backing.
+  constexpr uint32_t kUnbackedHwId2Bits = 0xfu | (3u << 4) | (0x1fu << 16) | (0xfu << 24);
+  if (desc->state == HwregState::HwId2Gfx11 &&
+      ((decoded.mask << decoded.offset) & kUnbackedHwId2Bits)) {
     value = 0;
     return HwregAccessResult::Unsupported;
   }

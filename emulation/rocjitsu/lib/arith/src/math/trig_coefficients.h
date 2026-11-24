@@ -15,7 +15,7 @@ namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE::trig {
 // Captured rocjitsu RDNA3/4 coefficients in units of 2^-26, transposed for
 // SIMD gathers. Rows hold constant, linear, quadratic and cubic terms.
 // Columns 0..15 approximate sine and 16..31 cosine over the first octant.
-static const int32_t coefficients[4][32] = {
+static constexpr int32_t coefficients[4][32] = {
     {0,        3292874,  6577818,  9846914,  13092288, 16306122, 19480674, 22608294,
      25681450, 28692736, 31634898, 34500850, 37283686, 39976702, 42573412, 45067558,
      67108864, 67028028, 66785716, 66382510, 65819384, 65097694, 64219178, 63185952,

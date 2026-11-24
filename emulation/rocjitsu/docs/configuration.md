@@ -353,6 +353,11 @@ engine; SE_ID must fit in three bits. DP_RATE reads 1 on gfx11 and gfx12 and
 is unsupported on gfx11.5, which has no measured value. Reads touching an
 unrepresentable field warn and write zero.
 
+RDNA3/RDNA4 `HW_ID2` reports ME_ID 1, since every wave comes from a compute
+queue, and STATE_ID 0. RocJITsu has no hardware queue slots, workgroup slots
+or per-wave hardware VMID, so QUEUE_ID, PIPE_ID, WG_ID and VM_ID are
+unsupported and the default 32-bit `HW_ID2` read warns and writes zero.
+
 Omitted geometry fields inherit defaults selected by `gfx_target_version`.
 For a smaller topology, set both `num_cu_per_sh` and
 `num_shader_arrays_per_engine` to match its CU groups; for example, two arrays
@@ -429,12 +434,12 @@ rocjitsu responsibilities.
 
 Matrix adapters forward FP16_OVFL where applicable. Floating-point WMMA ignores
 guest rounding and denormal controls; integer WMMA does not accept those controls.
-rj-arith never explicitly changes host FP controls. It assumes the default host FP
-environment: round-to-nearest, FTZ/DAZ disabled, and exceptions masked. In local mode,
-the executable must satisfy this precondition too: linking with `-ffast-math` can
-enable FTZ/DAZ before emulation starts. Arithmetic may set host sticky exception flags. Compatibility deliberately
-does not retain legacy host-environment isolation; nondefault host controls are
-outside the contract in every semantics mode. `RJ_FORCE_SCALAR`
+rocjitsu, including rj-arith, assumes the default host FP environment: round-to-nearest,
+FTZ/DAZ disabled, and exceptions masked. rj-arith never explicitly changes host FP
+controls. In local mode, the executable must satisfy this precondition too: linking with
+`-ffast-math` can enable FTZ/DAZ before emulation starts. Arithmetic may set host sticky
+exception flags. Nondefault host controls are outside the contract in every semantics
+mode. `RJ_FORCE_SCALAR`
 selects rj-arith's baseline CPU path; the test override also applies to existing CUs.
 It does not change semantics.
 

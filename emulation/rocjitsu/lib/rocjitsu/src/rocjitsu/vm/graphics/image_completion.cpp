@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/graphics/image_completion.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/buffer_format_detail.h"
 #include "rocjitsu/vm/graphics/image_bc.h"
@@ -212,7 +211,6 @@ void complete_image_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemStat
   if (!d.lds_dst && !cu.owns_vgpr_range(wf, d.dst_reg_base, registers))
     return;
   const auto &format = d.decoded_buffer_format;
-  const fp_mode::detail::ScopedFenv environment(0);
   // Fixed UNORM8 filtering consumes integer texel units. Decode those units
   // directly instead of normalizing to FP32 and rounding back for each tap.
   const bool unorm8_texels =

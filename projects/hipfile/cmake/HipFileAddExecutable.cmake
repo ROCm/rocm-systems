@@ -11,6 +11,8 @@ include(HipFileCompilerOptions)
 #   DEPS     [dependency1 [dependency2 ...]]    List of hipFile target library dependencies
 #   SRCS     [src1 [src2 ...]]                  The source files
 #   SYSINCLS [path1 [path2 ...]]                Paths to include dirs
+#   NO_SAFE_BUFFERS                             Don't apply the HIPFILE_WARN_UNSAFE_BUFFER_OPS
+#                                               flags (for the C++17 examples)
 #
 # NOTE: Assumes hipFile target libraries are named <foo>_(static|shared)
 #
@@ -21,13 +23,17 @@ include(HipFileCompilerOptions)
 function(hipfile_add_executable)
 
     # Parse arguments
-    set(options) # None at this time
+    set(options NO_SAFE_BUFFERS)
     set(oneValueArgs NAME)
     set(multiValueArgs SRCS DEPS SYSINCLS)
     cmake_parse_arguments(arg "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
     add_executable(${arg_NAME} ${arg_SRCS})
-    hipfile_set_compiler_flags(${arg_NAME})
+    if(arg_NO_SAFE_BUFFERS)
+        hipfile_set_compiler_flags(${arg_NAME} NO_SAFE_BUFFERS)
+    else()
+        hipfile_set_compiler_flags(${arg_NAME})
+    endif()
 
     # Set C++ standard
     target_compile_features(${arg_NAME} PRIVATE cxx_std_${HIPFILE_CXX_STANDARD})

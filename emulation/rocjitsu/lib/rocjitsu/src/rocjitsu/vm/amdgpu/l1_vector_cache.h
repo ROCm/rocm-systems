@@ -164,9 +164,18 @@ private:
                                                VmAccessKind kind, bool report_fault = true) const;
   void cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid,
                            uint64_t admission_generation, uint64_t cache_identity);
+  /// Pointers ensure_line() lends for the line it reported Complete. They stay
+  /// valid while maintenance_mutex_ is held and nothing else is allocated or
+  /// invalidated in cache_. `data` is set only for a line that call allocated
+  /// and filled from L2, so every byte behind it is valid.
+  struct EnsuredLine {
+    simdojo::CacheTag *tag = nullptr;
+    const uint8_t *data = nullptr;
+  };
   // Store allocation leaves untouched bytes absent instead of reading backing.
   VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid, uint64_t admission_generation,
-                              bool fetch_on_miss = true, const VmLocalGrantView *local = nullptr);
+                              bool fetch_on_miss = true, const VmLocalGrantView *local = nullptr,
+                              EnsuredLine *ensured = nullptr);
 
   CacheStore cache_;
   // Acquired before any L2 maintenance lock on ordinary accesses and scoped maintenance.
