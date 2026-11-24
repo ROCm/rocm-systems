@@ -281,7 +281,8 @@ struct InstrumentationOptions {
   /// register-to-register preservation and bounded allocation growth; absent
   /// means the existing allocation/scratch policy.
   std::optional<OriginalRegisterCounts> register_growth;
-  /// Explicit disjoint-entry requests; cannot be combined with legacy options.
+  /// Explicit disjoint-entry observations; cannot be combined with legacy options.
+  /// ReplaceWithInst is unsupported: ownership is proved on the original CFG.
   /// Every queued point must belong to exactly one requested entry scope.
   std::vector<EntryInstrumentationOptions> entries = {};
 };

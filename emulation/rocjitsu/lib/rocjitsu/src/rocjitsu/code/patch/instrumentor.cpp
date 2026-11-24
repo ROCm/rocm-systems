@@ -3342,6 +3342,12 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
     result.errors.emplace_back("Instrumentor::patch requires at least one queued point; got zero");
     return result;
   }
+  if (std::ranges::any_of(points_, [](const InstrumentationPoint &point) {
+        return point.kind == InstrumentationKind::ReplaceWithInst;
+      })) {
+    result.errors.emplace_back("explicit entry requests do not admit instruction replacement");
+    return result;
+  }
   std::string error;
   if (!ensure_blocks_built(&error) || obj_.text_sections().size() != 1) {
     result.errors.push_back(error.empty() ? "entry requests require one text section" : error);
@@ -3564,9 +3570,23 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
         }
       }
     std::vector<uint64_t> entries(entry_offsets.begin(), entry_offsets.end());
-    const CheckedTextEdits transaction(obj_, arch_, *decoder_, instruction_boundaries_, patcher,
-                                       entries);
     TextEditError edit_error;
+    const InstructionBoundaries &source_boundaries =
+        source_facts_ ? source_facts_->boundaries : instruction_boundaries_;
+    std::optional<TextEditReferences> local_references;
+    if (!source_facts_) {
+      FailureOr<TextEditReferences> collected = CheckedTextEdits::collect_references(
+          obj_, arch_, source_boundaries, patcher, entries, edit_error);
+      if (collected.failed()) {
+        result.errors.push_back("anchor edit transaction: " + edit_error.message);
+        result.edit_error = std::move(edit_error);
+        return result;
+      }
+      local_references = std::move(collected).value();
+    }
+    const TextEditReferences &references =
+        source_facts_ ? source_facts_->references : *local_references;
+    const CheckedTextEdits transaction(obj_, *decoder_, source_boundaries, references);
     if (transaction.apply(edits, new_text, edit_error).failed()) {
       result.errors.push_back("anchor edit transaction: " + edit_error.message);
       result.edit_error = std::move(edit_error);
@@ -3721,6 +3741,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
       const InstrumentedSite production = {
           .kind = site.site->kind,
           .original_offset = site.site->anchor_offset,
+          .original_size = site.site->original_size,
           .guest_offset = site.trampoline_offset + site.bytes.original_byte_offset,
           .guest_size =
               site.site->kind == InstrumentationKind::KernelEntry ? 0u : site.site->original_size,

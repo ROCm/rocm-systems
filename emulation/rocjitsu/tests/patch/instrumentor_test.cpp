@@ -8637,6 +8637,55 @@ TEST(InstrumentorDisjointEntries, ValidationPreservesInterleavedEntryAndOrdinary
   EXPECT_EQ(validation.sites[2].anchor_offset, 0u);
 }
 
+TEST(InstrumentorDisjointEntries, ReplacementCannotInvalidateOriginalEntryOwnership) {
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
+  const FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  const FailureOr<uint32_t> end = build_s_endpgm(kArch);
+  const FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+  ASSERT_TRUE(nop.succeeded() && end.succeeded() && ret.succeeded());
+  const std::vector<uint8_t> body =
+      make_amdgpu_probe_elf("entry_probe", {ret.value()}, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  // Deleting A's terminator creates a fallthrough into native B. Ownership
+  // established from the original image cannot justify this replacement.
+  std::vector<uint8_t> image = make_amdgpu_two_kernel_elf(
+      {nop.value(), end.value(), nop.value(), end.value()}, 0, 3, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  const std::vector<KernelDescriptorInfo> kernels = entry_growth_kernels(image);
+  ASSERT_EQ(kernels.size(), 2u);
+  amdhsa::kernel_descriptor_t native = kernels[1].descriptor;
+  native.kernel_code_entry_byte_offset += 8;
+  std::memcpy(image.data() + kernels[1].descriptor_file_offset, &native, sizeof(native));
+  const AmdGpuCodeObject source(image.data(), image.size());
+  Instrumentor instrumentor(
+      source, kArch,
+      {.register_growth = std::nullopt,
+       .entries = {{.descriptor_file_offset = kernels[0].descriptor_file_offset,
+                    .register_growth = std::nullopt}}});
+  instrumentor.add_point({.anchor_offset = 0,
+                          .kind = InstrumentationKind::KernelEntry,
+                          .probe_obj = &probe,
+                          .probe_symbol = "entry_probe",
+                          .probe_args = {}});
+  std::vector<uint8_t> expected_bytes(sizeof(uint32_t));
+  std::memcpy(expected_bytes.data(), &end.value(), expected_bytes.size());
+  instrumentor.add_point({.anchor_offset = 4,
+                          .kind = InstrumentationKind::ReplaceWithInst,
+                          .probe_symbol = {},
+                          .probe_args = {},
+                          .replacement = InstructionReplacement{.expected_bytes = expected_bytes,
+                                                                .replacement_bytes = {}}});
+  const Instrumentor::ValidationResult validation = instrumentor.validate_points();
+  const InstrumentedCodeObject result = instrumentor.patch();
+  const std::vector<std::string> expected = {
+      "explicit entry requests do not admit instruction replacement"};
+  EXPECT_EQ(validation.errors, expected);
+  EXPECT_TRUE(validation.sites.empty());
+  EXPECT_EQ(result.errors, expected);
+  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.entries.empty());
+  EXPECT_TRUE(result.sites.empty());
+}
+
 TEST(InstrumentorDisjointEntries, NativeKernargPreloadCannotHideAForeignFirmwareEntry) {
   constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
   const util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
@@ -9109,10 +9158,13 @@ TEST(InstrumentorDisjointEntries, BothSelectedEntriesHaveIndependentBootstrapRes
     for (const InstrumentedSite &site : entry.sites) {
       EXPECT_GE(site.original_offset, index * 256u);
       EXPECT_LT(site.original_offset, index * 256u + 12u);
+      EXPECT_EQ(site.original_size, sizeof(uint32_t));
       EXPECT_GE(site.instrumentation_offset, 268u);
       EXPECT_NE(site.instrumentation_size, 0u);
     }
   }
+  for (const InstrumentedSite &site : result.sites)
+    EXPECT_EQ(site.original_size, sizeof(uint32_t));
   EXPECT_NE(result.entries[0].resources.sgprs, result.entries[1].resources.sgprs);
   const std::optional<std::vector<KernargExtensionMetadata>> extensions =
       parse_kernarg_extension_metadata(
@@ -9122,6 +9174,19 @@ TEST(InstrumentorDisjointEntries, BothSelectedEntriesHaveIndependentBootstrapRes
   EXPECT_EQ(extensions->at(0).original_kernarg_size, 16u);
   EXPECT_EQ(extensions->at(1).original_kernarg_size, 32u);
   EXPECT_EQ(std::memcmp(source.image_data(), original.data(), original.size()), 0);
+
+  // A fork shares the original reference facts, but builds a fresh entry batch.
+  TextEditError fork_error;
+  FailureOr<std::unique_ptr<Instrumentor>> forked = instrumentor.fork(fork_error);
+  ASSERT_TRUE(forked.succeeded()) << fork_error.message;
+  add_entry_growth_points(*forked.value(), probe, 256);
+  add_entry_growth_points(*forked.value(), probe, 0);
+  const InstrumentedCodeObject forked_result = forked.value()->patch();
+  ASSERT_TRUE(forked_result.errors.empty()) << forked_result.errors.front();
+  EXPECT_EQ(forked_result.elf_bytes, result.elf_bytes);
+  ASSERT_EQ(forked_result.sites.size(), result.sites.size());
+  for (const InstrumentedSite &site : forked_result.sites)
+    EXPECT_EQ(site.original_size, sizeof(uint32_t));
 }
 
 TEST(InstrumentorDisjointEntries, LastEntryMetadataFailurePublishesNoPartialBatch) {
