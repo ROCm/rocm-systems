@@ -704,6 +704,7 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportP2p p2p-test.cc
     fakes/nccl_fakes.cc
     fakes/os_fakes.cc
     fakes/search_fakes.cc          # src/graph/search.cc ncclTopoGetLinkType seam
+    fakes/transport_p2p_prime_fakes.cc  # p2p.cc references ncclP2pPrimeBuffer (p2p_prime.cu)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc)
 
