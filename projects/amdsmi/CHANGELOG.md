@@ -163,6 +163,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed incremental builds leaving the staged Python package out of date**.  
+  - Rebuilding after editing a Python source file now refreshes the staged `amdsmi` package instead of keeping the old copy.
+
 - **Fixed `amd-smi reset --gpureset` resetting only the first GPU on UALink systems**.  
   - Each UALink GPU is now reset individually; GPUs in an XGMI hive are still reset once per hive.
 
