@@ -53,16 +53,21 @@ except ImportError as e:
 
 
 def check_version(local_ver: str, desired_ver: str, operator: str) -> bool:
-    """Check package version strings with simple operators used in companion
-    requirements.txt file"""
+    """Compare dotted package versions with the operators used in requirements.txt.
+
+    Comparison is numeric, so 2.10.0 is greater than 2.9.0. A local suffix
+    after '+' is ignored.
+    """
+    local = _numeric_version(local_ver)
+    desired = _numeric_version(desired_ver)
     ops = {
-        "==": lambda loc, des: loc == des,
-        ">=": lambda loc, des: loc >= des,
-        "<=": lambda loc, des: loc <= des,
-        ">": lambda loc, des: loc > des,
-        "<": lambda loc, des: loc < des,
+        "==": local == desired,
+        ">=": local >= desired,
+        "<=": local <= desired,
+        ">": local > desired,
+        "<": local < desired,
     }
-    return ops.get(operator, lambda loc, des: True)(local_ver, desired_ver)
+    return ops.get(operator, True)
 
 
 def check_python_version() -> None:
@@ -206,6 +211,15 @@ def main() -> None:
         console_error("Unsupported execution mode")
 
     sys.exit(0)
+
+
+def _numeric_version(version: str):
+    """Integer parts of the public dotted version, ignoring a '+' suffix.
+
+    2.13.0+rocm7.15.0a20260728 is (2, 13, 0).
+    """
+    public = version.split("+", 1)[0]
+    return tuple(int(part) for part in public.split(".") if part.isdigit())
 
 
 def _python_marker_applies(marker: str) -> bool:
