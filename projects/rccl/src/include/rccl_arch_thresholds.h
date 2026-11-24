@@ -98,6 +98,10 @@ struct rcclArchThresholds {
   size_t symTdmMaxR2Graph[RCCL_DDA_FUNC_COUNT];
   // Upper edge across UALink trays; it only lowers the window. 0 = no cap.
   size_t symTdmCrossTrayMaxR2[RCCL_DDA_FUNC_COUNT];
+  // AllGather only, R2 total bytes. On a comm where the hierarchical LSA AllGather kernel can run,
+  // these replace symMinR2 / symMaxR2 / symMaxR2Graph for AllGather. 0 = no hierarchical window.
+  size_t agHierSymMinR2;
+  size_t agHierSymMaxR2;
 
   // Rank-scaled tier caps, bytes per rank. On a comm of at least
   // rankScaledMinRanks ranks, a non-zero entry replaces the matching
@@ -118,6 +122,11 @@ struct rcclArchThresholds {
   int ddaArVmmFirstMinRanks;
   size_t ddaArVmmFirstMinBytes;
   size_t ddaArVmmFirstMaxPerRank;
+
+  // AllReduce only: with the peer-parallel LL128 kernels (RCCL_DDA_LL128_AR_PEER_PARALLEL) the LL128 one-shot runs
+  // to min(RCCL_DDA_LL128_ONESHOT_THRESHOLD's default, this / nRanks), since it moves (nRanks - 1) x the message per
+  // rank. 0 = that default at every rank count.
+  size_t ddaArLL128OneShotRankBytes;
 
   // AllReduce only: registered sum calls symkWithdrawn hands to DDA (rccl_wrap.cc). 0 turns that re-route off.
   size_t ddaArRegCaptureMinBytes;      // graph capture: DDA instead of Ring up to max(this, nRanks x the next)
@@ -149,6 +158,25 @@ struct rcclArchThresholds {
   int ddaA2aLL128MaxBlocks;
   size_t ddaA2aLL128MaxBlocksMinBytes;
   size_t ddaA2aLL128MaxBlocksMaxBytes;
+  // DDA LL128 two-shot Broadcast: threads per block (0 = use kDdaLL128BcDefaultThreads).
+  // The two-shot variant benefits from fewer threads (better occupancy at large messages).
+  unsigned ddaLL128BcTwoShotThreads;
+
+  // DDA LL128 ReduceScatter batched kernel block size at every size. 0 keeps 512 threads.
+  int ddaRsLL128Threads;
+  // DDA LL128 ReduceScatter takes its peer-parallel kernel while the shard is at most max(ddaRsLL128PeerMaxShard,
+  // nRanks x ddaRsLL128PeerMaxShardPerRank) and the message at most ddaRsLL128PeerMaxBytes. Zeros keep batched.
+  size_t ddaRsLL128PeerMaxShard;
+  size_t ddaRsLL128PeerMaxShardPerRank;
+  size_t ddaRsLL128PeerMaxBytes;
+  // On comms of at least ddaRsLL128LargeCommMinRanks ranks an enabled DDA LL128 ReduceScatter tier runs to
+  // ddaRsLL128LargeCommMaxBytes when that is above its rank-scaled cap. 0 leaves the tier cap alone.
+  int ddaRsLL128LargeCommMinRanks;
+  size_t ddaRsLL128LargeCommMaxBytes;
+  // On comms of at least ddaRsLLLargeCommMinRanks ranks an enabled DDA LL ReduceScatter tier runs to
+  // ddaRsLLLargeCommMaxBytes when that is above its cap. 0 leaves the tier cap alone.
+  int ddaRsLLLargeCommMinRanks;
+  size_t ddaRsLLLargeCommMaxBytes;
 
   // Ring / Tree crossovers that replace the tuning model's ranges on single-node
   // comms (nNodes == 1). Sizes are per rank as rcclGetSizePerRank() reports them

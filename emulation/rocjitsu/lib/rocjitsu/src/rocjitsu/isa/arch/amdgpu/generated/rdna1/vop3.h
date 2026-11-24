@@ -501,6 +501,33 @@ public:
   Operand m0;
 };
 
+class VMovrelsB32Vop3 : public Vop3 {
+public:
+  VMovrelsB32Vop3(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand m0;
+};
+
+class VMovrelsdB32Vop3 : public Vop3 {
+public:
+  VMovrelsdB32Vop3(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand m0;
+};
+
+class VMovrelsd2B32Vop3 : public Vop3 {
+public:
+  VMovrelsd2B32Vop3(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand m0;
+};
+
 class VCvtF16U16Vop3 : public Vop3 {
 public:
   VCvtF16U16Vop3(const MachineInst *inst);
@@ -1727,6 +1754,7 @@ public:
   Operand vdst;
   Operand src1;
   Operand src0;
+  Operand lds_m0;
 };
 
 class VInterpP1lvF16Vop3 : public Vop3 {
@@ -1745,6 +1773,7 @@ public:
   Operand src1;
   Operand src0;
   Operand src2;
+  Operand lds_m0;
 };
 
 class VPermB32Vop3 : public Vop3 {
@@ -1916,6 +1945,7 @@ public:
   Operand src1;
   Operand src0;
   Operand src2;
+  Operand lds_m0;
 };
 
 class VMadI16Vop3 : public Vop3 {

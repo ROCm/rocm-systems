@@ -26,7 +26,12 @@ LdsParamLoadLdsdir::LdsParamLoadLdsdir(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= CONDITIONAL_MEMORY_LANES;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::LDS_PARAM_LOAD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::DirectLds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -56,6 +61,8 @@ LdsDirectLoadLdsdir::LdsDirectLoadLdsdir(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::LDS_DIRECT_LOAD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::DirectLds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {

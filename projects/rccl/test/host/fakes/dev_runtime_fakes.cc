@@ -55,6 +55,13 @@ bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* window) {
   return g_devrWindowHasSysmemSegment(window);
 }
 
+// Same predicate as dev_runtime.cc. A null memory object stays false, so host
+// windows that never model GIN registration leave the symk GIN mask alone.
+bool ncclDevrWindowMissingGinSegments(struct ncclDevrWindow* win) {
+  return win != nullptr && win->memory != nullptr && win->memory->numGinSegments <= 0 &&
+         win->memory->maxGlobalNumSegments > 1 && !win->memory->globalHasSysmemSegment;
+}
+
 // Same arithmetic as dev_runtime.cc, so ce_coll.cc's receive-window bound sees production sizes.
 size_t ncclDevrWindowPeerSafeSize(struct ncclDevrWindow const* win) {
   if (win == nullptr) return 0;
@@ -147,6 +154,26 @@ ncclResult_t ncclDevrWorldToLsaRank(struct ncclComm*, int worldRank, int* lsaRan
 }
 ncclResult_t ncclDevrGetLsaTeamPtrMC(struct ncclComm*, struct ncclDevrWindow*, size_t, struct ncclTeam, void**) {
   FailLoudUnfaked("dev_runtime_fakes", "ncclDevrGetLsaTeamPtrMC");
+}
+// group.cc's devcomm-create task path; no suite reaches it.
+ncclResult_t ncclDevrCommCreateInternal(struct ncclComm*, struct ncclDevCommRequirements*, struct ncclDevComm*, bool,
+                                        uint32_t) {
+  FailLoudUnfaked("dev_runtime_fakes", "ncclDevrCommCreateInternal");
+}
+// Same body as dev_runtime.cc's: group.cc frees a queued task's requirements through it.
+void freeDevCommRequirements(struct ncclDevCommRequirements* reqs) {
+  if (reqs == nullptr) return;
+  while (reqs->resourceRequirementsList) {
+    struct ncclDevResourceRequirements* next = reqs->resourceRequirementsList->next;
+    free(reqs->resourceRequirementsList);
+    reqs->resourceRequirementsList = next;
+  }
+  while (reqs->teamRequirementsList) {
+    struct ncclTeamRequirements* next = reqs->teamRequirementsList->next;
+    free(reqs->teamRequirementsList);
+    reqs->teamRequirementsList = next;
+  }
+  free(reqs);
 }
 
 void ResetDevRuntimeFakes() {

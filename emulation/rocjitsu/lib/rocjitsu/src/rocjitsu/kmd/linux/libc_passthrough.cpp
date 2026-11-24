@@ -29,9 +29,10 @@ auto resolve_host_realpath() -> decltype(LibcPassthrough::realpath_fn) {
 }
 
 void LibcPassthrough::resolve() {
-  if (initialized_)
-    return;
+  std::call_once(initialization_once_, &LibcPassthrough::resolve_once, this);
+}
 
+void LibcPassthrough::resolve_once() {
   auto *handle = RTLD_NEXT;
   openat = util::lookup_symbol<decltype(openat)>(handle, "openat");
   close = util::lookup_symbol<decltype(close)>(handle, "close");
@@ -149,7 +150,7 @@ void LibcPassthrough::resolve() {
   // resolved. In release builds the asserts disappear, so the boolean must not
   // claim readiness while any later call would dereference a null function
   // pointer.
-  initialized_ =
+  const bool initialized =
       openat && close && read && write && ioctl && syscall && mmap && munmap && mprotect &&
       madvise && memfd_create && dup && dup2 && dup3 && fcntl && fopen && freopen && opendir &&
       readdir && closedir && stat && lstat && access && fstat_fn && readlink_fn && realpath_fn &&
@@ -157,7 +158,8 @@ void LibcPassthrough::resolve() {
       getrandom && prlimit && ftruncate && fallocate && socketpair && bind && epoll_ctl && prctl &&
       epoll_create1 && eventfd && epoll_wait && accept4 && getsockopt && setsockopt && socket &&
       connect && listen && execve && setsid && waitpid && poll && clone && exit_immediately;
-  assert(initialized_);
+  initialized_.store(initialized, std::memory_order_release);
+  assert(initialized);
 }
 
 LibcPassthrough &libc_passthrough() {

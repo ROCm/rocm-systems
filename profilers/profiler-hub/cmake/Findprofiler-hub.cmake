@@ -61,7 +61,7 @@ endif()
 # Search for installed library
 find_path(
     profiler-hub_INCLUDE_DIR
-    NAMES profiler-hub/storage.hpp
+    NAMES profiler-hub/cpp/storage.hpp
     HINTS
         ${profiler-hub_ROOT}
         $ENV{profiler-hub_ROOT}

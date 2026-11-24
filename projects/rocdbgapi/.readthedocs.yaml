@@ -13,6 +13,11 @@ python:
    - requirements: projects/rocdbgapi/docs/sphinx/requirements.txt
 
 build:
-   os: ubuntu-22.04
+   os: ubuntu-26.04
    tools:
       python: "3.10"
+   jobs:
+      post_system_dependencies:
+         - mkdir -p $HOME/.local/bin /tmp/doxygen
+         - curl -fsSL https://github.com/doxygen/doxygen/releases/download/Release_1_16_0/doxygen-1.16.0.linux.bin.tar.gz | tar xz -C /tmp/doxygen --strip-components=1
+         - cp /tmp/doxygen/bin/doxygen $HOME/.local/bin/doxygen

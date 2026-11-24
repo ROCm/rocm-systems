@@ -12,9 +12,20 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <gtest/gtest.h>
@@ -174,15 +185,68 @@ TEST(ProbeCallableTest, BuildsNopProbe) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  const auto callable = build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
-                                             /*num_arg_dwords=*/0, &err);
+  const auto callable =
+      build_probe_callable(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Cdna2,
+                           /*num_arg_dwords=*/0, &err);
   ASSERT_TRUE(callable.has_value()) << err;
   EXPECT_EQ(callable->symbol, "rj_probe");
-  EXPECT_EQ(callable->arch, ROCJITSU_CODE_ARCH_CDNA2);
+  EXPECT_EQ(callable->arch, rocjitsu::IsaFamily::Cdna2);
   EXPECT_EQ(callable->target, ROCJITSU_CODE_TARGET_GFX90A);
   EXPECT_EQ(callable->abi, *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31));
   EXPECT_EQ(callable->body_words, body);
   EXPECT_EQ(callable->output_text_offset, 0u); // assigned by a later layout step.
+}
+
+TEST(ProbeCallableTest, TranscendentalCompletionAdmissionIsTargetSpecific) {
+  struct Case {
+    rocjitsu::IsaFamily arch;
+    uint32_t flags;
+    uint32_t instruction;
+    bool accepted;
+  };
+  const uint32_t cdna_exp = cdna4::build_vop1(cdna4::kVExpF32Vop1, {.src0 = 256, .vdst = 1})[0];
+  const uint32_t cdna5_exp = cdna5::build_vop1(cdna5::kVExpF32Vop1, {.src0 = 256, .vdst = 1})[0];
+  const std::array<Case, 6> cases = {{
+      {.arch = rocjitsu::IsaFamily::Cdna3,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX942,
+       .instruction = cdna_exp,
+       .accepted = true},
+      {.arch = rocjitsu::IsaFamily::Cdna4,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX950,
+       .instruction = cdna_exp,
+       .accepted = true},
+      {.arch = rocjitsu::IsaFamily::Cdna5,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX1250,
+       .instruction = cdna5_exp,
+       .accepted = false},
+      {.arch = rocjitsu::IsaFamily::Cdna5,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX1251,
+       .instruction = cdna5_exp,
+       .accepted = false},
+      {.arch = rocjitsu::IsaFamily::Rdna3,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX1100,
+       .instruction = rdna3::build_vop1(rdna3::kVSqrtF32Vop1, {.src0 = 256, .vdst = 1})[0],
+       .accepted = true},
+      {.arch = rocjitsu::IsaFamily::Rdna4,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX1200,
+       .instruction = rdna4::build_vop1(rdna4::kVExpF32Vop1, {.src0 = 256, .vdst = 1})[0],
+       .accepted = true},
+  }};
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.flags);
+    const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, test_case.arch);
+    ASSERT_TRUE(ret.succeeded());
+    const std::vector<uint32_t> body = {test_case.instruction, ret.value()};
+    const std::vector<uint8_t> image = make_elf(body, {}, test_case.flags);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    std::string error;
+    const std::optional<ProbeCallable> callable =
+        build_probe_callable(object, whole_body_symbol(body), test_case.arch, 1, &error);
+    EXPECT_EQ(callable.has_value(), test_case.accepted) << error;
+    if (!test_case.accepted) {
+      EXPECT_NE(error.find("completion"), std::string::npos) << error;
+    }
+  }
 }
 
 TEST(ProbeCallableTest, CarriesTheDeclaredArgumentCountIntoTheAbi) {
@@ -191,8 +255,9 @@ TEST(ProbeCallableTest, CarriesTheDeclaredArgumentCountIntoTheAbi) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  const auto callable = build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
-                                             /*num_arg_dwords=*/2, &err);
+  const auto callable =
+      build_probe_callable(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Cdna2,
+                           /*num_arg_dwords=*/2, &err);
   ASSERT_TRUE(callable.has_value()) << err;
   EXPECT_EQ(callable->abi, *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31,
                                              /*num_arg_dwords=*/2));
@@ -208,7 +273,7 @@ TEST(ProbeCallableTest, RejectsMoreArgumentsThanFitInRegisters) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Cdna2,
                                     kMaxProbeArgVgprs + 1, &err)
                    .has_value());
   EXPECT_NE(err.find("argument dwords"), std::string::npos) << err;
@@ -220,7 +285,7 @@ TEST(ProbeCallableTest, ReportsRejectedEncodingAndWordOffset) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Cdna2,
                                     /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("word 0"), std::string::npos) << err;
@@ -233,10 +298,39 @@ TEST(ProbeCallableTest, RejectsBodyWithCall) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Cdna2,
                                     /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("call"), std::string::npos) << err;
+}
+
+TEST(ProbeCallableTest, RejectsVskipEnablingBodiesAndAcceptsClearControls) {
+  struct Case {
+    std::vector<uint32_t> body;
+    bool accepted;
+  };
+  const std::array<Case, 7> cases = {
+      Case{.body = {0xbf108081u}, .accepted = false},     // s_setvskip 1, 0
+      Case{.body = {0xbf108000u}, .accepted = false},     // s_setvskip s0, 0
+      Case{.body = {0xba000701u, 1u}, .accepted = false}, // s_setreg_imm32_b32 MODE[28], 1
+      Case{.body = {0xb9000701u}, .accepted = false},     // s_setreg_b32 MODE[28], s0
+      Case{.body = {0xbf108080u}, .accepted = true},      // s_setvskip 0, 0
+      Case{.body = {0xba000701u, 0u}, .accepted = true},
+      Case{.body = {0xba000001u, 1u}, .accepted = true}}; // MODE[0] leaves VSKIP unchanged.
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.body.front());
+    std::vector<uint32_t> body = test_case.body;
+    body.push_back(kSSetpcS30S31);
+    const std::vector<uint8_t> image = make_elf(body);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    std::string error;
+    const std::optional<ProbeCallable> callable = build_probe_callable(
+        object, whole_body_symbol(body), rocjitsu::IsaFamily::Cdna2, 0, &error);
+    EXPECT_EQ(callable.has_value(), test_case.accepted) << error;
+    if (!test_case.accepted) {
+      EXPECT_NE(error.find("VSKIP"), std::string::npos) << error;
+    }
+  }
 }
 
 TEST(ProbeCallableTest, RejectsScratchAccess) {
@@ -245,7 +339,7 @@ TEST(ProbeCallableTest, RejectsScratchAccess) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Cdna2,
                                     /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("scratch"), std::string::npos) << err;
@@ -257,10 +351,82 @@ TEST(ProbeCallableTest, RejectsSmemScratchAccess) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Cdna2,
                                     /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("scratch"), std::string::npos) << err;
+}
+
+TEST(ProbeCallableTest, RejectsProbeBodyThatMayEnableVskip) {
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
+  constexpr uint16_t kModeBit28 = amdgpu::MODE_HWREG | (28u << 6);
+  constexpr uint16_t kWholeMode = amdgpu::MODE_HWREG | (31u << 11);
+  constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, kArch);
+  static_assert(setpc.succeeded());
+  const std::vector<std::vector<uint32_t>> writes = {
+      {cdna4::build_sopc(cdna4::kSSetvskipSopc, {.ssrc0 = 129, .ssrc1 = 128})[0]},
+      {cdna4::build_sopc(cdna4::kSSetvskipSopc, {.ssrc0 = 4, .ssrc1 = 128})[0]},
+      {cdna4::build_sopk(cdna4::kSSetregB32Sopk, {.simm16 = kModeBit28, .sdst = 4})[0]},
+      {cdna4::build_sopk(cdna4::kSSetregImm32B32Sopk, {.simm16 = kModeBit28})[0], 1},
+      {cdna4::build_sopk(cdna4::kSSetregImm32B32Sopk, {.simm16 = kWholeMode})[0], 1u << 28}};
+  for (const std::vector<uint32_t> &write : writes) {
+    SCOPED_TRACE(write.front());
+    // Keep the write away from body offset zero: immediate MODE decoding must
+    // read its own literal, rather than treating the body's second word as one.
+    std::vector<uint32_t> body = {kSNop0};
+    body.insert(body.end(), write.begin(), write.end());
+    body.push_back(setpc.value());
+    const std::vector<uint8_t> image = make_elf(body, {}, EF_AMDGPU_MACH_AMDGCN_GFX950);
+    const AmdGpuCodeObject object(image.data(), image.size());
+
+    std::string error;
+    EXPECT_FALSE(build_probe_callable(object, whole_body_symbol(body), kArch, 0, &error));
+    EXPECT_NE(error.find("VSKIP"), std::string::npos) << error;
+  }
+}
+
+TEST(ProbeCallableTest, AcceptsProbeBodyThatOnlyClearsVskip) {
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
+  constexpr uint16_t kModeBit28 = amdgpu::MODE_HWREG | (28u << 6);
+  constexpr uint16_t kWholeMode = amdgpu::MODE_HWREG | (31u << 11);
+  constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, kArch);
+  static_assert(setpc.succeeded());
+  const std::vector<std::vector<uint32_t>> writes = {
+      {cdna4::build_sopc(cdna4::kSSetvskipSopc, {.ssrc0 = 128, .ssrc1 = 128})[0]},
+      // Select bit one of inline constant one: the selected bit is clear.
+      {cdna4::build_sopc(cdna4::kSSetvskipSopc, {.ssrc0 = 129, .ssrc1 = 129})[0]},
+      {cdna4::build_sopk(cdna4::kSSetregImm32B32Sopk, {.simm16 = kModeBit28})[0], 0},
+      // Nonzero MODE writes that leave VSKIP clear are also admissible.
+      {cdna4::build_sopk(cdna4::kSSetregImm32B32Sopk, {.simm16 = kWholeMode})[0], 1u << 5}};
+  for (const std::vector<uint32_t> &write : writes) {
+    SCOPED_TRACE(write.front());
+    std::vector<uint32_t> body = {kSNop0};
+    body.insert(body.end(), write.begin(), write.end());
+    body.push_back(setpc.value());
+    const std::vector<uint8_t> image = make_elf(body, {}, EF_AMDGPU_MACH_AMDGCN_GFX950);
+    const AmdGpuCodeObject object(image.data(), image.size());
+
+    std::string error;
+    const std::optional<ProbeCallable> callable =
+        build_probe_callable(object, whole_body_symbol(body), kArch, 0, &error);
+    ASSERT_TRUE(callable) << error;
+    EXPECT_EQ(callable->body_words, body);
+  }
+}
+
+TEST(ProbeCallableTest, AcceptsModeBit28WriteOnAnArchitectureWithoutVskip) {
+  constexpr uint16_t kModeBit28 = amdgpu::MODE_HWREG | (28u << 6);
+  const std::vector<uint32_t> body = {
+      rdna4::build_sopk(rdna4::kSSetregImm32B32Sopk, {.simm16 = kModeBit28})[0], 1,
+      kGfx12SSetpcS30S31};
+  const std::vector<uint8_t> image = make_elf(body, {}, EF_AMDGPU_MACH_AMDGCN_GFX1200);
+  const AmdGpuCodeObject object(image.data(), image.size());
+
+  std::string error;
+  const std::optional<ProbeCallable> callable =
+      build_probe_callable(object, whole_body_symbol(body), rocjitsu::IsaFamily::Rdna4, 0, &error);
+  ASSERT_TRUE(callable) << error;
+  EXPECT_EQ(callable->body_words, body);
 }
 
 TEST(ProbeCallableTest, RejectsMissingReturn) {
@@ -269,7 +435,7 @@ TEST(ProbeCallableTest, RejectsMissingReturn) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Cdna2,
                                     /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("s_setpc_b64"), std::string::npos) << err;
@@ -282,7 +448,7 @@ TEST(ProbeCallableTest, RejectsWrongReturnRegister) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Cdna2,
                                     /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("s_setpc_b64"), std::string::npos) << err;
@@ -295,7 +461,7 @@ TEST(ProbeCallableTest, RejectsRelocationInBody) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Cdna2,
                                     /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("relocation"), std::string::npos) << err;
@@ -308,8 +474,9 @@ TEST(ProbeCallableTest, AcceptsRelocationOutsideBody) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  const auto callable = build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
-                                             /*num_arg_dwords=*/0, &err);
+  const auto callable =
+      build_probe_callable(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Cdna2,
+                           /*num_arg_dwords=*/0, &err);
   ASSERT_TRUE(callable.has_value()) << err;
   EXPECT_EQ(callable->abi, *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31));
 }
@@ -323,8 +490,9 @@ TEST(ProbeCallableTest, RejectsNonDwordBodySize) {
   sym.body_size = 6; // not a multiple of 4.
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, sym, ROCJITSU_CODE_ARCH_CDNA2, /*num_arg_dwords=*/0, &err)
-                   .has_value());
+  EXPECT_FALSE(
+      build_probe_callable(obj, sym, rocjitsu::IsaFamily::Cdna2, /*num_arg_dwords=*/0, &err)
+          .has_value());
   EXPECT_NE(err.find("multiple of 4"), std::string::npos) << err;
 }
 
@@ -338,8 +506,9 @@ TEST(ProbeCallableTest, RejectsBodyPastImage) {
   sym.body_size = 8;
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, sym, ROCJITSU_CODE_ARCH_CDNA2, /*num_arg_dwords=*/0, &err)
-                   .has_value());
+  EXPECT_FALSE(
+      build_probe_callable(obj, sym, rocjitsu::IsaFamily::Cdna2, /*num_arg_dwords=*/0, &err)
+          .has_value());
   EXPECT_NE(err.find("past end of image"), std::string::npos) << err;
 }
 
@@ -354,8 +523,9 @@ TEST(ProbeCallableTest, RejectsStValueOverflow) {
   sym.st_value = UINT64_MAX; // st_value + body_size overflows.
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, sym, ROCJITSU_CODE_ARCH_CDNA2, /*num_arg_dwords=*/0, &err)
-                   .has_value());
+  EXPECT_FALSE(
+      build_probe_callable(obj, sym, rocjitsu::IsaFamily::Cdna2, /*num_arg_dwords=*/0, &err)
+          .has_value());
   EXPECT_NE(err.find("overflow"), std::string::npos) << err;
 }
 
@@ -368,8 +538,9 @@ TEST(ProbeCallableTest, AcceptsATwelveByteInstruction) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  const auto callable = build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_RDNA4,
-                                             /*num_arg_dwords=*/0, &err);
+  const auto callable =
+      build_probe_callable(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Rdna4,
+                           /*num_arg_dwords=*/0, &err);
   ASSERT_TRUE(callable.has_value()) << err;
   EXPECT_EQ(callable->body_words, body);
 }
@@ -383,7 +554,7 @@ TEST(ProbeCallableTest, RejectsATwelveByteScratchAccess) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_RDNA4,
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Rdna4,
                                     /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("scratch"), std::string::npos) << err;
@@ -402,7 +573,7 @@ TEST(ProbeCallableTest, RejectsAnRdna4ImageInstruction) {
     AmdGpuCodeObject obj(image.data(), image.size());
 
     std::string err;
-    EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_RDNA4,
+    EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Rdna4,
                                       /*num_arg_dwords=*/0, &err)
                      .has_value());
     EXPECT_NE(err.find("image instruction"), std::string::npos) << err;
@@ -417,7 +588,7 @@ TEST(ProbeCallableTest, RejectsAnInstructionRunningPastTheBody) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_RDNA4,
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Rdna4,
                                     /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("word 0"), std::string::npos) << err;

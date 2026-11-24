@@ -5,17 +5,27 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <atomic>
+#include <barrier>
 #include <cerrno>
 #include <climits>
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <thread>
+
+namespace {
+std::atomic<unsigned> openat_resolutions{0};
+}
 
 extern "C" void *__real_dlsym(void *, const char *);
 
 // Exercise the real legacy libc entry points on modern hosts too.
 extern "C" void *__wrap_dlsym(void *handle, const char *name) {
+  if (std::strcmp(name, "openat") == 0)
+    openat_resolutions.fetch_add(1, std::memory_order_relaxed);
   if (std::getenv("RJ_TEST_LEGACY_STAT")) {
 #if defined(__GLIBC__) && defined(__x86_64__)
     if (std::strcmp(name, "realpath") == 0)
@@ -96,4 +106,23 @@ TEST(LibcPassthroughTest, RealpathAllocatesAndAcceptsCallerBuffer) {
   std::free(allocated);
   EXPECT_EQ(real.realpath_fn("/proc/self/rocjitsu-nonexistent", nullptr), nullptr);
   EXPECT_EQ(errno, ENOENT);
+}
+
+TEST(LibcPassthroughTest, ConcurrentFirstUseResolvesOneCompleteTable) {
+  rocjitsu::LibcPassthrough table;
+  const auto before = openat_resolutions.load();
+  std::array<std::jthread, 8> workers;
+  std::barrier start(static_cast<std::ptrdiff_t>(workers.size()));
+  for (auto &worker : workers) {
+    worker = std::jthread([&] {
+      start.arrive_and_wait();
+      table.resolve();
+      EXPECT_TRUE(table.ready());
+      EXPECT_NE(table.openat, nullptr);
+      EXPECT_NE(table.exit_immediately, nullptr);
+    });
+  }
+  for (auto &worker : workers)
+    worker.join();
+  EXPECT_EQ(openat_resolutions.load(), before + 1);
 }

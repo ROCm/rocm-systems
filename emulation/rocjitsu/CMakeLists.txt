@@ -68,7 +68,7 @@ include(GNUInstallDirs)
 
 include(rj_sanitizers)
 
-# Sanitizer and static analysis options.
+# Sanitizer options.
 option(RJ_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(RJ_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(RJ_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
@@ -105,13 +105,28 @@ if(NOT RJ_SANITIZER_RUNTIME IN_LIST _rj_sanitizer_runtime_values)
     )
 endif()
 unset(_rj_sanitizer_runtime_values)
-option(RJ_CLANG_TIDY "Enable clang-tidy static analysis" OFF)
 option(
     RJ_ENABLE_EXPENSIVE_CHECKS
     "Enable expensive exhaustive test suites (MFMA/WMMA SIMD bit-exactness)"
     OFF
 )
 option(RJ_INSTALL_TESTS "Install rocjitsu test binaries" OFF)
+option(
+    ROCJITSU_ENABLE_INTERPOSER
+    "Include the Linux LD_PRELOAD interposer in librocjitsu"
+    ON
+)
+option(
+    RJ_ENABLE_HOST_FAULT_RECOVERY
+    "Recover invalid host memory accesses using SIGSEGV and SIGBUS handlers"
+    ON
+)
+# GNU-unique symbols make glibc retain a DSO after dlclose. All objects in
+# an unloadable explicit library, including its static dependencies, must use
+# ordinary C++ symbol binding instead.
+if(NOT ROCJITSU_ENABLE_INTERPOSER AND NOT RJ_ENABLE_HOST_FAULT_RECOVERY)
+    add_compile_options($<$<COMPILE_LANG_AND_ID:CXX,GNU>:-fno-gnu-unique>)
+endif()
 option(
     ROCJITSU_ENABLE_PERFSIM_PLUGIN
     "Build the optional RocJITsu adapter for an external Perfsim observer plugin"
@@ -333,16 +348,6 @@ endif()
 unset(_rj_sanitizer_count)
 unset(_rj_sanitizer_kinds)
 
-if(RJ_CLANG_TIDY)
-    find_program(CLANG_TIDY_EXE NAMES clang-tidy)
-    if(CLANG_TIDY_EXE)
-        message(STATUS "clang-tidy found: ${CLANG_TIDY_EXE}")
-        set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
-    else()
-        message(WARNING "clang-tidy not found, RJ_CLANG_TIDY ignored")
-    endif()
-endif()
-
 # Third-party dependencies (fetched into third_party/).
 # Third-party dependencies (fetched into third_party/).
 # Third-party dependencies (fetched into third_party/ by default).
@@ -372,6 +377,13 @@ set(FLATBUFFERS_INSTALL OFF CACHE BOOL "" FORCE)
 set(FLATBUFFERS_BUILD_FLATLIB ON CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(googletest flatbuffers)
+
+if(NOT ROCJITSU_ENABLE_INTERPOSER)
+    add_compile_definitions(RJ_DISABLE_INTERPOSER)
+endif()
+if(NOT RJ_ENABLE_HOST_FAULT_RECOVERY)
+    add_compile_definitions(RJ_DISABLE_HOST_FAULT_RECOVERY)
+endif()
 
 include(rj_flatbuffers)
 
@@ -443,7 +455,7 @@ function(rj_configure_shared_interposer target)
     )
 
     # Linux-only: KMD interposer (LD_PRELOAD shim) and its dependencies.
-    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND ROCJITSU_ENABLE_INTERPOSER)
         target_sources(
             ${target}
             PRIVATE ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/interposer.cpp

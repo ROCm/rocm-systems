@@ -8,6 +8,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/host_target.h"
 #include "util/simd_test_hooks.h"
 
@@ -66,7 +67,7 @@ struct Machine {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wave = nullptr;
 
-  explicit Machine(rj_code_arch_t arch) {
+  explicit Machine(rocjitsu::IsaFamily arch) {
     amdgpu::ComputeUnitCore::Config config{};
     config.arch = arch;
     config.num_wf_slots = 1;
@@ -108,9 +109,9 @@ struct Machine {
   }
 };
 
-std::array<uint32_t, 4> encoding(rj_code_arch_t arch, unsigned operation, uint8_t lo, uint8_t hi,
-                                 uint8_t neg, uint8_t neg_hi, uint8_t clamp, uint8_t dst,
-                                 SourceKind source_kind) {
+std::array<uint32_t, 4> encoding(rocjitsu::IsaFamily arch, unsigned operation, uint8_t lo,
+                                 uint8_t hi, uint8_t neg, uint8_t neg_hi, uint8_t clamp,
+                                 uint8_t dst, SourceKind source_kind) {
   uint16_t src0 = 256;
   uint16_t src1 = 258;
   switch (source_kind) {
@@ -144,16 +145,16 @@ std::array<uint32_t, 4> encoding(rj_code_arch_t arch, unsigned operation, uint8_
   };
   std::array<uint32_t, 2> words{};
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     words = older(cdna2::build_vop3p, cdna2::Vop3pBuilderFields{});
     break;
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     words = older(cdna3::build_vop3p, cdna3::Vop3pBuilderFields{});
     break;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     words = older(cdna4::build_vop3p, cdna4::Vop3pBuilderFields{});
     break;
-  case ROCJITSU_CODE_ARCH_CDNA5: {
+  case rocjitsu::IsaFamily::Cdna5: {
     const std::array<uint16_t, 3> ops = {cdna5::kVPkAddF32Vop3p, cdna5::kVPkMulF32Vop3p,
                                          cdna5::kVPkFmaF32Vop3p};
     words = cdna5::build_vop3p(ops[operation], {.vdst = dst,
@@ -176,7 +177,8 @@ std::array<uint32_t, 4> encoding(rj_code_arch_t arch, unsigned operation, uint8_
 
 bool is_nan(uint32_t bits) { return (bits & 0x7fffffff) > 0x7f800000; }
 
-class PackedF32Selection : public testing::TestWithParam<std::tuple<rj_code_arch_t, unsigned>> {
+class PackedF32Selection
+    : public testing::TestWithParam<std::tuple<rocjitsu::IsaFamily, unsigned>> {
 protected:
   void compare(Machine &machine, uint8_t lo, uint8_t hi, uint8_t neg, uint8_t neg_hi, uint32_t mode,
                uint8_t clamp, uint8_t dst, SourceKind source_kind, uint64_t exec) {
@@ -194,7 +196,7 @@ protected:
         ASSERT_EQ(simd[lane][half], scalar[lane][half]) << "lane=" << lane << " half=" << half;
         // CDNA2-4 can preserve signaling NaNs with IEEE mode disabled.
         if ((exec & (uint64_t{1} << lane)) && operation == 2 && is_nan(scalar[lane][half]) &&
-            (arch == ROCJITSU_CODE_ARCH_CDNA5 || (mode & 0x200u))) {
+            (arch == rocjitsu::IsaFamily::Cdna5 || (mode & 0x200u))) {
           EXPECT_NE(scalar[lane][half] & 0x00400000, 0u);
         }
         if (dst == 6 && !(exec & (uint64_t{1} << lane))) {
@@ -228,7 +230,7 @@ TEST_P(PackedF32Selection, ScalarSourcesAliasingAndEmptyExec) {
   // Only CDNA5 admits a literal source in this packed-F32 encoding.
   for (SourceKind source :
        {SourceKind::Vgpr, SourceKind::Sgpr, SourceKind::InlineFloat, SourceKind::Literal}) {
-    if (source == SourceKind::Literal && std::get<0>(GetParam()) != ROCJITSU_CODE_ARCH_CDNA5)
+    if (source == SourceKind::Literal && std::get<0>(GetParam()) != rocjitsu::IsaFamily::Cdna5)
       continue;
     // Packed FP32 register pairs must start at even VGPR addresses.
     for (uint8_t dst : {0, 2, 4, 6})
@@ -242,7 +244,7 @@ TEST_P(PackedF32Selection, RestoresHostEnvironment) {
   HostState saved;
   Machine machine(std::get<0>(GetParam()));
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
-  if (std::get<0>(GetParam()) != ROCJITSU_CODE_ARCH_CDNA2) {
+  if (std::get<0>(GetParam()) != rocjitsu::IsaFamily::Cdna2) {
     // rj-arith assumes default host controls and permits arithmetic sticky flags.
     // Unlike the legacy executor, it never saves or writes host FP controls.
     ASSERT_EQ(std::fesetenv(FE_DFL_ENV), 0);
@@ -278,7 +280,7 @@ TEST_P(PackedF32Selection, RestoresHostEnvironment) {
 
 INSTANTIATE_TEST_SUITE_P(
     Cdna, PackedF32Selection,
-    testing::Combine(testing::Values(ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-                                     ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5),
+    testing::Combine(testing::Values(rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+                                     rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5),
                      testing::Values(0u, 1u, 2u)));
 } // namespace

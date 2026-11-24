@@ -7,10 +7,12 @@ use std::ffi::c_void;
 
 use rocddi::device::gpu::profiling::SpmDestinationReport;
 
+use crate::admission::InFlightToken;
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
-use crate::runtime::{InFlightToken, boundary, initialized_mut, lock, map_error};
-use crate::{memory, runtime};
+use crate::lifecycle::{initialized_mut, lock};
+use crate::memory;
+use crate::status::{boundary, map_error};
 
 /// Flag that skips GPU linear-copy preload for an agent.
 const AMD_AGENT_PRELOAD_SKIP_BLITS: u64 = 1 << 1;
@@ -29,7 +31,7 @@ const AMD_AGENT_PRELOAD_SKIP_BLITS: u64 = 1 << 1;
 #[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_enable_logging(flags: *mut u8, file: *mut c_void) -> Status {
     boundary(|| {
-        if runtime::LogWriteScope::active() {
+        if crate::logging::LogWriteScope::active() {
             return INVALID_RUNTIME_STATE;
         }
         if flags.is_null() {
@@ -46,7 +48,7 @@ pub unsafe extern "C" fn hsa_amd_enable_logging(flags: *mut u8, file: *mut c_voi
             Some(runtime) => runtime,
             None => return NOT_INITIALIZED,
         };
-        let Some(_call) = runtime.inflight.enter() else {
+        let Some(_call) = runtime.control.inflight.enter() else {
             return OUT_OF_RESOURCES;
         };
         let logging = runtime.logging.clone();
@@ -81,7 +83,12 @@ pub unsafe extern "C" fn hsa_amd_register_system_event_handler(
         };
         // SAFETY: The C registration contract keeps callback data live and
         // synchronized until the runtime stops delivering events.
-        runtime.register_system_event_handler(callback, unsafe { CallbackArg::new(data) })
+        runtime.events.register(
+            runtime.agents.gpus.first().map(|gpu| &gpu.device),
+            &runtime.control.stop_workers,
+            callback,
+            unsafe { CallbackArg::new(data) },
+        )
     })
 }
 
@@ -101,14 +108,14 @@ pub unsafe extern "C" fn hsa_amd_coherency_get_type(agent: HsaAgent, kind: *mut 
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        let Some(index) = runtime.gpu_index(agent) else {
+        let Some(index) = runtime.agents.gpu_index(agent) else {
             return INVALID_AGENT;
         };
         if kind.is_null() {
             return INVALID_ARGUMENT;
         }
         // SAFETY: The caller supplied writable output storage.
-        unsafe { kind.write(runtime.gpus[index].coherency_type) };
+        unsafe { kind.write(runtime.agents.gpus[index].coherency_type) };
         SUCCESS
     })
 }
@@ -129,16 +136,16 @@ pub extern "C" fn hsa_amd_coherency_set_type(agent: HsaAgent, kind: u32) -> Stat
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        if !runtime.is_agent(agent) {
+        if !runtime.agents.is_agent(agent) {
             return INVALID_AGENT;
         }
         if !(AMD_COHERENCY_TYPE_COHERENT..=AMD_COHERENCY_TYPE_NONCOHERENT).contains(&kind) {
             return INVALID_ARGUMENT;
         }
-        let Some(index) = runtime.gpu_index(agent) else {
+        let Some(index) = runtime.agents.gpu_index(agent) else {
             return INVALID_AGENT;
         };
-        runtime.gpus[index].coherency_type = kind;
+        runtime.agents.gpus[index].coherency_type = kind;
         SUCCESS
     })
 }
@@ -159,16 +166,16 @@ pub extern "C" fn hsa_amd_agent_preload(agent: HsaAgent, flags: u64) -> Status {
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            let Some(index) = runtime.gpu_index(agent) else {
+            let Some(index) = runtime.agents.gpu_index(agent) else {
                 return INVALID_AGENT;
             };
             if flags & AMD_AGENT_PRELOAD_SKIP_BLITS != 0 {
                 return SUCCESS;
             }
-            let Some(token) = runtime.inflight.enter() else {
+            let Some(token) = runtime.control.inflight.enter() else {
                 return OUT_OF_RESOURCES;
             };
-            (token, runtime.gpus[index].device.clone())
+            (token, runtime.agents.gpus[index].device.clone())
         };
         match device
             .gpu()
@@ -198,10 +205,10 @@ pub extern "C" fn hsa_amd_agent_set_async_scratch_limit(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        let Some(index) = runtime.gpu_index(agent) else {
+        let Some(index) = runtime.agents.gpu_index(agent) else {
             return INVALID_AGENT;
         };
-        let gpu = &runtime.gpus[index];
+        let gpu = &runtime.agents.gpus[index];
         if !gpu.scratch.asynchronous
             || threshold as u64 > gpu.info().maximum_scratch_aperture_bytes()
         {
@@ -262,19 +269,19 @@ pub unsafe extern "C" fn hsa_amd_profiling_convert_tick_to_system_domain(
             if system_tick.is_null() {
                 return INVALID_ARGUMENT;
             }
-            let Some(index) = runtime.gpu_index(agent) else {
+            let Some(index) = runtime.agents.gpu_index(agent) else {
                 return INVALID_AGENT;
             };
-            let Some(token) = runtime.inflight.enter() else {
+            let Some(token) = runtime.control.inflight.enter() else {
                 return OUT_OF_RESOURCES;
             };
-            (token, runtime.gpus[index].device.clone())
+            (token, runtime.agents.gpus[index].device.clone())
         };
-        let counters = match runtime::clock_counters(&device) {
+        let counters = match crate::clock::clock_counters(&device) {
             Ok(counters) => counters,
             Err(error) => return map_error(error),
         };
-        let translated = match runtime::translate_gpu_tick(counters, agent_tick) {
+        let translated = match crate::clock::translate_gpu_tick(counters, agent_tick) {
             Ok(translated) => translated,
             Err(status) => return status,
         };
@@ -330,9 +337,9 @@ pub(crate) fn retained_gpu_device(
 ) -> Result<(InFlightToken, rocddi::device::Device), Status> {
     let guard = lock()?;
     let runtime = guard.as_ref().ok_or(NOT_INITIALIZED)?;
-    let index = runtime.gpu_index(agent).ok_or(INVALID_AGENT)?;
-    let token = runtime.inflight.enter().ok_or(OUT_OF_RESOURCES)?;
-    Ok((token, runtime.gpus[index].device.clone()))
+    let index = runtime.agents.gpu_index(agent).ok_or(INVALID_AGENT)?;
+    let token = runtime.control.inflight.enter().ok_or(OUT_OF_RESOURCES)?;
+    Ok((token, runtime.agents.gpus[index].device.clone()))
 }
 
 /// # Safety

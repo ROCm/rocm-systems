@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
@@ -22,8 +23,11 @@
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/lds_stack.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/ordered_count.h"
 #include "rocjitsu/vm/amdgpu/texel_byte_range.h"
 #include "rocjitsu/vm/amdgpu/translated_local_cache_policy.h"
+#include "rocjitsu/vm/graphics/bvh_intersection.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "util/log.h"
 
@@ -98,15 +102,22 @@ void MemoryPipeline::release_wait_counters(Wavefront &wf, const WaitCounterToken
     wf.release_wait_counter(counters.types[i]);
 }
 
-VmAccessOutcome MemoryPipeline::complete_entry(PipelineEntry entry) {
+VmAccessOutcome MemoryPipeline::complete_entry(PipelineEntry entry,
+                                               std::unique_ptr<Instruction> &inst) {
+  assert(inst.get() == entry.inst);
   MemoryAccessDeferredCompletion deferred_completion = [this, inst = entry.inst, wf = entry.wf,
                                                         counters = entry.counters,
                                                         wave_generation = entry.wave_generation]() {
-    finish_completed_access(inst, *wf, counters, wave_generation);
+    std::unique_ptr<Instruction> completed(inst);
+    finish_completed_access(completed, *wf, counters, wave_generation);
   };
+  // A Deferred backend may call the callback inline, destroying the instruction
+  // before complete_access returns. Only Complete and Failed leave ownership here.
+  inst.release();
   const MemoryAccessCompletion completion =
       complete_access(*entry.inst, *entry.wf, std::move(deferred_completion));
   if (completion == MemoryAccessCompletion::Failed) {
+    inst.reset(entry.inst);
     [[maybe_unused]] const bool cancelled = cancel_wait_check_issue(entry);
     assert(cancelled && "Rejected writeback has no matching wait-check producer");
     // Failure cleanup must not resume a waiter or retire an ENDING wave.
@@ -116,60 +127,74 @@ VmAccessOutcome MemoryPipeline::complete_entry(PipelineEntry entry) {
       entry.wf->set_state(WfState::RUNNING);
     if (entry.wf->instruction_execution_failed())
       entry.wf->preserve_instruction_execution_error_mnemonic(entry.inst->mnemonic());
-    delete entry.inst;
+    inst.reset();
     return VmAccessOutcome::Malformed;
   }
-  if (completion == MemoryAccessCompletion::Complete)
-    finish_completed_access(entry.inst, *entry.wf, entry.counters, entry.wave_generation);
+  if (completion == MemoryAccessCompletion::Complete) {
+    inst.reset(entry.inst);
+    finish_completed_access(inst, *entry.wf, entry.counters, entry.wave_generation);
+  }
   return VmAccessOutcome::Complete;
 }
 
-VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
-                                           bool retain_unavailable) {
+VmAccessOutcome MemoryPipeline::issue_impl(std::unique_ptr<Instruction> &inst, Wavefront &wf,
+                                           bool retain_unavailable, bool routing_observed) {
   const WaitCounterTokens counters = issue_counters(*inst);
   acquire_wait_counters(wf, counters);
   const VmAccessOutcome access = initiate_access(*inst, wf);
   if (access == VmAccessOutcome::Unavailable && retain_unavailable) {
-    issued_.push({.inst = inst,
+    issued_.push({.inst = inst.release(),
                   .wf = &wf,
                   .counters = counters,
                   .wave_generation = wf.dispatch_generation(),
-                  .issue_pc = wf.pc});
+                  .issue_pc = wf.pc,
+                  .routing_observed = routing_observed});
     wf.set_state(WfState::VM_RETRY);
     wf.cu().request_functional_yield();
     return VmAccessOutcome::Complete;
   }
   if (access != VmAccessOutcome::Complete) {
-    if (access == VmAccessOutcome::Faulted || wf.instruction_execution_failed()) {
+    if (access != VmAccessOutcome::Unavailable || wf.instruction_execution_failed()) {
       // An immediate fault can be retained by the same exception owner as a
       // retry fault. Discard its diagnostic producer before losing the instruction.
       [[maybe_unused]] const bool cancelled =
-          cancel_wait_check_issue({.inst = inst,
+          cancel_wait_check_issue({.inst = inst.get(),
                                    .wf = &wf,
                                    .counters = counters,
                                    .wave_generation = wf.dispatch_generation(),
-                                   .issue_pc = wf.pc});
+                                   .issue_pc = wf.pc,
+                                   .routing_observed = routing_observed});
       assert(cancelled && "Faulted memory issue has no matching wait-check producer");
     }
     release_wait_counters(wf, counters);
     if (wf.instruction_execution_failed())
       wf.preserve_instruction_execution_error_mnemonic(inst->mnemonic());
-    delete inst;
+    inst.reset();
     return access;
   }
-  return complete_entry({.inst = inst,
+  return complete_entry({.inst = inst.get(),
                          .wf = &wf,
                          .counters = counters,
                          .wave_generation = wf.dispatch_generation(),
-                         .issue_pc = wf.pc});
+                         .issue_pc = wf.pc,
+                         .routing_observed = routing_observed},
+                        inst);
 }
 
 VmAccessOutcome MemoryPipeline::issue(Instruction *inst, Wavefront &wf) {
-  return issue_impl(inst, wf, false);
+  std::unique_ptr<Instruction> owner(inst);
+  return issue_impl(owner, wf, false, false);
 }
 
-VmAccessOutcome MemoryPipeline::issue_deferred(Instruction *inst, Wavefront &wf) {
-  return issue_impl(inst, wf, true);
+VmAccessOutcome MemoryPipeline::issue_deferred(Instruction *inst, Wavefront &wf,
+                                               bool routing_observed) {
+  std::unique_ptr<Instruction> owner(inst);
+  return issue_impl(owner, wf, true, routing_observed);
+}
+
+VmAccessOutcome MemoryPipeline::issue_deferred(std::unique_ptr<Instruction> &inst, Wavefront &wf,
+                                               bool routing_observed) {
+  return issue_impl(inst, wf, true, routing_observed);
 }
 
 void MemoryPipeline::defer_unavailable(Instruction *inst, Wavefront &wf) {
@@ -270,6 +295,8 @@ bool MemoryPipeline::cancel_wait_check_issue(const PipelineEntry &entry) {
                                        wf.cu().arch(), xcnt))
       return false;
   }
+  if (entry.routing_observed)
+    wf.raw_cu().plugin_group().onAmdgpuMemoryAccessCancelled(*entry.inst, wf);
   return true;
 }
 
@@ -314,7 +341,8 @@ void MemoryPipeline::retry_entries(bool all_queues, uint32_t process_id, uint32_
       continue;
     }
     if (access == VmAccessOutcome::Complete) {
-      const VmAccessOutcome completion = complete_entry(entry);
+      std::unique_ptr<Instruction> completed(entry.inst);
+      const VmAccessOutcome completion = complete_entry(entry, completed);
       if (completion != VmAccessOutcome::Complete && fault_handler_) {
         fault_handler_(*entry.wf, completion, entry.issue_pc);
         if (all_queues)
@@ -499,12 +527,51 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
     return MemoryAccessCompletion::Complete;
 
   // Resident fetches preserve the shader-initialized status VGPR. A PRT NACK
-  // writes a nonzero status only for the failing lanes.
+  // writes a nonzero status only for the failing lanes. The RDNA3 and RDNA4
+  // image TFE field (ISA section 10.1) places status after the returned texel.
+  // For a returning compare-swap this overlaps the first comparison word.
+  if (d.texel_status) {
+    const auto &status = *d.texel_status;
+    const uint64_t warnings = status.lod_warnings & ~status.failures;
+    if (warnings)
+      wf.set_mode_raw(wf.mode_raw() | (1u << 10)); // MODE.LOD_CLAMPED is sticky.
+    uint64_t lanes = status.written_lanes();
+    while (lanes) {
+      const auto lane = std::countr_zero(lanes);
+      lanes &= lanes - 1;
+      const uint32_t flag = (status.failures & (uint64_t{1} << lane)) ? 1 : 2;
+      cu.write_vgpr(d.dst_reg_base + d.destination_vgpr_count(), lane,
+                    (uint32_t{status.lod[lane]} << 16) | flag);
+    }
+  }
+
   if (d.buffer_missing_lanes) {
     const uint32_t status = d.dst_reg_base + d.destination_vgpr_count();
     for (uint64_t lanes = d.buffer_missing_lanes; lanes; lanes &= lanes - 1)
       cu.write_vgpr(status, std::countr_zero(lanes), 1);
   }
+  if (d.image_status) {
+    const auto &status = *d.image_status;
+    const uint64_t misses = status.written_misses();
+    const uint64_t warnings = status.written_warnings();
+    if (warnings && (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3 ||
+                     wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5))
+      wf.set_mode_raw(wf.mode_raw() | (1u << 10)); // MODE.LOD_CLAMPED is sticky.
+    if (warnings && wf.cu().arch() == rocjitsu::IsaFamily::Rdna4)
+      wf.set_gfx12_excp_flag_user_extra_raw(wf.gfx12_excp_flag_user_extra_raw() | (1u << 31));
+    const uint32_t data_words = d.destination_vgpr_count();
+    for (uint64_t lanes = misses | warnings; lanes; lanes &= lanes - 1) {
+      const uint32_t lane = std::countr_zero(lanes);
+      const uint32_t cause = (misses & (uint64_t{1} << lane)) ? 1u : 2u;
+      cu.write_vgpr(d.dst_reg_base + data_words, lane,
+                    (uint32_t{status.levels[lane]} << 16) | cause);
+    }
+  }
+  if (d.bvh) {
+    complete_bvh_intersection(wf, cu, d);
+    return MemoryAccessCompletion::Complete;
+  }
+
   if (d.buffer_components) {
     complete_buffer_format_load(wf, cu, d);
     return MemoryAccessCompletion::Complete;
@@ -720,6 +787,19 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
     wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue,
                                           "unsupported integer atomic operation");
     return VmAccessOutcome::Malformed;
+  }
+  if (d.translation_probe) {
+    if (d.memviol || !d.load_dword_mask)
+      return VmAccessOutcome::Complete;
+    if (wf.address_space()) {
+      const auto snapshot = wf.snapshot_vm_access();
+      if (!snapshot ||
+          snapshot->query_access(d.addr, 1, VmAccessKind::Read) != VmAccessOutcome::Complete ||
+          !snapshot->info().legacy_cache_compatible)
+        return VmAccessOutcome::Complete;
+    }
+    l1_->prefetch_resident(d.addr, wf.process_id());
+    return VmAccessOutcome::Complete;
   }
   if (d.memviol)
     return VmAccessOutcome::Faulted;
@@ -1101,6 +1181,19 @@ void append_translated_requests(VectorMemState &d, uint64_t lane_mask, bool swiz
       size -= chunk;
     }
   };
+
+  if (d.graphics_sample) {
+    // Preflight and transfer the contributing texels in their tap-major response layout.
+    const auto &sample = *d.graphics_sample;
+    for (uint32_t tap = 0; tap < sample.tap_count; ++tap) {
+      const auto &request = sample.taps[tap];
+      for (uint64_t lanes = request.lane_mask & lane_mask; lanes; lanes &= lanes - 1) {
+        const uint32_t lane = std::countr_zero(lanes);
+        append(request.addresses[lane], (tap * d.wf_size + lane) * d.elem_size, d.elem_size);
+      }
+    }
+    return;
+  }
 
   auto append_run = [&](const CoalescedLaneRun &run) {
     if (run.lane_ordered) {
@@ -1532,6 +1625,22 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
 
     auto addr = static_cast<uint32_t>(per_lane_addr[lane]);
 
+    if (d.ds_src2) {
+      const uint32_t src = static_cast<uint32_t>(d.ds2_per_lane_addr[lane]);
+      const bool zero = d.ds2_oob_lane_mask & (uint64_t{1} << lane);
+      // Read both locations at issue, including updates by earlier lanes.
+      auto apply = [&](auto old, auto operand) {
+        using Bits = decltype(old);
+        return fp_operation ? apply_fp_atomic(d, *fp_operation, old, operand, Bits{0},
+                                              d.atomic_lds_denorm_mode, /*local=*/true)
+                            : apply_int_atomic(d.atomic_op, old, operand, Bits{0}).value();
+      };
+      if (esz == 4)
+        lds->write32(addr, apply(lds->read32(addr), zero ? uint32_t{0} : lds->read32(src)));
+      else
+        lds->write64(addr, apply(lds->read64(addr), zero ? uint64_t{0} : lds->read64(src)));
+      continue;
+    }
     if (esz == 4) {
       uint32_t old_val = lds->read32(addr);
       uint32_t new_val;
@@ -1592,17 +1701,23 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
 class DsAddressWindow {
 public:
   uint64_t base, end;
+  uint32_t alignment_mask;
   bool contains(uint64_t address, uint64_t bytes) const {
-    return address >= base && address < end && bytes <= end - address;
+    return !(address & alignment_mask) && address >= base && address < end &&
+           bytes <= end - address;
   }
 };
 
 DsAddressWindow ds_address_window(const VectorMemState &data, const Wavefront &wf,
                                   uint64_t backing_size) {
-  const uint64_t base = wf.lds_base();
-  const uint64_t size = wf.lds_size();
+  if (data.gds)
+    return {0, backing_size, 0};
+  const uint64_t base = data.ds_base(wf.lds_base());
+  const uint64_t size = data.gds_m0 ? *data.gds_m0 & 0xffffu : wf.lds_size();
   const uint64_t end = data.flat_local_allocation_end.value_or(base + size);
-  return {base, std::min(end, backing_size)};
+  const uint32_t alignment =
+      data.gds_m0 && data.atomic_op != AtomicOp::NONE ? data.elem_size - 1 : 0;
+  return {base, std::min(end, backing_size), alignment};
 }
 
 // Dispatch ordinary LDS loads, stores and atomics for uniform and mixed routes.
@@ -1612,18 +1727,18 @@ void execute_lds_access(VectorMemState &d, Wavefront &wf, Lds &lds,
                         const std::array<uint64_t, 64> &addresses, uint64_t lane_mask,
                         const std::vector<uint8_t> &store_data,
                         std::vector<uint8_t> &response_data) {
-  const bool rdna2 = wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool rdna2 = wf.cu().arch() == rocjitsu::IsaFamily::Rdna2;
   const auto window = ds_address_window(d, wf, lds.size_bytes());
-  const bool native_ds = d.flat_local_lane_mask == 0;
+  const bool native_ds = d.flat_local_lane_mask == 0 && !d.gds_m0 && !d.gds;
   const auto arch = wf.cu().arch();
   const bool full_tuple = native_ds && checks_entire_native_ds_address(arch);
   const uint32_t bytes_per_lane = d.num_elems * d.elem_size;
   const bool gfx12_native =
-      native_ds && (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5);
+      native_ds && (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5);
   const uint32_t granule = gfx12_native && d.atomic_op == AtomicOp::NONE
                                ? (d.is_load ? std::min(d.elem_size, 4u) : 1u)
                                : d.elem_size;
-  const uint64_t reporting_lanes = rdna2 ? d.flat_local_lane_mask : 0;
+  const uint64_t reporting_lanes = rdna2 ? (d.gds_m0 ? lane_mask : d.flat_local_lane_mask) : 0;
   const uint32_t minimum = full_tuple || d.atomic_op != AtomicOp::NONE ? bytes_per_lane : granule;
   uint64_t rejected = lane_mask & d.flat_local_oob_lane_mask;
   const bool ordinary = d.atomic_op == AtomicOp::NONE && granule != 0;
@@ -1752,8 +1867,8 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
     return VmAccessOutcome::Faulted;
   if (d.rejects_private_atomic(request_lanes)) {
     const auto arch = wf.cu().arch();
-    if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-        arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5) {
+    if (arch != rocjitsu::IsaFamily::Rdna3 && arch != rocjitsu::IsaFamily::Rdna3_5 &&
+        arch != rocjitsu::IsaFamily::Rdna4 && arch != rocjitsu::IsaFamily::Cdna5) {
       wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue,
                                             "64-bit FLAT atomic addressing private memory");
       return VmAccessOutcome::Malformed;
@@ -1764,17 +1879,77 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
   }
   const uint64_t shared_lanes = d.flat_local_lane_mask & request_lanes;
   const VmAccessOutcome outcome = initiate_global_access(d, wf, request_lanes & ~shared_lanes);
+  if (outcome == VmAccessOutcome::Complete && d.has_feedback_result()) {
+    if (d.feedback_wait) {
+      wf.ensure_memory_wait_scoreboard().complete_deferred_write(*d.feedback_wait,
+                                                                 d.feedback_write_lanes());
+      d.feedback_wait.reset();
+    }
+    wf.raw_cu().plugin_group().onAmdgpuImageFeedbackQualified(inst, wf);
+    if (wf.instruction_execution_failed())
+      return VmAccessOutcome::Malformed;
+  }
   if (outcome != VmAccessOutcome::Complete || shared_lanes == 0)
     return outcome;
 
   // Commit LDS only after all retryable global work completes. In particular,
   // a global retry must not repeat an LDS atomic or discard either result set.
+  wf.raw_cu().plugin_group().onAmdgpuMixedFlatLdsAccess(inst, wf);
+  if (wf.instruction_execution_failed())
+    return VmAccessOutcome::Malformed;
   execute_lds_access(d, wf, wf.lds(), d.per_lane_addr, shared_lanes, d.store_data, d.response_data);
+  return VmAccessOutcome::Complete;
+}
+
+VmAccessOutcome qualify_image_feedback(VectorMemState &d, const GpuVmAccess &vm) {
+  auto &status = *d.image_status;
+  if (status.checked)
+    return VmAccessOutcome::Complete;
+  if (!vm.is_current())
+    return VmAccessOutcome::Revoked;
+  if (!vm.info().ready)
+    return VmAccessOutcome::Unavailable;
+  const auto ranges = vm.nonresident_prt_ranges();
+  if (ranges && !ranges->empty()) {
+    const auto qualify = [&](const auto &addresses, uint64_t active) {
+      const uint64_t holes = nonresident_texel_lanes(d, addresses, active, ranges.get());
+      status.misses |= holes;
+      return holes;
+    };
+    if (!visit_image_sample_taps(d, [&](auto &tap) {
+          const uint64_t holes = qualify(tap.addresses, tap.lane_mask);
+          if constexpr (requires { tap.missing_lanes; })
+            tap.missing_lanes |= holes;
+          else
+            tap.translated.nonresident_lanes = image_tap_misses(tap) | holes;
+        }))
+      qualify(d.per_lane_addr, d.lane_mask);
+  }
+  // All other texels retain the ordinary translation, permission and fault behavior.
+  status.checked = true;
   return VmAccessOutcome::Complete;
 }
 
 VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wavefront &wf,
                                                           uint64_t request_lanes) {
+  if (d.image_status && wf.address_space() &&
+      (!d.translated.initialized || (d.translated.access && !d.translated.access->info().ready))) {
+    d.translated.access = wf.snapshot_vm_access();
+    if (!d.translated.access)
+      return VmAccessOutcome::Faulted;
+    d.translated.initialized = true;
+  }
+  if (d.image_status && d.translated.access) {
+    const auto outcome = qualify_image_feedback(d, *d.translated.access);
+    if (outcome != VmAccessOutcome::Complete)
+      return outcome;
+  }
+  if (d.image_status) {
+    // Route observers see the nominal footprint. Suppress sparse lanes when issuing the fetch.
+    if (!visit_image_sample_taps(d, [](auto &tap) { tap.lane_mask &= ~image_tap_misses(tap); }))
+      d.lane_mask &= ~d.image_status->misses;
+    request_lanes &= d.lane_mask;
+  }
   if (!d.image_sample)
     return initiate_texel_access(d, wf, request_lanes);
   auto &sample = *d.image_sample;
@@ -1801,14 +1976,16 @@ VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wav
     // Each tap retains its own request cursor, while all share one VM snapshot.
     // Restore the issue-time parent state before returning, including on retry.
     std::swap(d.per_lane_addr, tap.addresses);
-    std::swap(d.response_data, tap.response);
+    auto &payload = d.is_load ? d.response_data : d.store_data;
+    std::swap(payload, tap.response);
     std::swap(d.translated, tap.translated);
     const auto outcome = initiate_texel_access(d, wf, tap.lane_mask & request_lanes);
     std::swap(d.translated, tap.translated);
-    std::swap(d.response_data, tap.response);
+    std::swap(payload, tap.response);
     std::swap(d.per_lane_addr, tap.addresses);
     if (outcome != VmAccessOutcome::Complete)
       return outcome;
+    tap.lane_mask &= ~tap.translated.nonresident_lanes.value_or(0);
     ++sample.next_tap;
   }
   return VmAccessOutcome::Complete;
@@ -1819,7 +1996,7 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
   if (d.requires_scratch_backing && (d.scratch_lane_mask & request_lanes) && wf.scratch_base() == 0)
     return VmAccessOutcome::Faulted;
 
-  if (wf.address_space() || (has_ingress_handler() && wf.process_id() != 0)) {
+  if (d.image_metadata || wf.address_space() || (has_ingress_handler() && wf.process_id() != 0)) {
     const bool has_progress = d.translated.request_index != 0 ||
                               d.translated.completed_bytes != 0 || d.translated.atomic_lane != 0 ||
                               d.translated.atomic_loaded || d.translated.transfer_token.pending();
@@ -1841,7 +2018,8 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
       d.translated.nonresident_lanes =
           nonresident_texel_lanes(d, d.per_lane_addr, request_lanes, ranges.get());
     }
-    d.buffer_missing_lanes |= request_lanes & *d.translated.nonresident_lanes;
+    if (d.texel_status)
+      d.texel_status->failures |= request_lanes & *d.translated.nonresident_lanes;
     request_lanes &= ~*d.translated.nonresident_lanes;
     if (!d.image_sample)
       d.lane_mask &= ~*d.translated.nonresident_lanes;
@@ -1853,6 +2031,9 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
     qualify_buffer_residency(d, *d.translated.access);
     request_lanes &= d.lane_mask;
   }
+  if (d.image_metadata)
+    return initiate_image_metadata_access(d, wf);
+
   // Swizzle is a per-lane layout property. FLAT can mix private-aperture and
   // global lanes, while a buffer SRD can apply swizzling to every active lane.
   // Issue swizzled and plain groups separately so one group's element stride
@@ -1980,8 +2161,10 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
   }
 
   if (translated_address_space) {
-    if (d.is_load && d.response_data.empty())
-      d.response_data.assign(d.wf_size * d.num_elems * d.elem_size, 0);
+    if (d.is_load && d.response_data.empty()) {
+      const uint32_t elements = d.graphics_sample ? d.graphics_sample->tap_count : d.num_elems;
+      d.response_data.resize(d.wf_size * elements * d.elem_size);
+    }
     if (d.translated.requests.empty() && d.translated.request_index == 0) {
       if (swizzled_lanes)
         append_translated_requests(d, swizzled_lanes, true, l1_->transaction_policy());
@@ -1990,6 +2173,22 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
     }
     return execute_translated_transfer(d, wf.process_id(), peer_cache_read_handler_, l1_,
                                        ingress_handler_);
+  }
+
+  if (d.graphics_sample) {
+    const auto &sample = *d.graphics_sample;
+    const uint32_t tap_bytes = d.wf_size * d.elem_size;
+    d.response_data.assign(sample.tap_count * tap_bytes, 0);
+    for (uint32_t tap = 0; tap < sample.tap_count; ++tap) {
+      const auto &request = sample.taps[tap];
+      const auto outcome =
+          l1_->load(request.addresses.data(), request.lane_mask & request_lanes, d.elem_size, 1,
+                    d.response_data.data() + tap * tap_bytes, d.mtype, d.non_temporal,
+                    d.request_force_l1_bypass, d.wf_size, wf.process_id());
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
+    }
+    return VmAccessOutcome::Complete;
   }
 
   if (d.is_load) {
@@ -2045,10 +2244,102 @@ MemoryAccessCompletion GlobalMemPipeline::complete_access(Instruction &inst, Wav
   return vector_complete(d, wf, wf.raw_cu(), d.lane_mask, std::move(complete));
 }
 
-bool native_ds_atomic_misaligned(const VectorMemState &d, rj_code_arch_t arch,
+bool prepare_ordered_count(Wavefront &wf, VectorMemState &d, uint32_t offset0, uint32_t offset1,
+                           uint32_t addr, uint32_t vdst) {
+  const bool release = offset1 & 1;
+  const bool done = offset1 & 2;
+  if ((offset0 & 3) || (done && !release)) {
+    wf.report_instruction_execution_error(InstructionExecutionError::InvalidInstructionEncoding);
+    return false;
+  }
+  // Compute ordered ADD/EXCHANGE use one counter DWORD and the first active
+  // source lane. Other shader stages and the multi-counter mode require their
+  // own stage and stream-out state.
+  const unsigned operation = (offset1 >> 4) & 3;
+  if ((offset1 & 0xcc) || operation > 1 || (wf.m0() & 0xf000u)) {
+    wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return false;
+  }
+  d.gds_m0 = wf.m0();
+  const uint32_t address = ((wf.m0() >> 16) & ~3u) + offset0;
+  d.wf_size = wf.wf_size();
+  d.dst_reg_base = wf.vgpr_alloc().base + vdst;
+  d.num_elems = 1;
+  d.elem_size = 4;
+  RegisterAccess regs(wf);
+  const auto lanes = ordered_count_lanes(wf, vdst);
+  const uint32_t value = lanes.contribution ? regs.read_vgpr(wf.vgpr_alloc().base + addr,
+                                                             std::countr_zero(lanes.contribution))
+                                            : 0;
+  d.ordered_count.emplace(lanes.result, address, value, lanes.contribution && operation == 1,
+                          release);
+  d.exec_mask = lanes.result ? wf.exec() : 0;
+  d.lane_mask = lanes.contribution;
+  d.per_lane_addr.fill(address);
+  return true;
+}
+
+void LocalMemPipeline::capture_gds_violations(VectorMemState &data, const Wavefront &wf) {
+  assert(data.gds_m0 && wf.cu().arch() == rocjitsu::IsaFamily::Rdna2);
+  const auto window = ds_address_window(data, wf, GwsDevice::kGfx10GdsSizeKiB * 1024u);
+  const uint64_t bytes = data.elem_size * (data.atomic_op == AtomicOp::NONE ? data.num_elems : 1u);
+  const auto capture = [&](const auto &addresses, uint64_t lanes) {
+    while (lanes) {
+      const auto lane = std::countr_zero(lanes);
+      lanes &= lanes - 1;
+      if (!window.contains(addresses[lane], bytes))
+        data.address_range_violation_lanes |= uint64_t{1} << lane;
+    }
+  };
+  const auto requests = transpose_request_lane_mask(data, wf.wf_size());
+  capture(data.per_lane_addr, requests);
+  if (data.has_second_ds_address(wf.cu().arch(), requests))
+    capture(data.ds2_per_lane_addr, data.lane_mask);
+}
+
+VmAccessOutcome GwsDevice::execute_gds(VectorMemState &d, Wavefront &wf) {
+  if (d.lane_mask == 0 || d.num_elems == 0)
+    return VmAccessOutcome::Complete;
+  std::lock_guard lock(mutex_);
+  auto &share = data_shares_[wf.process_id()];
+  if (d.gds_register) {
+    const auto &reg = *d.gds_register;
+    if (reg.ordered) {
+      const uint64_t key = (uint64_t{wf.queue_id()} << 32) | wf.dispatch_id();
+      auto &next = share.ordered_walkers[key];
+      if (next != reg.logical_wave)
+        return VmAccessOutcome::Unavailable;
+      if (reg.flags & 1)
+        next = (next + std::max<unsigned>(1, reg.crawler_increment)) & 0x1fff;
+    }
+    auto &counter = share.streamout[reg.index];
+    const uint64_t old = counter;
+    if (reg.ordered && ((reg.flags >> 4) & 3) == 1)
+      counter = reg.operand;
+    else if (reg.subtract)
+      counter -= reg.operand;
+    else
+      counter += reg.operand;
+    if (reg.index < 8)
+      counter = static_cast<uint32_t>(counter);
+    d.response_data.resize(d.wf_size * d.elem_size);
+    std::memcpy(d.response_data.data() + std::countr_zero(d.exec_mask) * d.elem_size, &old,
+                d.elem_size);
+    return VmAccessOutcome::Complete;
+  }
+  execute_lds_access(d, wf, share.memory, d.per_lane_addr, d.lane_mask, d.store_data,
+                     d.response_data);
+  if (d.ds2_active)
+    execute_lds_access(d, wf, share.memory, d.ds2_per_lane_addr, d.lane_mask, d.ds2_store_data,
+                       d.ds2_response_data);
+  return VmAccessOutcome::Complete;
+}
+
+bool native_ds_atomic_misaligned(const VectorMemState &d, rocjitsu::IsaFamily arch,
                                  uint64_t request_lanes) {
-  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5) ||
-      d.flat_local_lane_mask || d.lds_stack_inputs || d.atomic_op == AtomicOp::NONE || !d.elem_size)
+  if ((arch != rocjitsu::IsaFamily::Rdna4 && arch != rocjitsu::IsaFamily::Cdna5) ||
+      d.flat_local_lane_mask || d.lds_stack_inputs || d.gds || d.atomic_op == AtomicOp::NONE ||
+      !d.elem_size)
     return false;
   for (uint64_t lanes = request_lanes; lanes; lanes &= lanes - 1) {
     const auto lane = std::countr_zero(lanes);
@@ -2063,15 +2354,9 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
   if (rejects_atomic_operation(d, wf, true))
     return VmAccessOutcome::Malformed;
   d.wf_size = wf.wf_size();
-  const bool cdna1_ds = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA1 && !d.flat_local_lane_mask;
-  if (cdna1_ds && d.is_load && d.atomic_op != AtomicOp::NONE) {
-    // MI100 3.6.1 nullifies the RMW when any returned VGPR is unallocated.
-    const auto &vgprs = wf.vgpr_alloc();
-    if (!vgprs.contains(d.dst_reg_base, d.destination_vgpr_count()) ||
-        (d.ds2_active && !vgprs.contains(d.ds2_dst_reg_base, d.ds2_destination_vgpr_count()))) {
-      d.exec_mask = d.lane_mask = 0;
-      return VmAccessOutcome::Complete;
-    }
+  if (cdna1_ds_atomic_nullified(d, wf.cu().arch(), wf.vgpr_alloc())) {
+    d.exec_mask = d.lane_mask = 0;
+    return VmAccessOutcome::Complete;
   }
   const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
   // Uniform shared-aperture FLAT must reject unsupported DDS too.
@@ -2079,6 +2364,19 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
     return VmAccessOutcome::Faulted;
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
+  if (d.ordered_count) {
+    const auto &op = *d.ordered_count;
+    const uint32_t logical_wave = *d.gds_m0 & GwsDevice::kComputeWaveIdMask;
+    const auto previous =
+        wf.raw_cu().gws_device().ordered_count(wf.process_id(), wf.queue_id(), logical_wave,
+                                               op.address, op.value, op.exchange, op.release);
+    if (!previous)
+      return VmAccessOutcome::Unavailable;
+    d.response_data.resize(d.wf_size * sizeof(uint32_t));
+    for (uint32_t lane = 0; lane < d.wf_size; ++lane)
+      std::memcpy(d.response_data.data() + lane * sizeof(uint32_t), &*previous, sizeof(uint32_t));
+    return VmAccessOutcome::Complete;
+  }
   if (d.ds_memviol)
     return VmAccessOutcome::Faulted;
   if (d.lds_stack_inputs) {
@@ -2091,19 +2389,27 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
     if (d.ds2_active)
       d.ds2_response_data.resize(d.wf_size * d.num_elems * d.elem_size);
   }
+  if (d.gds)
+    return wf.raw_cu().gws_device().execute_gds(d, wf);
   const auto arch = wf.cu().arch();
   if (native_ds_atomic_misaligned(d, arch, request_lanes))
     return VmAccessOutcome::Faulted;
-  execute_lds_access(d, wf, wf.lds(), d.per_lane_addr, request_lanes & ~d.ds_oob_lane_mask,
-                     d.store_data, d.response_data);
-  if (d.ds2_active && request_lanes) {
-    if (d.has_second_ds_address(wf.raw_cu().arch(), request_lanes)) {
-      execute_lds_access(d, wf, wf.lds(), d.ds2_per_lane_addr, d.lane_mask & ~d.ds2_oob_lane_mask,
-                         d.ds2_store_data, d.ds2_response_data);
-    } else if (d.is_load) {
-      d.ds2_response_data = d.response_data;
+  auto access = [&](Lds &backing) {
+    execute_lds_access(d, wf, backing, d.per_lane_addr, request_lanes & ~d.ds_oob_lane_mask,
+                       d.store_data, d.response_data);
+    if (d.ds2_active && request_lanes) {
+      if (d.has_second_ds_address(wf.raw_cu().arch(), request_lanes)) {
+        execute_lds_access(d, wf, backing, d.ds2_per_lane_addr, d.lane_mask & ~d.ds2_oob_lane_mask,
+                           d.ds2_store_data, d.ds2_response_data);
+      } else if (d.is_load) {
+        d.ds2_response_data = d.response_data;
+      }
     }
-  }
+  };
+  if (d.gds_m0)
+    wf.raw_cu().gws_device().access_gds(wf.cu().arch(), wf.process_id(), access);
+  else
+    access(wf.lds());
   if (d.atomic_op != AtomicOp::NONE)
     return VmAccessOutcome::Complete;
 
@@ -2185,7 +2491,7 @@ MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wave
   }
   if (d.transpose != 0)
     transpose_response(d);
-  const uint64_t result_lanes = d.lane_mask;
+  const uint64_t result_lanes = d.ordered_count ? d.ordered_count->result_lanes : d.lane_mask;
   MemoryAccessCompletion completion =
       vector_complete(d, wf, wf.raw_cu(), result_lanes, std::move(complete));
 

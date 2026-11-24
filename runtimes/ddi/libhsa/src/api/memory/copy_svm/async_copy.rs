@@ -8,9 +8,10 @@ use std::ffi::c_void;
 use rocddi::device::gpu::CopyRect;
 
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::memory::copy_svm::async_copy::*;
 use crate::memory::copy_svm::*;
-use crate::runtime::{boundary, initialized_mut, lock};
+use crate::status::boundary;
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),
@@ -186,7 +187,7 @@ pub unsafe extern "C" fn hsa_amd_memory_async_copy_rect(
         // SAFETY: The HSA caller supplies readable descriptor storage.
         let (dst, dst_offset, src, src_offset, range) =
             unsafe { (*dst, *dst_offset, *src, *src_offset, *range) };
-        let Some(index) = runtime.gpu_index(copy_agent) else {
+        let Some(index) = runtime.agents.gpu_index(copy_agent) else {
             return INVALID_AGENT;
         };
         let dependency_slice = if dependency_count == 0 {
@@ -204,8 +205,8 @@ pub unsafe extern "C" fn hsa_amd_memory_async_copy_rect(
         if range.x == 0 || range.y == 0 || range.z == 0 {
             return SUCCESS;
         }
-        if !runtime.sdma_enabled
-            || !runtime.gpus[index]
+        if !runtime.config.sdma_enabled
+            || !runtime.agents.gpus[index]
                 .device
                 .gpu()
                 .is_ok_and(|gpu| gpu.supports_linear_copy())
@@ -255,7 +256,7 @@ pub unsafe extern "C" fn hsa_amd_memory_async_copy_rect(
             ResolvedAsyncCopy {
                 route: AsyncCopyRoute::Gpu {
                     compute: false,
-                    device: Box::new(runtime.gpus[index].device.clone()),
+                    device: Box::new(runtime.agents.gpus[index].device.clone()),
                     index,
                     entry: GpuCopyEntry::Rect(CopyRect {
                         destination,
@@ -301,7 +302,7 @@ pub unsafe extern "C" fn hsa_amd_memory_copy_engine_status(
             Some(runtime) => runtime,
             None => return NOT_INITIALIZED,
         };
-        if !runtime.is_agent(dst) || !runtime.is_agent(src) {
+        if !runtime.agents.is_agent(dst) || !runtime.agents.is_agent(src) {
             return INVALID_AGENT;
         }
         let available = match copy_engine_mask(runtime, dst, src) {
@@ -341,7 +342,7 @@ pub unsafe extern "C" fn hsa_amd_memory_get_preferred_copy_engine(
             Some(runtime) => runtime,
             None => return NOT_INITIALIZED,
         };
-        if !runtime.is_agent(dst) || !runtime.is_agent(src) {
+        if !runtime.agents.is_agent(dst) || !runtime.agents.is_agent(src) {
             return INVALID_AGENT;
         }
         let available = match copy_engine_mask(runtime, dst, src) {

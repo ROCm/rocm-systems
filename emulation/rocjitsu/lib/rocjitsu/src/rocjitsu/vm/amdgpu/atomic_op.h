@@ -55,6 +55,11 @@ constexpr bool atomic_uses_two_sources(AtomicOp op) {
          op == AtomicOp::WRAP;
 }
 
+constexpr bool atomic_is_floating_point(AtomicOp op) {
+  return op == AtomicOp::FADD || op == AtomicOp::FMIN || op == AtomicOp::FMAX ||
+         op == AtomicOp::FCMPSWAP || op == AtomicOp::PK_ADD_F16 || op == AtomicOp::PK_ADD_BF16;
+}
+
 /// @brief Apply an integer atomic RMW operation (32-bit or 64-bit).
 /// @details Returns failure for operations outside the supported integer set.
 template <typename T>

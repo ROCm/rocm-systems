@@ -29,10 +29,14 @@ extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, siz
 extern std::function<bool(int)> g_symkKernelIdIsLL;
 extern std::function<bool(int)> g_symkKernelIdIsTma;
 extern std::function<ncclResult_t(struct ncclComm*)> g_symkFinalize;
+// Whether the hierarchical AllGather can run; defaults to false, so init skips its cross-rank sizing check.
+extern std::function<bool(struct ncclComm*)> g_symkAgHierAvailable;
+// Packages of the hierarchical AllGather; defaults to 0, so the hierarchical symk window is off.
+extern std::function<int(struct ncclComm*)> g_symkAgHierGroups;
 extern std::function<bool(struct ncclComm*)> g_symkAlltoAllLLForced;
 
 // The ncclSymk* index seams (kernel masks, ncclSymkGetKernelIndex, ncclSymkKernelIdToString,
-// ncclSymkMakeDevWork) live in sym_kernels_index_fakes.h, not here. rccl-UnitTestsMicro cannot link
+// ncclSymkMakeDevWork) live in sym_kernels_index_fakes.h, not here. rccl-UnitTestsMicroSymKernelsIndex cannot link
 // that file: the generated sym_kernels_host.cc already defines ncclSymkGetKernelIndex and the
 // kernel-list tables. The rest are not generated, so a TU needing one defines it itself.
 

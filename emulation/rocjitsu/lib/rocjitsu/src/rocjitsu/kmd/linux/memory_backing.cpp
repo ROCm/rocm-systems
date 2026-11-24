@@ -8,6 +8,7 @@
 
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/memory_keeper.h"
+#include "util/host_path.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -176,14 +177,14 @@ struct AllocationFlagsXattr {
 std::string keeper_path() {
   Dl_info info{};
   if (dladdr(reinterpret_cast<void *>(&create_memory_backing), &info) && info.dli_fname) {
-    std::error_code error;
-    const auto library = std::filesystem::canonical(info.dli_fname, error);
-    if (!error) {
+    const std::filesystem::path library = util::canonical_host_path(info.dli_fname);
+    if (!library.empty()) {
+      const std::filesystem::path library_dir = library.parent_path();
       // The same object is linked into the interposer, CLI, and unit tests.
       // Resolve each supported installed layout relative to that object.
       for (const char *relative : {RJ_MEMORY_KEEPER_INSTALL_PATH, RJ_MEMORY_KEEPER_BIN_INSTALL_PATH,
                                    RJ_MEMORY_KEEPER_TEST_INSTALL_PATH}) {
-        const auto installed = library.parent_path() / relative;
+        const auto installed = library_dir / relative;
         if (host_call(libc_passthrough().access, ::access, installed.c_str(), X_OK) == 0)
           return installed.string();
       }
@@ -191,10 +192,7 @@ std::string keeper_path() {
       // install staging prefix may itself live beneath the build directory.
       for (const char *directory : {RJ_MEMORY_KEEPER_BUILD_LIBDIR, RJ_MEMORY_KEEPER_BUILD_BINDIR,
                                     RJ_MEMORY_KEEPER_BUILD_TESTDIR}) {
-        if (!*directory)
-          continue;
-        const auto build = std::filesystem::canonical(directory, error);
-        if (!error && library.parent_path() == build)
+        if (*directory && library_dir == util::canonical_host_path(directory))
           return RJ_MEMORY_KEEPER_BUILD_PATH;
       }
     }
@@ -413,15 +411,16 @@ public:
     __builtin_unreachable();
   }
 
-  void retire() {
+  bool retire() {
     if (owner_ != getpid()) {
       // The lease mapping is MADV_DONTFORK. Neither its address nor the mutex
       // inherited from a vanished parent thread belongs to this child.
-      return;
+      return false;
     }
     std::lock_guard lock(mutex_);
     retired_ = true;
     release_lease();
+    return true;
   }
 
 private:
@@ -544,21 +543,27 @@ private:
 
   bool helper_disconnected() const {
     const int socket = connect_socket();
-    if (socket < 0)
-      return errno == ECONNREFUSED;
-    // A live keeper replies to an empty batch. A stopped keeper can keep its
-    // lease even when it cannot reply within the deadline.
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-    kmd::KeeperRequest request{0, O_RDWR, kmd::KeeperOperation::FlushFiles, {}};
-    bool closed;
-    if (kmd::send_keeper_descriptor(socket, &request, sizeof(request), -1) != 0)
-      closed = errno == EPIPE || errno == ECONNRESET;
-    else
-      closed = poll_until(socket, POLLIN | POLLRDHUP, deadline) & (POLLHUP | POLLRDHUP | POLLERR);
-    finish_private_request(socket);
-    host_close_fd(socket);
-    if (!closed)
-      return false;
+    if (socket < 0) {
+      if (errno == ECONNREFUSED)
+        return true;
+      // The cookie exchange can lose its connection before pidfd reports exit.
+      if (errno != EPIPE && errno != ECONNRESET)
+        return false;
+    } else {
+      // A live keeper replies to an empty batch. A stopped keeper can keep its
+      // lease even when it cannot reply within the deadline.
+      kmd::KeeperRequest request{0, O_RDWR, kmd::KeeperOperation::FlushFiles, {}};
+      bool closed;
+      if (kmd::send_keeper_descriptor(socket, &request, sizeof(request), -1) != 0)
+        closed = errno == EPIPE || errno == ECONNRESET;
+      else
+        closed = poll_until(socket, POLLIN | POLLRDHUP, deadline) & (POLLHUP | POLLRDHUP | POLLERR);
+      finish_private_request(socket);
+      host_close_fd(socket);
+      if (!closed)
+        return false;
+    }
 
     // The helper can reject a private channel under memory pressure. During
     // exit it can close the channel before releasing the listener. Give it the
@@ -771,10 +776,21 @@ private:
   bool retired_ = false;
 };
 
-// Intentionally process-lifetime: the keeper watches its owner pidfd and an
-// exec-sensitive lease, then exits once externally held tokens are gone.
+// Interposer builds retain the manager for the process lifetime; explicit hosts
+// release it when unloading. The keeper watches its owner pidfd and lease, then
+// exits once externally held tokens are gone.
 // A forked child never locks a mutex inherited from the parent's threads.
 std::atomic<Keeper *> keeper{};
+
+#if defined(RJ_DISABLE_INTERPOSER)
+__attribute__((destructor)) void release_keeper() {
+  // Explicit hosts retire all callers before unloading. A forked child must
+  // not destroy a mutex inherited from a vanished parent thread.
+  auto *current = keeper.exchange(nullptr, std::memory_order_relaxed);
+  if (current && current->retire())
+    delete current;
+}
+#endif
 
 Keeper *get_keeper() {
   auto *current = keeper.load(std::memory_order_acquire);

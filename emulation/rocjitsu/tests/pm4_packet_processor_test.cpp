@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h"
 
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
@@ -15,7 +16,6 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -146,7 +146,7 @@ protected:
 
   Pm4PacketProcessorTest() : memory(std::make_shared<FlatMemory>()) {
     address_space = vm.register_translated(1, memory, memory);
-    context.arch = ROCJITSU_CODE_ARCH_RDNA4;
+    context.arch = rocjitsu::IsaFamily::Rdna4;
     context.retry = [this] {
       queue.command_retry_pending = true;
       status = Pm4TestStatus::Blocked;
@@ -276,7 +276,7 @@ TEST_F(Pm4PacketProcessorTest, ShadowLoadRejectsOffsetPastThe48BitAperture) {
 }
 
 class Pm4PredExecTest : public Pm4PacketProcessorTest,
-                        public ::testing::WithParamInterface<rj_code_arch_t> {};
+                        public ::testing::WithParamInterface<rocjitsu::IsaFamily> {};
 
 TEST_P(Pm4PredExecTest, MaskedPredExecRetainsSkippedCursorAcrossPublicationRetry) {
   context.arch = GetParam();
@@ -345,14 +345,14 @@ TEST_P(Pm4PredExecTest, RejectsPredExecBeyondBufferForSelectedAndMaskedXcc) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Cdna, Pm4PredExecTest,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
-                                           ROCJITSU_CODE_ARCH_CDNA5));
+                         ::testing::Values(rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4,
+                                           rocjitsu::IsaFamily::Cdna5));
 
 TEST_F(Pm4PacketProcessorTest, RejectsPredExecOnOtherArchitectures) {
   for (const auto arch :
-       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_RDNA1,
-        ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-        ROCJITSU_CODE_ARCH_RDNA4}) {
+       {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Rdna1,
+        rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+        rocjitsu::IsaFamily::Rdna4}) {
     SCOPED_TRACE(arch);
     context.arch = arch;
     queue.faulted = false;
@@ -478,6 +478,23 @@ TEST_F(Pm4PacketProcessorTest, RejectsTruncatedPacketBeforeCallingItsHandler) {
   EXPECT_EQ(service(), Pm4TestStatus::Faulted);
   EXPECT_EQ(writes, 0u);
   EXPECT_FALSE(completed);
+}
+
+TEST_F(Pm4PacketProcessorTest, CursorPublicationRetryDoesNotReplayCompletedDma) {
+  constexpr uint32_t kSource = 0x1000;
+  const std::array words{0xc0055000u, 0u, kSource, 0u, kOutput, 0u, 8u};
+  memory->store<uint64_t>(kSource, 0x123456789abcdef0);
+  submit(words, true);
+  memory->make_store_unavailable_once(kReadPointer);
+  EXPECT_EQ(service(), Pm4TestStatus::Blocked);
+  EXPECT_FALSE(completed);
+  EXPECT_FALSE(queue.commands.submissions.front().data_transfer);
+  EXPECT_EQ(memory->load<uint64_t>(kOutput), 0x123456789abcdef0u);
+  memory->store<uint64_t>(kSource, 0);
+  EXPECT_EQ(service(), Pm4TestStatus::Ready);
+  EXPECT_TRUE(completed);
+  EXPECT_EQ(memory->load<uint64_t>(kOutput), 0x123456789abcdef0u);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), words.size());
 }
 
 TEST_F(Pm4PacketProcessorTest, RetiresSupportedNopEncodings) {
@@ -786,18 +803,22 @@ INSTANTIATE_TEST_SUITE_P(NonComplete, Pm4CacheFlushFailureTest,
                          ::testing::Values(VmAccessOutcome::Unavailable, VmAccessOutcome::Faulted,
                                            VmAccessOutcome::Malformed));
 
-TEST_F(Pm4PacketProcessorTest, PropagatesDispatchCallbackExceptionAfterCommittedWrite) {
+TEST_F(Pm4PacketProcessorTest, RetainsCommittedWriteAfterReturnedDispatchFailure) {
   const std::array words{0xc0033700u, 0x100u, kOutput, 0u, 0xdeadbeefu,
                          0xc0031500u, 1u,     1u,      1u, 1u};
   submit(words, true);
   uint32_t faults = 0, completions = 0;
-  context.fault_queue = [&] { ++faults; };
+  context.fault_queue = [&] {
+    ++faults;
+    queue.faulted = true;
+    status = Pm4TestStatus::Faulted;
+  };
   queue.commands.submissions.front().complete = [&](bool) { ++completions; };
   context.dispatch = [](const std::array<uint32_t, 4> &, util::DiagnosticEmitter) -> util::Result {
-    throw std::runtime_error("dispatch callback");
+    return util::Result::failure();
   };
-  EXPECT_THROW(service(), std::runtime_error);
-  EXPECT_EQ(faults, 0u);
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+  EXPECT_EQ(faults, 1u);
   EXPECT_EQ(completions, 0u);
   EXPECT_EQ(memory->load<uint32_t>(kOutput), 0xdeadbeefu);
   EXPECT_EQ(queue.read_pointer_journal.cursor(), 5u);

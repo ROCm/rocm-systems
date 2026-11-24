@@ -441,8 +441,8 @@ template <bool Extended, bool TrackStatus = false, typename Slot,
       case 11: {
         // RDNA3 names these V_DUAL_MAX_F32/V_DUAL_MIN_F32; later targets have
         // the IEEE maximumNumber/minimumNumber forms.
-        const rj_code_arch_t arch = wf.cu().arch();
-        if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) {
+        const rocjitsu::IsaFamily arch = wf.cu().arch();
+        if (arch != rocjitsu::IsaFamily::Rdna3 && arch != rocjitsu::IsaFamily::Rdna3_5) {
           const auto policy = input_denormal::Policy::make(wf.fp_denorm_mode_f32());
           result = slot.op == 10 ? minmax::evaluate<fp_format::F32, minmax::MaxNum>(policy, av, bv)
                                  : minmax::evaluate<fp_format::F32, minmax::MinNum>(policy, av, bv);
@@ -559,73 +559,6 @@ template <bool Extended, bool TrackStatus = false, typename Slot,
           typename Classify = std::nullptr_t>
 [[nodiscard]] bool try_execute_vopd_simd(const Slot &, const Slot &, Wavefront &,
                                          Classify = nullptr) {
-  return false;
-}
-
-template <bool Vop3, typename Inst>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_packed_fmac_simd(Inst &inst, Wavefront &wf) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vdst.simd_capable())
-    return false;
-  auto &second = [&]() -> auto & {
-    if constexpr (Vop3)
-      return inst.src1;
-    else
-      return inst.vsrc1;
-  }();
-  if (!second.simd_capable())
-    return false;
-  uint32_t abs = 0, neg = 0, omod = 0, clamp = 0;
-  if constexpr (Vop3) {
-    abs = inst.inst_.abs;
-    neg = inst.inst_.neg;
-    clamp = inst.inst_.clamp;
-    omod = fp_mode::effective_f16_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(),
-                                       true, inst.inst_.omod);
-  }
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  RegisterAccess regs(wf);
-  auto a = regs.read_operand(inst.src0, exec), b = regs.read_operand(second, exec);
-  auto dst = regs.readwrite_operand(inst.vdst, exec);
-  using U = util::native<uint32_t>;
-  constexpr uint32_t W = U::size();
-  for (uint32_t base = 0; base < wf.wf_size(); base += W) {
-    uint64_t mask = (exec >> base) & util::mask<uint64_t>(W);
-    if (!mask)
-      continue;
-    U av = a.template load_native<uint32_t>(base), bv = b.template load_native<uint32_t>(base);
-    // Inline constants denote one half value broadcast to both elements;
-    // literals and register sources already contain an independent packed pair.
-    auto inline_pair = [](U raw, const auto &operand, uint32_t selector) {
-      if (pk16_src_needs_narrowing(selector, operand.size_bits()))
-        raw = util::f32_to_f16_simd(std::bit_cast<util::native<float>>(raw));
-      if (dot2_src_needs_half_replication(selector)) {
-        raw &= U(0xffffu);
-        raw |= raw << 16;
-      }
-      return raw;
-    };
-    av = inline_pair(av, inst.src0, inst.inst_.src0);
-    if constexpr (Vop3)
-      bv = inline_pair(bv, second, inst.inst_.src1);
-    U cv = dst.template load_native<uint32_t>(base);
-    auto compute = [&](unsigned shift) {
-      return fma_f16_mode_simd(
-          (av >> shift) & U(0xffffu), (bv >> shift) & U(0xffffu), (cv >> shift) & U(0xffffu),
-          abs & 1, abs & 2, false, neg & 1, neg & 2, false, wf.fp_round_mode_f16_f64(),
-          wf.fp_denorm_mode_f16_f64(), omod, clamp, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf),
-          fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
-    };
-    U low = compute(0), high = compute(16);
-    if (dst.template store_native<uint32_t>(base, low | (high << 16), mask).failed())
-      return true;
-  }
-  return true;
-}
-
-template <bool Vop3, typename Inst>
-[[nodiscard]] bool try_execute_packed_fmac_simd(Inst &, Wavefront &) {
   return false;
 }
 

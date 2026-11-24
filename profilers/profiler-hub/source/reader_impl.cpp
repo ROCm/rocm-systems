@@ -3,8 +3,8 @@
 
 #include "reader_impl.hpp"
 #include "json_serializers.hpp"
-#include "profiler-hub/reader.hpp"
-#include "profiler-hub/storage.hpp"
+#include "profiler-hub/cpp/reader.hpp"
+#include "profiler-hub/cpp/storage.hpp"
 #include "storage_impl.hpp"
 
 #include "queries/select/table_select_query.hpp"

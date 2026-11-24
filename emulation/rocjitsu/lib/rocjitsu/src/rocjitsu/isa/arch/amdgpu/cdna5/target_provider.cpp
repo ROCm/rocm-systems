@@ -12,8 +12,7 @@ std::unique_ptr<rocjitsu::Decoder> create_target_decoder() {
   return create_target_decoder(kGfx1250Target);
 }
 
-std::unique_ptr<rocjitsu::Decoder>
-create_target_decoder(const IsaGpuTargetDescription &gpu_target) {
+std::unique_ptr<rocjitsu::Decoder> create_target_decoder(const IsaTargetBinding &gpu_target) {
   if (gpu_target.public_id != ROCJITSU_CODE_TARGET_GFX1250 &&
       gpu_target.public_id != ROCJITSU_CODE_TARGET_GFX1251)
     return nullptr;

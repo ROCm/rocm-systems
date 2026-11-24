@@ -7,7 +7,7 @@
 #![allow(unsafe_code, clippy::unwrap_used)]
 
 use rocddi::memory::storage::Allocator;
-use rocddi::session::{DriverContextLifetime, Session};
+use rocddi::session::{DriverContextLifetime, RetirementOutcome, Session};
 use std::ffi::c_void;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -73,7 +73,10 @@ fn inherited_final_session_skips_allocator_callback() {
     if child == 0 {
         // SAFETY: Bound a regression if the copied callback deadlocks.
         unsafe { libc::alarm(3) };
-        let inherited = !session.is_current_process();
+        let inherited = !session.is_current_process()
+            && session.state().is_err()
+            && session.begin_retirement().is_err()
+            && matches!(session.try_close(), RetirementOutcome::Failed(_));
         drop(session);
         // SAFETY: _exit avoids inherited test-harness cleanup.
         unsafe { libc::_exit(i32::from(!inherited)) }

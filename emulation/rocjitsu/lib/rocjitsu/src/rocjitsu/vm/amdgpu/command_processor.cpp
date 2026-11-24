@@ -5,6 +5,7 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
@@ -31,13 +32,11 @@ RJ_DIAGNOSTIC_POP
 #include <condition_variable>
 #include <cstring>
 #include <elf.h>
-#include <exception>
 #include <format>
 #include <limits>
 #include <optional>
 #include <string>
 #include <sys/mman.h>
-#include <system_error>
 #include <thread>
 
 namespace rocjitsu {
@@ -218,13 +217,13 @@ bool CommandProcessor::has_pending_aql_dispatch_work() const {
   });
 }
 
-void CommandProcessor::configure_for_arch(rj_code_arch_t arch) {
+void CommandProcessor::configure_for_arch(rocjitsu::IsaFamily arch) {
   // Matches LLVM's FeaturePackedTID: gfx90a and later CDNA targets, plus
   // GFX11 and later RDNA targets, receive work-item IDs packed in v0.
-  packed_tid_ = arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-                arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-                arch == ROCJITSU_CODE_ARCH_RDNA3_5 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-                arch == ROCJITSU_CODE_ARCH_CDNA5;
+  packed_tid_ = arch == rocjitsu::IsaFamily::Cdna2 || arch == rocjitsu::IsaFamily::Cdna3 ||
+                arch == rocjitsu::IsaFamily::Cdna4 || arch == rocjitsu::IsaFamily::Rdna3 ||
+                arch == rocjitsu::IsaFamily::Rdna3_5 || arch == rocjitsu::IsaFamily::Rdna4 ||
+                arch == rocjitsu::IsaFamily::Cdna5;
 }
 
 namespace {
@@ -351,69 +350,69 @@ bool plan_cluster_workgroups(const DispatchEntry &entry, uint32_t cluster_base_l
   return true;
 }
 
-bool sgpr_count_is_descriptor_encoded(rj_code_arch_t arch, uint32_t sgpr_gran) {
+bool sgpr_count_is_descriptor_encoded(rocjitsu::IsaFamily arch, uint32_t sgpr_gran) {
   if (sgpr_gran != 0)
     return true;
   return isa_properties(arch).descriptor_sgpr_count_encoded;
 }
 
-bool compute_pgm_rsrc1_mode_preserves_dx10_ieee(rj_code_arch_t arch) {
+bool compute_pgm_rsrc1_mode_preserves_dx10_ieee(rocjitsu::IsaFamily arch) {
   /*
    * New ISA families should classify descriptor-to-MODE field initialization
    * for the architecture's MODE layout.
    */
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return true;
-  case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_CDNA5:
-  case ROCJITSU_CODE_ARCH_RV32I:
-  case ROCJITSU_CODE_ARCH_RV64I:
-  case ROCJITSU_CODE_ARCH_NUM_ARCHS:
+  case rocjitsu::IsaFamily::Rdna4:
+  case rocjitsu::IsaFamily::Cdna5:
+  case rocjitsu::IsaFamily::Rv32i:
+  case rocjitsu::IsaFamily::Rv64i:
+  case rocjitsu::IsaFamily::Count:
     return false;
   }
   // Handle out-of-range values without a default, so -Wswitch catches new architectures.
   return false;
 }
 
-bool compute_pgm_rsrc1_mode_has_debug_field(rj_code_arch_t arch) {
+bool compute_pgm_rsrc1_mode_has_debug_field(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return true;
-  case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_CDNA5:
-  case ROCJITSU_CODE_ARCH_RV32I:
-  case ROCJITSU_CODE_ARCH_RV64I:
-  case ROCJITSU_CODE_ARCH_NUM_ARCHS:
+  case rocjitsu::IsaFamily::Rdna4:
+  case rocjitsu::IsaFamily::Cdna5:
+  case rocjitsu::IsaFamily::Rv32i:
+  case rocjitsu::IsaFamily::Rv64i:
+  case rocjitsu::IsaFamily::Count:
     return false;
   }
   // Handle out-of-range values without a default, so -Wswitch catches new architectures.
   return false;
 }
 
-uint32_t initial_ib_sts2_gfx11(uint32_t rsrc1, rj_code_arch_t arch) {
+uint32_t initial_ib_sts2_gfx11(uint32_t rsrc1, rocjitsu::IsaFamily arch) {
   using namespace rocjitsu::amdhsa;
   // The W7900 encodes an ordered launch as 2 in IB_STS2.MEM_ORDER[9:8].
-  const unsigned ordered_bit = arch == ROCJITSU_CODE_ARCH_RDNA3 ? 9u : 8u;
+  const unsigned ordered_bit = arch == rocjitsu::IsaFamily::Rdna3 ? 9u : 8u;
   return (RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED) << ordered_bit) |
          (RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS) << 10);
 }
 
-uint32_t initial_mode_from_compute_pgm_rsrc1(uint32_t rsrc1, rj_code_arch_t arch) {
+uint32_t initial_mode_from_compute_pgm_rsrc1(uint32_t rsrc1, rocjitsu::IsaFamily arch) {
   using namespace rocjitsu::amdhsa;
 
   uint32_t mode = 0;
@@ -546,8 +545,8 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
       if (pkt.queue_ptr != 0) {
         for (uint32_t word = 0; word < 4; ++word) {
           uint32_t value = launch_metadata->scratch_resource_descriptor[word];
-          if (word == 3 &&
-              (cu->arch() == ROCJITSU_CODE_ARCH_RDNA1 || cu->arch() == ROCJITSU_CODE_ARCH_RDNA2)) {
+          if (word == 3 && (cu->arch() == rocjitsu::IsaFamily::Rdna1 ||
+                            cu->arch() == rocjitsu::IsaFamily::Rdna2)) {
             // ROCr leaves INDEX_STRIDE for the CP to fill from this kernel's
             // wave size. Buffer spills must use the same lane interleave as FLAT.
             // This covers the compiler buffer-spill path. Explicit private V#
@@ -637,7 +636,7 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
   // Descriptor ID bits govern AQL and PM4. Internal dispatches that need
   // the legacy X SGPR request it explicitly through DispatchEntry.
   uint32_t sys_idx = pkt.num_user_sgprs;
-  const rj_code_arch_t arch = cu->arch();
+  const rocjitsu::IsaFamily arch = cu->arch();
   const auto properties = isa_properties(arch);
   if (!properties.uses_ttmp_workgroup_ids) {
     if (pkt.enable_wg_id_x)
@@ -648,9 +647,12 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
       cu->write_sgpr(sbase + sys_idx++, wg_id_z);
   }
   if (pkt.enable_wg_info) {
-    cu->write_sgpr(sbase + sys_idx,
-                   ShaderProcessorInput::workgroup_info(arch, pkt.wfs_per_workgroup, wf_index_in_wg,
-                                                        wf_index_in_wg));
+    // Without ordered append the ABI supplies the wave-in-group as the term.
+    // An ordered launch reserves terms when the whole workgroup commits below.
+    if (pkt.ordered_append == DispatchEntry::OrderedAppend::Disabled)
+      cu->write_sgpr(sbase + sys_idx,
+                     ShaderProcessorInput::workgroup_info(arch, pkt.wfs_per_workgroup,
+                                                          wf_index_in_wg, wf_index_in_wg));
     ++sys_idx;
   }
   if (properties.uses_ttmp_workgroup_ids) {
@@ -748,7 +750,7 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
       std::shared_ptr<uint32_t> lease = std::move(maybe_lease.value());
       scratch_slot = *lease;
       wf->set_scratch_lease(std::move(lease));
-    } else if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA5 || pkt.queue_ptr != 0) {
+    } else if (cu->arch() == rocjitsu::IsaFamily::Cdna5 || pkt.queue_ptr != 0) {
       const uint32_t shader_engine_count =
           std::max(scratch_wave_divisor_, scratch_shader_engine_count_);
       const uint32_t shader_engine_id = wf->shader_engine_id();
@@ -796,7 +798,7 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
       // fanned-out dispatch shares the allocation. CDNA5 uses the complete
       // physical XCC/SE/scoreboard address space instead of logical grid slots.
       uint64_t scratch_slots = static_cast<uint64_t>(pkt.grid_total_wgs()) * waves_per_wg;
-      if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+      if (cu->arch() == rocjitsu::IsaFamily::Cdna5) {
         const uint32_t shader_engine_count =
             std::max(scratch_wave_divisor_, scratch_shader_engine_count_);
         scratch_slots =
@@ -831,15 +833,15 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
                                                              : scratch_outcome;
 
     wf->set_scratch_base(wave_scratch);
-    if (cu->arch() == ROCJITSU_CODE_ARCH_RDNA3 || cu->arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+    if (cu->arch() == rocjitsu::IsaFamily::Rdna3 || cu->arch() == rocjitsu::IsaFamily::Rdna3_5)
       wf->set_status_raw(wf->status_raw() | (1u << 29)); // SCRATCH_EN
     wf->set_scratch_lane_size(pkt.private_segment_fixed_size);
     // CDNA compiler-generated functions use s32 as the private stack pointer
     // and s33 as its current frame value for explicit scratch SADDR operands.
     // The pointer is an offset within the per-wave scratch slice, not the SRD
     // base address supplied in the user SGPR block.
-    if ((cu->config().arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-         cu->config().arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+    if ((cu->config().arch == rocjitsu::IsaFamily::Cdna3 ||
+         cu->config().arch == rocjitsu::IsaFamily::Cdna4) &&
         wf->num_sgprs() >= 34) {
       cu->write_sgpr(sbase + 32, 32);
       cu->write_sgpr(sbase + 33, 0);
@@ -894,6 +896,8 @@ void CommandProcessor::startup() {
       });
   completion_->set_dispatch_retired_callback([this](const DispatchEntry &entry) {
     erase_cluster_workgroups(entry.dispatch_id);
+    if (gws_device_)
+      gws_device_->retire_ordered_dispatch(entry.process_id, entry.queue_id, entry.dispatch_id);
     dispatch_launch_metadata_.erase(entry.dispatch_id);
     // Resume fetch after the blocking packet's completion is durable.
     if (entry.blocks_following && engine()) {
@@ -1235,7 +1239,7 @@ uint64_t CommandProcessor::register_queue(ComputeQueueConfig config, bool fanout
   queue.address_space_lease = std::move(*address_space_lease);
   queue.fanout_replica = fanout_replica;
   if (!fanout_replica && queue.uses_kfd_queue_abi && queue.queue_desc_va != 0 && !cus_.empty() &&
-      cus_[0]->config().arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+      cus_[0]->config().arch == rocjitsu::IsaFamily::Cdna5 &&
       publish_async_scratch_capability(queue) != VmAccessOutcome::Complete) {
     return 0;
   }
@@ -1365,23 +1369,14 @@ uint64_t CommandProcessor::register_queue(ComputeQueueConfig config, bool fanout
   }();
   if (registration_id == 0)
     return 0;
-  try {
-    // Start (or restart) the doorbell poll thread for KFD (host-accessible) queues
-    // AFTER releasing hw_queue_mutex_. ensure_doorbell_monitor() serializes on its
-    // own doorbell_thread_mutex_. Keeping that lock order consistent with the stop
-    // path avoids joining a monitor while holding the queue mutex it needs to finish
-    // a scan. Internal test queues inject doorbell events directly via
-    // schedule_event_now() and need no monitor.
-    if (start_poll)
-      ensure_doorbell_monitor();
-  } catch (const std::system_error &) {
-    // The owner cascades teardown to its replicas before releasing its VM lease.
-    (void)unregister_queue_registration(registration_id);
-    throw;
-  } catch (...) {
-    // Allocation failures remain fatal even though thread-creation errors recover.
-    std::terminate();
-  }
+  // Start (or restart) the doorbell poll thread for KFD (host-accessible) queues
+  // AFTER releasing hw_queue_mutex_. ensure_doorbell_monitor() serializes on its
+  // own doorbell_thread_mutex_. Keeping that lock order consistent with the stop
+  // path avoids joining a monitor while holding the queue mutex it needs to finish
+  // a scan. Internal test queues inject doorbell events directly via
+  // schedule_event_now() and need no monitor.
+  if (start_poll)
+    ensure_doorbell_monitor();
   return registration_id;
 }
 
@@ -1580,6 +1575,7 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
       // every XCD at once: the KFD paths sweep all command processors, and an
       // owner cascades to its replicas below. No XCD is left holding a grid that
       // can no longer retire. Unregistering a lone replica is not supported.
+      reset_ordered_ids(*queue);
       compute_queues_.erase(queue);
     }
   }
@@ -1801,7 +1797,7 @@ void CommandProcessor::set_doorbell_base(uint32_t process_id, void *base) {
   }
 }
 
-void CommandProcessor::ensure_doorbell_monitor() {
+void CommandProcessor::ensure_doorbell_monitor() noexcept {
   std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
   // A monitor is already servicing this CP's queues — nothing to do. (The
   // register→ring window is fine: the live monitor scans every registered queue
@@ -1809,14 +1805,7 @@ void CommandProcessor::ensure_doorbell_monitor() {
   if (doorbell_running_)
     return;
   util::Logger::cp([&](auto &os) { os << std::format("{}: STARTING doorbell thread", name()); });
-  // Construct the thread BEFORE setting doorbell_running_: if the jthread
-  // constructor throws (std::system_error on thread-creation failure) the flag
-  // must stay false so a later ensure_doorbell_monitor() retries instead of
-  // no-oping forever. We still hold doorbell_thread_mutex_, so teardown cannot
-  // observe the new handle until both it and the running flag are published.
   assert(!doorbell_thread_.joinable());
-  if (std::exchange(fail_next_doorbell_monitor_start_for_testing_, false))
-    throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again));
   doorbell_thread_ = std::jthread([this](std::stop_token stop) { doorbell_poll_loop(stop); });
   doorbell_running_ = true;
 }
@@ -2130,16 +2119,24 @@ void CommandProcessor::drain_pending_cluster_barrier_completions() {
     completions.swap(pending_cluster_barrier_completions_);
   }
 
-  for (auto &completion : completions) {
-    std::vector<Wavefront *> members;
-    for (auto [cu, peer_wg_id] : completion.peers) {
-      auto peer_members =
-          cu->complete_barrier(completion.dispatch_id, peer_wg_id, completion.completion_bit);
-      members.insert(members.end(), peer_members.begin(), peer_members.end());
-    }
-    if (!members.empty())
-      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members), BarrierKind::Cluster);
+  for (auto &completion : completions)
+    complete_cluster_barrier_round(completion.dispatch_id, completion.completion_bit,
+                                   completion.generation, completion.peers);
+}
+
+void CommandProcessor::complete_cluster_barrier_round(
+    uint32_t dispatch_id, uint8_t completion_bit, uint64_t generation,
+    std::span<const std::pair<ComputeUnitCore *, uint32_t>> peers) {
+  ComputeUnitCore::BarrierCompletion completion;
+  for (auto [cu, peer_wg_id] : peers) {
+    auto peer = cu->complete_barrier(dispatch_id, peer_wg_id, completion_bit, generation);
+    completion.members.insert(completion.members.end(), peer.members.begin(), peer.members.end());
+    completion.armed.insert(completion.armed.end(), peer.armed.begin(), peer.armed.end());
+    completion.woken.insert(completion.woken.end(), peer.woken.begin(), peer.woken.end());
   }
+  ComputeUnitCore::notify_barrier_complete(
+      *plugin_group_, completion,
+      ComputeUnitCore::barrier_round(completion_bit, /*named_barrier_id=*/0, generation));
 }
 
 void CommandProcessor::register_cluster_workgroup(const DispatchEntry &entry, uint32_t local_wg_id,
@@ -2229,6 +2226,8 @@ uint32_t CommandProcessor::cluster_barrier_state(const Wavefront &wf, int32_t ba
 bool CommandProcessor::cluster_barrier_signal(Wavefront &wf, int32_t barrier_id) {
   bool is_first = false;
   const uint8_t completion_bit = static_cast<uint8_t>(-barrier_id);
+  uint64_t signaled_generation = 0;
+  bool completes = false;
   {
     std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
     ClusterWorkgroupPlacement *placement = nullptr;
@@ -2241,20 +2240,30 @@ bool CommandProcessor::cluster_barrier_signal(Wavefront &wf, int32_t barrier_id)
     if (!inserted)
       return false;
     is_first = barriers->signaled_workgroups[index].size() == 1;
-    if (barriers->signaled_workgroups[index].size() < barriers->member_count)
-      return is_first;
-
-    barriers->signaled_workgroups[index].clear();
-    PendingClusterBarrierCompletion completion{wf.dispatch_id(), completion_bit, {}};
-    auto &peers = completion.peers;
-    peers.reserve(placement->peer_wg_ids.size());
-    for (uint32_t peer_wg_id : placement->peer_wg_ids) {
-      auto peer = cluster_wg_placements_.find(wg_key(wf.dispatch_id(), peer_wg_id));
-      if (peer != cluster_wg_placements_.end() && peer->second.cu)
-        peers.emplace_back(peer->second.cu, peer_wg_id);
+    signaled_generation = barriers->generation[index];
+    if (barriers->signaled_workgroups[index].size() >= barriers->member_count) {
+      completes = true;
+      barriers->signaled_workgroups[index].clear();
+      ++barriers->generation[index];
+      PendingClusterBarrierCompletion completion{
+          wf.dispatch_id(), completion_bit, signaled_generation, {}};
+      auto &peers = completion.peers;
+      peers.reserve(placement->peer_wg_ids.size());
+      for (uint32_t peer_wg_id : placement->peer_wg_ids) {
+        auto peer = cluster_wg_placements_.find(wg_key(wf.dispatch_id(), peer_wg_id));
+        if (peer != cluster_wg_placements_.end() && peer->second.cu)
+          peers.emplace_back(peer->second.cu, peer_wg_id);
+      }
+      pending_cluster_barrier_completions_.push_back(std::move(completion));
     }
-    pending_cluster_barrier_completions_.push_back(std::move(completion));
   }
+  // Plugins are called outside the lock (see cluster_placements_mutex_). The
+  // signal precedes the round's completion, which a pool worker leaves queued
+  // until the fan-out rejoins.
+  plugin_group_->onAmdgpuBarrierSignaled(
+      wf, ComputeUnitCore::barrier_round(completion_bit, 0, signaled_generation));
+  if (!completes)
+    return is_first;
 
   // In serial mode this instruction already runs on the CP/engine thread, so
   // preserve immediate barrier resolution. Pool workers leave the compact
@@ -2269,6 +2278,7 @@ void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uin
   // both reach into a CU. Collect them under the lock and act after it is
   // dropped -- see cluster_placements_mutex_.
   std::array<std::vector<std::pair<ComputeUnitCore *, uint32_t>>, 2> resolved_peers;
+  std::array<uint64_t, 2> resolved_generation{};
   std::vector<std::pair<ComputeUnitCore *, uint64_t>> unpin;
   {
     std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
@@ -2289,6 +2299,7 @@ void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uin
             barriers.signaled_workgroups[index].size() < barriers.member_count)
           continue;
         barriers.signaled_workgroups[index].clear();
+        resolved_generation[index] = barriers.generation[index]++;
         for (uint32_t peer_wg_id : peer_wg_ids) {
           auto peer = cluster_wg_placements_.find(wg_key(dispatch_id, peer_wg_id));
           if (peer != cluster_wg_placements_.end() && !peer->second.completed && peer->second.cu)
@@ -2312,16 +2323,9 @@ void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uin
     }
   }
 
-  for (uint32_t index = 0; index < resolved_peers.size(); ++index) {
-    std::vector<Wavefront *> members;
-    const uint8_t completion_bit = static_cast<uint8_t>(kClusterBarrierBit + index);
-    for (auto [cu, peer_wg_id] : resolved_peers[index]) {
-      auto peer_members = cu->complete_barrier(dispatch_id, peer_wg_id, completion_bit);
-      members.insert(members.end(), peer_members.begin(), peer_members.end());
-    }
-    if (!members.empty())
-      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members), BarrierKind::Cluster);
-  }
+  for (uint32_t index = 0; index < resolved_peers.size(); ++index)
+    complete_cluster_barrier_round(dispatch_id, static_cast<uint8_t>(kClusterBarrierBit + index),
+                                   resolved_generation[index], resolved_peers[index]);
 
   release_cluster_lds_pins(unpin);
 }
@@ -2563,7 +2567,8 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       }
     }
 
-    // All fallible per-wave work succeeded: commit WG bookkeeping and the cluster pin.
+    // All fallible per-wave work succeeded: commit the launch terms, WG and cluster pin.
+    ShaderProcessorInput::init_ordered_append(*cu, entry, wg_wavefronts);
     cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup,
                         entry.num_named_barriers);
     register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
@@ -3192,6 +3197,8 @@ void CommandProcessor::service_command_streams(simdojo::Tick now) {
       if (entry.execution_begun)
         plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
       erase_cluster_workgroups(entry.dispatch_id);
+      if (gws_device_)
+        gws_device_->retire_ordered_dispatch(entry.process_id, entry.queue_id, entry.dispatch_id);
       state.entries.pop_front();
       if (flushed != VmAccessOutcome::Complete) {
         util::Logger::warn("PM4 queue failed: PM4 cache flush failed");
@@ -3227,18 +3234,12 @@ void CommandProcessor::service_command_streams(simdojo::Tick now) {
       if (busy)
         continue;
     }
-    try {
-      const auto result = dispatch_workgroups(entry);
-      if (result.outcome != VmAccessOutcome::Complete) {
-        entry.pm4_failure->fail();
-        fail_pm4_queue(queue, state);
-      } else if (entry.fully_completed() && engine()) {
-        engine()->schedule_event_now(doorbell_event());
-      }
-    } catch (const std::exception &error) {
-      util::Logger::warn("PM4 launch failed: ", error.what());
+    const auto result = dispatch_workgroups(entry);
+    if (result.outcome != VmAccessOutcome::Complete) {
       entry.pm4_failure->fail();
       fail_pm4_queue(queue, state);
+    } else if (entry.fully_completed() && engine()) {
+      engine()->schedule_event_now(doorbell_event());
     }
   }
 }
@@ -3302,6 +3303,13 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
   dp.interrupt_sink = queue.interrupt_sink;
   dp.enabled_cus = queue.enabled_cus;
   dp.kernel_wave_size = (initiator & (1u << 15)) ? 32 : 64;
+  if ((initiator & (1u << 3)) &&
+      (arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2)) {
+    dp.ordered_append = (initiator & (1u << 4)) ? DispatchEntry::OrderedAppend::PerWorkgroup
+                                                : DispatchEntry::OrderedAppend::PerWave;
+    // AMD's GFX10 compute-ring initialization programs 32 ordered IDs per physical CU.
+    dp.ordered_id_count = std::min<size_t>(cus_.size() * 32, GwsDevice::kComputeWaveIdMask + 1);
+  }
   if (RJ_AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT)) {
     dp.enable_private_segment = true;
     dp.pm4_scratch_waves_per_se = regs[kPm4ComputeTmpringSize] & 0xfff;
@@ -3336,16 +3344,16 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
     return emit_error.emit() << "unsupported PM4 wave size";
   dp.vgprs_per_wf =
       (RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT) + 1) * *granule;
-  if (arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-      arch == ROCJITSU_CODE_ARCH_CDNA4)
+  if (arch == rocjitsu::IsaFamily::Cdna2 || arch == rocjitsu::IsaFamily::Cdna3 ||
+      arch == rocjitsu::IsaFamily::Cdna4)
     dp.accum_vgpr_base = gfx90a_accum_vgpr_base(regs[kPm4ComputePgmRsrc3Gfx9]);
   if (dp.vgprs_per_wf > cus_[0]->vgpr_allocation_block_size())
     return emit_error.emit() << "PM4 launch exceeds available VGPRs";
   dp.initial_mode_raw = initial_mode_from_compute_pgm_rsrc1(rsrc1, arch);
   // The raw PM4 register programs this enable; the corresponding AQL descriptor bit is reserved.
-  if (arch == ROCJITSU_CODE_ARCH_RDNA2 && (rsrc2 & COMPUTE_PGM_RSRC2_ENABLE_EXCEPTION_MEMORY))
+  if (arch == rocjitsu::IsaFamily::Rdna2 && (rsrc2 & COMPUTE_PGM_RSRC2_ENABLE_EXCEPTION_MEMORY))
     dp.initial_mode_raw |= Wavefront::kRdna2MemoryViolationEnable;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5)
     dp.initial_ib_sts2 = initial_ib_sts2_gfx11(rsrc1, arch);
   dp.enable_wg_id_x = RJ_AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X);
   dp.enable_wg_id_y = RJ_AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y);
@@ -3470,9 +3478,20 @@ void CommandProcessor::cancel_queue_dispatches(const ComputeQueueRecord &queue) 
     erase_cluster_workgroups(dispatch_id);
     for (auto *cu : cus_)
       cu->abort_dispatch(dispatch_id);
+    if (gws_device_)
+      gws_device_->retire_ordered_dispatch(queue.process_id, queue.queue_id, dispatch_id);
     for (auto *spi : spis_)
       spi->release_wgp_dispatch(dispatch_id);
   }
+}
+
+void CommandProcessor::reset_ordered_ids(const ComputeQueueRecord &queue) {
+  // Production CUs share one device. Standalone CPs can own CU-local GDS stores.
+  if (gws_device_)
+    gws_device_->reset_ordered_ids(queue.process_id, queue.queue_id);
+  else
+    for (auto *cu : cus_)
+      cu->gws_device().reset_ordered_ids(queue.process_id, queue.queue_id);
 }
 
 void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs) {
@@ -3496,6 +3515,10 @@ void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchStat
 }
 
 void CommandProcessor::complete_failed_queue(ComputeQueueRecord &queue) {
+  // Completion callbacks can release command resources. Cancel queued data
+  // effects first; entered effects retain their backing until retirement drains.
+  for (auto &submission : queue.commands.submissions)
+    submission.data_transfer.reset();
   if (flush_gpu_caches(queue.address_space) != VmAccessOutcome::Complete)
     util::Logger::warn("PM4 queue cancellation cache flush failed");
   for (auto &submission : queue.commands.submissions)
@@ -3524,7 +3547,7 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
   process_pm4_packets(
       queue, gpu_vm_,
       {
-          .arch = cus_.empty() ? ROCJITSU_CODE_ARCH_INVALID : cus_[0]->config().arch,
+          .arch = cus_.empty() ? rocjitsu::IsaFamily::Invalid : cus_[0]->config().arch,
           .xcc_id = scratch_xcc_id_,
           .flush_caches = [this, &queue] { return flush_gpu_caches(queue.address_space); },
           .dispatch =
@@ -3543,6 +3566,7 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
                 arm_stall_recheck(now);
               },
           .fault_queue = [this, &queue, &qs] { fail_pm4_queue(queue, qs); },
+          .reset_gds_wave_id = [this, &queue] { reset_ordered_ids(queue); },
       });
 }
 
@@ -3970,7 +3994,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
       RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   uint32_t sgpr_gran =
       RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-  rj_code_arch_t arch = cus_.empty() ? ROCJITSU_CODE_ARCH_CDNA1 : cus_[0]->config().arch;
+  rocjitsu::IsaFamily arch = cus_.empty() ? rocjitsu::IsaFamily::Cdna1 : cus_[0]->config().arch;
   const uint32_t wave_size = kernel_wavefront_size(arch, kd);
   const auto vgpr_granularity = descriptor_vgpr_count_granule_for_wavefront(arch, wave_size);
   if (!vgpr_granularity)
@@ -4052,15 +4076,15 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
         const uint32_t provisioned_waves = tmpring_size & 0xFFFu;
         const uint32_t provisioned_wavesize = (tmpring_size >> 12) & wavesize_mask;
         if (provisioned_wavesize == 0 || provisioned_wavesize < required_wavesize ||
-            (arch == ROCJITSU_CODE_ARCH_CDNA5 && provisioned_waves == 0)) {
+            (arch == rocjitsu::IsaFamily::Cdna5 && provisioned_waves == 0)) {
           return std::nullopt;
         }
         const uint32_t engines = std::max(scratch_wave_divisor_, scratch_shader_engine_count_);
         if (provisioned_waves == 0)
           return std::nullopt;
         const bool per_engine =
-            arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-            arch == ROCJITSU_CODE_ARCH_RDNA3_5 || arch == ROCJITSU_CODE_ARCH_RDNA4;
+            arch == rocjitsu::IsaFamily::Cdna5 || arch == rocjitsu::IsaFamily::Rdna3 ||
+            arch == rocjitsu::IsaFamily::Rdna3_5 || arch == rocjitsu::IsaFamily::Rdna4;
         if (per_engine)
           return provisioned_waves;
         if (provisioned_waves % engines != 0)
@@ -4192,7 +4216,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
     }
   }
 
-  if (private_segment_fixed_size > 0 && arch == ROCJITSU_CODE_ARCH_CDNA5)
+  if (private_segment_fixed_size > 0 && arch == rocjitsu::IsaFamily::Cdna5)
     scratch_wave_limit_per_se = std::min(scratch_wave_limit_per_se, scratch_waves_per_se_);
 
   DispatchEntry dp{};
@@ -4224,18 +4248,18 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   uint32_t required_sgprs = sgprs > 0 ? sgprs : sgpr_limit;
   // gfx942 places VCC and FLAT_SCRATCH relative to the descriptor allocation.
   // A kernel using the stack ABI must itself request s32 and s33.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+  if (arch == rocjitsu::IsaFamily::Cdna4)
     required_sgprs = std::max(required_sgprs, 34u); // s32 stack pointer, s33 frame pointer
   dp.sgprs_per_wf = std::min(required_sgprs, sgpr_limit);
   dp.vgprs_per_wf = std::min(vgprs > 0 ? vgprs : vgpr_limit, vgpr_limit);
-  if (arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-      arch == ROCJITSU_CODE_ARCH_CDNA4)
+  if (arch == rocjitsu::IsaFamily::Cdna2 || arch == rocjitsu::IsaFamily::Cdna3 ||
+      arch == rocjitsu::IsaFamily::Cdna4)
     dp.accum_vgpr_base = gfx90a_accum_vgpr_base(kd.compute_pgm_rsrc3);
   dp.kernarg_addr = reinterpret_cast<uint64_t>(pkt.kernarg_address);
   dp.kernarg_size = kd.kernarg_size;
   dp.num_user_sgprs = user_sgprs;
   dp.kernel_code_properties = kd.kernel_code_properties;
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+  if (arch == rocjitsu::IsaFamily::Cdna5) {
     const uint32_t named_barrier_blocks =
         RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT);
     dp.num_named_barriers = std::min(named_barrier_blocks * 4u, ComputeUnitCore::kMaxNamedBarriers);
@@ -4243,7 +4267,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   dp.kernel_wave_size = wave_size;
   dp.kernarg_preload = kd.kernarg_preload;
   dp.initial_mode_raw = initial_mode_from_compute_pgm_rsrc1(kd.compute_pgm_rsrc1, arch);
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5)
     dp.initial_ib_sts2 = initial_ib_sts2_gfx11(kd.compute_pgm_rsrc1, arch);
   dp.private_segment_fixed_size = private_segment_fixed_size;
   dp.scratch_wave_limit_per_se = scratch_wave_limit_per_se;

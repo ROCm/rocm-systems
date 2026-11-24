@@ -23,6 +23,7 @@ struct Gfx11MimgEncoding {
   uint8_t vdata = 0;
   uint8_t srsrc = 0;
   bool tfe = false;
+  bool lwe = false;
   uint32_t nsa_word = 0;
 };
 
@@ -41,7 +42,8 @@ DecodeResult decode_gfx11_mimg(Decoder &decoder, Builder builder, uint16_t opcod
                                                   .vaddr = encoding.vaddr,
                                                   .vdata = encoding.vdata,
                                                   .srsrc = encoding.srsrc,
-                                                  .tfe = encoding.tfe});
+                                                  .tfe = encoding.tfe,
+                                                  .lwe = encoding.lwe});
   if (!encoding.nsa)
     return decoder.decode(base.data(), emit_error);
   const std::array<uint32_t, 3> words{base[0], base[1], encoding.nsa_word};

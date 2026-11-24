@@ -85,3 +85,47 @@ TEST(MathFractF16W64Gfx12, Arithmetic) {
 TEST(MathFrexpMantF16W64Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_unary<64, true, true>(rj_arith_v_frexp_mant_f16_w64_gfx12, 10);
 }
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathFrexpMantF16W32Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<32, true>(rj_arith_v_frexp_mant_f16_w32_gfx942,
+                                                             10);
+}
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathFrexpMantF16W64Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<64, true>(rj_arith_v_frexp_mant_f16_w64_gfx942,
+                                                             10);
+}
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathFrexpMantF32W32Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<32, false>(rj_arith_v_frexp_mant_f32_w32_gfx942,
+                                                              10);
+}
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathFrexpMantF32W64Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<64, false>(rj_arith_v_frexp_mant_f32_w64_gfx942,
+                                                              10);
+}
+
+// Check inherited fractional arithmetic and unsupported strict semantics.
+TEST(MathFractF16W32Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_unary<32, true, false>(rj_arith_v_fract_f16_w32_gfx942, 9);
+}
+
+// Check inherited fractional arithmetic and unsupported strict semantics.
+TEST(MathFractF16W64Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_unary<64, true, false>(rj_arith_v_fract_f16_w64_gfx942, 9);
+}
+
+// Check inherited fractional arithmetic and unsupported strict semantics.
+TEST(MathFractF32W32Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_unary<32, false, false>(rj_arith_v_fract_f32_w32_gfx942, 9);
+}
+
+// Check inherited fractional arithmetic and unsupported strict semantics.
+TEST(MathFractF32W64Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_unary<64, false, false>(rj_arith_v_fract_f32_w64_gfx942, 9);
+}

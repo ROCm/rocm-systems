@@ -3,11 +3,17 @@
 
 #pragma once
 
+#include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 
+#include "rocjitsu/vm/plugins/race_detector/core/event_registry.h"
+#include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
+#include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -15,9 +21,11 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <tuple>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
@@ -49,46 +57,98 @@ private:
   size_t head_ = 0;
 };
 
-/// Return the memory instruction recorded as the exact conflict.
+/// @brief Return the memory instruction recorded as the exact conflict.
 /// Returns failure if the detector no longer holds the conflicting event.
 util::FailureOr<MarkedInstruction> findConflict(const RaceViolation &, RaceDetector &);
 
-/// Format the instructions that one wave executed between a conflicting memory
-/// instruction and the access that raced with it.
-///
-/// Marks trace entries whose PC and encoding match `conflict` or `read` with `==>` and
-/// annotates them with wave and lane. Drops entries before the first marked one
-/// and after the first match of `read` that follows it, and elides the middle of
-/// a remaining span longer than 32 rows. If the trace contains no entry at the
-/// conflict's PC and encoding, prints the conflict first with a "(before trace window)"
-/// note. Each trace row prints its own captured bytes. Calls `disassemble` only
-/// for printed rows. Repeated executions of identical bytes at the same PC are
-/// not distinguished. Returns failure when `disassemble` fails. The callback must not throw.
+inline constexpr size_t kTraceHistorySize = 256;
+/// Default instruction context before formatTrace elides the middle of a report.
+inline constexpr size_t kDefaultTraceContext = 128;
+
+/// Instruction context for another wave's conflict when the reporting wave never
+/// ran the conflicting instruction.
+inline constexpr size_t kOtherWaveTraceContext = 16;
+
+/// @brief Format the reporting wave's trace in execution order.
+/// @details Mark the first matching same-wave conflict and the last matching
+/// current access by PC and encoding. Identical
+/// producer executions are not distinguished. A conflict from another wave, or
+/// one no longer retained, is printed separately before the trace. For another
+/// wave's conflict, the trace starts at the reporting wave's latest execution of
+/// the same instruction, or shows the last min(kOtherWaveTraceContext, context_instructions)
+/// instructions when it has none. Longer spans keep their beginning and end,
+/// plus synchronization and control-flow instructions. Context counts executed
+/// instructions before consecutive identical unmarked s_nops are compacted.
+/// Disassemble only printed rows. Returns failure when `disassemble` fails.
+/// The callback must not throw.
+/// @pre A same-wave conflict must not follow the current access in the trace.
+/// @pre context_instructions is between 2 and kTraceHistorySize, inclusive.
 util::FailureOr<std::string> formatTrace(
-    const RingBuffer<InstructionSnapshot, 256> &trace,
+    const RingBuffer<InstructionSnapshot, kTraceHistorySize> &trace,
     const std::function<util::FailureOr<std::string>(const InstructionSnapshot &)> &disassemble,
-    std::optional<MarkedInstruction> conflict, MarkedInstruction read);
+    std::optional<MarkedInstruction> conflict, MarkedInstruction access,
+    size_t context_instructions = kDefaultTraceContext);
+
+/// @brief Describe a violation: the hazard direction, the current access at
+/// `access_pc`, the conflicting event, and that event's completion and
+/// synchronization observed by the detector, with counter names for `arch`.
+/// Wave-local GDS source locks supply their producing instruction directly.
+/// @throws std::out_of_range if `events` no longer holds the conflicting event.
+/// @throws std::invalid_argument for an architecture without a wait-counter model.
+/// @throws std::logic_error if the event is already retired.
+std::string formatRaceDescription(const RaceViolation &violation, const EventRegistry &events,
+                                  uint64_t access_pc, rocjitsu::IsaFamily arch);
 
 struct RaceWavefrontState : WavefrontState {
   /// The wave's most recently issued instructions, oldest first. Each entry owns
   /// a copy of its encoding, so reports can disassemble it after the code is
   /// rewritten or unmapped.
-  RingBuffer<InstructionSnapshot, 256> trace;
+  RingBuffer<InstructionSnapshot, kTraceHistorySize> trace;
   WaveRaceState *race_state = nullptr;
   struct LdsOperandRead {
     uint32_t address;
     uint32_t bytes;
     uint32_t lane;
   };
-  std::optional<LdsOperandRead> lds_operand_read;
+  std::vector<LdsOperandRead> lds_operand_reads;
+
+  struct MixedLdsAccess {
+    struct Lane {
+      int address;
+      int lane;
+      int bytes;
+      uint8_t atomic_bytes;
+    };
+    EventId event;
+    MemoryOrderClass order;
+    bool reads;
+    bool writes;
+    std::vector<Lane> lanes;
+    IntervalSet intervals;
+  };
+  std::optional<MixedLdsAccess> mixed_lds;
+
+  // The GFX10 and GFX11 inline image queries write every selected DWORD on the same
+  // active lanes. Gather the actual register writes until execution succeeds.
+  struct ImageQuery {
+    amdgpu::VmemWriteback type;
+    amdgpu::WaitCounterType counter;
+    uint64_t lanes = 0;
+    std::vector<uint32_t> registers;
+  };
+  std::optional<ImageQuery> image_query;
 };
 
 class RaceDetectorPlugin : public ExecutionPlugin,
                            public AmdgpuTrapEntryObserver,
-                           public AmdgpuImplicitMemoryWaitObserver {
+                           public AmdgpuImplicitMemoryWaitObserver,
+                           public AmdgpuImageFeedbackObserver,
+                           public AmdgpuMixedFlatLdsObserver,
+                           public AmdgpuMemoryCancellationObserver {
 public:
-  /// @param config_json Plugin configuration object as a JSON string (unused;
-  ///        this plugin takes no configuration). May be null.
+  /// @param config_json Plugin JSON with an optional integer trace_context in
+  ///        [2, kTraceHistorySize]. Null or empty uses the default context.
+  /// @throws std::invalid_argument for malformed configuration.
   explicit RaceDetectorPlugin(const char *config_json = nullptr);
   ~RaceDetectorPlugin() override;
 
@@ -112,6 +172,9 @@ public:
 
   void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) override;
 
+  void onAmdgpuImageFeedbackQualified(const Instruction &inst, amdgpu::Wavefront &wf) override;
+  void onAmdgpuMixedFlatLdsAccess(const Instruction &inst, amdgpu::Wavefront &wf) override;
+  void onAmdgpuMemoryAccessCancelled(const Instruction &inst, amdgpu::Wavefront &wf) override;
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
                                   const Instruction &inst, amdgpu::Wavefront &wf) override;
 
@@ -143,8 +206,13 @@ public:
   void onAmdgpuTrapEntered(amdgpu::Wavefront &wf) override;
   void onAmdgpuImplicitMemoryWait(amdgpu::Wavefront &wf, const amdgpu::WaitFields &fields) override;
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,
-                               BarrierKind kind) override;
+  void onAmdgpuBarrierSignaled(const amdgpu::Wavefront &wf, const BarrierRound &round) override;
+
+  void onAmdgpuBarrierRoundCompleted(std::span<amdgpu::Wavefront *> notified,
+                                     std::span<amdgpu::Wavefront *> armed,
+                                     const BarrierRound &round) override;
+
+  void onAmdgpuBarrierWaitPassed(const amdgpu::Wavefront &wf, const BarrierRound &round) override;
 
   std::string getSummary() const;
 
@@ -152,6 +220,8 @@ public:
   size_t retainedWorkgroupCount() const;
 
 private:
+  size_t trace_context_ = kDefaultTraceContext;
+
   struct WorkgroupKey {
     uint32_t dispatch_id;
     uint32_t workgroup_id;
@@ -171,12 +241,19 @@ private:
   RaceWavefrontState *get_state(const amdgpu::Wavefront *wf) {
     return wf ? get_state(*wf) : nullptr;
   }
+  /// The wave's race state, or nullptr for a wave this plugin does not track.
+  /// For hooks that are not filtered by observes_hot_hooks_for_wavefront().
+  WaveRaceState *tracked_race_state(const amdgpu::Wavefront &wf) {
+    return wf.has_plugin_state(slot_index()) ? get_state(wf)->race_state : nullptr;
+  }
   void release_wave_state(amdgpu::Wavefront &wf) { wf.clear_plugin_state(slot_index()); }
 
   mutable std::mutex dispatch_mutex_;
   std::map<WorkgroupKey, std::unique_ptr<RaceDetector>> detectors_;
 
-  std::mutex report_mutex_;
+  mutable std::mutex report_mutex_;
+  uint64_t reports_emitted_ = 0;
+  uint64_t observations_suppressed_ = 0;
   std::set<std::pair<uint32_t, uint64_t>> observed_races_;
   std::unordered_map<uint32_t, KernelNames> dispatch_kernel_names_;
 };

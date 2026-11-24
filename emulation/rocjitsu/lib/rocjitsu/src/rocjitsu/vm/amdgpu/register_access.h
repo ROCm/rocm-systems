@@ -25,9 +25,11 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/block_memory.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/result.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/ordered_count.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "simdojo/components/vector_reg.h"
@@ -952,10 +954,8 @@ public:
     /// @brief Store one wave-width snapshot using the acquired lane and byte masks.
     /// @details Source and destination may overlap. Each call addresses one VGPR;
     /// adjacent registers need not have contiguous backing storage.
-    /// @throws std::invalid_argument if @p values does not hold one word per wave lane.
     void set_lanes(uint32_t relative_reg, std::span<const uint32_t> values) const {
-      if (values.size() != wf_size_)
-        throw std::invalid_argument("VGPR lane write needs one value per wave lane");
+      assert(values.size() == wf_size_ && "VGPR lane write needs one value per wave lane");
       if (!cu_)
         return;
       if (lane_mask_ == util::mask<uint64_t>(static_cast<int>(wf_size_)) &&
@@ -1110,7 +1110,7 @@ public:
     for (int i = 0; i < inst.num_dst_operands(); ++i) {
       const auto &operand = *inst.dst_operand(i);
       const auto reg =
-          cu_->arch() == ROCJITSU_CODE_ARCH_RDNA3_5 && (inst.flags() & MATRIX_REGISTER_ACCESSES)
+          cu_->arch() == rocjitsu::IsaFamily::Rdna3_5 && (inst.flags() & MATRIX_REGISTER_ACCESSES)
               ? gfx115_wmma_register(operand, true)
               : operand.decoded_vgpr();
       if (reg && operand.size_bits() &&
@@ -1150,9 +1150,64 @@ public:
 
   [[nodiscard]] std::optional<RegisterRef> memory_destination_register(const Instruction &inst,
                                                                        const Operand &op) const {
-    return destination_register(op, true, bool(inst.flags() & RESERVES_UNWRITTEN_VGPR),
-                                wavefront().wf_size() == 64 &&
-                                    (inst.flags() & COMPACT_WAVE64_MEMORY_RESULT));
+    auto result = destination_register(op, true, bool(inst.flags() & RESERVES_UNWRITTEN_VGPR),
+                                       wavefront().wf_size() == 64 &&
+                                           (inst.flags() & COMPACT_WAVE64_MEMORY_RESULT));
+    if (result && result->cls == RegClass::VGPR && (inst.flags() & INCLUDES_UNWRITTEN_LAST_VGPR))
+      --result->width;
+    return result;
+  }
+
+  /// VGPRs read by a GDS request. Ordered counts and GWS read their argument
+  /// from the first active lane. A suppressed result disables the request.
+  [[nodiscard]] uint64_t gds_source_lanes(const Instruction &inst) const {
+    if (const auto ordered = decoded_ordered_count_lanes(inst, wavefront()))
+      return ordered->contribution;
+    if (!vgpr_results_fit_allocation(inst))
+      return 0;
+    const uint64_t lanes = wavefront().exec();
+    return inst.mnemonic().starts_with("ds_gws_") ? lanes & -lanes : lanes;
+  }
+
+  /// Section 3.6.1 specifies an undefined data value for out-of-range
+  /// sources of reads and returning atomics. No-return DS/GDS and GWS
+  /// use the issuing wave's VGPR0 for each out-of-range source word.
+  [[nodiscard]] static bool ds_sources_use_vgpr0(const Instruction &inst) {
+    for (int i = 0; i < inst.num_dst_operands(); ++i)
+      if (inst.dst_operand(i)->decoded_vgpr())
+        return false;
+    return true;
+  }
+
+  /// Resolve each data-share source DWORD in the issuing wave. Preserve a
+  /// contiguous in-range tuple; a crossing tuple can refer to multiple VGPRs.
+  template <typename F>
+  void for_each_ds_source_range(const Operand &operand, bool use_vgpr0, F &&visit) const {
+    const auto reg = operand.decoded_vgpr();
+    if (!reg || !operand.reads_value())
+      return;
+    const auto &wf = wavefront();
+    const auto base = wf.vgpr_alloc().base;
+    const auto physical = base + reg->index;
+    if (use_vgpr0 ? wf.vgpr_alloc().contains(physical, reg->width)
+                  : cu_->owns_vgpr_range(wf, physical, reg->width)) {
+      visit(*reg);
+      return;
+    }
+    if (!use_vgpr0)
+      return;
+    for (uint32_t word = 0; word < reg->width; ++word) {
+      const auto physical_word = wf.ds_source_vgpr(physical + word);
+      visit(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(physical_word - base), 1});
+    }
+  }
+
+  template <typename F> void for_each_gds_source(const Instruction &inst, F &&visit) const {
+    for (int i = 0; i < inst.num_src_operands(); ++i) {
+      if (!inst.tracks_explicit_source(i))
+        continue;
+      for_each_ds_source_range(*inst.src_operand(i), ds_sources_use_vgpr0(inst), visit);
+    }
   }
 
   /// @brief Resolve a source using the execution bank and scalar selector.
@@ -1182,6 +1237,9 @@ public:
   /// Preserve backed inputs even if a later scalar word has no backing.
   [[nodiscard]] std::array<std::optional<RegisterRef>, 4>
   buffer_resource_registers(const Operand &op, unsigned scalar_words) const;
+
+  /// Inspect a scalar control input without publishing an architectural register read.
+  std::optional<uint32_t> scalar_control_value(uint32_t selector) const;
 
   // Scalar and per-lane operand access. Instruction implementations use these
   // for value-semantic operand reads and writes; Operand remains the
@@ -1621,7 +1679,7 @@ public:
   /// Report the architectural spelling of a gfx942 scalar alias. The race
   /// detector converts it to physical storage; other observers see the name.
   void observe_scalar_alias(RegisterRef reg, bool write) const {
-    if (!cu_->observes_register_access() || cu_->arch() != ROCJITSU_CODE_ARCH_CDNA3)
+    if (!cu_->observes_register_access() || cu_->arch() != rocjitsu::IsaFamily::Cdna3)
       return;
     if (write)
       cu_->notify_scalar_register_write(wavefront(), reg);
@@ -1848,7 +1906,7 @@ public:
     if (!cu_->valid_operand_vgpr_range(wavefront(), *base, reg_count) && uses_vgpr0_fallback())
       return std::nullopt; // A partial tuple can require noncontiguous source registers.
     if (auto mapped = remapped_valu_source(op, *base, reg_count)) {
-      if (reg_count != 1 && cu_->arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+      if (reg_count != 1 && cu_->arch() != rocjitsu::IsaFamily::Rdna3_5)
         return std::nullopt; // CDNA1 can substitute nonconsecutive source words.
       return read_vgpr_region(mapped->lo, reg_count, lane_mask);
     }
@@ -1953,7 +2011,8 @@ public:
 
 private:
   bool uses_vgpr0_fallback() const {
-    return (cu_->arch() == ROCJITSU_CODE_ARCH_RDNA1 || cu_->arch() == ROCJITSU_CODE_ARCH_RDNA2) &&
+    return (cu_->arch() == rocjitsu::IsaFamily::Rdna1 ||
+            cu_->arch() == rocjitsu::IsaFamily::Rdna2) &&
            wavefront().num_vgprs() != 0;
   }
 
@@ -1982,7 +2041,7 @@ private:
 
   uint32_t read_remapped_valu_word(const Operand &op, uint32_t reg, uint32_t lane) const {
     // Compact true16 VGPRs return their selected half normalized to bits 15:0.
-    if (cu_->arch() == ROCJITSU_CODE_ARCH_RDNA3_5 && op.size_bits() == 16 && !op.simd_capable()) {
+    if (cu_->arch() == rocjitsu::IsaFamily::Rdna3_5 && op.size_bits() == 16 && !op.simd_capable()) {
       const uint8_t bytes = op.register_byte_mask();
       const uint32_t value = read_vgpr(reg, lane, bytes);
       return (value >> (bytes == ExecutionPlugin::kHighHalfByteMask ? 16 : 0)) & 0xffffu;
@@ -1999,8 +2058,8 @@ private:
     const auto &wf = wavefront();
     const auto arch = cu_->arch();
     // CDNA2 resolves its unified VGPR/AccVGPR allocation in its operand backend.
-    if ((arch != ROCJITSU_CODE_ARCH_CDNA1 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-         arch != ROCJITSU_CODE_ARCH_CDNA4 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) ||
+    if ((arch != rocjitsu::IsaFamily::Cdna1 && arch != rocjitsu::IsaFamily::Cdna3 &&
+         arch != rocjitsu::IsaFamily::Cdna4 && arch != rocjitsu::IsaFamily::Rdna3_5) ||
         op.vgpr_msb_role() == VgprMsbRole::None || !wf.num_vgprs())
       return std::nullopt;
     const auto base = wf.vgpr_alloc().base;
@@ -2014,7 +2073,7 @@ private:
     if (bank.contains(reg, words))
       return std::nullopt;
     // A GFX11.5 VALU operand outside the allocation selects VGPR0 as its tuple base.
-    if (cu_->arch() == ROCJITSU_CODE_ARCH_RDNA3_5) {
+    if (cu_->arch() == rocjitsu::IsaFamily::Rdna3_5) {
       // VOPD preserves the low two register-index bits.
       const auto first = bank.base + (op.is_vopd_source() ? (reg - bank.base) % 4 : 0);
       return SourceWords{first, first + 1};
@@ -2057,7 +2116,6 @@ private:
   }
   /// Read an encoding-selected control word while planning an instruction's
   /// accesses. This does not constitute an executed register access.
-  std::optional<uint32_t> scalar_control_value(uint32_t selector) const;
   std::optional<uint64_t> vector_control_value(RegisterRef reg, unsigned lane) const;
 
   [[nodiscard]] uint32_t vgpr_region_wave_size(uint32_t physical_base, uint32_t reg_count) const {

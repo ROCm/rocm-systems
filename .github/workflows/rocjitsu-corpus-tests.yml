@@ -73,7 +73,7 @@ env:
 
 jobs:
   test:
-    runs-on: aws-linux-scale-rocm-prod
+    runs-on: az-linux-scale-rocm-default-prod
     name: test (${{ matrix.name }})
     env:
       ROCJITSU_HOST_CPU_BASELINE: ${{ matrix.host_cpu_baseline }}
@@ -208,6 +208,7 @@ jobs:
             runtimes/api-headers
             .github
             shared/machine-readable-isa/isa
+          persist-credentials: false
 
       - name: Checkout corpus
         # Every lane needs the corpus for the file-limit matrix, including
@@ -217,6 +218,7 @@ jobs:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
           ref: ${{ github.event.inputs.corpus_ref || env.ROCJITSU_DBT_CORPUS_REF }}
           path: rocjitsu-test-corpus
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -448,11 +450,13 @@ jobs:
             -DRJ_ENABLE_UBSAN=${{ matrix.enable_ubsan }} \
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
             -DRJ_ENABLE_EXPENSIVE_CHECKS=${{ matrix.enable_expensive_checks }} \
+            -DROCJITSU_ENABLE_INTERPOSER=ON -DRJ_ENABLE_HOST_FAULT_RECOVERY=ON \
             -DROCJITSU_ENABLE_PERFSIM_PLUGIN=ON \
             -DRJ_SANITIZER_RUNTIME=${{ matrix.sanitizer_runtime }}
 
           # Let Ninja and CTest choose their default CPU parallelism.
           cmake --build "${ROCJITSU_BUILD_DIR}" -j
+          echo "built=true" >> "${GITHUB_OUTPUT}"
 
           if [[ "${{ matrix.name }}" == release ]]; then
             VFIO_DISCOVERY="$(ctest --test-dir "${ROCJITSU_BUILD_DIR}" -N -R '^Vfio(TargetGrants|DeviceHost)')"
@@ -605,7 +609,7 @@ jobs:
 
       - name: Install corpus test dependencies
         id: install_corpus_dependencies
-        if: matrix.run_simulator_corpus
+        if: ${{ !cancelled() && matrix.run_simulator_corpus && steps.build_rocjitsu.outcome == 'success' }}
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         run: |
@@ -631,7 +635,7 @@ jobs:
         if: matrix.name == 'release'
         working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
         run: |
-          uv pip install -e lib/python
+          uv pip install -e "lib/python[test]"
           python -m pytest lib/python/amdisa/tests
 
       - name: Run corpus tests
@@ -696,7 +700,7 @@ jobs:
           retention-days: 7
 
       - name: Compare plain and translated gfx1250 simulator runs
-        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' }}
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' && steps.install_corpus_dependencies.outcome == 'success' }}
         timeout-minutes: 45
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
@@ -953,6 +957,7 @@ jobs:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
           ref: ${{ github.event.inputs.vulkan_corpus_ref || env.ROCJITSU_VULKAN_CORPUS_REF }}
           path: rocjitsu-vulkan-corpus
+          persist-credentials: false
 
       - name: Build pinned Vulkan CTS
         id: build_vulkan_cts
@@ -992,3 +997,22 @@ jobs:
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 7
+
+      # All consumers of the interposed build finish before its mode changes.
+      # The explicit build can reuse the tree even if a default test failed.
+      - name: Test explicit library embedding
+        if: ${{ !cancelled() && steps.build_rocjitsu.outputs.built == 'true' }}
+        shell: bash
+        run: |
+          ROCM_PATH="$(rocm-sdk path --root)" \
+            cmake -S "${ROCJITSU_SOURCE_DIR}" -B "${ROCJITSU_BUILD_DIR}" \
+            -DROCJITSU_ENABLE_INTERPOSER=OFF -DRJ_ENABLE_HOST_FAULT_RECOVERY=OFF
+          cmake --build "${ROCJITSU_BUILD_DIR}" \
+            --target vm_embedding_api_test libc_passthrough_test host_access_guard_test -j
+          ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
+            -R '^VmEmbeddingApi(DeathTest)?\.' --no-tests=error --output-on-failure --timeout 60 -j4
+          ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
+            -R '^LibcPassthrough\.' --no-tests=error --output-on-failure --timeout 60 -j4
+          ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
+            -R '^HostAccessGuardDeathTest\.DisabledRecoveryDeliversRealFaultsToTheHost$' \
+            --no-tests=error --output-on-failure --timeout 60 -j4

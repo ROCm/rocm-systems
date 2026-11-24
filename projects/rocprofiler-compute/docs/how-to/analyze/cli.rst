@@ -790,6 +790,10 @@ lists the operators and ignores ``--operator``.
 List all operators
 ---------------------
 
+``--list-operators`` accepts ``torch``, ``triton``, and ``user``, separated
+by spaces. For example, ``--list-operators torch user`` lists both groups.
+With no values, it lists every captured operator and user ROCTx region.
+
 Display all PyTorch operators captured during profiling:
 
 .. code-block:: shell-session
@@ -859,9 +863,11 @@ Filtering by Operator
 case-sensitive. A pattern can match an operator's name or its full call path,
 such as ``nn.Module.Net.forward/aten::addmm``.
 
-A prefix limits a pattern to one framework, as in ``torch:*relu*``. A pattern
-without a prefix uses the prefix before it. If no prefix comes before it, the
-pattern matches every traced framework and user ROCTx regions.
+Use ``torch:``, ``triton:``, or ``user:`` to limit a pattern to that group.
+A pattern without a prefix uses the most recent prefix. Before any prefix,
+the pattern matches every traced framework and user ROCTx regions.
+Separate patterns with spaces and quote them so the shell does not expand
+them. A comma is part of the pattern; it does not separate patterns.
 
 * **Wildcard** — ``*relu*`` matches any operator whose name contains ``relu``.
 * **Call path** — ``*/aten::addmm`` matches ``aten::addmm`` when another

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -24,6 +25,6 @@ inline constexpr uint32_t kAddressPairStrideBytes = 256;
 /// kAddressPairStrideBytes intervals in mapped memory. Vector addresses advance
 /// by four bytes per lane. The kernel uses s[16:31], s[40:42], and v[16:33] as
 /// scratch and ends with an explicit s_endpgm.
-void write_generated_kernel(std::span<uint8_t> payload, rj_code_arch_t arch, uint64_t seed);
+void write_generated_kernel(std::span<uint8_t> payload, rocjitsu::IsaFamily arch, uint64_t seed);
 
 } // namespace rocjitsu::execution_fuzz

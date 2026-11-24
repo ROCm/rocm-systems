@@ -36,7 +36,8 @@ TEST(FpAddF16W64Gfx11, Arithmetic) {
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
 TEST(FpAddF32W32Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 32>(
-      rj_arith_v_add_f32_w32_gfx12, [](double x, double y) { return x + y; }, /*gfx12=*/true);
+      rj_arith_v_add_f32_w32_gfx12, [](double x, double y) { return x + y; }, /*gfx12=*/true,
+      /*fp_status_supported=*/false, /*compatibility_status=*/true);
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -48,7 +49,8 @@ TEST(FpAddF32W32Gfx11, Arithmetic) {
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
 TEST(FpAddF32W64Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 64>(
-      rj_arith_v_add_f32_w64_gfx12, [](double x, double y) { return x + y; }, /*gfx12=*/true);
+      rj_arith_v_add_f32_w64_gfx12, [](double x, double y) { return x + y; }, /*gfx12=*/true,
+      /*fp_status_supported=*/false, /*compatibility_status=*/true);
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -108,7 +110,8 @@ TEST(FpSubF16W64Gfx11, Arithmetic) {
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
 TEST(FpSubF32W32Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 32>(
-      rj_arith_v_sub_f32_w32_gfx12, [](double x, double y) { return x - y; }, /*gfx12=*/true);
+      rj_arith_v_sub_f32_w32_gfx12, [](double x, double y) { return x - y; }, /*gfx12=*/true,
+      /*fp_status_supported=*/false, /*compatibility_status=*/true);
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -120,7 +123,8 @@ TEST(FpSubF32W32Gfx11, Arithmetic) {
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
 TEST(FpSubF32W64Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 64>(
-      rj_arith_v_sub_f32_w64_gfx12, [](double x, double y) { return x - y; }, /*gfx12=*/true);
+      rj_arith_v_sub_f32_w64_gfx12, [](double x, double y) { return x - y; }, /*gfx12=*/true,
+      /*fp_status_supported=*/false, /*compatibility_status=*/true);
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -156,7 +160,8 @@ TEST(FpSubrevF16W64Gfx11, Arithmetic) {
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
 TEST(FpSubrevF32W32Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 32>(
-      rj_arith_v_subrev_f32_w32_gfx12, [](double x, double y) { return y - x; }, /*gfx12=*/true);
+      rj_arith_v_subrev_f32_w32_gfx12, [](double x, double y) { return y - x; }, /*gfx12=*/true,
+      /*fp_status_supported=*/false, /*compatibility_status=*/true);
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -168,7 +173,8 @@ TEST(FpSubrevF32W32Gfx11, Arithmetic) {
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
 TEST(FpSubrevF32W64Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 64>(
-      rj_arith_v_subrev_f32_w64_gfx12, [](double x, double y) { return y - x; }, /*gfx12=*/true);
+      rj_arith_v_subrev_f32_w64_gfx12, [](double x, double y) { return y - x; }, /*gfx12=*/true,
+      /*fp_status_supported=*/false, /*compatibility_status=*/true);
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -428,4 +434,53 @@ TEST(FpAddF64Gfx11, CapturedNans) {
   using rocjitsu::arith::test::check_captured_gfx11;
   check_captured_gfx11<32, 64>(rj_arith_v_add_f64_w32, add_f64_lanes);
   check_captured_gfx11<64, 64>(rj_arith_v_add_f64_w64, add_f64_lanes);
+}
+
+// Expected causes retain the inherited bridge classifiers, including their
+// distinction from the separately qualified strict MUL reporting model.
+TEST(FpBinaryF32, CompatibilityStatus) {
+  using namespace rocjitsu::arith::test;
+  struct Case {
+    decltype(&rj_arith_v_add_f32_w32) wave32;
+    decltype(&rj_arith_v_add_f32_w64) wave64;
+    uint32_t a, b, causes;
+    uint64_t mode = 0, fp = 0;
+  };
+  const Case cases[] = {
+      {rj_arith_v_add_f32_w32_gfx12, rj_arith_v_add_f32_w64_gfx12, 0x7f7fffff, 0x7f7fffff, 0x28},
+      {rj_arith_v_add_f32_w32_gfx12, rj_arith_v_add_f32_w64_gfx12, 0x7f7fffff, 0x7f7fffff, 8,
+       RJ_ARITH_ALU_OMOD_HALF},
+      {rj_arith_v_sub_f32_w32_gfx12, rj_arith_v_sub_f32_w64_gfx12, 0x7f800000, 0x7f800000, 1},
+      {rj_arith_v_subrev_f32_w32_gfx12, rj_arith_v_subrev_f32_w64_gfx12, 0x7f800000, 0x7f800000, 1},
+      {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 0, 0x7f800000, 1},
+      {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 1, 0x7fc00000, 2},
+      {rj_arith_v_mul_f32_w32, rj_arith_v_mul_f32_w64, 0, 0x7f800000, 0},
+      {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 0x7f7fffff, 0x40000000, 8,
+       RJ_ARITH_ALU_OMOD_HALF},
+      {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 1, 0x3f000000, 0x32, 0,
+       RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS},
+      {rj_arith_v_min_num_f32_w32, rj_arith_v_min_num_f32_w64, 0x7f800000, 1, 2},
+      {rj_arith_v_maximum_f32_w32, rj_arith_v_maximum_f32_w64, 0x7f800001, 1, 3},
+      {rj_arith_v_min_num_f32_w32_gfx1250, rj_arith_v_min_num_f32_w64_gfx1250, 0x7f800001, 1, 0},
+  };
+  for (auto cpu : supported_cpu_levels()) {
+    for (int lanes : {32, 64}) {
+      for (const auto &test : cases) {
+        for (uint64_t exec_mask : {uint64_t(0), uint64_t(1) << (lanes - 1)}) {
+          Registers<3, 64> r;
+          r.v[0][lanes - 1] = test.a;
+          r.v[1][lanes - 1] = test.b;
+          uint32_t status = 0x80;
+          const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | test.fp;
+          // Alias D with A to catch classification performed after the source is overwritten.
+          const int error =
+              lanes == 32
+                  ? test.wave32(flags, uint32_t(exec_mask), test.mode, r.v, r.v, r.v + 1, &status)
+                  : test.wave64(flags, exec_mask, test.mode, r.v, r.v, r.v + 1, &status);
+          ASSERT_EQ(error, RJ_ARITH_SUCCESS);
+          EXPECT_EQ(status, 0x80U | (exec_mask ? test.causes : 0));
+        }
+      }
+    }
+  }
 }

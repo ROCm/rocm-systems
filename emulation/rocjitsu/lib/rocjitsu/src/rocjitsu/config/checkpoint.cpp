@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
@@ -25,6 +26,7 @@
 #include <fstream>
 #include <limits>
 #include <optional>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -34,29 +36,78 @@ namespace config {
 
 namespace {
 
-bool checkpoint_cu_owned_lds(rj_code_arch_t arch) {
-  return arch != ROCJITSU_CODE_ARCH_RDNA1 && arch != ROCJITSU_CODE_ARCH_RDNA2 &&
-         arch != ROCJITSU_CODE_ARCH_RV32I && arch != ROCJITSU_CODE_ARCH_RV64I;
+bool checkpoint_cu_owned_lds(rocjitsu::IsaFamily arch) {
+  return arch != rocjitsu::IsaFamily::Rdna1 && arch != rocjitsu::IsaFamily::Rdna2 &&
+         arch != rocjitsu::IsaFamily::Rv32i && arch != rocjitsu::IsaFamily::Rv64i;
 }
 
-const char *checkpoint_group_target(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+flatbuffers::Optional<fb::GraphicsWait> graphics_wait(const amdgpu::Wavefront &wave) {
+  if (!amdgpu::has_typed_export_waits(wave.cu().arch()))
+    return flatbuffers::nullopt;
+  if (wave.state() == amdgpu::WfState::EXPORT_WAIT)
+    return fb::GraphicsWait_Export;
+  if (wave.state() == amdgpu::WfState::PARAM_WAIT)
+    return fb::GraphicsWait_Parameters;
+  return fb::GraphicsWait_None;
+}
+
+util::Result restore_graphics_status(amdgpu::Wavefront &wave, const fb::WavefrontState &saved,
+                                     bool predates_grants, util::DiagnosticEmitter emit_error) {
+  uint32_t status = saved.status();
+  const auto arch = wave.cu().arch();
+  const auto waiting = saved.graphics_wait();
+  bool use_launch_grants = !waiting && predates_grants;
+  if (waiting) {
+    if (!amdgpu::has_typed_export_waits(arch))
+      return emit_error.emit() << "Graphics wait on an incompatible checkpoint architecture";
+    switch (*waiting) {
+    case fb::GraphicsWait_None:
+      break;
+    case fb::GraphicsWait_LaunchDefaults:
+      use_launch_grants = true;
+      break;
+    case fb::GraphicsWait_Export:
+    case fb::GraphicsWait_Parameters:
+      if (wave.state() != amdgpu::WfState::RUNNING)
+        return emit_error.emit() << "Inconsistent wave state for a checkpoint graphics wait";
+      wave.set_state(*waiting == fb::GraphicsWait_Export ? amdgpu::WfState::EXPORT_WAIT
+                                                         : amdgpu::WfState::PARAM_WAIT);
+      break;
+    default:
+      return emit_error.emit() << "Invalid checkpoint graphics wait";
+    }
+  }
+  if (use_launch_grants && amdgpu::has_typed_export_waits(arch)) {
+    // Standalone waves started with both frontend grants. GFX11.5 also supported
+    // independent grants, so keep a partial grant from a legacy frontend.
+    constexpr uint32_t grants =
+        amdgpu::Wavefront::kStatusExportReadyMask | amdgpu::Wavefront::kStatusParamReadyMask;
+    if (arch != rocjitsu::IsaFamily::Rdna3_5 || (status & grants) == 0)
+      status |= wave.status_raw() & grants;
+  }
+  wave.set_status_raw(status);
+  return util::Result::success();
+}
+
+const char *checkpoint_group_target(rocjitsu::IsaFamily arch) {
+  if (arch == rocjitsu::IsaFamily::Rdna4)
     return "RDNA4";
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+  if (arch == rocjitsu::IsaFamily::Cdna5)
     return "CDNA5";
   return arch_to_string(arch);
 }
 
-bool checkpoint_tracks_workgroups(rj_code_arch_t arch) {
-  return arch_is_cdna_4_or_lower(arch) || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+bool checkpoint_tracks_workgroups(rocjitsu::IsaFamily arch) {
+  return arch_is_cdna_4_or_lower(arch) || arch == rocjitsu::IsaFamily::Rdna3 ||
+         arch == rocjitsu::IsaFamily::Rdna3_5 ||
          amdgpu::Wavefront::supports_sleep_wakeup_credit(arch);
 }
 
 // Check the group graph before modifying a CU, or opening the output file on save.
 util::Result validate_checkpoint_groups(const fb::ComputeUnitState &state, uint32_t slots,
                                         const flatbuffers::Vector<uint32_t> *cursors,
-                                        rj_code_arch_t arch, util::DiagnosticEmitter emit_error) {
+                                        rocjitsu::IsaFamily arch,
+                                        util::DiagnosticEmitter emit_error) {
   const auto *target = checkpoint_group_target(arch);
   const auto *groups = state.rdna4_workgroups();
   if ((cursors != nullptr) != (groups != nullptr))
@@ -84,7 +135,7 @@ util::Result validate_checkpoint_groups(const fb::ComputeUnitState &state, uint3
       const auto waiting = wave->waiting_barrier();
       const auto complete = wave->barrier_complete_mask();
       const bool split_barriers =
-          arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+          arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
       if ((!split_barriers && (waiting || complete)) || complete > 3 || (waiting && !groups))
         return emit_error.emit() << "Invalid " << target
                                  << " checkpoint wave barrier or wake state";
@@ -92,7 +143,7 @@ util::Result validate_checkpoint_groups(const fb::ComputeUnitState &state, uint3
         // RDNA4 has required identity for sleep since this layout was introduced.
         // Older CDNA5 files stored wave-local timers and may carry a wake
         // credit. Restore those fields even when no group table was recorded.
-        if (arch == ROCJITSU_CODE_ARCH_RDNA4 && (wave->sleep_cycles() || wave->sleep_wakeup()))
+        if (arch == rocjitsu::IsaFamily::Rdna4 && (wave->sleep_cycles() || wave->sleep_wakeup()))
           return emit_error.emit()
                  << "Legacy RDNA4 checkpoint lacks workgroup identity for sleeping wave";
         continue;
@@ -321,7 +372,7 @@ config_from_checkpoint(const fb::SimulationConfig *fb_config, util::DiagnosticEm
   auto *vm = fb_config->vm();
   if (vm->arch())
     vm_config.soc.arch = parse_arch(vm->arch()->str());
-  if (vm_config.soc.arch == ROCJITSU_CODE_ARCH_INVALID)
+  if (vm_config.soc.arch == rocjitsu::IsaFamily::Invalid)
     return emit_error.emit() << "Checkpoint has missing or invalid architecture";
   vm_config.soc.exec_mode =
       parse_exec_mode(fb_config->exec_mode() ? fb_config->exec_mode()->str() : "");
@@ -425,6 +476,10 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
     for (auto *se : xcd->shader_engines()) {
       for (uint32_t ci = 0; ci < se->num_compute_units(); ++ci) {
         auto *cu = se->compute_unit(ci);
+        if (cu->gws_device().has_gds_checkpoint_state())
+          return emit_error.emit()
+                 << "Cannot checkpoint GDS memory or ordered-count state: indexed GDS data and "
+                    "outstanding process reservations require a live owner";
         if (cu->gws_device().tracked_process_count() != 0)
           return emit_error.emit() << "Cannot checkpoint GWS resource state: the shared table "
                                       "is not part of the checkpoint format";
@@ -441,7 +496,7 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
             return util::Result::failure();
           cu_scheduling = scheduling.value();
         }
-        const bool cdna3_wave = cu->arch() == ROCJITSU_CODE_ARCH_CDNA3;
+        const bool cdna3_wave = cu->arch() == rocjitsu::IsaFamily::Cdna3;
         const bool cu_owned_lds = checkpoint_cu_owned_lds(cu->arch());
         const auto lds_cursor =
             cu_owned_lds ? std::optional{cu->reserved_lds_bytes()} : std::nullopt;
@@ -464,7 +519,7 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
           if (gfx12 && w->barrier_state(1) != 0)
             return emit_error.emit()
                    << "Cannot checkpoint a GFX12 workgroup with allocated named barriers";
-          const bool rdna2 = cu->arch() == ROCJITSU_CODE_ARCH_RDNA2;
+          const bool rdna2 = cu->arch() == rocjitsu::IsaFamily::Rdna2;
           // Only the SoC's built-in identity mapping and direct standalone memory
           // are present in this file. A PASID alone cannot restore a frontend VM.
           const bool internal =
@@ -490,7 +545,8 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
           if (cu_owned_lds && w->state() != amdgpu::WfState::RUNNING) {
             const bool recorded_barrier = gfx12 && w->state() == amdgpu::WfState::BARRIER &&
                                           w->checkpoint_waiting_barrier() != 0;
-            if (!recorded_barrier)
+            const auto parked = graphics_wait(*w);
+            if (!recorded_barrier && (!parked || *parked == fb::GraphicsWait_None))
               return emit_error.emit()
                      << "Cannot checkpoint AMDGPU state without its scheduler record on "
                      << cu->name();
@@ -524,7 +580,7 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
                      << "Cannot checkpoint separately placed RDNA2 register blocks";
             register_blocks.push_back(block);
           }
-          const bool cdna4 = cu->arch() == ROCJITSU_CODE_ARCH_CDNA4;
+          const bool cdna4 = cu->arch() == rocjitsu::IsaFamily::Cdna4;
           const bool rounded_sgprs = arch_is_cdna_4_or_lower(cu->arch()) && !cdna3_wave;
           uint32_t sgpr_words = w->num_sgprs();
           if (rdna2)
@@ -582,6 +638,17 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
           }
           const fb::WaveExceptionRegisters exceptions(
               w->trapsts(), w->gfx12_excp_flag_user_extra_raw(), w->gfx12_trap_ctrl_raw());
+          std::vector<flatbuffers::Offset<fb::ShaderExportRow>> export_rows;
+          for (const auto &row : w->shader_exports()) {
+            std::vector<uint32_t> values;
+            values.reserve(w->wf_size() * 4);
+            for (unsigned lane = 0; lane < w->wf_size(); ++lane)
+              values.insert(values.end(), row.values[lane].begin(), row.values[lane].end());
+            export_rows.push_back(
+                fb::CreateShaderExportRow(builder, row.target, row.row, row.components, row.done,
+                                          row.valid_lanes, builder.CreateVector(values)));
+          }
+          const auto exports = export_rows.empty() ? 0 : builder.CreateVector(export_rows);
           fb::WavefrontStateBuilder record(builder);
           if (gfx10) {
             record.add_gfx10_resources(wave_resources);
@@ -602,9 +669,8 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
           record.add_m0(w->m0());
           record.add_halted(w->is_halted());
           record.add_status(w->status_raw());
-          if (cu->arch() == ROCJITSU_CODE_ARCH_RDNA3 || cu->arch() == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-              cu->arch() == ROCJITSU_CODE_ARCH_RDNA4)
-            record.add_graphics_wait(fb::GraphicsWait_LaunchDefaults);
+          if (const auto wait = graphics_wait(*w))
+            record.add_graphics_wait(*wait);
           record.add_sgprs(sgprs_vec);
           record.add_vgprs(vgprs_vec.value());
           record.add_mode(w->mode_raw());
@@ -628,7 +694,7 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
             record.add_num_sgprs(w->num_sgprs());
           if (!gfx10)
             record.add_num_vgprs(w->num_vgprs());
-          if (cdna4 || cdna3_wave || cu->arch() == ROCJITSU_CODE_ARCH_CDNA2)
+          if (cdna4 || cdna3_wave || cu->arch() == rocjitsu::IsaFamily::Cdna2)
             record.add_accum_vgpr_base(w->accum_vgpr_base());
           record.add_sleep_cycles(w->sleep_cycles());
           if (gfx12) {
@@ -637,10 +703,12 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
                                              (unsigned(w->trap_barrier_complete()) << 1));
             record.add_waiting_barrier(w->checkpoint_waiting_barrier());
           }
-          if (cu->arch() == ROCJITSU_CODE_ARCH_RDNA3 || cu->arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+          if (cu->arch() == rocjitsu::IsaFamily::Rdna3 ||
+              cu->arch() == rocjitsu::IsaFamily::Rdna3_5)
             record.add_ib_sts2_gfx11(w->ib_sts2_gfx11() & ~(1u << 11));
           if (!rdna2)
             record.add_uses_internal_address_space(internal);
+          record.add_shader_exports(exports);
           wf_offsets.push_back(record.Finish());
         }
 
@@ -664,6 +732,10 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
         }
         auto name = builder.CreateString(cu->name());
         auto wfs_vec = builder.CreateVector(wf_offsets);
+        const auto &levels = cu->performance_levels();
+        const auto saved_levels = std::ranges::any_of(levels, [](auto count) { return count != 0; })
+                                      ? builder.CreateVector(levels.data(), levels.size())
+                                      : 0;
         auto cus = fb::CreateComputeUnitState(
             builder, name, wfs_vec, 0, cu->config().functional_quantum, true,
             cu->config().memory_wait_diagnostics != amdgpu::MemoryWaitDiagnostics::Off,
@@ -671,7 +743,7 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
             cu->config().gws_wait_limit, arithmetic_to_fb(builder, cu->config().arithmetic),
             cu_resources, register_blocks.empty() ? 0 : builder.CreateVector(register_blocks), lds,
             lds_cursor, cu_scheduling, cu->cycle_count(), group_vec,
-            gfx10 ? std::nullopt : std::optional{cu->model_realtime_timestamp()});
+            gfx10 ? std::nullopt : std::optional{cu->model_realtime_timestamp()}, saved_levels);
 
         cu_offsets.push_back(cus);
       }
@@ -881,10 +953,17 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
           (cu_resources && !Gfx10CheckpointResources::supported(*cu)))
         return emit_error.emit() << "Unexpected or incomplete GFX10 CU checkpoint records";
       if (cu_resources &&
-          (Gfx10CheckpointResources::restore_cu(*cu_resources, *cu, emit_error).failed() ||
-           (cu_scheduling &&
-            Gfx10CheckpointScheduler::restore_cu(*cu_scheduling, *cu, emit_error).failed())))
+          Gfx10CheckpointResources::restore_cu(*cu_resources, *cu, emit_error).failed())
         return util::Result::failure();
+      if (cu_scheduling)
+        Gfx10CheckpointScheduler::restore_cu(*cu_scheduling, *cu);
+      // GFX10 checkpoints written before the shared counter field keep it in
+      // the scheduling record. A CU without either field starts at zero.
+      const auto *levels = cu_state->shader_perf_levels();
+      if (!levels && cu_scheduling)
+        levels = cu_scheduling->perf_levels();
+      if (levels && !cu->restore_performance_levels({levels->data(), levels->size()}))
+        return emit_error.emit() << "Invalid checkpoint performance-counter count";
       cu->restore_cycle_count(cu_state->cycle_count());
       if (auto realtime = cu_state->model_realtime())
         cu->restore_model_realtime(*realtime);
@@ -925,7 +1004,7 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
           return emit_error.emit() << "Invalid checkpoint LDS reservation";
         cu->lds().write(0u, lds->data(), lds->size());
       }
-      const bool rdna2 = cu->arch() == ROCJITSU_CODE_ARCH_RDNA2;
+      const bool rdna2 = cu->arch() == rocjitsu::IsaFamily::Rdna2;
       const auto *blocks = rdna2 ? cu_state->rdna2_register_blocks() : nullptr;
       const auto *wf_states = cu_state->wavefronts();
       if (blocks && blocks->size() != (wf_states ? wf_states->size() : 0))
@@ -956,7 +1035,7 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
           if ((wave_resources != nullptr) != (cu_resources != nullptr) ||
               (wave_scheduling != nullptr) != (cu_scheduling != nullptr))
             return emit_error.emit() << "Inconsistent GFX10 wave checkpoint records";
-          if (cu->arch() == ROCJITSU_CODE_ARCH_RDNA1 && !wave_resources) {
+          if (cu->arch() == rocjitsu::IsaFamily::Rdna1 && !wave_resources) {
             if (wf_state->halted())
               continue;
             return emit_error.emit() << "Cannot restore active RDNA1 wave: checkpoint omitted "
@@ -993,31 +1072,34 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
               return emit_error.emit() << "Invalid RDNA2 checkpoint VGPR payload or lane count";
           }
           uint32_t accum_base = 0;
-          if (cu->arch() != ROCJITSU_CODE_ARCH_CDNA4 && !Gfx10CheckpointResources::supported(*cu)) {
+          if (cu->arch() != rocjitsu::IsaFamily::Cdna4 &&
+              !Gfx10CheckpointResources::supported(*cu)) {
             if (const auto total = wf_state->num_vgprs()) {
               if (*total > cu->vgpr_allocation_block_size())
                 return emit_error.emit() << "Invalid checkpoint VGPR allocation";
               num_vgprs = *total;
             }
-            if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA2 || cu->arch() == ROCJITSU_CODE_ARCH_CDNA3) {
+            if (cu->arch() == rocjitsu::IsaFamily::Cdna2 ||
+                cu->arch() == rocjitsu::IsaFamily::Cdna3) {
               accum_base = wf_state->accum_vgpr_base();
               if (accum_base > amdgpu::ACC_VGPR_OFFSET || accum_base % 4 != 0 ||
                   (accum_base && !wf_state->num_vgprs()))
                 return emit_error.emit()
-                       << "Invalid " << (cu->arch() == ROCJITSU_CODE_ARCH_CDNA2 ? "CDNA2" : "CDNA3")
+                       << "Invalid "
+                       << (cu->arch() == rocjitsu::IsaFamily::Cdna2 ? "CDNA2" : "CDNA3")
                        << " checkpoint AccVGPR boundary";
             }
           }
-          if (arch_is_cdna_4_or_lower(cu->arch()) && cu->arch() != ROCJITSU_CODE_ARCH_CDNA3) {
+          if (arch_is_cdna_4_or_lower(cu->arch()) && cu->arch() != rocjitsu::IsaFamily::Cdna3) {
             if (const auto requested = wf_state->num_sgprs()) {
               num_sgprs = *requested;
               restore_sgpr_words = amdgpu::Wavefront::rounded_sgpr_count(num_sgprs, sgpr_capacity);
               if (!num_sgprs || num_sgprs > sgpr_capacity || !sgprs ||
                   sgprs->size() != restore_sgpr_words)
                 return emit_error.emit() << "Invalid "
-                                         << (cu->arch() == ROCJITSU_CODE_ARCH_CDNA1   ? "CDNA1"
-                                             : cu->arch() == ROCJITSU_CODE_ARCH_CDNA2 ? "CDNA2"
-                                                                                      : "CDNA4")
+                                         << (cu->arch() == rocjitsu::IsaFamily::Cdna1   ? "CDNA1"
+                                             : cu->arch() == rocjitsu::IsaFamily::Cdna2 ? "CDNA2"
+                                                                                        : "CDNA4")
                                          << " checkpoint SGPR allocation";
             } else {
               // A pre-TTMP-file record may also contain trap selectors after its SGPRs.
@@ -1025,7 +1107,7 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
               restore_sgpr_words = num_sgprs;
             }
           }
-          if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA4) {
+          if (cu->arch() == rocjitsu::IsaFamily::Cdna4) {
             const auto saved_total = wf_state->num_vgprs();
             accum_base = wf_state->accum_vgpr_base();
             num_vgprs = saved_total.value_or(num_vgprs);
@@ -1060,8 +1142,8 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
             wf->set_lds_size(window->size());
           }
           if (wf_state->ib_sts2_gfx11()) {
-            if ((cu->arch() != ROCJITSU_CODE_ARCH_RDNA3 &&
-                 cu->arch() != ROCJITSU_CODE_ARCH_RDNA3_5) ||
+            if ((cu->arch() != rocjitsu::IsaFamily::Rdna3 &&
+                 cu->arch() != rocjitsu::IsaFamily::Rdna3_5) ||
                 (wf_state->ib_sts2_gfx11() & ~0x703u))
               return emit_error.emit() << "Invalid GFX11 checkpoint IB_STS2";
             wf->set_ib_sts2_gfx11(wf_state->ib_sts2_gfx11());
@@ -1091,10 +1173,32 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
             wf->restore_rdna4_checkpoint_barriers(wf_state->barrier_complete_mask(),
                                                   wf_state->waiting_barrier());
           }
-          if (const auto wait = wf_state->graphics_wait();
-              wait && *wait != fb::GraphicsWait_None && *wait != fb::GraphicsWait_LaunchDefaults)
-            return emit_error.emit() << "Unsupported checkpoint graphics wait";
-          wf->set_status_raw(wf_state->status());
+          // The resource-only writer saved both CU LDS and dispatch cursors before it
+          // modeled grants. Older frontend-aware files have only dispatch cursors.
+          const auto *cp_state = checkpoint->command_processor();
+          const bool predates_grants =
+              cursor.has_value() || !cp_state || !cp_state->next_dispatch_ids();
+          if (restore_graphics_status(*wf, *wf_state, predates_grants, emit_error).failed())
+            return util::Result::failure();
+          if (const auto *saved = wf_state->shader_exports()) {
+            std::vector<amdgpu::ShaderExportRow> rows;
+            std::set<std::pair<uint8_t, uint8_t>> seen;
+            for (const auto *entry : *saved) {
+              if (!amdgpu::has_typed_export_waits(cu->arch()) || entry->target() >= 64 ||
+                  entry->components() > 15 ||
+                  (wf->wf_size() < 64 && (entry->valid_lanes() >> wf->wf_size())) ||
+                  entry->values()->size() != wf->wf_size() * 4 ||
+                  !seen.emplace(entry->target(), entry->row()).second)
+                return emit_error.emit() << "Invalid wave shader export row in checkpoint";
+              auto &row = rows.emplace_back(
+                  amdgpu::ShaderExportRow{entry->target(), entry->row(), entry->components(),
+                                          entry->done(), entry->valid_lanes()});
+              for (unsigned lane = 0; lane < wf->wf_size(); ++lane)
+                for (unsigned channel = 0; channel < 4; ++channel)
+                  row.values[lane][channel] = entry->values()->Get(4 * lane + channel);
+            }
+            wf->restore_shader_exports(std::move(rows));
+          }
           wf->set_sleep_cycles(wf_state->sleep_cycles());
           if (wf->supports_sleep_wakeup_credit())
             wf->set_sleep_wakeup(wf_state->sleep_wakeup());
@@ -1106,8 +1210,8 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
                     .failed())))
             return util::Result::failure();
           if (const auto *exceptions = wf_state->exceptions()) {
-            const bool gfx12 =
-                cu->arch() == ROCJITSU_CODE_ARCH_RDNA4 || cu->arch() == ROCJITSU_CODE_ARCH_CDNA5;
+            const bool gfx12 = cu->arch() == rocjitsu::IsaFamily::Rdna4 ||
+                               cu->arch() == rocjitsu::IsaFamily::Cdna5;
             if ((!gfx12 && (exceptions->gfx12_user_extra() || exceptions->gfx12_trap_ctrl())) ||
                 (exceptions->gfx12_user_extra() & ~(3u << 30)))
               return emit_error.emit() << "Invalid checkpoint wave exception registers";

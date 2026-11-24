@@ -21,6 +21,9 @@ int64_t IbCastArThreshold = 8192;
 // Default -2: BY_INDEX. 0=BY_INDEX, 1=BY_ID, 2=BY_ORDER (software CTS; CTS offload forces BY_ORDER).
 NCCL_PARAM(IbCastReceiverSideMatchingScheme, "IB_RECEIVER_SIDE_MATCHING_SCHEME", -2);
 RCCL_PARAM(IbCastGdrFlushGpuMemNoRelaxedOrdering, "GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING", 1);
+// Sends below this size are not split across QPs. Only consulted while the CAST
+// scheduler is disabled; the scheduler has its own threshold in splitDataMin.
+RCCL_PARAM(IbCastSplitDataThreshold, "IB_SPLIT_DATA_THRESHOLD", 128);
 
 const char* IbCastReqTypeStr[] = {"Unused", "Send", "Recv", "Flush", "IPut", "IGet", "Failed"};
 
@@ -283,6 +286,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
   int qpIndex = -1;
   ncclIbQp* qp = NULL;
   const int align = 128;
+  const int64_t splitDataThreshold = rcclParamIbCastSplitDataThreshold();
   for (int i = 0; i < nqps; i++) {
     NCCLCHECK(IbCastCommBaseGetQpForRequest(&comm->base, startQpIndex, i, &qp, &qpIndex));
 
@@ -323,6 +327,10 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
         chunkSize = (weightedSendSize / align) * align;
         if (i == (nqps - 1)) length = std::max((int)(reqs[r]->send.size - sendOffsets[r]), chunkSize);
         else length = chunkSize;
+      } else if (!reqs[r]->desc.parms.enable && reqs[r]->send.size < splitDataThreshold) {
+        // Use the active QP only for send below the threshold.
+        chunkSize = (i == 0) ? reqs[r]->send.size : 0;
+        length = std::min((int)(reqs[r]->send.size - sendOffsets[r]), chunkSize);
       } else {
         chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
         length = std::min((int)(reqs[r]->send.size - sendOffsets[r]), chunkSize);
@@ -734,6 +742,18 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
   return ncclSuccess;
 }
 
+// Number of QPs to arm for a receive request.
+// By default, receiver preposts work requests for one QP per device.
+// With the scheduler on, receiver preposts work requests for all QPs,
+// because it doesn't know what mode the sender picked (weighted split or weighted RR).
+static inline int IbCastRecvCommGetNqps(struct ncclIbRecvComm* comm) {
+  if (comm->useCtsOffload) return 1;
+  // BY_ORDER senders never initialize schedParms (see IbCastUpdateSchedParmsTry), so they take the
+  // scheduler-off path even when the scheduler is globally enabled. Mirror that here.
+  if (castGlobalQpSchedParms.enable && comm->base.recvMatchingScheme != BY_ORDER) return comm->base.nqps;
+  return IbCastCommBaseGetDefaultNqpsPerRequest(&comm->base);
+}
+
 ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** phandles,
                          void** request) {
   // See IbCastIsend above.
@@ -783,7 +803,7 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
 
   if (!netOptRecvCompletionEnabled) {
     TIME_START(1);
-    const int nqps = (comm->useCtsOffload) ? 1 : comm->base.nqps;
+    int nqps = IbCastRecvCommGetNqps(comm);
     int qpIndex = -1;
     ncclIbQp* qp = NULL;
     for (int i = 0; i < nqps; i++) {
@@ -907,8 +927,11 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
       wr.wr_id = IbCastEncodeCommId(wr.wr_id, comm->base.qpSharing.netIbCommId);
     }
 
+    // The RO=0 scratchpad write and the following read are one fence. Link them
+    // and post once: an RC send queue still executes the unsignaled write before
+    // the signaled read, and the proxy rings one doorbell instead of two.
+    struct ibv_send_wr writeWr;
     if (useGpuFlushMem) {
-      struct ibv_send_wr writeWr;
       memset(&writeWr, 0, sizeof(writeWr));
       writeWr.wr_id = wr.wr_id;
       writeWr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
@@ -917,8 +940,7 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
       writeWr.num_sge = 1;
       writeWr.opcode = IBV_WR_RDMA_WRITE;
       writeWr.send_flags = 0;
-      struct ibv_send_wr* badWriteWr;
-      NCCLCHECK(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &writeWr, &badWriteWr));
+      writeWr.next = &wr;
 
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
@@ -935,9 +957,10 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
           wr.wr_id);
     TIME_START(4);
     struct ibv_send_wr* bad_wr;
+    struct ibv_send_wr* postWr = useGpuFlushMem ? &writeWr : &wr;
     INFO(NCCL_NET, "NET/IB: %s: posting flush dev=%d qpn=%u wr_id=0x%lx",
          __func__, i, comm->devs[i].gpuFlush.qp.qp->qp_num, wr.wr_id);
-    NCCLCHECK(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr));
+    NCCLCHECK(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, postWr, &bad_wr));
     TIME_STOP(4);
 
     IbCastAddEvent(req, i);

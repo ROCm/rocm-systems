@@ -330,9 +330,4 @@ void SdmaRingConsumer::reset() {
 
 void SdmaRingConsumer::cancel_in_flight() noexcept { clear_in_flight(); }
 
-void SdmaRingConsumer::latch_callback_failure() noexcept {
-  terminal_ = SdmaRingStatus::Faulted;
-  clear_in_flight();
-}
-
 } // namespace rocjitsu::amdgpu

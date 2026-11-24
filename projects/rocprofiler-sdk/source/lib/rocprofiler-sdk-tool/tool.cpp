@@ -28,6 +28,7 @@
 #include "execution_profile.hpp"
 #include "graph_stack.hpp"
 #include "helper.hpp"
+#include "kernel_dispatch_record.hpp"
 #include "kernel_iteration_filter.hpp"
 #include "stream_stack.hpp"
 
@@ -361,6 +362,19 @@ auto  att_device_context     = rocprofiler_context_id_t{0};
 auto  att_device_trace_id =
     std::atomic<rocprofiler_dispatch_id_t>{std::numeric_limits<uint64_t>::max()};
 std::mutex att_shader_data;
+
+auto&
+att_dispatch_kernel_iterations()
+{
+    static auto value = common::Synchronized<kernel_iteration_t, true>{};
+    return value;
+}
+
+void
+reset_att_dispatch_kernel_iterations()
+{
+    att_dispatch_kernel_iterations().wlock([](auto& iterations) { iterations.clear(); });
+}
 
 thread_local auto thread_dispatch_rename      = as_pointer<kernel_rename_stack_t>();
 thread_local auto thread_dispatch_rename_dtor = common::scope_destructor{[]() {
@@ -1296,9 +1310,10 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     header->payload);
 
                 auto attr = get_ext_attribution(record);
+                auto data = tool::copy_kernel_dispatch_record(record);
                 tool::write_ring_buffer(
                     tool::tool_buffer_tracing_kernel_dispatch_ext_record_t{
-                        *record, attr.stream_id, attr.graph_exec_id, attr.graph_node_id},
+                        data, attr.stream_id, attr.graph_exec_id, attr.graph_node_id},
                     domain_type::KERNEL_DISPATCH);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
@@ -1974,10 +1989,9 @@ att_dispatch_callback(rocprofiler_agent_id_t /* agent_id  */,
                       void* /*userdata_config*/,
                       rocprofiler_user_data_t* userdata_shader)
 {
-    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
-    userdata_shader->value       = dispatch_id;
+    userdata_shader->value = dispatch_id;
 
-    if(is_targeted_kernel(kernel_id, dispatch_id, kernel_iteration))
+    if(is_targeted_kernel(kernel_id, dispatch_id, att_dispatch_kernel_iterations()))
         return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
     return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
 }
@@ -2939,6 +2953,7 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
               << " (parent PID: " << parent_pid << ")";
     // NOLINTNEXTLINE(readability-suspicious-call-argument): parent_pid is correctly the _ppid arg
     tool_metadata->set_process_id(instrumented_pid, parent_pid);
+    tool_metadata->process_end_ns = 0;
 
     for(uint64_t i = 0; i < context_ids_length; ++i)
     {
@@ -4554,6 +4569,11 @@ tool_detach(void* /*tool_data*/)
             });
         });
     }
+
+    // Kernel registrations and contexts outlive an attachment. Clear dispatch ATT iteration
+    // selection only after this session's contexts have stopped; tool_init starts the first
+    // context before tool_attach runs, while other target threads can continue dispatching.
+    if(tool::get_config().advanced_thread_trace) reset_att_dispatch_kernel_iterations();
 }
 
 void
@@ -5312,10 +5332,9 @@ rocprofv3_main(int argc, char** argv, char** envp)
     if(!get_sigaction_function())
         get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
 
-    // fork+exec and spawn children re-init through the normal init path. Plain fork children
-    // re-init worker state via the pthread_atfork handler below. GPU use in a forked child is
-    // illegal (runtime not fork-safe) so it usually dies first, but host-side data like roctx
-    // markers still flushes if reached (covered by a test).
+    // fork+exec and spawn children re-init through the normal init path. Profiling after fork
+    // without exec is unsupported. The pthread_atfork handler below resets the signal worker as
+    // a best-effort safeguard; it does not make inherited profiler or runtime state fork-safe.
     {
         auto& sw   = get_signal_worker();
         sw.eventfd = eventfd(0, EFD_CLOEXEC);

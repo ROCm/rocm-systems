@@ -69,6 +69,44 @@ TEST(AnvilEngineMap, PreferredMaskSelectsAnEvenEngine) {
   EXPECT_EQ(preferredUsableEngine(0), -1);
 }
 
+// Remote-peer queues go on the usable (even) engine carrying the fewest queues,
+// which keeps a pod's extra queues inside each engine's KFD queue limit.
+TEST(AnvilEngineMap, LeastLoadedPicksTheEvenEngineWithFewestQueues) {
+  EXPECT_EQ(leastLoadedUsableEngine({3, 0, 1, 0, 2, 0, 1, 0}), 2);
+  EXPECT_EQ(leastLoadedUsableEngine({4, 0, 4, 0, 4, 0, 0, 0}), 6);
+}
+
+TEST(AnvilEngineMap, LeastLoadedIgnoresOddEnginesAndBreaksTiesLow) {
+  EXPECT_EQ(leastLoadedUsableEngine({2, 0, 2, 0}), 0);
+  EXPECT_EQ(leastLoadedUsableEngine({1, 0, 0, 0, 0}), 2);
+}
+
+TEST(AnvilEngineMap, LeastLoadedWithUnknownEngineCountUsesEngineZero) {
+  EXPECT_EQ(leastLoadedUsableEngine({}), 0);
+}
+
+// Local-peer queues: MI450 reports every engine as preferred (mask 0xfff), so taking the lowest
+// preferred engine put every local queue of a 4P16G pod rank on engine 0 and exhausted its KFD
+// queues. The least loaded preferred engine spreads them.
+TEST(AnvilEngineMap, PreferredMaskWithLoadSelectsTheLeastLoadedEvenEngine) {
+  EXPECT_EQ(leastLoadedPreferredEngine(0xfff, {2, 0, 2, 0, 1, 0, 2, 0, 2, 0, 2, 0}), 4);
+  EXPECT_EQ(leastLoadedPreferredEngine(0xfff, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}), 0);
+  // Engines outside the mask are not picked even when idle.
+  EXPECT_EQ(leastLoadedPreferredEngine(0x0014, {0, 0, 3, 0, 1, 0, 0, 0}), 4);
+}
+
+TEST(AnvilEngineMap, PreferredSingleEngineMaskIgnoresLoad) {
+  EXPECT_EQ(leastLoadedPreferredEngine(0x0004, {0, 0, 5, 0, 0, 0}), 2);
+  // Only an odd engine preferred: the paired even engine, as preferredUsableEngine picks.
+  EXPECT_EQ(leastLoadedPreferredEngine(0x0008, {0, 0, 5, 0, 0, 0}), 2);
+}
+
+TEST(AnvilEngineMap, PreferredWithUnknownLoadUsesTheLowestPreferredEngine) {
+  EXPECT_EQ(leastLoadedPreferredEngine(0xfff, {}), 0);
+  EXPECT_EQ(leastLoadedPreferredEngine(0x0010, {}), 4);
+  EXPECT_EQ(leastLoadedPreferredEngine(0, {}), -1);
+}
+
 TEST(AnvilEngineMap, PartitionFoldsEvenWhenDoubledIdIsInRange) {
   // The partition path must apply the safe-engine fold even when the legacy map id is in range.
   EXPECT_TRUE(oamMapEngineNeedsFold(kCpxXgmi, kCpxTotal, 0));

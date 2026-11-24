@@ -7,7 +7,7 @@ library:
     <<: *level_2
     tags: [module]
   Unit_hip_library_load_co:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [module]
   Unit_hipKernelGetParamInfo_Negative:
     <<: *level_default

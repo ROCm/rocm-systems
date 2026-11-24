@@ -9,34 +9,6 @@
 
 namespace rocjitsu::amdgpu {
 
-/// Issue and overwrite checks must agree on the bytes supplied by each result.
-template <typename Visit>
-void for_each_memory_result_range(RegisterRef reg, const RegisterModifiers &modifiers,
-                                  bool sram_ecc, Visit visit) {
-  const uint8_t data = modifiers.memory_result_bytes;
-  const uint8_t tail = modifiers.memory_result_last_bytes;
-  if (sram_ecc || reg.cls != RegClass::VGPR) {
-    visit(reg, 0xf);
-    return;
-  }
-  const uint16_t last = reg.index + reg.width - 1;
-  const bool has_status =
-      modifiers.memory_result_has_status ||
-      (modifiers.memory_result_payload_words && reg.width > modifiers.memory_result_payload_words);
-  if (has_status)
-    --reg.width;
-  if (reg.width && data != tail) {
-    const RegisterRef partial{reg.cls, static_cast<uint16_t>(reg.index + reg.width - 1), 1};
-    if (--reg.width)
-      visit(reg, data);
-    visit(partial, tail);
-  } else if (reg.width) {
-    visit(reg, data);
-  }
-  if (has_status)
-    visit(RegisterRef{reg.cls, last, 1}, 0xf);
-}
-
 // Keep decoded metadata rules shared while retaining each instruction's class
 // layout. Inlining resolves operand addresses to constant instruction offsets.
 template <typename Inst>
@@ -67,6 +39,35 @@ void buffer_register_modifiers(const Inst &inst, RegisterModifiers &modifiers) {
     modifiers.memory_result_bytes = ResultBytes;
   if constexpr (LastResultBytes != 0xf)
     modifiers.memory_result_last_bytes = LastResultBytes;
+}
+
+// Visit contiguous result words with the same byte mask. The payload may end
+// in a packed or high-half result before a full-DWORD TFE/LWE status word.
+template <typename Visit>
+void for_each_memory_result_range(RegisterRef reg, const RegisterModifiers &modifiers,
+                                  bool sram_ecc, Visit visit) {
+  if (reg.width == 0)
+    return;
+  const uint8_t bytes = modifiers.memory_result_bytes;
+  const uint8_t tail = modifiers.memory_result_last_bytes;
+  if (reg.cls != RegClass::VGPR || sram_ecc || (bytes == 0xf && tail == 0xf)) {
+    visit(reg, 0xf);
+    return;
+  }
+  const uint8_t payload = modifiers.memory_result_payload_words
+                              ? std::min(reg.width, modifiers.memory_result_payload_words)
+                              : reg.width;
+  const uint8_t suffix = reg.width - payload;
+  reg.width = payload;
+  if (payload && bytes == tail) {
+    visit(reg, bytes);
+  } else if (payload) {
+    if (--reg.width)
+      visit(reg, bytes);
+    visit(RegisterRef{reg.cls, static_cast<uint16_t>(reg.index + reg.width), 1}, tail);
+  }
+  if (suffix)
+    visit(RegisterRef{reg.cls, static_cast<uint16_t>(reg.index + payload), suffix}, 0xf);
 }
 
 } // namespace rocjitsu::amdgpu

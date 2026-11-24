@@ -31,6 +31,18 @@ Context variants (``rocshmem_ctx_tile_*``) accept an explicit ``rocshmem_ctx_t``
 non-context variants use the default context. All collective operations — context
 and non-context alike — take an explicit ``rocshmem_team_t`` parameter.
 
+Device code that uses the tile API must include ``rocshmem_device.hpp`` in
+addition to ``rocshmem.hpp``. This header provides the template wrappers that
+forward to the precompiled bitcode implementations, and it is only meaningful
+during device compilation:
+
+.. code-block:: cpp
+
+  #include <rocshmem/rocshmem.hpp>
+  #ifdef __HIP_DEVICE_COMPILE__
+  #include <rocshmem/rocshmem_device.hpp>
+  #endif
+
 All functions are templated on the tensor and coordinate types:
 
 - ``dst_tensor_t`` / ``src_tensor_t``: tensor descriptor types carrying element type,
@@ -136,7 +148,8 @@ ROCSHMEM_TILE_BROADCAST
 
 **Description:**
 Broadcasts the tile region ``[start_coord, boundary)`` from the root PE's ``src``
-tensor to all other PEs' ``dst`` tensors in the team.
+tensor to every PE's ``dst`` tensor in the team, including the root's own ``dst``
+(when ``dst`` and ``src`` are different buffers on the root).
 
 -------------------------------
 Reduction routines

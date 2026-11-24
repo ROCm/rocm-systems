@@ -4,6 +4,7 @@
 #pragma once
 
 #include "checkpoint_generated.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "util/diagnostic.h"
 
@@ -14,7 +15,7 @@ namespace rocjitsu::config {
 class Gfx10CheckpointResources {
 public:
   static bool supported(const amdgpu::ComputeUnitCore &cu) {
-    return cu.arch() == ROCJITSU_CODE_ARCH_RDNA1 || cu.arch() == ROCJITSU_CODE_ARCH_RDNA2;
+    return cu.arch() == rocjitsu::IsaFamily::Rdna1 || cu.arch() == rocjitsu::IsaFamily::Rdna2;
   }
 
   static util::FailureOr<flatbuffers::Offset<fb::Gfx10CuResources>>
@@ -23,7 +24,8 @@ public:
     // Restore builds a standalone machine. The default KFD handlers resolve by
     // process ID, and save_wave verifies ownership of resident waves. Custom controls,
     // exports and trace sinks can affect standalone waves and have no saved owner.
-    if (cu.external_trap_resolver_ || cu.external_trap_updater_ || cu.external_sendmsg_handler_)
+    if (cu.shader_export_handler_ || cu.shader_trace_handler_ || cu.external_trap_resolver_ ||
+        cu.external_trap_updater_ || cu.external_sendmsg_handler_)
       return emit_error.emit() << "Cannot checkpoint GFX10 frontend callbacks on " << cu.name();
     if (cu.lds_allocation_pinned())
       return emit_error.emit() << "Cannot checkpoint shared LDS reservations on " << cu.name();
@@ -76,7 +78,7 @@ public:
   static util::Result restore_cu(const fb::Gfx10CuResources &s, amdgpu::ComputeUnitCore &cu,
                                  util::DiagnosticEmitter emit_error) {
     const auto &a = *s.launch_apertures();
-    if ((a.ptr32() && cu.arch() != ROCJITSU_CODE_ARCH_RDNA1) ||
+    if ((a.ptr32() && cu.arch() != rocjitsu::IsaFamily::Rdna1) ||
         (s.lds() && s.lds()->size() > cu.lds().size_bytes()) ||
         (s.next_lds_alloc() && (!s.lds() || s.next_lds_alloc() > s.lds()->size())) ||
         !cu.restore_lds_cursor(s.next_lds_alloc()))
@@ -92,7 +94,7 @@ public:
                                    amdgpu::Wavefront &wave, util::DiagnosticEmitter emit_error) {
     const auto &a = *s.apertures();
     const auto &limits = *s.wait_limits();
-    if ((a.ptr32() && cu.arch() != ROCJITSU_CODE_ARCH_RDNA1) ||
+    if ((a.ptr32() && cu.arch() != rocjitsu::IsaFamily::Rdna1) ||
         uint64_t{s.lds_base()} + s.lds_size() > cu.lds().size_bytes() ||
         (wave.status_raw() & (1u << 5)) ||
         (s.self_halted() && !(wave.status_raw() & ((1u << 13) | (1u << 23)))) || limits.vm() > 63 ||
@@ -101,8 +103,10 @@ public:
     wave.flat_pointer32_ = a.ptr32();
     wave.set_apertures(a.shared_base(), a.shared_limit(), a.private_base(), a.private_limit(),
                        s.override_launch());
-    wave.set_wait_target(limits.vm(), limits.lgkm(), limits.exp());
-    wave.set_wait_target_vscnt(limits.vs());
+    wave.wait_for({.vmcnt = limits.vm(),
+                   .lgkmcnt = limits.lgkm(),
+                   .expcnt = limits.exp(),
+                   .vscnt = limits.vs()});
     wave.set_trapsts(s.trapsts());
     if (s.self_halted()) {
       wave.set_debug_halted(true);

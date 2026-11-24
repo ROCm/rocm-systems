@@ -265,6 +265,7 @@ from .amdsmi_interface import amdsmi_topo_get_link_weight
 from .amdsmi_interface import amdsmi_get_minmax_bandwidth_between_processors
 from .amdsmi_interface import amdsmi_get_link_metrics
 from .amdsmi_interface import amdsmi_topo_get_link_type
+from .amdsmi_interface import amdsmi_get_gpu_cpu_links
 from .amdsmi_interface import amdsmi_get_link_topology
 from .amdsmi_interface import amdsmi_topo_get_p2p_status
 from .amdsmi_interface import amdsmi_is_P2P_accessible
@@ -344,6 +345,8 @@ from .amdsmi_interface import AmdSmiVirtualizationMode
 from .amdsmi_interface import AmdSmiVramType
 from .amdsmi_interface import AmdSmiAffinityScope
 from .amdsmi_interface import AmdSmiPtlData
+from .amdsmi_interface import AmdSmiHawkInsertionPriority
+from .amdsmi_interface import AmdSmiPowerStabilizationParamId
 from .amdsmi_interface import AmdSmiNpmBalancingMode
 
 from .amdsmi_interface import amdsmi_get_gpu_uma_carveout_info
@@ -351,6 +354,10 @@ from .amdsmi_interface import amdsmi_set_gpu_uma_carveout
 from .amdsmi_interface import amdsmi_get_ttm_info
 from .amdsmi_interface import amdsmi_set_ttm_pages_limit
 from .amdsmi_interface import amdsmi_reset_ttm_pages_limit
+
+# Power Stabilization (HAWK dummy-compute insertion + Ramp Management)
+from .amdsmi_interface import amdsmi_get_power_stabilization_info
+from .amdsmi_interface import amdsmi_set_power_stabilization_param
 
 # AMPP (amdsmi power profile)
 from .amdsmi_interface import amdsmi_get_ampp_profiles

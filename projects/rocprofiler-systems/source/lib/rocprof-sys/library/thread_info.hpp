@@ -45,6 +45,8 @@ enum ThreadIdType : int
     StlThreadID = 4,
 };
 
+inline constexpr std::int64_t k_main_thread_index = 0;
+
 struct thread_index_data
 {
     using stl_tid_t    = std::thread::id;

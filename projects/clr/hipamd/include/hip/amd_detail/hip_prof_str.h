@@ -519,7 +519,9 @@ enum hip_api_id_t {
   HIP_API_ID_hipGraphGetId = 497,
   HIP_API_ID_hipGraphNodeGetLocalId = 498,
   HIP_API_ID_hipGraphNodeGetToolsId = 499,
-  HIP_API_ID_LAST = 499,
+  HIP_API_ID_hipDeviceGetExecAffinitySupport = 500,
+  HIP_API_ID_hipArrayGetPlane = 501,
+  HIP_API_ID_LAST = 501,
 
 
   HIP_API_ID_hipBindTexture = HIP_API_ID_NONE,
@@ -560,6 +562,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipArrayDestroy: return "hipArrayDestroy";
     case HIP_API_ID_hipArrayGetDescriptor: return "hipArrayGetDescriptor";
     case HIP_API_ID_hipArrayGetInfo: return "hipArrayGetInfo";
+    case HIP_API_ID_hipArrayGetPlane: return "hipArrayGetPlane";
     case HIP_API_ID_hipArrayGetSparseProperties: return "hipArrayGetSparseProperties";
     case HIP_API_ID_hipChooseDeviceR0000: return "hipChooseDeviceR0000";
     case HIP_API_ID_hipChooseDeviceR0600: return "hipChooseDeviceR0600";
@@ -598,6 +601,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipDeviceGetCacheConfig: return "hipDeviceGetCacheConfig";
     case HIP_API_ID_hipDeviceGetDefaultMemPool: return "hipDeviceGetDefaultMemPool";
     case HIP_API_ID_hipDeviceGetDevResource: return "hipDeviceGetDevResource";
+    case HIP_API_ID_hipDeviceGetExecAffinitySupport: return "hipDeviceGetExecAffinitySupport";
     case HIP_API_ID_hipDeviceGetExecutionCtx: return "hipDeviceGetExecutionCtx";
     case HIP_API_ID_hipDeviceGetGraphMemAttribute: return "hipDeviceGetGraphMemAttribute";
     case HIP_API_ID_hipDeviceGetLimit: return "hipDeviceGetLimit";
@@ -1053,6 +1057,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipArrayDestroy", name) == 0) return HIP_API_ID_hipArrayDestroy;
   if (strcmp("hipArrayGetDescriptor", name) == 0) return HIP_API_ID_hipArrayGetDescriptor;
   if (strcmp("hipArrayGetInfo", name) == 0) return HIP_API_ID_hipArrayGetInfo;
+  if (strcmp("hipArrayGetPlane", name) == 0) return HIP_API_ID_hipArrayGetPlane;
   if (strcmp("hipArrayGetSparseProperties", name) == 0) return HIP_API_ID_hipArrayGetSparseProperties;
   if (strcmp("hipChooseDeviceR0000", name) == 0) return HIP_API_ID_hipChooseDeviceR0000;
   if (strcmp("hipChooseDeviceR0600", name) == 0) return HIP_API_ID_hipChooseDeviceR0600;
@@ -1091,6 +1096,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipDeviceGetCacheConfig", name) == 0) return HIP_API_ID_hipDeviceGetCacheConfig;
   if (strcmp("hipDeviceGetDefaultMemPool", name) == 0) return HIP_API_ID_hipDeviceGetDefaultMemPool;
   if (strcmp("hipDeviceGetDevResource", name) == 0) return HIP_API_ID_hipDeviceGetDevResource;
+  if (strcmp("hipDeviceGetExecAffinitySupport", name) == 0) return HIP_API_ID_hipDeviceGetExecAffinitySupport;
   if (strcmp("hipDeviceGetExecutionCtx", name) == 0) return HIP_API_ID_hipDeviceGetExecutionCtx;
   if (strcmp("hipDeviceGetGraphMemAttribute", name) == 0) return HIP_API_ID_hipDeviceGetGraphMemAttribute;
   if (strcmp("hipDeviceGetLimit", name) == 0) return HIP_API_ID_hipDeviceGetLimit;
@@ -1590,6 +1596,12 @@ typedef struct hip_api_data_s {
       hipArray_t array;
     } hipArrayGetInfo;
     struct {
+      hipArray_t* pPlaneArray;
+      hipArray_t pPlaneArray__val;
+      hipArray_t hArray;
+      unsigned int planeIdx;
+    } hipArrayGetPlane;
+    struct {
       hipArraySparseProperties* sparseProperties;
       hipArraySparseProperties sparseProperties__val;
       hipArray_t array;
@@ -1771,6 +1783,12 @@ typedef struct hip_api_data_s {
       hipDevResource resource__val;
       hipDevResourceType type;
     } hipDeviceGetDevResource;
+    struct {
+      int* pi;
+      int pi__val;
+      hipExecAffinityType type;
+      hipDevice_t dev;
+    } hipDeviceGetExecAffinitySupport;
     struct {
       hipExecutionCtx_t* ctx;
       hipExecutionCtx_t ctx__val;
@@ -4581,6 +4599,12 @@ typedef struct hip_api_data_s {
   cb_data.args.hipArrayGetInfo.flags = (unsigned int*)flags; \
   cb_data.args.hipArrayGetInfo.array = (hipArray_t)array; \
 };
+// hipArrayGetPlane[('hipArray_t*', 'pPlaneArray'), ('hipArray_t', 'hArray'), ('unsigned int', 'planeIdx')]
+#define INIT_hipArrayGetPlane_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipArrayGetPlane.pPlaneArray = (hipArray_t*)pPlaneArray; \
+  cb_data.args.hipArrayGetPlane.hArray = (hipArray_t)hArray; \
+  cb_data.args.hipArrayGetPlane.planeIdx = (unsigned int)planeIdx; \
+};
 // hipArrayGetSparseProperties[('hipArraySparseProperties*', 'sparseProperties'), ('hipArray_t', 'array')]
 #define INIT_hipArrayGetSparseProperties_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipArrayGetSparseProperties.sparseProperties = (hipArraySparseProperties*)sparseProperties; \
@@ -4767,6 +4791,12 @@ typedef struct hip_api_data_s {
   cb_data.args.hipDeviceGetDevResource.device = (hipDevice_t)device; \
   cb_data.args.hipDeviceGetDevResource.resource = (hipDevResource*)resource; \
   cb_data.args.hipDeviceGetDevResource.type = (hipDevResourceType)type; \
+};
+// hipDeviceGetExecAffinitySupport[('int*', 'pi'), ('hipExecAffinityType', 'type'), ('hipDevice_t', 'dev')]
+#define INIT_hipDeviceGetExecAffinitySupport_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipDeviceGetExecAffinitySupport.pi = (int*)pi; \
+  cb_data.args.hipDeviceGetExecAffinitySupport.type = (hipExecAffinityType)type; \
+  cb_data.args.hipDeviceGetExecAffinitySupport.dev = (hipDevice_t)dev; \
 };
 // hipDeviceGetExecutionCtx[('hipExecutionCtx_t*', 'ctx'), ('int', 'device')]
 #define INIT_hipDeviceGetExecutionCtx_CB_ARGS_DATA(cb_data) { \
@@ -7637,6 +7667,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipArrayGetInfo.extent) data->args.hipArrayGetInfo.extent__val = *(data->args.hipArrayGetInfo.extent);
       if (data->args.hipArrayGetInfo.flags) data->args.hipArrayGetInfo.flags__val = *(data->args.hipArrayGetInfo.flags);
       break;
+// hipArrayGetPlane[('hipArray_t*', 'pPlaneArray'), ('hipArray_t', 'hArray'), ('unsigned int', 'planeIdx')]
+    case HIP_API_ID_hipArrayGetPlane:
+      if (data->args.hipArrayGetPlane.pPlaneArray) data->args.hipArrayGetPlane.pPlaneArray__val = *(data->args.hipArrayGetPlane.pPlaneArray);
+      break;
 // hipArrayGetSparseProperties[('hipArraySparseProperties*', 'sparseProperties'), ('hipArray_t', 'array')]
     case HIP_API_ID_hipArrayGetSparseProperties:
       if (data->args.hipArrayGetSparseProperties.sparseProperties) data->args.hipArrayGetSparseProperties.sparseProperties__val = *(data->args.hipArrayGetSparseProperties.sparseProperties);
@@ -7785,6 +7819,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipDeviceGetDevResource[('hipDevice_t', 'device'), ('hipDevResource*', 'resource'), ('hipDevResourceType', 'type')]
     case HIP_API_ID_hipDeviceGetDevResource:
       if (data->args.hipDeviceGetDevResource.resource) data->args.hipDeviceGetDevResource.resource__val = *(data->args.hipDeviceGetDevResource.resource);
+      break;
+// hipDeviceGetExecAffinitySupport[('int*', 'pi'), ('hipExecAffinityType', 'type'), ('hipDevice_t', 'dev')]
+    case HIP_API_ID_hipDeviceGetExecAffinitySupport:
+      if (data->args.hipDeviceGetExecAffinitySupport.pi) data->args.hipDeviceGetExecAffinitySupport.pi__val = *(data->args.hipDeviceGetExecAffinitySupport.pi);
       break;
 // hipDeviceGetExecutionCtx[('hipExecutionCtx_t*', 'ctx'), ('int', 'device')]
     case HIP_API_ID_hipDeviceGetExecutionCtx:
@@ -9628,6 +9666,14 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", array="; roctracer::hip_support::detail::operator<<(oss, data->args.hipArrayGetInfo.array);
       oss << ")";
     break;
+    case HIP_API_ID_hipArrayGetPlane:
+      oss << "hipArrayGetPlane(";
+      if (data->args.hipArrayGetPlane.pPlaneArray == NULL) oss << "pPlaneArray=NULL";
+      else { oss << "pPlaneArray="; roctracer::hip_support::detail::operator<<(oss, data->args.hipArrayGetPlane.pPlaneArray__val); }
+      oss << ", hArray="; roctracer::hip_support::detail::operator<<(oss, data->args.hipArrayGetPlane.hArray);
+      oss << ", planeIdx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipArrayGetPlane.planeIdx);
+      oss << ")";
+    break;
     case HIP_API_ID_hipArrayGetSparseProperties:
       oss << "hipArrayGetSparseProperties(";
       if (data->args.hipArrayGetSparseProperties.sparseProperties == NULL) oss << "sparseProperties=NULL";
@@ -9886,6 +9932,14 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       if (data->args.hipDeviceGetDevResource.resource == NULL) oss << ", resource=NULL";
       else { oss << ", resource="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetDevResource.resource__val); }
       oss << ", type="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetDevResource.type);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipDeviceGetExecAffinitySupport:
+      oss << "hipDeviceGetExecAffinitySupport(";
+      if (data->args.hipDeviceGetExecAffinitySupport.pi == NULL) oss << "pi=NULL";
+      else { oss << "pi="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetExecAffinitySupport.pi__val); }
+      oss << ", type="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetExecAffinitySupport.type);
+      oss << ", dev="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetExecAffinitySupport.dev);
       oss << ")";
     break;
     case HIP_API_ID_hipDeviceGetExecutionCtx:

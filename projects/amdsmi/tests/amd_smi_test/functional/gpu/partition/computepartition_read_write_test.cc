@@ -250,6 +250,12 @@ static void checkPartitionIdChanges(amdsmi_processor_handle* const processor_han
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_kfd_info", "gpu=" + std::to_string(i), isVerbose);
     amdsmi_status_t ret = amdsmi_get_gpu_kfd_info(curr_processor_handles[i], &kfd_info);
     DISPLAY_AMDSMI_STATUS(isVerbose, __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+    if (access("/dev/dxg", F_OK) == 0) {
+      // WSL has no KFD, so there is no partition ID to check
+      EXPECT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED)
+          << "gpu " << i << ": KFD info should not be present in WSL environment.";
+      continue;
+    }
     if (isVerbose) {
       std::cout << "\t**Checking Partition ID | Device: " << std::to_string(i)
                 << "\n\t\t**Current Partition: " << current_partition

@@ -2020,9 +2020,11 @@ NCCL_P2P_LL_THRESHOLD
 
 The ``NCCL_P2P_LL_THRESHOLD`` is the per-channel message size threshold (in bytes) that RCCL uses when selecting the legacy LL low-latency protocol for P2P (send/recv) operations. The effective cutoff depends on the number of P2P channels considered by the protocol selector. The cutoff selects LL for eligible transfers at or below it, but it is not a strict upper bound: larger transfers may still use LL when they fit in one LL data step across the selected P2P channels. Otherwise RCCL uses the SIMPLE protocol. For collective operations implemented with P2P transfers, the size compared against this cutoff is the per-peer P2P transfer size, not the total collective buffer size. This threshold applies when the P2P latency path uses the legacy LL protocol (i.e. when the LL128 path is not active for the communicator). Because legacy LL carries roughly 2x wire overhead, it stops beating SIMPLE at relatively small sizes, so this defaults lower than ``NCCL_P2P_LL128_THRESHOLD``.
 
+On single-node all-XGMI gfx942 and gfx950, an unset or empty value does not use that per-channel product. The SIMPLE channel estimate is 1 for messages up to the SIMPLE part size, so ``nChannels * 4096`` would not select LL. RCCL instead allows legacy LL up to the smaller of that part size (``NCCL_P2P_NVL_CHUNKSIZE / 8``, 64 KiB with the default 512 KiB chunk) and 64 KiB per peer. A non-empty value keeps the per-channel rule on every architecture. The LL128 path uses ``NCCL_P2P_LL128_THRESHOLD`` instead and is not widened.
+
 Values accepted
 ^^^^^^^^^^^^^^^
-Decimal number. Default is 4096.
+Decimal number. Default is 4096. An empty value is treated as unset.
 
 NCCL_P2P_LL128_THRESHOLD
 ------------------------

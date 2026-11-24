@@ -29,7 +29,7 @@ a value shown for the wrong GPU or the wrong field fails the comparison.
 | `RDC_FAKE_HIVES=H` | XGMI hives, 1 to 128; GPU `g` is in hive `g % H` (default 1) |
 | `RDC_FAKE_FAIL=rule,...` | `rule` is `api[@gpu][=status]` (`gpu` is the processor index, which counts partitions when `RDC_FAKE_PARTITIONS` is set): the call returns `status` (a number or an `AMDSMI_STATUS_*` name, default `AMDSMI_STATUS_UNKNOWN_ERROR`; anything else aborts). `api` `*` matches every call that takes a GPU. Calls without a GPU argument, such as `amdsmi_init`, match only rules without `@gpu`. |
 | `RDC_FAKE_POISON=1` | a failing call first fills its outputs with `0xA5` bytes, as a caller that ignores the status would read from a dirty stack |
-| `RDC_FAKE_SENTINEL=api[@gpu],...` | the call succeeds but reports amd-smi's "not available" value (all bits set); honored by `amdsmi_get_power_info`, `amdsmi_get_gpu_activity`, `amdsmi_get_gpu_busy_percent`, `amdsmi_get_clock_info` and `amdsmi_get_gpu_metrics_info` |
+| `RDC_FAKE_SENTINEL=api[@gpu],...` | the call succeeds but reports what amd-smi reports for a value it cannot read: all bits set in `amdsmi_get_power_info`, `amdsmi_get_gpu_metrics_info` and `amdsmi_get_violation_status`; activities of `0xFFFF` in `amdsmi_get_gpu_activity`; `clk` = `UINT32_MAX` in `amdsmi_get_clock_info`; `current` = `UINT32_MAX` (no current level) in `amdsmi_get_clk_freq` |
 | `RDC_FAKE_FAIL_ONCE=rule,...` | like `RDC_FAKE_FAIL`, but each rule fails only the first matching call |
 | `RDC_FAKE_UNFILLED=api[@gpu],...` | the call returns `AMDSMI_STATUS_SUCCESS` without writing its outputs, as a library that reports success but leaves a structure unset |
 | `RDC_FAKE_DELAY_MS=api[@gpu]=ms,...` | every matching call sleeps `ms` milliseconds (0 to 60000) first, whoever makes it |
@@ -94,7 +94,8 @@ RDC_TEST_PREFIX=<install prefix> LD_LIBRARY_PATH=<prefix>/lib:<prefix>/lib/rdc \
     python3 -m pytest tests/ci/test_fake_gpu.py tests/ci/test_fake_gpu_fake.py
 ```
 
-`rdcd` allows one instance per host, so stop any other `rdcd` first. Set
-`RDC_TEST_TIME_FACTOR` to stretch the timeouts for sanitizer builds, and
-`RDC_TEST_STRESS=1` to run the stress tests (long loops, marked `stress`).
+`rdcd` allows one root instance and one of another user per host, so stop any
+other `rdcd` first. Set `RDC_TEST_TIME_FACTOR` to stretch the timeouts for
+sanitizer builds, and `RDC_TEST_STRESS=1` to run the stress tests (long loops,
+marked `stress`).
 With `RDC_CI_REQUIRE_STRESS=1` a run in which no stress test ran fails.

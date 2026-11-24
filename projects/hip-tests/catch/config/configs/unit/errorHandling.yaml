@@ -8,9 +8,11 @@ errorHandling:
     <<: *level_default
     tags: [smoke, P0]
   Unit_hipGetErrorString_Negative_Parameters: *level_default
-  Unit_hipDrvGetErrorName_Positive_Basic: *level_default
+  Unit_hipDrvGetErrorName_Positive_Basic:
+    <<: *level_default
   Unit_hipDrvGetErrorName_Negative_Parameters: *level_default
-  Unit_hipDrvGetErrorString_Positive_Basic: *level_default
+  Unit_hipDrvGetErrorString_Positive_Basic:
+    <<: *level_default
   Unit_hipDrvGetErrorString_Negative_Parameters: *level_default
   Unit_hipGetLastError_Positive_Basic:
     <<: *level_default

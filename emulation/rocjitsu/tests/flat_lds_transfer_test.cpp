@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -21,15 +22,15 @@
 
 namespace rocjitsu {
 namespace {
-class FlatLdsTransfer : public testing::TestWithParam<std::pair<rj_code_arch_t, unsigned>> {
+class FlatLdsTransfer : public testing::TestWithParam<std::pair<rocjitsu::IsaFamily, unsigned>> {
 protected:
   bool modern() const {
-    return GetParam().first == ROCJITSU_CODE_ARCH_CDNA3 ||
-           GetParam().first == ROCJITSU_CODE_ARCH_CDNA4;
+    return GetParam().first == rocjitsu::IsaFamily::Cdna3 ||
+           GetParam().first == rocjitsu::IsaFamily::Cdna4;
   }
   bool rdna() const {
-    return GetParam().first == ROCJITSU_CODE_ARCH_RDNA1 ||
-           GetParam().first == ROCJITSU_CODE_ARCH_RDNA2;
+    return GetParam().first == rocjitsu::IsaFamily::Rdna1 ||
+           GetParam().first == rocjitsu::IsaFamily::Rdna2;
   }
   unsigned vector_saddr() const { return rdna() ? 125 : 127; }
   void SetUp() override {
@@ -115,7 +116,7 @@ protected:
 TEST_P(FlatLdsTransfer, ScratchWidthsAndAddressModesPreserveInactiveLanesAndVgprs) {
   for (unsigned kind = 0; kind < 5; ++kind)
     for (unsigned mode = 0;
-         mode < (modern() || GetParam().first == ROCJITSU_CODE_ARCH_RDNA2 ? 4u : 2u); ++mode) {
+         mode < (modern() || GetParam().first == rocjitsu::IsaFamily::Rdna2 ? 4u : 2u); ++mode) {
       if (!modern() && mode == 2)
         continue; // Legacy encodings have no combined form.
       SCOPED_TRACE(testing::Message() << "kind=" << kind << " mode=" << mode);
@@ -223,7 +224,7 @@ TEST_P(FlatLdsTransfer, GlobalLoadsToLdsPreserveInactiveLanesAndVgprs) {
 }
 
 TEST_P(FlatLdsTransfer, Cdna3RejectsCdna4WideGlobalLoadEncodings) {
-  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA3)
+  if (GetParam().first != rocjitsu::IsaFamily::Cdna3)
     GTEST_SKIP() << "Checks the CDNA3 decoder boundary.";
   for (unsigned dwords : {3u, 4u}) {
     auto words = global_wide_lds_encoding(dwords, 127, 0);
@@ -279,7 +280,7 @@ TEST_P(FlatLdsTransfer, CoincidentDsWritesIgnoreData1) {
 }
 
 TEST_P(FlatLdsTransfer, Cdna3DualAddressAccessesRespectTheWorkgroupAllocation) {
-  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA3)
+  if (GetParam().first != rocjitsu::IsaFamily::Cdna3)
     GTEST_SKIP();
   ASSERT_EQ(cu->allocate_lds(1), 0u);
   const uint32_t allocation = cu->allocate_lds(1);
@@ -363,7 +364,7 @@ TEST_P(FlatLdsTransfer, EmptyExecDoesNotTouchLdsOrVgprs) {
 }
 
 TEST_P(FlatLdsTransfer, Cdna2ScratchChecksLogicalBytesBeforeSwizzling) {
-  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA2)
+  if (GetParam().first != rocjitsu::IsaFamily::Cdna2)
     GTEST_SKIP();
   clear();
   wave->set_exec(3);
@@ -476,7 +477,7 @@ TEST_P(FlatLdsTransfer, RdnaLlvmEncodingsAndUnsignedGlobalOffsets) {
   EXPECT_EQ(wave->lds().read32(132), 0x11223344);
   ASSERT_NO_FATAL_FAILURE(issue({0xdc304004, 0x087d0002}, false));
   EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 8, 0), 0x11223344);
-  if (GetParam().first == ROCJITSU_CODE_ARCH_RDNA2) {
+  if (GetParam().first == rocjitsu::IsaFamily::Rdna2) {
     memory.write32(0x10000 + wave->wf_size() * 4, 0x55667788);
     vector(0, 0, 0xffffffff);
     ASSERT_NO_FATAL_FAILURE(issue({0xdc304004, 0x087f0000}, false));
@@ -517,7 +518,7 @@ TEST_P(FlatLdsTransfer, RdnaScratchScalarOffsetIsUnsigned) {
 }
 
 TEST_P(FlatLdsTransfer, GlobalWideLoadsPreservePaddingInactiveLanesAndVgprs) {
-  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA4)
+  if (GetParam().first != rocjitsu::IsaFamily::Cdna4)
     GTEST_SKIP() << "Wide GLOBAL LDS loads require CDNA4.";
   constexpr uint64_t base = 0x123400020000;
   for (unsigned count : {3u, 4u})
@@ -564,7 +565,7 @@ TEST_P(FlatLdsTransfer, GlobalWideLoadsPreservePaddingInactiveLanesAndVgprs) {
 }
 
 TEST_P(FlatLdsTransfer, GlobalWideLoadsRespectM0WidthAndWholePayloadBounds) {
-  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA4)
+  if (GetParam().first != rocjitsu::IsaFamily::Cdna4)
     GTEST_SKIP() << "Wide GLOBAL LDS loads require CDNA4.";
   for (unsigned count : {3u, 4u})
     for (uint32_t m0 : {0u, 3u, 0x10003u, 0xfffc0003u})
@@ -602,7 +603,7 @@ TEST_P(FlatLdsTransfer, GlobalWideLoadsRespectM0WidthAndWholePayloadBounds) {
 }
 
 TEST_P(FlatLdsTransfer, GlobalWideLoadsApplyThirteenBitOffsetToLds) {
-  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA4)
+  if (GetParam().first != rocjitsu::IsaFamily::Cdna4)
     GTEST_SKIP() << "Wide GLOBAL LDS loads require CDNA4.";
   // Offset 2048 sets bit 11, so it becomes -2048 if only 12 bits are sign-extended.
   constexpr int offset = 2048;
@@ -629,13 +630,13 @@ TEST_P(FlatLdsTransfer, GlobalWideLoadsApplyThirteenBitOffsetToLds) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Architectures, FlatLdsTransfer,
-                         testing::Values(std::pair{ROCJITSU_CODE_ARCH_CDNA1, 64u},
-                                         std::pair{ROCJITSU_CODE_ARCH_CDNA2, 64u},
-                                         std::pair{ROCJITSU_CODE_ARCH_CDNA3, 64u},
-                                         std::pair{ROCJITSU_CODE_ARCH_CDNA4, 64u},
-                                         std::pair{ROCJITSU_CODE_ARCH_RDNA1, 32u},
-                                         std::pair{ROCJITSU_CODE_ARCH_RDNA1, 64u},
-                                         std::pair{ROCJITSU_CODE_ARCH_RDNA2, 32u},
-                                         std::pair{ROCJITSU_CODE_ARCH_RDNA2, 64u}));
+                         testing::Values(std::pair{rocjitsu::IsaFamily::Cdna1, 64u},
+                                         std::pair{rocjitsu::IsaFamily::Cdna2, 64u},
+                                         std::pair{rocjitsu::IsaFamily::Cdna3, 64u},
+                                         std::pair{rocjitsu::IsaFamily::Cdna4, 64u},
+                                         std::pair{rocjitsu::IsaFamily::Rdna1, 32u},
+                                         std::pair{rocjitsu::IsaFamily::Rdna1, 64u},
+                                         std::pair{rocjitsu::IsaFamily::Rdna2, 32u},
+                                         std::pair{rocjitsu::IsaFamily::Rdna2, 64u}));
 } // namespace
 } // namespace rocjitsu

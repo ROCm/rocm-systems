@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -18,7 +19,7 @@ namespace amdgpu {
 
 // GFX9 SALU redirects an unallocated source tuple to s[0:width) and discards its destination.
 inline bool scalar_gpr_out_of_range(const Wavefront &wf, uint32_t selector, uint32_t width) {
-  return (selector < kFlatScratchSelectorFirst || wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA4) &&
+  return (selector < kFlatScratchSelectorFirst || wf.cu().arch() == rocjitsu::IsaFamily::Cdna4) &&
          wf.exceeds_rounded_sgpr_allocation(selector, width);
 }
 
@@ -102,8 +103,8 @@ inline uint32_t resolve_src_scalar_value(const Wavefront &wf, int ev, int m0_ev)
   // On gfx10.3 these operands contain 64-bit addresses. B32 reads the low
   // dword; software that needs the aperture tag uses the upper half of a B64 move.
   const auto aperture_word = [&](uint64_t address) {
-    return static_cast<uint32_t>(wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2 ? address
-                                                                            : address >> 32);
+    return static_cast<uint32_t>(wf.cu().arch() == rocjitsu::IsaFamily::Rdna2 ? address
+                                                                              : address >> 32);
   };
   if (ev == 235)
     return aperture_word(wf.shared_aperture_base()); // SRC_SHARED_BASE
@@ -165,7 +166,7 @@ inline uint32_t resolve_src_scalar16(const Wavefront &wf, int ev, int m0_ev,
 // the encoding values that resolve without reporting UnsupportedOperandValue.
 // Isa::simd_capable_value() uses it to keep the SIMD fast path off operands whose
 // scalar broadcast would report a guest execution failure.
-inline bool can_resolve_src_scalar(int ev, rj_code_arch_t arch) {
+inline bool can_resolve_src_scalar(int ev, rocjitsu::IsaFamily arch) {
   const int m0_ev = static_cast<int>(scalar_m0_selector(arch));
   bool ok =
       (ev >= 0 && ev <= static_cast<int>(kVccSelectorLast)) ||

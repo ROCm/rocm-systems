@@ -772,7 +772,7 @@ class TestDeriveScalarSplitBarrier:
             ('S_BARRIER_SIGNAL_ISFIRST', 'scalar_barrier_signal', 'signal_isfirst'),
             ('S_BARRIER_INIT', 'scalar_barrier_init', None),
             ('S_BARRIER_JOIN', 'scalar_barrier_join', None),
-            ('S_WAKEUP_BARRIER', 'true_nop', None),
+            ('S_WAKEUP_BARRIER', 'scalar_barrier_wakeup', None),
         ],
     )
     def test_named_barrier_ops_derive_execution_model(
@@ -1012,33 +1012,13 @@ class TestDeriveVectorUnary:
         assert ('inst_.abs' in cpp) == has_abs
         assert 'inst_.neg' in cpp
 
-    @pytest.mark.parametrize(
-        ('name', 'operation'),
-        [
-            ('V_CVT_FLOOR_I32_F32', 'FloorI32'),
-            ('V_CVT_NEAREST_I32_F32', 'NearestI32'),
-        ],
-    )
-    def test_cvt_floor_nearest_lower_to_shared_conversion(self, name, operation):
-        # One stage object, resolved before the lane loop, applies ABS/NEG and
-        # the input flush to the raw source bits.
-        for enc, fields, args in (
-            ('ENC_VOP1', frozenset(), 'wf'),
-            ('ENC_VOP3', frozenset({'abs', 'neg'}), 'wf, inst_.abs, inst_.neg'),
-        ):
-            block = derive_sema_block(derive_semantics(name, enc))
-            if fields:
-                block = enrich_block(block, enc_field_names=fields)
-            cpp = lower_sema_block(block)
-            declaration = (
-                'const auto conversion = amdgpu::conversion_f32_to_integer<'
-                f'amdgpu::conversion::{operation}>({args});'
-            )
-            assert declaration in cpp
-            assert cpp.index(declaration) < cpp.index('for (uint32_t lane')
-            assert 'conversion(amdgpu::RegisterAccess(wf).read_lane(' in cpp
-            for host in ('apply_to_float', 'std::floor', 'Policy::make'):
-                assert host not in cpp
+    @pytest.mark.parametrize('name', ['V_CVT_FLOOR_I32_F32', 'V_CVT_NEAREST_I32_F32'])
+    @pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
+    def test_cvt_floor_nearest_require_arithmetic_lowering(self, name, enc):
+        # All target profiles use rj-arith; do not regenerate retired C++ helpers.
+        block = derive_sema_block(derive_semantics(name, enc))
+        with pytest.raises(ValueError, match='require rj-arith lowering'):
+            lower_sema_block(block)
 
     @pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
     def test_cos_bf16_lowers_through_shared_transcendental(self, enc):

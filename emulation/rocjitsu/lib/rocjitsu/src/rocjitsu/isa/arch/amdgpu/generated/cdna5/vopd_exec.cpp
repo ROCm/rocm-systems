@@ -5,7 +5,8 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vopd.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vopd_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -47,229 +48,255 @@ namespace {
 [[maybe_unused]] constexpr uint16_t kVopdMinNumF64 = 36;
 } // namespace
 
-bool Vopd::uses_src_neg_modifier(uint16_t op) {
-  switch (op) {
-  case kVopdFmacF32:
-  case kVopdFmaakF32:
-  case kVopdFmamkF32:
-  case kVopdMulF32:
-  case kVopdAddF32:
-  case kVopdSubF32:
-  case kVopdSubrevF32:
-  case kVopdMulDx9ZeroF32:
-  case kVopdMaxNumF32:
-  case kVopdMinNumF32:
-  case kVopdFmaF32:
-  case kVopdCndmaskB32:
-    return true;
-  default:
-    return false;
-  }
-}
-
-uint32_t Vopd::apply_neg(uint32_t value, uint8_t neg_bits, uint8_t src_idx) {
-  return (neg_bits & (1u << src_idx)) ? (value ^ 0x80000000u) : value;
-}
-
-uint32_t Vopd::bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table) {
-  return amdgpu::bitop3_words(src0, src1, uint32_t{0}, static_cast<uint8_t>(truth_table));
-}
-uint64_t Vopd::apply_neg64(uint64_t value, uint8_t neg_bits, uint8_t src_idx) {
-  return (neg_bits & (1u << src_idx)) ? (value ^ 0x8000000000000000ULL) : value;
-}
-
-uint64_t Vopd::execute_slot64(const Slot &slot, amdgpu::Wavefront &wf, uint32_t lane) {
-  uint64_t src0 =
-      apply_neg64(amdgpu::RegisterAccess(wf).read_lane64(*slot.src0, lane), slot.neg, 0);
-  uint64_t src1 =
-      apply_neg64(amdgpu::RegisterAccess(wf).read_lane64(*slot.src1, lane), slot.neg, 1);
-
-  switch (slot.op) {
-  case kVopdFmaF64: {
-    uint64_t src2 =
-        apply_neg64(amdgpu::RegisterAccess(wf).read_lane64(*slot.src2, lane), slot.neg, 2);
-    double result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
-        std::bit_cast<double>(src0), std::bit_cast<double>(src1), std::bit_cast<double>(src2),
-        wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());
-    return std::bit_cast<uint64_t>(result);
-  }
-  case kVopdAddF64: {
-    double result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(
-        std::bit_cast<double>(src0), std::bit_cast<double>(src1), 0.0, wf.fp_round_mode_f16_f64(),
-        wf.fp_denorm_mode_f16_f64());
-    return std::bit_cast<uint64_t>(result);
-  }
-  case kVopdMulF64: {
-    double result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::MUL>(
-        std::bit_cast<double>(src0), std::bit_cast<double>(src1), 0.0, wf.fp_round_mode_f16_f64(),
-        wf.fp_denorm_mode_f16_f64());
-    return std::bit_cast<uint64_t>(result);
-  }
-  case kVopdMinNumF64: {
-    double result = std::fmin(std::bit_cast<double>(src0), std::bit_cast<double>(src1));
-    return std::bit_cast<uint64_t>(result);
-  }
-  case kVopdMaxNumF64: {
-    double result = std::fmax(std::bit_cast<double>(src0), std::bit_cast<double>(src1));
-    return std::bit_cast<uint64_t>(result);
-  }
-  default:
-    wf.report_instruction_execution_error(
-        amdgpu::InstructionExecutionError::UnimplementedInstruction);
-    return 0;
-  }
-}
-
-uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t lane) {
-  uint32_t src0 = amdgpu::RegisterAccess(wf).read_lane(*slot.src0, lane);
-  if (uses_src_neg_modifier(slot.op))
-    src0 = apply_neg(src0, slot.neg, 0);
-  // MOV has no src1: its unused encoding bits may name a pending register.
-  if (slot.op == kVopdMovB32)
-    return src0;
-  uint32_t src1 = amdgpu::RegisterAccess(wf).read_lane(*slot.src1, lane);
-  uint32_t src2 = slot.has_src2_operand ? amdgpu::RegisterAccess(wf).read_lane(*slot.src2, lane)
-                                        : slot.src2_imm;
-  if (uses_src_neg_modifier(slot.op)) {
-    src1 = apply_neg(src1, slot.neg, 1);
-    src2 = apply_neg(src2, slot.neg, 2);
-  }
-
-  switch (slot.op) {
-  case kVopdFmacF32: {
-    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
-        std::bit_cast<float>(src0), std::bit_cast<float>(src1),
-        std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane)),
-        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdFmaakF32: {
-    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
-        std::bit_cast<float>(src0), std::bit_cast<float>(src1), std::bit_cast<float>(src2),
-        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdFmamkF32: {
-    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
-        std::bit_cast<float>(src0), std::bit_cast<float>(src2), std::bit_cast<float>(src1),
-        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdMulF32: {
-    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::MUL>(
-        std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(),
-        wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdMulDx9ZeroF32: {
-    float lhs = std::bit_cast<float>(src0);
-    float rhs = std::bit_cast<float>(src1);
-    return std::bit_cast<uint32_t>(
-        amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::MUL_LEGACY>(
-            lhs, rhs, 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32()));
-  }
-  case kVopdAddF32: {
-    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(
-        std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(),
-        wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdSubF32: {
-    // The ISA defines VOPD by the VOP2 instructions (16.11): add the
-    // negated subtrahend, keeping the sources in operand order.
-    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(
-        std::bit_cast<float>(src0), std::bit_cast<float>(src1 ^ 0x80000000u), 0.0f,
-        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdSubrevF32: {
-    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(
-        std::bit_cast<float>(src0 ^ 0x80000000u), std::bit_cast<float>(src1), 0.0f,
-        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdMovB32:
-    return src0;
-  case kVopdCndmaskB32: {
-    uint64_t condition =
-        slot.uses_vcc ? wf.vcc_mask() : amdgpu::read_wave_mask_scalar(*slot.src2, wf);
-    return ((condition >> lane) & 1u) ? src1 : src0;
-  }
-  case kVopdMaxNumF32: {
-    return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MaxNum>(
-        amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
-  }
-  case kVopdMinNumF32: {
-    return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MinNum>(
-        amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
-  }
-  case kVopdAddNcU32:
-    return src0 + src1;
-  case kVopdLshlrevB32:
-    return src1 << (src0 & 31u);
-  case kVopdBitop2B32:
-    return bitop2(src0, src1, slot.src2_imm);
-  case kVopdFmaF32: {
-    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
-        std::bit_cast<float>(src0), std::bit_cast<float>(src1), std::bit_cast<float>(src2),
-        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdSubNcU32:
-    return src0 - src1;
-  case kVopdLshrrevB32:
-    return src1 >> (src0 & 31u);
-  case kVopdAshrrevI32:
-    return static_cast<uint32_t>(static_cast<int32_t>(src1) >> (src0 & 31u));
-  case kVopdMaxI32:
-    return static_cast<uint32_t>(std::max(static_cast<int32_t>(src0), static_cast<int32_t>(src1)));
-  case kVopdMinI32:
-    return static_cast<uint32_t>(std::min(static_cast<int32_t>(src0), static_cast<int32_t>(src1)));
-  default:
-    wf.report_instruction_execution_error(
-        amdgpu::InstructionExecutionError::UnimplementedInstruction);
-    return 0;
-  }
-}
-
 void Vopd::execute_impl(amdgpu::Wavefront &wf) {
   if (wf.wf_size() != 32) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
     return;
   }
-  if (amdgpu::try_execute_vopd_integer_pair_simd<kVopdMovB32, kVopdAddNcU32, kVopdLshlrevB32>(
-          wf, x_, y_))
-    return;
-  if (amdgpu::try_execute_vopd_simd<true>(x_, y_, wf))
-    return;
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    bool x64 = is_float64_op(x_.op);
-    bool y64 = is_float64_op(y_.op);
-    uint64_t x_result64 = x64 ? execute_slot64(x_, wf, lane) : 0;
-    if (wf.instruction_execution_failed())
-      return;
-    uint64_t y_result64 = y64 ? execute_slot64(y_, wf, lane) : 0;
-    if (wf.instruction_execution_failed())
-      return;
-    uint32_t x_result32 = x64 ? 0 : execute_slot(x_, wf, lane);
-    if (wf.instruction_execution_failed())
-      return;
-    uint32_t y_result32 = y64 ? 0 : execute_slot(y_, wf, lane);
-    if (wf.instruction_execution_failed())
-      return;
-    if (x64)
-      amdgpu::RegisterAccess(wf).write_lane64(*x_.dst, lane, x_result64);
-    else
-      amdgpu::RegisterAccess(wf).write_lane(*x_.dst, lane, x_result32);
-    if (y64)
-      amdgpu::RegisterAccess(wf).write_lane64(*y_.dst, lane, y_result64);
-    else
-      amdgpu::RegisterAccess(wf).write_lane(*y_.dst, lane, y_result32);
-  }
+  amdgpu::arith::execute_dual_pair<2>(
+      wf, x_, y_,
+      [&](const Slot &slot, amdgpu::RegisterAccess &registers, uint32_t exec_mask, uint32_t *result,
+          uint32_t *state) -> int {
+        switch (slot.op) {
+        case kVopdFmacF32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          flags = amdgpu::arith::float32_flags(wf, flags, false) & ~RJ_ARITH_FP_DX10_CLAMP_OFF;
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          amdgpu::arith::VectorInput32 acc(registers, wf, *slot.dst, wf.exec());
+          std::copy_n(acc.data, 32, result);
+          const uint64_t modifiers = ((slot.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                                     ((slot.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);
+          return rj_arith_v_dual_fmac_f32_w32_gfx1250(flags, exec_mask, modifiers, &result, &a.data,
+                                                      &b.data, state);
+        }
+        case kVopdFmaakF32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          flags = amdgpu::arith::float32_flags(wf, flags, false) & ~RJ_ARITH_FP_DX10_CLAMP_OFF;
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          return rj_arith_v_dual_fmaak_f32_w32_gfx12(flags, exec_mask, 0, &result, &a.data, &b.data,
+                                                     slot.src2_imm, state);
+        }
+        case kVopdFmamkF32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          flags = amdgpu::arith::float32_flags(wf, flags, false) & ~RJ_ARITH_FP_DX10_CLAMP_OFF;
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          return rj_arith_v_dual_fmamk_f32_w32_gfx12(flags, exec_mask, 0, &result, &a.data,
+                                                     slot.src2_imm, &b.data, state);
+        }
+        case kVopdMulF32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          flags = amdgpu::arith::float32_flags(wf, flags, false) & ~RJ_ARITH_FP_DX10_CLAMP_OFF;
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          const uint64_t modifiers = ((slot.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                                     ((slot.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);
+          return rj_arith_v_dual_mul_f32_w32_gfx1250(flags, exec_mask, modifiers, &result, &a.data,
+                                                     &b.data, state);
+        }
+        case kVopdAddF32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          flags = amdgpu::arith::float32_flags(wf, flags, false) & ~RJ_ARITH_FP_DX10_CLAMP_OFF;
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          const uint64_t modifiers = ((slot.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                                     ((slot.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);
+          return rj_arith_v_dual_add_f32_w32_gfx1250(flags, exec_mask, modifiers, &result, &a.data,
+                                                     &b.data, state);
+        }
+        case kVopdSubF32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          flags = amdgpu::arith::float32_flags(wf, flags, false) & ~RJ_ARITH_FP_DX10_CLAMP_OFF;
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          const uint64_t modifiers = ((slot.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                                     ((slot.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);
+          return rj_arith_v_dual_sub_f32_w32_gfx1250(flags, exec_mask, modifiers, &result, &a.data,
+                                                     &b.data, state);
+        }
+        case kVopdSubrevF32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          flags = amdgpu::arith::float32_flags(wf, flags, false) & ~RJ_ARITH_FP_DX10_CLAMP_OFF;
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          const uint64_t modifiers = ((slot.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                                     ((slot.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);
+          return rj_arith_v_dual_subrev_f32_w32_gfx1250(flags, exec_mask, modifiers, &result,
+                                                        &a.data, &b.data, state);
+        }
+        case kVopdMulDx9ZeroF32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          flags = amdgpu::arith::float32_flags(wf, flags, false) & ~RJ_ARITH_FP_DX10_CLAMP_OFF;
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          const uint64_t modifiers = ((slot.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                                     ((slot.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);
+          return rj_arith_v_dual_mul_dx9_zero_f32_w32_gfx1250(flags, exec_mask, modifiers, &result,
+                                                              &a.data, &b.data, state);
+        }
+        case kVopdMovB32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          return rj_arith_v_dual_mov_b32_w32(flags, exec_mask, 0, &result, &a.data);
+        }
+        case kVopdCndmaskB32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          const uint64_t modifiers = ((slot.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                                     ((slot.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);
+          const uint32_t condition =
+              slot.uses_vcc ? wf.vcc_mask() : amdgpu::read_wave_mask_scalar(*slot.src2, wf);
+          return rj_arith_v_dual_cndmask_b32_w32_gfx1250(flags, exec_mask, modifiers, &result,
+                                                         &a.data, &b.data, condition);
+        }
+        case kVopdMaxNumF32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          flags = amdgpu::arith::float32_flags(wf, flags, false) & ~RJ_ARITH_FP_DX10_CLAMP_OFF;
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          const uint64_t modifiers = ((slot.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                                     ((slot.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);
+          return rj_arith_v_dual_max_num_f32_w32_gfx1250(flags, exec_mask, modifiers, &result,
+                                                         &a.data, &b.data, state);
+        }
+        case kVopdMinNumF32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          flags = amdgpu::arith::float32_flags(wf, flags, false) & ~RJ_ARITH_FP_DX10_CLAMP_OFF;
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          const uint64_t modifiers = ((slot.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                                     ((slot.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);
+          return rj_arith_v_dual_min_num_f32_w32_gfx1250(flags, exec_mask, modifiers, &result,
+                                                         &a.data, &b.data, state);
+        }
+        case kVopdAddNcU32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          return rj_arith_v_dual_add_nc_u32_w32(flags, exec_mask, 0, &result, &a.data, &b.data);
+        }
+        case kVopdLshlrevB32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          return rj_arith_v_dual_lshlrev_b32_w32(flags, exec_mask, 0, &result, &a.data, &b.data);
+        }
+        case kVopdBitop2B32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          return rj_arith_v_dual_bitop2_b32_w32(flags, exec_mask, slot.src2_imm, &result, &a.data,
+                                                &b.data);
+        }
+        case kVopdFmaF32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          flags = amdgpu::arith::float32_flags(wf, flags, false) & ~RJ_ARITH_FP_DX10_CLAMP_OFF;
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          const uint64_t modifiers = ((slot.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                                     ((slot.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+                                     ((slot.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u);
+          amdgpu::arith::VectorInput32 c(registers, wf, *slot.src2, wf.exec());
+          return rj_arith_v_dual_fma_f32_w32_gfx1250(flags, exec_mask, modifiers, &result, &a.data,
+                                                     &b.data, &c.data, state);
+        }
+        case kVopdSubNcU32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          return rj_arith_v_dual_sub_nc_u32_w32(flags, exec_mask, 0, &result, &a.data, &b.data);
+        }
+        case kVopdLshrrevB32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          return rj_arith_v_dual_lshrrev_b32_w32(flags, exec_mask, 0, &result, &a.data, &b.data);
+        }
+        case kVopdAshrrevI32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          return rj_arith_v_dual_ashrrev_i32_w32(flags, exec_mask, 0, &result, &a.data, &b.data);
+        }
+        case kVopdMaxI32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          return rj_arith_v_dual_max_i32_w32(flags, exec_mask, 0, &result, &a.data, &b.data);
+        }
+        case kVopdMinI32: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          return rj_arith_v_dual_min_i32_w32(flags, exec_mask, 0, &result, &a.data, &b.data);
+        }
+        case kVopdFmaF64: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          flags = amdgpu::arith::float16_f64_flags(wf, flags, false) & ~RJ_ARITH_FP_DX10_CLAMP_OFF;
+          amdgpu::arith::VectorInput64 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput64 b(registers, wf, *slot.src1, wf.exec());
+          const uint64_t modifiers = ((slot.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                                     ((slot.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+                                     ((slot.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u);
+          uint32_t *d[] = {result, result + 32};
+          amdgpu::arith::VectorInput64 c(registers, wf, *slot.src2, wf.exec());
+          return rj_arith_v_dual_fma_f64_w32_gfx1250(flags, exec_mask, modifiers, d, a.data.data(),
+                                                     b.data.data(), c.data.data(), state);
+        }
+        case kVopdAddF64: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          flags = amdgpu::arith::float16_f64_flags(wf, flags, false) & ~RJ_ARITH_FP_DX10_CLAMP_OFF;
+          amdgpu::arith::VectorInput64 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput64 b(registers, wf, *slot.src1, wf.exec());
+          const uint64_t modifiers = ((slot.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                                     ((slot.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);
+          uint32_t *d[] = {result, result + 32};
+          return rj_arith_v_dual_add_f64_w32_gfx1250(flags, exec_mask, modifiers, d, a.data.data(),
+                                                     b.data.data(), state);
+        }
+        case kVopdMulF64: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          flags = amdgpu::arith::float16_f64_flags(wf, flags, false) & ~RJ_ARITH_FP_DX10_CLAMP_OFF;
+          amdgpu::arith::VectorInput64 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput64 b(registers, wf, *slot.src1, wf.exec());
+          const uint64_t modifiers = ((slot.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                                     ((slot.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);
+          uint32_t *d[] = {result, result + 32};
+          return rj_arith_v_dual_mul_f64_w32_gfx1250(flags, exec_mask, modifiers, d, a.data.data(),
+                                                     b.data.data(), state);
+        }
+        case kVopdMaxNumF64: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          flags = amdgpu::arith::float16_f64_flags(wf, flags, false) & ~RJ_ARITH_FP_DX10_CLAMP_OFF;
+          amdgpu::arith::VectorInput64 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput64 b(registers, wf, *slot.src1, wf.exec());
+          const uint64_t modifiers = ((slot.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                                     ((slot.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);
+          uint32_t *d[] = {result, result + 32};
+          return rj_arith_v_dual_max_num_f64_w32_gfx1250(flags, exec_mask, modifiers, d,
+                                                         a.data.data(), b.data.data(), state);
+        }
+        case kVopdMinNumF64: {
+          uint64_t flags = wf.cu().arithmetic_flags();
+          flags = amdgpu::arith::float16_f64_flags(wf, flags, false) & ~RJ_ARITH_FP_DX10_CLAMP_OFF;
+          amdgpu::arith::VectorInput64 a(registers, wf, *slot.src0, wf.exec());
+          amdgpu::arith::VectorInput64 b(registers, wf, *slot.src1, wf.exec());
+          const uint64_t modifiers = ((slot.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                                     ((slot.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);
+          uint32_t *d[] = {result, result + 32};
+          return rj_arith_v_dual_min_num_f64_w32_gfx1250(flags, exec_mask, modifiers, d,
+                                                         a.data.data(), b.data.data(), state);
+        }
+        default:
+          wf.report_instruction_execution_error(
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+          return RJ_ARITH_ERROR_INVALID_FLAGS;
+        }
+      });
 }
 
 } // namespace cdna5

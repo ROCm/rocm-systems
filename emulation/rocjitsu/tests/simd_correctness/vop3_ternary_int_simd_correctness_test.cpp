@@ -16,6 +16,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -129,7 +130,7 @@ struct Fixture {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4, uint32_t width = 0)
+  explicit Fixture(rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4, uint32_t width = 0)
       : gpu_mem("vop3_tern_int_mem"), l2("vop3_tern_int_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
@@ -239,8 +240,9 @@ TEST(Vop3TernaryIntSimdCorrectness, AlignSelectsTheCountFromSrc2) {
   constexpr uint32_t counts = 0x03121108u;
   constexpr std::array<unsigned, 4> byte_counts{8, 17, 18, 3};
   // GFX11 and GFX12 share the CDNA5 encoding. Only S2 changes with OPSEL[2].
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                    ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch :
+       {rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+        rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     SCOPED_TRACE(arch);
     Fixture fx(arch);
     ASSERT_NE(fx.wf, nullptr);
@@ -252,10 +254,10 @@ TEST(Vop3TernaryIntSimdCorrectness, AlignSelectsTheCountFromSrc2) {
     fx.cu->write_vgpr(base + kDstVgpr, 1, DST_SENTINEL);
     for (uint8_t opsel = 0; opsel < 8; ++opsel) {
       const unsigned count =
-          arch == ROCJITSU_CODE_ARCH_CDNA4 ? byte_counts[opsel & 3u] : (opsel & 4u ? 18u : 8u);
+          arch == rocjitsu::IsaFamily::Cdna4 ? byte_counts[opsel & 3u] : (opsel & 4u ? 18u : 8u);
       for (bool bytes : {false, true}) {
         const auto words =
-            arch == ROCJITSU_CODE_ARCH_CDNA4
+            arch == rocjitsu::IsaFamily::Cdna4
                 ? cdna4::build_vop3(
                       bytes ? cdna4::kVAlignbyteB32Vop3 : cdna4::kVAlignbitB32Vop3,
                       {.vdst = kDstVgpr, .op_sel = opsel, .src0 = 256, .src1 = 257, .src2 = 258})
@@ -279,7 +281,7 @@ TEST(Vop3TernaryIntSimdCorrectness, AlignSelectsTheCountFromSrc2) {
 }
 
 TEST(Vop3TernaryIntSimdCorrectness, CdnaMadI16AndU16PreserveUnselectedDestination) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4);
+  Fixture fx(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(fx.wf, nullptr);
   const uint32_t base = fx.wf->vgpr_alloc().base;
   fx.wf->set_exec(1);
@@ -309,7 +311,7 @@ TEST(Vop3TernaryIntSimdCorrectness, CdnaMadI16AndU16PreserveUnselectedDestinatio
 
 TEST(Vop3TernaryIntSimdCorrectness, Gfx10MadSelectsSourceAndDestinationHalves) {
   constexpr uint32_t seed = 0x9abcdeffu;
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     Fixture fx(arch);
     ASSERT_NE(fx.wf, nullptr);
     const uint32_t base = fx.wf->vgpr_alloc().base;
@@ -360,7 +362,7 @@ TEST(Vop3TernaryIntSimdCorrectness, Cdna5IntegerMinmaxGoldenResults) {
   for (bool force_scalar : {true, false}) {
     util::set_force_scalar_for_testing(force_scalar);
     for (const auto &test_case : cases) {
-      Fixture fixture(ROCJITSU_CODE_ARCH_CDNA5);
+      Fixture fixture(rocjitsu::IsaFamily::Cdna5);
       ASSERT_NE(fixture.wf, nullptr);
       const auto words = cdna5::build_vop3(
           test_case.opcode, {.vdst = kDstVgpr, .src0 = 256, .src1 = 257, .src2 = 258});
@@ -444,16 +446,16 @@ TEST(Vop3TernaryIntSimdCorrectness, IntegerMinmaxPreservesSignedAndUnsignedBits)
       Operation{rdna4::kVMaxminI32Vop3, cdna5::kVMaxminI32Vop3, true, true},
       Operation{rdna4::kVMinmaxI32Vop3, cdna5::kVMinmaxI32Vop3, true, false}};
   ForceScalarGuard guard;
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
-    Fixture fx(arch, arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64);
+  for (auto arch : {rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
+    Fixture fx(arch, arch == rocjitsu::IsaFamily::Cdna5 ? 32 : 64);
     ASSERT_NE(fx.wf, nullptr);
     for (bool scalar : {false, true}) {
       util::set_force_scalar_for_testing(scalar);
       for (auto operation : operations) {
         const uint16_t op =
-            arch == ROCJITSU_CODE_ARCH_CDNA5 ? operation.cdna5_op : operation.rdna4_op;
+            arch == rocjitsu::IsaFamily::Cdna5 ? operation.cdna5_op : operation.rdna4_op;
         const auto words =
-            arch == ROCJITSU_CODE_ARCH_CDNA5
+            arch == rocjitsu::IsaFamily::Cdna5
                 ? cdna5::build_vop3(op, {.vdst = kDstVgpr, .src0 = 256, .src1 = 257, .src2 = 258})
                 : rdna4::build_vop3(op, {.vdst = kDstVgpr, .src0 = 256, .src1 = 257, .src2 = 258});
         std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words.data()));

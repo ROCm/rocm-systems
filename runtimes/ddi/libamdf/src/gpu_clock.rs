@@ -4,7 +4,7 @@
 //! GPU clock metadata and native host/device correlation samples.
 
 use crate::generated::amdf::*;
-use crate::instance::{self, Device};
+use crate::session::{self, Device};
 use crate::support::{UNSUPPORTED, boundary, native, object, output_pointer};
 
 fn clock_info(info: rocddi::host::clock::ClockInfo) -> Result<amdf_observation_clock_info_t, u64> {
@@ -27,7 +27,7 @@ pub(crate) unsafe extern "C" fn queue_clock_info(
         output_pointer(out)?;
         let device = object(pointer.cast::<Device>())?;
         device.require_current_process()?;
-        let _family = instance::family(device.native.endpoint(), ordinal)?;
+        let _family = session::family(device.native.endpoint(), ordinal)?;
         let gpu = device
             .native
             .gpu()
@@ -49,7 +49,7 @@ pub(crate) unsafe extern "C" fn clock_sample(
         output_pointer(out)?;
         let device = object(pointer.cast::<Device>())?;
         device.require_current_process()?;
-        let _family = instance::family(device.native.endpoint(), ordinal)?;
+        let _family = session::family(device.native.endpoint(), ordinal)?;
         let gpu = device
             .native
             .gpu()

@@ -6,6 +6,7 @@
 /// F16/BF16 SWMMAC instructions.
 
 #include "mma_exact_test_support.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "../decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
@@ -76,7 +77,7 @@ constexpr std::array SWMMAC_CASES{
 };
 
 struct SwmmacFixture : ExactFixture {
-  SwmmacFixture() : ExactFixture(ROCJITSU_CODE_ARCH_CDNA5, WF_SIZE) {}
+  SwmmacFixture() : ExactFixture(rocjitsu::IsaFamily::Cdna5, WF_SIZE) {}
 };
 
 struct Observation {
@@ -219,7 +220,7 @@ void run_exact_case(const SwmmacCase &test, Mode mode, uint32_t seed, uint32_t m
                     .src0 = static_cast<uint16_t>(256 + a_off),
                     .src1 = static_cast<uint16_t>(256 + b_off),
                     .src2 = static_cast<uint16_t>(256 + index_off)});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
   ASSERT_NE(instruction, nullptr);
@@ -244,7 +245,7 @@ std::unique_ptr<Instruction> decode_case(const SwmmacCase &test) {
   const auto words = cdna5::build_vop3p(
       test.opcode,
       {.vdst = ACC_OFF, .src0 = 256 + A_OFF, .src1 = 256 + B_OFF, .src2 = 256 + INDEX_OFF});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   if (!decoder)
     return nullptr;
   return std::unique_ptr<Instruction>(decode_valid(*decoder, words.data()));
@@ -359,7 +360,7 @@ TEST(SwmmacK64SimdExact, IndexKeyUsesShiftedMetadataWord) {
                                                                 .src0 = 256 + A_OFF,
                                                                 .src1 = 256 + B_OFF,
                                                                 .src2 = 256 + INDEX_OFF});
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
@@ -431,7 +432,7 @@ TEST(SwmmacK64SimdExact, Bf16ResultRoundsHalfwayToEven) {
   const auto words = cdna5::build_vop3p(
       test.opcode,
       {.vdst = ACC_OFF, .src0 = 256 + A_OFF, .src1 = 256 + B_OFF, .src2 = 256 + INDEX_OFF});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
   ASSERT_NE(instruction, nullptr);

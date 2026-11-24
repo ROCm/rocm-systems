@@ -9,6 +9,8 @@
 Memory management routines
 ---------------------------
 
+.. _rocshmem_malloc:
+
 ROCSHMEM_MALLOC
 ---------------
 
@@ -102,6 +104,8 @@ ROCSHMEM_FREE
 This routine frees a memory allocation from the symmetric heap.
 It is a collective operation and must be called by all PEs.
 
+.. _rocshmem_buffer_register:
+
 ROCSHMEM_BUFFER_REGISTER
 ------------------------
 
@@ -136,6 +140,8 @@ ROCSHMEM_BUFFER_UNREGISTER_ALL
 **Description:**
 Deregisters all buffers that were previously registered using
 `rocshmem_buffer_register`.
+
+.. _rocshmem_buffer_register_symmetric:
 
 ROCSHMEM_BUFFER_REGISTER_SYMMETRIC
 ----------------------------------
@@ -183,6 +189,8 @@ Backend behavior:
   NIC registration remains in place and is used for all other peers.
 * **RO (reverse offload) backend:** symmetric user-buffer registration is not
   supported; this routine returns ``NULL``.
+
+.. _rocshmem_buffer_unregister_symmetric:
 
 ROCSHMEM_BUFFER_UNREGISTER_SYMMETRIC
 ------------------------------------

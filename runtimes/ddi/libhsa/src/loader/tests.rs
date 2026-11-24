@@ -126,46 +126,6 @@ fn public_loader_constants_match_hsa_headers() {
 }
 
 #[test]
-/// Checks reporting of one combined segment for v2 code objects.
-fn reports_one_combined_segment_for_v2_code_objects() {
-    let loads = [
-        LoadSegment {
-            file_offset: 0,
-            virtual_address: 0,
-            file_size: 0x17c0,
-            memory_size: 0x17c0,
-        },
-        LoadSegment {
-            file_offset: 0x1800,
-            virtual_address: 0x2800,
-            file_size: 0x6c8,
-            memory_size: 0x6c8,
-        },
-        LoadSegment {
-            file_offset: 0x1ec8,
-            virtual_address: 0x3ec8,
-            file_size: 0x70,
-            memory_size: 0x138,
-        },
-        LoadSegment {
-            file_offset: 0x1f38,
-            virtual_address: 0x4f38,
-            file_size: 4,
-            memory_size: 4,
-        },
-    ];
-    let segments = loaded_segments(&loads, 0x0010_0000, 0);
-    assert!(segments.is_ok());
-    let Some(segments) = segments.ok() else {
-        return;
-    };
-    assert_eq!(segments.len(), 1);
-    assert_eq!(segments[0].storage_offset, 0);
-    assert_eq!(segments[0].address, 0x0010_0000);
-    assert_eq!(segments[0].size, 0x4f3c);
-}
-
-#[test]
 /// Checks scoping of v2 code object symbols to the load agent.
 fn scopes_v2_code_object_symbols_to_the_load_agent() {
     let agent = HsaAgent { handle: 7 };

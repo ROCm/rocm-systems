@@ -56,7 +56,7 @@ stream:
     <<: *level_default
     tags: [callback, P1]
   Unit_hipStreamAddCallback_WithCreatedStream:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [callback, P0]
   Unit_hipStreamAddCallback_OrderedWithKernels:
     <<: *level_default

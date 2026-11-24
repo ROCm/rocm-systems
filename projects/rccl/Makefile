@@ -77,8 +77,10 @@ nccl4py.%:
 ir.%:
 	${MAKE} -C bindings/ir $* BUILDDIR=${ABSBUILDDIR}
 
+# Pass NCCL_EMIT_LLVM_IR explicitly: bindings/ir treats it unset as "on", which
+# would arm its .bc serialization edge for an LTO-IR-only build.
 ir-emit: src.build
-	${MAKE} -C bindings/ir $(IR_GOALS) BUILDDIR=${ABSBUILDDIR}
+	${MAKE} -C bindings/ir $(IR_GOALS) BUILDDIR=${ABSBUILDDIR} NCCL_EMIT_LLVM_IR=$(NCCL_EMIT_LLVM_IR)
 
 pkg.debian.prep: lic
 pkg.txz.prep: lic

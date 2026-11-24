@@ -9,6 +9,7 @@
 #define NCCL_SYMMETRIC_SCHED_H_
 
 #include "device.h"
+#include "dev_runtime.h"
 #include "nccl.h"
 #include "scheduler.h"
 #include "tuning.h"
@@ -102,6 +103,18 @@ static bool symBatchesAlone(const struct ncclTaskColl* t) {
   return t->aggIsolate || t->symkExtract == RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY;
 }
 
+// [RCCL] Upper bound on a symmetric launch's tuned channel count: the Symk tuning models cap at
+// ncclSymkAgHierMaxBlocks and the Genk model at min(nChannels, maxCTAs).
+static int symkMaxLaunchChannels(struct ncclComm* comm) {
+  return std::max(ncclSymkAgHierMaxBlocks, std::min(comm->nChannels, comm->config.maxCTAs));
+}
+
+// [RCCL] Symk/Genk kernels take a 4 KB argument even when workArgsBytes is 5 KB, so a batch must fit 4 KB.
+static_assert(sizeof(ncclGenkDevWorkArgs4K) == sizeof(ncclSymkDevWorkArgs4K), "symkMaxArgsBytes assumes one size");
+static size_t symkMaxArgsBytes(struct ncclComm* comm) {
+  return std::min<size_t>(comm->workArgsBytes, sizeof(ncclSymkDevWorkArgs4K));
+}
+
 ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskColl* task,
                                        struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next>* symTaskQueue,
                                        struct ncclTaskColl** remainTasksHead, bool* needGenkDevComm) {
@@ -178,9 +191,9 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
   if (!foundSymm) return ret;
 
   // make sure kernel args space can hold at least a single work
-  size_t const minArgsSize = symkMaxDevWorkArgsSize(MAXCHANNELS, 1, ncclProfilerPluginLoaded());
-  if (comm->workArgsBytes < minArgsSize) {
-    WARN("Symmetric kernel args size %u is smaller than minimum size %zu", comm->workArgsBytes, minArgsSize);
+  size_t const minArgsSize = symkMaxDevWorkArgsSize(symkMaxLaunchChannels(comm), 1, ncclProfilerPluginLoaded());
+  if (symkMaxArgsBytes(comm) < minArgsSize) {
+    WARN("Symmetric kernel args size %zu is smaller than minimum size %zu", symkMaxArgsBytes(comm), minArgsSize);
     return ncclInternalError;
   }
 
@@ -208,7 +221,8 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
         // (it is the head), or if the next task is one (so it starts its own batch).
         bool configBoundary = symBatchesAlone(task) || (task->next != nullptr && symBatchesAlone(task->next));
         if (headTask->func == ncclFuncAlltoAll ||
-            symkMaxDevWorkArgsSize(MAXCHANNELS, nWorks + 1, ncclProfilerPluginLoaded()) > comm->workArgsBytes ||
+            symkMaxDevWorkArgsSize(symkMaxLaunchChannels(comm), nWorks + 1, ncclProfilerPluginLoaded()) >
+              symkMaxArgsBytes(comm) ||
             task->next == nullptr || configBoundary) {
           task->isSymLast = 1;
           break;
@@ -249,6 +263,13 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       NCCLCHECK(symBatchAlignment(comm, headTask, &input.symAligned16B));
       input.chunkSteps = headTask->chunkSteps;
       input.sliceSteps = headTask->sliceSteps;
+      input.ginWindowsUnregistered = false;
+      for (struct ncclTaskColl* scan = headTask; scan != nullptr; scan = scan->next) {
+        if (ncclDevrWindowMissingGinSegments(scan->sendWin) || ncclDevrWindowMissingGinSegments(scan->recvWin)) {
+          input.ginWindowsUnregistered = true;
+        }
+        if (scan->isSymLast) break;
+      }
       input.minCTAs = headTask->minCTAs;
       input.maxCTAs = headTask->maxCTAs;
       input.CTAPolicy = headTask->CTAPolicy;
@@ -424,10 +445,18 @@ static ncclResult_t ncclSymmetricTaskSchedulerImpl(
   }
 
   plan->kernelArgsSize = ncclSymkDevWorkArgsSize<Args>(nMaxChannels, workCount, profilerEnabled);
-  // [RCCL] Both kernel families take their args as a by-value 4K union; size the buffer to match.
-  plan->kernelArgsSize =
-    std::max<size_t>(plan->kernelArgsSize,
-                     sizeof(typename std::conditional<Genk, ncclGenkDevWorkArgs4K, ncclSymkDevWorkArgs4K>::type));
+  {
+    // [RCCL] Both kernel families take their args as a by-value 4K union; size the buffer to match.
+    constexpr size_t kArgs4K =
+      sizeof(typename std::conditional<Genk, ncclGenkDevWorkArgs4K, ncclSymkDevWorkArgs4K>::type);
+    if (plan->kernelArgsSize > kArgs4K) {
+      WARN("Symmetric kernel args size %zu for %d works exceeds the %zu-byte symmetric kernel argument",
+           plan->kernelArgsSize, workCount, kArgs4K);
+      ret = ncclInternalError;
+      goto fail;
+    }
+    plan->kernelArgsSize = kArgs4K;
+  }
   argsBuf = (Args*)calloc(1, plan->kernelArgsSize);
   if (argsBuf == NULL) {
     WARN("Failed to allocate %zu bytes of symmetric kernel args", plan->kernelArgsSize);

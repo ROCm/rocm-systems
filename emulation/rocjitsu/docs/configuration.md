@@ -1,6 +1,6 @@
 # Configuration
 
-Rocjitsu behavior is configured declaratively in JSON. Simulator configs
+rocjitsu behavior is configured declaratively in JSON. Simulator configs
 specify the component hierarchy, link connectivity, and simulation parameters;
 DBT guest configs select the guest and host targets and execution backend.
 
@@ -43,7 +43,7 @@ The gfx1250 PCI profile intentionally advertises no UVD, VCN, or JPEG hardware.
 Compute-only guests therefore require an AMDGPU kernel containing commit
 `4e07da515d1c` (`drm/amdgpu: enumerate UMSCH HW IP`) or an equivalent backport.
 That change makes multimedia discovery accept a device with no VCN instance.
-Rocjitsu does not emulate a placeholder media block, and adding one would expand
+rocjitsu does not emulate a placeholder media block, and adding one would expand
 the device contract beyond the compute functionality modeled here.
 
 The generic `scripts/run-vfio-guest.py` launcher requires externally prepared
@@ -290,7 +290,7 @@ so these retained pools do not imply simultaneous execution on every GPU.
 Dispatch workers can accelerate compute batches. The E=1 pin addresses the
 documented RCCL hang; the D=1 default preserves small-collective performance.
 
-Mirage embeds the tables in its RocJITsu backend at build time and
+Mirage embeds the tables in its rocjitsu backend at build time and
 selects them by the agent's GPU target and GPU count. The hardware agent format carries no
 host scheduling policy. Unknown targets use the serial fallback. For multiple
 GPUs, it uses the matching native preset when available. Other GPU counts
@@ -344,6 +344,14 @@ unsupported. Any HW_ID slice touching an unsupported bit rejects the entire
 read; the default 32-bit HW_ID read therefore still warns and writes zero.
 Unknown or unrepresentable identity fields likewise issue an `s_getreg_b32`
 warning and write zero.
+
+RDNA3/RDNA4 `HW_ID1` reports the wave slot, the CU's WGP and its half of it,
+SA_ID and SE_ID. A CU's wave slots alternate between its two SIMDs, so slot
+`s` reads SIMD `s % 2` and WAVE_ID `s / 2`. SIMD_ID, WGP_ID and SA_ID require
+an even shader-array width of at most 32 CUs and at most two arrays per shader
+engine; SE_ID must fit in three bits. DP_RATE reads 1 on gfx11 and gfx12 and
+is unsupported on gfx11.5, which has no measured value. Reads touching an
+unrepresentable field warn and write zero.
 
 Omitted geometry fields inherit defaults selected by `gfx_target_version`.
 For a smaller topology, set both `num_cu_per_sh` and

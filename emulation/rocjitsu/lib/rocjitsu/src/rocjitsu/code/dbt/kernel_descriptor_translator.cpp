@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
@@ -51,81 +52,81 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
 // ISA-family helpers.
 // -----------------------------------------------------------------------------
 
-[[nodiscard]] bool arch_supports_wave_size(rj_code_arch_t arch, uint32_t wf) {
+[[nodiscard]] bool arch_supports_wave_size(rocjitsu::IsaFamily arch, uint32_t wf) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return supports_wave_size<cdna1::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return supports_wave_size<cdna2::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return supports_wave_size<cdna3::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return supports_wave_size<cdna4::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return supports_wave_size<rdna1::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return supports_wave_size<rdna2::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return supports_wave_size<rdna3::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return supports_wave_size<rdna3_5::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return supports_wave_size<rdna4::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return supports_wave_size<cdna5::Isa>(wf);
   default:
     return false;
   }
 }
 
-[[nodiscard]] uint32_t arch_default_wave_size(rj_code_arch_t arch) {
+[[nodiscard]] uint32_t arch_default_wave_size(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::Isa::WF_SIZE;
   default:
     return 64;
   }
 }
 
-[[nodiscard]] uint32_t arch_max_vgprs(rj_code_arch_t arch) {
+[[nodiscard]] uint32_t arch_max_vgprs(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     // gfx1250 extends each encoded VGPR operand with dynamic high-bank bits.
     // Descriptor validation must allow the complete addressable register
     // range even though its inherited RDNA base describes one 256-VGPR bank.
@@ -135,27 +136,27 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   }
 }
 
-[[nodiscard]] bool arch_has_accvgpr(rj_code_arch_t arch) {
+[[nodiscard]] bool arch_has_accvgpr(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return HasAccVgpr<cdna1::Isa>;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return HasAccVgpr<cdna2::Isa>;
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return HasAccVgpr<cdna3::Isa>;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return HasAccVgpr<cdna4::Isa>;
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return HasAccVgpr<rdna1::Isa>;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return HasAccVgpr<rdna2::Isa>;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return HasAccVgpr<rdna3::Isa>;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return HasAccVgpr<rdna3_5::Isa>;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return HasAccVgpr<rdna4::Isa>;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return HasAccVgpr<cdna5::Isa>;
   default:
     return false;
@@ -163,7 +164,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
 }
 
 [[nodiscard]] uint8_t choose_host_wavefront_size(uint8_t guest_wavefront_size,
-                                                 rj_code_arch_t host_arch) {
+                                                 rocjitsu::IsaFamily host_arch) {
   if (guest_wavefront_size == 64 && arch_supports_wave_size(host_arch, 64))
     return 64;
   if (guest_wavefront_size == 32 && arch_supports_wave_size(host_arch, 32))
@@ -177,7 +178,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
 // Kernel descriptor field helpers.
 // -----------------------------------------------------------------------------
 
-[[nodiscard]] uint32_t user_sgpr_count(const KD &desc, rj_code_arch_t arch) {
+[[nodiscard]] uint32_t user_sgpr_count(const KD &desc, rocjitsu::IsaFamily arch) {
   return kernel_descriptor_user_sgpr_count(arch, desc);
 }
 
@@ -197,12 +198,12 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   return static_cast<uint16_t>(sgpr);
 }
 
-[[nodiscard]] bool uses_kernarg_preload_firmware_skip(rj_code_arch_t arch) {
+[[nodiscard]] bool uses_kernarg_preload_firmware_skip(rocjitsu::IsaFamily arch) {
   // CDNA3/CDNA4 implement kernarg preloading through the legacy firmware
   // compatibility window: old firmware enters at the descriptor entry and
   // compatible firmware enters 256 bytes later. GFX1250 supports preloading in
   // hardware but has one entry, exactly as specified by the descriptor.
-  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+  return arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
 }
 
 [[nodiscard]] std::optional<uint32_t> kernarg_bytes_to_preserve(const KD &desc) {
@@ -225,7 +226,8 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   return std::max(desc.kernarg_size, preload_end_bytes);
 }
 
-[[nodiscard]] int16_t workgroup_id_sgpr(const KD &desc, uint32_t dimension, rj_code_arch_t arch) {
+[[nodiscard]] int16_t workgroup_id_sgpr(const KD &desc, uint32_t dimension,
+                                        rocjitsu::IsaFamily arch) {
   if (isa_properties(arch).uses_ttmp_workgroup_ids)
     return -1;
   const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
@@ -250,17 +252,18 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   return -1;
 }
 
-[[nodiscard]] bool uses_gfx90a_accum_offset(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-         arch == ROCJITSU_CODE_ARCH_CDNA4;
+[[nodiscard]] bool uses_gfx90a_accum_offset(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Cdna2 || arch == rocjitsu::IsaFamily::Cdna3 ||
+         arch == rocjitsu::IsaFamily::Cdna4;
 }
 
-[[nodiscard]] bool uses_gfx10_plus_rsrc3(rj_code_arch_t arch) {
+[[nodiscard]] bool uses_gfx10_plus_rsrc3(rocjitsu::IsaFamily arch) {
   return !arch_descriptor_encodes_sgpr_allocation(arch);
 }
 
 [[nodiscard]] std::optional<uint32_t>
-descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wavefront_size) {
+checked_descriptor_vgpr_granularity_for_wavefront(rocjitsu::IsaFamily arch,
+                                                  uint32_t wavefront_size) {
   // This is the AMDHSA kernel-descriptor encoding granularity for
   // COMPUTE_PGM_RSRC1.GRANULATED_WORKITEM_VGPR_COUNT, not the physical VGPR
   // allocation block from the ISA manuals. For example, RDNA3/RDNA4 manuals
@@ -285,7 +288,7 @@ descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wavefron
   return (registers + granularity - 1) / granularity - 1;
 }
 
-[[nodiscard]] uint16_t accum_vgpr_base(const KD &desc, rj_code_arch_t guest_arch) {
+[[nodiscard]] uint16_t accum_vgpr_base(const KD &desc, rocjitsu::IsaFamily guest_arch) {
   if (!uses_gfx90a_accum_offset(guest_arch) || !arch_has_accvgpr(guest_arch))
     return 0;
 
@@ -310,13 +313,14 @@ void append_rdna4_salu_write(std::vector<uint32_t> &words, util::FailureOr<uint3
   // scalar producer/consumer dependencies; entry prologues bypass the normal
   // instruction-level HazardTracker, so serialize each injected scalar write
   // before the patcher appends the branch back to the original entry.
-  constexpr auto delay = build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4);
+  constexpr auto delay = build_s_delay_alu(kDelayAluSaluDep1, rocjitsu::IsaFamily::Rdna4);
   static_assert(delay.succeeded());
   words.push_back(delay.value());
 }
 
 void append_rdna4_workgroup_grid_prologue(std::vector<uint32_t> &words, const KD &desc,
-                                          rj_code_arch_t guest_arch, rj_code_arch_t host_arch) {
+                                          rocjitsu::IsaFamily guest_arch,
+                                          rocjitsu::IsaFamily host_arch) {
   const uint16_t shift16 = scalar_positive_inline_u32(16);
   const int16_t sgpr_wg_id_x = workgroup_id_sgpr(desc, 0, guest_arch);
   const int16_t sgpr_wg_id_y = workgroup_id_sgpr(desc, 1, guest_arch);
@@ -347,8 +351,9 @@ void append_rdna4_workgroup_grid_prologue(std::vector<uint32_t> &words, const KD
   }
 }
 
-[[nodiscard]] std::vector<uint32_t>
-build_kernel_entry_prologue(const KD &src, rj_code_arch_t guest_arch, rj_code_arch_t host_arch) {
+[[nodiscard]] std::vector<uint32_t> build_kernel_entry_prologue(const KD &src,
+                                                                rocjitsu::IsaFamily guest_arch,
+                                                                rocjitsu::IsaFamily host_arch) {
   std::vector<uint32_t> words;
 
   // Kernel-entry register initialization ABI notes:
@@ -365,7 +370,7 @@ build_kernel_entry_prologue(const KD &src, rj_code_arch_t guest_arch, rj_code_ar
   // - Scratch/private-segment initialization is descriptor-driven today. If a
   //   future target needs SGPR-based scratch setup, it should be appended here
   //   and represented in KdTranslation::prologue_words, not hidden in the patcher.
-  if (arch_is_cdna_4_or_lower(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch_is_cdna_4_or_lower(guest_arch) && host_arch == rocjitsu::IsaFamily::Rdna4)
     append_rdna4_workgroup_grid_prologue(words, src, guest_arch, host_arch);
 
   return words;
@@ -421,7 +426,7 @@ void append_descriptor_resource_error(KdTranslation &result, std::string message
 }
 
 [[nodiscard]] KdTranslation
-translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
+translate_one_descriptor(rocjitsu::IsaFamily guest_arch, rocjitsu::IsaFamily host_arch,
                          uint64_t descriptor_file_offset, std::string kernel_name,
                          uint64_t entry_text_offset, const KD &src,
                          const KernelDescriptorTranslationOptions &options) {
@@ -509,9 +514,9 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   // source count must be decoded with the guest granularity and re-encoded with
   // the host granularity.
   const auto guest_vgpr_granularity =
-      descriptor_vgpr_granularity_for_wavefront(guest_arch, result.guest_wavefront_size);
+      checked_descriptor_vgpr_granularity_for_wavefront(guest_arch, result.guest_wavefront_size);
   const auto host_vgpr_granularity =
-      descriptor_vgpr_granularity_for_wavefront(host_arch, result.host_wavefront_size);
+      checked_descriptor_vgpr_granularity_for_wavefront(host_arch, result.host_wavefront_size);
   if (!guest_vgpr_granularity || !host_vgpr_granularity) {
     append_descriptor_error(
         result, "guest or host architecture does not support the selected wavefront size");
@@ -570,7 +575,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
       }
     }
   }
-  if (host_arch == ROCJITSU_CODE_ARCH_CDNA1 && result.target_agpr_count != 0) {
+  if (host_arch == rocjitsu::IsaFamily::Cdna1 && result.target_agpr_count != 0) {
     // CDNA1 has no ACCUM_OFFSET. Reserve the larger independent VGPR/AGPR count.
     result.target_accvgpr_base = 0;
     required_vgpr_allocation = std::max(required_vgprs, result.target_agpr_count);
@@ -774,30 +779,30 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
 
 } // namespace
 
-Rsrc3Layout rsrc3_layout(rj_code_arch_t arch) {
+Rsrc3Layout rsrc3_layout(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return Rsrc3Layout::Reserved;
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     return Rsrc3Layout::Gfx9Accum;
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
     return Rsrc3Layout::Gfx10;
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return Rsrc3Layout::Gfx11;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return Rsrc3Layout::Gfx120;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return Rsrc3Layout::Gfx125;
   default:
     return Rsrc3Layout::Incompatible;
   }
 }
 
-bool rsrc3_carries_verbatim(rj_code_arch_t source_arch, rj_code_arch_t target_arch) {
+bool rsrc3_carries_verbatim(rocjitsu::IsaFamily source_arch, rocjitsu::IsaFamily target_arch) {
   // Every neighbouring pair is kept apart deliberately, because each disagrees
   // on bits the other reserves: a GFX11 or GFX12 word on a GFX10 target would
   // set INST_PREF_SIZE and IMAGE_OP, and a GFX125 word on a GFX120 target would
@@ -810,8 +815,8 @@ bool rsrc3_layout_has_shared_vgpr_count(Rsrc3Layout layout) {
   return layout == Rsrc3Layout::Gfx10 || layout == Rsrc3Layout::Gfx11;
 }
 
-KernelDescriptorTranslator::KernelDescriptorTranslator(rj_code_arch_t guest_arch,
-                                                       rj_code_arch_t host_arch)
+KernelDescriptorTranslator::KernelDescriptorTranslator(rocjitsu::IsaFamily guest_arch,
+                                                       rocjitsu::IsaFamily host_arch)
     : guest_arch_(guest_arch), host_arch_(host_arch) {}
 
 void KdTranslation::configure_skipped_stub() {

@@ -67,6 +67,18 @@ impl KfdProcessTrap {
         self.address_in(&device.vm)
     }
 
+    /// Restores only this retained normal code while cleanup owns the GPU VM.
+    pub(crate) fn restore(&self, device: &DeviceState) -> Result<(), Error> {
+        // Exact VM identity and the retained allocation prove the saved code
+        // remains mapped. Address validation also rejects inherited or lost VMs.
+        let address = self.address_in(&device.vm)?;
+        device
+            .vm
+            .kfd()
+            .set_trap_handler(device.vm.gpu_id, address, 0)
+            .map_err(|source| native_error("KFD process trap restoration", source))
+    }
+
     fn address_in(&self, vm: &Shared<memory::DeviceVm>) -> Result<u64, Error> {
         if !Shared::ptr_eq(&self.vm, vm) {
             return Err(error(
@@ -198,9 +210,15 @@ impl LinuxKfdDriver {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
-    use super::super::{ProcessSlot, ProcessState, sys, sysfs, uapi};
+    use super::super::{ProcessSlot, ProcessState, connection, sysfs, uapi};
     use super::*;
+    use crate::device::gpu::profiling::linux::ProcessTrap;
+    use crate::device::{Device, DeviceResources};
+    use crate::driver::test_driver::TestDriver;
+    use crate::driver::{DeviceDriverState, Driver, DriverInstance, EndpointSelector};
     use crate::os::ProcessIdentity;
+    use crate::session::{RetirementOutcome, Session, SessionState};
+    use crate::topology::{EndpointKind, GpuInfo};
     use std::fs::{File, OpenOptions};
     use std::sync::atomic::{AtomicBool, AtomicUsize};
     use std::sync::{Arc, Condvar, Mutex};
@@ -254,11 +272,11 @@ mod tests {
             let observed_failure = fail_bind.clone();
             let disables = Arc::new(AtomicUsize::new(0));
             let observed_disables = disables.clone();
-            let mut kfd = sys::Kfd::with_hook(
+            let mut kfd = connection::Kfd::with_hook(
                 File::open("/dev/null").unwrap(),
                 Arc::new(move |call| {
                     match call {
-                        sys::Call::Allocate(args) => {
+                        connection::Call::Allocate(args) => {
                             assert_eq!(
                                 args.flags,
                                 uapi::GTT
@@ -272,17 +290,19 @@ mod tests {
                             args.mmap_offset = 0;
                             observed_allocations.fetch_add(1, Ordering::Relaxed);
                         }
-                        sys::Call::Map(args, ids) => {
+                        connection::Call::Map(args, ids) => {
                             assert_eq!(ids, &[42]);
                             args.success = args.count;
                         }
-                        sys::Call::Unmap(args, _) if allow_cleanup => args.success = args.count,
-                        sys::Call::Free(_) if allow_cleanup => {
+                        connection::Call::Unmap(args, _) if allow_cleanup => {
+                            args.success = args.count;
+                        }
+                        connection::Call::Free(_) if allow_cleanup => {
                             observed_frees.fetch_add(1, Ordering::Relaxed);
                         }
-                        sys::Call::Wait(args, _) => args.result = uapi::WAIT_TIMEOUT,
-                        sys::Call::DestroyEvent(_) => {}
-                        sys::Call::SetTrapHandler(args) => {
+                        connection::Call::Wait(args, _) => args.result = uapi::WAIT_TIMEOUT,
+                        connection::Call::DestroyEvent(_) => {}
+                        connection::Call::SetTrapHandler(args) => {
                             assert_eq!(args.gpu_id, 42);
                             assert_ne!(args.tba_address, 0);
                             assert_eq!(args.tma_address, 0);
@@ -293,7 +313,7 @@ mod tests {
                                 ));
                             }
                         }
-                        sys::Call::RuntimeEnable(args) => {
+                        connection::Call::RuntimeEnable(args) => {
                             if args.mode_mask == 0 {
                                 observed_disables.fetch_add(1, Ordering::Relaxed);
                             }
@@ -342,6 +362,7 @@ mod tests {
 
     fn node() -> sysfs::KfdNode {
         sysfs::KfdNode {
+            debug: sysfs::KfdDebugProperties::default(),
             host_atomics: false,
             node: 1,
             gpu_id: 42,
@@ -359,6 +380,99 @@ mod tests {
             error: error(ErrorKind::Busy, "injected publication failure"),
             operands_may_be_live: uncertain,
         }
+    }
+
+    fn device_for_vm(vm: Shared<memory::DeviceVm>, driver: Shared<LinuxKfdDriver>) -> Device {
+        let mut endpoint = TestDriver::new(
+            node().identity,
+            EndpointKind::Gpu {
+                info: GpuInfo::default(),
+            },
+            DriverContextLifetime::Process,
+        )
+        .open_endpoint(node().identity)
+        .unwrap();
+        endpoint.driver_instance = driver.driver_instance();
+        endpoint.selector = EndpointSelector::LinuxKfd {
+            native: node(),
+            access_targets: None,
+        };
+        let driver_state = DeviceDriverState::LinuxKfd {
+            driver,
+            state: DeviceState {
+                vm,
+                native: node(),
+                asic_family_id: 0,
+                gpu_counter_frequency_hz: 0,
+            },
+        };
+        Device {
+            resources: DeviceResources::for_activated(&endpoint, &driver_state).unwrap(),
+            driver_state,
+            endpoint,
+        }
+    }
+
+    #[test]
+    #[allow(unsafe_code)]
+    fn retained_trap_restores_during_retirement_without_admitting_new_handlers() {
+        let fixture = Fixture::new();
+        let driver = LinuxKfdDriver::with_context_lifetime(
+            DriverContextLifetime::Process,
+            ProcessIdentity::capture().unwrap(),
+        );
+        let mut session = Session::from_drivers(
+            vec![DriverInstance::LinuxKfd(Shared::new(driver).unwrap())],
+            DriverContextLifetime::Process,
+        )
+        .unwrap();
+        let DriverInstance::LinuxKfd(driver) = &session.installed_drivers().unwrap()[0] else {
+            panic!("fixture did not install KFD");
+        };
+        let driver = driver.clone();
+        let device = device_for_vm(fixture.vm.clone(), driver.clone());
+        let gpu = device.gpu().unwrap();
+        let trap = ProcessTrap::from_native(fixture.install(|_, _| Ok(())).unwrap());
+        let address = trap.address(&gpu).unwrap();
+        let other_vm = memory::queue_fixture(
+            fixture.resources.kfd().unwrap(),
+            File::open("/dev/null").unwrap(),
+            node(),
+        );
+        let other_device = device_for_vm(other_vm, driver.clone());
+
+        session.begin_retirement().unwrap();
+        assert_eq!(session.state().unwrap(), SessionState::Retiring);
+        // SAFETY: The fixture retains the code and mocks binding without
+        // execution. The ordinary installation must fail before a native call.
+        assert_eq!(
+            unsafe { gpu.set_trap_handler(address, 0) }
+                .unwrap_err()
+                .kind(),
+            ErrorKind::Unsupported
+        );
+        // SAFETY: This test exclusively owns both mock VMs and their bindings.
+        assert_eq!(
+            unsafe { trap.restore(&other_device.gpu().unwrap()) }
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidArgument
+        );
+        assert_eq!(*fixture.bindings.lock().unwrap(), vec![address]);
+
+        fixture.fail_bind.store(true, Ordering::Relaxed);
+        // SAFETY: Both attempts restore retained, published code to its own
+        // mock VM. A failed binding must leave the token available for retry.
+        assert!(unsafe { trap.restore(&gpu) }.is_err());
+        unsafe { trap.restore(&gpu) }.unwrap();
+        assert_eq!(*fixture.bindings.lock().unwrap(), vec![address; 3]);
+        assert_eq!(fixture.allocations.load(Ordering::Relaxed), 1);
+        assert_eq!(session.state().unwrap(), SessionState::Retiring);
+        assert!(matches!(session.try_close(), RetirementOutcome::Busy));
+        drop(other_device);
+        drop(device);
+        drop(driver);
+        assert!(matches!(session.try_close(), RetirementOutcome::Closed));
     }
 
     #[test]

@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -40,7 +41,7 @@ constexpr CounterDomain kLoad{WaitCounterKind::Load, WaitCounterType::LOADCNT};
 constexpr CounterDomain kDs{WaitCounterKind::Ds, WaitCounterType::DSCNT};
 
 template <typename Consume>
-void with_wait(rj_code_arch_t arch, std::span<const uint32_t> words, Consume consume) {
+void with_wait(rocjitsu::IsaFamily arch, std::span<const uint32_t> words, Consume consume) {
   auto decoder = Decoder::create(arch);
   ASSERT_NE(decoder, nullptr);
   util::StringDiagnostic error;
@@ -52,9 +53,7 @@ void with_wait(rj_code_arch_t arch, std::span<const uint32_t> words, Consume con
 
 class CoreWaitBackend {
 public:
-  static constexpr bool supports_embedded_waits = true;
-
-  explicit CoreWaitBackend(rj_code_arch_t arch) : arch_(arch) {
+  explicit CoreWaitBackend(rocjitsu::IsaFamily arch) : arch_(arch) {
     state_.bind(0x1000, &reports_,
                 [](void *context, const auto &) { ++*static_cast<unsigned *>(context); });
   }
@@ -88,7 +87,7 @@ public:
   }
 
 private:
-  rj_code_arch_t arch_;
+  rocjitsu::IsaFamily arch_;
   MemoryWaitShadow shadow_;
   MemoryWaitScoreboard state_{shadow_};
   unsigned reports_ = 0;
@@ -96,9 +95,7 @@ private:
 
 class RaceWaitBackend {
 public:
-  static constexpr bool supports_embedded_waits = false;
-
-  explicit RaceWaitBackend(rj_code_arch_t arch) {
+  explicit RaceWaitBackend(rocjitsu::IsaFamily arch) {
     ComputeUnitCore::Config config{};
     config.arch = arch;
     config.num_wf_slots = 1;
@@ -185,46 +182,56 @@ TYPED_TEST_SUITE(WaitHazardTest, WaitBackends);
 
 TYPED_TEST(WaitHazardTest, TargetWaitEncodingsRetireTheirCounter) {
   struct Case {
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     uint32_t word;
     CounterDomain counter;
   };
   const Case cases[] = {
-      {ROCJITSU_CODE_ARCH_CDNA1, 0xbf8c0f70u, {WaitCounterKind::Load, WaitCounterType::VMCNT}},
-      {ROCJITSU_CODE_ARCH_CDNA1, 0xbf8cc07fu, {WaitCounterKind::Ds, WaitCounterType::LGKMCNT}},
-      {ROCJITSU_CODE_ARCH_CDNA2, 0xbf8c0f70u, {WaitCounterKind::Load, WaitCounterType::VMCNT}},
-      {ROCJITSU_CODE_ARCH_CDNA2, 0xbf8cc07fu, {WaitCounterKind::Ds, WaitCounterType::LGKMCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA1, 0xbf8c3f70u, {WaitCounterKind::Load, WaitCounterType::VMCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA1, 0xbf8cc07fu, {WaitCounterKind::Ds, WaitCounterType::LGKMCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA1, 0xbbfd0000u, {WaitCounterKind::Store, WaitCounterType::VSCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA2, 0xbf8c3f70u, {WaitCounterKind::Load, WaitCounterType::VMCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA2, 0xbf8cc07fu, {WaitCounterKind::Ds, WaitCounterType::LGKMCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA2, 0xbbfd0000u, {WaitCounterKind::Store, WaitCounterType::VSCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc20000u, {WaitCounterKind::Sample, std::nullopt}},
-      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc30000u, {WaitCounterKind::Bvh, std::nullopt}},
-      {ROCJITSU_CODE_ARCH_CDNA3, 0xbf8c0f70u, {WaitCounterKind::Load, WaitCounterType::VMCNT}},
-      {ROCJITSU_CODE_ARCH_CDNA3, 0xbf8cc07fu, {WaitCounterKind::Ds, WaitCounterType::LGKMCNT}},
-      {ROCJITSU_CODE_ARCH_CDNA4, 0xbf8c0f70u, {WaitCounterKind::Load, WaitCounterType::VMCNT}},
-      {ROCJITSU_CODE_ARCH_CDNA4, 0xbf8cc07fu, {WaitCounterKind::Ds, WaitCounterType::LGKMCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA3, 0xbf8903f7u, {WaitCounterKind::Load, WaitCounterType::LOADCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA3, 0xbf89fc07u, {WaitCounterKind::Ds, WaitCounterType::DSCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA3, 0xbc7c0000u, {WaitCounterKind::Store, WaitCounterType::STORECNT}},
-      {ROCJITSU_CODE_ARCH_RDNA3_5, 0xbf8903f7u, {WaitCounterKind::Load, WaitCounterType::LOADCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA3_5, 0xbf89fc07u, {WaitCounterKind::Ds, WaitCounterType::DSCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA3_5,
+      {rocjitsu::IsaFamily::Cdna1, 0xbf8c0f70u, {WaitCounterKind::Load, WaitCounterType::VMCNT}},
+      {rocjitsu::IsaFamily::Cdna1, 0xbf8cc07fu, {WaitCounterKind::Ds, WaitCounterType::LGKMCNT}},
+      {rocjitsu::IsaFamily::Cdna2, 0xbf8c0f70u, {WaitCounterKind::Load, WaitCounterType::VMCNT}},
+      {rocjitsu::IsaFamily::Cdna2, 0xbf8cc07fu, {WaitCounterKind::Ds, WaitCounterType::LGKMCNT}},
+      {rocjitsu::IsaFamily::Rdna1, 0xbf8c3f70u, {WaitCounterKind::Load, WaitCounterType::VMCNT}},
+      {rocjitsu::IsaFamily::Rdna1, 0xbf8cc07fu, {WaitCounterKind::Ds, WaitCounterType::LGKMCNT}},
+      {rocjitsu::IsaFamily::Rdna1, 0xbbfd0000u, {WaitCounterKind::Store, WaitCounterType::VSCNT}},
+      {rocjitsu::IsaFamily::Rdna2, 0xbf8c3f70u, {WaitCounterKind::Load, WaitCounterType::VMCNT}},
+      {rocjitsu::IsaFamily::Rdna2, 0xbf8cc07fu, {WaitCounterKind::Ds, WaitCounterType::LGKMCNT}},
+      {rocjitsu::IsaFamily::Rdna2, 0xbbfd0000u, {WaitCounterKind::Store, WaitCounterType::VSCNT}},
+      {rocjitsu::IsaFamily::Rdna4, 0xbfc20000u, {WaitCounterKind::Sample, std::nullopt}},
+      {rocjitsu::IsaFamily::Rdna4, 0xbfc30000u, {WaitCounterKind::Bvh, std::nullopt}},
+      {rocjitsu::IsaFamily::Cdna3, 0xbf8c0f70u, {WaitCounterKind::Load, WaitCounterType::VMCNT}},
+      {rocjitsu::IsaFamily::Cdna3, 0xbf8cc07fu, {WaitCounterKind::Ds, WaitCounterType::LGKMCNT}},
+      {rocjitsu::IsaFamily::Cdna4, 0xbf8c0f70u, {WaitCounterKind::Load, WaitCounterType::VMCNT}},
+      {rocjitsu::IsaFamily::Cdna4, 0xbf8cc07fu, {WaitCounterKind::Ds, WaitCounterType::LGKMCNT}},
+      {rocjitsu::IsaFamily::Rdna3, 0xbf8903f7u, {WaitCounterKind::Load, WaitCounterType::LOADCNT}},
+      {rocjitsu::IsaFamily::Rdna3, 0xbf89fc07u, {WaitCounterKind::Ds, WaitCounterType::DSCNT}},
+      {rocjitsu::IsaFamily::Rdna3,
        0xbc7c0000u,
        {WaitCounterKind::Store, WaitCounterType::STORECNT}},
-      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc00000u, {WaitCounterKind::Load, WaitCounterType::LOADCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc10000u, {WaitCounterKind::Store, WaitCounterType::STORECNT}},
-      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc60000u, {WaitCounterKind::Ds, WaitCounterType::DSCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc70000u, {WaitCounterKind::Km, WaitCounterType::KMCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc40000u, {WaitCounterKind::Exp, WaitCounterType::EXPCNT}},
-      {ROCJITSU_CODE_ARCH_CDNA5, 0xbfc00000u, {WaitCounterKind::Load, WaitCounterType::LOADCNT}},
-      {ROCJITSU_CODE_ARCH_CDNA5, 0xbfc10000u, {WaitCounterKind::Store, WaitCounterType::STORECNT}},
-      {ROCJITSU_CODE_ARCH_CDNA5, 0xbfc60000u, {WaitCounterKind::Ds, WaitCounterType::DSCNT}},
-      {ROCJITSU_CODE_ARCH_CDNA5, 0xbfc70000u, {WaitCounterKind::Km, WaitCounterType::KMCNT}},
-      {ROCJITSU_CODE_ARCH_CDNA5, 0xbfca0000u, {WaitCounterKind::Async, WaitCounterType::ASYNCCNT}},
-      {ROCJITSU_CODE_ARCH_CDNA5,
+      {rocjitsu::IsaFamily::Rdna3_5,
+       0xbf8903f7u,
+       {WaitCounterKind::Load, WaitCounterType::LOADCNT}},
+      {rocjitsu::IsaFamily::Rdna3_5, 0xbf89fc07u, {WaitCounterKind::Ds, WaitCounterType::DSCNT}},
+      {rocjitsu::IsaFamily::Rdna3_5,
+       0xbc7c0000u,
+       {WaitCounterKind::Store, WaitCounterType::STORECNT}},
+      {rocjitsu::IsaFamily::Rdna4, 0xbfc00000u, {WaitCounterKind::Load, WaitCounterType::LOADCNT}},
+      {rocjitsu::IsaFamily::Rdna4,
+       0xbfc10000u,
+       {WaitCounterKind::Store, WaitCounterType::STORECNT}},
+      {rocjitsu::IsaFamily::Rdna4, 0xbfc60000u, {WaitCounterKind::Ds, WaitCounterType::DSCNT}},
+      {rocjitsu::IsaFamily::Rdna4, 0xbfc70000u, {WaitCounterKind::Km, WaitCounterType::KMCNT}},
+      {rocjitsu::IsaFamily::Rdna4, 0xbfc40000u, {WaitCounterKind::Exp, WaitCounterType::EXPCNT}},
+      {rocjitsu::IsaFamily::Cdna5, 0xbfc00000u, {WaitCounterKind::Load, WaitCounterType::LOADCNT}},
+      {rocjitsu::IsaFamily::Cdna5,
+       0xbfc10000u,
+       {WaitCounterKind::Store, WaitCounterType::STORECNT}},
+      {rocjitsu::IsaFamily::Cdna5, 0xbfc60000u, {WaitCounterKind::Ds, WaitCounterType::DSCNT}},
+      {rocjitsu::IsaFamily::Cdna5, 0xbfc70000u, {WaitCounterKind::Km, WaitCounterType::KMCNT}},
+      {rocjitsu::IsaFamily::Cdna5,
+       0xbfca0000u,
+       {WaitCounterKind::Async, WaitCounterType::ASYNCCNT}},
+      {rocjitsu::IsaFamily::Cdna5,
        0xbfcb0000u,
        {WaitCounterKind::Tensor, WaitCounterType::TENSORCNT}},
   };
@@ -243,10 +250,10 @@ TYPED_TEST(WaitHazardTest, TargetWaitEncodingsRetireTheirCounter) {
 }
 
 TYPED_TEST(WaitHazardTest, FullDrainWaitsRetireEverySupportedCounter) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
-                    ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                    rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     for (uint32_t word : {0xbf890000u, 0xbf89fc07u, 0xbf89ffffu, 0xbf8a0000u}) {
-      if (arch != ROCJITSU_CODE_ARCH_RDNA4 && word != 0xbf8a0000u)
+      if (arch != rocjitsu::IsaFamily::Rdna4 && word != 0xbf8a0000u)
         continue;
       SCOPED_TRACE(static_cast<unsigned>(arch));
       SCOPED_TRACE(word);
@@ -265,15 +272,15 @@ TYPED_TEST(WaitHazardTest, FullDrainWaitsRetireEverySupportedCounter) {
       for (const auto counter : counters) {
         if (!TypeParam::supports(counter))
           continue;
-        if (arch != ROCJITSU_CODE_ARCH_CDNA5 &&
+        if (arch != rocjitsu::IsaFamily::Cdna5 &&
             (counter.core == WaitCounterKind::Async || counter.core == WaitCounterKind::Tensor))
           continue;
-        if (arch != ROCJITSU_CODE_ARCH_RDNA4 &&
+        if (arch != rocjitsu::IsaFamily::Rdna4 &&
             (counter.core == WaitCounterKind::Sample || counter.core == WaitCounterKind::Bvh))
           continue;
         // GFX11 scalar-memory results belong to the combined LGKM domain.
         auto domain = counter;
-        if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5) &&
+        if ((arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5) &&
             domain.core == WaitCounterKind::Km)
           domain.core = WaitCounterKind::Ds;
         backend.load(domain, reg++, true);
@@ -287,7 +294,7 @@ TYPED_TEST(WaitHazardTest, FullDrainWaitsRetireEverySupportedCounter) {
 }
 
 TYPED_TEST(WaitHazardTest, Rdna1WaitIdleRetiresAggregateCounters) {
-  TypeParam backend(ROCJITSU_CODE_ARCH_RDNA1);
+  TypeParam backend(rocjitsu::IsaFamily::Rdna1);
   ASSERT_TRUE(backend.ready());
   const CounterDomain counters[] = {
       {WaitCounterKind::Load, WaitCounterType::VMCNT},
@@ -307,7 +314,7 @@ TYPED_TEST(WaitHazardTest, Rdna1WaitIdleRetiresAggregateCounters) {
 TYPED_TEST(WaitHazardTest, UnmappedWaitPreservesPendingOrdinaryLoads) {
   for (const uint32_t word : {0xbfc20000u, 0xbfc30000u}) { // Sample/Bvh waits.
     SCOPED_TRACE(word);
-    TypeParam backend(ROCJITSU_CODE_ARCH_RDNA4);
+    TypeParam backend(rocjitsu::IsaFamily::Rdna4);
     ASSERT_TRUE(backend.ready());
     backend.load(kLoad, 5);
     backend.load(kDs, 6);
@@ -317,9 +324,9 @@ TYPED_TEST(WaitHazardTest, UnmappedWaitPreservesPendingOrdinaryLoads) {
   }
 }
 
-TYPED_TEST(WaitHazardTest, EmbeddedExpcntWaitIsCurrentlyCoreOnly) {
+TYPED_TEST(WaitHazardTest, EmbeddedExpcntWaitRetiresOnlyTheSpecifiedExports) {
   for (const auto arch :
-       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
     for (const uint32_t threshold : {0u, 1u, 7u}) {
       for (const bool explicit_wait : {false, true}) {
         SCOPED_TRACE(static_cast<unsigned>(arch));
@@ -338,12 +345,11 @@ TYPED_TEST(WaitHazardTest, EmbeddedExpcntWaitIsCurrentlyCoreOnly) {
         // The control uses a fresh backend: probing a hazard before this wait
         // could suppress a repeated report and hide a failure to retire it.
         if (explicit_wait)
-          backend.wait(arch == ROCJITSU_CODE_ARCH_RDNA4 ? 0xbfc40000u   // s_wait_expcnt 0.
-                                                        : 0xbd7c0000u); // s_waitcnt_expcnt null, 0.
-        EXPECT_EQ(backend.reports(5),
-                  !explicit_wait && (!TypeParam::supports_embedded_waits || threshold == 7));
-        EXPECT_EQ(backend.reports(6),
-                  !explicit_wait && (!TypeParam::supports_embedded_waits || threshold != 0));
+          backend.wait(arch == rocjitsu::IsaFamily::Rdna4
+                           ? 0xbfc40000u   // s_wait_expcnt 0.
+                           : 0xbd7c0000u); // s_waitcnt_expcnt null, 0.
+        EXPECT_EQ(backend.reports(5), !explicit_wait && threshold == 7);
+        EXPECT_EQ(backend.reports(6), !explicit_wait && threshold != 0);
         EXPECT_TRUE(backend.reports(7));
         EXPECT_TRUE(backend.reports(8));
       }
@@ -353,47 +359,50 @@ TYPED_TEST(WaitHazardTest, EmbeddedExpcntWaitIsCurrentlyCoreOnly) {
 
 TYPED_TEST(WaitHazardTest, UpperImmediateBitsAreIgnoredBeforeCheckingTheSentinel) {
   struct Case {
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     uint32_t opcode;
     uint32_t mask;
     CounterDomain counter;
   };
   const Case cases[] = {
       // SOPK waits select null so the thresholds depend only on SIMM16.
-      {ROCJITSU_CODE_ARCH_RDNA1,
+      {rocjitsu::IsaFamily::Rdna1,
        0xbcfd0000u,
        0x7u,
        {WaitCounterKind::Exp, WaitCounterType::EXPCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA2,
+      {rocjitsu::IsaFamily::Rdna2,
        0xbcfd0000u,
        0x7u,
        {WaitCounterKind::Exp, WaitCounterType::EXPCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA3,
+      {rocjitsu::IsaFamily::Rdna3,
        0xbd7c0000u,
        0x7u,
        {WaitCounterKind::Exp, WaitCounterType::EXPCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA3_5,
+      {rocjitsu::IsaFamily::Rdna3_5,
        0xbd7c0000u,
        0x7u,
        {WaitCounterKind::Exp, WaitCounterType::EXPCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA4,
+      {rocjitsu::IsaFamily::Rdna4,
        0xbfc40000u,
        0x7u,
        {WaitCounterKind::Exp, WaitCounterType::EXPCNT}},
-      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc00000u, 0x3fu, kLoad},
-      {ROCJITSU_CODE_ARCH_RDNA4,
+      {rocjitsu::IsaFamily::Rdna4, 0xbfc00000u, 0x3fu, kLoad},
+      {rocjitsu::IsaFamily::Rdna4,
        0xbfc10000u,
        0x3fu,
        {WaitCounterKind::Store, WaitCounterType::STORECNT}},
-      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc60000u, 0x3fu, kDs},
-      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc20000u, 0x3fu, {WaitCounterKind::Sample, std::nullopt}},
-      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc30000u, 0x7u, {WaitCounterKind::Bvh, std::nullopt}},
-      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc70000u, 0x1fu, {WaitCounterKind::Km, WaitCounterType::KMCNT}},
-      {ROCJITSU_CODE_ARCH_CDNA5,
+      {rocjitsu::IsaFamily::Rdna4, 0xbfc60000u, 0x3fu, kDs},
+      {rocjitsu::IsaFamily::Rdna4, 0xbfc20000u, 0x3fu, {WaitCounterKind::Sample, std::nullopt}},
+      {rocjitsu::IsaFamily::Rdna4, 0xbfc30000u, 0x7u, {WaitCounterKind::Bvh, std::nullopt}},
+      {rocjitsu::IsaFamily::Rdna4,
+       0xbfc70000u,
+       0x1fu,
+       {WaitCounterKind::Km, WaitCounterType::KMCNT}},
+      {rocjitsu::IsaFamily::Cdna5,
        0xbfca0000u,
        0x3fu,
        {WaitCounterKind::Async, WaitCounterType::ASYNCCNT}},
-      {ROCJITSU_CODE_ARCH_CDNA5,
+      {rocjitsu::IsaFamily::Cdna5,
        0xbfcb0000u,
        0x3fu,
        {WaitCounterKind::Tensor, WaitCounterType::TENSORCNT}},
@@ -419,7 +428,7 @@ TYPED_TEST(WaitHazardTest, UpperImmediateBitsAreIgnoredBeforeCheckingTheSentinel
 }
 
 TYPED_TEST(WaitHazardTest, PartialWaitCountsOperationsWithoutRegisterResults) {
-  TypeParam backend(ROCJITSU_CODE_ARCH_CDNA5);
+  TypeParam backend(rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(backend.ready());
   backend.load(kLoad, 5);
   backend.counter_only(kLoad);
@@ -438,7 +447,7 @@ TYPED_TEST(WaitHazardTest, CombinedWaitKeepsCounterThresholdsIndependent) {
       {0xbfc80000u, kLoad},                                               // s_wait_loadcnt_dscnt
       {0xbfc90000u, {WaitCounterKind::Store, WaitCounterType::STORECNT}}, // s_wait_storecnt_dscnt
   };
-  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (const auto arch : {rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     for (const auto &c : cases) {
       for (const uint32_t load_or_store_count : {0u, 1u, 63u}) {
         for (const uint32_t ds_count : {0u, 1u, 63u}) {
@@ -464,7 +473,7 @@ TYPED_TEST(WaitHazardTest, CombinedWaitKeepsCounterThresholdsIndependent) {
 }
 
 TYPED_TEST(WaitHazardTest, UnrelatedWaitDoesNotReuseAnEarlierThreshold) {
-  TypeParam backend(ROCJITSU_CODE_ARCH_CDNA5);
+  TypeParam backend(rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(backend.ready());
   backend.wait(0xbfc00000u); // s_wait_loadcnt 0.
   backend.load(kLoad, 5);
@@ -477,7 +486,7 @@ TYPED_TEST(WaitHazardTest, UnrelatedWaitDoesNotReuseAnEarlierThreshold) {
 TYPED_TEST(WaitHazardTest, NoWaitSentinelPreservesPendingResults) {
   for (const uint32_t word : {0xbfc0003fu, 0xbfc83f3fu}) {
     SCOPED_TRACE(word);
-    TypeParam backend(ROCJITSU_CODE_ARCH_CDNA5);
+    TypeParam backend(rocjitsu::IsaFamily::Cdna5);
     ASSERT_TRUE(backend.ready());
     backend.load(kLoad, 5);
     backend.wait(word);
@@ -488,7 +497,7 @@ TYPED_TEST(WaitHazardTest, NoWaitSentinelPreservesPendingResults) {
 TYPED_TEST(WaitHazardTest, UnorderedResultRequiresAZeroWait) {
   for (const uint32_t threshold : {0u, 1u}) {
     SCOPED_TRACE(threshold);
-    TypeParam backend(ROCJITSU_CODE_ARCH_CDNA5);
+    TypeParam backend(rocjitsu::IsaFamily::Cdna5);
     ASSERT_TRUE(backend.ready());
     const CounterDomain scalar{WaitCounterKind::Km, WaitCounterType::KMCNT};
     backend.load(scalar, 5, true);
@@ -499,7 +508,7 @@ TYPED_TEST(WaitHazardTest, UnorderedResultRequiresAZeroWait) {
 }
 
 TYPED_TEST(WaitHazardTest, RegisterLanesAndBytesKeepIndependentReadiness) {
-  TypeParam backend(ROCJITSU_CODE_ARCH_CDNA5);
+  TypeParam backend(rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(backend.ready());
   backend.load(kLoad, 5, false, 1, 0x3);
   EXPECT_FALSE(backend.reports(5, 2, 0xf));

@@ -5,6 +5,8 @@
 //!
 //! These types describe implementation-neutral profiling operations. Native
 //! registration state remains privately owned by the selected platform driver.
+//! A retained sampling registration cannot restart after session retirement;
+//! stopping, destroying, and relinquishing registrations remain available.
 
 use crate::Error;
 use crate::device::gpu::GpuDevice;
@@ -180,18 +182,16 @@ pub(crate) struct DriverPcSampling<D: Driver, P: PcSamplingResource> {
     /// Native registration dropped before its creating driver.
     inner: Owned<P>,
     /// Exact driver instance retained through cleanup.
-    _driver: Shared<D>,
+    driver: Shared<D>,
 }
 
 impl<D: Driver, P: PcSamplingResource> DriverPcSampling<D, P> {
     pub(crate) fn new(driver: Shared<D>, inner: Owned<P>) -> Self {
-        Self {
-            inner,
-            _driver: driver,
-        }
+        Self { inner, driver }
     }
 
     pub(crate) fn start(&mut self) -> Result<(), Error> {
+        let _operation = self.driver.admission().enter()?;
         self.inner.start()
     }
 
@@ -353,8 +353,55 @@ impl GpuDevice<'_> {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
-mod clock_tests {
+mod tests {
     use super::*;
+    use crate::ErrorKind;
+
+    #[test]
+    fn retirement_blocks_sampling_restart_but_preserves_stop_and_destroy() {
+        use crate::driver::test_driver::TestDriver;
+        use crate::session::DriverContextLifetime;
+        use crate::topology::EndpointKind;
+        use std::sync::{Arc, Mutex};
+
+        struct NativeSampling(Arc<Mutex<Vec<&'static str>>>);
+        impl PcSamplingResource for NativeSampling {
+            fn start(&mut self) -> Result<(), Error> {
+                self.0.lock().unwrap().push("start");
+                Ok(())
+            }
+            fn stop(&mut self) -> Result<(), Error> {
+                self.0.lock().unwrap().push("stop");
+                Ok(())
+            }
+            fn destroy(&mut self) -> Result<(), Error> {
+                self.0.lock().unwrap().push("destroy");
+                Ok(())
+            }
+            fn relinquish_adopted(&mut self) -> Result<(), Error> {
+                self.0.lock().unwrap().push("relinquish");
+                Ok(())
+            }
+        }
+
+        let driver = Shared::new(TestDriver::new(
+            [1; 16],
+            EndpointKind::Npu,
+            DriverContextLifetime::Session,
+        ))
+        .unwrap();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mut sampling = DriverPcSampling::new(
+            driver.clone(),
+            Owned::new(NativeSampling(calls.clone())).unwrap(),
+        );
+        sampling.start().unwrap();
+        driver.admission().begin_retirement().unwrap();
+        assert_eq!(sampling.start().unwrap_err().kind(), ErrorKind::Unsupported);
+        sampling.stop().unwrap();
+        sampling.destroy().unwrap();
+        assert_eq!(*calls.lock().unwrap(), ["start", "stop", "destroy"]);
+    }
 
     #[test]
     fn correlation_uses_primary_host_domain_without_an_auxiliary_clock() {

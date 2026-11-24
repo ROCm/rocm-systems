@@ -276,7 +276,7 @@ amdsmi_status_t WSLGPUBackend::GetKfdInfo(amdsmi_kfd_info_t* info) {
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
   // No KFD in WSL — the KFD ID and node ID concepts don't apply.
   std::memset(info, 0xFF, sizeof(*info));
-  return AMDSMI_STATUS_SUCCESS;
+  return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t WSLGPUBackend::GetAsicInfo(amdsmi_asic_info_t* info) {
@@ -476,7 +476,7 @@ amdsmi_status_t WSLGPUBackend::GetClockInfo(amdsmi_clk_type_t clk_type, amdsmi_c
   if (hstatus != HSAKMT_STATUS_SUCCESS) return hsakmt_to_amdsmi(hstatus);
   // Feature support checked before nullptr so NOT_SUPPORTED takes priority over INVAL.
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
-  std::memset(info, 0, sizeof(*info));
+  std::memset(info, 0xFF, sizeof(*info));
   info->clk = rocdxg_info.clk;
   info->min_clk = rocdxg_info.min_clk;
   info->max_clk = rocdxg_info.max_clk;

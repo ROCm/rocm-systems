@@ -193,6 +193,25 @@ class HostInterface {
   __host__ T amo_fetch_cas(void* dst, T value, T cond, int pe,
                            WindowInfo* window_info);
 
+  /**
+   * @brief Blocking host-initiated signal operations (verbs transport).
+   *
+   * Parallel to the blocking putmem/amo above and reached from the public C API.
+   * On a WindowInfoVerbs these run synchronously on the calling host thread via
+   * the net::RmaEngine (put-with-signal: ordered RDMA_WRITE for SIGNAL_SET /
+   * fetch-add for SIGNAL_ADD; fetch/wait: HDP-flushed direct load of the
+   * fine-grained host-coherent heap).
+   */
+  __host__ void putmem_signal(void* dest, const void* source, size_t nelems,
+                              uint64_t* sig_addr, uint64_t signal, int sig_op,
+                              int pe, WindowInfo* window_info);
+
+  __host__ uint64_t signal_fetch(const uint64_t* sig_addr,
+                                 WindowInfo* window_info);
+
+  __host__ void signal_wait_until(uint64_t* sig_addr, int cmp,
+                                  uint64_t cmp_value, WindowInfo* window_info);
+
   __host__ void fence(WindowInfo* window_info);
 
   __host__ void quiet(WindowInfo* window_info);
@@ -428,6 +447,22 @@ class HostInterface {
 
   /// Build the verbs host stack if selected; no-op otherwise. Collective.
   __host__ void maybe_setup_verbs_host(SymmetricHeap* heap);
+
+  /**
+   * @brief 8-byte AMO fast-path helpers for the verbs host transport.
+   *
+   * Non-template, verbs-header-free indirection called from the amo_fetch_*
+   * templates (host_templates.hpp): if @p window_info is a WindowInfoVerbs,
+   * perform the atomic and set @p *out (true); otherwise return false so the
+   * caller falls through to the MPI-window path. Defined in host.cpp so the
+   * verbs headers stay out of the device-compiled template header.
+   */
+  __host__ bool verbs_amo_fetch_add(WindowInfo* window_info, void* dst,
+                                    uint64_t value, int pe,
+                                    uint64_t* fetch_val);
+  __host__ bool verbs_amo_fetch_cas(WindowInfo* window_info, void* dst,
+                                    uint64_t swap, uint64_t compare, int pe,
+                                    uint64_t* fetch_val);
 #endif
 
   /*

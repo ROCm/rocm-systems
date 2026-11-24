@@ -21,6 +21,12 @@ or modifying any C++ or CMake code. It indexes one file per topic under
 `.ai/rules/cpp/`, covering the language version, performance, testability,
 callback boundaries, naming, comments, STL usage, and CMake.
 
+## Writing Style
+
+Read and follow **[`.ai/rules/writing-style.md`](.ai/rules/writing-style.md)** before
+writing documentation, code comments, docstrings, commit messages, pull request
+descriptions, or design documents. These rules cover sentence structure and word choice.
+
 ## Ruff
 
 All code in `src/` must pass Ruff checks. Read **[`.ai/rules/ruff.md`](.ai/rules/ruff.md)**

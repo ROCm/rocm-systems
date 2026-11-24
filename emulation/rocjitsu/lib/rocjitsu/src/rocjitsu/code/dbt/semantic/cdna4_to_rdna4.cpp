@@ -216,7 +216,7 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
 
   LanePermutation perm{};
   for (size_t i = 0; i < rocjitsu::kMatrixConversionCount; ++i) {
-    if (std::string_view(rocjitsu::kMatrixConversions[i].src_mnemonic) == inst.mnemonic()) {
+    if (rocjitsu::kMatrixConversions[i].src_operation == inst.amdgpu_operation()) {
       perm = {rocjitsu::kMatrixConversions[i].xor_byte_mask,
               rocjitsu::kMatrixConversions[i].range_start,
               rocjitsu::kMatrixConversions[i].range_end};

@@ -2,15 +2,15 @@
 
 .. meta::
    :description: rocjitsu (ROCm Just-in-Time Suite) is an emulation toolkit for running AMD GPU applications on simulated or real hardware without requiring a physical GPU. It supports three execution strategies: full ISA simulation via LD_PRELOAD interposition, dynamic binary translation (DBT) enabling code compiled for one GPU architecture to run on another, and dynamic binary instrumentation (DBI) for runtime profiling, tracing, and race detection. Supported targets span CDNA1–CDNA4 and RDNA1–RDNA4 architectures (GFX9 through GFX12) plus RISC-V, with a JSON-configurable SoC topology and a daemon mode for multi-process workloads such as PyTorch and RCCL.
-   :keywords: rocJITsu, AMD, ROCm, GPU
+   :keywords: rocjitsu, AMD, ROCm, GPU
 
 ======================
-rocJITsu documentation
+rocjitsu documentation
 ======================
 
 rocjitsu (ROCm Just-in-Time Suite) is an emulation toolkit for running AMD GPU applications on simulated or real hardware without requiring a physical GPU. It supports three execution strategies: full ISA simulation via LD_PRELOAD interposition, dynamic binary translation (DBT) enabling code compiled for one GPU architecture to run on another, and dynamic binary instrumentation (DBI) for runtime profiling, tracing, and race detection. Supported targets span CDNA1–CDNA4 and RDNA1–RDNA4 architectures (GFX9 through GFX12) plus RISC-V, with a JSON-configurable SoC topology and a daemon mode for multi-process workloads such as PyTorch and RCCL.
 
-The rocJITsu public repository is located at
+The rocjitsu public repository is located at
 `ROCm/rocm-systems <https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu>`_.
 
 .. grid:: 2

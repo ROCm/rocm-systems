@@ -34,7 +34,7 @@ warp:
     <<: *level_default
     tags: [deviceLib, vote]
   Unit_hipVoteSync_Ballot:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [deviceLib, vote]
   Unit_Warp_Shfl_Positive_Basic:
     <<: *level_default
@@ -73,7 +73,7 @@ warp:
     <<: *level_default
     tags: [deviceLib, intrinsic, shuffle]
   Unit_hipShflTests:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [deviceLib, intrinsic, shuffle]
   Unit_hipShflUndefArgs:
     <<: *level_default

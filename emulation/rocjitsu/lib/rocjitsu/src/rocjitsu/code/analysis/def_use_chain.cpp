@@ -99,9 +99,9 @@ InstDefUse::InstDefUse(const Instruction &inst, uint8_t wave_size,
       ref = inst.wave_sized_destination(*op, *ref, wave_size);
       expand_operand_register(defs, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Def,
                               unknown_vgpr_defs);
-      if ((inst.flags() & CONDITIONAL_LAST_VGPR_DEF) && ref->cls == RegClass::VGPR && ref->width)
+      if ((inst.flags() & CONDITIONAL_LAST_VGPR_DEF) && is_vector_def(*ref) && ref->width)
         conditional_vgpr_def =
-            RegisterRef{RegClass::VGPR, static_cast<uint16_t>(ref->index + ref->width - 1), 1};
+            RegisterRef{ref->cls, static_cast<uint16_t>(ref->index + ref->width - 1), 1};
       has_vector_def |= is_vector_def(*ref);
     } else if (auto sc = op->to_special_reg_class()) {
       defs.expand(RegisterRef{*sc, 0, 1}); // singleton special def

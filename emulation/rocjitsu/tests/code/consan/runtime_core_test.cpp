@@ -228,6 +228,105 @@ TEST_F(ConSanRuntimeCore, SlowCollectorDoesNotHoldUpTheObserverOrAnotherCompleti
   EXPECT_EQ(snapshot.execution.report, raw_);
 }
 
+TEST_F(ConSanRuntimeCore, MultiWorkgroupSlowSnapshotAndWriterKeepOwningBytesAcrossReuse) {
+  header_.manifest.target = 1250;
+  header_.manifest.entry.workgroup_id_scalar = 117;
+  const std::shared_ptr<const Manifest> facts = std::make_shared<const Manifest>(header_.manifest);
+  const LaunchDimensions dimensions{{260, 1, 1}, {65, 1, 1}};
+  CapturedExecution first_envelope = test::execution(*facts, 1, 1, dimensions);
+  CapturedExecution second_envelope = test::execution(*facts, 2, 2, dimensions);
+  std::vector<uint8_t> source = first_envelope.report;
+  const std::vector<uint8_t> original = source;
+  const std::vector<uint8_t> next = second_envelope.report;
+  ASSERT_EQ(source.size(), 64u + 12u * 576u);
+  first_envelope.report.clear();
+  second_envelope.report.clear();
+  first_envelope.completion = 0;
+  second_envelope.completion = 0;
+  DispatchLifecycle first(facts, std::move(first_envelope));
+  DispatchLifecycle second(facts, std::move(second_envelope));
+  ASSERT_EQ(first.submitted(), RuntimeStatus::Success);
+  ASSERT_EQ(second.submitted(), RuntimeStatus::Success);
+  uint32_t forwarded = 0;
+  const auto forward = [&] {
+    ++forwarded;
+    return true;
+  };
+  ASSERT_EQ(first.observe(true, true, forward), RuntimeStatus::Success);
+  std::promise<void> copying, permit_copy;
+  std::future<void> entered = copying.get_future(), proceed = permit_copy.get_future();
+  OwnedSnapshot first_snapshot, second_snapshot;
+  std::future<RuntimeStatus> collector = std::async(std::launch::async, [&] {
+    return first.snapshot(
+        [&](std::span<uint8_t> bytes) {
+          copying.set_value();
+          proceed.wait();
+          std::copy(source.begin(), source.end(), bytes.begin());
+          return CopyResult{RuntimeStatus::Success, bytes.size()};
+        },
+        first_snapshot);
+  });
+  if (entered.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    permit_copy.set_value();
+    (void)collector.get();
+    FAIL() << "snapshot callback did not start";
+  }
+  EXPECT_TRUE(first_snapshot.execution.report.empty());
+  EXPECT_EQ(second.observe(true, true, forward), RuntimeStatus::Success);
+  EXPECT_EQ(forwarded, 2u);
+  permit_copy.set_value();
+  ASSERT_EQ(collector.get(), RuntimeStatus::Success);
+  std::fill(source.begin(), source.end(), 0xee);
+  ASSERT_EQ(second.snapshot(
+                [&](std::span<uint8_t> bytes) {
+                  std::copy(next.begin(), next.end(), bytes.begin());
+                  return CopyResult{RuntimeStatus::Success, bytes.size()};
+                },
+                second_snapshot),
+            RuntimeStatus::Success);
+  EXPECT_EQ(first_snapshot.execution.report, original);
+
+  std::promise<void> writing, permit_write;
+  std::future<void> writer_entered = writing.get_future(),
+                    writer_proceed = permit_write.get_future();
+  bool block = false;
+  CaptureSink callbacks = sink();
+  const std::function<int64_t(std::span<const uint8_t>)> normal_write = callbacks.write;
+  callbacks.write = [&](std::span<const uint8_t> bytes) {
+    if (block) {
+      writing.set_value();
+      writer_proceed.wait();
+      block = false;
+    }
+    return normal_write(bytes);
+  };
+  SnapshotWriter writer;
+  ASSERT_EQ(writer.start(header_, callbacks), RuntimeStatus::Success);
+  block = true;
+  std::future<RuntimeStatus> pending =
+      std::async(std::launch::async, [&] { return writer.append(first_snapshot); });
+  if (writer_entered.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    permit_write.set_value();
+    (void)pending.get();
+    FAIL() << "writer callback did not start";
+  }
+  EXPECT_EQ(publishes_, 0u);
+  EXPECT_EQ(first_snapshot.execution.report, original);
+  EXPECT_EQ(second_snapshot.execution.report, next);
+  permit_write.set_value();
+  ASSERT_EQ(pending.get(), RuntimeStatus::Success);
+  ASSERT_EQ(writer.append(second_snapshot), RuntimeStatus::Success);
+  EXPECT_EQ(writer.finish(), RuntimeStatus::Success);
+  EXPECT_EQ(closes_, 1u);
+  EXPECT_EQ(publishes_, 1u);
+  const FailureOr<Capture> decoded = decode_capture(output_);
+  ASSERT_TRUE(decoded.succeeded());
+  ASSERT_EQ(decoded.value().executions.size(), 2u);
+  EXPECT_EQ(decoded.value().executions[0].report, original);
+  EXPECT_EQ(decoded.value().executions[1].report, next);
+  EXPECT_EQ(decoded.value().executions[1].storage_generation, 2u);
+}
+
 TEST_F(ConSanRuntimeCore, ShortWritesAreRetriedAndMalformedRawRowsAreSavedUnchanged) {
   wire::write_u32(raw_, kReportHeaderBytes + wire::kRowStatus, UINT32_MAX);
   OwnedSnapshot snapshot = copied_snapshot();

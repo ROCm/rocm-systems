@@ -106,12 +106,13 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         name,
     )
 
+    unimplemented = (
+        '  wf.report_instruction_execution_error(\n'
+        '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+        '  return;'
+    )
     if not m:
-        return (
-            f'  // MFMA stub: {name}\n'
-            f'  (void)wf;\n'
-            f'  throw util::UnimplementedInst(mnemonic());'
-        )
+        return unimplemented
 
     result_type = m.group(1)  # F32, I32, F64, BF16F32
     M, N, K = int(m.group(2)), int(m.group(3)), int(m.group(4))
@@ -303,8 +304,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     )
     if uses_runtime_wave_swmmac_layout and not uses_rdna_swmmac_arithmetic:
         # Reject unsupported sparse shapes before resolving operands or index keys.
-        L = ['  throw util::UnimplementedInst(mnemonic());']
-        return '\n'.join(L)
+        return unimplemented
     # Fixed-wave bit zero is rejected below; the other bits are reuse hints.
     swmmac_index_key_expr = (
         '0u' if uses_fixed_wave_swmmac_layout else 'inst_.opsel & 0x3u'

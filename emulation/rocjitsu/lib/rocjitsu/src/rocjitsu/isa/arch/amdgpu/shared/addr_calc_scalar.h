@@ -165,12 +165,14 @@ template <typename DsInst>
 void ds_calculate_addresses(const DsInst &inst, amdgpu::Wavefront &wf, VectorMemState &d) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
+  if (d.gds)
+    exec &= -exec;
   d.lane_mask = exec;
   d.exec_mask = exec;
   d.wf_size = wf.wf_size();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
-  const uint32_t ds_base = wf.lds_base();
+  const uint32_t ds_base = d.ds_base(wf.lds_base());
   uint32_t offset = (static_cast<uint32_t>(inst.offset1) << 8) | inst.offset0;
   RegisterAccess regs(cu);
   uint32_t addr = wf.vgpr_alloc().base + inst.addr;

@@ -36,8 +36,8 @@ static ncclResult_t isMloPartBufRdmaCapable(struct ncclComm* comm, const void* p
       if (comm->cuMemGdrSupport && comm->minDriverVersion >= 13040) {
         CUmemGenericAllocationHandle handle;
         CUmemAllocationProp prop = {};
-        if (CUPFN(cuMemRetainAllocationHandle(&handle, (void*)ptr)) != CUDA_SUCCESS) return ncclSuccess;
-        if (CUPFN(cuMemGetAllocationPropertiesFromHandle(&prop, handle)) == CUDA_SUCCESS)
+        if (CUPROBE(cuMemRetainAllocationHandle(&handle, (void*)ptr)) != CUDA_SUCCESS) return ncclSuccess;
+        if (CUPROBE(cuMemGetAllocationPropertiesFromHandle(&prop, handle)) == CUDA_SUCCESS)
           *isRdmaCapable = prop.allocFlags.gpuDirectRDMACapable;
         CUCHECK(cuMemRelease(handle));
       }

@@ -47,7 +47,7 @@ void check_binary64_rounding(Call call, uint64_t a, uint64_t b, const uint64_t (
 // named tests also exercise its literal exception cases separately.
 template <int Width, int Lanes, bool Packed = false, typename Call, typename Reference>
 void check_binary_arithmetic(Call call, Reference reference, bool gfx12,
-                             bool fp_status_supported = false) {
+                             bool fp_status_supported = false, bool compatibility_status = false) {
   static_assert(Width == 16 || Width == 32 || Width == 64);
   static_assert(Lanes == 32 || Lanes == 64);
   static_assert(!Packed || Width == 16);
@@ -116,7 +116,8 @@ void check_binary_arithmetic(Call call, Reference reference, bool gfx12,
             }
             ASSERT_EQ(error, RJ_ARITH_SUCCESS);
             bool reporting =
-                fp_status_supported && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL;
+                (fp_status_supported && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) ||
+                (compatibility_status && semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY);
             if (!reporting || !exec_mask) {
               EXPECT_EQ(fp_status, 0x80000000U);
             } else {

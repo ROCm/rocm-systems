@@ -78,54 +78,6 @@ def _read_vop3_true16_src(opnd: str, opsel: str, src_idx: int) -> str:
     )
 
 
-def gen_vector_bcnt(dst: list[str], src: list[str]) -> str:
-    """Generate V_BCNT_U32_B32 body: D.u32 = CountOneBits(S0.u32) + S1.u32."""
-    L = []
-    L.append('  uint64_t exec = wf.exec();')
-    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-    L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append(
-        f'    uint32_t bits = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
-    )
-    L.append(
-        f'    uint32_t accum = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
-    )
-    L.append(
-        f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane,'
-        ' static_cast<uint32_t>(std::popcount(bits)) + accum);'
-    )
-    L.append('  }')
-    return '\n'.join(L)
-
-
-def gen_vector_mbcnt(dst: list[str], src: list[str], op: str | None) -> str:
-    """Generate V_MBCNT_LO/HI_U32_B32 body."""
-    L = []
-    L.append('  uint64_t exec = wf.exec();')
-    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-    L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append(
-        f'    uint32_t mask = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
-    )
-    L.append(
-        f'    uint32_t base = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
-    )
-    if op == 'lo':
-        L.append(
-            '    uint32_t thread_mask = lane < 32 ? (1u << lane) - 1 : 0xFFFFFFFFu;'
-        )
-        L.append('    uint32_t count = std::popcount(mask & thread_mask);')
-    else:  # hi
-        L.append('    uint32_t shift = lane >= 32 ? lane - 32 : 0;')
-        L.append('    uint32_t thread_mask = lane >= 32 ? (1u << shift) - 1 : 0;')
-        L.append('    uint32_t count = std::popcount(mask & thread_mask);')
-    L.append(
-        f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, base + count);'
-    )
-    L.append('  }')
-    return '\n'.join(L)
-
-
 def _resolved_vgpr_offset_call(opnd: str, uses_vgpr_msb_indexing: bool) -> str:
     if uses_vgpr_msb_indexing:
         return (
@@ -1039,7 +991,7 @@ def gen_vector_div_scale(
         L.extend(vop3_src_mod('s2', 2, has_abs))
     mode = 'f16_f64' if is_f64 else 'f32'
     # RDNA3 preserves F64 signaling NaNs; physical gfx1100 and gfx1201 differ.
-    quiet_nan = ', wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA3' if is_f64 else ''
+    quiet_nan = ', wf.cu().arch() != rocjitsu::IsaFamily::Rdna3' if is_f64 else ''
     L.append(
         f'    const amdgpu::DivisionScaleResult<{fp_type}> scaled = amdgpu::div_scale(s0, s1, s2, wf.fp_round_mode_{mode}(), wf.fp_denorm_mode_{mode}(){quiet_nan});'
     )
@@ -1107,77 +1059,6 @@ def _gen_division_result(
         # Both scale the rounded result, then clamp (checked on gfx1201).
         result = apply_output(dtype or 'f32', result)
     L.append(f'    amdgpu::RegisterAccess(wf).{write}({dst[0]}, lane, {result});')
-    L.append('  }')
-    return '\n'.join(L)
-
-
-def gen_vector_dot(
-    dst: list[str], src: list[str], op: str | None, dtype: str | None
-) -> str:
-    """Generate V_DOT*C body (dot product accumulate)."""
-    L = []
-    d = dst[0] if dst else src[0]
-    s0, s1 = (src[0], src[1]) if dst else (src[1], src[2])
-    L.append('  uint64_t exec = wf.exec();')
-    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-    L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append(f'    uint32_t a = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);')
-    L.append(f'    uint32_t b = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);')
-    L.append(f'    uint32_t acc = amdgpu::RegisterAccess(wf).read_lane({d}, lane);')
-    if op == 'dot4c':
-        L.append('    for (int i = 0; i < 4; ++i) {')
-        L.append('      int8_t ea = static_cast<int8_t>((a >> (i * 8)) & 0xFF);')
-        L.append('      int8_t eb = static_cast<int8_t>((b >> (i * 8)) & 0xFF);')
-        L.append(
-            '      acc += static_cast<uint32_t>(static_cast<int32_t>(ea) * static_cast<int32_t>(eb));'
-        )
-        L.append('    }')
-    elif op == 'dot8c':
-        L.append('    for (int i = 0; i < 8; ++i) {')
-        L.append('      int32_t ea = static_cast<int32_t>((a >> (i * 4)) & 0xF);')
-        L.append('      if (ea & 8) ea |= ~0xF;')
-        L.append('      int32_t eb = static_cast<int32_t>((b >> (i * 4)) & 0xF);')
-        L.append('      if (eb & 8) eb |= ~0xF;')
-        L.append('      acc += static_cast<uint32_t>(ea * eb);')
-        L.append('    }')
-    elif op == 'dot2c' and dtype == 'f32':
-        # V_DOT2C_F32_F16: D.f32 += f16_lo(A)*f16_lo(B) + f16_hi(A)*f16_hi(B)
-        L.append('    if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||')
-        L.append('        wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5) {')
-        L.append(
-            f'      if (amdgpu::pk16_src_needs_narrowing(inst_.src0, {s0}.size_bits()))'
-        )
-        L.append('        a = util::f32_to_f16(std::bit_cast<float>(a));')
-        L.append(
-            '      acc = amdgpu::gfx11_dot2_f32<false>(a, b, a >> 16, b >> 16, acc);'
-        )
-        L.append(f'      amdgpu::RegisterAccess(wf).write_lane({d}, lane, acc);')
-        L.append('      continue;')
-        L.append('    }')
-        L.append('    float a0 = util::f16_to_f32(static_cast<uint16_t>(a & 0xFFFF));')
-        L.append(
-            '    float a1 = util::f16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));'
-        )
-        L.append('    float b0 = util::f16_to_f32(static_cast<uint16_t>(b & 0xFFFF));')
-        L.append(
-            '    float b1 = util::f16_to_f32(static_cast<uint16_t>((b >> 16) & 0xFFFF));'
-        )
-        L.append('    float facc = std::bit_cast<float>(acc);')
-        L.append('    facc += a0 * b0 + a1 * b1;')
-        L.append('    acc = std::bit_cast<uint32_t>(facc);')
-    elif op == 'dot2c' and dtype == 'i32':
-        # V_DOT2C_I32_I16: D.i32 += i16_lo(A)*i16_lo(B) + i16_hi(A)*i16_hi(B)
-        L.append('    int16_t a0 = static_cast<int16_t>(a & 0xFFFF);')
-        L.append('    int16_t a1 = static_cast<int16_t>((a >> 16) & 0xFFFF);')
-        L.append('    int16_t b0 = static_cast<int16_t>(b & 0xFFFF);')
-        L.append('    int16_t b1 = static_cast<int16_t>((b >> 16) & 0xFFFF);')
-        L.append(
-            '    int64_t dot = static_cast<int64_t>(a0) * b0 + static_cast<int64_t>(a1) * b1;'
-        )
-        L.append('    acc += static_cast<uint32_t>(dot);')
-    else:
-        L.append(f'    (void)a; (void)b; // unhandled dot variant: {op}/{dtype}')
-    L.append(f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, acc);')
     L.append('  }')
     return '\n'.join(L)
 

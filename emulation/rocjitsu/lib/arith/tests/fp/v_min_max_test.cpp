@@ -234,8 +234,9 @@ TEST(FpSelection, ExactDirectedBits) {
         Registers<6, 32> r;
         write_fp(r.v, 0, c.width, c.a);
         write_fp(r.v + 2, 0, c.width, c.b);
+        uint32_t status = 0;
         ASSERT_EQ(c.call(cpu | semantics | c.flags, 1, c.instruction_flags, r.v + 4, r.v, r.v + 2,
-                         nullptr),
+                         &status),
                   RJ_ARITH_SUCCESS);
         EXPECT_EQ(read_fp(r.v + 4, 0, c.width), c.expected);
       }
@@ -339,13 +340,14 @@ TEST(FpSelection, NativeNanSelection) {
             write_fp(r.v, lane, family.width, a);
             write_fp(r.v + 2, lane, family.width, values[lane % value_count]);
           }
-          ASSERT_EQ(call(semantics, 0xffffffffU, 0, r.v + 4, r.v, r.v + 2, nullptr),
+          uint32_t status = 0;
+          ASSERT_EQ(call(semantics, 0xffffffffU, 0, r.v + 4, r.v, r.v + 2, &status),
                     RJ_ARITH_SUCCESS);
           for (uint64_t cpu : levels) {
             if (cpu == RJ_ARITH_CPU_BASELINE) {
               continue;
             }
-            ASSERT_EQ(call(cpu | semantics, 0xffffffffU, 0, r.v + 6, r.v, r.v + 2, nullptr),
+            ASSERT_EQ(call(cpu | semantics, 0xffffffffU, 0, r.v + 6, r.v, r.v + 2, &status),
                       RJ_ARITH_SUCCESS);
             for (int lane = 0; lane < 32; ++lane) {
               EXPECT_EQ(read_fp(r.v + 6, lane, family.width), read_fp(r.v + 4, lane, family.width))

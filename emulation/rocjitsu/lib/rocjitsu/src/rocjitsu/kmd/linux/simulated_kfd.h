@@ -5,6 +5,7 @@
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/gpu_alias_ingress.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
@@ -67,34 +68,35 @@ enum class TrapInterruptSite { Unknown, Profiling, QueueException };
 
 enum class TrapInterruptAbi { Unsupported, PreGfx12, Gfx12 };
 
-constexpr TrapInterruptAbi trap_interrupt_abi(rj_code_arch_t arch) {
+constexpr TrapInterruptAbi trap_interrupt_abi(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return TrapInterruptAbi::PreGfx12;
-  case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Rdna4:
+  case rocjitsu::IsaFamily::Cdna5:
     return TrapInterruptAbi::Gfx12;
-  case ROCJITSU_CODE_ARCH_RV32I:
-  case ROCJITSU_CODE_ARCH_RV64I:
-  case ROCJITSU_CODE_ARCH_INVALID:
+  case rocjitsu::IsaFamily::Rv32i:
+  case rocjitsu::IsaFamily::Rv64i:
+  case rocjitsu::IsaFamily::Invalid:
     return TrapInterruptAbi::Unsupported;
   }
   return TrapInterruptAbi::Unsupported;
 }
 
-constexpr bool uses_pre_gfx12_trap_interrupt_sites(rj_code_arch_t arch) {
+constexpr bool uses_pre_gfx12_trap_interrupt_sites(rocjitsu::IsaFamily arch) {
   return trap_interrupt_abi(arch) == TrapInterruptAbi::PreGfx12;
 }
 
-constexpr TrapInterruptSite
-classify_pre_gfx12_trap_interrupt_site(rj_code_arch_t arch, uint32_t payload_move, uint32_t delay) {
+constexpr TrapInterruptSite classify_pre_gfx12_trap_interrupt_site(rocjitsu::IsaFamily arch,
+                                                                   uint32_t payload_move,
+                                                                   uint32_t delay) {
   constexpr uint32_t kSNop0 = 0xBF800000u;
   if (delay != kSNop0)
     return TrapInterruptSite::Unknown;
@@ -102,20 +104,20 @@ classify_pre_gfx12_trap_interrupt_site(rj_code_arch_t arch, uint32_t payload_mov
   uint32_t profiling_move = 0;
   uint32_t exception_move = 0;
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     profiling_move = 0xBEFC0073u;
     exception_move = 0xBEFC006Fu;
     break;
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
     profiling_move = 0xBEFC0373u;
     exception_move = 0xBEFC036Fu;
     break;
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
     profiling_move = 0xBEFD0073u;
     exception_move = 0xBEFD006Fu;
     break;
@@ -199,7 +201,28 @@ private:
 /// overloads so each client thread identifies itself by connection, not by
 /// shared mutable state.
 class SimulatedKfd : public LinuxKfd {
+  class LocalIngressCache;
+  // Borrowed host-command owner; trivial TLS does not retain the library.
+  inline static thread_local std::unique_ptr<LocalIngressCache> *scoped_ingress_cache_ = nullptr;
+  static LocalIngressCache &thread_ingress_cache();
+
 public:
+  /// @brief Bound host-thread ingress caches to the current command.
+  /// @details Simulation workers retain their caches outside this scope.
+  class ScopedIngressCache {
+  public:
+    ScopedIngressCache();
+    ~ScopedIngressCache();
+    ScopedIngressCache(const ScopedIngressCache &) = delete;
+    ScopedIngressCache &operator=(const ScopedIngressCache &) = delete;
+
+  private:
+    // Allocated only when this command enters the local memory fast path.
+    std::unique_ptr<LocalIngressCache> cache_;
+    // Borrowed enclosing scope, restored before releasing the current cache.
+    std::unique_ptr<LocalIngressCache> *previous_;
+  };
+
   /// Minimum backing descriptor requested when the process limit permits it.
   /// Shared with the interposer so its early table growth covers this range.
   static constexpr int kBackingFdMin = 4096;
@@ -528,6 +551,8 @@ public:
   /// requested allocation flags. mapping_flags_for_handle encodes that policy as
   /// COHERENT for the interposer's GEM_VA path.
   static amdgpu::Mtype pte_mtype_for_flags(uint32_t alloc_flags, bool shared = false);
+  /// Whether the selected render node executes the GFX10 ordered-append reset ABI.
+  [[nodiscard]] bool supports_pm4_gds_wave_id_reset(uint32_t render_minor) const;
   /// @brief Submit compute IBs to the CP assigned to a DRM file/context/ring key.
   int submit_pm4(uint32_t render_minor, uint64_t queue_key, amdgpu::Pm4Submission submission);
   /// Cancel accepted work and release the queue owned by one DRM context/ring.
@@ -556,6 +581,8 @@ public:
 
   private:
     std::shared_ptr<KfdProcess> process_;
+    // Match the lock order of KFD allocation and grant updates.
+    std::unique_lock<std::mutex> alloc_lock_;
     KfdProcess::PageTableTransaction transaction_;
   };
 
@@ -1134,7 +1161,7 @@ private:
   bool debug_stop_publishable(uint32_t gpu_id);
   int resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uint32_t num_queues);
   void apply_cwsr_to_wave(amdgpu::Wavefront &wf, const kmd::CwsrWaveState &state,
-                          rj_code_arch_t arch);
+                          rocjitsu::IsaFamily arch);
 
   /// @brief Address-watchpoint handler installed on every compute unit.
   /// @details Runs on the engine thread for each active-lane global-memory

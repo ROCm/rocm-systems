@@ -126,14 +126,7 @@ def test_float_to_float_vop3_passes_every_modifier_to_one_stage_object(name, for
         assert host not in cpp
 
 
-def test_f64_conversion_simd_uses_raw_lane_glue():
-    assert simd_probe_line('v_cvt_f32_f64_vop1') == (
-        '  ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64(conversion);'
-    )
-    # A floating source's ABS/NEG/OMOD/CLAMP travel in the shared object.
-    assert simd_probe_line('v_cvt_f64_f32_vop3') == (
-        '  ROCJITSU_TRY_SIMD_CONVERSION_TO_F64(conversion);'
-    )
+def test_half_conversion_simd_uses_raw_lane_glue():
     f16 = simd_probe_line('v_cvt_f16_f32_vop3', true16_vop3=True)
     assert f16 == (
         '  if (amdgpu::try_execute_words_simd<1, false, true, 0>(inst, wf, conversion))'

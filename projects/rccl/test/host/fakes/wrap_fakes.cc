@@ -4,19 +4,18 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only dependency floor for src/rccl_wrap.cc's microtest, compiled
-// into rccl-UnitTestsMicro alongside p2p.cc/rma_proxy_progress.cc's own
-// tests. #include-ing the whole 1773-line rccl_wrap.cc (via WRAP_CC_PATH)
-// pulls in the DDA / CE / symmetric-kernel / hierarchical backend-selection
-// machinery even though the covered functions (see wrap-test.cc) don't reach
-// all of it yet. Everything below satisfies the link closure. Controllable
+// Host-only dependency floor for src/rccl_wrap.cc's microtest
+// (rccl-UnitTestsMicroWrap). #include-ing the whole 1773-line rccl_wrap.cc
+// (via WRAP_CC_PATH) pulls in the DDA / CE / symmetric-kernel / hierarchical
+// backend-selection machinery even though the covered functions (see
+// wrap-test.cc) don't reach all of it yet. Everything below satisfies the link closure. Controllable
 // seams use conservative production-like defaults; tests override them with
 // ScopedHook when a branch needs different behaviour.
 //
 // Dependencies with an established owner live in their canonical fake files:
 // collectives_fakes, strongstream_stubs, ce_fakes, sym_kernels_fakes,
-// transport_stubs, and tuning_fakes. dev_runtime.cc is now another unit under
-// test in this binary, so its real window lookup/predicate functions satisfy
+// transport_stubs, and tuning_fakes. dev_runtime.cc is compiled into this
+// binary as a source, so its real window lookup/predicate functions satisfy
 // rccl_wrap.cc directly. This file contains only the remaining rccl_wrap.cc
 // link-closure seams that have no shared owner yet. nccl_stubs.cc is not linked
 // because it defines commSetUnrollFactor, which is a real function supplied by
@@ -43,6 +42,7 @@
 #include "enqueue.h"
 #include "group.h"
 #include "nccl.h"
+#include "nccl_fakes.h"  // g_loadParam
 #include "rccl_common.h"
 #ifdef ENABLE_ROCSHMEM_GIN
 #include "algorithms/gin/gin_all_reduce.h"
@@ -107,6 +107,9 @@ static int64_t DefaultParamP2pDisable() { return 0; }  // init.cc:137
 std::function<int64_t()> g_paramP2pDisable = DefaultParamP2pDisable;
 int64_t ncclParamP2pDisable() { return g_paramP2pDisable(); }
 
+// enqueue.cc owns NCCL_PARAM(EnqueueRearchEnable); rccl_wrap.cc reads it to skip warp speed.
+int64_t ncclParamEnqueueRearchEnable() { return g_loadParam("ENQUEUE_REARCH_ENABLE", 0); }
+
 // The settable env-var fake (SetMicroEnv/SetMicroEnvAbsent/ClearMicroEnv,
 // the bare-getenv() link-level interposer, and ncclGetEnv) is NOT defined
 // here: fakes/env_fakes.cc is the shared owner of src/misc/param.cc + getenv
@@ -114,11 +117,9 @@ int64_t ncclParamP2pDisable() { return g_paramP2pDisable(); }
 // "Where a fake belongs"). rccl_wrap.cc's several bare getenv() call sites
 // (rcclSetPxn, rcclSetP2pNetChunkSize, rcclUpdateCollectiveProtocol,
 // rcclUpdateThreadThreshold, ...) are covered by that same interposer.
-// ncclGroupDepth is NOT faked here: group-test.cc (also part of this binary
-// since the rccl-UnitTestsMicro merge) compiles the real group.cc, which
-// defines it -- a second copy here would be a duplicate-symbol error. Its
-// real default (0, "not grouped") is what every rccl_wrap.cc test so far
-// assumes, same as when this was a hand-copied stub.
+// ncclGroupDepth is NOT defined here: fakes/dev_runtime_micro_fakes.cc,
+// which this binary also links, owns it. Its default (0, "not grouped") is
+// what every rccl_wrap.cc test so far assumes.
 
 // ncclDevFuncUnrollGenerated: extern bool const[NCCL_NUM_UNROLLS]. Real array,
 // not abort-floor -- commSetUnrollFactor indexes it unconditionally on every
@@ -168,10 +169,28 @@ ncclResult_t rcclReserveHierarchicalTempBuffer(struct ncclComm* comm) { return g
 // ---------------------------------------------------------------------------
 
 #ifdef ENABLE_ROCSHMEM_GIN
-// The real definitions live in gin_alltoall_sdma.cu / gin_all_reduce_sdma.cu,
-// which this host-only binary intentionally does not compile. Keep GIN-SDMA
-// out of the selector by default so ENABLE_ROCSHMEM_GIN builds retain the
-// non-GIN test behaviour.
+// The real definitions live in gin_all_gather_sdma.cu / gin_alltoall_sdma.cu /
+// gin_all_reduce_sdma.cu, which this host-only binary intentionally does not
+// compile. Keep GIN-SDMA out of the selector by default so ENABLE_ROCSHMEM_GIN
+// builds retain the non-GIN test behaviour.
+// Channel count rcclSelectAllGather publishes when the eligibility seam is true.
+constexpr int kAllGatherGinSdmaFakeCtas = 4;
+
+static bool DefaultAllGatherGinSdmaEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t) { return false; }
+std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t)> g_allGatherGinSdmaEligible =
+    DefaultAllGatherGinSdmaEligible;
+
+bool ncclAllGatherGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                  ncclDataType_t datatype) {
+  return g_allGatherGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype);
+}
+
+// The null probe matches a hook that returns true unconditionally. A hook that
+// inspects its comm still links, and reports no channels until it accepts null.
+int ncclAllGatherGinSdmaCtaCount(int, size_t bytes) {
+  return g_allGatherGinSdmaEligible(nullptr, nullptr, nullptr, bytes, ncclFloat32) ? kAllGatherGinSdmaFakeCtas : 0;
+}
+
 bool ncclAllToAllGinSdmaEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t) {
   return false;
 }

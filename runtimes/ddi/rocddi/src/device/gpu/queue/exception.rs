@@ -3,7 +3,7 @@
 
 //! Native AQL queue exception decoding and scratch replacement ownership.
 
-/// Portable meaning of the command processor's AQL exception bits.
+/// Portable meaning of a CP inactive signal or KFD queue exception mask.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AqlQueueException {
     /// Queue stopped for scratch backing sized to this execution wave.
@@ -25,6 +25,8 @@ pub enum AqlQueueException {
     InvalidArgument,
     /// The dispatch exceeded its register budget.
     OutOfRegisters,
+    /// Dispatch parameters exceed hardware execution limits.
+    InvalidDispatchParameters,
     /// An access crossed a protected memory aperture.
     MemoryApertureViolation,
     /// The shader executed an illegal instruction.
@@ -77,6 +79,44 @@ pub const fn decode_aql_queue_exception(bits: u64) -> AqlQueueException {
     }
 }
 
+/// Decodes a KFD exception mask, whose bit positions are exception code minus
+/// one. This is the separate error-event payload, not the CP inactive signal.
+/// Known exceptions follow `ROCr`'s priority order; unknown codes remain generic.
+#[must_use]
+pub const fn decode_kfd_queue_exception(bits: u64) -> AqlQueueException {
+    use AqlQueueException as E;
+    let errors = [
+        (1, E::Exception), // Wave abort.
+        (2, E::Exception), // Wave trap.
+        (3, E::Exception), // Wave math error.
+        (4, E::IllegalInstruction),
+        (5, E::MemoryFault),
+        (6, E::MemoryApertureViolation),
+        (16, E::IncompatibleArguments), // Dispatch dimensions.
+        (17, E::InvalidAllocation),     // Group segment size.
+        (18, E::InvalidCodeObject),
+        (20, E::InvalidPacketFormat),
+        (21, E::InvalidArgument), // Workgroup size.
+        (22, E::InvalidDispatchParameters),
+        (23, E::InvalidPacketFormat),     // Vendor packet.
+        (30, E::Unknown),                 // Queue preemption error.
+        (33, E::MemoryApertureViolation), // Device memory violation.
+        (34, E::Unknown),                 // Device RAS error.
+        (35, E::Unknown),                 // Device fatal halt.
+        (36, E::Unknown),                 // Device new.
+        (49, E::Unknown),                 // Process device removal.
+    ];
+    let mut index = 0;
+    while index < errors.len() {
+        let (code, exception) = errors[index];
+        if bits & (1 << (code - 1)) != 0 {
+            return exception;
+        }
+        index += 1;
+    }
+    E::Unknown
+}
+
 /// Stages candidate scratch before an update can publish its address. On
 /// failure, both the current and candidate owners remain retained; on success,
 /// the displaced owner is returned only after the update completes.
@@ -99,6 +139,34 @@ pub fn replace_scratch_owner<T, E>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kfd_masks_are_distinct_from_cp_inactive_bits() {
+        assert_eq!(decode_kfd_queue_exception(1), AqlQueueException::Exception);
+        assert_eq!(
+            decode_aql_queue_exception(1),
+            AqlQueueException::Scratch { lanes_per_wave: 64 }
+        );
+        for (code, expected) in [
+            (16, AqlQueueException::IncompatibleArguments),
+            (17, AqlQueueException::InvalidAllocation),
+            (18, AqlQueueException::InvalidCodeObject),
+            (20, AqlQueueException::InvalidPacketFormat),
+            (22, AqlQueueException::InvalidDispatchParameters),
+            (33, AqlQueueException::MemoryApertureViolation),
+        ] {
+            assert_eq!(decode_kfd_queue_exception(1 << (code - 1)), expected);
+        }
+        assert_eq!(
+            decode_kfd_queue_exception((1 << 15) | (1 << 16)),
+            AqlQueueException::IncompatibleArguments
+        );
+        assert_eq!(decode_kfd_queue_exception(0), AqlQueueException::Unknown);
+        assert_eq!(
+            decode_kfd_queue_exception(1 << 63),
+            AqlQueueException::Unknown
+        );
+    }
 
     #[test]
     fn scratch_decode_preserves_wave_size_and_fault_priority() {

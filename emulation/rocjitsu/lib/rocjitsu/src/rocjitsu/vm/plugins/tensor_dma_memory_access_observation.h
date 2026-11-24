@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_metadata.h"
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -95,6 +96,8 @@ struct TensorDmaMemoryAccessObservation {
   uint32_t data_size = 0;         ///< Raw element-size code; bytes = 1 << data_size.
   int64_t tensor_dim0_stride = 0; ///< Descriptor dimension-zero stride in bytes.
   int64_t tensor_dim1_stride = 0; ///< Descriptor dimension-one stride in bytes.
+  /// @brief Decoded tensor operation identity, independent of display spelling.
+  Operation operation = Operation::Unknown;
 };
 
 } // namespace rocjitsu::amdgpu

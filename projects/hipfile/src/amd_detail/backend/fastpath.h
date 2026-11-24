@@ -42,6 +42,7 @@ protected:
     ssize_t _io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
                      hoff_t file_offset, hoff_t buffer_offset) override;
     bool    is_fallback_eligible(std::exception_ptr e_ptr, ssize_t nbytes) const override;
+    void    on_fallback() const override;
 };
 
 }

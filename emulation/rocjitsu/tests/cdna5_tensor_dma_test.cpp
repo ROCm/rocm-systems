@@ -4,6 +4,7 @@
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -162,6 +163,7 @@ TEST(TensorDmaMemoryAccessObservationTest, PreservesLegacyPositionalInitializati
   EXPECT_EQ(access.data_size, 0u);
   EXPECT_EQ(access.tensor_dim0_stride, 0);
   EXPECT_EQ(access.tensor_dim1_stride, 0);
+  EXPECT_EQ(access.operation, amdgpu::Operation::Unknown);
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaDescriptorReadPropagatesFailure) {
@@ -1083,6 +1085,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationReportsCompletedDenseLoadAndStore
   observer.inspect = [&](const amdgpu::TensorDmaMemoryAccessObservation &access) {
     if (!access.is_load)
       return;
+    EXPECT_EQ(access.operation, amdgpu::Operation::TENSOR_LOAD_TO_LDS);
     const uint64_t barrier = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
     load_was_complete_at_callback =
         cu->lds().read32(wf->lds_base() + 0 * sizeof(uint32_t)) == 0x81000000u &&
@@ -1130,6 +1133,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationReportsCompletedDenseLoadAndStore
   observer.inspect = [&](const amdgpu::TensorDmaMemoryAccessObservation &access) {
     if (access.is_load)
       return;
+    EXPECT_EQ(access.operation, amdgpu::Operation::TENSOR_STORE_FROM_LDS);
     store_was_complete_at_callback =
         store_storage[0] == 0x82000000u && store_storage[1] == 0x82000001u &&
         store_storage[4] == 0x82000003u && store_storage[5] == 0x82000004u;
@@ -3408,7 +3412,7 @@ TEST(Gfx1250ExecutionTest, SBarrierWaitIsNoOpForSingleWaveWorkgroup) {
   ASSERT_NE(wf, nullptr);
   ASSERT_EQ(wf->state(), amdgpu::WfState::RUNNING);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
 
   const std::array<uint32_t, 2> wait_words = {0xBF94FFFFu, 0u};
@@ -3436,7 +3440,7 @@ TEST(Gfx1250ExecutionTest, SBarrierWaitReleasesOnlyAfterSignalQuorum) {
   ASSERT_NE(wf1, nullptr);
   cu->begin_workgroup(0, 0, 2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
 
   const std::array<uint32_t, 2> wait_words = {0xBF94FFFFu, 0u};
@@ -3469,7 +3473,7 @@ TEST(Gfx1250ExecutionTest, ReleaseWaitCounterWakesWaitcntWhenTargetIsSatisfied) 
   ASSERT_NE(wf, nullptr);
 
   wf->wait_counters().increment(amdgpu::WaitCounterType::TENSORCNT);
-  wf->set_wait_target_tensorcnt(0);
+  wf->wait_for({.tensorcnt = 0});
   ASSERT_EQ(wf->state(), amdgpu::WfState::WAITCNT);
 
   wf->release_wait_counter(amdgpu::WaitCounterType::TENSORCNT);
@@ -4148,6 +4152,7 @@ public:
   std::vector<uint64_t> addresses;
 };
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(Gfx1250ExecutionTest, TensorDmaCoalescingPreservesClippedAndRefusedExtents) {
   using namespace amdgpu::tensor_dma_detail;
   constexpr uint32_t kProcessId = 81251;
@@ -4231,5 +4236,6 @@ TEST(Gfx1250ExecutionTest, TensorDmaCoalescingPreservesClippedAndRefusedExtents)
   }
   ASSERT_TRUE(legacy_vm.unregister_address_space(address_space));
 }
+#endif
 
 } // namespace

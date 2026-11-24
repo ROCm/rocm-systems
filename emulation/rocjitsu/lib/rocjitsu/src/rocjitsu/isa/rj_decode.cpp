@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -32,14 +33,15 @@ rj_status_t create_decoder_handle(Factory &&factory, rj_code_decoder_t **decoder
 
 } // namespace
 
-rj_status_t rj_code_decoder_create(rj_code_arch_t arch, rj_code_decoder_t **decoder) {
+rj_status_t rj_code_decoder_create(rj_code_target_id_t target, rj_code_decoder_t **decoder) {
   if (!decoder)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   *decoder = nullptr;
-  if (arch < ROCJITSU_CODE_ARCH_CDNA1 || arch >= ROCJITSU_CODE_ARCH_NUM_ARCHS)
+  if (target < ROCJITSU_CODE_TARGET_GFX90A || target >= ROCJITSU_CODE_TARGET_NUM_TARGETS)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  return create_decoder_handle([arch] { return Decoder::create(arch); }, decoder);
+  return create_decoder_handle(
+      [target] { return Decoder::create(default_isa_target_registry(), target); }, decoder);
 }
 
 rj_status_t rj_code_decoder_create_for_target(const char *target_id, rj_code_decoder_t **decoder) {

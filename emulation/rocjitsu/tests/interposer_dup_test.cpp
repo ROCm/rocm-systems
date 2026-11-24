@@ -933,6 +933,59 @@ TEST(InterposerDupTest, FcntlDupfdKeepsKfdRouting) {
   EXPECT_EQ(close(kfd), 0);
 }
 
+// The memory keeper takes its lease with OFD locks, which go through the
+// interposed fcntl with a pointer argument. Take a write lock on a temporary
+// file, check that F_OFD_GETLK reports the conflict from a second open of the
+// same file, then release the lock. This catches a dropped vararg pointer
+// without starting the keeper.
+TEST(InterposerDupTest, FcntlOfdLocksReachTheRealFileTable) {
+  rocjitsu::test::ScopedTempFile lock_file;
+  ASSERT_TRUE(lock_file.initialize("rocjitsu_ofd_lock"));
+
+  int first = open(lock_file.path().c_str(), O_RDWR | O_CLOEXEC);
+  ASSERT_GE(first, 0);
+  int second = open(lock_file.path().c_str(), O_RDWR | O_CLOEXEC);
+  ASSERT_GE(second, 0);
+
+  struct flock lease {};
+  lease.l_type = F_WRLCK;
+  lease.l_whence = SEEK_SET;
+  lease.l_start = 0;
+  lease.l_len = 0;
+  ASSERT_EQ(fcntl(first, F_OFD_SETLK, &lease), 0) << std::strerror(errno);
+
+  // The lock is open-file-description scoped: a second open of the same path
+  // must observe the conflict. F_OFD_GETLK reports the conflicting lock with
+  // l_pid set to -1, since an OFD lock is not tied to a process id.
+  struct flock conflict {};
+  conflict.l_type = F_WRLCK;
+  conflict.l_whence = SEEK_SET;
+  conflict.l_start = 0;
+  conflict.l_len = 0;
+  ASSERT_EQ(fcntl(second, F_OFD_GETLK, &conflict), 0) << std::strerror(errno);
+  EXPECT_EQ(conflict.l_type, F_WRLCK);
+  EXPECT_EQ(conflict.l_pid, -1);
+
+  // Unlock through the waiting variant; nothing conflicts, so it returns at
+  // once and a third probe no longer reports the lock.
+  struct flock release {};
+  release.l_type = F_UNLCK;
+  release.l_whence = SEEK_SET;
+  release.l_start = 0;
+  release.l_len = 0;
+  ASSERT_EQ(fcntl(first, F_OFD_SETLKW, &release), 0) << std::strerror(errno);
+  struct flock clear {};
+  clear.l_type = F_WRLCK;
+  clear.l_whence = SEEK_SET;
+  clear.l_start = 0;
+  clear.l_len = 0;
+  ASSERT_EQ(fcntl(second, F_OFD_GETLK, &clear), 0) << std::strerror(errno);
+  EXPECT_EQ(clear.l_type, F_UNLCK);
+
+  EXPECT_EQ(close(second), 0);
+  EXPECT_EQ(close(first), 0);
+}
+
 // dup2 that OVERWRITES the primary KFD fd number must invalidate the old primary
 // identity: after dup2(other, kfd) the kfd number now names 'other', so KFD
 // ioctls on it must NOT be routed to the (now-replaced) KFD backend, and closing
@@ -6571,6 +6624,10 @@ TEST(InterposerForkTest, ChildFailsClosedOnAnUnclassifiablePath) {
   // Well past PATH_MAX, so resolution cannot produce a comparable absolute path.
   const std::string overlong = "/" + std::string(PATH_MAX + 64, 'x');
 
+  rocjitsu::test::ScopedTempDirectory directory;
+  ASSERT_TRUE(directory.initialize("rj-missing-"));
+  const std::string missing = directory.path() + "/missing";
+
   const pid_t child = fork();
   ASSERT_GE(child, 0) << "fork failed: " << std::strerror(errno);
   if (child == 0) {
@@ -6584,7 +6641,7 @@ TEST(InterposerForkTest, ChildFailsClosedOnAnUnclassifiablePath) {
       _exit(41);
     // ...and a path that IS classifiable still reports its own error, so failing
     // closed has not swallowed ordinary errno reporting.
-    if (open("/tmp/rocjitsu-no-such-file-here", O_RDONLY | O_CLOEXEC) >= 0)
+    if (open(missing.c_str(), O_RDONLY | O_CLOEXEC) >= 0)
       _exit(42);
     if (errno != ENOENT)
       _exit(43);

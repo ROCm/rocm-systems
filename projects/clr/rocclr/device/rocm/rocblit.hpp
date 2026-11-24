@@ -217,7 +217,7 @@ class DmaBlitManager : public device::HostBlitManager {
     size_t copySize_;         //!< last copy size
   };
   //! Synchronizes the blit operations if necessary
-  inline void synchronize() const;
+  void synchronize() const;
 
   //! Returns the virtual GPU object
   VirtualGPU& gpu() const { return static_cast<VirtualGPU&>(vDev_); }
@@ -225,7 +225,7 @@ class DmaBlitManager : public device::HostBlitManager {
   //! Returns the ROC device object
   const Device& dev() const { return static_cast<const Device&>(dev_); };
 
-  inline Memory& gpuMem(device::Memory& mem) const;
+  Memory& gpuMem(device::Memory& mem) const;
 
   //! Pins host memory for GPU access
   amd::Memory* pinHostMemory(const void* hostMem,  //!< Host memory pointer
@@ -243,10 +243,12 @@ class DmaBlitManager : public device::HostBlitManager {
                              hsa_agent_t& srcAgent, size_t size,
                              amd::CopyMetadata& copyMetadata) const;
 
-  //! Batch version of hsaCopy - resolves multiple Memory objects to addresses/agents
-  bool hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
-                    const std::vector<hsa_signal_t>* externalWaitEvents = nullptr,
-                    std::vector<ProfilingSignal*>* outBatchSignals = nullptr) const;
+  //! SDMA batch submission hook behind copyBufferBatch/WriteBufferBatch/ReadBufferBatch.
+  //! Virtual so AbceBlitManager can reroute it through the ABCE orchestrator
+  //! while inheriting the partitioning and staging done by its callers.
+  virtual bool submitCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
+                               const std::vector<hsa_signal_t>* externalWaitEvents = nullptr,
+                               std::vector<ProfilingSignal*>* outBatchSignals = nullptr) const;
 
   //! Batch version of rocrCopyBuffer
   bool rocrCopyBufferBatch(
@@ -621,16 +623,27 @@ class KernelBlitManager : public DmaBlitManager {
     return (dev().info().imageSupport_) ? BlitTotal : BlitLinearTotal;
   }
 
-  //! Copies a buffer using the shader path
+  //! Streaming values of the copyBuffer kernel's copy_mode argument, must match blitcl.cpp.
+  //! Cached copies pass the element size instead.
+  enum CopyStreamMode : uint32_t {
+    CopyStreamStore = 2 * sizeof(uint64_t) + 1,
+    CopyStreamLoadStore = 2 * sizeof(uint64_t) + 2,
+  };
+
+ protected:
+  //! Copies a buffer using the shader path. localCopy marks a copy within this device's local
+  //! memory, which uses a full grid with nontemporal accesses when it exceeds half of the MALL.
   bool shaderCopyBuffer(address dst, address src, const amd::Coord3D& dstOrigin,
                         const amd::Coord3D& srcOrigin, const amd::Coord3D& size, bool entire,
                         const uint32_t blitWg, amd::CopyMetadata copyMetadata,
-                        bool attachSignal = false) const;
+                        bool attachSignal = false, bool localCopy = false) const;
 
   //! Returns true if a linear buffer copy should use the shader path.
   bool useShaderCopyBufferPath(const Memory& srcMemory, const Memory& dstMemory, size_t size,
                                amd::CopyMetadata copyMetadata,
                                bool* useLimitedP2pBlitWg = nullptr) const;
+
+ private:
 
   //! Copies a batch of buffers using a single/multiple shader dispatch
   bool ShaderCopyBufferBatch(const std::vector<amd::BatchCopyOp>& copy_ops) const;

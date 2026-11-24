@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/consan/prepare.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
@@ -20,6 +22,16 @@
 
 namespace rocjitsu::consan {
 namespace {
+
+uint32_t workgroup_id_scalar(const InputProgram &program) {
+  const bool enabled = RJ_AMDHSA_BITS_GET(program.kernel.descriptor.compute_pgm_rsrc2,
+                                          amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X);
+  if (!enabled)
+    return UINT32_MAX;
+  if (isa_properties(program.target->arch).uses_ttmp_workgroup_ids)
+    return kWorkgroupIdTtmp9Selector;
+  return kernel_descriptor_user_sgpr_count(program.target->arch, program.kernel.descriptor);
+}
 
 Result reject(InputError &error, std::string message) {
   error = {.code = InputErrorCode::ResourceLimit, .text_offset = {}, .message = std::move(message)};
@@ -44,6 +56,10 @@ Result finish_manifest(const InputProgram &program, PreparedArtifact &artifact, 
   manifest.target = program.target->id;
   manifest.wave_size = program.wave_size;
   manifest.code_object_abi = 5;
+  manifest.scope = program.barriers.empty()
+                       ? ScopeKind::NativeLdsNoSynchronization
+                       : (program.repeated ? ScopeKind::NativeLdsWorkgroupBarrierLoop
+                                           : ScopeKind::NativeLdsWorkgroupBarrier);
   manifest.original_text_bytes = program.text_bytes;
   manifest.prepared_text_bytes = section.size();
   manifest.entry = {.name = program.kernel.kernel_name,
@@ -57,7 +73,8 @@ Result finish_manifest(const InputProgram &program, PreparedArtifact &artifact, 
                     .prepared_group_bytes = program.kernel.descriptor.group_segment_fixed_size,
                     .prepared_sgprs = sgprs,
                     .prepared_vgprs = vgprs,
-                    .maximum_workgroup_size = program.maximum_workgroup_size};
+                    .maximum_workgroup_size = program.maximum_workgroup_size,
+                    .workgroup_id_scalar = workgroup_id_scalar(program)};
   ContractError contract_error;
   if (validate_manifest(manifest, &contract_error).failed())
     return reject(error, "invalid lowered facts: " + contract_error.message);
@@ -65,7 +82,8 @@ Result finish_manifest(const InputProgram &program, PreparedArtifact &artifact, 
 }
 
 FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error) {
-  const FailureOr<uint32_t> stride = lds_race_row_stride(program.accesses.size(), error);
+  const FailureOr<uint32_t> stride =
+      lds_race_row_stride(program.accesses.size(), error, !program.barriers.empty());
   if (stride.failed())
     return Result::failure();
   const std::span<const uint8_t> probe_image =
@@ -82,11 +100,19 @@ FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error
       .preservation = GuestStatePreservation::DeclaredRegisters,
       .register_growth = OriginalRegisterCounts{program.original_sgprs, program.original_vgprs}};
   Instrumentor instrumentor(object, program.target->arch, options);
+  const uint32_t workgroup_scalar = workgroup_id_scalar(program);
+  ProbeArgValue workgroup_arg = probe_arg_imm(0);
+  if (workgroup_scalar == kWorkgroupIdTtmp9Selector)
+    workgroup_arg = {.source = ProbeArgSource::EntryTtmp, .register_index = 9};
+  else if (workgroup_scalar != UINT32_MAX)
+    workgroup_arg = {.source = ProbeArgSource::EntrySgpr,
+                     .register_index = static_cast<uint16_t>(workgroup_scalar)};
   const std::vector<ProbeArgValue> context_args{
       {ProbeArgSource::LogBufferPtrLo},
       {ProbeArgSource::LogBufferPtrHi},
       {.source = ProbeArgSource::EntryVgprLane0, .register_index = 0},
-      probe_arg_imm(stride.value())};
+      probe_arg_imm(stride.value()),
+      workgroup_arg};
   auto add = [&](uint64_t offset, InstrumentationKind kind, const char *symbol,
                  std::vector<ProbeArgValue> args) {
     InstrumentationPoint point;
@@ -95,6 +121,9 @@ FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error
     point.probe_obj = &probes;
     point.probe_symbol = symbol;
     point.probe_args = std::move(args);
+    // Scalar barriers complete even at guest EXEC=0. Enable every callback lane
+    // so lane zero can publish; access probes use the saved guest mask argument,
+    // rather than callback EXEC, to decide which lanes actually accessed LDS.
     point.force_full_exec = true;
     instrumentor.add_point(point);
   };
@@ -108,7 +137,19 @@ FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error
     args.push_back({ProbeArgSource::AnchorExecLo});
     args.push_back(program.wave_size == 64 ? ProbeArgValue{ProbeArgSource::AnchorExecHi}
                                            : probe_arg_imm(0));
+    args.push_back(probe_arg_imm(access.width));
+    args.push_back(probe_arg_imm(program.repeated));
     add(access.original_offset, InstrumentationKind::BeforeInst, "rj_consan_access",
+        std::move(args));
+  }
+  // Advance phase only after the unchanged guest wait completes. Recording at
+  // the signal or before the wait could certify ordering before synchronization.
+  for (uint32_t group = 0; group < program.barriers.size(); ++group) {
+    std::vector<ProbeArgValue> args = context_args;
+    args.push_back(probe_arg_imm(group));
+    args.push_back(probe_arg_imm(static_cast<uint32_t>(sync_offset(program.accesses.size()))));
+    args.push_back(probe_arg_imm(static_cast<uint32_t>(program.barriers.size())));
+    add(program.barriers[group].original_wait, InstrumentationKind::AfterInst, "rj_consan_barrier",
         std::move(args));
   }
   for (const uint64_t offset : program.exit_offsets)
@@ -129,6 +170,7 @@ FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error
     artifact.manifest.sites.push_back({.id = access.site,
                                        .analysis = AnalysisKind::LdsRaceDetection,
                                        .access = access.kind,
+                                       .width = access.width,
                                        .original_offset = access.original_offset,
                                        .original_size = 8,
                                        .prepared_guest_offset = mapping->guest_offset,
@@ -136,6 +178,25 @@ FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error
                                        .probe_offset = mapping->instrumentation_offset,
                                        .probe_size = mapping->instrumentation_size,
                                        .first_slot = access.site * kAddressGroupsPerSite});
+  }
+  for (const BarrierFacts &barrier : program.barriers) {
+    const std::vector<InstrumentedSite>::iterator mapping =
+        std::ranges::find_if(output.sites, [&](const auto &site) {
+          return site.kind == InstrumentationKind::AfterInst &&
+                 site.original_offset == barrier.original_wait;
+        });
+    if (mapping == output.sites.end() || mapping->guest_size != 4)
+      return reject(error, "callable DBI lowering omitted a barrier completion mapping");
+    BarrierFacts facts = barrier;
+    // Split signals stay in original text. A legacy barrier both signals and
+    // waits, so its two facts refer to the same relocated guest instruction.
+    facts.prepared_signal = barrier.original_signal == barrier.original_wait
+                                ? mapping->guest_offset
+                                : barrier.original_signal;
+    facts.prepared_wait = mapping->guest_offset;
+    facts.completion_probe = mapping->instrumentation_offset;
+    facts.probe_size = mapping->instrumentation_size;
+    artifact.manifest.barriers.push_back(facts);
   }
   if (finish_manifest(program, artifact, output.resources.sgprs, output.resources.vgprs, error)
           .failed())
@@ -152,7 +213,7 @@ Result validate_prepared(std::span<const uint8_t> original, const PreparedArtifa
   if (verify_artifact_images(artifact.manifest, original, artifact.image, &contract_error).failed())
     return reject(error, contract_error.message);
   const TargetProfile *target = target_profile(artifact.manifest.target);
-  const rj_code_arch_t arch = target->arch;
+  const rocjitsu::IsaFamily arch = target->arch;
   const FailureOr<InputProgram> program =
       build_input_program(original, *target, artifact.manifest.entry.name, error);
   if (program.failed())
