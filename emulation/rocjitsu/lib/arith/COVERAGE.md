@@ -79,19 +79,22 @@ Both explicit strict modes remain unqualified for these operations.
 
 ### Matrix instructions
 
-CDNA matrix support covers twenty gfx942 MFMA forms (FP16/BF16, XF32 and FP8/BF8),
-fourteen gfx950 half-input MFMA forms plus eight OCP FP8/BF8 forms, and five
-gfx1250 half-input WMMA forms plus sixteen FP8/BF8 K64/K128 forms.
+CDNA matrix support covers twenty dense and twelve sparse gfx942 MFMA/SMFMAC
+forms (FP16/BF16, dense XF32, and FNUZ FP8/BF8), fourteen dense and eight sparse
+gfx950 half-input forms plus eight dense and twelve sparse OCP FP8/BF8 forms,
+and five gfx1250 half-input WMMA forms plus sixteen FP8/BF8 K64/K128 forms.
 gfx942 FP8/BF8 uses FNUZ; gfx950 and gfx1250 use OCP.
 All have scalar, AVX2 and AVX-512-v4 approximate implementations. Loose and
-Compatibility retain those paths. The twenty gfx942 forms additionally support
-the integer empirical model contributed in #14809, with default CBSZ/ABID/BLGP
-and FP16_OVFL clear. Exact modes use that model; exact-allow-Loose falls back
-outside its qualified controls. All-negative-zero sums (+0) and subnormal C
-preservation are hardware-captured; XF32 NaNs with payload only in bits 12:0
-(truncating to infinity), BF16 2^128 product overflow, and subnormal BF16
-product ties are inferred from the model. This qualification does not extend to gfx950
-or gfx1250, whose strict modes remain unsupported.
+Compatibility retain those paths. The twenty dense gfx942 MFMA forms (with
+default CBSZ/ABID/BLGP and `FP16_OVFL` clear) and the twelve sparse gfx942
+`V_SMFMAC_F32_*` forms (with `FP16_OVFL` clear, across all CBSZ/ABID metadata
+selectors) support the integer empirical model contributed in #14809. Exact
+modes use that model; exact-allow-Loose falls back outside its qualified
+controls. All-negative-zero sums (+0), negative subnormal underflow to +0,
+subnormal C preservation, XF32 NaNs with payload only in bits 12:0 (truncating
+to infinity), BF16 2^128 product overflow, and subnormal BF16 product outputs
+and ties are all MI300X hardware-captured. This qualification does not extend
+to gfx950 or gfx1250, whose strict modes remain unsupported.
 Comparison and register-routing instructions also use rj-arith. Other families
 are migrating independently; an entry point's header documents its supported
 semantics and controls.

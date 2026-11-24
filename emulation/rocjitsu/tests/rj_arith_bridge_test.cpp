@@ -17865,4 +17865,99 @@ TEST(ArithBridgeTest, MullitStrictExactAcceptancePerArchitecture) {
   }
 }
 
+TEST(ArithBridgeTest, Gfx942SmfmacExactUsesGroupedRoundingAndIsolatesGfx950) {
+  for (bool cdna4 : {false, true}) {
+    for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose,
+                           ArithmeticSemantics::BitExactEmpiricalAllowLoose,
+                           ArithmeticSemantics::BitExactEmpiricalNoFpStatus,
+                           ArithmeticSemantics::BitExactEmpirical}) {
+      BridgeFixture fixture(cdna4 ? rocjitsu::IsaFamily::Cdna4 : rocjitsu::IsaFamily::Cdna3, 64,
+                            {semantics}, 32);
+      ASSERT_NE(fixture.wave, nullptr);
+      fixture.wave->set_exec(0); // SMFMAC participates as a whole wave, independent of EXEC.
+      const auto base = fixture.base();
+      for (uint32_t reg = 0; reg < 24; ++reg) {
+        for (uint32_t lane = 0; lane < 64; ++lane) {
+          fixture.cu->write_vgpr(base + reg, lane, 0);
+        }
+      }
+      // Byte 2 (selected by cbsz=0, abid=2) chooses B[0] and B[1]; bytes 0..1 hold distractors.
+      fixture.cu->write_vgpr(base, 0, 0x3c00U | uint32_t(util::f32_to_f16(0x1.8p-13f)) << 16);
+      fixture.cu->write_vgpr(base + 4, 0, 0x3c00U | uint32_t(util::f32_to_f16(-0x1p-12f)) << 16);
+      fixture.cu->write_vgpr(base + 12, 0, 0x0004ffffU);
+      fixture.cu->write_vgpr(base + 16, 0, 0x80000000U);
+      auto words =
+          cdna4 ? cdna4::build_vop3p_mfma(
+                      cdna4::kVSmfmacF3216x16x32F16Vop3pMfma,
+                      {.vdst = 16, .abid = 2, .acc_cd = 0, .src0 = 256, .src1 = 260, .src2 = 268})
+                : cdna3::build_vop3p_mfma(
+                      cdna3::kVSmfmacF3216x16x32F16Vop3pMfma,
+                      {.vdst = 16, .abid = 2, .acc_cd = 0, .src0 = 256, .src1 = 260, .src2 = 268});
+      auto decoded = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(decoded.succeeded());
+      const bool rejected =
+          cdna4 && (semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus ||
+                    semantics == ArithmeticSemantics::BitExactEmpirical);
+      fixture.recorder->writes.clear();
+      EXPECT_EQ(fixture.cu->execute_instruction(decoded.value().get(), *fixture.wave).succeeded(),
+                !rejected);
+      if (rejected) {
+        EXPECT_TRUE(fixture.recorder->writes.empty());
+        EXPECT_EQ(fixture.cu->read_vgpr(base + 16, 0), 0x80000000U);
+        continue;
+      }
+      const bool approximate = cdna4 || semantics == ArithmeticSemantics::Compatibility ||
+                               semantics == ArithmeticSemantics::Loose;
+      EXPECT_EQ(fixture.cu->read_vgpr(base + 16, 0), approximate ? 0x3f7fffffU : 0x3f800000U);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx942SmfmacFp16OvflRestrictsOnlyExactQualification) {
+  for (bool bf16 : {false, true}) {
+    for (bool overflow : {false, true}) {
+      for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose,
+                             ArithmeticSemantics::BitExactEmpiricalAllowLoose,
+                             ArithmeticSemantics::BitExactEmpiricalNoFpStatus,
+                             ArithmeticSemantics::BitExactEmpirical}) {
+        BridgeFixture fixture(rocjitsu::IsaFamily::Cdna3, 64, {semantics}, 32);
+        ASSERT_NE(fixture.wave, nullptr);
+        fixture.wave->set_mode_raw(overflow ? Wavefront::FP16_OVFL_BIT : 0);
+        const auto base = fixture.base();
+        for (uint32_t lane = 0; lane < 64; ++lane) {
+          for (uint32_t reg = 0; reg < 2; ++reg) {
+            fixture.cu->write_vgpr(base + reg, lane, bf16 ? 0x7f7f7f7fU : 0x3c003c00U);
+          }
+          for (uint32_t reg = 0; reg < 4; ++reg) {
+            fixture.cu->write_vgpr(base + 4 + reg, lane, 0x40004000U);
+            fixture.cu->write_vgpr(base + 16 + reg, lane, 0x80000000U);
+          }
+          fixture.cu->write_vgpr(base + 12, lane, 0x44444444U);
+        }
+        auto words = cdna3::build_vop3p_mfma(
+            bf16 ? cdna3::kVSmfmacF3216x16x32Bf16Vop3pMfma : cdna3::kVSmfmacF3216x16x32F16Vop3pMfma,
+            {.vdst = 16, .acc_cd = 0, .src0 = 256, .src1 = 260, .src2 = 268});
+        auto decoded = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(decoded.succeeded());
+        const bool rejected =
+            overflow && (semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus ||
+                         semantics == ArithmeticSemantics::BitExactEmpirical);
+        fixture.recorder->writes.clear();
+        EXPECT_EQ(fixture.cu->execute_instruction(decoded.value().get(), *fixture.wave).succeeded(),
+                  !rejected);
+        if (rejected) {
+          EXPECT_TRUE(fixture.recorder->writes.empty());
+        }
+        for (uint32_t reg = 0; reg < 4; ++reg) {
+          for (uint32_t lane = 0; lane < 64; ++lane) {
+            EXPECT_EQ(fixture.cu->read_vgpr(base + 16 + reg, lane), rejected ? 0x80000000U
+                                                                    : bf16   ? 0x7f800000U
+                                                                             : 0x42000000U);
+          }
+        }
+      }
+    }
+  }
+}
+
 } // namespace rocjitsu::amdgpu

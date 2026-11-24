@@ -10705,16 +10705,24 @@ def test_sparse_integer_gfx1250_wmma_library_dispatch():
 
 
 @pytest.mark.parametrize('arch,suffix', [('cdna3', ''), ('cdna4', '_gfx950')])
-def test_sparse_fp8_library_uses_architecture_specific_encoding(arch, suffix):
-    body = _gen_mfma(
-        Instruction('V_SMFMAC_F32_16X16X64_FP8_BF8', 'ENC_VOP3P_MFMA', 0, []), arch
-    )
-    assert f'rj_arith_v_smfmac_f32_16x16x64_fp8_bf8_w64{suffix},' in body
-    assert 'exec_sparse_matrix<2, 4, 4, 1, 64>' in body
+@pytest.mark.parametrize(
+    'name,out_regs',
+    [
+        ('V_SMFMAC_F32_16X16X32_F16', 4),
+        ('V_SMFMAC_F32_16X16X32_BF16', 4),
+        ('V_SMFMAC_F32_32X32X16_F16', 16),
+        ('V_SMFMAC_F32_32X32X16_BF16', 16),
+        ('V_SMFMAC_F32_16X16X64_FP8_BF8', 4),
+    ],
+)
+def test_sparse_fp8_library_uses_architecture_specific_encoding(
+    arch, suffix, name, out_regs
+):
+    body = _gen_mfma(Instruction(name, 'ENC_VOP3P_MFMA', 0, []), arch)
+    assert f'rj_arith_{name.lower()}_w64{suffix},' in body
+    assert f'exec_sparse_matrix<2, 4, {out_regs}, 1, 64>' in body
     assert 'inst_.cbsz | (uint64_t(inst_.abid) << 3)' in body
-    flags = 'cu.arithmetic_flags()'
-    if arch == 'cdna4':
-        flags += ' | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0)'
+    flags = 'cu.arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0)'
     assert f'{flags}, controls, dst, s0b, s1b, idx' in body
 
 

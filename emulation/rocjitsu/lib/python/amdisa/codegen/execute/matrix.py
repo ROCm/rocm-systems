@@ -172,12 +172,10 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             and result_type == 'F32'
             and input_type in ('F16', 'BF16', *_F8_FIXED)
         ):
+            if arch_name == 'cdna3':
+                flags += ' | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0)'
             bits = 16 if input_type in ('F16', 'BF16') else 8
-            suffix = (
-                '_gfx950'
-                if bits == 8 and arch_name == 'cdna4' and M * K == 1024
-                else ''
-            )
+            suffix = '_gfx950' if arch_name == 'cdna4' and M * K * bits == 8192 else ''
             entry = f'rj_arith_{name.lower()}_w64{suffix}'
             L.append('  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);')
             L.append(
