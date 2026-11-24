@@ -36,10 +36,10 @@ GENERATE_PY = RCCL_ROOT / "src" / "device" / "symmetric" / "generate.py"
 # If a change moves these numbers, update them here AND explain in the PR
 # description WHY. Do not blind-update.
 # ---------------------------------------------------------------------------
-EXPECTED_TOTAL = 49
+EXPECTED_TOTAL = 54
 EXPECTED_PER_COLL = {
     "AllGather": 4,
-    "AllReduce": 10,
+    "AllReduce": 15,
     "ReduceScatter": 35,
 }
 EXPECTED_DIMS = {
@@ -62,10 +62,10 @@ EXPECTED_DIMS = {
 # arch from one that only asks whether any target was given.
 GPU_TARGETS_WITHOUT_TDM = "gfx942;gfx950"
 GPU_TARGETS_WITH_TDM = "gfx942;gfx1250"
-EXPECTED_TDM_TOTAL = 66
+EXPECTED_TDM_TOTAL = 71
 EXPECTED_TDM_PER_COLL = {
     "AllGather": 6,
-    "AllReduce": 15,
+    "AllReduce": 20,
     "ReduceScatter": 45,
 }
 EXPECTED_TDM_ALGOS = {"TmaST", "HierLsaTmaST", "RSxTmaLD_AGxTmaST", "TmaLD"}

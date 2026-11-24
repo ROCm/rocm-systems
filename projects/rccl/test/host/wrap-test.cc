@@ -6438,6 +6438,30 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredRerouteLeavesOtherCallsUnc
       });
 }
 
+// Multi-host comms (topo->nHosts > 1) take symk from symMinR2MultiNode where the table sets it.
+TEST(WrapMicrotestIsolated, SelectAllReduce_MultiHostSymkMinimum) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_MultiHostSymkMinimum",
+      []() {
+        const int symk = (int)rcclAddonAlgos_t::RCCL_SYMMETRIC;
+        RegisteredAr ar(8);
+        ar.table_.symMaxR2[ncclFuncAllReduce] = kThreshUnlimited;
+        ar.table_.symMaxR2Graph[ncclFuncAllReduce] = kThreshUnlimited;
+        ar.table_.symMinR2MultiNode[ncclFuncAllReduce] = 2 * kMiB;
+        EXPECT_NE(symk, ar.Select(4 * kMiB, /*capturing=*/false).algo) << "single host";
+        ar.comm_->topo->nHosts = 2;
+        EXPECT_NE(symk, ar.Select(2 * kMiB - 64, /*capturing=*/false).algo) << "multi-host";
+        EXPECT_EQ(symk, ar.Select(2 * kMiB, /*capturing=*/false).algo) << "multi-host";
+        EXPECT_EQ(symk, ar.Select(2 * kMiB, /*capturing=*/true).algo) << "multi-host, under capture";
+
+        ar.table_.symMinR2MultiNode[ncclFuncAllReduce] = 0;
+        EXPECT_NE(symk, ar.Select(4 * kMiB, /*capturing=*/false).algo) << "unset keeps symMinR2";
+        ar.table_.symMinR2MultiNode[ncclFuncAllReduce] = 2 * kMiB;
+        g_loadParam = ForceParam("RCCL_SYM_K_MIN_BYTES", 16 * kMiB);
+        EXPECT_NE(symk, ar.Select(8 * kMiB, /*capturing=*/false).algo) << "RCCL_SYM_K_MIN_BYTES wins";
+      });
+}
+
 // The CE cap counts CE's reduce launch on the chunk ncclCeAllReduce picks, smaller than the shard when the staging
 // slot is (a resolved staging size, or before ncclCeInit, RCCL_CE_AR_STAGING_BYTES).
 TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerCeCapFollowsCeChunk) {

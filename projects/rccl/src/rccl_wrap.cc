@@ -1094,10 +1094,16 @@ inline size_t rcclSymMaxR2CapTab(const rcclArchThresholds* table, ncclFunc_t fun
 
 // R2 symmetric-kernel lower-bound per collective.  Below this size DDA is
 // faster than symk; symk is suppressed so DDA can win.  0 = no suppression.
-inline size_t rcclSymMinR2CapTab(const rcclArchThresholds* table, ncclFunc_t func) {
+// multiNode selects symMinR2MultiNode where the table sets it. Pass comm->topo->nHosts > 1: under MNNVL a
+// multi-host comm is one LSA clique and comm->nNodes stays 1.
+inline size_t rcclSymMinR2CapTab(const rcclArchThresholds* table, ncclFunc_t func, bool multiNode = false) {
   const int64_t param = rcclParamSymKMinBytes();
   if (param >= 0) return (size_t)param;
   if (table == nullptr) return 0;
+  if (multiNode) {
+    const size_t multiNodeMin = funcThresholdFromTable(table->symMinR2MultiNode, func);
+    if (multiNodeMin != 0) return multiNodeMin;
+  }
   return funcThresholdFromTable(table->symMinR2, func);
 }
 
@@ -2038,7 +2044,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // both windows to carry NCCL_WIN_COLL_SYMMETRIC, so symkRequested=true already
     // implies recv is registered; when symkRequested=false suppression is moot.
     const size_t symMaxR2 = rcclSymMaxR2CapTab(archTable, ncclFuncAllReduce, ceCapturing);
-    const size_t symMinR2 = rcclSymMinR2CapTab(archTable, ncclFuncAllReduce);
+    const size_t symMinR2 = rcclSymMinR2CapTab(archTable, ncclFuncAllReduce, comm->topo->nHosts > 1);
     const bool symSuppressedByMax = msgBytes > symMaxR2;
     const bool symSuppressedByMin = symMinR2 > 0 && msgBytes < symMinR2;
     const bool symkRequested =

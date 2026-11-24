@@ -60,6 +60,23 @@ inline uint8_t agStValue(int rank, size_t idx)
     return static_cast<uint8_t>((idx + 37 * static_cast<size_t>(rank)) % kAgStPatternPeriod);
 }
 
+// Prime, so the period does not divide the 1024-float gfx950 chunk and a chunk-aligned
+// misplacement still changes the values.
+constexpr size_t kLdPatternPeriod = 1021;
+
+// Value a rank writes at a global index, small enough to be exact in float.
+inline float ldPatternValue(int rank, size_t globalIdx)
+{
+    return static_cast<float>(rank + 1) + static_cast<float>(globalIdx % kLdPatternPeriod);
+}
+
+// Sum of ldPatternValue over all ranks at one global index.
+inline float ldPatternSum(int nRanks, size_t globalIdx)
+{
+    return static_cast<float>(nRanks * (nRanks + 1)) / 2.0f
+           + static_cast<float>(nRanks) * static_cast<float>(globalIdx % kLdPatternPeriod);
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -97,14 +114,7 @@ protected:
             GTEST_SKIP() << "Need 4 or more MPI ranks on a single node";
         }
 
-        // Read at communicator init, so the guard must outlive createTestCommunicator.
-        MPIHelpers::MpiEnvGuard symKernelGuard("NCCL_SYM_KERNEL", kernel);
-        // gfx1250 gives AllGather under 128 KiB or over 2 MiB to DDA and the copy engines before NCCL_SYM_KERNEL is
-        // consulted. Both bounds are cached on first read, so lifting them takes only in a process that hasn't read
-        // them yet, and lasts for the rest of it.
-        MPIHelpers::MpiEnvGuard symkMinGuard("RCCL_SYM_K_MIN_BYTES", "0");
-        MPIHelpers::MpiEnvGuard symkMaxGuard("RCCL_SYM_K_MAX_BYTES",
-                                             std::to_string(std::numeric_limits<int64_t>::max()).c_str());
+        forceHierKernels(kernel);
         ASSERT_EQ(ncclSuccess, createTestCommunicator());
 
         int rank{};
@@ -116,13 +126,10 @@ protected:
                                                   (16 << 20) + 3};
         const size_t              maxCount = *std::max_element(counts.begin(), counts.end());
 
-        const std::string gated = mpiCoordinatedSkipReason(
-            rcclParamSymKMinBytes() != 0 || rcclParamSymKMaxBytes() < static_cast<int64_t>(maxCount * nRanks),
-            "RCCL_SYM_K_MIN_BYTES or RCCL_SYM_K_MAX_BYTES was read earlier in this process; run the test in its own "
-            "mpirun invocation");
-        if(!gated.empty())
+        const std::string skip = hierSkipReason();
+        if(!skip.empty())
         {
-            GTEST_SKIP() << gated;
+            GTEST_SKIP() << skip;
         }
 
         constexpr int    kBackToBackCalls = 8;
@@ -138,16 +145,6 @@ protected:
         if(!noSym.empty())
         {
             GTEST_SKIP() << noSym;
-        }
-
-        // Without symmetricSupport the forced kernel is ineligible; skip with that reason instead of on ncclInvalidUsage.
-        ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
-        ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(getActiveCommunicator(), &props));
-        int symmetric = props.deviceApiSupport ? 1 : 0;
-        ASSERT_EQ(MPI_SUCCESS, MPI_Allreduce(MPI_IN_PLACE, &symmetric, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
-        if(!symmetric)
-        {
-            GTEST_SKIP() << "Symmetric kernels unavailable (symmetricSupport off, e.g. cuMem/VMM unavailable)";
         }
 
         bool first = true;
@@ -259,6 +256,112 @@ protected:
         }
         return mpiCoordinatedSkipReason(!ok, "Symmetric memory not available (VMM/cuMem unsupported)");
     }
+
+    // Forces kernels and lifts the symmetric size window for the rest of the test. The window is cached on first read,
+    // so it lifts only in a process that hasn't read it yet.
+    void forceHierKernels(const char* kernels)
+    {
+        hierEnv_.push_back(std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_SYM_KERNEL", kernels));
+        hierEnv_.push_back(std::make_unique<MPIHelpers::MpiEnvGuard>("RCCL_SYM_K_MIN_BYTES", "0"));
+        hierEnv_.push_back(std::make_unique<MPIHelpers::MpiEnvGuard>(
+            "RCCL_SYM_K_MAX_BYTES", std::to_string(std::numeric_limits<int64_t>::max()).c_str()));
+    }
+
+    std::string hierSkipReason()
+    {
+        const std::string gated = mpiCoordinatedSkipReason(
+            rcclParamSymKMinBytes() != 0 || rcclParamSymKMaxBytes() != std::numeric_limits<int64_t>::max(),
+            "RCCL_SYM_K_MIN_BYTES or RCCL_SYM_K_MAX_BYTES was read earlier in this process; run the test in its own "
+            "mpirun invocation");
+        if(!gated.empty())
+        {
+            return gated;
+        }
+        // Without symmetricSupport the forced kernel is ineligible; skip with that reason, not on ncclInvalidUsage.
+        ncclCommProperties_t props   = NCCL_COMM_PROPERTIES_INITIALIZER;
+        const ncclResult_t   queried = ncclCommQueryProperties(getActiveCommunicator(), &props);
+        EXPECT_EQ(ncclSuccess, queried);
+        int symmetric = queried == ncclSuccess && props.deviceApiSupport;
+        EXPECT_EQ(MPI_SUCCESS, MPI_Allreduce(MPI_IN_PLACE, &symmetric, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
+        if(!symmetric)
+        {
+            return "Symmetric kernels unavailable (symmetricSupport off, e.g. cuMem/VMM unavailable)";
+        }
+        return {};
+    }
+
+    struct HierArOp
+    {
+        float* send;
+        float* recv;
+        size_t count;
+        size_t patternBase;
+    };
+
+    // Runs ops in one group and checks them. The first call of a test may skip every rank where the kernel isn't
+    // eligible, so callers stop on IsSkipped() or HasFatalFailure().
+    void runHierAllReduce(const std::vector<HierArOp>& ops, int rank, int nRanks, bool* first, const char* label)
+    {
+        for(const HierArOp& op : ops)
+        {
+            ASSERT_MPI_EQ(hipSuccess,
+                          initializeBufferWithPattern<float>(op.send, op.count, [rank, &op](size_t i) {
+                              return ldPatternValue(rank, op.patternBase + i);
+                          }));
+            if(op.recv != op.send)
+            {
+                ASSERT_MPI_EQ(hipSuccess, zeroInitializeBuffer<float>(op.recv, op.count));
+            }
+        }
+
+        ncclResult_t res = ops.size() > 1 ? ncclGroupStart() : ncclSuccess;
+        for(const HierArOp& op : ops)
+        {
+            if(res == ncclSuccess)
+            {
+                res = ncclAllReduce(op.send, op.recv, op.count, ncclFloat, ncclSum, getActiveCommunicator(),
+                                    getActiveStream());
+            }
+        }
+        if(ops.size() > 1)
+        {
+            ncclResult_t endRes = ncclGroupEnd();
+            res                 = res == ncclSuccess ? endRes : res;
+        }
+        // Drain before the vote so a skip never leaves a kernel reading a window that ~SymBuf deregisters.
+        hipError_t        syncErr = (res == ncclSuccess) ? hipStreamSynchronize(getActiveStream()) : hipSuccess;
+        const std::string ineligible
+            = mpiCoordinatedSkipReason(res == ncclInvalidUsage && *first,
+                                       "AllReduce_HierLsaLDST symmetric kernel not eligible on this topology");
+        if(!ineligible.empty())
+        {
+            GTEST_SKIP() << ineligible;
+        }
+        *first = false;
+        ASSERT_MPI_EQ(ncclSuccess, res);
+        ASSERT_MPI_EQ(hipSuccess, syncErr);
+
+        bool ok = true;
+        for(const HierArOp& op : ops)
+        {
+            size_t errIdx{};
+            float  expVal{}, actVal{};
+            bool   opOk = verifyBufferData<float>(
+                op.recv, op.count, [nRanks, &op](size_t i) { return ldPatternSum(nRanks, op.patternBase + i); }, 0,
+                1e-5, &errIdx, &expVal, &actVal);
+            if(!opOk)
+            {
+                ADD_FAILURE() << "AllReduce_HierLsaLDST mismatch, " << label << ", count=" << op.count
+                              << " index=" << errIdx << " expected=" << expVal << " got=" << actVal;
+            }
+            ok = ok && opOk;
+        }
+        // Collective so a rank-local mismatch stops every rank instead of leaving peers in the next kernel.
+        ASSERT_MPI_TRUE(ok);
+    }
+
+private:
+    std::vector<std::unique_ptr<MPIHelpers::MpiEnvGuard>> hierEnv_;
 };
 
 // ===========================================================================
@@ -808,28 +911,6 @@ TEST_F(SymmetricKernelCorruptionTest, ReduceScatterLL_PositionDependentData)
 // data tests use position-dependent data, since a constant fill hides a mispartitioned range.
 // ===========================================================================
 
-namespace
-{
-
-// Prime, so the period does not divide the 1024-float gfx950 chunk and a chunk-aligned
-// misplacement still changes the values.
-constexpr size_t kLdPatternPeriod = 1021;
-
-// Value a rank writes at a global index, small enough to be exact in float.
-inline float ldPatternValue(int rank, size_t globalIdx)
-{
-    return static_cast<float>(rank + 1) + static_cast<float>(globalIdx % kLdPatternPeriod);
-}
-
-// Sum of ldPatternValue over all ranks at one global index.
-inline float ldPatternSum(int nRanks, size_t globalIdx)
-{
-    return static_cast<float>(nRanks * (nRanks + 1)) / 2.0f
-           + static_cast<float>(nRanks) * static_cast<float>(globalIdx % kLdPatternPeriod);
-}
-
-} // namespace
-
 // gfx950 gates the deep path on a floor instead of trimming to a whole wave.
 // The large counts are not multiples of the chunk size, so the last wave is partial, while the
 // small ones stay on the LL kernels, where a stride disagreeing with the launch width would alias
@@ -1245,12 +1326,7 @@ TEST_F(SymmetricKernelCorruptionTest, ReduceScatterHierLsaLDST_PositionDependent
         GTEST_SKIP() << "Need 4 or more MPI ranks";
     }
 
-    // Read at communicator init, so the guard must outlive createTestCommunicator.
-    MPIHelpers::MpiEnvGuard symKernelGuard("NCCL_SYM_KERNEL", "ReduceScatter_HierLsaLDST");
-    // Lift the size window the symmetric kernels get, as runHierAllGatherDataTest does.
-    MPIHelpers::MpiEnvGuard symkMinGuard("RCCL_SYM_K_MIN_BYTES", "0");
-    MPIHelpers::MpiEnvGuard symkMaxGuard("RCCL_SYM_K_MAX_BYTES",
-                                         std::to_string(std::numeric_limits<int64_t>::max()).c_str());
+    forceHierKernels("ReduceScatter_HierLsaLDST");
     ASSERT_EQ(ncclSuccess, createTestCommunicator());
 
     int rank{};
@@ -1262,14 +1338,10 @@ TEST_F(SymmetricKernelCorruptionTest, ReduceScatterHierLsaLDST_PositionDependent
     const std::vector<size_t> counts   = {1, 15, 16, 17, 4097, 65539, (1 << 20) + 5, 8 << 20, (12 << 20) + 3};
     const size_t              maxCount = *std::max_element(counts.begin(), counts.end());
 
-    const std::string gated = mpiCoordinatedSkipReason(
-        rcclParamSymKMinBytes() != 0
-            || rcclParamSymKMaxBytes() < static_cast<int64_t>(maxCount * nRanks * sizeof(float)),
-        "RCCL_SYM_K_MIN_BYTES or RCCL_SYM_K_MAX_BYTES was read earlier in this process; run the test in its own "
-        "mpirun invocation");
-    if(!gated.empty())
+    const std::string skip = hierSkipReason();
+    if(!skip.empty())
     {
-        GTEST_SKIP() << gated;
+        GTEST_SKIP() << skip;
     }
 
     // Window registration is collective, so allocate once and agree on the outcome before any rank can skip.
@@ -1280,16 +1352,6 @@ TEST_F(SymmetricKernelCorruptionTest, ReduceScatterHierLsaLDST_PositionDependent
     if(!noSym.empty())
     {
         GTEST_SKIP() << noSym;
-    }
-
-    // Without symmetricSupport the forced kernel is ineligible; skip with that reason instead of on ncclInvalidUsage.
-    ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
-    ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(getActiveCommunicator(), &props));
-    int symmetric = props.deviceApiSupport ? 1 : 0;
-    ASSERT_EQ(MPI_SUCCESS, MPI_Allreduce(MPI_IN_PLACE, &symmetric, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
-    if(!symmetric)
-    {
-        GTEST_SKIP() << "Symmetric kernels unavailable (symmetricSupport off, e.g. cuMem/VMM unavailable)";
     }
 
     bool first = true;
@@ -1345,6 +1407,229 @@ TEST_F(SymmetricKernelCorruptionTest, ReduceScatterHierLsaLDST_PositionDependent
             ASSERT_MPI_TRUE(ok);
         }
     }
+}
+
+// AllReduce_HierLsaLDST (sum only) on gfx1250 partition mode. Counts: fewer than ranks, around the 16-byte pack, tails,
+// several rounds, and either side of 64 MiB, where the launch switches to the pipelined roles.
+TEST_F(SymmetricKernelCorruptionTest, AllReduceHierLsaLDST_PositionDependentData)
+{
+    if(!validateTestPrerequisites(4))
+    {
+        GTEST_SKIP() << "Need 4 or more MPI ranks";
+    }
+    forceHierKernels("AllReduce_HierLsaLDST");
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+    int rank{};
+    int nRanks{};
+    ASSERT_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+    ASSERT_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
+
+    const std::vector<size_t> counts
+        = {1, 3, 4, 15, 16, 17, 4097, 65539, (1 << 20) + 5, 8 << 20, 16 << 20, (16 << 20) + 3};
+    const size_t     maxCount = *std::max_element(counts.begin(), counts.end());
+    constexpr size_t kSlack   = 4; // room to start a buffer off its 16-byte boundary
+
+    std::string skip = hierSkipReason();
+    if(!skip.empty())
+    {
+        GTEST_SKIP() << skip;
+    }
+    SymBuf sendSym;
+    SymBuf recvSym;
+    skip = allocSymBufsSkipReason(
+        {{(maxCount + kSlack) * sizeof(float), &sendSym}, {(maxCount + kSlack) * sizeof(float), &recvSym}});
+    if(!skip.empty())
+    {
+        GTEST_SKIP() << skip;
+    }
+
+    float* send = static_cast<float*>(sendSym.ptr);
+    float* recv = static_cast<float*>(recvSym.ptr);
+    struct
+    {
+        const char* label;
+        size_t      sendOff;
+        size_t      recvOff;
+        bool        inPlace;
+    } const placements[] = {
+        {"out-of-place", 0, 0, false},
+        {"in-place", 0, 0, true},
+        {"both misaligned", 1, 1, false},
+        {"output misaligned", 0, 1, false},
+    };
+    bool first = true;
+    for(size_t count : counts)
+    {
+        for(const auto& p : placements)
+        {
+            float* in  = send + p.sendOff;
+            float* out = p.inPlace ? in : recv + p.recvOff;
+            runHierAllReduce({{in, out, count, 0}}, rank, nRanks, &first, p.label);
+            if(IsSkipped() || HasFatalFailure())
+            {
+                return;
+            }
+        }
+    }
+}
+
+// Grouped works share a launch and carry the round count between them, and into the next launch.
+TEST_F(SymmetricKernelCorruptionTest, AllReduceHierLsaLDST_GroupedWorks)
+{
+    if(!validateTestPrerequisites(4))
+    {
+        GTEST_SKIP() << "Need 4 or more MPI ranks";
+    }
+    forceHierKernels("AllReduce_HierLsaLDST");
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+    int rank{};
+    int nRanks{};
+    ASSERT_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+    ASSERT_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
+
+    const std::vector<size_t> counts = {17, (1 << 20) + 5, 4 << 20, 3};
+    std::vector<size_t>       offsets;
+    size_t                    total = 0;
+    for(size_t count : counts)
+    {
+        offsets.push_back(total);
+        total += (count + 3) & ~size_t(3);
+    }
+
+    std::string skip = hierSkipReason();
+    if(!skip.empty())
+    {
+        GTEST_SKIP() << skip;
+    }
+    SymBuf sendSym;
+    SymBuf recvSym;
+    skip = allocSymBufsSkipReason({{total * sizeof(float), &sendSym}, {total * sizeof(float), &recvSym}});
+    if(!skip.empty())
+    {
+        GTEST_SKIP() << skip;
+    }
+
+    std::vector<HierArOp> ops;
+    for(size_t i = 0; i < counts.size(); ++i)
+    {
+        ops.push_back({static_cast<float*>(sendSym.ptr) + offsets[i], static_cast<float*>(recvSym.ptr) + offsets[i],
+                       counts[i], 101 * i});
+    }
+    bool first = true;
+    for(int launch = 0; launch < 2; ++launch)
+    {
+        runHierAllReduce(ops, rank, nRanks, &first, launch == 0 ? "grouped, first launch" : "grouped, second launch");
+        if(IsSkipped() || HasFatalFailure())
+        {
+            return;
+        }
+    }
+}
+
+// The hierarchical ReduceScatter and AllReduce share their round count and flags; alternate them with no host sync.
+TEST_F(SymmetricKernelCorruptionTest, HierReduceScatterThenAllReduce_ShareRoundState)
+{
+    if(!validateTestPrerequisites(4))
+    {
+        GTEST_SKIP() << "Need 4 or more MPI ranks";
+    }
+    forceHierKernels("ReduceScatter_HierLsaLDST,AllReduce_HierLsaLDST");
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+    int rank{};
+    int nRanks{};
+    ASSERT_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+    ASSERT_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
+
+    constexpr int    kRounds   = 3;
+    constexpr size_t kRsCount  = (1 << 18) + 4;
+    constexpr size_t kArCount  = (1 << 20) + 5;
+    const size_t     rsInCount = kRsCount * static_cast<size_t>(nRanks);
+    const size_t     arStride  = (kArCount + 3) & ~size_t(3);
+
+    std::string skip = hierSkipReason();
+    if(!skip.empty())
+    {
+        GTEST_SKIP() << skip;
+    }
+    SymBuf rsSendSym;
+    SymBuf rsRecvSym;
+    SymBuf arSendSym;
+    SymBuf arRecvSym;
+    skip = allocSymBufsSkipReason({{rsInCount * sizeof(float), &rsSendSym},
+                                   {kRounds * kRsCount * sizeof(float), &rsRecvSym},
+                                   {arStride * sizeof(float), &arSendSym},
+                                   {kRounds * arStride * sizeof(float), &arRecvSym}});
+    if(!skip.empty())
+    {
+        GTEST_SKIP() << skip;
+    }
+
+    float* rsSend = static_cast<float*>(rsSendSym.ptr);
+    float* rsRecv = static_cast<float*>(rsRecvSym.ptr);
+    float* arSend = static_cast<float*>(arSendSym.ptr);
+    float* arRecv = static_cast<float*>(arRecvSym.ptr);
+    ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<float>(
+                                  rsSend, rsInCount, [rank](size_t i) { return ldPatternValue(rank, i); }));
+    ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<float>(
+                                  arSend, kArCount, [rank](size_t i) { return ldPatternValue(rank, i); }));
+    ASSERT_MPI_EQ(hipSuccess, zeroInitializeBuffer<float>(rsRecv, kRounds * kRsCount));
+    ASSERT_MPI_EQ(hipSuccess, zeroInitializeBuffer<float>(arRecv, kRounds * arStride));
+
+    ncclResult_t firstRes = ncclSuccess;
+    ncclResult_t res      = ncclSuccess;
+    for(int round = 0; round < kRounds && res == ncclSuccess; ++round)
+    {
+        res = ncclReduceScatter(rsSend, rsRecv + round * kRsCount, kRsCount, ncclFloat, ncclSum,
+                                getActiveCommunicator(), getActiveStream());
+        if(round == 0)
+        {
+            firstRes = res;
+        }
+        if(res == ncclSuccess)
+        {
+            res = ncclAllReduce(arSend, arRecv + round * arStride, kArCount, ncclFloat, ncclSum,
+                                getActiveCommunicator(), getActiveStream());
+        }
+    }
+    hipError_t        syncErr = (firstRes == ncclSuccess) ? hipStreamSynchronize(getActiveStream()) : hipSuccess;
+    const std::string ineligible
+        = mpiCoordinatedSkipReason(firstRes == ncclInvalidUsage,
+                                   "ReduceScatter_HierLsaLDST symmetric kernel not eligible on this topology");
+    if(!ineligible.empty())
+    {
+        GTEST_SKIP() << ineligible;
+    }
+    ASSERT_MPI_EQ(ncclSuccess, res);
+    ASSERT_MPI_EQ(hipSuccess, syncErr);
+
+    const size_t rsBase = static_cast<size_t>(rank) * kRsCount;
+    bool         ok     = true;
+    for(int round = 0; round < kRounds; ++round)
+    {
+        size_t errIdx{};
+        float  expVal{}, actVal{};
+        if(!verifyBufferData<float>(
+               rsRecv + round * kRsCount, kRsCount,
+               [nRanks, rsBase](size_t j) { return ldPatternSum(nRanks, rsBase + j); }, 0, 1e-5, &errIdx, &expVal,
+               &actVal))
+        {
+            ADD_FAILURE() << "ReduceScatter_HierLsaLDST mismatch, round " << round << " index=" << errIdx
+                          << " expected=" << expVal << " got=" << actVal;
+            ok = false;
+        }
+        if(!verifyBufferData<float>(
+               arRecv + round * arStride, kArCount, [nRanks](size_t j) { return ldPatternSum(nRanks, j); }, 0, 1e-5,
+               &errIdx, &expVal, &actVal))
+        {
+            ADD_FAILURE() << "AllReduce_HierLsaLDST mismatch, round " << round << " index=" << errIdx
+                          << " expected=" << expVal << " got=" << actVal;
+            ok = false;
+        }
+    }
+    ASSERT_MPI_TRUE(ok);
 }
 
 #endif // MPI_TESTS_ENABLED

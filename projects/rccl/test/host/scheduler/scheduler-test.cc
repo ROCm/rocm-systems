@@ -1801,13 +1801,13 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_WorkArgsAbove4K_C
   for (int n : batchSizes) EXPECT_LE(symkMaxDevWorkArgsSize(nCh, n, false), kSymkArgBytes);
 }
 
-// The per-launch channel bound: at least ncclSymkAgHierMaxBlocks (72), else min(nChannels, maxCTAs).
-TEST_F(SchedulerMicrotest, SymkMaxLaunchChannels_FloorAt72_ElseMinOfNChannelsAndMaxCtas) {
+// The per-launch channel bound: at least ncclSymkHierRows() (96), else min(nChannels, maxCTAs).
+TEST_F(SchedulerMicrotest, SymkMaxLaunchChannels_FloorAtTheHierRows_ElseMinOfNChannelsAndMaxCtas) {
   std::unique_ptr<ncclComm> comm(new ncclComm{});
   struct Case {
     int nChannels, maxCTAs, expected;
   };
-  for (const Case& c : {Case{0, 0, 72}, Case{128, 128, 128}, Case{128, 64, 72}, Case{200, 100, 100}}) {
+  for (const Case& c : {Case{0, 0, 96}, Case{128, 128, 128}, Case{128, 64, 96}, Case{200, 100, 100}}) {
     comm->nChannels = c.nChannels;
     comm->config.maxCTAs = c.maxCTAs;
     EXPECT_EQ(symkMaxLaunchChannels(comm.get()), c.expected) << "nChannels=" << c.nChannels << " maxCTAs=" << c.maxCTAs;
@@ -2765,6 +2765,36 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_TmaKernel_ShippingGeometry_Thr
   auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
   ASSERT_NE(argsBuf, nullptr);
   EXPECT_EQ(argsBuf->maxDynamicSmem, kSymTmaGrantBytes);
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_HierKernel_LaunchTuningReachesKernelArgs) {
+  SymmetricTaskScheduler_Scene scene;
+  scene.comm->symkState.kcomm.hierChunkSize = 128 << 10;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.func = ncclFuncAllReduce;
+  task.devFuncId = ncclSymkKernelId_AllReduce_HierLsaLDST;
+  task.datatype = ncclFloat32;
+  task.count = 1024;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  size_t seenBytes = 0;
+  int seenBlocks = 0;
+  ScopedHook tuning(g_symkHierLaunchTuning, [&](struct ncclComm*, enum ncclSymkKernelId kernelId, size_t nBytes,
+                                                int nBlocks, struct ncclSymkHierTuning* tuned) {
+    EXPECT_EQ(kernelId, ncclSymkKernelId_AllReduce_HierLsaLDST);
+    seenBytes = nBytes;
+    seenBlocks = nBlocks;
+    *tuned = ncclSymkHierTuning{nBlocks, 512, true, 32 << 10};
+    return true;
+  });
+
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
+  ASSERT_NE(argsBuf, nullptr);
+  EXPECT_EQ(seenBytes, size_t(1024 * sizeof(float)));
+  EXPECT_GT(seenBlocks, 0);
+  EXPECT_EQ(argsBuf->kcomm.hierChunkSize, 32u << 10);
+  EXPECT_TRUE(argsBuf->kcomm.hierPipeline);
+  EXPECT_EQ(scene.comm->symkState.kcomm.hierChunkSize, 128u << 10);
 }
 
 // The tuned width's windows, one byte short: the plan has to fail rather than launch an overrun

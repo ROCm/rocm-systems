@@ -99,6 +99,7 @@ static constexpr struct ncclAlgRegEntry algRegistry[] = {
   {"SYMK_HierLsaST",         SYMBIT(AllGather_HierLsaST),       F_AG, -1, -1, ncclSymkKernelId_AllGather_HierLsaST},
   {"SYMK_HierLsaTmaST",      SYMBIT(AllGather_HierLsaTmaST),    F_AG, -1, -1, ncclSymkKernelId_AllGather_HierLsaTmaST},
   {"SYMK_HierLsaLDST",       SYMBIT(ReduceScatter_HierLsaLDST), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_HierLsaLDST},
+  {"SYMK_HierLsaLDST",       SYMBIT(AllReduce_HierLsaLDST),     F_AR, -1, -1, ncclSymkKernelId_AllReduce_HierLsaLDST},
 #undef SYMBIT
 };
 // clang-format on

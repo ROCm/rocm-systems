@@ -134,6 +134,9 @@ ncclResult_t ncclSymkLsaBaseModel(struct ncclTuningInput_t* input, enum ncclSymk
     busBytes = nBytes / nRanks + nBytes;
     busMultiplier = nRanks;
     break;
+  case ncclSymkKernelId_AllReduce_HierLsaLDST:
+    busBytes = 2 * nBytes;
+    break;
 
   case ncclSymkKernelId_AllGather_LL:
     busBytes = nRanks * nBytes * LL_BusFactor;

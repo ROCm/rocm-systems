@@ -408,7 +408,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                    // [1] Reduce          -- not used on gfx1250
     2ULL*1024*1024,       // [2] AllGather
     kThreshUnlimited,     // [3] ReduceScatter
-    0,                    // [4] AllReduce
+    kThreshUnlimited,     // [4] AllReduce
     0,                    // [5] SendRecv        -- not used on gfx1250
     0,                    // [6] Send            -- not used on gfx1250
     0,                    // [7] Recv            -- not used on gfx1250
@@ -422,7 +422,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                    // [1] Reduce          -- not used on gfx1250
     2ULL*1024*1024,       // [2] AllGather
     kThreshUnlimited,     // [3] ReduceScatter
-    0,                    // [4] AllReduce
+    kThreshUnlimited,     // [4] AllReduce
     0,                    // [5] SendRecv        -- not used on gfx1250
     0,                    // [6] Send            -- not used on gfx1250
     0,                    // [7] Recv            -- not used on gfx1250
@@ -440,6 +440,18 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     kThreshUnlimited,     // [6] Send            -- not used on gfx1250
     kThreshUnlimited,     // [7] Recv            -- not used on gfx1250
     kThreshUnlimited,     // [8] AlltoAll        -- not used on gfx1250
+  },
+  // symMinR2 on multi-node comms; 0 = same as symMinR2.
+  .symMinR2MultiNode = {
+    0,                    // [0] Broadcast
+    0,                    // [1] Reduce
+    0,                    // [2] AllGather
+    0,                    // [3] ReduceScatter
+    2ULL*1024*1024,       // [4] AllReduce
+    0,                    // [5] SendRecv
+    0,                    // [6] Send
+    0,                    // [7] Recv
+    0,                    // [8] AlltoAll
   },
   .agHierSymMinR2 = 16ULL*1024*1024,
   .agHierSymMaxR2 = kThreshUnlimited,

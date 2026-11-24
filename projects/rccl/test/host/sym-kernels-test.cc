@@ -511,23 +511,38 @@ TEST_F(SymKernelMaskTest, AllGather_AGKernelSurvives) {
 
 // ---- Hierarchical AllGather: packages found in peerInfo, and the mask gate ----
 
-TEST_F(SymKernelMicrotest, AgHierLimits_UnsetEnvKeepsTheDefaults) {
-  EXPECT_EQ(ncclSymkAgHierMaxBlocksLimit(), ncclSymkAgHierMaxBlocks);
-  EXPECT_EQ(ncclSymkAgHierMaxChunkBytesLimit(), ncclSymkAgHierMaxChunkBytes);
+TEST_F(SymKernelMicrotest, HierLimits_UnsetEnvKeepsEachKernelsCap) {
+  EXPECT_EQ(ncclSymkHierCtas(), 0);
+  EXPECT_EQ(ncclSymkHierChunkBytes(), size_t(0));
+  EXPECT_EQ(ncclSymkHierMaxBlocksLimit(ncclSymkKernelId_AllGather_HierLsaST), ncclSymkAgHierMaxBlocks);
+  EXPECT_EQ(ncclSymkHierMaxBlocksLimit(ncclSymkKernelId_AllGather_HierLsaTmaST), ncclSymkAgHierTmaMaxBlocks);
+  EXPECT_EQ(ncclSymkHierMaxBlocksLimit(ncclSymkKernelId_ReduceScatter_HierLsaLDST), ncclSymkHierMaxBlocks);
+  EXPECT_EQ(ncclSymkHierMaxBlocksLimit(ncclSymkKernelId_AllReduce_HierLsaLDST), ncclSymkHierMaxBlocks);
+  EXPECT_EQ(ncclSymkHierMaxBlocksLimit(ncclSymkKernelId_AllGather_ST), 0);
+  EXPECT_EQ(ncclSymkHierRows(), ncclSymkHierMaxBlocks);
 }
 
-TEST_F(SymKernelMicrotest, AgHierLimits_EnvOverridesAndClamps) {
-  g_loadParam = ParamOverride({{"SYM_AG_HIER_CTAS", 96}, {"SYM_AG_HIER_CHUNK_BYTES", 64 << 10}});
-  EXPECT_EQ(ncclSymkAgHierMaxBlocksLimit(), 96);
-  EXPECT_EQ(ncclSymkAgHierMaxChunkBytesLimit(), size_t(64 << 10));
+TEST_F(SymKernelMicrotest, HierLimits_EnvOverridesAndClamps) {
+  g_loadParam = ParamOverride({{"SYM_HIER_CTAS", 40}, {"SYM_HIER_CHUNK_BYTES", 64 << 10}});
+  EXPECT_EQ(ncclSymkHierCtas(), 40);
+  EXPECT_EQ(ncclSymkHierChunkBytes(), size_t(64 << 10));
+  EXPECT_EQ(ncclSymkHierMaxBlocksLimit(ncclSymkKernelId_AllGather_HierLsaST), 40);
+  EXPECT_EQ(ncclSymkHierMaxBlocksLimit(ncclSymkKernelId_AllGather_HierLsaTmaST), 40);
+  EXPECT_EQ(ncclSymkHierMaxBlocksLimit(ncclSymkKernelId_AllReduce_HierLsaLDST), 40);
+  EXPECT_EQ(ncclSymkHierRows(), 40);
 
-  g_loadParam = ParamOverride({{"SYM_AG_HIER_CTAS", 10000}, {"SYM_AG_HIER_CHUNK_BYTES", int64_t(1) << 40}});
-  EXPECT_EQ(ncclSymkAgHierMaxBlocksLimit(), MAXCHANNELS);
-  EXPECT_EQ(ncclSymkAgHierMaxChunkBytesLimit(), size_t(1) << 30);
+  // The TDM AllGather never exceeds its own cap.
+  g_loadParam = ParamOverride({{"SYM_HIER_CTAS", 128}});
+  EXPECT_EQ(ncclSymkHierMaxBlocksLimit(ncclSymkKernelId_AllGather_HierLsaTmaST), ncclSymkAgHierTmaMaxBlocks);
+  EXPECT_EQ(ncclSymkHierMaxBlocksLimit(ncclSymkKernelId_ReduceScatter_HierLsaLDST), 128);
 
-  g_loadParam = ParamOverride({{"SYM_AG_HIER_CTAS", 0}, {"SYM_AG_HIER_CHUNK_BYTES", -1}});
-  EXPECT_EQ(ncclSymkAgHierMaxBlocksLimit(), ncclSymkAgHierMaxBlocks);
-  EXPECT_EQ(ncclSymkAgHierMaxChunkBytesLimit(), ncclSymkAgHierMaxChunkBytes);
+  g_loadParam = ParamOverride({{"SYM_HIER_CTAS", 10000}, {"SYM_HIER_CHUNK_BYTES", int64_t(1) << 40}});
+  EXPECT_EQ(ncclSymkHierCtas(), MAXCHANNELS);
+  EXPECT_EQ(ncclSymkHierChunkBytes(), size_t(1) << 30);
+
+  g_loadParam = ParamOverride({{"SYM_HIER_CTAS", -1}, {"SYM_HIER_CHUNK_BYTES", -1}});
+  EXPECT_EQ(ncclSymkHierCtas(), 0);
+  EXPECT_EQ(ncclSymkHierChunkBytes(), size_t(0));
 }
 
 // A package is a run of consecutive ranks on one physical device, and every package must be the same size.
@@ -581,29 +596,73 @@ TEST_F(SymKernelMaskTest, HierKernels_OnlyOnGfx1250PartitionModeWithTwoOrMorePac
     EXPECT_EQ(KernelBitSet(kmask, ncclSymkKernelId_AllGather_HierLsaTmaST), c.offered && TmaReachableOnThisBuild())
         << c.name;
     EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllGather_ST)) << c.name;
-    // The hierarchical ReduceScatter has the same gate, and is sum only.
+    // The hierarchical ReduceScatter and AllReduce have the same gate, and are sum only.
     ncclSymkKernelMask rsSum = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
     EXPECT_EQ(KernelBitSet(rsSum, ncclSymkKernelId_ReduceScatter_HierLsaLDST), c.offered) << c.name;
     ncclSymkKernelMask rsAvg = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSumPostDiv, kTy, /*nElts=*/1024);
     EXPECT_FALSE(KernelBitSet(rsAvg, ncclSymkKernelId_ReduceScatter_HierLsaLDST)) << c.name;
+    ncclSymkKernelMask arSum = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024);
+    EXPECT_EQ(KernelBitSet(arSum, ncclSymkKernelId_AllReduce_HierLsaLDST), c.offered) << c.name;
+    ncclSymkKernelMask arAvg = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSumPostDiv, kTy, /*nElts=*/1024);
+    EXPECT_FALSE(KernelBitSet(arAvg, ncclSymkKernelId_AllReduce_HierLsaLDST)) << c.name;
   }
 }
 
 // Blocks step up at 16 and 64 MiB of bus bytes. The chunk drops to the small one below 512 KiB per block, and never
 // exceeds what the slots were sized for.
-TEST_F(SymKernelMicrotest, RsHierLaunch_BlocksAndChunkSize) {
-  EXPECT_EQ(ncclSymkRsHierLaunchBlocks(4, (size_t(4) << 20) - 1), 64);
-  EXPECT_EQ(ncclSymkRsHierLaunchBlocks(4, size_t(4) << 20), 80);
-  EXPECT_EQ(ncclSymkRsHierLaunchBlocks(4, (size_t(16) << 20) - 1), 80);
-  EXPECT_EQ(ncclSymkRsHierLaunchBlocks(4, size_t(16) << 20), ncclSymkRsHierMaxBlocks);
+TEST_F(SymKernelMicrotest, HierLaunch_BlocksAndChunkSize) {
+  comm_->nRanks = 4;
+  auto rsTuning = [&](size_t nBytes, int nBlocks) {
+    struct ncclSymkHierTuning tuned;
+    EXPECT_TRUE(ncclSymkHierLaunchTuning(comm_.get(), ncclSymkKernelId_ReduceScatter_HierLsaLDST, nBytes, nBlocks,
+                                         &tuned));
+    return tuned;
+  };
+  EXPECT_EQ(rsTuning((size_t(4) << 20) - 1, 1).blocks, 64);
+  EXPECT_EQ(rsTuning(size_t(4) << 20, 1).blocks, 80);
+  EXPECT_EQ(rsTuning((size_t(16) << 20) - 1, 1).blocks, 80);
+  EXPECT_EQ(rsTuning(size_t(16) << 20, 1).blocks, ncclSymkHierMaxBlocks);
 
-  comm_->symkState.kcomm.rsHierChunkSize = ncclSymkRsHierMaxChunkBytes;
-  EXPECT_EQ(ncclSymkRsHierLaunchChunkSize(comm_.get(), ncclSymkRsHierChunkSwitchBlockBytes - 1),
-            ncclSymkRsHierMinChunkBytes);
-  EXPECT_EQ(ncclSymkRsHierLaunchChunkSize(comm_.get(), ncclSymkRsHierChunkSwitchBlockBytes),
-            ncclSymkRsHierMaxChunkBytes);
-  comm_->symkState.kcomm.rsHierChunkSize = 16 << 10;  // slots shrunk to fit many packages
-  EXPECT_EQ(ncclSymkRsHierLaunchChunkSize(comm_.get(), 0), 16u << 10);
+  // The chunk follows the bytes each block handles, which is nBytes with one block.
+  comm_->symkState.kcomm.hierChunkSize = ncclSymkHierMaxChunkBytes;
+  EXPECT_EQ(rsTuning(ncclSymkHierChunkSwitchBlockBytes - 1, 1).chunkBytes, ncclSymkHierMinChunkBytes);
+  EXPECT_EQ(rsTuning(ncclSymkHierChunkSwitchBlockBytes, 1).chunkBytes, ncclSymkHierMaxChunkBytes);
+  comm_->symkState.kcomm.hierChunkSize = 16 << 10;  // slots shrunk to fit many packages
+  EXPECT_EQ(rsTuning(0, 1).chunkBytes, 16u << 10);
+}
+
+// Every setting switches above 64 MiB. The chunk, overridden or not, never exceeds what the slots were sized for.
+TEST_F(SymKernelMicrotest, HierLaunch_AllReduceSettings) {
+  SetTdmCapableArch(comm_.get());
+  comm_->hasMloPart = true;
+  comm_->symkState.kcomm.hierChunkSize = ncclSymkHierMaxChunkBytes;
+  struct ncclSymkHierTuning t;
+  auto arTuning = [&](size_t nBytes) {
+    return ncclSymkHierLaunchTuning(comm_.get(), ncclSymkKernelId_AllReduce_HierLsaLDST, nBytes, /*nBlocks=*/1, &t);
+  };
+  ASSERT_TRUE(arTuning(size_t(64) << 20));
+  EXPECT_EQ(t.blocks, 64);
+  EXPECT_EQ(t.threads, 256);
+  EXPECT_FALSE(t.pipeline);
+  EXPECT_EQ(t.chunkBytes, 128u << 10);
+  ASSERT_TRUE(arTuning((size_t(64) << 20) + 1));
+  EXPECT_EQ(t.blocks, 88);
+  EXPECT_EQ(t.threads, 512);
+  EXPECT_TRUE(t.pipeline);
+  EXPECT_EQ(t.chunkBytes, 32u << 10);
+
+  g_loadParam = ParamOverride({{"SYM_HIER_CHUNK_BYTES", (64 << 10) + 100}, {"SYM_HIER_PIPELINE", 1}});
+  ASSERT_TRUE(arTuning(1 << 20));
+  EXPECT_EQ(t.chunkBytes, 64u << 10);
+  EXPECT_TRUE(t.pipeline);
+  g_loadParam = ParamOverride({{"SYM_HIER_CHUNK_BYTES", int64_t(1) << 30}, {"SYM_HIER_PIPELINE", 0}});
+  ASSERT_TRUE(arTuning(size_t(1) << 30));
+  EXPECT_EQ(t.chunkBytes, ncclSymkHierMaxChunkBytes);
+  EXPECT_FALSE(t.pipeline);
+  EXPECT_EQ(t.threads, 512);
+
+  comm_->hasMloPart = false;
+  EXPECT_FALSE(arTuning(1 << 20));
 }
 
 // The mask drops the hierarchical kernels across LSA teams, so the groups that open their window must be 0 too.
