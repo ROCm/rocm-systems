@@ -35,7 +35,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - `rocprof-attach -t/--attach-tool-library` is now optional. A tool library given with `-t` or `ROCPROF_ATTACH_TOOL_LIBRARY` is used exactly as given and is interpreted in the target's filesystem. `rocprofv3 --attach` now honors a user-set `ROCPROF_ATTACH_TOOL_LIBRARY`.
 - A user-set `ROCP_TOOL_LIBRARIES` is ignored in attach mode, with a warning. Use `-t` or `ROCPROF_ATTACH_TOOL_LIBRARY` to attach a custom tool library.
 - `rocprof-attach` reports a clear error before touching the target when the target's rocprofiler-sdk attach library predates attachment through the `rocp-bg-attach` thread.
-- Bump rocpd schema to version 3.1.0 for PC sampling support (`rocpd_gpu_pc_sample`, blob tables `rocpd_info_blob_schema`/`rocpd_info_blob_field`/`rocpd_blob_event`, `rocpd_disassembly_data`, and `rocpd_event.parent_id`). The pre-PC-sampling 3.0.6 schema is now frozen under `versions/3.0.6/` per the rocpd schema versioning scheme.
+- Bumped rocpd schema to version 3.1.0 for PC sampling support (`rocpd_gpu_pc_sample`, blob tables (`rocpd_info_blob_schema`/`rocpd_info_blob_field`/`rocpd_blob_event`), `rocpd_disassembly_data`, and `rocpd_event.parent_id`). The pre-PC-sampling 3.0.6 schema is now frozen under `versions/3.0.6/`, following the rocpd schema versioning convention.
 - rocpd lazily disassembles PC samples only from code objects whose bytes match the content hash `rocprofv3` records for them, and writes back only those instructions. `rocpd2csv` and `python -m rocpd.query` accept `--no-cache-disassembly` and `--codeobj-path-prefix-map`, and the PC-sampling CSV files start with a `Guid` column.
 
 ### Resolved issues
