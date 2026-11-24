@@ -11440,8 +11440,6 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherMustEnqueue_ReportsPlannerK
         int algo = -7, protocol = -7, maxChannels = -7;
         EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
                                                     nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
-        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, algo)
-            << "check mode runs ncclEnqueueCheck, which never runs DDA";
         EXPECT_EQ(NCCL_ALGO_TREE, algo) << "the hooked planner kernel";
         EXPECT_EQ(NCCL_PROTO_LL, protocol);
         DeleteCommWithArch(comm);
@@ -11470,8 +11468,6 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllReduceMustEnqueue_ReportsPlannerK
         int algo = -7, protocol = -7, maxChannels = -7;
         EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllReduce, 8, ncclFloat32, ncclSum, nullptr,
                                                     nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
-        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, algo)
-            << "check mode runs ncclEnqueueCheck, which never runs DDA";
         EXPECT_EQ(NCCL_ALGO_TREE, algo) << "the hooked planner kernel";
         EXPECT_EQ(NCCL_PROTO_LL, protocol);
         DeleteCommWithArch(comm);
@@ -11501,8 +11497,6 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_ReduceScatterMustEnqueue_ReportsPlan
         int algo = -7, protocol = -7, maxChannels = -7;
         EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncReduceScatter, 8, ncclFloat32, ncclSum, nullptr,
                                                     nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
-        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, algo)
-            << "check mode runs ncclEnqueueCheck, which never runs DDA";
         EXPECT_EQ(NCCL_ALGO_TREE, algo) << "the hooked planner kernel";
         EXPECT_EQ(NCCL_PROTO_LL, protocol);
         DeleteCommWithArch(comm);
@@ -11557,7 +11551,7 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherMustEnqueue_KeepsCeRegister
         comm->nNodes = 1;
         comm->config.CTAPolicy = 0;
         comm->checkMode = ncclCheckModeDebugLocal;
-        int algo, protocol, maxChannels;
+        int algo = -7, protocol = -7, maxChannels = -7;
         EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
                                                     nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, algo);
@@ -11676,7 +11670,6 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherMustEnqueue_DdaNotRelabeled
         comm->checkMode = ncclCheckModeDebugLocal;
         EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
                                                     nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
-        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER, algo);
         EXPECT_EQ(NCCL_ALGO_TREE, algo);
         DeleteCommWithArch(comm);
       });
