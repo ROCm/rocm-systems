@@ -680,7 +680,7 @@ public:
   /// @brief Close and drain without running maintenance on the releasing thread.
   [[nodiscard]] bool close_gpu_alias_ingress(const KfdProcess::GpuAliasRecord &alias,
                                              GpuAliasIngressGate::OwnerPost owner_post,
-                                             std::function<void()> drained) {
+                                             std::function<int()> drained) {
     return alias_ingress_gate_->close(GpuAliasIngressGate::key(alias), std::move(owner_post),
                                       std::move(drained));
   }
@@ -955,7 +955,7 @@ private:
   void finish_ordinary_mapping(const KfdProcess &proc, uint64_t handle);
   int run_ordinary_mapping_drain(KfdProcess &proc, uint64_t handle,
                                  const PendingOrdinaryMapping &pending, bool retry,
-                                 const std::function<void()> &work);
+                                 const std::function<int()> &work);
 
   /// Resolve a multi-GPU DRM render minor through published node metadata.
   /// Before topology setup, retain the legacy ordinal fallback used by tests.
@@ -986,7 +986,7 @@ private:
   has_exclusive_canonical_lines(std::span<const KfdProcess::GpuAliasRecord> aliases) const;
 
   /// @brief Select owner GPU domains for local-only retirement, all domains for canonical aliases.
-  [[nodiscard]] std::vector<amdgpu::DeviceCacheDomain>
+  [[nodiscard]] util::FailureOr<std::vector<amdgpu::DeviceCacheDomain>>
   maintenance_domains_for_aliases(std::span<const KfdProcess::GpuAliasRecord> aliases) const;
 
   /// @brief Form an exact UC scope for a current canonical grant and VM.

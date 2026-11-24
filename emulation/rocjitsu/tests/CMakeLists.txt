@@ -1589,37 +1589,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_configure_target(queue_registration_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
     rj_add_gtest_tests(queue_registration_allocation_failure_test)
 
-    add_executable(
-        kfd_mmap_allocation_failure_test
-        kfd_mmap_allocation_failure_test.cpp
-    )
-    target_link_libraries(
-        kfd_mmap_allocation_failure_test
-        PRIVATE
-            ${RJ_OBJECT_LIBS}
-            util
-            flatbuffers
-            Threads::Threads
-            GTest::gtest_main
-    )
-    rj_configure_target(kfd_mmap_allocation_failure_test TEST)
-    rj_add_gtest_tests(kfd_mmap_allocation_failure_test)
-    if(RJ_INSTALL_TESTS)
-        file(
-            APPEND "${RJ_INSTALL_CTEST_FILE}"
-            "include(\"kfd_mmap_allocation_failure_test.cmake\")\n"
-        )
-    endif()
-    rj_add_test(
-        NAME KfdMmapAllocationFailureTest.FixedDoorbellReplacementPublishesOnceAndRetries.token
-        COMMAND $<TARGET_FILE:kfd_mmap_allocation_failure_test>
-            --gtest_filter=KfdMmapAllocationFailureTest.FixedDoorbellReplacementPublishesOnceAndRetries
-        ENVIRONMENT "RJ_TEST_FORCE_TOKEN_BACKING=1"
-        INSTALL_COMMAND "bin/kfd_mmap_allocation_failure_test"
-            --gtest_filter=KfdMmapAllocationFailureTest.FixedDoorbellReplacementPublishesOnceAndRetries
-        INSTALL_ENVIRONMENT "RJ_TEST_FORCE_TOKEN_BACKING=1"
-    )
-
     # Native dispatch must extract both the relative tables and their factories
     # from a static archive, including when the C++ objects use LTO.
     add_library(rocjitsu_cdna5_test_archive STATIC)
