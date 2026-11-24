@@ -15,8 +15,9 @@ namespace rocjitsu::risc_v::detail {
 // range. Every binary32 input is exactly representable in binary64.
 template <typename Int>
 void convert_fp_to_integer(HartState &hart, int rd, double value, unsigned rm) {
-  if (rm == 7)
+  if (rm == 7) {
     rm = hart.read_csr(kCsrFrm);
+  }
 
   double rounded;
   switch (rm) {
@@ -25,8 +26,9 @@ void convert_fp_to_integer(HartState &hart, int rd, double value, unsigned rm) {
     // modf splits exactly regardless of the host rounding mode. A value with a
     // fractional part is small enough that adding one to its integer part is exact.
     const double fraction = std::abs(std::modf(value, &rounded));
-    if (fraction > 0.5 || (fraction == 0.5 && (rm == 4 || std::fmod(rounded, 2.0) != 0)))
+    if (fraction > 0.5 || (fraction == 0.5 && (rm == 4 || std::fmod(rounded, 2.0) != 0))) {
       rounded += std::copysign(1.0, value);
+    }
     break;
   }
   case 2: // RDN
@@ -53,15 +55,17 @@ void convert_fp_to_integer(HartState &hart, int rd, double value, unsigned rm) {
     hart.fcsr |= invalid;
   } else {
     result = static_cast<Int>(rounded);
-    if (rounded != value)
+    if (rounded != value) {
       hart.fcsr |= inexact;
+    }
   }
 
   // Both W and WU sign-extend the low word to XLEN.
-  if constexpr (sizeof(Int) == sizeof(int32_t))
+  if constexpr (sizeof(Int) == sizeof(int32_t)) {
     hart.write_xreg(rd, sext32(static_cast<int32_t>(result)));
-  else
+  } else {
     hart.write_xreg(rd, static_cast<int64_t>(result));
+  }
 }
 
 } // namespace rocjitsu::risc_v::detail
