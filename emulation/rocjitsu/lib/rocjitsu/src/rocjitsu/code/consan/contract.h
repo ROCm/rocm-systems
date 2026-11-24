@@ -128,8 +128,11 @@ inline constexpr uint32_t kRecordGuestMask = 32;
 inline constexpr uint32_t kRecordFlags = 40;
 inline constexpr uint32_t kRecordPhase = 44;
 inline constexpr uint32_t kRecordReservedBegin = 48;
+// Transpose records use the first two reserved words for the pre-instruction EXEC.
+inline constexpr uint32_t kRecordAnchorExec = kRecordReservedBegin;
 inline constexpr uint32_t kAccessCommitted = 0x43534143;
 inline constexpr uint32_t kExactGuestMask = 1;
+inline constexpr uint32_t kExactTransposeRequestMask = 4;
 } // namespace wire
 
 /// @brief Initial software budgets, checked before allocating untrusted extents.
@@ -158,7 +161,23 @@ public:
   bool operator==(const ImageIdentity &) const = default;
 };
 
-enum class LdsRangeShape : uint32_t { Single = 0, Dual = 1, DualStride64 = 2 };
+enum class LdsRangeShape : uint32_t {
+  Single = 0,
+  Dual = 1,
+  DualStride64 = 2,
+  Transpose4 = 3,
+  Transpose6 = 4,
+  Transpose8 = 5,
+  Transpose16 = 6
+};
+
+constexpr bool is_dual(LdsRangeShape shape) {
+  return shape == LdsRangeShape::Dual || shape == LdsRangeShape::DualStride64;
+}
+
+constexpr bool is_transpose(LdsRangeShape shape) {
+  return shape >= LdsRangeShape::Transpose4 && shape <= LdsRangeShape::Transpose16;
+}
 
 struct LdsRangeRecipe {
   LdsRangeShape shape = LdsRangeShape::Single;

@@ -228,10 +228,32 @@ foreach(
                 endforeach()
             endforeach()
         endforeach()
+        set(_transpose_specs)
+        if(_gpu STREQUAL "gfx950" OR _gpu STREQUAL "gfx1250")
+            foreach(_bits IN ITEMS 4 6 8 16)
+                set(_transpose_scenarios
+                    full
+                    partial
+                    empty
+                    overlap
+                    adjacent
+                )
+                if(_gpu STREQUAL "gfx1250")
+                    list(APPEND _transpose_scenarios short)
+                endif()
+                foreach(_scenario IN LISTS _transpose_scenarios)
+                    list(
+                        APPEND _transpose_specs
+                        "transpose-${_bits}-${_scenario}:0:0:0:0:0"
+                    )
+                endforeach()
+            endforeach()
+        endif()
         foreach(
             _spec
             IN
             ITEMS
+                ${_transpose_specs}
                 u16:16:0:0:0:0
                 i16:16:1:0:0:0
                 b64:64:0:0:0:0
@@ -292,6 +314,19 @@ foreach(
             if(_name STREQUAL "d16-u16")
                 set(_peer_option -DCONSAN_D16_HALF=1)
             endif()
+            if(_name MATCHES "^transpose-([0-9]+)-(.*)$")
+                set(_form ${CMAKE_MATCH_1})
+                set(_scenario ${CMAKE_MATCH_2})
+                set(_peer_option -DCONSAN_TRANSPOSE_BITS=${_form})
+                if(
+                    _scenario STREQUAL "adjacent"
+                    OR _scenario STREQUAL "overlap"
+                )
+                    list(APPEND _peer_option -DTR_PEER=1)
+                endif()
+                string(TOUPPER "${_scenario}" _scenario_define)
+                list(APPEND _peer_option -DTR_${_scenario_define}=1)
+            endif()
             set(_object ${_directory}/width-${_name}.o)
             set(_image ${_directory}/width-${_name}.hsaco)
             add_custom_command(
@@ -312,6 +347,7 @@ foreach(
                     fixtures/native_widths.s
                     fixtures/native_d16.inc
                     fixtures/native_dual.inc
+                    fixtures/native_transpose.inc
                     ${AMDCXX}
                 VERBATIM
             )

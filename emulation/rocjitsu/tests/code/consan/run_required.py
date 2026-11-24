@@ -120,6 +120,8 @@ def required_names():
         'ConSanHsaPlugin.MissingAmdSignalCreationKeepsCoreSignalSupportAvailable',
         'ConSanSimProductionE2E.gfx1250.wave32.assembly.mixed_barrier',
         'ConSanSimProductionE2E.gfx1250.wave32.assembly.missing-statistics',
+        'ConSanBootstrapSim.TransposeIssuesOnceAndRoutesPhysicalSourceLanes',
+        'ConSanNativeWidthsStatic.TransposeMappingsRequireTheDecodedFormAndLegalRegisterTuple',
         'ConSanContract.TargetWaveFactsRoundTripAndRowsFollowActualGeometry',
         'ConSanAnalysis.Wave64HighLanesAndFullMasksRetainExactLanePairCounts',
         'ConSanAnalysis.InvalidUtf8EntryNamesAreAnalysisInputErrorsAfterBinaryRoundTrip',
@@ -178,6 +180,21 @@ def required_names():
         names.add(
             f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.single_missing_id.groups1'
         )
+        if gpu in ('gfx950', 'gfx1250'):
+            for bits in (4, 6, 8, 16):
+                for scenario in (
+                    'full',
+                    'empty',
+                    'partial',
+                    'overlap',
+                    'adjacent',
+                    'short',
+                ):
+                    if scenario == 'short' and gpu != 'gfx1250':
+                        continue
+                    names.add(
+                        f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.transpose_{bits}_{scenario}'
+                    )
         suffix = f'{gpu}Wave{wave_size}'
         width_cases = GFX1250_WIDTH_CASES if gpu == 'gfx1250' else CORE_WIDTH_CASES
         for case in width_cases:
@@ -283,6 +300,9 @@ def physical_names():
         name.replace('ConSanSim', 'ConSanPhysical', 1)
         for name in required_names()
         if name.startswith('ConSanSim')
+        and not re.search(
+            r'\.gfx950\.wave64\.assembly\.transpose_(4|6|8|16)_partial$', name
+        )
     }
 
 

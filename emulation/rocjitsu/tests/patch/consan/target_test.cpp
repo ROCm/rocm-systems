@@ -94,6 +94,50 @@ TEST(ConSanNativeWidthsStatic, AdmitGfx1250B64WithExactWidths) {
   EXPECT_EQ(artifact.value().manifest.sites[1].width, 4u);
 }
 
+TEST(ConSanNativeWidthsStatic, TransposeMappingsRequireTheDecodedFormAndLegalRegisterTuple) {
+  for (const test::TargetMode mode :
+       {test::TargetMode{"gfx950", 64}, test::TargetMode{"gfx1250", 32}}) {
+    const TargetProfile &target = *target_profile(mode.target);
+    const bool cdna4 = mode.wave_size == 64;
+    for (const auto &[bits, shape] : std::array{std::pair{4u, LdsRangeShape::Transpose4},
+                                                std::pair{6u, LdsRangeShape::Transpose6},
+                                                std::pair{8u, LdsRangeShape::Transpose8},
+                                                std::pair{16u, LdsRangeShape::Transpose16}}) {
+      SCOPED_TRACE(mode.target);
+      SCOPED_TRACE(bits);
+      const uint32_t width = bits == 6 ? 12 : bits == 16 && !cdna4 ? 16 : 8;
+      const auto original = test::read_fixture(
+          test::target_fixture_path(mode, "width-transpose-" + std::to_string(bits) + "-full"));
+      InputError error;
+      const auto input = build_input_program(original, target, "lds_producer_consumer", error);
+      ASSERT_TRUE(input.succeeded()) << error.message;
+      ASSERT_EQ(input.value().accesses.size(), 2u);
+      const auto &access = input.value().accesses[1];
+      EXPECT_EQ(access.address_vgpr, 8);
+      EXPECT_EQ(access.immediate_bytes, 2048);
+      EXPECT_EQ(access.width, width);
+      EXPECT_EQ(access.kind, AccessKind::Read);
+      EXPECT_EQ(access.lds_ranges.shape, shape);
+      auto artifact = prepare(original, target, "lds_producer_consumer", error);
+      ASSERT_TRUE(artifact.succeeded()) << error.message;
+      ASSERT_TRUE(validate_prepared(original, artifact.value(), error).succeeded())
+          << error.message;
+      artifact.value().manifest.sites[1].lds_ranges.shape = LdsRangeShape::Single;
+      EXPECT_TRUE(validate_prepared(original, artifact.value(), error).failed());
+
+      auto changed = original;
+      const size_t vdst = input.value().text_file_offset + access.original_offset + 7;
+      ASSERT_EQ(changed.at(vdst), 8);
+      changed[vdst] = 255;
+      EXPECT_TRUE(build_input_program(changed, target, "lds_producer_consumer", error).failed());
+      EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess);
+      changed[vdst] = 9;
+      auto odd = build_input_program(changed, target, "lds_producer_consumer", error);
+      EXPECT_EQ(odd.failed(), cdna4 && width == 8) << error.message;
+    }
+  }
+}
+
 TEST_P(ConSanTargetStatic, QualifySingleRangeFormsWithExactDataWidths) {
   const test::TargetMode mode = GetParam();
   for (const auto &[name, width] :

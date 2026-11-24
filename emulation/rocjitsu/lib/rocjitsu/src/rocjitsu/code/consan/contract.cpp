@@ -249,11 +249,20 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
   for (size_t index = 0; index < manifest.sites.size(); ++index) {
     const SiteFacts &site = manifest.sites[index];
     const LdsRangeRecipe &ranges = site.lds_ranges;
-    const bool valid_ranges = ranges.shape == LdsRangeShape::Single
-                                  ? ranges.offset0 == 0 && ranges.offset1 == 0
-                                  : (ranges.shape == LdsRangeShape::Dual ||
-                                     ranges.shape == LdsRangeShape::DualStride64) &&
-                                        admits_bytes && (site.width == 4 || site.width == 8);
+    bool valid_ranges = ranges.offset0 == 0 && ranges.offset1 == 0;
+    if (is_dual(ranges.shape)) {
+      valid_ranges = admits_bytes && (site.width == 4 || site.width == 8);
+    } else if (is_transpose(ranges.shape)) {
+      const bool cdna4 = target->arch == IsaFamily::Cdna4 && manifest.wave_size == 64;
+      const bool cdna5 = target->arch == IsaFamily::Cdna5 && manifest.wave_size == 32;
+      const uint32_t width = ranges.shape == LdsRangeShape::Transpose6             ? 12
+                             : ranges.shape == LdsRangeShape::Transpose16 && cdna5 ? 16
+                                                                                   : 8;
+      valid_ranges = valid_ranges && admits_bytes && (cdna4 || cdna5) &&
+                     site.access == AccessKind::Read && site.width == width;
+    } else {
+      valid_ranges = valid_ranges && ranges.shape == LdsRangeShape::Single;
+    }
     if (site.id != index || site.owner_entry != entry.id ||
         site.analysis != AnalysisKind::LdsRaceDetection || site.record != RecordKind::Access ||
         !valid_ranges || (site.access != AccessKind::Read && site.access != AccessKind::Write) ||

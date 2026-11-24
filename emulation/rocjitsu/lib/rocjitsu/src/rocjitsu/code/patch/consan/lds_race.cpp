@@ -159,6 +159,19 @@ NativeLdsForm native_lds_form(const Instruction &instruction) {
   case amdgpu::Operation::DS_READ_B128:
   case amdgpu::Operation::DS_WRITE_B128:
     return {.width = 16};
+  case amdgpu::Operation::DS_READ_B64_TR_B4:
+  case amdgpu::Operation::DS_LOAD_TR4_B64:
+    return {.width = 8, .shape = LdsRangeShape::Transpose4};
+  case amdgpu::Operation::DS_READ_B96_TR_B6:
+  case amdgpu::Operation::DS_LOAD_TR6_B96:
+    return {.width = 12, .shape = LdsRangeShape::Transpose6};
+  case amdgpu::Operation::DS_READ_B64_TR_B8:
+  case amdgpu::Operation::DS_LOAD_TR8_B64:
+    return {.width = 8, .shape = LdsRangeShape::Transpose8};
+  case amdgpu::Operation::DS_READ_B64_TR_B16:
+    return {.width = 8, .shape = LdsRangeShape::Transpose16};
+  case amdgpu::Operation::DS_LOAD_TR16_B128:
+    return {.width = 16, .shape = LdsRangeShape::Transpose16};
   default:
     break;
   }
@@ -305,7 +318,12 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
                                 offset);
     }
     const bool read = instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Load;
-    const bool dual = form.shape != LdsRangeShape::Single;
+    const bool dual = is_dual(form.shape);
+    const bool transpose = is_transpose(form.shape);
+    if (transpose && (!read || (arch != IsaFamily::Cdna4 && arch != IsaFamily::Cdna5) ||
+                      instruction.num_dst_operands() != 1 || instruction.num_src_operands() != 2))
+      return reject_instruction(error, InputErrorCode::UnsupportedAccess,
+                                "unsupported LDS transpose operands or target", offset);
     const bool dual_store = dual && !read;
     if (dual && (instruction.num_dst_operands() != 1 ||
                  instruction.num_src_operands() != (dual_store ? 3 : 2))) {
@@ -318,15 +336,21 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
     const uint32_t words_per_range = std::max(width / 4, 1u);
     const Operand *value = read ? instruction.dst_operand(0) : instruction.src_operand(1);
     const uint32_t value_words = read && dual ? 2 * words_per_range : words_per_range;
-    if (!address_reg || !allocated_vgpr_tuple(value, value_words, allocated_vgprs) ||
+    const std::optional<RegisterRef> value_reg =
+        allocated_vgpr_tuple(value, value_words, allocated_vgprs);
+    if (!address_reg || !value_reg ||
         (dual_store &&
          !allocated_vgpr_tuple(instruction.src_operand(2), words_per_range, allocated_vgprs))) {
       return reject_instruction(error, InputErrorCode::UnsupportedAccess,
                                 "LDS operands exceed allocation", offset);
     }
 
+    if (transpose && arch == IsaFamily::Cdna4 && width == 8 && value_reg->index % 2 != 0)
+      return reject_instruction(error, InputErrorCode::UnsupportedAccess,
+                                "CDNA4 B64 transpose requires an even destination VGPR", offset);
+
     uint16_t immediate = static_cast<uint16_t>(instruction.raw_encoding()[0]);
-    LdsRangeRecipe ranges{};
+    LdsRangeRecipe ranges{.shape = form.shape};
     if (dual) {
       ranges = {.shape = form.shape,
                 .offset0 = static_cast<uint8_t>(immediate),

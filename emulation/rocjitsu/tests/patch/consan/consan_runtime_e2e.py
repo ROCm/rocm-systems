@@ -52,6 +52,11 @@ CASES = (
     'loop_no_b0_sync_loss',
     'loop_no_b1',
     'loop_late',
+    *(
+        f'transpose_{bits}_{scenario}'
+        for bits in (4, 6, 8, 16)
+        for scenario in ('full', 'empty', 'partial', 'overlap', 'adjacent', 'short')
+    ),
     'wide_u8',
     'wide_i8_alias_high',
     'wide_d16_u8',
@@ -228,6 +233,10 @@ class Driver:
         )
         if args.fixture_kind == 'named-assembly':
             fixture = fixture_directory / f'{fixture_name}.hsaco'
+        elif fixture_name.startswith('transpose_'):
+            fixture = fixture_directory / (
+                'width-' + fixture_name.replace('_', '-') + '.hsaco'
+            )
         elif fixture_name.startswith('wide_'):
             name = {'wide_alias': 'b128-alias', 'wide_collision': 'b64-collision'}.get(
                 fixture_name, fixture_name.removeprefix('wide_').replace('_', '-')
@@ -323,6 +332,8 @@ class Driver:
         )
         mode = 'synchronized' if synchronized else ('defined' if defined else 'observe')
         wide = fixture_name.startswith('wide_')
+        if fixture_name.startswith('transpose_'):
+            mode = fixture_name
         if wide:
             mode = (
                 'wide_b128'
@@ -359,6 +370,7 @@ class Driver:
         if (
             synchronized
             or wide
+            or fixture_name.startswith('transpose_')
             or fixture_name == 'mixed_barrier'
             or (grouped and args.case not in ('grouped_oversized', 'grouped_edge'))
             or (
@@ -597,7 +609,84 @@ class Driver:
                     4 if row['loss'] or row['sync_loss'] else 0
                 )
 
+    def assert_transpose_observations(self, decoded, fixture):
+        _, bits, scenario = fixture.split('_')
+        wave_size = self.args.wave_size
+        cdna4 = self.args.target == 'gfx950'
+        width = 12 if bits == '6' else 16 if bits == '16' and not cdna4 else 8
+        full = (1 << wave_size) - 1
+        architectural = {'empty': 0, 'partial': 1 << (wave_size - 1), 'short': 15}.get(
+            scenario, full
+        )
+        requests = architectural if cdna4 else full
+        peer = scenario in ('overlap', 'adjacent')
+        assert len(decoded['executions']) == 1
+        assert len(decoded['sites']) == 2
+        site = decoded['sites'][0 if peer else 1]
+        assert site['transpose_bits'] == int(bits)
+        rows = decoded['executions'][0]['rows']
+        assert len(rows) == (2 if peer else 1)
+        for wave, row in enumerate(rows):
+            expected = []
+            if peer and wave == 1:
+                offset = 2112 + width - (4 if scenario == 'overlap' else 0)
+                expected = [(1, 1, 2, 4, offset, 1, None)]
+                loss = 0
+            else:
+                if not peer:
+                    expected = [
+                        (0, 1, 2, 16, 2048 + 16 * lane, 1 << lane, None)
+                        for lane in range(4)
+                    ]
+                source_lanes = [
+                    lane for lane in range(wave_size) if requests & (1 << lane)
+                ]
+                for lane in source_lanes[:4]:
+                    mask = (
+                        sum(1 << bit for bit in range(lane, wave_size, 4))
+                        if peer
+                        else 1 << lane
+                    )
+                    if scenario == 'short' and lane == 0:
+                        mask = full ^ 0xE
+                    offset = 2048 + lane * (32 if peer else 16)
+                    expected.append(
+                        (
+                            0 if peer else 1,
+                            1 if peer else 2,
+                            1,
+                            width,
+                            offset,
+                            mask,
+                            architectural,
+                        )
+                    )
+                loss = (
+                    0 if peer or scenario == 'short' else 1 + (requests.bit_count() > 4)
+                )
+            assert row['status'] == ROW_ENTERED | ROW_EXITED | (
+                ROW_EXHAUSTED if loss else 0
+            )
+            assert row['wave'] == wave and row['serial'] == 1
+            assert row['loss'] == loss and row['final_sequence'] == expected[-1][1]
+            assert len(row['records']) == len(expected)
+            for record, (site, seq, kind, size, address, mask, anchor) in zip(
+                row['records'], expected
+            ):
+                assert record['site'] == site and record['sequence'] == seq
+                assert record['commit'] == 0x43534143
+                assert decoded['sites'][site]['access'] == kind
+                assert decoded['sites'][site]['width'] == record['width'] == size
+                assert record['offset'] == address and record['mask'] == mask
+                if anchor is None:
+                    assert record['flags'] == 1
+                else:
+                    assert record['flags'] == 4 and record['anchor_exec'] == anchor
+
     def assert_observations(self, decoded, fixture):
+        if fixture.startswith('transpose_'):
+            self.assert_transpose_observations(decoded, fixture)
+            return
         if fixture.startswith('loop_'):
             self.assert_loop_observations(decoded, fixture)
             return

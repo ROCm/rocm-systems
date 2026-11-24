@@ -44,6 +44,7 @@ struct SiteGroup {
   std::vector<Observation> records;
   uint32_t sequence = 0;
   uint64_t mask = 0;
+  std::optional<uint64_t> transpose_exec;
   std::set<uint32_t> offsets;
   bool ambiguous = false;
 };
@@ -208,7 +209,17 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
   }
   using Operation = std::pair<uint32_t, uint32_t>;
   std::map<Operation, SiteGroup> groups;
+  const uint32_t lanes =
+      std::min(facts.wave_size, execution.dimensions.workgroup[0] - wave * facts.wave_size);
+  const uint64_t active_mask = lanes == 64 ? UINT64_MAX : (uint64_t{1} << lanes) - 1;
+  // Transpose records identify physical LDS request lanes, including those
+  // beyond the logical workitems in a short CDNA5 wave.
+  const uint64_t physical_mask = facts.wave_size == 64 ? UINT64_MAX : UINT32_MAX;
   for (const SiteFacts &site : facts.sites) {
+    const bool transpose = is_transpose(site.lds_ranges.shape);
+    const uint64_t request_mask = transpose ? physical_mask : active_mask;
+    const uint32_t reserved_begin =
+        transpose ? wire::kRecordAnchorExec + sizeof(uint64_t) : wire::kRecordReservedBegin;
     bool vacant = false;
     for (uint32_t address_group = 0; address_group < kAddressGroupsPerSite; ++address_group) {
       const std::span<const uint8_t> record =
@@ -223,28 +234,44 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
       const uint32_t offset = *wire::read_u32(record, wire::kRecordLdsOffset);
       const uint32_t width = *wire::read_u32(record, wire::kRecordWidth);
       const uint64_t mask = *wire::read_u64(record, wire::kRecordGuestMask);
-      const uint32_t lanes =
-          std::min(facts.wave_size, execution.dimensions.workgroup[0] - wave * facts.wave_size);
-      const uint64_t active_mask = lanes == 64 ? UINT64_MAX : (uint64_t{1} << lanes) - 1;
       const uint32_t flags = *wire::read_u32(record, wire::kRecordFlags);
       if (commit != wire::kAccessCommitted ||
           wire::read_u32(record, wire::kRecordAnalysis) != uint32_t(site.analysis) ||
           wire::read_u32(record, wire::kRecordKind) != uint32_t(site.record) ||
           wire::read_u32(record, wire::kRecordSite) != site.id ||
           wire::read_u32(record, wire::kRecordRange) != 0 || sequence == 0 || sequence > final ||
-          width != site.width || mask == 0 || (mask & ~active_mask) != 0 ||
-          !all_zero(record.subspan(wire::kRecordReservedBegin))) {
+          width != site.width || mask == 0 || (mask & ~request_mask) != 0 ||
+          !all_zero(record.subspan(reserved_begin))) {
         ++result.rejected_records;
         issue(result, wave, site.id, "invalid_record_commit_identity_mask_or_sequence", workgroup);
         continue;
       }
-      if (flags != wire::kExactGuestMask || offset > execution.group_bytes ||
+      const uint32_t mask_kind =
+          transpose ? wire::kExactTransposeRequestMask : wire::kExactGuestMask;
+      if (flags != mask_kind || offset > execution.group_bytes ||
           width > execution.group_bytes - offset) {
         ++result.rejected_records;
         issue(result, wave, site.id, "invalid_or_out_of_bounds_effective_range", workgroup);
         continue;
       }
-      // Three-dword DS accesses use the same native alignment as four dwords.
+      SiteGroup &group = groups[{site.id, repeated ? sequence : 0}];
+      if (transpose) {
+        const uint64_t anchor_exec = *wire::read_u64(record, wire::kRecordAnchorExec);
+        if (group.transpose_exec && *group.transpose_exec != anchor_exec)
+          group.ambiguous = true;
+        group.transpose_exec = anchor_exec;
+        if (facts.wave_size == 64 && anchor_exec != physical_mask) {
+          ++result.rejected_records;
+          issue(result, wave, site.id, "partial_exec_lds_transpose", workgroup);
+          continue;
+        }
+        if (anchor_exec & ~physical_mask) {
+          ++result.rejected_records;
+          issue(result, wave, site.id, "invalid_transpose_anchor_exec", workgroup);
+          continue;
+        }
+      }
+      // The qualified three-dword profile conservatively requires 16-byte alignment.
       // Without the launch alignment mode we can only trust mode-independent addresses.
       const uint32_t alignment = width == 12 ? 16 : width;
       if ((offset % alignment) != 0) {
@@ -255,7 +282,6 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
       if (vacant && !repeated) {
         issue(result, wave, site.id, "record_after_vacant_reservation", workgroup);
       }
-      SiteGroup &group = groups[{site.id, repeated ? sequence : 0}];
       if (repeated && (std::countr_zero(mask) % kAddressGroupsPerSite) != address_group) {
         ++result.rejected_records;
         issue(result, wave, site.id, "invalid_first_publisher_lane_bank", workgroup);
@@ -293,7 +319,7 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
         issue(result, wave, site.id, "access_phase_contradicts_qualified_program", workgroup);
       }
       group.records.push_back({{wave, site.id, sequence, mask, offset, width, site.original_offset,
-                                site.access, phase, workgroup},
+                                site.access, phase, workgroup, 0, group.transpose_exec},
                                phase_valid});
     }
   }
@@ -332,12 +358,17 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
     issue(result, wave, UINT32_MAX, "missing_observed_occurrence", workgroup);
   }
   for (const auto &[site, group] : groups) {
-    if (group.ambiguous || std::ranges::any_of(group.records, [&](const Observation &record) {
-          return record.participant.phase != group.records.front().participant.phase;
-        })) {
+    if (!group.records.empty() && group.transpose_exec && group.mask != physical_mask &&
+        (loss == 0 || (!repeated && group.records.size() < kAddressGroupsPerSite))) {
+      result.rejected_records += group.records.size();
+      issue(result, wave, site.first, "incomplete_transpose_request_mask", workgroup);
+    } else if (group.ambiguous ||
+               std::ranges::any_of(group.records, [&](const Observation &record) {
+                 return record.participant.phase != group.records.front().participant.phase;
+               })) {
       result.rejected_records += group.records.size();
       issue(result, wave, site.first, "ambiguous_instruction_group_ownership", workgroup);
-    } else if (facts.sites[site.first].lds_ranges.shape != LdsRangeShape::Single) {
+    } else if (is_dual(facts.sites[site.first].lds_ranges.shape)) {
       const bool coalesce =
           isa_properties(target_profile(facts.target)->arch).coincident_ds_ignores_data1;
       expand_dual_group(group, facts.sites[site.first], coalesce, execution.group_bytes, examples,

@@ -5,6 +5,7 @@
 #include "rocjitsu/code/consan/encoding.h"
 #include "util/diagnostic.h"
 
+#include <array>
 #include <fstream>
 #include <iostream>
 
@@ -41,9 +42,14 @@ int main(int argc, char **argv) {
       std::cout << "{\"id\":" << site.id << ",\"access\":" << uint32_t(site.access)
                 << ",\"width\":" << site.width << ",\"original_offset\":" << site.original_offset
                 << ",\"guest_offset\":" << site.prepared_guest_offset;
-      if (site.lds_ranges.shape != LdsRangeShape::Single) {
+      if (is_dual(site.lds_ranges.shape)) {
         std::cout << ",\"range_offsets\":[" << site.lds_ranges.byte_offset(0, site.width) << ','
                   << site.lds_ranges.byte_offset(1, site.width) << ']';
+      }
+      if (is_transpose(site.lds_ranges.shape)) {
+        constexpr std::array<uint32_t, 4> bits{4, 6, 8, 16};
+        std::cout << ",\"transpose_bits\":"
+                  << bits[uint32_t(site.lds_ranges.shape) - uint32_t(LdsRangeShape::Transpose4)];
       }
       std::cout << '}';
     }
@@ -163,8 +169,12 @@ int main(int argc, char **argv) {
               << *wire::read_u32(execution.report, record + wire::kRecordLdsOffset)
               << ",\"width\":" << *wire::read_u32(execution.report, record + wire::kRecordWidth)
               << ",\"mask\":" << *wire::read_u64(execution.report, record + wire::kRecordGuestMask)
-              << ",\"flags\":" << *wire::read_u32(execution.report, record + wire::kRecordFlags)
-              << '}';
+              << ",\"flags\":" << *wire::read_u32(execution.report, record + wire::kRecordFlags);
+          if (is_transpose(site.lds_ranges.shape)) {
+            std::cout << ",\"anchor_exec\":"
+                      << *wire::read_u64(execution.report, record + wire::kRecordAnchorExec);
+          }
+          std::cout << '}';
         }
       }
       std::cout << "]}";

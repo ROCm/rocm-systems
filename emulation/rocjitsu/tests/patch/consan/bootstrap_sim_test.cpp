@@ -6,7 +6,9 @@
 #include "halt_snapshot_plugin.h"
 #include "native_d16_oracle.h"
 #include "rocjitsu/isa/isa_family.h"
+#include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "target_fixture.h"
+#include "transpose_oracle.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -1322,6 +1324,114 @@ TEST_P(ConSanTargetSim, ByteAccessPreservesNeighborBytesAndExtendsOnlyActiveLane
       const uint32_t byte = 0x87u + wave;
       EXPECT_EQ(after.full_output[4 * wave], count ? (high ? 0xffffff00u | byte : byte) : 0);
       EXPECT_EQ(after.full_output[4 * wave + 1], count ? (byte << 24) | 0x00234567u : 0);
+    }
+  }
+}
+
+// Observe the guest issue and routed LDS request independently of the emitted probe.
+struct TransposeTrace {
+  std::vector<uint64_t> issued_exec;
+  std::vector<uint64_t> routed_masks;
+};
+
+class TransposeRequests final : public ExecutionPlugin {
+public:
+  TransposeRequests(TransposeTrace &trace, std::string mnemonic, uint32_t width,
+                    std::string_view scenario)
+      : ExecutionPlugin("transpose_requests"), trace_(trace), mnemonic_(std::move(mnemonic)),
+        width_(width), scenario_(scenario) {}
+  bool requires_serial_hot_hooks() const override { return true; }
+  bool observes_memory_routing() const override { return true; }
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &inst,
+                                        amdgpu::Wavefront &wave) override {
+    if (inst.mnemonic() == mnemonic_)
+      trace_.issued_exec.push_back(wave.exec());
+  }
+  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
+                                  const Instruction &, amdgpu::Wavefront &wave) override {
+    if (access.mnemonic != mnemonic_)
+      return;
+    EXPECT_EQ(access.bytes_per_lane(), width_);
+    EXPECT_EQ(wave.wave_in_group(), 0u);
+    ASSERT_EQ(trace_.issued_exec.size(), 1u);
+    EXPECT_EQ(access.architectural_exec_lane_mask, trace_.issued_exec.front());
+    trace_.routed_masks.push_back(access.request_lane_mask);
+    ASSERT_EQ(access.addresses.size(), access.wavefront_size);
+    for (uint32_t lane = 0; lane < access.wavefront_size; ++lane) {
+      if ((access.request_lane_mask & (uint64_t{1} << lane)) == 0)
+        continue;
+      const uint32_t offset = scenario_ == "overlap" || scenario_ == "adjacent" ? 32 * (lane % 4)
+                              : scenario_ == "short" && lane >= 4               ? 0
+                                                                                : 16 * lane;
+      EXPECT_EQ(access.addresses[lane], wave.lds_base() + 2048 + offset) << lane;
+    }
+  }
+
+private:
+  TransposeTrace &trace_;
+  std::string mnemonic_;
+  uint32_t width_;
+  std::string_view scenario_;
+};
+
+TEST_F(ConSanBootstrapSim, TransposeIssuesOnceAndRoutesPhysicalSourceLanes) {
+  for (const test::TargetMode target :
+       {test::TargetMode{"gfx950", 64}, test::TargetMode{"gfx1250", 32}}) {
+    const bool cdna4 = target.wave_size == 64;
+    const uint64_t full = cdna4 ? UINT64_MAX : UINT32_MAX;
+    for (const uint32_t bits : {4u, 6u, 8u, 16u}) {
+      const uint32_t width = 4 * test::transpose_words(bits, cdna4);
+      const std::string payload = "b" + std::to_string(8 * width);
+      const std::string mnemonic = cdna4 ? "ds_read_" + payload + "_tr_b" + std::to_string(bits)
+                                         : "ds_load_tr" + std::to_string(bits) + "_" + payload;
+      for (const std::string_view scenario :
+           {"full", "partial", "empty", "overlap", "adjacent", "short"}) {
+        if (cdna4 && scenario == "short")
+          continue;
+        SCOPED_TRACE(target.target);
+        SCOPED_TRACE(mnemonic);
+        SCOPED_TRACE(scenario);
+        const std::string fixture =
+            "width-transpose-" + std::to_string(bits) + "-" + std::string(scenario);
+        const bool peer = scenario == "overlap" || scenario == "adjacent";
+        const uint32_t threads = scenario == "short" ? 4 : (peer ? 2 : 1) * target.wave_size;
+        const uint32_t words_per_wave = 4 * std::min(threads, target.wave_size);
+        const uint64_t exec = scenario == "short"     ? 15
+                              : scenario == "empty"   ? 0
+                              : scenario == "partial" ? (uint64_t{1} << (target.wave_size - 1))
+                                                      : full;
+        const uint64_t requests = cdna4 ? exec : full;
+        RunResult before, after;
+        for (auto mode : {Bootstrap::None, Bootstrap::Instrumented}) {
+          TransposeTrace trace;
+          RunResult &result = mode == Bootstrap::None ? before : after;
+          ASSERT_NO_FATAL_FAILURE(
+              run(fixture, mode, result, target, threads, true, words_per_wave, false, 1,
+                  std::make_unique<TransposeRequests>(trace, mnemonic, width, scenario)));
+          EXPECT_EQ(trace.issued_exec, (std::vector<uint64_t>{exec}));
+          if (requests || !trace.routed_masks.empty()) {
+            EXPECT_EQ(trace.routed_masks, (std::vector<uint64_t>{requests}));
+          }
+        }
+        expect_guest_state(before, after);
+        if (cdna4 && scenario == "partial")
+          continue; // ISA result is undefined; replay checks the diagnostic.
+        ASSERT_EQ(after.full_output.size(), 4 * threads);
+        for (uint32_t thread = 0; thread < threads; ++thread) {
+          const auto expected =
+              test::transpose_output(thread % target.wave_size, bits, cdna4, scenario);
+          for (uint32_t word = 0; word < 4; ++word)
+            EXPECT_EQ(after.full_output[4 * thread + word], expected[word])
+                << thread << " word " << word;
+        }
+        if (scenario == "short") {
+          for (uint32_t lane = threads; lane < target.wave_size; ++lane) {
+            const auto expected = test::transpose_output(lane, bits, cdna4, scenario);
+            for (uint32_t word = 0; word < width / 4; ++word)
+              EXPECT_EQ(after.waves[0].vgpr(8 + word, lane), expected[word]) << lane;
+          }
+        }
+      }
     }
   }
 }

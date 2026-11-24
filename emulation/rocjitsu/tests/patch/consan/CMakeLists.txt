@@ -481,6 +481,41 @@ if(TARGET consan_hsa_runner)
                 )
             endforeach()
             if(RJ_BUILD_CONSAN_ANALYZER)
+                if(_gpu STREQUAL "gfx950" OR _gpu STREQUAL "gfx1250")
+                    foreach(_bits IN ITEMS 4 6 8 16)
+                        foreach(
+                            _scenario
+                            IN
+                            ITEMS full partial empty overlap adjacent short
+                        )
+                            if(
+                                _scenario STREQUAL "short"
+                                AND NOT _gpu STREQUAL "gfx1250"
+                            )
+                                continue()
+                            endif()
+                            if(
+                                _gpu STREQUAL "gfx950"
+                                AND _scenario STREQUAL "partial"
+                                AND _environment STREQUAL "Physical"
+                            )
+                                continue() # The gfx950 ISA defines only full and empty EXEC.
+                            endif()
+                            set(_launch_size ${_wave_size})
+                            if(
+                                _scenario STREQUAL "overlap"
+                                OR _scenario STREQUAL "adjacent"
+                            )
+                                set(_launch_size ${_threads})
+                            elseif(_scenario STREQUAL "short")
+                                set(_launch_size 4)
+                            endif()
+                            consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                                transpose_${_bits}_${_scenario} ${_launch_size} production analysis
+                            )
+                        endforeach()
+                    endforeach()
+                endif()
                 set(_width_cases
                     wide_u8
                     wide_i8_alias_high

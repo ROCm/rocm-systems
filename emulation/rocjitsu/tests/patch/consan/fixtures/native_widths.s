@@ -75,7 +75,7 @@
 #define MASK_AND_SAVE s_and_saveexec_b32
 #define WAVE_SHIFT 5
 #endif
-#ifdef CONSAN_DUAL_WRITE
+#if defined(CONSAN_DUAL_WRITE) || defined(CONSAN_TRANSPOSE_BITS)
 #define GROUP_BYTES 4096
 #else
 #define GROUP_BYTES 1024
@@ -124,6 +124,9 @@
 .type CONSAN_KERNEL,@function
 .p2align 8
 CONSAN_KERNEL:
+#ifdef CONSAN_TRANSPOSE_BITS
+#include "native_transpose.inc"
+#else
   LOAD32 s4, s[0:1], 0
   LOAD64 s[6:7], s[0:1], 8
   consan_wait_all
@@ -262,6 +265,7 @@ CONSAN_KERNEL:
   MASK_MOVE MASK_EXEC, MASK_SAVE
   consan_wait_stores
   s_endpgm
+#endif
 .Lkernel_end:
 .size CONSAN_KERNEL, .Lkernel_end-CONSAN_KERNEL
 

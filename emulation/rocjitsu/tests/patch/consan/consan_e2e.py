@@ -88,6 +88,18 @@ class AnalysisDriver(Driver):
             if case == 'wide_collision'
             else (1 if case == 'collision' else 0)
         )
+        transpose = case.startswith('transpose_')
+        transpose_overlap = transpose and case.endswith('_overlap')
+        rejected = int(
+            transpose and self.args.target == 'gfx950' and case.endswith('_partial')
+        )
+        transpose_loss = 0
+        if transpose and case.endswith(('_full', '_empty', '_partial')):
+            transpose_loss = (
+                1 if self.args.target == 'gfx950' and not case.endswith('_full') else 2
+            )
+        if transpose_overlap:
+            pairs = 1
         if case == 'wide_d16_overlap':
             pairs = 8
         dual = case.startswith('wide_dual_')
@@ -123,6 +135,8 @@ class AnalysisDriver(Driver):
         assert result['target'] == int(self.args.target[3:])
         assert result['wave_size'] == self.args.wave_size
         assert result['entry'] == self.entry, (result['entry'], self.entry)
+        if transpose:
+            assert 'transpose_' in result['scope']
         assert result['cross_wave_pairs'] == pairs
         assert result['ordered_pairs'] == sum(
             execution['ordered_pairs'] for execution in result['executions']
@@ -134,7 +148,8 @@ class AnalysisDriver(Driver):
             )
         assert result['collision_groups'] == collisions
         assert result['coverage_complete'] == (
-            case
+            not transpose_loss
+            and case
             not in (
                 'exhausted',
                 'loop_access_loss',
@@ -150,12 +165,18 @@ class AnalysisDriver(Driver):
         assert len(raw['executions']) == len(result['executions'])
         for observed, analyzed in zip(raw['executions'], result['executions']):
             assert analyzed['serial'] == observed['serial']
-            assert analyzed['valid_observations'] == sum(
+            assert analyzed['valid_observations'] + rejected == sum(
                 len(raw['sites'][record['site']].get('range_offsets', [0]))
                 for row in observed['rows']
                 for record in row['records']
             )
-            assert analyzed['rejected_records'] == 0
+            assert analyzed['rejected_records'] == rejected
+            if rejected:
+                assert any(
+                    issue['reason'] == 'partial_exec_lds_transpose'
+                    and issue['site'] == 1
+                    for issue in analyzed['issues']
+                )
             assert analyzed['lost_occurrences'] == (
                 {
                     'exhausted': 1,
@@ -163,10 +184,11 @@ class AnalysisDriver(Driver):
                     'loop_sync_loss': 32,
                     'loop_no_b0_full_journal': 24,
                     'loop_no_b0_sync_loss': 32,
-                }.get(case, 0)
+                }.get(case, transpose_loss)
             )
             assert analyzed['ordering_uncertain'] == (
-                case
+                bool(transpose_loss)
+                or case
                 in (
                     'exhausted',
                     'loop_access_loss',
@@ -201,6 +223,41 @@ class AnalysisDriver(Driver):
                     assert a['mask'] == b['mask'] == 1
                     endpoints.add(a['site'])
                 assert endpoints == set(range(8))
+            if transpose_overlap:
+                width = raw['sites'][0]['width']
+                (finding,) = analyzed['cross_wave_examples']
+                a, b = sorted(
+                    (finding['first'], finding['second']),
+                    key=lambda endpoint: endpoint['wave'],
+                )
+                assert finding['ordering'] == 'unordered'
+                assert (a['wave'], a['site'], a['access'], a['offset'], a['width']) == (
+                    0,
+                    0,
+                    'read',
+                    2112,
+                    width,
+                )
+                assert (
+                    b['wave'],
+                    b['site'],
+                    b['access'],
+                    b['offset'],
+                    b['width'],
+                    b['mask'],
+                ) == (1, 1, 'write', 2112 + width - 4, 4, 1)
+                assert (
+                    a['mask_role'] == 'transpose_source_lanes'
+                    and a['anchor_exec'] == (1 << self.args.wave_size) - 1
+                )
+                assert a['mask'] == sum(
+                    1 << lane for lane in range(2, self.args.wave_size, 4)
+                )
+                assert (
+                    analyzed['cross_wave_lane_pairs']
+                    == finding['lane_pairs']
+                    == self.args.wave_size // 4
+                )
             if dual and pairs:
                 width = 4 if '_b32_' in case else 8
                 second_offset = 8 + 5 * width * (64 if '_stride64_' in case else 1)

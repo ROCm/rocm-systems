@@ -220,7 +220,7 @@ gfx942/gfx950 use the corresponding `ds_write_*` and `ds_read_*` names.
 Access probes capture addresses before an aliased load can overwrite them, record actual byte
 widths and byte immediates, and preserve every guest result word. For b96 the
 range spans three dwords. Its effective start must be 16-byte aligned so the
-range is independent of the launch alignment mode. Transpose, FLAT and atomic
+range is independent of the launch alignment mode. FLAT and atomic
 forms remain unsupported. The minimum fixed LDS extent remains four bytes.
 
 Two-address native LDS loads and stores support 32- and 64-bit elements.
@@ -232,6 +232,33 @@ with an additional factor of 64 for stride-64 forms. For example, a b32
 operation with offsets 3 and 5 covers bytes [base + 12, base + 16) and
 [base + 20, base + 24). With equal offsets, gfx942/gfx950 coalesce the access
 and a store uses DATA0.
+
+The following matrix transpose reads gather LDS data from physical source lanes
+and distribute the result across destination lanes. Each source lane contributes
+one contiguous range starting at its pre-instruction address VGPR plus the byte
+immediate. Only the returned elements undergo the matrix permutation. The
+before-instruction probe also covers an address VGPR aliased by the destination.
+
+| Element bits | gfx950, wave64 | gfx1250, wave32 |
+| --- | --- | --- |
+| 4 | `ds_read_b64_tr_b4` (8 bytes) | `ds_load_tr4_b64` (8 bytes) |
+| 6 | `ds_read_b96_tr_b6` (12 bytes) | `ds_load_tr6_b96` (12 bytes) |
+| 8 | `ds_read_b64_tr_b8` (8 bytes) | `ds_load_tr8_b64` (8 bytes) |
+| 16 | `ds_read_b64_tr_b16` (8 bytes) | `ds_load_tr16_b128` (16 bytes) |
+
+On gfx950, a defined active transpose requires full EXEC and the B64
+destination starts at an even VGPR. The simulator issues no requests at
+empty EXEC. Replay rejects a nonempty partial EXEC and reports
+`partial_exec_lds_transpose`. The capture profile conservatively requires a
+16-byte-aligned effective start for packed B96. [CDNA4 ISA, section 11.4](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf)
+
+On gfx1250, all 32 physical source lanes request data even at partial or empty
+EXEC and in a short final wave. Each transpose record preserves the guest
+EXEC separately from the source lanes which actually requested the recorded
+range. Finding examples expose `mask_role` as `transpose_source_lanes` and
+`anchor_exec` as the original mask. Physical source lanes may exceed the
+number of logical workitems in the last wave. These reads share the four
+address-group retention limit with ordinary operations. [CDNA5 ISA, section 11.2.4](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna5-instruction-set-architecture.pdf)
 
 Access widths are measured in bytes. `NativeLdsAccess::width` and
 `SiteFacts::width` default to zero, meaning unspecified and invalid. Producers
