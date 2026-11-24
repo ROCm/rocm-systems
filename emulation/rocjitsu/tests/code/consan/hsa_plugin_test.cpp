@@ -302,6 +302,10 @@ protected:
     amd_.hsa_amd_queue_intercept_create_fn = [](hsa_agent_t, uint32_t, hsa_queue_type32_t,
                                                 void (*)(hsa_status_t, hsa_queue_t *, void *),
                                                 void *, uint32_t, uint32_t, hsa_queue_t **queue) {
+      if (current_->queue_create_status_ != HSA_STATUS_SUCCESS) {
+        *queue = nullptr;
+        return current_->queue_create_status_;
+      }
       *queue = current_->queue_create_result_ ? current_->queue_create_result_ : &current_->queue_;
       return HSA_STATUS_SUCCESS;
     };
@@ -719,6 +723,7 @@ protected:
   std::promise<void> shutdown_entered_;
   std::shared_future<void> resume_shutdown_;
   uint32_t native_queue_calls_ = 0, queue_destroy_calls_ = 0;
+  hsa_status_t queue_create_status_ = HSA_STATUS_SUCCESS;
   hsa_status_t queue_register_status_ = HSA_STATUS_SUCCESS;
   bool block_queue_registration_ = false;
   std::promise<void> queue_registration_entered_;
@@ -850,38 +855,55 @@ protected:
     else
       application_writer(packets, count);
   }
-  void expect_queue_capacity(bool native) {
-    std::array<hsa_queue_t, 17> queues = {};
-    for (size_t index = 0; index < 16; ++index) {
+  hsa_status_t create_application_queue(bool native, hsa_queue_t **queue) {
+    if (!native)
+      return core_.hsa_queue_create_fn({1}, 128, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0, 0,
+                                       queue);
+    hsa_amd_queue_create_desc_t desc = native_descriptor();
+    const hsa_status_t status = amd_.hsa_amd_queue_create_fn({1}, &desc, 1);
+    *queue = desc.queue;
+    return status;
+  }
+  void expect_more_than_sixteen_queues(bool native) {
+    configure_native_image();
+    ASSERT_TRUE(installed_);
+    std::array<hsa_queue_t, 33> queues = {};
+    size_t created_count = 0;
+    for (size_t index = 0; index < queues.size() - 1; ++index) {
       queue_create_result_ = &queues[index];
       hsa_queue_t *created = nullptr;
-      hsa_status_t status = HSA_STATUS_ERROR;
-      if (native) {
-        hsa_amd_queue_create_desc_t desc = native_descriptor();
-        status = amd_.hsa_amd_queue_create_fn({1}, &desc, 1);
-        created = desc.queue;
-      } else {
-        status = core_.hsa_queue_create_fn({1}, 128, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0, 0,
-                                           &created);
+      const hsa_status_t status = create_application_queue(native, &created);
+      EXPECT_EQ(status, HSA_STATUS_SUCCESS) << index;
+      EXPECT_EQ(created, &queues[index]);
+      if (status != HSA_STATUS_SUCCESS || created != &queues[index])
+        break;
+      ++created_count;
+    }
+    if (created_count == queues.size() - 1) {
+      queue_create_result_ = &queues.back();
+      queue_create_status_ = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      hsa_queue_t *created = nullptr;
+      EXPECT_EQ(create_application_queue(native, &created), HSA_STATUS_ERROR_OUT_OF_RESOURCES);
+      EXPECT_EQ(created, nullptr);
+      queue_create_status_ = HSA_STATUS_SUCCESS;
+      const hsa_status_t retried = create_application_queue(native, &created);
+      EXPECT_EQ(retried, HSA_STATUS_SUCCESS);
+      EXPECT_EQ(created, &queues.back());
+      if (retried == HSA_STATUS_SUCCESS && created == &queues.back())
+        ++created_count;
+      EXPECT_TRUE(bind());
+      if (!HasFailure()) {
+        submit_application(extended_packet());
+        EXPECT_EQ(application_packets_.size(), 1u);
+        EXPECT_EQ(drain_(), 0);
+        EXPECT_EQ(statistics_().native_completed, 1u);
       }
-      ASSERT_EQ(status, HSA_STATUS_SUCCESS) << index;
-      ASSERT_EQ(created, &queues[index]);
     }
-    queue_create_result_ = &queues.back();
-    hsa_queue_t *created = nullptr;
-    if (native) {
-      hsa_amd_queue_create_desc_t desc = native_descriptor();
-      EXPECT_NE(amd_.hsa_amd_queue_create_fn({1}, &desc, 1), HSA_STATUS_SUCCESS);
-      created = desc.queue;
-    } else {
-      EXPECT_NE(core_.hsa_queue_create_fn({1}, 128, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0, 0,
-                                          &created),
-                HSA_STATUS_SUCCESS);
-    }
-    EXPECT_EQ(created, nullptr);
-    for (size_t index = 0; index < 16; ++index)
+    for (size_t index = 0; index < created_count; ++index)
       EXPECT_EQ(core_.hsa_queue_destroy_fn(&queues[index]), HSA_STATUS_SUCCESS);
-    EXPECT_NE(finish_(), 0);
+    if (created_count == queues.size()) {
+      EXPECT_EQ(finish_(), 0);
+    }
   }
   bool wait_for_native_completed(uint64_t count) {
     const std::chrono::steady_clock::time_point deadline =
@@ -916,12 +938,12 @@ TEST_F(ConSanApplicationHsaPlugin, NativeQueueBeforeImageLoadInstallsThePacketIn
   EXPECT_EQ(queue_destroy_calls_, 1u);
 }
 
-TEST_F(ConSanApplicationHsaPlugin, CoreQueueCreationAdmitsSixteenDistinctQueues) {
-  expect_queue_capacity(false);
+TEST_F(ConSanApplicationHsaPlugin, CoreQueueCreationAdmitsMoreThanSixteenDistinctQueues) {
+  expect_more_than_sixteen_queues(false);
 }
 
-TEST_F(ConSanApplicationHsaPlugin, AmdQueueCreationAdmitsSixteenDistinctQueues) {
-  expect_queue_capacity(true);
+TEST_F(ConSanApplicationHsaPlugin, AmdQueueCreationAdmitsMoreThanSixteenDistinctQueues) {
+  expect_more_than_sixteen_queues(true);
 }
 
 TEST_F(ConSanApplicationHsaPlugin, NativeQueueRegistrationFailureReturnsNoUnobservedQueue) {

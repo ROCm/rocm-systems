@@ -180,12 +180,14 @@ artifact still requires `RJ_CONSAN_ARTIFACT_DIR` and
 capture. Native-only execution does not require a capture path; native execution
 cannot substitute for a selected artifact's capture.
 
-This adapter accepts up to 16 live system-memory compute queues, including queues
-created through `hsa_amd_queue_create` before image loading. Queue priority and CU
-mask are retained. Freeze resolves every entry before publishing bindings, and
-kernel objects must be distinct across the admitted modules. Native ABI checks
-permit compiler hidden arguments, constant pointers, nonzero private segments,
-and descriptor register allocations larger than their metadata requirement.
+This adapter imposes no additional limit on the number of live system-memory
+compute queues; queue creation remains subject to ROCR and system resources.
+Queues created through `hsa_amd_queue_create` before image loading are supported.
+Queue priority and CU mask are retained. Freeze resolves every entry before
+publishing bindings, and kernel objects must be distinct across the admitted
+modules. Native ABI checks permit compiler hidden arguments, constant pointers,
+nonzero private segments, and descriptor register allocations larger than their
+metadata requirement.
 Selected-entry qualification retains its stricter register and ISA requirements.
 
 The native packet profile accepts individual standard dispatches and AMD extended

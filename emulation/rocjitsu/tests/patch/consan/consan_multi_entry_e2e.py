@@ -106,6 +106,7 @@ def run(args):
         summary = ledger[-1]
         assert summary['app_status'] == 0 and summary['finish_status'] is None
         assert summary['initializations'] == summary['shutdowns'] == 2
+        assert summary['queues_created'] == summary['queues_destroyed'] == 17
         assert summary['loads'] == 1 and summary['completed'] == 4
         assert summary['native_submitted'] == summary['native_completed'] == 4
         for counter in ('submitted', 'forwarded', 'copied', 'written', 'reused'):

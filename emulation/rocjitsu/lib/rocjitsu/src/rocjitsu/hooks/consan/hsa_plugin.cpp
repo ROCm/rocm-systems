@@ -500,8 +500,7 @@ public:
       std::lock_guard lock(mutex_);
       if (closed_ || status_ != RuntimeStatus::Success ||
           (!application_profile_ &&
-           (!started_ || queue_ever_ || !module_ || agent.handle != module_->agent.handle)) ||
-          queues_.size() + queue_creations_ >= 16) {
+           (!started_ || queue_ever_ || !module_ || agent.handle != module_->agent.handle))) {
         return reject_locked("MVP requires one queue created after the prepared module is frozen");
       }
       queue_ever_ = true;
@@ -1623,7 +1622,7 @@ private:
   hsa_amd_memory_pool_t pool_{};
   std::vector<std::unique_ptr<QueueState>> queues_;
   uint32_t queue_creations_ = 0;
-  // Enclosing AMD create calls fence finish, but do not reserve queue capacity.
+  // Enclosing AMD create calls remain live through replacement queue cleanup.
   uint32_t native_queue_calls_ = 0;
   uint32_t callbacks_ = 0;
   uint32_t shutdown_calls_ = 0;

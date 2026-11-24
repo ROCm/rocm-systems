@@ -157,40 +157,53 @@ int run(int argc, char **argv) {
   hsa_executable_t executable = {};
   hsa_code_object_reader_t reader = {};
   hsa_queue_t *queue = nullptr;
+  std::vector<hsa_queue_t *> native_queues;
   hsa_signal_t signal = {};
   void *arguments = nullptr;
   void *output = nullptr;
   int result = 0;
   uint32_t loads = 0;
   uint32_t completed = 0;
+  uint32_t queues_created = 0, queues_destroyed = 0;
   std::array<Entry, 3> entries = {
       Entry{.name = "mk_a.kd", .argument_bytes = 16, .group_bytes = 8},
       Entry{.name = "mk_b.kd", .argument_bytes = 32, .group_bytes = 256},
       Entry{.name = "mk_c.kd", .argument_bytes = 24, .group_bytes = 64}};
   if (native_application) {
-    hsa_amd_queue_create_desc_t descriptor = {};
-    descriptor.version = HSA_AMD_QUEUE_CREATE_DESC_VERSION;
-    descriptor.engine_type = HSA_AMD_QUEUE_ENGINE_COMPUTE;
-    descriptor.queue_size_bytes = 128 * sizeof(hsa_kernel_dispatch_packet_t);
-    descriptor.priority = HSA_AMD_QUEUE_PRIORITY_NORMAL;
-    descriptor.engine.compute.type = HSA_QUEUE_TYPE_SINGLE;
-    if (!require(hsa_amd_queue_create(initialized.gpu, &descriptor, 1),
-                 "AMD queue before image load") ||
-        descriptor.queue == nullptr)
-      return 20;
-    queue = descriptor.queue;
+    constexpr uint32_t kNativeQueues = 17;
+    for (uint32_t index = 0; index < kNativeQueues; ++index) {
+      hsa_amd_queue_create_desc_t descriptor = {};
+      descriptor.version = HSA_AMD_QUEUE_CREATE_DESC_VERSION;
+      descriptor.engine_type = HSA_AMD_QUEUE_ENGINE_COMPUTE;
+      descriptor.queue_size_bytes = 128 * sizeof(hsa_kernel_dispatch_packet_t);
+      descriptor.priority = HSA_AMD_QUEUE_PRIORITY_NORMAL;
+      descriptor.engine.compute.type = HSA_QUEUE_TYPE_SINGLE;
+      const hsa_status_t status = hsa_amd_queue_create(initialized.gpu, &descriptor, 1);
+      const bool distinct =
+          descriptor.queue != nullptr && std::find(native_queues.begin(), native_queues.end(),
+                                                   descriptor.queue) == native_queues.end();
+      if (distinct)
+        native_queues.push_back(descriptor.queue);
+      if (!require(status, "AMD queue before image load") || !distinct) {
+        result = 20;
+        break;
+      }
+      ++queues_created;
+      queue = descriptor.queue;
+    }
   }
-  const int descriptor = ::open(argv[1], O_RDONLY | O_CLOEXEC);
-  if (descriptor < 0 ||
-      !require(hsa_code_object_reader_create_from_file(descriptor, &reader), "reader") ||
-      !require(hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
-                                         nullptr, &executable),
-               "executable") ||
-      !require(hsa_executable_load_agent_code_object(executable, initialized.gpu, reader, nullptr,
-                                                     nullptr),
-               "whole-image load")) {
+  const int descriptor = result == 0 ? ::open(argv[1], O_RDONLY | O_CLOEXEC) : -1;
+  if (result == 0 &&
+      (descriptor < 0 ||
+       !require(hsa_code_object_reader_create_from_file(descriptor, &reader), "reader") ||
+       !require(hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
+                                          nullptr, &executable),
+                "executable") ||
+       !require(hsa_executable_load_agent_code_object(executable, initialized.gpu, reader, nullptr,
+                                                      nullptr),
+                "whole-image load"))) {
     result = 20;
-  } else {
+  } else if (result == 0) {
     ++loads;
   }
   if (descriptor >= 0) {
@@ -253,6 +266,8 @@ int run(int argc, char **argv) {
                  "queue")))) {
     result = 20;
   }
+  if (!native_application && queue)
+    ++queues_created;
   if (result == 0 && native_application) {
     if (!require(hsa_shut_down(), "intermediate HSA shutdown")) {
       result = 22;
@@ -354,8 +369,18 @@ int run(int argc, char **argv) {
   if (signal.handle && !require(hsa_signal_destroy(signal), "signal cleanup") && result == 0) {
     result = 22;
   }
-  if (queue && !require(hsa_queue_destroy(queue), "queue cleanup") && result == 0) {
-    result = 22;
+  if (native_application) {
+    for (hsa_queue_t *created : native_queues) {
+      if (require(hsa_queue_destroy(created), "native queue cleanup"))
+        ++queues_destroyed;
+      else if (result == 0)
+        result = 22;
+    }
+  } else if (queue) {
+    if (require(hsa_queue_destroy(queue), "queue cleanup"))
+      ++queues_destroyed;
+    else if (result == 0)
+      result = 22;
   }
   if (reader.handle && !require(hsa_code_object_reader_destroy(reader), "reader cleanup") &&
       result == 0) {
@@ -372,10 +397,12 @@ int run(int argc, char **argv) {
   if (output && !require(hsa_amd_memory_pool_free(output), "output cleanup") && result == 0) {
     result = 22;
   }
-  if (!require(hsa_shut_down(), "shutdown")) {
-    if (result == 0)
-      result = 22;
-  } else {
+  while (shutdowns < initializations) {
+    if (!require(hsa_shut_down(), "shutdown")) {
+      if (result == 0)
+        result = 22;
+      break;
+    }
     ++shutdowns;
   }
   if (plugin)
@@ -386,10 +413,12 @@ int run(int argc, char **argv) {
   else
     std::cout << finish_status;
   std::cout << ",\"initializations\":" << initializations << ",\"shutdowns\":" << shutdowns
-            << ",\"loads\":" << loads << ",\"completed\":" << completed
-            << ",\"submitted\":" << stats.submitted << ",\"forwarded\":" << stats.forwarded
-            << ",\"copied\":" << stats.copied << ",\"written\":" << stats.written
-            << ",\"reused\":" << stats.reused << ",\"native_submitted\":" << stats.native_submitted
+            << ",\"queues_created\":" << queues_created
+            << ",\"queues_destroyed\":" << queues_destroyed << ",\"loads\":" << loads
+            << ",\"completed\":" << completed << ",\"submitted\":" << stats.submitted
+            << ",\"forwarded\":" << stats.forwarded << ",\"copied\":" << stats.copied
+            << ",\"written\":" << stats.written << ",\"reused\":" << stats.reused
+            << ",\"native_submitted\":" << stats.native_submitted
             << ",\"native_completed\":" << stats.native_completed << "}\n";
   return result;
 }
