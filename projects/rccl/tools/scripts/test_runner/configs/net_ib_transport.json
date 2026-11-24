@@ -1840,11 +1840,6 @@
           "test_filter": "NetIbMultiSegmentMPITest.CrossBoundaryTransferSucceeds"
         },
         {
-          "name": "NetIB_MultiSeg_DeepEP_MultiNodeAsymmetricCrossBoundaryStress",
-          "description": "32 iterations crossing independently selected source and destination boundaries in an 8-segment window, with a sentinel-checked destination; requires ranks on two nodes",
-          "test_filter": "NetIbMultiSegmentMPITest.DeepEP_MultiNodeAsymmetricCrossBoundaryStress"
-        },
-        {
           "name": "NetIB_MultiSeg_WholeBufferSingleTransfer",
           "description": "A single transfer spanning the whole window crosses every boundary and exercises the full splitting builder",
           "test_filter": "NetIbMultiSegmentMPITest.WholeBufferSingleTransfer"
@@ -2074,11 +2069,6 @@
           "test_filter": "RmaMultiSegmentMPITest.DeepEP_EngramMixedWindowIGet"
         },
         {
-          "name": "NetIB_RMA_MultiSeg_DeepEP_EngramIGetStress",
-          "description": "32-iteration DeepEP Engram fetch sweep over changing remote CPU and local GPU offsets; skips unless there is exactly one rank on each of two nodes",
-          "test_filter": "RmaMultiSegmentMPITest.DeepEP_MultiNodeEngramMixedWindowIGetStress"
-        },
-        {
           "name": "NetIB_RMA_MultiSeg_IFlush",
           "description": "Receiver-side iflush fences every physical segment after a full-window iput",
           "test_filter": "RmaMultiSegmentMPITest.IFlushMultiSegment"
@@ -2271,11 +2261,6 @@
           "test_filter": "RmaMultiSegmentMPITest.DeepEP_HybridImportedCpuSegmentIGet"
         },
         {
-          "name": "NetIB_RMA_MultiSeg_DeepEP_HybridMultiNodeIGetStress",
-          "description": "32 iterations alternating the remote node's imported CPU-owner segment while varying offsets and sizes: segment-window selection, shared-handle lifetime and independent local/remote cursors",
-          "test_filter": "RmaMultiSegmentMPITest.DeepEP_HybridMultiNodeIGetStress"
-        },
-        {
           "name": "NetIB_RMA_MultiSeg_DeepEP_HybridOutOfRangeIGetRejected",
           "description": "Negative: an IGet overrunning the final imported CPU segment is rejected before posting and leaves the GPU destination intact",
           "test_filter": "RmaMultiSegmentMPITest.DeepEP_HybridOutOfRangeIGetRejected"
@@ -2325,6 +2310,50 @@
           "name": "NetIB_RMA_MultiSeg_PostPath_2x4",
           "description": "Post-path, all-pairs and many-to-one tests on 8 ranks across 2 nodes",
           "test_filter": "RmaMultiSegmentPostMPITest.*:-RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe"
+        }
+      ]
+    },
+    "net_ib_multisegment_stress_nightly": {
+      "extends": "net_ib_base",
+      "timeout": 900,
+      "description": "Queue oversubscribe and boundary stress. Disabled by default. RCCL_MSEG_SQ_STRESS=1 opts into the send-queue cases.",
+      "env_variables": {
+        "NCCL_NET": "ib",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "ALL",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_MSEG_SQ_STRESS": "1"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiSeg_Stress_Nightly",
+          "description": "NET and RMA boundary stress plus opt-in send-queue oversubscribe",
+          "test_filter": "NetIbMultiSegmentMPITest.SendQueueFatChainOversubscribe:NetIbMultiSegmentMPITest.DeepEP_MultiNodeAsymmetricCrossBoundaryStress:RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe:RmaMultiSegmentMPITest.BoundaryStressNoCorruption:RmaMultiSegmentMPITest.MultiNodeAsymmetricIGetBoundaryStress:RmaMultiSegmentMPITest.DeepEP_MultiNodeEngramMixedWindowIGetStress"
+        }
+      ]
+    },
+    "net_ib_multisegment_hybrid_stress_nightly": {
+      "extends": "net_ib_base",
+      "num_ranks": 8,
+      "num_nodes": 2,
+      "num_gpus": 4,
+      "timeout": 900,
+      "description": "Hybrid imported-CPU IGet stress. Disabled by default. Needs 4 local ranks.",
+      "env_variables": {
+        "NCCL_NET": "ib",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "NCCL_SYM_REUSE_SYSMEM_HANDLES": "1",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "ALL",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "NetIB_RMA_MultiSeg_DeepEP_HybridMultiNodeIGetStress",
+          "description": "32 iterations alternating the remote node's imported CPU-owner segment",
+          "test_filter": "RmaMultiSegmentMPITest.DeepEP_HybridMultiNodeIGetStress"
         }
       ]
     }
@@ -2905,6 +2934,18 @@
       "description": "Multi-segment RMA post-path tests on 8 ranks across 2 nodes",
       "config": "net_ib_rma_multisegment_scale_2x4",
       "enabled": true
+    },
+    {
+      "name": "NET IB - Multi-Segment stress (nightly)",
+      "description": "Disabled boundary and queue stress",
+      "config": "net_ib_multisegment_stress_nightly",
+      "enabled": false
+    },
+    {
+      "name": "NET IB - Hybrid RMA stress (nightly)",
+      "description": "Disabled 8-rank hybrid IGet stress",
+      "config": "net_ib_multisegment_hybrid_stress_nightly",
+      "enabled": false
     }
   ]
 }
