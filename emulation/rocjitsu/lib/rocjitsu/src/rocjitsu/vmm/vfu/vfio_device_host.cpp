@@ -532,6 +532,7 @@ int VfioDeviceHost::begin_target_quiesce() {
   }
   quiesce_gates_ = target_grants_->begin_quiesce(target_ordinal_);
   quiescing_ = true;
+  quiesce_wake_->set_waiting(true);
   quiesce_pending_ = !target_quiesce_drained();
   if (!quiesce_pending_) {
     return 0;
@@ -548,6 +549,7 @@ void VfioDeviceHost::end_target_quiesce() noexcept {
   if (!quiescing_) {
     return;
   }
+  quiesce_wake_->set_waiting(false);
   target_grants_->end_quiesce(target_ordinal_);
   quiesce_gates_.clear();
   quiesce_pending_ = false;

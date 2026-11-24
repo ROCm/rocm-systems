@@ -33,7 +33,7 @@ retain_peer_effects(std::shared_ptr<std::vector<amdgpu::VmTransferEffectGate::Pe
         if (held_effect) {
           for (const auto &weak_wake : wakes) {
             if (const auto wake = weak_wake.lock()) {
-              wake->notify();
+              wake->notify_if_waiting();
             }
           }
         }
@@ -50,12 +50,21 @@ VfioQuiesceWake::~VfioQuiesceWake() {
   }
 }
 
-void VfioQuiesceWake::notify() const noexcept {
-  if (fd_ < 0) {
+void VfioQuiesceWake::set_waiting(bool waiting) noexcept {
+  const std::lock_guard lock(mutex_);
+  waiting_ = waiting;
+}
+
+void VfioQuiesceWake::notify_if_waiting() noexcept {
+  // The producer drops its last gate permit before taking this lock. Either
+  // the ensuing drain check observes that drop, or the waiter is already armed.
+  const std::lock_guard lock(mutex_);
+  if (!waiting_ || fd_ < 0) {
     return;
   }
   const uint64_t one = 1;
-  (void)::write(fd_, &one, sizeof(one));
+  while (::write(fd_, &one, sizeof(one)) < 0 && errno == EINTR) {
+  }
 }
 
 VfioTargetGrants::VfioTargetGrants(std::size_t host_count)
@@ -470,10 +479,10 @@ VfioTargetGrants::retain_effect(std::optional<amdgpu::VmTransferEffectGate::Perm
       [retained = std::move(retained), requester_wake, owner_wake]() mutable {
         retained.reset();
         if (const auto wake = requester_wake.lock()) {
-          wake->notify();
+          wake->notify_if_waiting();
         }
         if (const auto wake = owner_wake.lock()) {
-          wake->notify();
+          wake->notify_if_waiting();
         }
       });
 }

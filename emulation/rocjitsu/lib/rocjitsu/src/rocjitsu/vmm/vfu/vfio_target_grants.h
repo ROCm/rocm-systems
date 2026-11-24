@@ -36,9 +36,12 @@ public:
   VfioQuiesceWake(const VfioQuiesceWake &) = delete;
   VfioQuiesceWake &operator=(const VfioQuiesceWake &) = delete;
   [[nodiscard]] int fd() const noexcept { return fd_; }
-  void notify() const noexcept;
+  void set_waiting(bool waiting) noexcept;
+  void notify_if_waiting() noexcept;
 
 private:
+  std::mutex mutex_;
+  bool waiting_ = false;
   int fd_ = -1;
 };
 
