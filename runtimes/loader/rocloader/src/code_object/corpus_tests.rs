@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use super::{CodeObject, SymbolKind, SymbolTableOrder};
+use super::{CodeObject, FloatRoundingMode, Profile, SymbolKind, SymbolTableOrder};
 use crate::elf::LoadPlan;
 use crate::loaded_image::CODE_ALIGNMENT;
 
@@ -33,6 +33,22 @@ fn embedded_image_and_copy_kernels_materialize_at_distinct_load_addresses() {
             let bytes = std::fs::read(&path).unwrap();
             let object = CodeObject::parse(&bytes)
                 .unwrap_or_else(|error| panic!("{}: {error:?}", path.display()));
+            let contract = object.contract();
+            assert_eq!(contract.profile, None, "{}", path.display());
+            assert_eq!(contract.rounding, None, "{}", path.display());
+            for profile in [Profile::Base, Profile::Full] {
+                for rounding in [
+                    FloatRoundingMode::Default,
+                    FloatRoundingMode::Zero,
+                    FloatRoundingMode::Near,
+                ] {
+                    assert!(
+                        contract.validate(profile, rounding).is_ok(),
+                        "{}: {profile:?}/{rounding:?}",
+                        path.display()
+                    );
+                }
+            }
             assert!(
                 object
                     .symbols(SymbolTableOrder::DynamicFirst)

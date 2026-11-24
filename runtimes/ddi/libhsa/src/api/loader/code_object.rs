@@ -221,7 +221,10 @@ pub unsafe extern "C" fn hsa_code_object_get_info(
                     })
                 }
                 CODE_OBJECT_INFO_DEFAULT_FLOAT_ROUNDING_MODE => {
-                    value.cast::<u32>().write(match object.contract().rounding {
+                    let Some(rounding) = object.contract().rounding else {
+                        return INVALID_CODE_OBJECT;
+                    };
+                    value.cast::<u32>().write(match rounding {
                         rocloader::FloatRoundingMode::Default => {
                             DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT
                         }
