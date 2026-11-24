@@ -2996,6 +2996,12 @@ hsa_status_t Runtime::Load() {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
+  // Reserve the event that signals created after the KFD signal events run out
+  // share (see InterruptSignal::EventPool::ReserveOverflow()). AMD::Load() has
+  // opened KFD and settled whether interrupts are used.
+  EventPool.ReserveOverflow(g_use_interrupt_wait && flag_.enable_shared_overflow_event() &&
+                            KfdVersion().supports_event_age);
+
   asyncSignals_.reset(new AsyncEventsInfo(false));
   asyncExceptions_.reset(new AsyncEventsInfo(g_use_interrupt_wait));
 
