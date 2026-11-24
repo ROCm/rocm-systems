@@ -985,12 +985,12 @@ ProfilingSignal* VirtualGPU::RetiringSignalTracker::TakeHostSignal() {
 }
 
 // ================================================================================================
-void VirtualGPU::RetiringSignalTracker::PlaceForUse(bool timing_only) {
+void VirtualGPU::RetiringSignalTracker::PlaceForUse(bool host_memory) {
   ProfilingSignal* current = signal_list_[current_id_];
-  if (current->in_device_memory_ != timing_only) {
+  if (current->in_device_memory_ != host_memory) {
     return;
   }
-  ProfilingSignal* replacement = timing_only ? TakeHostSignal() : TakeSpare();
+  ProfilingSignal* replacement = host_memory ? TakeHostSignal() : TakeSpare();
   if (replacement == nullptr) {
     return;
   }
@@ -999,7 +999,7 @@ void VirtualGPU::RetiringSignalTracker::PlaceForUse(bool timing_only) {
     spare_signals_.push_back(replacement);
     return;
   }
-  (timing_only ? spare_signals_ : host_signals_).push_back(current);
+  (host_memory ? spare_signals_ : host_signals_).push_back(current);
   signal_list_[current_id_] = replacement;
 }
 
@@ -1301,7 +1301,8 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
     }
   }
   if (!use_irq) {
-    PlaceForUse(timing_only);
+    // An SDMA submission reads and flushes a device-memory signal across the bus
+    PlaceForUse(timing_only || IsSdmaEngine(engine_));
   }
   ProfilingSignal* prof_signal = signal_list_[current_id_];
   const bool blocking_callback = enqueHandler && ts->command().Callback() != nullptr &&
