@@ -11,7 +11,8 @@ namespace rocjitsu::arith::test {
 // Independently quantize against the finite format's positive values. The stochastic
 // seed contributes a fractional offset at the source mantissa's precision.
 template <int ExponentBits, int FractionBits>
-uint32_t quantize_finite(float value, bool stochastic, uint32_t seed) {
+uint32_t quantize_finite(float value, bool stochastic, uint32_t seed, bool gfx950 = false,
+                         int source_fraction = 23) {
   constexpr int bias = (1 << (ExponentBits - 1)) - 1;
   constexpr int count = 1 << (ExponentBits + FractionBits);
   uint32_t raw = std::bit_cast<uint32_t>(value),
@@ -24,12 +25,12 @@ uint32_t quantize_finite(float value, bool stochastic, uint32_t seed) {
   }
   double x = std::fabs(double(value));
   if (std::isnan(x)) {
-    return 0;
+    return gfx950 ? (sign | (count - 1)) : 0;
   }
   if (x >= values[count - 1]) {
     return sign | (count - 1);
   }
-  if (x < values[1] / 2) {
+  if (!(gfx950 && stochastic) && x < values[1] / 2) {
     return sign;
   }
   int lower = 0;
@@ -39,7 +40,11 @@ uint32_t quantize_finite(float value, bool stochastic, uint32_t seed) {
   double spacing = values[lower + 1] - values[lower];
   double fraction = (x - values[lower]) / spacing;
   bool up;
-  if (stochastic) {
+  if (gfx950 && stochastic) {
+    int precision = source_fraction - FractionBits;
+    double fixed = std::floor(std::ldexp(fraction, precision));
+    up = (fixed + double(seed >> (32 - precision))) >= double(1U << precision);
+  } else if (stochastic) {
     int exponent, spacing_exponent;
     std::frexp(x, &exponent);
     std::frexp(spacing, &spacing_exponent);

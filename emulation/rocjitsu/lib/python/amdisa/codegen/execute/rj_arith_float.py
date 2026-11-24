@@ -1221,8 +1221,11 @@ def gen_wide_scaled_narrow(ctx: ExecuteContext) -> str | None:
     flags = 'wf.cu().arithmetic_flags()'
     if pk8 and '_FP4_' not in name:
         flags += ' | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0)'
-    if f32 and not gfx1250:
-        flags += ' | (!(wf.fp_denorm_mode_f32() & 1) ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0)'
+    if not gfx1250:
+        denorm = (
+            'fp_denorm_mode_f16_f64' if name.endswith('_F16') else 'fp_denorm_mode_f32'
+        )
+        flags += f' | (!(wf.{denorm}() & 1) ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0)'
     wave64 = 'nullptr' if gfx1250 else wave_api(api, 64)
     lines += [
         f'  amdgpu::arith::execute_wide_scaled_narrow<{str(ternary).lower()}{policy}>(wf, {wave_api(api, 32)}, {wave64},',
@@ -1244,14 +1247,12 @@ def gen_scaled_narrow(ctx: ExecuteContext) -> str | None:
     if len(ctx.dst_ops) != 1 or len(ctx.src_ops) != operands:
         return None
     api = 'rj_arith_' + name.lower() + '_gfx950'
+    denorm = 'fp_denorm_mode_f16_f64' if name.endswith('_F16') else 'fp_denorm_mode_f32'
     lines = [
         '  uint64_t flags = wf.cu().arithmetic_flags();',
         '  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;',
+        f'  if (!(wf.{denorm}() & 1)) flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;',
     ]
-    if f32:
-        lines += [
-            '  if (!(wf.fp_denorm_mode_f32() & 1)) flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;'
-        ]
     if stochastic or fp4:
         lines += [
             '  const unsigned byte = (inst_.op_sel >> 2) & 3;',
@@ -1273,9 +1274,10 @@ def gen_scaled_narrow(ctx: ExecuteContext) -> str | None:
         source_bytes = None
     ternary = operands == 3
     pair_a = fp4 and stochastic and f32
+    special_policy = f', false, true, {str(stochastic).lower()}' if fp4 else ''
     second = f'&{ctx.src_ops[1]}' if ternary else 'nullptr'
     lines += [
-        f'  amdgpu::arith::execute_scaled_conversion<true, {str(ternary).lower()}, {str(pair_a).lower()}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+        f'  amdgpu::arith::execute_scaled_conversion<true, {str(ternary).lower()}, {str(pair_a).lower()}{special_policy}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         f'      flags, modifiers, {ctx.dst_ops[0]}, {ctx.src_ops[0]}, {second}, {ctx.src_ops[-1]}, {source_bytes or "0xF"}, destination_bytes);',
     ]
     return '\n'.join(lines)
@@ -1324,6 +1326,17 @@ def gen_wide_scaled_widen(ctx: ExecuteContext) -> str | None:
     lines += [
         '  uint64_t flags = cu.arithmetic_flags();',
         '  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;',
+    ]
+    if not gfx1250:
+        denorm = (
+            'fp_denorm_mode_f16_f64'
+            if '_F16_' in ctx.inst.name
+            else 'fp_denorm_mode_f32'
+        )
+        lines += [
+            f'  if (!(wf.{denorm}() & 2)) flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;'
+        ]
+    lines += [
         f'  amdgpu::arith::execute_wide_scaled_widen<{str(gfx1250).lower()}>(wf, {wave_api(api, 32)}, {wave64},',
         f'      flags, destination_base, source_base, {scale}, {words}, {mode}, {input_words}{selection});',
     ]
@@ -1346,9 +1359,11 @@ def gen_scaled_widen(ctx: ExecuteContext) -> str | None:
     pair = '_PK_F32_' in name
     half = not packed and '_F16_' in name
     api = 'rj_arith_' + name.lower() + '_gfx950'
+    denorm = 'fp_denorm_mode_f16_f64' if '_F16_' in name else 'fp_denorm_mode_f32'
     lines = [
         '  uint64_t flags = wf.cu().arithmetic_flags();',
         '  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;',
+        f'  if (!(wf.{denorm}() & 2)) flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;',
     ]
     if packed and not fp4:
         lines += [

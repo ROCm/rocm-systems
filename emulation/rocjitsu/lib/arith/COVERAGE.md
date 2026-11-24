@@ -102,6 +102,17 @@ Comparison and register-routing instructions also use rj-arith. Other families
 are migrating independently; an entry point's header documents its supported
 semantics and controls.
 
+### Scaled low-precision conversions
+
+All 49 CDNA4 (`_gfx950`) `V_CVT_SCALEF32_*` instructions (short and wide `PK32`
+widening from FP8/BF8/FP6/BF6/FP4 to F32/F16/BF16, plus short and wide
+`PK`/`2XPK16`/`PK32`/`SR` narrowing to FP8/BF8/FP6/BF6/FP4) are calibrated
+against MI350X hardware captures across scalar, AVX2 and AVX-512-v4, accept
+explicit strict modes (no FP status output; Compatibility resolves to mode 2),
+and honor guest denormal flushing (`FP_FLUSH_OUTPUT_DENORMALS` on widening and
+`FP_FLUSH_INPUT_DENORMALS` on narrowing). The gfx1250 (`_gfx1250`) E8M0 scaled
+`PK8`/`PK16` entry points remain loose-only.
+
 ### Floating-point selection
 
 CDNA3/4 legacy MIN/MAX and MIN3/MAX3/MED3 support FP16/FP32, with binary

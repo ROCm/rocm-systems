@@ -15920,6 +15920,92 @@ TEST(ArithBridgeTest, CdnaHalfExponentQualification) {
   }
 }
 
+// MI350X (gfx950) finite-only FP4/FP6/BF6 scaled narrowing: special scales, NaNs,
+// and infinities saturate to signed max code; stochastic rounding operates in the
+// source format's significand width without an inherited tiny-value flush cutoff.
+inline uint8_t gfx950_scaled_finite_narrow(int exp_bits, int frac_bits, int src_frac, float decoded,
+                                           int scale_exp, bool stochastic, uint32_t seed) {
+  const uint32_t raw_decoded = std::bit_cast<uint32_t>(decoded);
+  const uint32_t sign_bit = (raw_decoded >> 31) & 1U;
+  const uint32_t sign = sign_bit << (exp_bits + frac_bits);
+  const uint32_t max_code = (1U << (exp_bits + frac_bits)) - 1U;
+  if (scale_exp == 255 || std::isnan(decoded) || std::isinf(decoded)) {
+    return uint8_t(sign | max_code);
+  }
+  const float scaled = float(double(decoded) / std::ldexp(1.0, scale_exp - 127));
+  const uint32_t raw = std::bit_cast<uint32_t>(scaled);
+  const uint32_t magnitude = raw & 0x7fffffffU;
+  const int bias = (1 << (exp_bits - 1)) - 1;
+  const int exponent = int(magnitude >> 23) - 127 + bias;
+  if (exponent >= (1 << exp_bits)) {
+    return uint8_t(sign | max_code);
+  }
+  const uint32_t significand = (magnitude & 0x7fffffU) | 0x800000U;
+  const unsigned alignment = exponent < 1 ? unsigned(1 - exponent) : 0U;
+  uint32_t result = 0U;
+  if (stochastic) {
+    const uint32_t sig_mask = ~0U << (23 - src_frac);
+    const uint32_t aligned = alignment < 25U ? ((significand >> alignment) & sig_mask) : 0U;
+    result = (aligned + (seed >> (9 + frac_bits))) >> (23 - frac_bits);
+  } else {
+    const unsigned shift = unsigned(23 - frac_bits) + alignment;
+    result =
+        shift > 24U
+            ? 0U
+            : (significand + (1U << (shift - 1U)) - 1U + ((significand >> shift) & 1U)) >> shift;
+  }
+  if (exponent > 0) {
+    result += unsigned(exponent - 1) << frac_bits;
+  }
+  if (result > max_code) {
+    result = max_code;
+  }
+  return uint8_t(sign | result);
+}
+
+// MI350X (gfx950) OCP FP8/BF8 scaled narrowing: special scales and NaNs emit
+// unsigned canonical NaN (0xff FP8 / 0xfe BF8), +/-Inf saturates under FP16_OVFL,
+// and stochastic rounding uses the source format's significand width.
+inline uint8_t gfx950_scaled_fp8_narrow(bool bf8, int src_frac, float decoded, int scale_exp,
+                                        bool stochastic, uint32_t seed, bool saturate) {
+  if (scale_exp == 255 || std::isnan(decoded)) {
+    return bf8 ? 0xfeU : 0xffU;
+  }
+  const int frac_bits = bf8 ? 2 : 3;
+  const int bias = bf8 ? 15 : 7;
+  const uint32_t terminal = bf8 ? 124U : 127U;
+  const uint32_t limit = saturate ? (terminal - 1U) : terminal;
+  const float scaled = float(double(decoded) / std::ldexp(1.0, scale_exp - 127));
+  const uint32_t raw = std::bit_cast<uint32_t>(scaled);
+  const uint32_t sign = (raw >> 24) & 0x80U;
+  const uint32_t magnitude = raw & 0x7fffffffU;
+  const int exponent = int(magnitude >> 23) - 127 + bias;
+  if (exponent >= (bf8 ? 31 : 16)) {
+    return uint8_t(sign | limit);
+  }
+  const uint32_t significand = (magnitude & 0x7fffffU) | 0x800000U;
+  const unsigned alignment = exponent < 1 ? unsigned(1 - exponent) : 0U;
+  uint32_t result = 0U;
+  if (stochastic) {
+    const uint32_t sig_mask = ~0U << (23 - src_frac);
+    const uint32_t aligned = alignment < 25U ? ((significand >> alignment) & sig_mask) : 0U;
+    result = (aligned + (seed >> (9 + frac_bits))) >> (23 - frac_bits);
+  } else {
+    const unsigned shift = unsigned(23 - frac_bits) + alignment;
+    result =
+        shift > 24U
+            ? 0U
+            : (significand + (1U << (shift - 1U)) - 1U + ((significand >> shift) & 1U)) >> shift;
+  }
+  if (exponent > 0) {
+    result += unsigned(exponent - 1) << frac_bits;
+  }
+  if (result > limit) {
+    result = limit;
+  }
+  return uint8_t(sign | result);
+}
+
 TEST(ArithBridgeTest, WideScaledWidenRegionsAndAliases) {
   struct Form {
     uint16_t opcode;
@@ -15955,7 +16041,13 @@ TEST(ArithBridgeTest, WideScaledWidenRegionsAndAliases) {
         if (gfx1250 && lanes == 64) {
           continue; // gfx1250 is Wave32-only.
         }
-        for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+        for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose,
+                               ArithmeticSemantics::BitExactEmpiricalNoFpStatus,
+                               ArithmeticSemantics::BitExactEmpirical}) {
+          if (gfx1250 && (semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus ||
+                          semantics == ArithmeticSemantics::BitExactEmpirical)) {
+            continue;
+          }
           for (int variant = 0; variant < (gfx1250 ? 4 : 6); ++variant) {
             ArithmeticPolicy policy{};
             policy.semantics = semantics;
@@ -16008,7 +16100,7 @@ TEST(ArithBridgeTest, WideScaledWidenRegionsAndAliases) {
                 const int byte = (variant & 2) + (width == 8 ? 0 : lane / 16);
                 exponent = exponents[(provider + byte) % 4];
               }
-              if (variant < 4 && ((exec_mask >> lane) & 1) && (gfx1250 || exponent != 255)) {
+              if (variant < 4 && ((exec_mask >> lane) & 1)) {
                 for (int e = 0; e < elements; ++e) {
                   float value = form.source == 0   ? util::fp4_e2m1_to_f32(codes[e])
                                 : form.source == 1 ? util::fp8_e4m3_to_f32(codes[e])
@@ -16017,9 +16109,15 @@ TEST(ArithBridgeTest, WideScaledWidenRegionsAndAliases) {
                                                    : util::bf6_e3m2_to_f32(codes[e]);
                   value = gfx1250 ? value * util::e8m0_to_f32(uint8_t(exponent))
                                   : float(double(value) * std::ldexp(1.0, exponent - 127));
-                  uint32_t word = form.destination == 0   ? std::bit_cast<uint32_t>(value)
-                                  : form.destination == 1 ? util::f32_to_f16_mode(value, true)
-                                                          : util::f32_to_bf16_rne_mode(value, true);
+                  uint32_t word = form.destination == 0 ? std::bit_cast<uint32_t>(value)
+                                  : form.destination == 1
+                                      ? util::f32_to_f16_mode(value, gfx1250)
+                                      : util::f32_to_bf16_rne_mode(value, gfx1250);
+                  if (!gfx1250 && exponent == 255) {
+                    word = form.destination == 0   ? 0xffc00000U
+                           : form.destination == 1 ? 0xfe00U
+                                                   : 0xffc0U;
+                  }
                   int reg = destination + (form.destination == 0 ? e : e / 2);
                   if (form.destination == 0 || e % 2 == 0) {
                     expected[reg][lane] = word;
@@ -16071,12 +16169,16 @@ TEST(ArithBridgeTest, WideScaledWidenRegionsAndAliases) {
                 EXPECT_TRUE(fixture.recorder->reads.empty());
                 EXPECT_TRUE(fixture.recorder->writes.empty());
               } else {
-                uint64_t written = gfx1250 ? exec_mask : exec_mask & ~0x8888888888888888ULL;
                 ASSERT_EQ(fixture.recorder->writes.size(),
                           unsigned(form.destination == 0 ? elements : elements / 2));
                 for (auto write : fixture.recorder->writes) {
-                  EXPECT_EQ(write.lanes, written);
+                  EXPECT_EQ(write.lanes, exec_mask);
                   EXPECT_EQ(write.bytes, 15);
+                }
+                for (const auto &read : fixture.recorder->reads) {
+                  if (!gfx1250 && read.reg != 7) {
+                    EXPECT_EQ(read.lanes & 0x8888888888888888ULL, 0U);
+                  }
                 }
               }
             }
@@ -16116,7 +16218,9 @@ TEST(ArithBridgeTest, ScaledWidenGfx950LayoutsAndPolicies) {
   };
   for (const auto &form : forms) {
     for (int lanes : {32, 64}) {
-      for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+      for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose,
+                             ArithmeticSemantics::BitExactEmpiricalNoFpStatus,
+                             ArithmeticSemantics::BitExactEmpirical}) {
         for (int variant = 0; variant < 4; ++variant) {
           ArithmeticPolicy policy{};
           policy.semantics = semantics;
@@ -16172,12 +16276,12 @@ TEST(ArithBridgeTest, ScaledWidenGfx950LayoutsAndPolicies) {
                 float scaled = float(double(decoded) * std::ldexp(1.0, exponent - 127));
                 uint32_t value = form.destination == 0 ? std::bit_cast<uint32_t>(scaled)
                                  : form.destination == 1
-                                     ? util::f32_to_f16_mode(scaled, saturate)
-                                     : util::f32_to_bf16_rne_mode(scaled, saturate);
-                if (exponent == 255) {
-                  value = form.destination == 0   ? 0x7fc00000
-                          : form.destination == 1 ? 0x7e00
-                                                  : 0x7fc0;
+                                     ? util::f32_to_f16_mode(scaled, false)
+                                     : util::f32_to_bf16_rne_mode(scaled, false);
+                if (exponent == 255 || std::isnan(decoded)) {
+                  value = form.destination == 0   ? 0xffc00000U
+                          : form.destination == 1 ? 0xfe00U
+                                                  : 0xffc0U;
                 }
                 if (form.destination == 0) {
                   expected[element] = value;
@@ -16252,7 +16356,13 @@ TEST(ArithBridgeTest, WideScaledNarrowLayoutsAndAliases) {
         if (gfx1250 && lanes != 32) {
           continue;
         }
-        for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+        for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose,
+                               ArithmeticSemantics::BitExactEmpiricalNoFpStatus,
+                               ArithmeticSemantics::BitExactEmpirical}) {
+          if (gfx1250 && (semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus ||
+                          semantics == ArithmeticSemantics::BitExactEmpirical)) {
+            continue;
+          }
           for (int aliasing : {50, 0, 28, 32, 48}) {
             ArithmeticPolicy policy{};
             policy.semantics = semantics;
@@ -16313,27 +16423,28 @@ TEST(ArithBridgeTest, WideScaledNarrowLayoutsAndAliases) {
             }
             ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                             .succeeded());
-            // gfx950 scale-255 lanes do not observe source data. Check before verification
+            // gfx950 scale-255 lanes do not observe stochastic seeds. Check before verification
             // reads themselves notify the recorder.
             if (fixture.recorder) {
               ASSERT_EQ(fixture.recorder->writes.size(), unsigned(output_words));
               for (auto write : fixture.recorder->writes) {
-                EXPECT_EQ(write.lanes, gfx1250 ? exec_mask : exec_mask & ~0x8888888888888888ULL);
+                EXPECT_EQ(write.lanes, exec_mask);
                 EXPECT_EQ(write.bytes, 15);
               }
               for (const auto &read : fixture.recorder->reads) {
-                if (!gfx1250 && read.reg != 48) {
+                if (!gfx1250 && form.stochastic && read.reg == 32) {
                   EXPECT_EQ(read.lanes & 0x8888888888888888ULL, 0U);
                 }
               }
             }
+            const int src_frac = form.source == 0 ? 23 : form.source == 1 ? 10 : 7;
             for (int lane = 0; lane < lanes; ++lane) {
               uint32_t expected[6];
               for (int word = 0; word < output_words; ++word) {
                 expected[word] = input[aliasing + word][lane];
               }
               int exponent = (input[48][lane] >> 23) & 255;
-              if (((exec_mask >> lane) & 1) && (gfx1250 || exponent != 255)) {
+              if ((exec_mask >> lane) & 1) {
                 uint8_t codes[32];
                 uint32_t seed = input[32][lane];
                 for (int element = 0; element < elements; ++element) {
@@ -16342,34 +16453,41 @@ TEST(ArithBridgeTest, WideScaledNarrowLayoutsAndAliases) {
                                                  ? element
                                                  : (element % 2 ? 32 : 0) + element / 2][lane]
                                      : input[element / 2][lane] >> ((element % 2) * 16);
-                  float value = form.source == 0   ? std::bit_cast<float>(raw)
-                                : form.source == 1 ? util::f16_to_f32(uint16_t(raw))
-                                                   : util::bf16_to_f32(uint16_t(raw));
-                  value = exponent == 255 ? std::numeric_limits<float>::quiet_NaN()
-                                          : float(double(value) / std::ldexp(1.0, exponent - 127));
-                  switch (form.format) {
-                  case 0:
-                    codes[element] = form.stochastic ? util::f32_to_fp6_e2m3_sr(value, seed)
-                                                     : util::f32_to_fp6_e2m3_rne(value);
-                    break;
-                  case 1:
-                    codes[element] = form.stochastic ? util::f32_to_bf6_e3m2_sr(value, seed)
-                                                     : util::f32_to_bf6_e3m2_rne(value);
-                    break;
-                  case 2:
-                    codes[element] = form.stochastic ? util::f32_to_fp4_e2m1_sr(value, seed)
-                                                     : util::f32_to_fp4_e2m1_rne(value);
-                    break;
-                  case 3:
-                    codes[element] = form.stochastic
-                                         ? util::f32_to_fp8_e4m3_sr_mode(value, seed, saturate)
-                                         : util::f32_to_fp8_e4m3_rne_mode(value, saturate);
-                    break;
-                  case 4:
-                    codes[element] = form.stochastic
-                                         ? util::f32_to_bf8_e5m2_sr_mode(value, seed, saturate)
-                                         : util::f32_to_bf8_e5m2_rne_mode(value, saturate);
-                    break;
+                  float decoded = form.source == 0   ? std::bit_cast<float>(raw)
+                                  : form.source == 1 ? util::f16_to_f32(uint16_t(raw))
+                                                     : util::bf16_to_f32(uint16_t(raw));
+                  if (!gfx1250) {
+                    codes[element] = gfx950_scaled_finite_narrow(
+                        form.format == 1 ? 3 : 2, form.format == 1 ? 2 : 3, src_frac, decoded,
+                        exponent, form.stochastic, seed);
+                  } else {
+                    float value = exponent == 255
+                                      ? std::numeric_limits<float>::quiet_NaN()
+                                      : float(double(decoded) / std::ldexp(1.0, exponent - 127));
+                    switch (form.format) {
+                    case 0:
+                      codes[element] = form.stochastic ? util::f32_to_fp6_e2m3_sr(value, seed)
+                                                       : util::f32_to_fp6_e2m3_rne(value);
+                      break;
+                    case 1:
+                      codes[element] = form.stochastic ? util::f32_to_bf6_e3m2_sr(value, seed)
+                                                       : util::f32_to_bf6_e3m2_rne(value);
+                      break;
+                    case 2:
+                      codes[element] = form.stochastic ? util::f32_to_fp4_e2m1_sr(value, seed)
+                                                       : util::f32_to_fp4_e2m1_rne(value);
+                      break;
+                    case 3:
+                      codes[element] = form.stochastic
+                                           ? util::f32_to_fp8_e4m3_sr_mode(value, seed, saturate)
+                                           : util::f32_to_fp8_e4m3_rne_mode(value, saturate);
+                      break;
+                    case 4:
+                      codes[element] = form.stochastic
+                                           ? util::f32_to_bf8_e5m2_sr_mode(value, seed, saturate)
+                                           : util::f32_to_bf8_e5m2_rne_mode(value, saturate);
+                      break;
+                    }
                   }
                   seed = util::prng_advance(seed);
                 }
@@ -16459,8 +16577,11 @@ TEST(ArithBridgeTest, ScaledNarrowGfx950LayoutsAndPolicies) {
       {cdna4::kVCvtScalef32SrPkFp4Bf16Vop3, 2, false, true, true},
   };
   for (auto form : forms) {
+    const int src_frac = form.source == 0 ? 23 : form.source == 1 ? 10 : 7;
     for (int lanes : {32, 64}) {
-      for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+      for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose,
+                             ArithmeticSemantics::BitExactEmpiricalNoFpStatus,
+                             ArithmeticSemantics::BitExactEmpirical}) {
         for (int variant = 0; variant < 5; ++variant) {
           ArithmeticPolicy policy{};
           policy.semantics = semantics;
@@ -16508,7 +16629,6 @@ TEST(ArithBridgeTest, ScaledNarrowGfx950LayoutsAndPolicies) {
           }
           ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                           .succeeded());
-          // Aliased D is also read to retain bytes when the scale is NaN.
           if (fixture.recorder) {
             for (const auto &read : fixture.recorder->reads) {
               if (read.reg == unsigned(a) && a != destination) {
@@ -16519,21 +16639,17 @@ TEST(ArithBridgeTest, ScaledNarrowGfx950LayoutsAndPolicies) {
           for (int lane = 0; lane < lanes; ++lane) {
             uint32_t expected = input[destination][lane];
             int exponent = (input[c][lane] >> 23) & 255;
-            if (((exec_mask >> lane) & 1) && exponent != 255) {
+            if ((exec_mask >> lane) & 1) {
               auto narrow = [&](uint32_t raw, uint32_t seed) -> uint32_t {
-                float value = form.source == 0   ? std::bit_cast<float>(raw)
-                              : form.source == 1 ? util::f16_to_f32(uint16_t(raw))
-                                                 : util::bf16_to_f32(uint16_t(raw));
-                value = float(double(value) / std::ldexp(1.0, exponent - 127));
+                float decoded = form.source == 0   ? std::bit_cast<float>(raw)
+                                : form.source == 1 ? util::f16_to_f32(uint16_t(raw))
+                                                   : util::bf16_to_f32(uint16_t(raw));
                 if (form.fp4) {
-                  return form.stochastic ? util::f32_to_fp4_e2m1_sr(value, seed)
-                                         : util::f32_to_fp4_e2m1_rne(value);
+                  return gfx950_scaled_finite_narrow(2, 1, src_frac, decoded, exponent,
+                                                     form.stochastic, seed);
                 }
-                return form.bf8
-                           ? (form.stochastic ? util::f32_to_bf8_e5m2_sr_mode(value, seed, saturate)
-                                              : util::f32_to_bf8_e5m2_rne_mode(value, saturate))
-                           : (form.stochastic ? util::f32_to_fp8_e4m3_sr_mode(value, seed, saturate)
-                                              : util::f32_to_fp8_e4m3_rne_mode(value, saturate));
+                return gfx950_scaled_fp8_narrow(form.bf8, src_frac, decoded, exponent,
+                                                form.stochastic, seed, saturate);
               };
               uint32_t value = narrow(input[a][lane], input[b][lane]);
               if (!form.stochastic || form.fp4) {
@@ -16566,21 +16682,39 @@ TEST(ArithBridgeTest, WideScaledSpecialScalesStillRejectUnsupportedSemantics) {
       for (uint32_t scale : {0x3f800000U, 0x7f800000U, 0x7fc00000U}) {
         ArithmeticPolicy policy{};
         policy.semantics = ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
-        BridgeFixture f(rocjitsu::IsaFamily::Cdna4, 64, policy, 128);
-        f.wave->set_exec(1);
-        f.cu->write_vgpr(f.base() + 40, 0, scale);
-        f.cu->write_vgpr(f.base() + 48, 0, 0xdeadbeefU);
-        const uint16_t opcode = !narrow      ? cdna4::kVCvtScalef32Pk32F32Fp6Vop3
-                                : stochastic ? cdna4::kVCvtScalef32SrPk32Fp6F32Vop3
-                                             : cdna4::kVCvtScalef322xpk16Fp6F32Vop3;
-        auto words = cdna4::build_vop3(opcode, {.vdst = 48, .src0 = 256, .src1 = 288, .src2 = 296});
-        if (!narrow) {
-          words = cdna4::build_vop3(opcode, {.vdst = 48, .src0 = 256, .src1 = 296});
+        BridgeFixture f1250(rocjitsu::IsaFamily::Cdna5, 32, policy, 128);
+        f1250.wave->set_exec(1);
+        f1250.cu->write_vgpr(f1250.base() + 40, 0, scale);
+        f1250.cu->write_vgpr(f1250.base() + 48, 0, 0xdeadbeefU);
+        const uint16_t opcode1250 = !narrow      ? cdna5::kVCvtScalePk16F32Fp6Vop3
+                                    : stochastic ? cdna5::kVCvtScalef32SrPk16Fp6F32Vop3
+                                                 : cdna5::kVCvtScalef32Pk16Fp6F32Vop3;
+        auto words1250 =
+            stochastic
+                ? cdna5::build_vop3(opcode1250, {.vdst = 48, .src0 = 256, .src1 = 288, .src2 = 296})
+                : cdna5::build_vop3(opcode1250, {.vdst = 48, .src0 = 256, .src1 = 296});
+        auto inst1250 = f1250.decoder->decode_window(words1250);
+        ASSERT_TRUE(inst1250.succeeded());
+        EXPECT_TRUE(f1250.cu->execute_instruction(inst1250.value().get(), *f1250.wave).failed());
+        EXPECT_EQ(f1250.cu->read_vgpr(f1250.base() + 48, 0), 0xdeadbeefU);
+
+        BridgeFixture f950(rocjitsu::IsaFamily::Cdna4, 64, policy, 128);
+        f950.wave->set_exec(1);
+        f950.cu->write_vgpr(f950.base() + 40, 0, scale);
+        f950.cu->write_vgpr(f950.base() + 48, 0, 0xdeadbeefU);
+        const uint16_t opcode950 = !narrow      ? cdna4::kVCvtScalef32Pk32F32Fp6Vop3
+                                   : stochastic ? cdna4::kVCvtScalef32SrPk32Fp6F32Vop3
+                                                : cdna4::kVCvtScalef322xpk16Fp6F32Vop3;
+        auto words950 =
+            narrow
+                ? cdna4::build_vop3(opcode950, {.vdst = 48, .src0 = 256, .src1 = 288, .src2 = 296})
+                : cdna4::build_vop3(opcode950, {.vdst = 48, .src0 = 256, .src1 = 296});
+        auto inst950 = f950.decoder->decode_window(words950);
+        ASSERT_TRUE(inst950.succeeded());
+        EXPECT_TRUE(f950.cu->execute_instruction(inst950.value().get(), *f950.wave).succeeded());
+        if (((scale >> 23) & 255) == 255) {
+          EXPECT_EQ(f950.cu->read_vgpr(f950.base() + 48, 0), narrow ? 0xdf7df7dfU : 0xffc00000U);
         }
-        auto instruction = f.decoder->decode_window(words);
-        ASSERT_TRUE(instruction.succeeded());
-        EXPECT_TRUE(f.cu->execute_instruction(instruction.value().get(), *f.wave).failed());
-        EXPECT_EQ(f.cu->read_vgpr(f.base() + 48, 0), 0xdeadbeefU);
       }
     }
   }
@@ -16617,14 +16751,14 @@ TEST(ArithBridgeTest, ScaledSpecialLanesDoNotObserveDataOrSeeds) {
     }
     EXPECT_EQ(data_reads, 2U);
     EXPECT_EQ(seed_reads, narrow ? 2U : 0U);
-    EXPECT_EQ(f.cu->read_vgpr(f.base() + 8, 0), narrow ? 0xdeadbeefU : 0x7fc00000U);
+    EXPECT_EQ(f.cu->read_vgpr(f.base() + 8, 0), narrow ? 0xdeadbeffU : 0xffc00000U);
     if (!narrow) {
-      EXPECT_EQ(f.cu->read_vgpr(f.base() + 9, 0), 0x7fc00000U);
+      EXPECT_EQ(f.cu->read_vgpr(f.base() + 9, 0), 0xffc00000U);
     }
   }
 }
 
-TEST(ArithBridgeTest, ShortScaledSpecialScaleRejectsStrictWithoutOperandReads) {
+TEST(ArithBridgeTest, ShortScaledSpecialScaleSucceedsStrictWithoutOperandReads) {
   BridgeFixture f(rocjitsu::IsaFamily::Cdna4, 64,
                   ArithmeticPolicy{ArithmeticSemantics::BitExactEmpiricalNoFpStatus});
   f.wave->set_exec(1);
@@ -16635,13 +16769,46 @@ TEST(ArithBridgeTest, ShortScaledSpecialScaleRejectsStrictWithoutOperandReads) {
   auto instruction = f.decoder->decode_window(words);
   ASSERT_TRUE(instruction.succeeded());
   f.recorder->reads.clear();
-  EXPECT_TRUE(f.cu->execute_instruction(instruction.value().get(), *f.wave).failed());
+  EXPECT_TRUE(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded());
   for (const auto &read : f.recorder->reads) {
     if (read.reg == 0 || read.reg == 2) {
       EXPECT_EQ(read.lanes, 0U);
     }
   }
-  EXPECT_EQ(f.cu->read_vgpr(f.base() + 8, 0), 0xdeadbeefU);
+  EXPECT_EQ(f.cu->read_vgpr(f.base() + 8, 0), 0xdeadbeffU);
+}
+
+TEST(ArithBridgeTest, ScaledOppositeModeDenormalRoutingGfx950) {
+  struct Case {
+    uint16_t opcode;
+    uint32_t a, scale, expect_mode_0x30, expect_mode_0xc0;
+  };
+  // MODE 0x30 preserves F32/BF16 denormals while flushing F16/F64; MODE 0xc0 flips them.
+  const Case cases[] = {
+      {cdna4::kVCvtScalef32PkFp8F16Vop3, 0x00000001U, 0x35800000U, 0xdead0000U, 0xdead0018U},
+      {cdna4::kVCvtScalef32PkFp8Bf16Vop3, 0x00000001U, 0x00800000U, 0xdead0004U, 0xdead0000U},
+      {cdna4::kVCvtScalef32PkF16Fp4Vop3, 0x00000001U, 0x35800000U, 0x00000000U, 0x00000008U},
+      {cdna4::kVCvtScalef32PkBf16Fp4Vop3, 0x00000001U, 0x00800000U, 0x00000040U, 0x00000000U},
+  };
+  for (auto semantics :
+       {ArithmeticSemantics::BitExactEmpiricalNoFpStatus, ArithmeticSemantics::BitExactEmpirical}) {
+    for (const auto &c : cases) {
+      for (uint32_t mode : {0x30U, 0xc0U}) {
+        BridgeFixture f(rocjitsu::IsaFamily::Cdna4, 64, ArithmeticPolicy{semantics});
+        f.wave->set_exec(1);
+        f.wave->set_mode_raw(mode);
+        f.cu->write_vgpr(f.base(), 0, c.a);
+        f.cu->write_vgpr(f.base() + 1, 0, c.scale);
+        f.cu->write_vgpr(f.base() + 2, 0, 0xdeadbeefU);
+        const auto words = cdna4::build_vop3(c.opcode, {.vdst = 2, .src0 = 256, .src1 = 257});
+        auto instruction = f.decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        ASSERT_TRUE(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded());
+        EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0),
+                  mode == 0x30U ? c.expect_mode_0x30 : c.expect_mode_0xc0);
+      }
+    }
+  }
 }
 
 // gfx1250 keeps its inherited status model even when numerics reuse gfx12 kernels.
