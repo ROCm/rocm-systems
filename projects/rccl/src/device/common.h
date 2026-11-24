@@ -388,9 +388,7 @@ struct RunWorkBatch<ncclFuncAllGatherV, T, RedOp, NCCL_ALGO_RING, Proto>;
 // registered collectives. Bcast work carries no profiling bit.
 __device__ __forceinline__ bool profilerEnabled(int workItemIdx) {
   char* work = ncclShmem.workStorage + workItemIdx * ncclShmem.workSize;
-  if (ncclShmem.workType == ncclDevWorkTypeP2p) return ((struct ncclDevWorkP2p*)work)->profilerEnabled;
-  if (ncclShmem.workType == ncclDevWorkTypeBcast) return false;
-  return ((struct ncclDevWorkColl*)work)->profilerEnabled;
+  return ncclDevWorkProfilerEnabled(ncclShmem.workType, work);
 }
 
 // Specialized here for non-P2p (Coll and CollReg)
@@ -714,9 +712,11 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   }
   // profiler(FINI) runs on thread 0 only: wait for every thread to leave the work body before
   // timestamping the last batch's completion and publishing its progress counters.
-  // Kernel-arg flags gate the shmem profilerEnabled() read so disabled runs skip it.
+  // Kernel-arg flags gate the work-storage scan so disabled runs skip it. Check every
+  // work because batch sharing can put an unprofiled work before a profiled one.
   if (progressOn ||
-      ((args->devFlags & RCCL_DEV_FLAG_PROFILER) && ncclShmem.nWorks > 0 && profilerEnabled(0)))
+      ((args->devFlags & RCCL_DEV_FLAG_PROFILER) &&
+       ncclDevWorkBatchHasProfiler(ncclShmem.workType, ncclShmem.workStorage, ncclShmem.workSize, ncclShmem.nWorks)))
     __syncthreads();
   profiler(FINI);
 }

@@ -16,6 +16,9 @@
 #include "ScopedHook.h"
 #include "TaskPrepScene.h"
 
+// task_posttuning.cc is linked into this binary, but transport/p2p.cc is not.
+bool ncclP2pUsesMemcpy() { return false; }
+
 #include TASK_PREP_CC_PATH
 
 // Declared by the task_prep TUs and defined in fakes/, exactly as those TUs declare them.

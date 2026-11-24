@@ -404,6 +404,8 @@ struct ncclKernelComm;
 #pragma pack(push) /* push current alignment to stack */
 #pragma pack(8) /* set alignment to 8 bytes boundary */
 
+constexpr int ncclDevWorkP2pMaxChannels = 1 << 8;
+
 struct alignas(16) ncclDevWorkP2p {
   void *sendAddr, *recvAddr;
   size_t sendBytes, recvBytes;
@@ -411,7 +413,9 @@ struct alignas(16) ncclDevWorkP2p {
   uint64_t sendOpCount, recvOpCount;
   // From the part index, nP2pChannels, and channelBase the device code can
   // calculate which part of the transfer a channel is responsible for.
-  uint8_t nP2pChannels; // Always equal to comm->p2pnChannels
+  // Always equal to comm->p2pnChannels. Zero encodes ncclDevWorkP2pMaxChannels,
+  // which is one past the largest value this byte can store.
+  uint8_t nP2pChannels;
   uint8_t channelBase; // Channel owning first part.
   // Zero channels indicates no work in that direction.
   uint8_t nSendChannels, nRecvChannels;
@@ -445,6 +449,11 @@ inline __host__ __device__ void ncclP2pPartBounds(int nParts, int part, size_t b
 
 // implemented in channel.h
 inline __host__ uint8_t ncclP2pChannelBaseForRound(struct ncclComm* comm, int p2pRound, int p2pBatchEnable);
+
+inline __host__ __device__ int ncclP2pWorkChannelStride(int channelsPerPeer, int nSendChannels, int nRecvChannels) {
+  int workChannels = nSendChannels > nRecvChannels ? nSendChannels : nRecvChannels;
+  return channelsPerPeer > workChannels ? channelsPerPeer : workChannels;
+}
 
 // ncclP2pChannelToPart and ncclP2pChannelForPart are inverses. The device code
 // uses ncclP2pChannelToPart to determine which part "this" channel is responsible for.
@@ -597,6 +606,19 @@ enum ncclDevWorkType : uint8_t {
   ncclDevWorkTypeCollReg,
   ncclDevWorkTypeBcast, // for batched broadcast
 };
+
+inline __host__ __device__ bool ncclDevWorkProfilerEnabled(enum ncclDevWorkType type, const void* work) {
+  if (type == ncclDevWorkTypeP2p) return ((const struct ncclDevWorkP2p*)work)->profilerEnabled;
+  if (type == ncclDevWorkTypeBcast) return false;
+  return ((const struct ncclDevWorkColl*)work)->profilerEnabled;
+}
+
+inline __host__ __device__ bool ncclDevWorkBatchHasProfiler(enum ncclDevWorkType type, const char* workStorage,
+                                                             size_t workSize, int nWorks) {
+  for (int i = 0; i < nWorks; i++)
+    if (ncclDevWorkProfilerEnabled(type, workStorage + i * workSize)) return true;
+  return false;
+}
 
 constexpr size_t ncclDevWorkSize(enum ncclDevWorkType type) {
   return type == ncclDevWorkTypeP2p     ? sizeof(ncclDevWorkP2p) :
@@ -830,17 +852,14 @@ struct alignas(16) ncclDevKernelArgsStorage {
 };
 
 typedef ncclDevKernelArgsStorage<(5 << 10)> ncclDevKernelArgs5K;
+typedef ncclDevKernelArgsStorage<(8 << 10)> ncclDevKernelArgs8K;
 typedef ncclDevKernelArgsStorage<(4 << 10)> ncclDevKernelArgs4K;
 // typedef ncclDevKernelArgsStorage<(32<<10)-4> ncclDevKernelArgs31K;
 
-#ifdef ENABLE_WARP_SPEED
-// needed extra storage for accomodating more channels than 128 for WarpSpeed support
-// 256 channels (i.e. 256 warps) would hang without this extra storage
-// 5KB should be sufficient for now
-typedef ncclDevKernelArgs5K ncclDevKernelArgsDefaultStorage;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// 8 KiB accommodates the kernel-args header plus one batch per channel at 256 channels on ROCm.
+typedef ncclDevKernelArgs8K ncclDevKernelArgsDefaultStorage;
 #else
-// 5KB needed so 256-channel non-WarpSpeed builds can fit one batch per channel
-// in the kernel-args buffer (4KB only fits ~252 batches).
 typedef ncclDevKernelArgs5K ncclDevKernelArgsDefaultStorage;
 #endif
 __host__ __device__ constexpr int ncclMaxKernelArgsSize(/*int cudaDriver, */ int cudaArch = NCCL_CUDA_ARCH) {
