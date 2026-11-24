@@ -63,15 +63,15 @@ static const std::map<rdc_field_t, const char*> temp_field_map_k = {
     {RDC_FI_PROF_EVAL_FLOPS_16, "TOTAL_16_OPS"},
     {RDC_FI_PROF_EVAL_FLOPS_32, "TOTAL_32_OPS"},
     {RDC_FI_PROF_EVAL_FLOPS_64, "TOTAL_64_OPS"},
-    {RDC_FI_PROF_EVAL_FLOPS_16_PERCENT, "RDC_OPS_16_PER_SIMDCYCLE"},
+    // metrics below are not divided by time passed
+    {RDC_FI_PROF_EVAL_FLOPS_16_PERCENT, "RDC_OPS_16_PER_SIMDCYCLE"},  // already per cycle
     {RDC_FI_PROF_EVAL_FLOPS_32_PERCENT, "RDC_OPS_32_PER_SIMDCYCLE"},
     {RDC_FI_PROF_EVAL_FLOPS_64_PERCENT, "RDC_OPS_64_PER_SIMDCYCLE"},
-    // metrics below are not divided by time passed
     {RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL, "ValuPipeIssueUtil"},
     {RDC_FI_PROF_SM_ACTIVE, "VALUBusy"},
     {RDC_FI_PROF_OCC_PER_ACTIVE_CU, "MeanOccupancyPerActiveCU"},
     {RDC_FI_PROF_OCC_ELAPSED,
-     "GRBM_GUI_ACTIVE"},  // this metric is derived from OCC_PER_ACTIVE_CU and ACTIVE_CYCLES
+     "GRBM_GUI_ACTIVE"},  // derived from OCC_PER_ACTIVE_CU, ACTIVE_CYCLES and ELAPSED_CYCLES
     {RDC_FI_PROF_CPC_CPC_STAT_BUSY, "CPC_CPC_STAT_BUSY"},
     {RDC_FI_PROF_CPC_CPC_STAT_IDLE, "CPC_CPC_STAT_IDLE"},
     {RDC_FI_PROF_CPC_CPC_STAT_STALL, "CPC_CPC_STAT_STALL"},
@@ -328,18 +328,20 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
   // Divide eval-field rates by the fixed collection window, not wall-clock, for stable values.
   const double sample_time_ms = static_cast<double>(collection_duration_us_k) / 1000.0;
 
-  // For OCC_ELAPSED, we need to read the occupancy metric as well
+  // OCC_ELAPSED also needs the occupancy and the elapsed cycles
   std::map<std::string, double> sampled_values;
   if (field == RDC_FI_PROF_OCC_ELAPSED) {
-    double occ_val = 0.0;
-    const auto status = run_profiler(agent_index, RDC_FI_PROF_OCC_PER_ACTIVE_CU, &occ_val);
-    if (status != RDC_ST_OK) {
-      RDC_LOG(RDC_ERROR, "Occupancy read failed!");
-      return status;
-    }
-    auto occ_field_it = field_to_metric.find(RDC_FI_PROF_OCC_PER_ACTIVE_CU);
-    if (occ_field_it != field_to_metric.end()) {
-      sampled_values[occ_field_it->second] = occ_val;
+    for (const rdc_field_t input : {RDC_FI_PROF_OCC_PER_ACTIVE_CU, RDC_FI_PROF_ELAPSED_CYCLES}) {
+      double input_val = 0.0;
+      const auto status = run_profiler(agent_index, input, &input_val);
+      if (status != RDC_ST_OK) {
+        RDC_LOG(RDC_ERROR, "Read of field " << input << " for OCC_ELAPSED failed!");
+        return status;
+      }
+      auto input_field_it = field_to_metric.find(input);
+      if (input_field_it != field_to_metric.end()) {
+        sampled_values[input_field_it->second] = input_val;
+      }
     }
   }
 
@@ -398,14 +400,15 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
       metrics_to_sample.push_back(metric_name);
     }
 
-    // Special case: RDC_FI_PROF_OCC_ELAPSED needs two metrics
+    // Special case: RDC_FI_PROF_OCC_ELAPSED also needs the occupancy and the elapsed cycles
     if (field == RDC_FI_PROF_OCC_ELAPSED) {
-      if (field_to_metric_index.find(RDC_FI_PROF_OCC_PER_ACTIVE_CU) ==
-          field_to_metric_index.end()) {
-        auto occ_field_it = field_to_metric.find(RDC_FI_PROF_OCC_PER_ACTIVE_CU);
-        if (occ_field_it != field_to_metric.end()) {
-          field_to_metric_index[RDC_FI_PROF_OCC_PER_ACTIVE_CU] = metrics_to_sample.size();
-          metrics_to_sample.push_back(occ_field_it->second);
+      for (const rdc_field_t input : {RDC_FI_PROF_OCC_PER_ACTIVE_CU, RDC_FI_PROF_ELAPSED_CYCLES}) {
+        if (field_to_metric_index.find(input) == field_to_metric_index.end()) {
+          auto input_field_it = field_to_metric.find(input);
+          if (input_field_it != field_to_metric.end()) {
+            field_to_metric_index[input] = metrics_to_sample.size();
+            metrics_to_sample.push_back(input_field_it->second);
+          }
         }
       }
     }
@@ -505,49 +508,45 @@ rdc_status_t RdcRocpBase::apply_field_transformation(
       break;
 
     case RDC_FI_PROF_OCC_ELAPSED: {
-      const double active_cycles_val = raw_value;
-      if (active_cycles_val != 0.0) {
-        // Look for the occupancy metric in sampled values
-        auto occ_field_it = field_to_metric.find(RDC_FI_PROF_OCC_PER_ACTIVE_CU);
-        if (occ_field_it != field_to_metric.end()) {
-          auto occ_sampled_it = sampled_values.find(occ_field_it->second);
-          if (occ_sampled_it != sampled_values.end()) {
-            const double occupancy_val = occ_sampled_it->second;
-            output->dbl = occupancy_val / active_cycles_val;
-          } else {
-            return RDC_ST_BAD_PARAMETER;
-          }
-        } else {
-          return RDC_ST_BAD_PARAMETER;
+      // OCC_PER_ACTIVE_CU averages over the cycles the GPU was active; spread it over all the
+      // elapsed cycles: OCC_PER_ACTIVE_CU * ACTIVE_CYCLES / ELAPSED_CYCLES.
+      const auto sampled = [&](rdc_field_t input, double* value) {
+        const auto metric_it = field_to_metric.find(input);
+        if (metric_it == field_to_metric.end()) {
+          return false;
         }
-      } else {
+        const auto sampled_it = sampled_values.find(metric_it->second);
+        if (sampled_it == sampled_values.end()) {
+          return false;
+        }
+        *value = sampled_it->second;
+        return true;
+      };
+      const double active_cycles_val = raw_value;
+      double occupancy_val = 0.0;
+      double elapsed_cycles_val = 0.0;
+      if (!sampled(RDC_FI_PROF_OCC_PER_ACTIVE_CU, &occupancy_val) ||
+          !sampled(RDC_FI_PROF_ELAPSED_CYCLES, &elapsed_cycles_val) || elapsed_cycles_val == 0.0) {
         return RDC_ST_BAD_PARAMETER;
       }
+      output->dbl = occupancy_val * active_cycles_val / elapsed_cycles_val;
     } break;
 
     case RDC_FI_PROF_EVAL_FLOPS_16_PERCENT: {
-      if (!is_eval_field) {
-        RDC_LOG(RDC_ERROR, "Field expected to be in the eval_fields list but it isn't!");
-        return RDC_ST_BAD_PARAMETER;
-      }
+      // RDC_OPS_*_PER_SIMDCYCLE is already ops per SIMD per cycle: divide it by the peak ops per
+      // SIMD per cycle (the CDNA white papers' peak per CU over the SIMDs per CU), not by time.
       const std::string target_version = agents[agent_index].name;
       const bool isMI200 = (target_version.find("gfx90a") != std::string::npos);
       if (isMI200) {
-        output->dbl =
-            divided_dbl / (1024.0F / static_cast<double>(agents[agent_index].simd_per_cu));
+        output->dbl = raw_value / (1024.0F / static_cast<double>(agents[agent_index].simd_per_cu));
       } else {  // Assume mi300
-        output->dbl =
-            divided_dbl / (2048.0F / static_cast<double>(agents[agent_index].simd_per_cu));
+        output->dbl = raw_value / (2048.0F / static_cast<double>(agents[agent_index].simd_per_cu));
       }
     } break;
 
     case RDC_FI_PROF_EVAL_FLOPS_32_PERCENT:
     case RDC_FI_PROF_EVAL_FLOPS_64_PERCENT:
-      if (!is_eval_field) {
-        RDC_LOG(RDC_ERROR, "Field expected to be in the eval_fields list but it isn't!");
-        return RDC_ST_BAD_PARAMETER;
-      }
-      output->dbl = divided_dbl / (256.0F / static_cast<double>(agents[agent_index].simd_per_cu));
+      output->dbl = raw_value / (256.0F / static_cast<double>(agents[agent_index].simd_per_cu));
       break;
 
     default:

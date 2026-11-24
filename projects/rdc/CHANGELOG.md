@@ -136,6 +136,9 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdci policy --reg` no longer uses a whole CPU core once rdcd goes away, and no longer reads freed memory as it exits. With a connection to rdcd, `rdc_policy_unregister()` and `rdc_disconnect()` now wait for a running policy callback to return, and `rdc_policy_register()` works again for a group that was unregistered; it used to return `RDC_ST_CONFLICT` for that group until the connection was closed.
 
+- `RDC_FI_PROF_EVAL_FLOPS_16_PERCENT`, `RDC_FI_PROF_EVAL_FLOPS_32_PERCENT`, `RDC_FI_PROF_EVAL_FLOPS_64_PERCENT`, and `RDC_FI_PROF_OCC_ELAPSED` no longer read close to 0 on a busy GPU. The FLOPS fields report a ratio to the peak of an MI200 or MI300 series GPU, where 1.0 is the peak, as in ROCm 6.3.3; ROCm 7.1 and 7.2 reported up to about 100 times that ratio.
+  - `RDC_FI_PROF_OCC_ELAPSED` reports the mean occupancy per active CU scaled by the fraction of the elapsed cycles the GPU was active, so it equals `RDC_FI_PROF_OCC_PER_ACTIVE_CU` on a GPU that is busy the whole time.
+
 ## RDC 1.4.0 for ROCm 10.2.0
 
 ### Resolved Issues
