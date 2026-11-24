@@ -41,7 +41,7 @@ namespace hsa
 {
 rocprofiler::hsa::rocprofiler_packet
 generate_marker_packet_for_kernel(
-    context::correlation_id*                      correlation_id,
+    const context::correlation_id*                correlation_id,
     const tracing::external_correlation_id_map_t& external_correlation_ids,
     const rocprofiler_dispatch_id_t               dispatch_id);
 

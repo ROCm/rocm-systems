@@ -45,8 +45,9 @@ is_configured_on_agent(rocprofiler_agent_id_t agent_id);
 
 // Explicit replacement for the PC-sampling per-queue completion callback that
 // used to be registered with the HSA queue controller. Notifies the CID manager
-// that the kernel's correlation ID has completed. No-op when PC sampling HSA
-// support is unavailable or when the service is not configured on the agent.
+// that the kernel's correlation ID has completed when this dispatch acquired a
+// PC-sampling reference at enqueue time. No-op when PC sampling HSA support is
+// unavailable or the dispatch did not acquire that reference.
 void
 kernel_dispatch_phase_exit_hook(const ::rocprofiler::hsa::Queue*              queue,
                                 const ::rocprofiler::hsa::rocprofiler_packet& kernel_packet,

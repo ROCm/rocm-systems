@@ -53,21 +53,26 @@ void
 kernel_dispatch_phase_exit_hook(const ::rocprofiler::hsa::Queue*              queue,
                                 const ::rocprofiler::hsa::rocprofiler_packet& kernel_packet,
                                 std::shared_ptr<::rocprofiler::hsa::queue_info_session_t>& session,
-                                ::rocprofiler::hsa::packet_data_t& /*packet*/,
+                                ::rocprofiler::hsa::packet_data_t&                         packet,
                                 ::rocprofiler::hsa::inst_pkt_t& /*inst_pkt*/,
                                 kernel_dispatch::profiling_time /*dispatch_time*/)
 {
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+    // Route by dispatch-time ownership, not current service configuration. During late attach,
+    // configuration can become visible after this dispatch was submitted. Only a dispatch that
+    // acquired the PC-sampling reference alongside its marker may enqueue that reference for
+    // retirement.
+    if(!packet.has_pc_sampling_ref) return;
     if(!session) return;
     CHECK(queue);
     const auto* agent = queue->get_agent().get_rocp_agent();
     CHECK(agent);
-    if(!is_pc_sample_service_configured(agent->id)) return;
     hsa::kernel_completion_cb(agent, kernel_packet, *session);
 #else
     (void) queue;
     (void) kernel_packet;
     (void) session;
+    (void) packet;
 #endif
 }
 }  // namespace pc_sampling
