@@ -36,7 +36,6 @@ const char* kAmdgpuFdinfo =
 TEST(SystemUnit, ParseDrmFdinfoReadsAmdgpuClient) {
   const auto usage = amd::smi::ParseDrmFdinfo(kAmdgpuFdinfo);
   EXPECT_EQ(usage.driver, "amdgpu");
-  EXPECT_EQ(usage.pdev, "0000:05:00.0");
   EXPECT_EQ(usage.client, "32825");
   EXPECT_EQ(usage.cpu, 4132ULL << 10);
   EXPECT_EQ(usage.gtt, 4168ULL << 10);

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <fcntl.h>
+#include <sys/sysmacros.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -6362,6 +6363,22 @@ amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* proc
   return (capacity >= num_pids) ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_OUT_OF_RESOURCES;
 }
 
+namespace {
+
+// Device number of the render node, from its sysfs "dev" file ("<major>:<minor>").
+bool RenderDevFromMinor(uint32_t drm_render_minor, dev_t* render_dev) {
+  std::ifstream dev_file(amd::smi::test_hooks::SysfsDrmRoot() + "/renderD" +
+                         std::to_string(drm_render_minor) + "/dev");
+  unsigned int major_num = 0;
+  unsigned int minor_num = 0;
+  char colon = '\0';
+  if (!(dev_file >> major_num >> colon >> minor_num) || colon != ':') return false;
+  *render_dev = makedev(major_num, minor_num);
+  return true;
+}
+
+}  // namespace
+
 amdsmi_status_t amdsmi_get_gpu_process_info_self(amdsmi_processor_handle processor_handle,
                                                  amdsmi_proc_info_t* info) {
   AMDSMI_CHECK_INIT();
@@ -6381,8 +6398,17 @@ amdsmi_status_t amdsmi_get_gpu_process_info_self(amdsmi_processor_handle process
   if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 
-  // Collector matches drm-pdev on the physical PCI BDF (function 0).
-  return gpuvsmi_get_self_info(gpu_device->get_bdf(), *info);
+  const uint32_t render_minor = gpu_device->get_drm_render_minor();
+  if (render_minor == std::numeric_limits<uint32_t>::max()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  dev_t render_dev = 0;
+  if (!RenderDevFromMinor(render_minor, &render_dev)) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  return gpuvsmi_get_self_info(render_dev, *info, amd::smi::test_hooks::SelfFdinfoDir().c_str(),
+                               amd::smi::test_hooks::SelfFdDir().c_str());
 }
 
 amdsmi_status_t amdsmi_get_power_info(amdsmi_processor_handle processor_handle,

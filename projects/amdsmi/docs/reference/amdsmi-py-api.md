@@ -2004,7 +2004,7 @@ finally:
 
 ### amdsmi_get_gpu_process_info_self
 
-Description: Returns the calling process's usage of the given GPU. Unlike `amdsmi_get_gpu_process_list`, it needs neither the host PID nor access to other processes, so it works inside a container with its own PID namespace. Usage is for the physical PCI device of the handle, so sibling compute partitions of the same package share the same totals. Memory prefers `drm-total-*` (buffer size, including non-resident allocations). On older kernels that only print `drm-memory-*`, the values are resident size and can drop when buffers are evicted without being freed.
+Description: Returns the calling process's usage of the given GPU. Unlike `amdsmi_get_gpu_process_list`, it needs neither the host PID nor access to other processes, so it works inside a container with its own PID namespace. Only descriptors open on this handle's DRM render node are counted, so compute partitions of one GPU are reported separately. Memory prefers `drm-total-*` (buffer size, including non-resident allocations). On older kernels that only print `drm-memory-*`, the values are resident size and can drop when buffers are evicted without being freed.
 
 Input parameters:
 
@@ -2025,7 +2025,7 @@ Field | Description
 
 Exceptions that can be thrown by `amdsmi_get_gpu_process_info_self` function:
 
-* `AmdSmiLibraryException`, with `AMDSMI_STATUS_NOT_FOUND` if the calling process has not opened the device, or `AMDSMI_STATUS_FILE_ERROR` if an fdinfo entry could not be read
+* `AmdSmiLibraryException`, with `AMDSMI_STATUS_NOT_FOUND` if the calling process has not opened the device, `AMDSMI_STATUS_NOT_SUPPORTED` if the handle has no DRM render node, or `AMDSMI_STATUS_FILE_ERROR` if an fdinfo entry could not be read
 * `AmdSmiParameterException`
 
 Example:

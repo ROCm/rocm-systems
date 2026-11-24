@@ -4455,11 +4455,11 @@ def amdsmi_get_gpu_process_list_by_pid(processor_handles: list) -> list:
 def amdsmi_get_gpu_process_info_self(processor_handle: processor_handle_t) -> Dict[str, Any]:
     """Get the calling process's usage of a GPU.
 
-    Works inside a container with its own PID namespace. Usage is for the
-    physical PCI device of the handle. Memory prefers drm-total-*; on older
-    kernels that only print drm-memory-*, values can drop on eviction.
-    cu_occupancy, sdma_usage and evicted_time come from KFD and are always
-    "N/A".
+    Works inside a container with its own PID namespace. Counts only
+    descriptors open on the handle's DRM render node. Memory prefers
+    drm-total-*; on older kernels that only print drm-memory-*, values can
+    drop on eviction. cu_occupancy, sdma_usage and evicted_time come from
+    KFD and are always "N/A".
     """
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)

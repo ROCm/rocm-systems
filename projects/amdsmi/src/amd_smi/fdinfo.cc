@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -13,7 +14,6 @@
 #include <fstream>
 #include <limits>
 #include <map>
-#include <sstream>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -208,15 +208,40 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
   return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t gpuvsmi_get_self_info(const amdsmi_bdf_t& bdf, amdsmi_proc_info_t& info,
-                                      const char* fdinfo_dir) {
-  // amdgpu prints the physical PCI BDF in drm-pdev (function 0). Partition
-  // handles may carry the partition index in function_number; match physical.
-  char bdf_str[13];
-  snprintf(bdf_str, 13, "%04" PRIx32 ":%02" PRIx32 ":%02" PRIx32 ".0",
-           static_cast<uint32_t>(bdf.domain_number & 0xffff),
-           static_cast<uint32_t>(bdf.bus_number & 0xff),
-           static_cast<uint32_t>(bdf.device_number & 0x1f));
+namespace {
+
+bool IsNumericFdName(const char* name) {
+  if (name == nullptr || name[0] == '\0') return false;
+  for (const char* p = name; *p != '\0'; ++p) {
+    if (*p < '0' || *p > '9') return false;
+  }
+  return true;
+}
+
+amdsmi_status_t ReadFdinfoText(const std::string& path, std::string* text) {
+  errno = 0;
+  std::ifstream fdinfo(path);
+  if (!fdinfo) {
+    if (errno == ENOENT) return AMDSMI_STATUS_NOT_FOUND;
+    return AMDSMI_STATUS_FILE_ERROR;
+  }
+  text->clear();
+  for (std::string line; std::getline(fdinfo, line);) {
+    text->append(line);
+    text->push_back('\n');
+  }
+  // getline sets failbit on EOF after a successful read; badbit is a hard error.
+  if (fdinfo.bad()) return AMDSMI_STATUS_FILE_ERROR;
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+}  // namespace
+
+amdsmi_status_t gpuvsmi_get_self_info(dev_t render_dev, amdsmi_proc_info_t& info,
+                                      const char* fdinfo_dir, const char* fd_dir) {
+  if (fdinfo_dir == nullptr || fd_dir == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
 
   DIR* d = opendir(fdinfo_dir);
   if (!d) {
@@ -226,37 +251,28 @@ amdsmi_status_t gpuvsmi_get_self_info(const amdsmi_bdf_t& bdf, amdsmi_proc_info_
   std::map<std::string, amd::smi::DrmClientUsage> clients;
   amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
   for (struct dirent* dir; (dir = readdir(d)) != NULL;) {
-    // /proc/*/fdinfo entries are named by descriptor number; skip . / .. and
-    // any other nonnumeric name.
-    const char* name = dir->d_name;
-    if (name[0] == '\0') continue;
-    bool numeric = true;
-    for (const char* p = name; *p != '\0'; ++p) {
-      if (*p < '0' || *p > '9') {
-        numeric = false;
-        break;
-      }
-    }
-    if (!numeric) continue;
+    if (!IsNumericFdName(dir->d_name)) continue;
 
-    errno = 0;
-    std::ifstream fdinfo(std::string(fdinfo_dir) + name);
-    if (!fdinfo) {
-      // Descriptor closed between readdir and open: skip. Other failures
-      // (for example EMFILE after opendir consumed the last fd) must not be
-      // reported as complete usage.
-      if (errno == ENOENT) continue;
+    const std::string fd_path = std::string(fd_dir) + dir->d_name;
+    struct stat st{};
+    if (stat(fd_path.c_str(), &st) != 0) {
+      if (errno == ENOENT) continue;  // Descriptor closed between readdir and stat.
       status = AMDSMI_STATUS_FILE_ERROR;
       break;
     }
-    std::stringstream text;
-    text << fdinfo.rdbuf();
-    if (fdinfo.bad()) {
-      status = AMDSMI_STATUS_FILE_ERROR;
+    if (!S_ISCHR(st.st_mode) || st.st_rdev != render_dev) continue;
+
+    std::string text;
+    const amdsmi_status_t read_status =
+        ReadFdinfoText(std::string(fdinfo_dir) + dir->d_name, &text);
+    if (read_status == AMDSMI_STATUS_NOT_FOUND) continue;
+    if (read_status != AMDSMI_STATUS_SUCCESS) {
+      status = read_status;
       break;
     }
-    auto usage = amd::smi::ParseDrmFdinfo(text.str());
-    if (usage.driver == "amdgpu" && usage.pdev == bdf_str) clients[usage.client] = usage;
+
+    auto usage = amd::smi::ParseDrmFdinfo(text);
+    if (usage.driver == "amdgpu") clients[usage.client] = usage;
   }
   closedir(d);
   if (status != AMDSMI_STATUS_SUCCESS) return status;

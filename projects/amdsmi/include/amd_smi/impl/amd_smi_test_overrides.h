@@ -29,4 +29,9 @@ AMDSMI_TEST_HOOK const std::string& KfdNodesPathRoot();
 // leaving files that a later real run on the same host would read.
 AMDSMI_TEST_HOOK const std::string& AppTmpDir();
 
+// Roots amdsmi_get_gpu_process_info_self() reads for the caller's DRM clients.
+// Defaults keep the trailing "/": "/proc/self/fdinfo/" and "/proc/self/fd/".
+AMDSMI_TEST_HOOK const std::string& SelfFdinfoDir();
+AMDSMI_TEST_HOOK const std::string& SelfFdDir();
+
 }  // namespace amd::smi::test_hooks

@@ -24,7 +24,6 @@ namespace amd::smi {
 // Usage that one DRM client reports in one fdinfo file.
 struct DrmClientUsage {
   std::string driver;
-  std::string pdev;
   // drm-client-id, or amdgpu's pasid on kernels without it. Duplicated fds
   // share one client and so report the same key.
   std::string client;
@@ -81,7 +80,6 @@ inline DrmClientUsage ParseDrmFdinfo(const std::string& text) {
 
   DrmClientUsage usage;
   usage.driver = get("drm-driver");
-  usage.pdev = get("drm-pdev");
   usage.client = get("drm-client-id");
   if (usage.client.empty()) usage.client = get("pasid");
   usage.vram = memory("vram");
