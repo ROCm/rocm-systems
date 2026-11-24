@@ -131,7 +131,7 @@ struct ApertureWords {
       const auto src = source->to_register_ref();
       writes_exec |= dst && dst->cls == RegClass::EXEC;
       if (dst && op == Op::S_MOV_B64 && dst->cls == RegClass::SGPR && dst->width == 2 &&
-          source->encoding_value() == static_cast<int>(base)) {
+          source->has_register_selector() && source->encoding_value() == static_cast<int>(base)) {
         proven = RegisterRef{RegClass::SGPR, static_cast<uint16_t>(dst->index + 1), 1};
         all = true;
       } else if (dst && src && dst->width == 1 && src->width == 1 && active.contains(*src) &&

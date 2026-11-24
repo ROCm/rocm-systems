@@ -63,6 +63,16 @@ TEST(ConSanInput, GroupFlatNeedsAnUnclobberedApertureOnEveryIncomingPathAndActiv
       EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess);
     }
   };
+  // An extended literal carries its numeric payload in the decoded operand.
+  // Even the two aperture selector values must behave like an unknown pointer.
+  constexpr uint32_t literal = 0xbe8401ff; // s_mov_b64 s[4:5], literal32
+  check({literal, 239, copy}, false);
+  const std::optional<uint64_t> unknown_offset = error.text_offset;
+  for (const uint32_t value : {235u, 237u}) {
+    SCOPED_TRACE(value);
+    check({literal, value, copy}, false);
+    EXPECT_EQ(error.text_offset, unknown_offset);
+  }
   check({shared, narrow, copy}, true);
   check({shared, copy, narrow}, true);
   check({shared, narrow, copy, restore}, false);

@@ -177,11 +177,12 @@ original code-object files nor live HSA state.
 
 ## Available analysis
 
-`LdsRaceDetection` is the only implemented analysis. It checks ordinary native
-LDS reads/writes and admitted relaxed LDS atomic accesses at naturally aligned addresses, using the same observations
-for two checks. All supported targets admit ordinary single-range b8, b16, b32,
-b64, b96, and b128: gfx942/gfx950 wave64, gfx1100/gfx1201 wave32 or wave64, and
-gfx1250 wave32.
+`LdsRaceDetection` is the only implemented analysis. It checks ordinary native LDS
+reads/writes, proven Group-FLAT B32 loads/stores, and admitted relaxed LDS atomics
+at naturally aligned addresses. It uses the same observations for two checks.
+All supported targets admit ordinary single-range b8, b16, b32, b64, b96, and
+b128 native LDS operations on gfx942/gfx950 wave64, gfx1100/gfx1201 wave32 or
+wave64, and gfx1250 wave32.
 
 | Check | What it reports |
 | --- | --- |
@@ -232,7 +233,17 @@ gfx942/gfx950 use the corresponding `ds_write_*` and `ds_read_*` names.
 Access probes capture addresses before an aliased load can overwrite them, record actual byte
 widths and byte immediates, and preserve every guest result word. For b96 the
 range spans three dwords. Its effective start must be 16-byte aligned so the
-range is independent of the launch alignment mode. FLAT forms remain unsupported. The minimum fixed LDS extent remains four bytes.
+range is independent of the launch alignment mode. The minimum fixed LDS extent is four bytes.
+
+A generic FLAT B32 load or store contributes a four-byte LDS range when its
+address belongs to the shared aperture. Preparation follows copies of the
+shared-aperture high word into the address VGPR pair and
+requires that proof on every incoming path for every active lane. The probe
+samples the low word before the access, including when the load overwrites an
+address register. It adds the byte displacement and records an exact Group-FLAT
+site. gfx942, gfx950, and gfx1100 use 8-byte instructions. gfx1201 and gfx1250
+use 12-byte VFLAT instructions with a signed displacement. A proven private
+access contributes no LDS site. An unresolved address prevents preparation.
 
 Two-address native LDS loads and stores support 32- and 64-bit elements.
 One guest instruction produces one occurrence and shares the four sampled
