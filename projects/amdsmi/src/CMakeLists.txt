@@ -85,7 +85,9 @@ else()
 endif()
 file(GLOB RAS_DECODE_INCLUDES "${RAS_DECODE_INC_DIR}/*.h")
 file(GLOB RAS_DECODE_SOURCES "${RAS_DECODE_SRC_DIR}/*.c")
-list(REMOVE_ITEM RAS_DECODE_SOURCES "main.c")
+# Absolute path: a bare "main.c" never matches the GLOB'd paths and would leak
+# a second main() into libamd_smi.
+list(REMOVE_ITEM RAS_DECODE_SOURCES "${RAS_DECODE_SRC_DIR}/main.c")
 
 set(SRC_LIST ${SRC_LIST} ${RAS_DECODE_SOURCES})
 set(INC_LIST ${INC_LIST} ${RAS_DECODE_INCLUDES})

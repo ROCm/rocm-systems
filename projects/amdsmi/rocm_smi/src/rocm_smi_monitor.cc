@@ -322,8 +322,15 @@ int32_t Monitor::setTempSensorLabelMap(void) {
     // and will fail appropriately later when we check for support.
     if (ret) {
       index_temp_type_map_.insert({file_index, RSMI_TEMP_TYPE_INVALID});
+    } else if (const auto name_it = kTempSensorNameMap.find(type_str);
+               name_it == kTempSensorNameMap.end()) {
+      // A label this library does not know must not fail discovery of the whole device.
+      ss << __PRETTY_FUNCTION__ << " | Unrecognized temp label '" << type_str << "' for temp"
+         << file_index << " | Sensor ignored |";
+      LOG_ERROR(ss);
+      index_temp_type_map_.insert({file_index, RSMI_TEMP_TYPE_INVALID});
     } else {
-      t_type = kTempSensorNameMap.at(type_str);
+      t_type = name_it->second;
       temp_type_index_map_[t_type] = file_index;
       index_temp_type_map_.insert({file_index, t_type});
     }
@@ -363,8 +370,15 @@ int32_t Monitor::setVoltSensorLabelMap(void) {
     // and will fail appropriately later when we check for support.
     if (ret) {
       index_volt_type_map_.insert({file_index, RSMI_VOLT_TYPE_INVALID});
+    } else if (const auto name_it = kVoltSensorNameMap.find(type_str);
+               name_it == kVoltSensorNameMap.end()) {
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__ << " | Unrecognized voltage label '" << type_str << "' for in"
+         << file_index << " | Sensor ignored |";
+      LOG_ERROR(ss);
+      index_volt_type_map_.insert({file_index, RSMI_VOLT_TYPE_INVALID});
     } else {
-      t_type = kVoltSensorNameMap.at(type_str);
+      t_type = name_it->second;
       volt_type_index_map_[t_type] = file_index;
       index_volt_type_map_.insert({file_index, t_type});
     }
@@ -446,14 +460,19 @@ static int get_supported_sensors(std::string dir_path, std::string fn_reg_ex,
 }
 
 uint32_t Monitor::getTempSensorIndex(rsmi_temperature_type_t type) {
+  // Boundary enums (e.g. *_LAST) are not keys; callers check for INVALID.
+  if (temp_type_index_map_.count(type) == 0) return RSMI_TEMP_TYPE_INVALID;
   return temp_type_index_map_.at(type);
 }
 
 rsmi_temperature_type_t Monitor::getTempSensorEnum(uint64_t ind) {
+  // Same sentinel as an unlabelled sensor, like getVoltSensorEnum().
+  if (index_temp_type_map_.count(ind) == 0) return RSMI_TEMP_TYPE_INVALID;
   return index_temp_type_map_.at(ind);
 }
 
 uint32_t Monitor::getVoltSensorIndex(rsmi_voltage_type_t type) {
+  if (volt_type_index_map_.count(type) == 0) return RSMI_VOLT_TYPE_INVALID;
   return volt_type_index_map_.at(type);
 }
 

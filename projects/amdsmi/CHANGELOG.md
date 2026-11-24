@@ -208,6 +208,18 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed the `amdsmi` Python module from TheRock's `rocm-sdk-core` wheel failing outside `share/amd_smi`**.  
   - Copied into `site-packages`, the module could not find its library unless `torch` was imported first. It now loads the wheel's own library, never a system `libamd_smi.so` from another ROCm release.
 
+- **Fixed `amdsmi_get_temp_metric()` returning `AMDSMI_STATUS_INTERNAL_EXCEPTION` for `AMDSMI_TEMPERATURE_TYPE_BASEBOARD_LAST`**.  
+  - A temperature type with no sensor on the GPU now returns `AMDSMI_STATUS_NOT_SUPPORTED`, and no longer logs `Exception caught: map::at`.
+
+- **Fixed `amdsmi_get_temp_metric()` and `amdsmi_get_gpu_volt_metric()` returning `AMDSMI_STATUS_INTERNAL_EXCEPTION` for an unknown metric**.  
+  - A metric outside the enum now returns `AMDSMI_STATUS_INVAL`.
+
+- **Fixed device discovery failing with `Exception caught: map::at` on an unrecognized hwmon sensor**.  
+  - A temperature or voltage label the library does not know, or a labelled `temp<N>` between 8 and 99, is now ignored and the other sensors keep working.
+
+- **Fixed a second `main()` being linked into `libamd_smi`**.  
+  - The ras-decode `main.c` was not excluded from the library build.
+
 - **Fixed misleading errors when a GPU, CPU, or AI NIC driver is not loaded**.  
   - When the device is present, `amd-smi` now names the missing driver (exit code 206) instead of reporting "not supported" or an invalid parameter, and `list`, `static`, `metric`, `firmware`, `monitor`, and `topology` show the available devices with a note about the rest on stderr.
 

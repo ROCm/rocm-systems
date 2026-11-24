@@ -3590,9 +3590,16 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   };
 
   const auto mon_type_it = kMetricTypeMap.find(metric);
-  if (mon_type_it != kMetricTypeMap.end()) {
-    mon_type = mon_type_it->second;
+  if (mon_type_it == kMetricTypeMap.end()) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind << " | Cause: unknown temperature metric "
+       << static_cast<uint32_t>(metric)
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
   }
+  mon_type = mon_type_it->second;
 
   if (temperature == nullptr) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
@@ -3679,8 +3686,8 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   }
   std::shared_ptr<amd::smi::Monitor> m = dev->monitor();
 
-  // getTempSensorIndex will throw an out of range exception if sensor_type is
-  // not found
+  // getTempSensorIndex returns RSMI_TEMP_TYPE_INVALID for a sensor_type that
+  // isn't a valid key (e.g. *_LAST boundary values)
   uint32_t sensor_index = m->getTempSensorIndex(static_cast<rsmi_temperature_type_t>(sensor_type));
 
   // Check if sensor_index is valid (not RSMI_TEMP_TYPE_INVALID)
@@ -3741,7 +3748,13 @@ rsmi_status_t rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sens
       mon_type = amd::smi::kMonVoltHighest;
       break;
     default:
-      mon_type = amd::smi::kMonInvalid;
+      ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+         << " | Fail "
+         << " | Device #: " << dv_ind << " | Cause: unknown voltage metric "
+         << static_cast<uint32_t>(metric)
+         << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+      LOG_ERROR(ss);
+      return RSMI_STATUS_INVALID_ARGS;
   }
 
   DEVICE_MUTEX
@@ -3753,14 +3766,7 @@ rsmi_status_t rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sens
   }
   std::shared_ptr<amd::smi::Monitor> m = dev->monitor();
 
-  // getVoltSensorIndex will throw an out of range exception if sensor_type is
-  // not found
-  uint32_t sensor_index;
-  try {
-    sensor_index = m->getVoltSensorIndex(sensor_type);
-  } catch (...) {
-    return RSMI_STATUS_NOT_SUPPORTED;
-  }
+  uint32_t sensor_index = m->getVoltSensorIndex(sensor_type);
 
   // Check if sensor_index is valid (not RSMI_VOLT_TYPE_INVALID)
   if (sensor_index == RSMI_VOLT_TYPE_INVALID) {
