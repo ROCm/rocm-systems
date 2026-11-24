@@ -163,6 +163,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed the documented units of `amdsmi_process_info_t`'s `vram_usage` and `cu_occupancy`** (documentation-only ABI change).  
+  - The header gave `vram_usage` in MB and `cu_occupancy` as a percent; `amdsmi_get_gpu_compute_process_info()` and `amdsmi_get_gpu_compute_process_info_by_pid()` return bytes and a number of compute units.
+
 - **Fixed `amd-smi reset --gpureset` resetting only the first GPU on UALink systems**.  
   - Each UALink GPU is now reset individually; GPUs in an XGMI hive are still reset once per hive.
 
