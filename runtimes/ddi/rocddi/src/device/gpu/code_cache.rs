@@ -104,7 +104,7 @@ impl GpuDevice<'_> {
                 MemoryKind::System,
                 page,
                 page,
-                DeviceAccess::READ | DeviceAccess::WRITE,
+                DeviceAccess::READ | DeviceAccess::WRITE | DeviceAccess::EXECUTE,
             )
             .map_err(retired)?;
         let host = storage.info().host_address.ok_or_else(|| {
