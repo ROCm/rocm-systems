@@ -66,6 +66,9 @@ memory:
   Unit_hipMemcpy3D_Negative_Parameters:
     <<: *level_default
     tags: [transfer, P1]
+  Unit_hipMemcpy3D_Negative_OffsetPointerOutOfBounds:
+    <<: *level_default
+    tags: [transfer, P1]
   Unit_hipMemcpy3D_Capture:
     <<: *level_default
     tags: [transfer]
@@ -151,6 +154,9 @@ memory:
     <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpy2D_Negative_Parameters:
+    <<: *level_default
+    tags: [transfer, P1]
+  Unit_hipMemcpy2D_Negative_OffsetPointerOutOfBounds:
     <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpy2D_Capture:
