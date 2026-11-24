@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/consan/prepare.h"
+#include "util/log.h"
+
+#include <algorithm>
 
 #include <filesystem>
 #include <fstream>
@@ -26,14 +29,23 @@ int run(int argc, char **argv) {
   std::filesystem::path destination;
   rocjitsu::consan::ScopeKind scope = rocjitsu::consan::ScopeKind::NativeLdsNoSynchronization;
   bool profile_seen = false;
+  bool require_all = false;
   if (argc == 5) {
     entries.push_back(argv[3]);
     destination = argv[4];
-  } else if (argc >= 6 && (argc % 2) == 0) {
+  } else if (argc >= 6) {
     destination = argv[3];
-    for (int index = 4; index < argc; index += 2) {
+    for (int index = 4; index < argc; ++index) {
       const std::string_view option(argv[index]);
-      const std::string_view value(argv[index + 1]);
+      if (option == "--require-all" && !require_all) {
+        require_all = true;
+        continue;
+      }
+      if (index + 1 >= argc) {
+        std::cerr << "Expected a value for " << option << '\n';
+        return 2;
+      }
+      const std::string_view value(argv[++index]);
       if (option == "--profile" && !profile_seen &&
           (value == "lds" || value == "execution-trace")) {
         profile_seen = true;
@@ -49,7 +61,7 @@ int run(int argc, char **argv) {
     }
   } else {
     std::cerr << "Usage: rj_consan_prepare ORIGINAL TARGET NEW-DIRECTORY [--profile "
-                 "lds|execution-trace] --entry NAME [--entry NAME]\n"
+                 "lds|execution-trace] [--require-all] --entry NAME [--entry NAME]\n"
                  "   or: rj_consan_prepare ORIGINAL TARGET ENTRY NEW-DIRECTORY\n";
     return 2;
   }
@@ -75,16 +87,40 @@ int run(int argc, char **argv) {
     return 2;
   }
   rocjitsu::consan::InputError error;
-  const rocjitsu::FailureOr<rocjitsu::consan::PreparedImageArtifact> artifact =
-      rocjitsu::consan::prepare_image(original, *target, entries, error, scope);
-  if (artifact.failed()) {
+  const rocjitsu::FailureOr<rocjitsu::consan::PreparationResult> preparation =
+      rocjitsu::consan::prepare_image_best_effort(original, *target, entries, error, scope);
+  if (preparation.failed()) {
     std::cerr << "Preparation rejected input: " << error.message << '\n';
     return 2;
   }
-  const rocjitsu::FailureOr<std::vector<uint8_t>> facts =
-      rocjitsu::consan::encode_image_facts(artifact.value().facts);
-  if (facts.failed()) {
-    std::cerr << "Cannot encode validated static facts\n";
+  const rocjitsu::consan::PreparationResult &result = preparation.value();
+  const size_t skipped = static_cast<size_t>(
+      std::ranges::count_if(result.entries, [](const rocjitsu::consan::EntryPreparation &entry) {
+        return !entry.instrumented && !entry.no_probes_needed;
+      }));
+  if (require_all && skipped != 0) {
+    const std::vector<rocjitsu::consan::EntryPreparation>::const_iterator first =
+        std::ranges::find_if(result.entries, [](const rocjitsu::consan::EntryPreparation &entry) {
+          return !entry.instrumented && !entry.no_probes_needed;
+        });
+    std::cerr << "Preparation rejected incomplete requested coverage: " << skipped
+              << " requested entries are blocked; " << first->entry << ": " << first->reason.message
+              << '\n';
+    return 2;
+  }
+  std::vector<uint8_t> encoded_facts;
+  if (result.artifact) {
+    const rocjitsu::FailureOr<std::vector<uint8_t>> facts =
+        rocjitsu::consan::encode_image_facts(result.artifact->facts);
+    if (facts.failed()) {
+      std::cerr << "Cannot encode validated static facts\n";
+      return 3;
+    }
+    encoded_facts = facts.value();
+  }
+  const std::string report = rocjitsu::consan::render_preparation_report(result);
+  if (report.empty()) {
+    std::cerr << "Cannot encode consistent preparation outcomes\n";
     return 3;
   }
   std::error_code status;
@@ -93,21 +129,47 @@ int run(int argc, char **argv) {
               << (status ? status.message() : "already exists") << '\n';
     return 3;
   }
-  // Incomplete writes never publish the ready marker. The runtime requires it
-  // and still validates both exact image identities and the facts checksum.
-  if (!write(destination / "prepared.hsaco", artifact.value().image) ||
-      !write(destination / "facts.bin", facts.value()) ||
-      !write(destination / "ready", rocjitsu::consan::kProducerContract)) {
-    std::cerr << "Artifact write/close failed\n";
-    return 3;
+  const std::span<const uint8_t> report_bytes(reinterpret_cast<const uint8_t *>(report.data()),
+                                              report.size());
+  if (result.artifact) {
+    // Incomplete writes never publish the ready marker. Report publication is
+    // part of preparation success, while facts retain the exact selected set.
+    if (!write(destination / "prepared.hsaco", result.artifact->image) ||
+        !write(destination / "facts.bin", encoded_facts) ||
+        !write(destination / "preparation.json", report_bytes) ||
+        !write(destination / "ready", rocjitsu::consan::kProducerContract)) {
+      std::cerr << "Artifact write/close failed\n";
+      return 3;
+    }
+  } else {
+    // Native-only output is an explicit no-instrumentation outcome. Configure
+    // original.hsaco as a native image; it has no selected facts or capture.
+    if (!write(destination / "original.hsaco", original) ||
+        !write(destination / "preparation.json", report_bytes)) {
+      std::cerr << "Artifact write/close failed\n";
+      return 3;
+    }
   }
+  if (skipped != 0)
+    util::Logger::warn("ConSan requested=", result.entries.size(), " instrumented=",
+                       std::ranges::count_if(result.entries,
+                                             [](const rocjitsu::consan::EntryPreparation &entry) {
+                                               return entry.instrumented;
+                                             }),
+                       " blocked=", skipped, "; see ", (destination / "preparation.json").string());
+  if (!result.artifact) {
+    std::cout << "outcome=native_only original=" << (destination / "original.hsaco").string()
+              << '\n';
+    return std::cout ? 0 : 3;
+  }
+  const rocjitsu::consan::PreparedImageArtifact &artifact = *result.artifact;
   constexpr std::string_view kHex = "0123456789abcdef";
   std::cout << "selection_profile=";
-  for (const uint8_t byte : artifact.value().facts.selection_profile) {
+  for (const uint8_t byte : artifact.facts.selection_profile) {
     std::cout << kHex[byte >> 4] << kHex[byte & 15];
   }
   std::cout << '\n';
-  for (const rocjitsu::consan::ImageEntryFacts &entry : artifact.value().facts.entries) {
+  for (const rocjitsu::consan::ImageEntryFacts &entry : artifact.facts.entries) {
     std::cout << "entry=" << entry.binding.name << " key=" << entry.key
               << " disposition=" << (entry.selected ? "selected" : "native") << '\n';
     if (!entry.selected) {
@@ -125,7 +187,7 @@ int run(int argc, char **argv) {
                 << " probe_bytes=" << site.probe_size << '\n';
     }
   }
-  return 0;
+  return std::cout ? 0 : 3;
 }
 
 } // namespace

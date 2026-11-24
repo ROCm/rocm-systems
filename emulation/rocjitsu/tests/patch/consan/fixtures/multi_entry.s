@@ -18,6 +18,9 @@
 #ifndef MK_NATIVE_GLOBAL
 #define MK_NATIVE_GLOBAL 0
 #endif
+#ifndef MK_UNSUPPORTED_C
+#define MK_UNSUPPORTED_C 0
+#endif
 #ifndef MK_UNREACHABLE_PC_READ
 #define MK_UNREACHABLE_PC_READ 0
 #endif
@@ -152,6 +155,9 @@ mk_b:
 .type mk_c,@function
 .p2align 8
 mk_c:
+#if MK_UNSUPPORTED_C
+  v_xor_b32 v12, 1, v0
+#endif
 #if MK_NATIVE_SCALAR
   s_load_b32 s4, s[0:1], 0
   wait_all

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/consan/contract.h"
+#include "rocjitsu/code/consan/image/facts.h"
 #include "rocjitsu/code/consan/target.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/consan/lds_race.h"
@@ -41,6 +42,15 @@ struct InputLimits {
   uint64_t text_bytes = 1024 * 1024;
   uint32_t instructions = 65536;
 };
+
+/// @brief Inspect LDS applicability independently of instrumentation ABI support.
+/// @details A certificate requires complete decoded direct control flow and no
+/// LDS, generic-address-space, cross-kernel or unknown memory effects. A missing
+/// certificate is not a proof that LDS executes; normal qualification must still
+/// decide whether the requested instrumentation can be provided.
+[[nodiscard]] FailureOr<std::optional<NoProbesNeededProof>>
+inspect_no_lds_memory(std::span<const uint8_t> image, const TargetProfile &target, EntryKey entry,
+                      InputError &error, const InputLimits &limits = {});
 
 /// @brief Compiler-owned original-program analysis, not a prepared artifact.
 /// @details No prepared mappings or register reservations are fabricated here.

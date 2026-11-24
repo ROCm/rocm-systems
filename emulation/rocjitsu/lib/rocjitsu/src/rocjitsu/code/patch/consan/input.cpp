@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/consan/input.h"
+#include "rocjitsu/code/consan/encoding.h"
 #include "rocjitsu/code/consan/image/metadata.h"
 #include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/analysis/control_flow.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
@@ -14,6 +16,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
+#include "util/sha256.h"
 
 #include <algorithm>
 #include <array>
@@ -402,6 +405,117 @@ FailureOr<InputProgram> build_entry_program(std::span<const uint8_t> image,
 }
 
 } // namespace
+
+FailureOr<std::optional<NoProbesNeededProof>>
+inspect_no_lds_memory(std::span<const uint8_t> image, const TargetProfile &target, EntryKey entry,
+                      InputError &error, const InputLimits &limits) {
+  error = {};
+  if (image.size() > limits.image_bytes)
+    return reject(error, InputErrorCode::ResourceLimit, "code object exceeds image budget");
+  const TargetProfile *profile = target_profile(target.name);
+  if (profile == nullptr || *profile != target)
+    return reject(error, InputErrorCode::UnsupportedTarget,
+                  "unsupported or inconsistent native LDS target profile");
+  if (validate_image_header(image, *profile, error).failed())
+    return Result::failure();
+  AmdGpuCodeObject object(image.data(), image.size());
+  if (!object.is_valid() || object.text_sections().size() != 1 ||
+      object.allocated_executable_sections().size() != 1)
+    return reject(error, InputErrorCode::InvalidImage,
+                  "expected one valid executable .text section");
+  const Section &text = *object.text_sections().front();
+  if (text.size() > limits.text_bytes)
+    return reject(error, InputErrorCode::ResourceLimit, "text exceeds analysis budget");
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(image, text.sectionOffset(), text.size(), text.sectionHeaderIndex());
+  const std::vector<KernelDescriptorInfo>::const_iterator selected =
+      std::ranges::find(kernels, entry, &KernelDescriptorInfo::descriptor_file_offset);
+  if (selected == kernels.end())
+    return reject(error, InputErrorCode::InvalidImage, "LDS applicability entry is absent");
+  CodeObjectPatcher patcher(object);
+  if (patcher.has_relocations_within_text() || patcher.has_unsupported_relocation_to_text() ||
+      patcher.has_malformed_rocr_relocation_section() ||
+      patcher.has_rocr_rejected_none_relocation())
+    return std::optional<NoProbesNeededProof>{};
+  const IsaTargetRegistry &registry = default_isa_target_registry();
+  std::unique_ptr<Decoder> decoder = Decoder::create(registry, profile->public_id);
+  if (decoder == nullptr)
+    return reject(error, InputErrorCode::DecodeFailure, "concrete target decoder is unavailable");
+  const std::array<uint64_t, 1> entries = {selected->entry_text_offset};
+  util::StringDiagnostic diagnostic;
+  const FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
+      BasicBlock::build_reachable(object, *decoder, target.arch, entries, diagnostic.emitter());
+  if (blocks.failed() || blocks.value().empty())
+    return reject(error, InputErrorCode::DecodeFailure,
+                  "invalid original CFG for LDS applicability: " + diagnostic.message());
+  std::vector<const BasicBlock *> ordered;
+  for (const std::unique_ptr<BasicBlock> &block : blocks.value())
+    ordered.push_back(block.get());
+  std::ranges::sort(ordered, {}, &BasicBlock::start_offset);
+  NoProbesNeededProof proof;
+  util::Sha256 hash;
+  hash.update("consan-no-lds-code-v1");
+  uint64_t previous_end = 0;
+  for (const BasicBlock *block : ordered) {
+    if (block->has_implicit_terminator() ||
+        block->successor_issue() != BasicBlock::SuccessorIssue::None ||
+        !block->call_edges().empty())
+      return std::optional<NoProbesNeededProof>{};
+    if (block->start_offset() < previous_end || block->end_offset() > text.size())
+      return reject(error, InputErrorCode::InvalidImage,
+                    "overlapping or unbounded LDS applicability code ranges");
+    previous_end = block->end_offset();
+    for (const Instruction &instruction : block->instructions()) {
+      if (++proof.instruction_count > limits.instructions)
+        return reject(error, InputErrorCode::ResourceLimit, "instruction analysis budget exceeded");
+      for (const KernelDescriptorInfo &sibling : kernels)
+        if (sibling.descriptor_file_offset != entry &&
+            instruction.src_loc() == sibling.entry_text_offset)
+          return std::optional<NoProbesNeededProof>{};
+      // Some system transfers carry only WRITES_PC and are not CFG edges.
+      if ((instruction.flags() & WRITES_PC) != 0 && !is_program_path_terminator(instruction) &&
+          !instruction.branch_offset_bytes())
+        return std::optional<NoProbesNeededProof>{};
+      if (instruction.amdgpu_operation() == amdgpu::Operation::Unknown ||
+          (instruction.flags() & (INDIRECT_BRANCH | INDIRECT_CALL | INVALID_VOPD_OPERANDS |
+                                  INVALID_IU_MODIFIERS | INVALID_MFMA_BROADCAST)) != 0 ||
+          instruction.transfers_to_lds() || instruction.transfers_from_lds())
+        return std::optional<NoProbesNeededProof>{};
+      switch (instruction.amdgpu_memory_addressing()) {
+      case amdgpu::MemoryAddressing::Flat:
+      case amdgpu::MemoryAddressing::Lds:
+      case amdgpu::MemoryAddressing::Gds:
+      case amdgpu::MemoryAddressing::DirectLds:
+      case amdgpu::MemoryAddressing::Tensor:
+      case amdgpu::MemoryAddressing::Cluster:
+        return std::optional<NoProbesNeededProof>{};
+      case amdgpu::MemoryAddressing::None:
+        if (instruction.is_memory_op() ||
+            instruction.amdgpu_memory_kind() != amdgpu::MemoryKind::None)
+          return std::optional<NoProbesNeededProof>{};
+        break;
+      case amdgpu::MemoryAddressing::Scalar:
+      case amdgpu::MemoryAddressing::Global:
+      case amdgpu::MemoryAddressing::Scratch:
+      case amdgpu::MemoryAddressing::Buffer:
+      case amdgpu::MemoryAddressing::TypedBuffer:
+      case amdgpu::MemoryAddressing::Image:
+        break;
+      }
+    }
+    const uint64_t bytes = block->end_offset() - block->start_offset();
+    std::array<uint8_t, 16> range{};
+    wire::write_u64(range, 0, block->start_offset());
+    wire::write_u64(range, 8, bytes);
+    hash.update(range.data(), range.size());
+    hash.update(image.data() + text.sectionOffset() + block->start_offset(), bytes);
+    proof.code_bytes += bytes;
+  }
+  if (proof.instruction_count == 0 || proof.code_bytes == 0)
+    return reject(error, InputErrorCode::DecodeFailure, "empty LDS applicability code");
+  proof.code_sha256 = hash.finish();
+  return std::optional<NoProbesNeededProof>{proof};
+}
 
 FailureOr<InputProgram> build_input_program(std::span<const uint8_t> image,
                                             const TargetProfile &target, std::string_view entry,

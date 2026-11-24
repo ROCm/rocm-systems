@@ -9,6 +9,7 @@
 #   cmake -DRJ_LOG_GROUPS=DBT_HOOKS → group 2 only
 #   cmake -DRJ_LOG_GROUPS=PLUGINS   → group 3 only
 #   cmake -DRJ_LOG_GROUPS=DRIVER    → group 4 only
+#   cmake -DRJ_LOG_GROUPS=CONSAN    → group 5 only
 #   cmake -DRJ_LOG_GROUPS=ALL       → all groups
 #   cmake -DRJ_LOG_GROUPS=0x3       → raw bitmask (groups 0 and 1)
 #   cmake -DRJ_LOG_GROUPS=OFF       → all logging off (default)
@@ -23,13 +24,14 @@
 #   DBT_HOOKS (bit 2)  ROCR HSA tools DBT hook tracing.
 #   PLUGINS   (bit 3)  Plugin discovery, loading, and configuration.
 #   DRIVER    (bit 4)  KFD driver: ioctl dispatch, process/session state.
+#   CONSAN    (bit 5)  ConSan qualification, instrumentation and capture.
 #
 # Usage: include(rj_log) after project().
 
 set(RJ_LOG_GROUPS
     "OFF"
     CACHE STRING
-    "Log groups: OFF, ALL, or comma-separated names (VM, CP, DBT_HOOKS, PLUGINS, DRIVER). Raw bitmask also accepted."
+    "Log groups: OFF, ALL, or comma-separated names (VM, CP, DBT_HOOKS, PLUGINS, DRIVER, CONSAN). Raw bitmask also accepted."
 )
 
 # --- Group name → bit mapping (keep in sync with Logger::Group in log.h) ---
@@ -38,12 +40,13 @@ set(_RJ_GROUP_CP 2) # bit 1
 set(_RJ_GROUP_DBT_HOOKS 4) # bit 2
 set(_RJ_GROUP_PLUGINS 8) # bit 3
 set(_RJ_GROUP_DRIVER 16) # bit 4
+set(_RJ_GROUP_CONSAN 32) # bit 5
 
 # All known group bits OR'd together.
 math(
     EXPR
     _RJ_GROUP_ALL
-    "${_RJ_GROUP_VM} | ${_RJ_GROUP_CP} | ${_RJ_GROUP_DBT_HOOKS} | ${_RJ_GROUP_PLUGINS} | ${_RJ_GROUP_DRIVER}"
+    "${_RJ_GROUP_VM} | ${_RJ_GROUP_CP} | ${_RJ_GROUP_DBT_HOOKS} | ${_RJ_GROUP_PLUGINS} | ${_RJ_GROUP_DRIVER} | ${_RJ_GROUP_CONSAN}"
 )
 
 # --- Resolve the user value to a numeric bitmask ---
@@ -71,7 +74,7 @@ else()
         else()
             message(
                 FATAL_ERROR
-                "Unknown log group '${_group}'. Known groups: VM, CP, DBT_HOOKS, PLUGINS, DRIVER. Use OFF or ALL for all."
+                "Unknown log group '${_group}'. Known groups: VM, CP, DBT_HOOKS, PLUGINS, DRIVER, CONSAN. Use OFF or ALL for all."
             )
         endif()
     endforeach()
