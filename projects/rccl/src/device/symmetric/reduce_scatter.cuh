@@ -408,7 +408,7 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_TmaLD(ncclSymkDevWorkA
 template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_ReduceScatter_HierLsaLDST(ncclSymkDevWorkArgs const* args) {
   // The host picks the chunk size per launch, at most the size the slots were sized for.
-  size_t const chunkBytes = args->kcomm.rsHierChunkSize;
+  size_t const chunkBytes = args->kcomm.hierChunkSize;
   size_t const RoundElts = chunkBytes / sizeof(T);
   ncclSymkArgsHandler handler{args};
   ncclDevComm const& comm = handler.comm;
@@ -419,10 +419,10 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_HierLsaLDST(ncclSymkDe
   ncclTeam scaleIn = ncclTeamInnerFactor(lsa, args->kcomm.hierScaleInSize);
   ncclTeam scaleUp = ncclTeamOuterFactor(lsa, args->kcomm.hierScaleInSize);
   int nPeers = scaleUp.nRanks - 1;
-  ncclDevResourceHandle slotsBuf = args->kcomm.rsHierSlots;
-  ncclDevResourceHandle flagsBuf = args->kcomm.rsHierFlags;
+  ncclDevResourceHandle slotsBuf = args->kcomm.hierSlotsBuf;
+  ncclDevResourceHandle flagsBuf = args->kcomm.hierFlagsBuf;
   uint64_t* flags = (uint64_t*)ncclGetResourceBufferLocalPointer(comm, flagsBuf) +
-                    blockIdx.x * ncclSymkRsHierFlagsPerBlock(scaleUp.nRanks);
+                    blockIdx.x * ncclSymkHierFlagsPerBlock(scaleUp.nRanks);
   uint64_t* ready = flags;
   uint64_t* credit = flags + scaleUp.nRanks;
   // Peers never write the round count, so it carries over from this block's last launch.

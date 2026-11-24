@@ -238,8 +238,11 @@ def instantiate(k, profile):
   prof = 'true' if profile else 'false'
   start = '  ncclSymkProfilerStart(&args4K.args);\n' if profile else ''
   stop  = '  ncclSymkProfilerStop(&args4K.args);\n' if profile else ''
-  # The hierarchical ReduceScatter and AllReduce launch at ncclSymkMaxThreads.
-  bounds = '__launch_bounds__(ncclSymkMaxThreads) ' if k.algo == "HierLsaLDST" else ''
+  # The hierarchical AllReduce is tuned up to 512 threads, so it is bounded wider than the ReduceScatter.
+  bounds = ''
+  if k.algo == "HierLsaLDST":
+    bounds = '__launch_bounds__(ncclSymkHierMaxThreads) ' if k.coll == "AllReduce" else \
+             '__launch_bounds__(ncclSymkMaxThreads) '
   if k.coll in reductions:
     inst = form_red_ty.format(cname=cname, id=id, prof=prof, red=red_to_Func[k.red], ty=ty_to_cxxtype[k.ty],
                               start=start, stop=stop, bounds=bounds)

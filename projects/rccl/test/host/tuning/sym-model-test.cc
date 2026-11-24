@@ -320,22 +320,27 @@ TEST_F(SymModelTdmReachableTest, DefaultParam_OneSidedRegistration_TmaValidOnlyO
   }
 }
 
-TEST_F(SymModelTdmTest, AgHierCtas_SymCtasCannotExceedTheDefaultCap) {
-  g_loadParam = ParamOverride({{"SYM_CTAS", 96}});
+TEST_F(SymModelTdmTest, HierCtas_SymCtasCannotExceedTheDefaultCap) {
+  g_loadParam = ParamOverride({{"SYM_CTAS", 128}});
   EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_HierLsaST), ncclSymkAgHierMaxBlocks);
+  EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_ReduceScatter_HierLsaLDST), ncclSymkHierMaxBlocks);
+  EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllReduce_HierLsaLDST), ncclSymkHierMaxBlocks);
   EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_ST), ncclSymkMaxBlocks);
 }
 
-TEST_F(SymModelTdmTest, AgHierCtas_EnvSetsTheCountAboveTheDefaultCap) {
-  g_loadParam = ParamOverride({{"SYM_AG_HIER_CTAS", 96}});
-  EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_HierLsaST), 96);
+TEST_F(SymModelTdmTest, HierCtas_EnvSetsTheCountOfEveryHierarchicalKernel) {
+  g_loadParam = ParamOverride({{"SYM_HIER_CTAS", 120}});
+  EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_HierLsaST), 120);
+  EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_HierLsaTmaST), ncclSymkAgHierTmaMaxBlocks);
+  EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_ReduceScatter_HierLsaLDST), 120);
+  EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllReduce_HierLsaLDST), 120);
   EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_ST), 0);
 }
 
-TEST_F(SymModelTdmTest, AgHierCtas_SymCtasReducesFromTheOverriddenCap) {
-  g_loadParam = ParamOverride({{"SYM_AG_HIER_CTAS", 96}, {"SYM_CTAS", 40}});
+TEST_F(SymModelTdmTest, HierCtas_SymCtasReducesFromTheOverriddenCap) {
+  g_loadParam = ParamOverride({{"SYM_HIER_CTAS", 96}, {"SYM_CTAS", 40}});
   EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_HierLsaST), 40);
-  g_loadParam = ParamOverride({{"SYM_AG_HIER_CTAS", 96}, {"SYM_CTAS", 128}});
+  g_loadParam = ParamOverride({{"SYM_HIER_CTAS", 96}, {"SYM_CTAS", 128}});
   EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_HierLsaST), 96);
 }
 
@@ -363,13 +368,20 @@ class SymModelTdmHierTest : public SymModelTdmReachableTest {
     SymModelTdmReachableTest::SetUp();
     comm_->hasMloPart = true;
     comm_->symkState.kcomm.hierScaleInSize = 2;
-    comm_->symkState.agHierMaxBlocks = ncclSymkAgHierMaxBlocks;
+    comm_->symkState.hierMaxBlocks = ncclSymkAgHierMaxBlocks;
   }
 
   // What NCCL_SYM_KERNEL=AllGather_HierLsaTmaST leaves to the model.
   ncclTuningResult_t EvaluateForcedHierTma(size_t nBytes) {
     comm_->tuningContext.forced[ncclFuncAllGather] = 1;
     return Evaluate(Input(ncclFuncAllGather, nBytes), ncclSymkKernelId_AllGather_HierLsaTmaST);
+  }
+
+  // Blocks the vector kernel's groups use out of nBlocks.
+  int AgHierLaunchBlocks(int nBlocks) {
+    struct ncclSymkHierTuning tuned;
+    bool hier = ncclSymkHierLaunchTuning(comm_.get(), ncclSymkKernelId_AllGather_HierLsaST, 0, nBlocks, &tuned);
+    return hier ? tuned.blocks : nBlocks;
   }
 };
 
@@ -439,16 +451,16 @@ TEST_F(SymModelTdmHierTest, VectorKernel_HonorsMinCtas) {
   in.maxCTAs = MAXCHANNELS;
   ncclTuningResult_t r = Evaluate(in, ncclSymkKernelId_AllGather_HierLsaST);
   ASSERT_TRUE(r.valid);
-  EXPECT_EQ(r.nChannels, ncclSymkAgHierLaunchBlocks(comm_.get(), ncclSymkAgHierMaxBlocks));
+  EXPECT_EQ(r.nChannels, AgHierLaunchBlocks(ncclSymkAgHierMaxBlocks));
 }
 
-// hierPushFlags is sized at init, so NCCL_SYM_AG_HIER_CTAS raised after init cannot launch past its rows.
+// hierPushFlags is sized at init, so NCCL_SYM_HIER_CTAS raised after init cannot launch past its rows.
 TEST_F(SymModelTdmHierTest, VectorKernel_HierCtasAboveTheInitRows_LaunchesTheRows) {
-  ScopedHook loadParam(g_loadParam, ParamOverride({{"SYM_AG_HIER_CTAS", 96}}));
+  ScopedHook loadParam(g_loadParam, ParamOverride({{"SYM_HIER_CTAS", 96}}));
   comm_->tuningContext.forced[ncclFuncAllGather] = 1;
   ncclTuningResult_t r = Evaluate(Input(ncclFuncAllGather, size_t(64) << 20), ncclSymkKernelId_AllGather_HierLsaST);
   ASSERT_TRUE(r.valid);
-  EXPECT_EQ(r.nChannels, ncclSymkAgHierLaunchBlocks(comm_.get(), comm_->symkState.agHierMaxBlocks));
+  EXPECT_EQ(r.nChannels, AgHierLaunchBlocks(comm_->symkState.hierMaxBlocks));
 }
 
 // The vector kernels hold every size range, so neither TDM kernel runs unless asked for.

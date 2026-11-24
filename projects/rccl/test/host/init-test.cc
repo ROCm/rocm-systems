@@ -10851,9 +10851,10 @@ struct Tr_AllGatherInfo {
   bool nicFused;
   int minCTAs;
   int maxCTAs;
-  int symAgHierMaxBlocks;
-  int64_t symAgHierMaxChunkBytes;
   int64_t symCtas;
+  int symHierCtas;
+  int64_t symHierChunkBytes;
+  int64_t symHierPipeline;
 };
 
 // One GPU node per rank, so ncclTopoRankToIndex (:1869) resolves and every rank carries an arch string.
@@ -11556,10 +11557,10 @@ TEST_F(InitMicrotest, InitTransportsRank_RomeConsensusFails_PropagatesThatCode) 
   EXPECT_EQ(0, g_ncclTopoPostsetCalls);
 }
 
-TEST_F(InitMicrotest, InitTransportsRank_HierAllGatherSizingMismatch_FailsOnlyWhereHierAllGatherCanRun) {
+TEST_F(InitMicrotest, InitTransportsRank_HierSizingMismatch_FailsOnlyWhereHierKernelsCanRun) {
   using Patch = std::function<void(Tr_AllGatherInfo&)>;
   // The mismatch and kTrPostsetReached share a code, so the Postset call count tells them apart.
-  // Every comm is partitioned, so a hierarchical AllGather that can't run (MI300X, MI355X) must skip the check.
+  // Every comm is partitioned, so where the hierarchical kernels can't run (MI300X, MI355X) the check is skipped.
   auto reachesPostset = [](bool hierAvailable, const Patch& patch) {
     TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
     Tr_ReachAllGather3(c, "gfx900");
@@ -11576,8 +11577,9 @@ TEST_F(InitMicrotest, InitTransportsRank_HierAllGatherSizingMismatch_FailsOnlyWh
         EXPECT_EQ(row.minCTAs, 3);
         EXPECT_EQ(row.maxCTAs, 5);
         EXPECT_EQ(row.symCtas, 7);
-        EXPECT_EQ(row.symAgHierMaxBlocks, ncclSymkAgHierMaxBlocks);
-        EXPECT_EQ(row.symAgHierMaxChunkBytes, int64_t(ncclSymkAgHierMaxChunkBytes));
+        EXPECT_EQ(row.symHierCtas, 0);
+        EXPECT_EQ(row.symHierChunkBytes, 0);
+        EXPECT_EQ(row.symHierPipeline, -1);
       }
       if (r == 2 && patch) patch(row);
     });
@@ -11588,9 +11590,10 @@ TEST_F(InitMicrotest, InitTransportsRank_HierAllGatherSizingMismatch_FailsOnlyWh
   const Patch patches[] = {
       [](Tr_AllGatherInfo& row) { row.minCTAs += 1; },
       [](Tr_AllGatherInfo& row) { row.maxCTAs -= 1; },
-      [](Tr_AllGatherInfo& row) { row.symAgHierMaxBlocks += 1; },
-      [](Tr_AllGatherInfo& row) { row.symAgHierMaxChunkBytes *= 2; },
       [](Tr_AllGatherInfo& row) { row.symCtas += 1; },
+      [](Tr_AllGatherInfo& row) { row.symHierCtas += 1; },
+      [](Tr_AllGatherInfo& row) { row.symHierChunkBytes += 4096; },
+      [](Tr_AllGatherInfo& row) { row.symHierPipeline = 1; },
   };
   EXPECT_TRUE(reachesPostset(/*hierAvailable=*/true, nullptr)) << "matching values";
   for (size_t i = 0; i < std::size(patches); i++) {

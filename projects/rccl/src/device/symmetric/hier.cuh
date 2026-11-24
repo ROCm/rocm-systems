@@ -98,7 +98,7 @@ static __device__ void hierReduceFinish(ncclDevComm const& comm, ncclTeam scaleI
 static __device__ uint64_t* hierFlagRow(ncclDevComm const& comm, ncclTeam scaleUp, ncclDevResourceHandle flagsBuf,
                                         int peer) {
   return (uint64_t*)ncclGetResourceBufferLsaPointer(comm, flagsBuf, ncclTeamRankToLsa(comm, scaleUp, peer)) +
-         blockIdx.x * ncclSymkRsHierFlagsPerBlock(scaleUp.nRanks);
+         blockIdx.x * ncclSymkHierFlagsPerBlock(scaleUp.nRanks);
 }
 
 // Raises flag base + s on the rank of scaleUp s + 1 places up from ours, after a system-scope release.

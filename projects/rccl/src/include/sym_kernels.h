@@ -258,7 +258,10 @@ constexpr int ncclSymkAgHierBlocksForSize(int nRanks, size_t nBytes) {
 constexpr int ncclSymkAgHierTmaMaxBlocks = 48;
 
 // Max blocks for the hierarchical LSA ReduceScatter kernel.
-constexpr int ncclSymkRsHierMaxBlocks = 96;
+constexpr int ncclSymkHierMaxBlocks = 96;
+
+// Widest block the hierarchical kernels are compiled for.
+constexpr int ncclSymkHierMaxThreads = 1024;
 
 // How the hierarchical LSA AllGather kernel splits nBlocks over nGroups packages. Group 0 copies with
 // whole blocks where a pushing group forwards with half of each, so it gets about half as many blocks
@@ -273,22 +276,23 @@ constexpr __host__ __device__ int ncclSymkAgHierGroupBlocks(int nBlocks, int nGr
 }
 // Chunk size: the bytes a block pushes to each other package per round. Small launches use this one, since a
 // bigger chunk would leave their blocks too few rounds to overlap.
-constexpr size_t ncclSymkRsHierMinChunkBytes = 64 << 10;
+constexpr size_t ncclSymkHierMinChunkBytes = 64 << 10;
 // Chunk size of big launches. Twice the small one, so a launch does half as many flag handshakes.
-constexpr size_t ncclSymkRsHierMaxChunkBytes = 2 * ncclSymkRsHierMinChunkBytes;
+constexpr size_t ncclSymkHierMaxChunkBytes = 2 * ncclSymkHierMinChunkBytes;
 // Bytes per block at which a launch switches from the min to the max chunk size, so that a block always gets
 // several rounds of the max chunk to overlap.
-constexpr size_t ncclSymkRsHierChunkSwitchBlockBytes = 4 * ncclSymkRsHierMaxChunkBytes;
+constexpr size_t ncclSymkHierChunkSwitchBlockBytes = 4 * ncclSymkHierMaxChunkBytes;
 // Alignment of the landing slots. Every slot is a whole number of chunks past the first, so with chunks that
 // are multiples of it, no slot, warp tile or store crosses a 4 KiB page.
-constexpr size_t ncclSymkRsHierSlotsAlign = 4 << 10;
-// Per-rank budget for the landing slots, which grow with the package count: ncclSymkRsHierMaxBlocks blocks
+constexpr size_t ncclSymkHierSlotsAlign = 4 << 10;
+// Per-rank budget for the landing slots, which grow with the package count: ncclSymkHierRows() blocks
 // times two rounds in flight times one slot per other package. Within it the chunk is
-// ncclSymkRsHierMaxChunkBytes, which holds up to 11 packages; beyond that the chunk shrinks to fit.
-constexpr size_t ncclSymkRsHierSlotsMaxBytes = 256 << 20;
+// ncclSymkHierMaxChunkBytes, which at the default 96 rows holds up to 11 packages; beyond that the chunk
+// shrinks to fit.
+constexpr size_t ncclSymkHierSlotsMaxBytes = 256 << 20;
 // Flags a block of it keeps: a ready count from each other package, the block's round count, a credit
 // count from each other package, then an allgather ready count (AllReduce only) from each other package.
-constexpr __host__ __device__ int ncclSymkRsHierFlagsPerBlock(int nGroups) {
+constexpr __host__ __device__ int ncclSymkHierFlagsPerBlock(int nGroups) {
   return 3 * nGroups;
 }
 
@@ -478,15 +482,15 @@ struct ncclSymkDevComm {
   uint32_t hierMaxChunkBytes;
   // Per block of the hierarchical ReduceScatter and AllReduce, two rounds of landing slots, one for each
   // other package, that the same block on that package's counterpart rank stores partial sums into.
-  ncclDevResourceHandle rsHierSlots;
+  ncclDevResourceHandle hierSlotsBuf;
   // Per block of the hierarchical ReduceScatter and AllReduce, the flags that pace those slots: counterparts
   // raise a ready count when a round's sums land, and owners raise a credit count once they have read them.
-  ncclDevResourceHandle rsHierFlags;
+  ncclDevResourceHandle hierFlagsBuf;
   // Chunk size: bytes of partial sums a block sends each other package per round.
-  uint32_t rsHierChunkSize;
-  // Whether the hierarchical AllReduce splits its warps into concurrent roles, or runs every role on all
+  uint32_t hierChunkSize;
+  // Whether the hierarchical kernels split their warps into concurrent roles, or run every role on all
   // warps in turn.
-  bool arHierPipeline;
+  bool hierPipeline;
   // Profiler counters (host-pinned), indexed by channel id and per-channel entry.
   // workPhases holds per-phase timestamps published behind a fence.
   struct ncclDevProfiler* workStarted;
@@ -502,8 +506,8 @@ struct ncclSymkState {
   bool ginBackendUnsupported;
   int maxGinInboxBlocks;
   int alltoAllLLMaxResidentCtas;
-  // Rows of hierPushFlags, so the most blocks a hierarchical AllGather launch may use.
-  int agHierMaxBlocks;
+  // ncclSymkHierRows() at init, so the most blocks any hierarchical launch may use.
+  int hierMaxBlocks;
 #if !defined(NCCL_OS_WINDOWS)
   struct {
     ncclDevResourceHandle bufHandle;
@@ -630,18 +634,48 @@ bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedO
 bool ncclSymkAlltoAllLLForced(struct ncclComm* comm);
 ncclSymkKernelMask ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                                 size_t nElts, bool symAligned16B = true, bool ginWindowsUnregistered = false);
-// Whether the hierarchical LSA kernels (AllGather and ReduceScatter) can run on this arch and partition mode.
+// Whether the hierarchical LSA kernels can run on this arch and partition mode.
 bool ncclSymkHierAvailable(struct ncclComm* comm);
 // Packages the hierarchical LSA kernels span on this comm, or 0 where they can't run.
 int ncclSymkHierGroups(struct ncclComm* comm);
-// How many of nBlocks the hierarchical LSA AllGather kernel puts to work; the rest would sit out.
-int ncclSymkAgHierLaunchBlocks(struct ncclComm* comm, int nBlocks);
-int ncclSymkAgHierMaxBlocksLimit();
-size_t ncclSymkAgHierMaxChunkBytesLimit();
-// The chunk size a hierarchical ReduceScatter launch uses when each of its blocks handles blockBytes.
-uint32_t ncclSymkRsHierLaunchChunkSize(struct ncclComm* comm, size_t blockBytes);
-// Blocks the hierarchical ReduceScatter launches with for nBytes per rank.
-int ncclSymkRsHierLaunchBlocks(int nRanks, size_t nBytes);
+// NCCL_SYM_HIER_CTAS clamped to MAXCHANNELS, or 0 where unset.
+int ncclSymkHierCtas();
+// NCCL_SYM_HIER_CHUNK_BYTES clamped to 1 GiB, or 0 where unset.
+size_t ncclSymkHierChunkBytes();
+int64_t ncclParamSymHierPipeline();
+// The most blocks a launch of a hierarchical kernel may use: NCCL_SYM_HIER_CTAS where set, else the kernel's own
+// cap. The TDM AllGather never exceeds its cap. 0 for kernels that are not hierarchical.
+inline int ncclSymkHierMaxBlocksLimit(enum ncclSymkKernelId kernelId) {
+  int ctas = ncclSymkHierCtas();
+  switch (kernelId) {
+  case ncclSymkKernelId_AllGather_HierLsaST:
+    return ctas > 0 ? ctas : ncclSymkAgHierMaxBlocks;
+  case ncclSymkKernelId_AllGather_HierLsaTmaST:
+    return ctas > 0 && ctas < ncclSymkAgHierTmaMaxBlocks ? ctas : ncclSymkAgHierTmaMaxBlocks;
+  case ncclSymkKernelId_ReduceScatter_HierLsaLDST:
+  case ncclSymkKernelId_AllReduce_HierLsaLDST:
+    return ctas > 0 ? ctas : ncclSymkHierMaxBlocks;
+  default:
+    return 0;
+  }
+}
+// Rows of the hierarchical kernels' per-block flags and slots: the most blocks any of their launches may use.
+inline int ncclSymkHierRows() {
+  static_assert(ncclSymkHierMaxBlocks >= ncclSymkAgHierMaxBlocks && ncclSymkHierMaxBlocks >= ncclSymkAgHierTmaMaxBlocks,
+                "the ReduceScatter and AllReduce cap bounds every hierarchical kernel");
+  return ncclSymkHierMaxBlocksLimit(ncclSymkKernelId_ReduceScatter_HierLsaLDST);
+}
+// Launch settings of a hierarchical kernel that moves nBytes in total over nBlocks blocks (0 if not yet known).
+// Fields a kernel does not tune keep the communicator's defaults, except threads, which is 0 for those. False when
+// the kernel does not apply: not hierarchical, or outside gfx1250 partition mode where it needs that.
+struct ncclSymkHierTuning {
+  int blocks; // Before the caller clamps it to its bounds. AllGather returns the blocks its groups can use.
+  int threads; // 0 = keep the default width.
+  bool pipeline;
+  uint32_t chunkBytes; // Capped by what the communicator's slots hold.
+};
+bool ncclSymkHierLaunchTuning(struct ncclComm* comm, enum ncclSymkKernelId kernelId, size_t nBytes, int nBlocks,
+                              struct ncclSymkHierTuning* tuning);
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 bool ncclSymkIsGfx950(struct ncclComm* comm);
@@ -660,8 +694,8 @@ bool ncclSymkGfx1250AllGatherPrefersStore(int nRanks, size_t nBytes);
 // Whether AllGather should take the hierarchical kernel over the store kernel on gfx1250 in partition
 // mode, which the shared cost model never does.
 bool ncclSymkGfx1250AllGatherPrefersHier(int nRanks, size_t nBytes);
-// Whether ReduceScatter on gfx1250 in partition mode should take the hierarchical kernel over LL.
-bool ncclSymkGfx1250ReduceScatterPrefersHier(int nRanks, size_t nBytes);
+// On gfx1250 in partition mode ReduceScatter prefers the hierarchical kernel over LL above this many bus bytes.
+constexpr size_t ncclSymkGfx1250RsLLMaxBytes = 1 << 20;
 #endif
 
 ncclResult_t ncclSymkMakeDevWork(struct ncclComm* comm, struct ncclTaskColl* task, struct ncclSymkDevWork* outDevWork);

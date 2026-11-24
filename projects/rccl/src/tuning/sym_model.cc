@@ -18,21 +18,14 @@
 #include <algorithm>
 
 NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
-extern int64_t ncclParamSymAgHierCtas();
 
 static constexpr float disableTime = 1.e30f;
 
 int ncclSymkModelCtasEnvOverride(enum ncclSymkKernelId kernelId) {
-  bool hier = kernelId == ncclSymkKernelId_AllGather_HierLsaST;
-  int maxBlocks = hier ? ncclSymkAgHierMaxBlocksLimit() : ncclSymkMaxBlocks;
-  if (kernelId == ncclSymkKernelId_AllGather_HierLsaTmaST) {
-    maxBlocks = ncclSymkAgHierTmaMaxBlocks;
-  }
-  if (kernelId == ncclSymkKernelId_ReduceScatter_HierLsaLDST || kernelId == ncclSymkKernelId_AllReduce_HierLsaLDST) {
-    maxBlocks = ncclSymkRsHierMaxBlocks;
-  }
+  int hierMaxBlocks = ncclSymkHierMaxBlocksLimit(kernelId);
+  int maxBlocks = hierMaxBlocks > 0 ? hierMaxBlocks : ncclSymkMaxBlocks;
   int64_t nUserCTAs = ncclParamSymCTAs();
-  if (hier && nUserCTAs < 1) nUserCTAs = ncclParamSymAgHierCtas();
+  if (hierMaxBlocks > 0 && nUserCTAs < 1) nUserCTAs = ncclSymkHierCtas();
   if (nUserCTAs < 1) return 0;
   if (nUserCTAs > maxBlocks) return maxBlocks;
   return static_cast<int>(nUserCTAs);
@@ -116,7 +109,7 @@ static bool rcclSymkReduceScatterYieldsInPartitionMode(struct ncclTuningInput_t*
   }
   // The same conditions ncclTuningSymkModelSim puts on LL (no grouping) and on the rest (a registered send).
   bool sendReg = inputs->winRegType == ncclSymSendRegRecvReg || inputs->winRegType == ncclSymSendRegRecvNonreg;
-  bool hierFirst = ncclSymkGfx1250ReduceScatterPrefersHier(comm->nRanks, inputs->nBytes);
+  bool hierFirst = size_t(comm->nRanks) * inputs->nBytes > ncclSymkGfx1250RsLLMaxBytes;
   for (int k : {hierFirst ? hier : ll, ld, hierFirst ? ll : hier}) {
     if ((valid_kmask >> k & 1) && inputs->tuningMask.test(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + k) &&
         (k == ll ? inputs->nWorks <= 1 : sendReg)) {
@@ -124,6 +117,20 @@ static bool rcclSymkReduceScatterYieldsInPartitionMode(struct ncclTuningInput_t*
     }
   }
   return false;  // None of the three can run; leave the choice to the cost model.
+}
+
+// In gfx1250 partition mode AllReduce runs the hierarchical kernel wherever it can, unless the user forced the
+// choice.
+static bool rcclSymkAllReduceYieldsInPartitionMode(struct ncclTuningInput_t* const inputs,
+                                                   enum ncclSymkKernelId kernelId, ncclSymkKernelMask valid_kmask) {
+  constexpr int hier = ncclSymkKernelId_AllReduce_HierLsaLDST;
+  struct ncclComm* comm = inputs->comm;
+  if (inputs->func != ncclFuncAllReduce || !ncclSymkIsGfx1250(comm) || !comm->hasMloPart ||
+      comm->tuningContext.forced[inputs->func]) {
+    return false;
+  }
+  return (valid_kmask >> hier & 1) && inputs->tuningMask.test(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + hier) &&
+         kernelId != hier;
 }
 
 static int rcclSymkCalculateWarps(struct ncclTuningInput_t* const inputs, enum ncclSymkKernelId kernelId) {
@@ -140,6 +147,8 @@ static int rcclSymkCalculateWarps(struct ncclTuningInput_t* const inputs, enum n
     // The width tuning is fitted to the gfx950 LSA kernels.
     nThreads = ncclSymkGfx950BlockThreads(inputs->func, isLL, comm->nRanks, inputs->nBytes);
   }
+  struct ncclSymkHierTuning tuned;
+  if (ncclSymkHierLaunchTuning(comm, kernelId, inputs->nBytes, 0, &tuned) && tuned.threads) nThreads = tuned.threads;
   return std::max(1, nThreads / comm->WarpSize);
 }
 #endif
@@ -218,7 +227,8 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (rcclSymkAllGatherLLYieldsToST(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask) ||
       rcclSymkAllGatherYieldsInPartitionMode(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask) ||
-      rcclSymkReduceScatterYieldsInPartitionMode(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask)) {
+      rcclSymkReduceScatterYieldsInPartitionMode(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask) ||
+      rcclSymkAllReduceYieldsInPartitionMode(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask)) {
     tuning->valid = 0;
     tuning->timeUs = -1.0;
     return ncclSuccess;

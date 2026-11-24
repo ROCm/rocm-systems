@@ -104,9 +104,9 @@ static bool symBatchesAlone(const struct ncclTaskColl* t) {
 }
 
 // [RCCL] Upper bound on a symmetric launch's tuned channel count: the Symk tuning models cap at
-// ncclSymkAgHierMaxBlocks and the Genk model at min(nChannels, maxCTAs).
+// ncclSymkHierRows() and the Genk model at min(nChannels, maxCTAs).
 static int symkMaxLaunchChannels(struct ncclComm* comm) {
-  return std::max(ncclSymkAgHierMaxBlocks, std::min(comm->nChannels, comm->config.maxCTAs));
+  return std::max(ncclSymkHierRows(), std::min(comm->nChannels, comm->config.maxCTAs));
 }
 
 // [RCCL] Symk/Genk kernels take a 4 KB argument even when workArgsBytes is 5 KB, so a batch must fit 4 KB.
@@ -582,13 +582,11 @@ static ncclResult_t ncclSymmetricTaskSchedulerImpl(
   memcpy(&argsBuf->kcomm, &kcomm, sizeof(kcomm));
   plan->workBytes = totalCount * ncclTypeSize(headTask->datatype);
   if constexpr (!Genk) {
-    if (kernelId == ncclSymkKernelId_ReduceScatter_HierLsaLDST && curChannel > 0) {
-      // Every rank sees the same count and block count, so they all pick the same chunk size.
-      argsBuf->kcomm.rsHierChunkSize = ncclSymkRsHierLaunchChunkSize(comm, size_t(plan->workBytes) / curChannel);
-    }
-    if (kernelId == ncclSymkKernelId_AllReduce_HierLsaLDST && curChannel > 0) {
-      argsBuf->kcomm.rsHierChunkSize =
-        ncclSymkRsHierLaunchChunkSize(comm, size_t(plan->workBytes) / curChannel / comm->nRanks);
+    // Every rank sees the same count and block count, so they all pick the same launch settings.
+    struct ncclSymkHierTuning tuned;
+    if (curChannel > 0 && ncclSymkHierLaunchTuning(comm, kernelId, size_t(plan->workBytes), curChannel, &tuned)) {
+      argsBuf->kcomm.hierChunkSize = tuned.chunkBytes;
+      argsBuf->kcomm.hierPipeline = tuned.pipeline;
     }
   }
   for (int c = 0; c < curChannel; c++) {

@@ -1975,9 +1975,10 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     bool nicFused;
     int minCTAs;
     int maxCTAs;
-    int symAgHierMaxBlocks;
-    int64_t symAgHierMaxChunkBytes;
     int64_t symCtas;
+    int symHierCtas;
+    int64_t symHierChunkBytes;
+    int64_t symHierPipeline;
   };
 
   int nChannelsOrig;
@@ -2566,9 +2567,10 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   allGather3Data[rank].p2pMaxPeers = comm->p2pMaxPeers;
   allGather3Data[rank].minCTAs = comm->config.minCTAs;
   allGather3Data[rank].maxCTAs = comm->config.maxCTAs;
-  allGather3Data[rank].symAgHierMaxBlocks = ncclSymkAgHierMaxBlocksLimit();
-  allGather3Data[rank].symAgHierMaxChunkBytes = int64_t(ncclSymkAgHierMaxChunkBytesLimit());
   allGather3Data[rank].symCtas = ncclParamSymCTAs();
+  allGather3Data[rank].symHierCtas = ncclSymkHierCtas();
+  allGather3Data[rank].symHierChunkBytes = int64_t(ncclSymkHierChunkBytes());
+  allGather3Data[rank].symHierPipeline = ncclParamSymHierPipeline();
 
   allGather3Data[rank].localNetDeviceCount = localNetDeviceCount;
   allGather3Data[rank].localNetCountByBw = localNetCountByBw;
@@ -2611,21 +2613,22 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
 
-  // The hierarchical AllGather pairs blocks across ranks by index and chunk, so ranks that size its grid or
-  // chunks differently hang
+  // The hierarchical kernels pair blocks across ranks by index and chunk, so ranks that size their grid,
+  // chunks or pipeline differently hang
   if (ncclSymkHierAvailable(comm)) {
     for (int r = 0; r < nranks; r++) {
       const auto& mine = allGather3Data[rank];
       const auto& peer = allGather3Data[r];
-      if (peer.minCTAs != mine.minCTAs || peer.maxCTAs != mine.maxCTAs ||
-          peer.symAgHierMaxBlocks != mine.symAgHierMaxBlocks ||
-          peer.symAgHierMaxChunkBytes != mine.symAgHierMaxChunkBytes || peer.symCtas != mine.symCtas) {
-        WARN("CTA bounds or NCCL_SYM_CTAS/NCCL_SYM_AG_HIER_CTAS/NCCL_SYM_AG_HIER_CHUNK_BYTES mismatch: rank %d (%s) "
-             "has minCTAs %d maxCTAs %d sym CTAs %lld hier CTAs %d chunk %lld, rank %d (%s) has %d %d %lld %d %lld; "
-             "all ranks must match",
-             rank, mine.hostname, mine.minCTAs, mine.maxCTAs, (long long)mine.symCtas, mine.symAgHierMaxBlocks,
-             (long long)mine.symAgHierMaxChunkBytes, r, peer.hostname, peer.minCTAs, peer.maxCTAs,
-             (long long)peer.symCtas, peer.symAgHierMaxBlocks, (long long)peer.symAgHierMaxChunkBytes);
+      if (peer.minCTAs != mine.minCTAs || peer.maxCTAs != mine.maxCTAs || peer.symCtas != mine.symCtas ||
+          peer.symHierCtas != mine.symHierCtas || peer.symHierChunkBytes != mine.symHierChunkBytes ||
+          peer.symHierPipeline != mine.symHierPipeline) {
+        WARN("CTA bounds or NCCL_SYM_CTAS/NCCL_SYM_HIER_CTAS/NCCL_SYM_HIER_CHUNK_BYTES/NCCL_SYM_HIER_PIPELINE "
+             "mismatch: rank %d (%s) has minCTAs %d maxCTAs %d sym CTAs %lld hier CTAs %d hier chunk %lld "
+             "hier pipeline %lld, rank %d (%s) has %d %d %lld %d %lld %lld; all ranks must match",
+             rank, mine.hostname, mine.minCTAs, mine.maxCTAs, (long long)mine.symCtas, mine.symHierCtas,
+             (long long)mine.symHierChunkBytes, (long long)mine.symHierPipeline, r, peer.hostname, peer.minCTAs,
+             peer.maxCTAs, (long long)peer.symCtas, peer.symHierCtas, (long long)peer.symHierChunkBytes,
+             (long long)peer.symHierPipeline);
         ret = ncclInvalidUsage;
         goto fail;
       }

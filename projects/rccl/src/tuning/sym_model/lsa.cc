@@ -16,7 +16,7 @@
 #include <cfloat>
 #include <cmath>
 
-// RCCL caps a few LSA kernels below ncclSymkMaxBlocks (or, for the hierarchical AllGather, above it).
+// RCCL caps a few LSA kernels below ncclSymkMaxBlocks (or, for the hierarchical kernels, above it).
 static int maxBlocksLsa(struct ncclComm* comm, enum ncclSymkKernelId kernelId) {
   switch (kernelId) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -24,12 +24,10 @@ static int maxBlocksLsa(struct ncclComm* comm, enum ncclSymkKernelId kernelId) {
     return ncclSymkIsGfx950(comm) ? std::min(ncclSymkMaxBlocks, 24) : ncclSymkMaxBlocks;
 #endif
   case ncclSymkKernelId_AllGather_HierLsaST:
-    return ncclSymkAgHierMaxBlocksLimit();
   case ncclSymkKernelId_AllGather_HierLsaTmaST:
-    return ncclSymkAgHierTmaMaxBlocks;
   case ncclSymkKernelId_ReduceScatter_HierLsaLDST:
   case ncclSymkKernelId_AllReduce_HierLsaLDST:
-    return ncclSymkRsHierMaxBlocks;
+    return ncclSymkHierMaxBlocksLimit(kernelId);
   default:
     (void)comm;
     return ncclSymkMaxBlocks;
@@ -117,8 +115,8 @@ ncclResult_t ncclSymkLsaModel(struct ncclTuningInput_t* input, enum ncclSymkKern
   withinPeakFactor = rcclSymkLsaWithinPeakFactor(kernelId);
 #endif
 
-  // maxBlocksLsa() lets the hierarchical AllGather exceed ncclSymkMaxBlocks, and
-  // NCCL_SYM_AG_HIER_CTAS can raise that as far as MAXCHANNELS.
+  // maxBlocksLsa() lets the hierarchical kernels exceed ncclSymkMaxBlocks, and
+  // NCCL_SYM_HIER_CTAS can raise that as far as MAXCHANNELS.
   struct ncclSymkLsaEstimate candidates[MAXCHANNELS + 1];
   bool modeled = false;
   NCCLCHECK(evaluateLsaEstimate(input, kernelId, nBytes, nMaxBlocks, &candidates[nMaxBlocks], &modeled));
@@ -162,17 +160,16 @@ ncclResult_t ncclSymkLsaModel(struct ncclTuningInput_t* input, enum ncclSymkKern
     }
     *nBlocks = tuned;
   }
-  if (kernelId == ncclSymkKernelId_AllGather_HierLsaST || kernelId == ncclSymkKernelId_AllGather_HierLsaTmaST) {
-    *nBlocks = ncclSymkAgHierLaunchBlocks(comm, *nBlocks);
-  }
-  // The hierarchical ReduceScatter's model has no term for its savings, so its width comes from measurement,
-  // within the bounds the user or the communicator set.
-  if (kernelId == ncclSymkKernelId_ReduceScatter_HierLsaLDST && nUserCTAs <= 0) {
-    *nBlocks = std::min(std::max(ncclSymkRsHierLaunchBlocks(comm->nRanks, nBytes), nMinBlocks), nMaxBlocks);
-  }
-  if (kernelId == ncclSymkKernelId_AllReduce_HierLsaLDST && nUserCTAs <= 0) {
-    *nBlocks = std::min(std::max(ncclSymkRsHierLaunchBlocks(comm->nRanks, nBytes / comm->nRanks), nMinBlocks),
-                        nMaxBlocks);
+  // Hierarchical kernels size their own launch: the hierarchical ReduceScatter and AllReduce models have no term for
+  // their savings, so their width comes from measurement, within the bounds the user or the communicator set. The
+  // hierarchical AllGather trims to the blocks its groups can use, even under a user count.
+  struct ncclSymkHierTuning hierTuned;
+  if (ncclSymkHierLaunchTuning(comm, kernelId, nBytes, *nBlocks, &hierTuned)) {
+    if (kernelId == ncclSymkKernelId_AllGather_HierLsaST || kernelId == ncclSymkKernelId_AllGather_HierLsaTmaST) {
+      *nBlocks = hierTuned.blocks;
+    } else if (nUserCTAs <= 0) {
+      *nBlocks = std::min(std::max(hierTuned.blocks, nMinBlocks), nMaxBlocks);
+    }
   }
   return ncclSuccess;
 }

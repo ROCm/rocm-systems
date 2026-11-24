@@ -19,7 +19,7 @@ ASSERT_HOOK_MATCHES_PROD(g_symkKernelIdIsTma, rcclSymkKernelIdIsTma);
 ASSERT_HOOK_MATCHES_PROD(g_symkFinalize, ncclSymkFinalize);
 ASSERT_HOOK_MATCHES_PROD(g_symkHierAvailable, ncclSymkHierAvailable);
 ASSERT_HOOK_MATCHES_PROD(g_symkHierGroups, ncclSymkHierGroups);
-ASSERT_HOOK_MATCHES_PROD(g_symkRsHierLaunchChunkSize, ncclSymkRsHierLaunchChunkSize);
+ASSERT_HOOK_MATCHES_PROD(g_symkHierLaunchTuning, ncclSymkHierLaunchTuning);
 ASSERT_HOOK_MATCHES_PROD(g_symkAlltoAllLLForced, ncclSymkAlltoAllLLForced);
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -69,16 +69,22 @@ static int DefaultSymkHierGroups(struct ncclComm*) { return 0; }
 std::function<int(struct ncclComm*)> g_symkHierGroups = DefaultSymkHierGroups;
 int ncclSymkHierGroups(struct ncclComm* comm) { return g_symkHierGroups(comm); }
 
-static uint32_t DefaultSymkRsHierLaunchChunkSize(struct ncclComm* comm, size_t) {
-  return comm->symkState.kcomm.rsHierChunkSize;
+// No tuning: callers keep the communicator's defaults.
+static bool DefaultSymkHierLaunchTuning(struct ncclComm*, enum ncclSymkKernelId, size_t, int,
+                                        struct ncclSymkHierTuning*) {
+  return false;
 }
-std::function<uint32_t(struct ncclComm*, size_t)> g_symkRsHierLaunchChunkSize = DefaultSymkRsHierLaunchChunkSize;
-uint32_t ncclSymkRsHierLaunchChunkSize(struct ncclComm* comm, size_t blockBytes) {
-  return g_symkRsHierLaunchChunkSize(comm, blockBytes);
+std::function<bool(struct ncclComm*, enum ncclSymkKernelId, size_t, int, struct ncclSymkHierTuning*)>
+    g_symkHierLaunchTuning = DefaultSymkHierLaunchTuning;
+bool ncclSymkHierLaunchTuning(struct ncclComm* comm, enum ncclSymkKernelId kernelId, size_t nBytes, int nBlocks,
+                              struct ncclSymkHierTuning* tuning) {
+  return g_symkHierLaunchTuning(comm, kernelId, nBytes, nBlocks, tuning);
 }
 
-int ncclSymkAgHierMaxBlocksLimit() { return ncclSymkAgHierMaxBlocks; }
-size_t ncclSymkAgHierMaxChunkBytesLimit() { return ncclSymkAgHierMaxChunkBytes; }
+// The hierarchical kernels' env knobs at their defaults.
+int ncclSymkHierCtas() { return 0; }
+size_t ncclSymkHierChunkBytes() { return 0; }
+int64_t ncclParamSymHierPipeline() { return -1; }
 
 // NCCL 2.32.6: whether the tuner forced the AlltoAll LL symmetric kernel. Default false, as for a comm whose
 // tuning context forces nothing.
@@ -104,6 +110,6 @@ void ResetSymKernelsFakes() {
   g_symkFinalize = DefaultSymkFinalize;
   g_symkHierAvailable = DefaultSymkHierAvailable;
   g_symkHierGroups = DefaultSymkHierGroups;
-  g_symkRsHierLaunchChunkSize = DefaultSymkRsHierLaunchChunkSize;
+  g_symkHierLaunchTuning = DefaultSymkHierLaunchTuning;
   g_symkAlltoAllLLForced = DefaultSymkAlltoAllLLForced;
 }

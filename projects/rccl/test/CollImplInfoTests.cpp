@@ -44,7 +44,7 @@
 #include "common/SymmetricBufferHelpers.hpp"  // RCCLTestHelpers::SymBuf (RAII deregister+free)
 #include "common/SymmetricKernelLog.hpp"
 #include "rccl_common.h"  // rcclGetCollImplInfo, rcclSymKGetInfo, rcclGetAlgoName, rcclGetProtocolName, rcclAddonAlgos_t
-#include "sym_kernels.h"  // ncclSymkMaxBlocks, ncclSymkAgHierMaxBlocks, ncclSymkRsHierMaxBlocks
+#include "sym_kernels.h"  // ncclSymkMaxBlocks, ncclSymkAgHierMaxBlocks, ncclSymkHierMaxBlocks
 
 // rccl_common.h drags in RCCL's internal NCCLCHECK (which `return`s). These tests
 // live in void functions, so use a gtest-friendly, non-returning check instead.
@@ -417,12 +417,14 @@ namespace RcclUnitTesting
 
           // Symmetric block count: at least 1 because the model rejects a zero count, at most
           // ncclSymkMaxBlocks, or the hierarchical kernels' own caps (ncclSymkAgHierMaxBlocks,
-          // ncclSymkRsHierMaxBlocks) where AllGather or ReduceScatter takes one. Device independent,
+          // ncclSymkHierMaxBlocks) where AllGather, ReduceScatter or AllReduce takes one. Device independent,
           // since the model clamps to those constants and to maxCTAs and never to the CU count. Was -1
           // before the model set maxChannels, which is the regression this guards.
+          const bool hierLdst =
+            sel.symKernel == "ReduceScatter_HierLsaLDST" || sel.symKernel == "AllReduce_HierLsaLDST";
           const int maxSymkBlocks = sel.symKernel == "AllGather_HierLsaST" ? ncclSymkAgHierMaxBlocks :
                                     sel.symKernel == "AllGather_HierLsaTmaST" ? ncclSymkAgHierTmaMaxBlocks :
-                                    sel.symKernel == "ReduceScatter_HierLsaLDST" ? ncclSymkRsHierMaxBlocks : ncclSymkMaxBlocks;
+                                    hierLdst ? ncclSymkHierMaxBlocks : ncclSymkMaxBlocks;
           EXPECT_GE(symk.channels, 1)
             << "symk reported SYM without a channel count\nLOG:\n" << log;
           EXPECT_LE(symk.channels, maxSymkBlocks)

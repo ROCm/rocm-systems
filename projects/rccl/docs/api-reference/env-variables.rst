@@ -1956,26 +1956,46 @@ threshold table introduced for gfx1250.
           regardless of predicted time or message size. Intended for A/B
           measurement, not production.
 
-    * - | ``NCCL_SYM_AG_HIER_CTAS``
-        | Block count for the hierarchical LSA AllGather
-          (``AllGather_HierLsaST``). ``0`` follows the size schedule: 64 blocks
-          when the gathered size (``nRanks`` times the bytes per rank) is below
-          1 GiB, and 72 from 1 GiB up, raised to ``NCCL_MIN_CTAS`` when that is
-          higher. A positive value uses that count for every size, clamped to
-          ``MAXCHANNELS``. ``NCCL_SYM_CTAS``, when set, is used instead, capped
-          at this limit. The launch can still drop blocks that do not fill a
-          package group. Set the same value on every rank; on a partitioned
-          communicator, initialization fails when ranks differ.
-      - | ``0``: Size schedule, 64 or 72 blocks (default).
+    * - | ``NCCL_SYM_HIER_CTAS``
+        | Block count for the hierarchical LSA kernels: AllGather
+          (``AllGather_HierLsaST`` and ``AllGather_HierLsaTmaST``),
+          ReduceScatter (``ReduceScatter_HierLsaLDST``) and AllReduce
+          (``AllReduce_HierLsaLDST``). ``0`` follows each kernel's size
+          schedule, within ``NCCL_MIN_CTAS`` and ``NCCL_MAX_CTAS``. AllGather
+          uses 64 blocks when the gathered size (``nRanks`` times the bytes per
+          rank) is below 1 GiB and 72 from 1 GiB up. ReduceScatter uses 64, 80
+          or 96 blocks for a total size below 16 MiB, below 64 MiB, or above.
+          AllReduce uses 64 blocks up to 64 MiB and 88 above. A positive value
+          uses that count for every size, clamped to ``MAXCHANNELS``; the TDM
+          AllGather never exceeds 48. ``NCCL_SYM_CTAS``, when set, is used
+          instead, capped at this limit. The communicator sizes the kernels'
+          per-block flags and ReduceScatter/AllReduce slots for this many blocks
+          when it is created. The AllGather launch can still drop blocks that do
+          not fill a package group. Set the same value on every rank; on a
+          partitioned communicator, initialization fails when ranks differ.
+      - | ``0``: Each kernel's size schedule (default).
         | ``N``: Use ``N`` blocks for every size.
 
-    * - | ``NCCL_SYM_AG_HIER_CHUNK_BYTES``
-        | Largest chunk one block of ``AllGather_HierLsaST`` or
-          ``AllGather_HierLsaTmaST`` pushes before the
-          next chunk can overlap it. ``0`` uses 256 KiB. A positive value
-          replaces that, clamped to 1 GiB. Read once when the communicator is
-          created, so it applies to every later collective on that communicator.
-          Set the same value on every rank; on a partitioned communicator,
-          initialization fails when ranks differ.
-      - | ``0``: 256 KiB (default).
-        | ``N`` (bytes): Cap each pushed chunk at ``N`` bytes.
+    * - | ``NCCL_SYM_HIER_CHUNK_BYTES``
+        | Chunk size of the hierarchical LSA kernels. For AllGather
+          (``AllGather_HierLsaST`` and ``AllGather_HierLsaTmaST``) it is the
+          largest chunk one block pushes before the next chunk can overlap it;
+          ``0`` uses 256 KiB, and a positive value is clamped to 1 GiB. For
+          ReduceScatter (``ReduceScatter_HierLsaLDST``) and AllReduce
+          (``AllReduce_HierLsaLDST``) it is the bytes of partial sums one block
+          sends each other package per round; ``0`` follows the size schedule,
+          and a positive value is aligned down to 4 KiB and capped at what the
+          communicator's slots hold, at most 128 KiB. Set the same value on
+          every rank; on a partitioned communicator, initialization fails when
+          ranks differ.
+      - | ``0``: Each kernel's default (default).
+        | ``N`` (bytes): Use ``N``-byte chunks, within each kernel's limit.
+
+    * - | ``NCCL_SYM_HIER_PIPELINE``
+        | Whether the hierarchical AllReduce (``AllReduce_HierLsaLDST``) splits
+          its warps into concurrent roles or runs every role on all warps in
+          turn. Set the same value on every rank; on a
+          partitioned communicator, initialization fails when ranks differ.
+      - | ``-1``: Size schedule, split above 64 MiB (default).
+        | ``0``: Every role on all warps in turn.
+        | ``1``: Concurrent roles.

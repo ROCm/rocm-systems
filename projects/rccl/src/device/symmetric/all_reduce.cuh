@@ -455,7 +455,7 @@ static __device__ void arHierCopyBatch(ncclCoopWarpSpan role, Red red, int nBatc
 // finisher and forwarder warps run concurrently, each on its own round.
 template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_AllReduce_HierLsaLDST(ncclSymkDevWorkArgs const* args) {
-  size_t const chunkBytes = args->kcomm.rsHierChunkSize;
+  size_t const chunkBytes = args->kcomm.hierChunkSize;
   size_t const RoundElts = chunkBytes / sizeof(T);
   constexpr size_t PackElts = ncclSymkBytePerPack / sizeof(T);
   ncclSymkArgsHandler handler{args};
@@ -469,10 +469,10 @@ __device__ __forceinline__ void ncclSymkRun_AllReduce_HierLsaLDST(ncclSymkDevWor
   ncclTeam scaleIn = ncclTeamInnerFactor(lsa, args->kcomm.hierScaleInSize);
   ncclTeam scaleUp = ncclTeamOuterFactor(lsa, args->kcomm.hierScaleInSize);
   int nPeers = scaleUp.nRanks - 1;
-  ncclDevResourceHandle slotsBuf = args->kcomm.rsHierSlots;
-  ncclDevResourceHandle flagsBuf = args->kcomm.rsHierFlags;
+  ncclDevResourceHandle slotsBuf = args->kcomm.hierSlotsBuf;
+  ncclDevResourceHandle flagsBuf = args->kcomm.hierFlagsBuf;
   uint64_t* flags = (uint64_t*)ncclGetResourceBufferLocalPointer(comm, flagsBuf) +
-                    blockIdx.x * ncclSymkRsHierFlagsPerBlock(scaleUp.nRanks);
+                    blockIdx.x * ncclSymkHierFlagsPerBlock(scaleUp.nRanks);
   uint64_t* ready = flags;
   uint64_t* credit = flags + scaleUp.nRanks;
   uint64_t* agReady = flags + 2 * scaleUp.nRanks;
@@ -484,7 +484,7 @@ __device__ __forceinline__ void ncclSymkRun_AllReduce_HierLsaLDST(ncclSymkDevWor
   int nFwd = scaleIn.nRanks - 1;
 
   // Without the pipeline every warp takes the three roles in turn.
-  bool pipeline = args->kcomm.arHierPipeline;
+  bool pipeline = args->kcomm.hierPipeline;
   int nWarps = blockDim.x / WARP_SIZE;
   int roleId = 0;
   ncclCoopWarpSpan role(0, nWarps, 0);

@@ -34,7 +34,8 @@ extern std::function<ncclResult_t(struct ncclComm*)> g_symkFinalize;
 extern std::function<bool(struct ncclComm*)> g_symkHierAvailable;
 // Packages of the hierarchical kernels; defaults to 0, so the hierarchical symk window is off.
 extern std::function<int(struct ncclComm*)> g_symkHierGroups;
-extern std::function<uint32_t(struct ncclComm*, size_t)> g_symkRsHierLaunchChunkSize;
+extern std::function<bool(struct ncclComm*, enum ncclSymkKernelId, size_t, int, struct ncclSymkHierTuning*)>
+    g_symkHierLaunchTuning;
 extern std::function<bool(struct ncclComm*)> g_symkAlltoAllLLForced;
 
 // The ncclSymk* index seams (kernel masks, ncclSymkGetKernelIndex, ncclSymkKernelIdToString,
