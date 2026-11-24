@@ -33,7 +33,18 @@ L2Cache::L2Cache(std::string name, std::shared_ptr<DeviceCacheCoherence> coheren
   req_port_ = add_port(std::make_unique<simdojo::Port>("req", 0, this, simdojo::PortDirection::OUT,
                                                        simdojo::PortProtocol::MEMORY));
   coherence_epoch_ = coherence_->current_epoch();
+  cache_.enable_region_residency();
   coherence_->register_l2_cache(this);
+}
+
+void L2Cache::drop_bypassed_copies(uint64_t address, uint64_t size) {
+  auto maintenance_lock = acquire_cache_access();
+  for (uint64_t line = CacheStore::line_address(address); line < address + size;
+       line += LINE_SIZE) {
+    std::lock_guard set_lock(set_mutex(line));
+    // Unpublished bytes are newer than any racing bypass write; keep them.
+    cache_.invalidate_clean_all_vmids(line);
+  }
 }
 
 L2Cache::~L2Cache() { coherence_->unregister_l2_cache(this); }
@@ -610,7 +621,7 @@ void L2Cache::discard_rebound_line_locked(uint64_t addr, uint32_t vmid,
                                           CacheStore::Allocation &line) {
   if (line.tag && line.tag->cache_identity != current_cache_identity(vmid)) {
     (void)clear_dirty_bytes(CacheStore::line_address(addr), 0, LINE_SIZE, vmid);
-    CacheStore::invalidate_tag(*line.tag);
+    cache_.invalidate_resident(*line.tag, addr);
     line = {};
   }
 }
@@ -865,7 +876,7 @@ VmAccessOutcome L2Cache::allocate_line_locked(uint64_t addr, uint32_t vmid,
         admitted ? publish_dirty_bytes(evicted_addr, evicted_data, evicted.vmid)
                  : VmAccessOutcome::Complete;
     if (outcome != VmAccessOutcome::Complete) {
-      CacheStore::invalidate_tag(*allocated.tag);
+      cache_.invalidate_resident(*allocated.tag, addr);
       CacheStore::Allocation restored = cache_.allocate_with_data(evicted_addr, evicted.vmid);
       *restored.tag = evicted;
       std::memcpy(restored.data, evicted_data, LINE_SIZE);
@@ -907,7 +918,7 @@ VmAccessOutcome L2Cache::fill_line_locked(uint64_t addr, uint32_t vmid,
   if (outcome == VmAccessOutcome::Complete)
     CacheStore::mark_valid_bytes(*line.tag, 0, LINE_SIZE);
   else
-    CacheStore::invalidate_tag(*line.tag);
+    cache_.invalidate_resident(*line.tag, addr);
   return outcome;
 }
 
@@ -1331,7 +1342,7 @@ VmAccessOutcome L2Cache::flush_line_locked(uint64_t addr, uint32_t vmid,
         return outcome;
     }
   }
-  CacheStore::invalidate_tag(*line.tag);
+  cache_.invalidate_resident(*line.tag, addr);
   return VmAccessOutcome::Complete;
 }
 

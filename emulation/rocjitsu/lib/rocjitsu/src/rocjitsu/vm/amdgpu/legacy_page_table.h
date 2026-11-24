@@ -8,12 +8,16 @@
 
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory_resource>
+#include <mutex>
+#include <optional>
+#include <shared_mutex>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -86,6 +90,84 @@ public:
 
 using LegacyPageTable = std::pmr::unordered_map<uint64_t, LegacyPageTableEntry>;
 
+/// @brief A run of whole, uniformly mapped GPU pages observed at one generation.
+/// @details Every page in [begin, end) has exactly one full-page host extent at
+/// page offset zero, the same MTYPE and the same storage-owner class, and the
+/// host pages are consecutive, so one offset translates the whole run.
+struct LegacyLocalExtent {
+  uint64_t begin = 0;
+  uint64_t end = 0;
+  uint8_t *host_begin = nullptr;
+  Mtype mtype = Mtype::RW;
+  LegacyHostExtentOwner owner = LegacyHostExtentOwner::Application;
+
+  [[nodiscard]] bool contains(uint64_t address, uint64_t size) const {
+    return address >= begin && address < end && size <= end - address;
+  }
+  [[nodiscard]] uint8_t *host(uint64_t address) const { return host_begin + (address - begin); }
+};
+
+/// @brief Local extents shared by every reader of one page-table generation.
+/// @details Builders publish extents only while holding the page table shared
+/// and after reading the generation under that lock. Mutators bump the
+/// generation under the exclusive lock, so a published extent is exactly as
+/// current as a copied PTE carrying the same generation.
+class LegacyLocalExtentTable {
+public:
+  [[nodiscard]] std::optional<LegacyLocalExtent> find(uint64_t address, uint64_t generation) const {
+    std::shared_lock lock(mutex_);
+    if (generation != generation_)
+      return std::nullopt;
+    const auto it = upper_bound(address);
+    if (it == extents_.begin())
+      return std::nullopt;
+    const auto &extent = *std::prev(it);
+    if (address >= extent.end)
+      return std::nullopt;
+    return extent;
+  }
+
+  void publish(const LegacyLocalExtent &extent, uint64_t generation) {
+    std::unique_lock lock(mutex_);
+    if (generation < generation_)
+      return;
+    if (generation != generation_) {
+      extents_.clear();
+      generation_ = generation;
+    }
+    // Builders bound each walk, so one maximal run may be published in
+    // pieces. Overlapping pieces of one generation belong to the same run and
+    // share its host offset; merge them.
+    LegacyLocalExtent merged = extent;
+    auto first = upper_bound(extent.begin);
+    if (first != extents_.begin() && std::prev(first)->end > extent.begin)
+      --first;
+    auto last = first;
+    for (; last != extents_.end() && last->begin < extent.end; ++last) {
+      if (last->begin < merged.begin) {
+        merged.host_begin = last->host_begin;
+        merged.begin = last->begin;
+      }
+      merged.end = std::max(merged.end, last->end);
+    }
+    extents_.insert(extents_.erase(first, last), merged);
+  }
+
+private:
+  [[nodiscard]] std::vector<LegacyLocalExtent>::const_iterator upper_bound(uint64_t address) const {
+    return std::upper_bound(extents_.begin(), extents_.end(), address,
+                            [](uint64_t a, const LegacyLocalExtent &e) { return a < e.begin; });
+  }
+  [[nodiscard]] std::vector<LegacyLocalExtent>::iterator upper_bound(uint64_t address) {
+    return std::upper_bound(extents_.begin(), extents_.end(), address,
+                            [](uint64_t a, const LegacyLocalExtent &e) { return a < e.begin; });
+  }
+
+  mutable std::shared_mutex mutex_;
+  uint64_t generation_ = 0;
+  std::vector<LegacyLocalExtent> extents_;
+};
+
 /// @brief Lifetime-safe admission state for lock-free copied legacy PTEs.
 ///
 /// @details A reader joins only while the generation it cached is current.
@@ -96,6 +178,9 @@ using LegacyPageTable = std::pmr::unordered_map<uint64_t, LegacyPageTableEntry>;
 class LegacyPageTableCacheState {
 public:
   [[nodiscard]] uint64_t generation() const { return generation_.load(std::memory_order_seq_cst); }
+
+  /// Extents built under this state's generations; see LegacyLocalExtentTable.
+  [[nodiscard]] LegacyLocalExtentTable &local_extents() const { return local_extents_; }
 
   [[nodiscard]] bool try_acquire(uint64_t expected_generation) const {
     if (generation_.load(std::memory_order_seq_cst) != expected_generation)
@@ -145,6 +230,7 @@ private:
   alignas(64) std::atomic<uint64_t> generation_{1};
   std::atomic<bool> draining_{false};
   mutable std::array<ReaderShard, kReaderShards> readers_;
+  mutable LegacyLocalExtentTable local_extents_;
 
   std::atomic<uint64_t> &reader_count() const {
     // Thread identity gives inline calls in different shared libraries the

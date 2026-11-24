@@ -87,6 +87,25 @@ class PreparedCanonicalWriteback;
 /// reconciliation mutex. See L2MaintenanceMutex for admission and publication.
 class L2Cache : public simdojo::Component {
 public:
+  /// @brief Whether a write may bypass this L2 for [address, address + size).
+  /// @details True only when no line may hold a copy and nothing is dirty.
+  /// The caller must write backing, then call drop_bypassed_copies() if a
+  /// recheck reports a copy, because a concurrent fill may start meanwhile.
+  [[nodiscard]] bool may_bypass(uint64_t address, uint64_t size) const {
+    return !has_dirty_lines_.load(std::memory_order_acquire) && !cache_.may_hold(address, size);
+  }
+  /// @brief Whether some line holds bytes not yet written to backing.
+  [[nodiscard]] bool has_unpublished_lines() const {
+    return has_dirty_lines_.load(std::memory_order_acquire);
+  }
+  /// @brief Recheck after a bypassing write; true when a copy may now exist.
+  [[nodiscard]] bool bypass_raced_fill(uint64_t address, uint64_t size) const {
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+    return cache_.may_hold(address, size);
+  }
+  /// @brief Discard clean copies of a range written around this cache.
+  void drop_bypassed_copies(uint64_t address, uint64_t size);
+
   static constexpr uint32_t LINE_SIZE_BITS = 7;
   static constexpr uint32_t NUM_SETS = 2048;
   static constexpr uint32_t ASSOCIATIVITY = 16;
