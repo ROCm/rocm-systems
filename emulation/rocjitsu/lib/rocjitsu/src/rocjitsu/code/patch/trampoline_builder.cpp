@@ -631,7 +631,8 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   // A full-exec site opens the window for its own sake: the probe runs inside it
   // rather than under the anchor mask.
   const bool needs_full_mask = will_spill || !plan.register_saves.empty() ||
-                               !plan.probe_args.empty() || plan.force_full_exec;
+                               !plan.probe_args.empty() || plan.force_full_exec ||
+                               plan.cdna5_valu_spacing;
 
   // EXEC/VCC/M0 operand codes are resolved per-arch, but only when actually
   // reserving that register -- so a plan with no special-state saves (and no
@@ -657,7 +658,11 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   // Word count is derived from the resource decisions, not a fixed envelope size.
   // Each add/addc uses the 32-bit literal form (instruction + literal word) so the
   // count is independent of the (layout-dependent) addend values.
-  uint32_t envelope_words = 0;
+  if (plan.cdna5_valu_spacing && plan.arch != rocjitsu::IsaFamily::Cdna5) {
+    report(error_out, "CDNA5 VALU spacing requires a CDNA5 target");
+    return false;
+  }
+  uint32_t envelope_words = plan.cdna5_valu_spacing ? 8 : 0;
   envelope_words += 1;     // s_getpc_b64
   envelope_words += 2 + 2; // s_add_u32 + literal, s_addc_u32 + literal
   envelope_words += 1;     // s_swappc_b64
@@ -822,7 +827,8 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // special_state_saves membership.
   const bool full_mask_exec = !plan.vgpr_spills.empty() || !plan.sgpr_spills.empty() ||
                               !plan.acc_spills.empty() || !plan.probe_args.empty() ||
-                              !plan.register_saves.empty() || plan.force_full_exec;
+                              !plan.register_saves.empty() || plan.force_full_exec ||
+                              plan.cdna5_valu_spacing;
 
   // SGPR pair holding the saved anchor EXEC (populated by the save loop below).
   // Reused to restore the anchor mask before the call; always present when the
@@ -869,6 +875,17 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   if (full_mask_exec &&
       !append_scalar(build_s_mov_b64(exec_operand, minus_one, plan.arch, &error))) {
     return std::nullopt;
+  }
+
+  // CDNA5 ISA 5.7.2/7.12.1: scalar waits do not discharge WMMA/TRANS
+  // register hazards. These independent VALUs precede even spill source reads
+  // and temporary writes, with EXEC widened so masked guests receive spacing.
+  if (plan.cdna5_valu_spacing) {
+    if (plan.arch != rocjitsu::IsaFamily::Cdna5) {
+      report(error_out, "CDNA5 VALU spacing requires a CDNA5 target");
+      return std::nullopt;
+    }
+    env.insert(env.end(), 8, cdna5::build_vop1(cdna5::kVNopVop1)[0]);
   }
 
   // Spill saves: store each live+clobbered register before the call.

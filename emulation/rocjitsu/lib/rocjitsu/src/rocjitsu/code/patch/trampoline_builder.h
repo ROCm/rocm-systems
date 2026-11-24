@@ -166,6 +166,9 @@ struct TrampolinePlan {
   /// restore being what it drops. The re-widen stays either way, since the probe
   /// may have narrowed EXEC while it ran.
   bool force_full_exec = false;
+  /// Emit eight full-mask V_NOPs before the first envelope VGPR access. The
+  /// orchestrator must first bound guest producers to the supported hazard table.
+  bool cdna5_valu_spacing = false;
 
   bool is_probe_call = false;    ///< True once plan_probe_call() populated these.
   uint16_t link_pair_base = 30;  ///< Return-link pair, derived from the probe cc.

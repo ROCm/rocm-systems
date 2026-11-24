@@ -6248,10 +6248,13 @@ TEST(InstrumentorResources, ScratchGrowthAndWrapperShareMetadataPublication) {
       SCOPED_TRACE(static_cast<int>(binding));
       SCOPED_TRACE(original_private);
       const bool narrow = original_private == 127;
-      const std::vector<uint8_t> image = test::with_resource_metadata(
-          make_kernarg_kernel_elf({kMovV3V2, 0xbf810000u}, original_private,
-                                  EF_AMDGPU_MACH_AMDGCN_GFX950, 20),
-          {{"test_kernel", 20, 32, 4, original_private}}, narrow);
+      const std::vector<uint8_t> kernel_image = make_kernarg_kernel_elf(
+          {kMovV3V2, 0xbf810000u}, original_private, EF_AMDGPU_MACH_AMDGCN_GFX950, 20);
+      const std::vector<uint8_t> image =
+          narrow ? test::with_resource_metadata_padding(
+                       kernel_image, {{"test_kernel", 20, 32, 4, original_private}}, 0)
+                 : test::with_resource_metadata(kernel_image,
+                                                {{"test_kernel", 20, 32, 4, original_private}});
       const std::vector<uint8_t> original = image;
       const std::vector<uint8_t> probe_image =
           make_gfx950_probe_elf("scratch", {kMovV2Zero, kProbeSetpcS30S31});
@@ -7146,6 +7149,73 @@ TEST(InstrumentorProbePatch, CallableSitesRejectReleasedStorageAtTheObservationP
   }
 }
 
+TEST(InstrumentorKernelBoundary, TerminalDeallocationBundlePreservesAdjacencyAndEntrySafety) {
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna5;
+  constexpr uint32_t kMach = EF_AMDGPU_MACH_AMDGCN_GFX1250;
+  constexpr uint32_t kNop = build_s_nop(0, kArch).value();
+  constexpr uint32_t kEnd = build_s_endpgm(kArch).value();
+  constexpr uint32_t kRelease = cdna5::build_sopp(cdna5::kSSendmsgSopp, {.simm16 = 3})[0];
+  const std::vector<uint8_t> body = make_amdgpu_probe_elf(
+      "terminal", {test::make_mov_vgpr_inline(7, 5), build_s_setpc_b64(30, kArch).value()}, kMach);
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  struct Case {
+    std::vector<uint32_t> words;
+    uint64_t anchor = 0;
+    bool admitted = false;
+    std::string_view rejection = {};
+  };
+  const std::array cases = {
+      Case{.words = {kNop, kRelease, kEnd}, .anchor = 4, .admitted = true},
+      Case{.words = {build_s_branch(0, kArch).value(), kRelease, kEnd},
+           .anchor = 4,
+           .admitted = true},
+      // A reference to the second instruction must not enter patched padding.
+      Case{.words = {cdna5::build_sopp(cdna5::kSCbranchScc1Sopp, {.simm16 = 1})[0], kRelease, kEnd},
+           .anchor = 4,
+           .rejection = "branch reference enters"},
+      Case{.words = {kNop, kRelease, kNop, kEnd},
+           .anchor = 4,
+           .rejection = "adjacent canonical s_endpgm"},
+      // An earlier release makes storage unavailable before the callback.
+      Case{.words = {kRelease, kNop, kRelease, kEnd}, .anchor = 8, .rejection = "VGPR allocation"},
+  };
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.anchor);
+    SCOPED_TRACE(test_case.words.front());
+    const std::vector<uint8_t> image = test::with_resource_metadata(
+        make_kernarg_kernel_elf(test_case.words, 0, kMach, kTestKernargSize, true, 3, 0, 1),
+        {{"test_kernel", kTestKernargSize, 32, 32, 0}});
+    const AmdGpuCodeObject object(image.data(), image.size());
+    Instrumentor instrumentor(
+        object, kArch,
+        {.preservation = GuestStatePreservation::DeclaredRegisters,
+         .register_growth = OriginalRegisterCounts{.sgprs = 32, .vgprs = 32}});
+    instrumentor.add_point({.anchor_offset = test_case.anchor,
+                            .kind = InstrumentationKind::KernelExit,
+                            .probe_obj = &probe,
+                            .probe_symbol = "terminal",
+                            .probe_args = {}});
+    const InstrumentedCodeObject result = instrumentor.patch();
+    ASSERT_EQ(result.errors.empty(), test_case.admitted)
+        << (result.errors.empty() ? "" : result.errors.front());
+    if (!test_case.admitted) {
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.sites.empty());
+      EXPECT_NE(result.errors.front().find(test_case.rejection), std::string::npos)
+          << result.errors.front();
+      continue;
+    }
+    ASSERT_EQ(result.sites.size(), 1u);
+    const InstrumentedSite &site = result.sites.front();
+    EXPECT_EQ(site.original_size, 8u);
+    EXPECT_EQ(site.guest_size, 8u);
+    const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    const std::vector<uint32_t> words = section_words(patched, ".text");
+    EXPECT_EQ(words.at(site.guest_offset / 4), kRelease);
+    EXPECT_EQ(words.at(site.guest_offset / 4 + 1), kEnd);
+  }
+}
+
 TEST(InstrumentorProbePatch, KernelEntryUsesDispatchModeStateDespiteGuestBackedges) {
   constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
   constexpr uint32_t kNop = cdna4::build_sopp(cdna4::kSNopSopp)[0];
@@ -7414,6 +7484,63 @@ TEST(InstrumentorProbePatch, AfterInstRejectsMfmaAnchorsAndPendingScalarDependen
                            .probe_symbol = {},
                            .probe_args = args},
                           !producer, "MFMA");
+    }
+  }
+}
+
+TEST(InstrumentorProbePatch, OptInCdna5SpacingProtectsKnownProducersAndRejectsUnknownMatrix) {
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna5;
+  constexpr uint32_t kMach = EF_AMDGPU_MACH_AMDGCN_GFX1250;
+  const std::array<uint32_t, 2> dense =
+      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x32F16Vop3p,
+                         {.vdst = 8, .src0 = 272, .src1 = 280, .src2 = 264, .opsel_hi = 3});
+  const std::array<uint32_t, 2> unknown =
+      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x32Bf16Vop3p,
+                         {.vdst = 8, .src0 = 272, .src1 = 280, .src2 = 264, .opsel_hi = 3});
+  const uint32_t nop = build_s_nop(0, kArch).value();
+  const uint32_t end = build_s_endpgm(kArch).value();
+  const std::vector<uint8_t> body = make_amdgpu_probe_elf(
+      "spaced", {build_v_mov_b32_src(8, 256, kArch).value(), build_s_setpc_b64(30, kArch).value()},
+      kMach);
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  for (const bool supported : {false, true}) {
+    const std::array<uint32_t, 2> producer = supported ? dense : unknown;
+    for (const bool enabled : {false, true}) {
+      SCOPED_TRACE(supported);
+      SCOPED_TRACE(enabled);
+      const std::vector<uint8_t> image = test::with_resource_metadata(
+          make_amdgpu_kernel_elf({producer[0], producer[1], nop, end}, 0, 3, kMach, 3, 0, false,
+                                 false, false, false, true),
+          {{"test_kernel", 0, 32, 64, 0}});
+      const AmdGpuCodeObject object(image.data(), image.size());
+      Instrumentor instrumentor(
+          object, kArch,
+          {.preservation = GuestStatePreservation::DeclaredRegisters,
+           .register_growth = OriginalRegisterCounts{.sgprs = 32, .vgprs = 64},
+           .cdna5_spacing = enabled ? Cdna5CallableSpacing::ConservativeKnownProducers
+                                    : Cdna5CallableSpacing::Default});
+      instrumentor.add_point({.anchor_offset = 8,
+                              .kind = InstrumentationKind::AfterInst,
+                              .probe_obj = &probe,
+                              .probe_symbol = "spaced",
+                              .probe_args = {probe_arg_vgpr(8)}});
+      const InstrumentedCodeObject result = instrumentor.patch();
+      const bool admitted = enabled && supported;
+      ASSERT_EQ(result.errors.empty(), admitted)
+          << (result.errors.empty() ? "" : result.errors.front());
+      ASSERT_EQ(result.sites.size(), admitted ? 1u : 0u);
+      if (enabled && !supported)
+        EXPECT_NE(result.errors.front().find("unknown matrix producer"), std::string::npos);
+      if (admitted) {
+        const InstrumentedSite &site = result.sites.front();
+        EXPECT_EQ(site.instrumentation_offset, site.guest_offset + 4);
+        const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+        const std::vector<uint32_t> words = section_words(patched, ".text");
+        const std::span<const uint32_t> envelope(words.data() + site.instrumentation_offset / 4,
+                                                 site.instrumentation_size / 4);
+        const uint32_t vector_nop = cdna5::build_vop1(cdna5::kVNopVop1)[0];
+        EXPECT_EQ(std::ranges::count(envelope, vector_nop), 8);
+      }
     }
   }
 }

@@ -119,7 +119,69 @@ CONSAN_KERNEL:
   v_mov_b32 v2, s4
   v_mov_b32 v5, 0
 
-#if (CONSAN_CASE >= 25 && CONSAN_CASE <= 35) || CONSAN_CASE == 38 || (CONSAN_CASE >= 40 && CONSAN_CASE <= 42)
+#if CONSAN_CASE == 49 || CONSAN_CASE == 50
+  .irp reg,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31
+  v_mov_b32 v\reg, 0
+  .endr
+#if CONSAN_CASE == 49
+  v_wmma_f32_16x16x32_f16 v[8:15], v[16:23], v[24:31], v[8:15]
+#else
+  v_wmma_f32_16x16x32_bf16 v[8:15], v[16:23], v[24:31], v[8:15]
+#endif
+  .rept 4
+  v_nop
+  .endr
+#endif
+
+#if CONSAN_CASE == 47 || CONSAN_CASE == 48
+  // Both the access path and the zero-work path converge on the same bundle.
+  s_cmp_eq_u32 s4, 0
+  s_cbranch_scc1 .Lterminal_bundle
+#endif
+
+#if CONSAN_CASE >= 43 && CONSAN_CASE <= 46
+  v_cmp_eq_u32 MASK_VCC, 0, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+#if CONSAN_CASE == 45 || CONSAN_CASE == 46
+.Lpending_loop:
+  // First entry is empty; a backedge can still carry pending LDS here.
+#if CONSAN_GFX12
+  s_barrier_signal -1
+  s_barrier_wait -1
+#else
+  s_barrier
+#endif
+  DS_STORE v1, v2
+#if CONSAN_CASE == 45
+  consan_wait_lds
+#endif
+  s_sub_u32 s4, s4, 1
+  s_cmp_eq_u32 s4, 0
+  s_cbranch_scc0 .Lpending_loop
+#else
+  DS_STORE v1, v2
+  s_cmp_eq_u32 s4, 7
+  s_cbranch_scc1 .Lright_drain
+  consan_wait_lds
+  s_branch .Ldrain_join
+.Lright_drain:
+#if CONSAN_CASE == 43
+  consan_wait_lds
+#else
+  s_nop 0
+#endif
+.Ldrain_join:
+#if CONSAN_GFX12
+  s_barrier_signal -1
+  s_barrier_wait -1
+#else
+  s_barrier
+#endif
+#endif
+  DS_LOAD v3, v1
+  consan_wait_all
+  GLOBAL_STORE v5, v3, s[6:7]
+#elif (CONSAN_CASE >= 25 && CONSAN_CASE <= 35) || CONSAN_CASE == 38 || (CONSAN_CASE >= 40 && CONSAN_CASE <= 42)
 #if CONSAN_CASE == 25
   s_mov_b32 s10, 0
 #elif CONSAN_CASE == 26
@@ -407,6 +469,13 @@ CONSAN_KERNEL:
   MASK_MOVE MASK_EXEC, MASK_SAVE
   consan_wait_all
   consan_wait_stores
+#if CONSAN_CASE == 47 || CONSAN_CASE == 48
+.Lterminal_bundle:
+  s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
+#if CONSAN_CASE == 48
+  s_nop 0
+#endif
+#endif
   s_endpgm
 .Lkernel_end:
 .size CONSAN_KERNEL, .Lkernel_end-CONSAN_KERNEL
@@ -429,7 +498,11 @@ CONSAN_KERNEL:
   .amdhsa_system_sgpr_workgroup_id_x 1
 #endif
   .amdhsa_system_vgpr_workitem_id 0
+#if CONSAN_CASE == 49 || CONSAN_CASE == 50
+  .amdhsa_next_free_vgpr 32
+#else
   .amdhsa_next_free_vgpr 8
+#endif
   .amdhsa_next_free_sgpr 16
 #if CONSAN_LEGACY
   .amdhsa_accum_offset 8
@@ -456,7 +529,11 @@ amdhsa.kernels:
     .group_segment_fixed_size: GROUP_BYTES
     .private_segment_fixed_size: 0
     .sgpr_count: 16
+#if CONSAN_CASE == 49 || CONSAN_CASE == 50
+    .vgpr_count: 32
+#else
     .vgpr_count: 8
+#endif
     .wavefront_size: CONSAN_WAVE_SIZE
     .max_flat_workgroup_size: CONSAN_MAX_WORKGROUP
     .args:

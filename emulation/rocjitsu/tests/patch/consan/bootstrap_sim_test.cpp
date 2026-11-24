@@ -150,7 +150,7 @@ protected:
            test::TargetMode target_mode = {"gfx1100", 32}, uint32_t threads = 64,
            bool target_fixture = false, uint32_t output_words_per_wave = 1,
            bool seed_counters = false, uint32_t workgroups = 1,
-           std::unique_ptr<ExecutionPlugin> observer = {}) {
+           std::unique_ptr<ExecutionPlugin> observer = {}, uint32_t input_value = 7) {
 #ifdef CONSAN_FIXTURE_DIR
     const std::vector<uint8_t> original =
         test::read_fixture(target_fixture ? test::target_fixture_path(target_mode, fixture)
@@ -294,7 +294,6 @@ protected:
     const uint64_t descriptor = object.kernel_descriptor_offset("lds_producer_consumer");
     ASSERT_NE(descriptor, 0u);
     std::array<uint8_t, 16> arguments{};
-    const uint32_t input_value = 7;
     std::memcpy(arguments.data(), &input_value, sizeof(input_value));
     std::memcpy(arguments.data() + 4, &waves_per_workgroup, sizeof(waves_per_workgroup));
     std::memcpy(arguments.data() + 8, &kOutput, sizeof(kOutput));
@@ -380,6 +379,7 @@ protected:
     (void)output_words_per_wave;
     (void)workgroups;
     (void)observer;
+    (void)input_value;
 #endif
   }
 };
@@ -685,6 +685,52 @@ std::vector<ObservedAccess> published_accesses(const RunResult &result, bool exh
     }
   }
   return accesses;
+}
+
+TEST_F(ConSanBootstrapSim, TerminalDeallocationCoversAccessAndBypassPathsOnce) {
+  const test::TargetMode target = {.target = "gfx1250", .wave_size = 32};
+  for (const uint32_t input : {0u, 7u}) {
+    SCOPED_TRACE(input);
+    RunResult before, after;
+    ASSERT_NO_FATAL_FAILURE(
+        run("native-47", Bootstrap::None, before, target, 64, true, 1, false, 1, {}, input));
+    ASSERT_NO_FATAL_FAILURE(
+        run("native-47", Bootstrap::Instrumented, after, target, 64, true, 1, false, 1, {}, input));
+    expect_guest_state(before, after);
+    const std::vector<ObservedAccess> records = published_accesses(after);
+    EXPECT_EQ(records.size(), input == 0 ? 0u : 2u);
+    const uint64_t stride = report_row_bytes(after.manifest.sites.size(), false);
+    for (uint32_t wave = 0; wave < 2; ++wave) {
+      const uint64_t row = kReportHeaderBytes + wave * stride;
+      EXPECT_EQ(wire::read_u32(after.report, row + wire::kRowStatus), kCompletedRowStatus);
+      EXPECT_EQ(wire::read_u32(after.report, row + wire::kRowFinalSequence), input == 0 ? 0u : 1u);
+    }
+  }
+}
+
+TEST_P(ConSanTargetSim, OriginalDrainDataflowPreservesSeparatedAndRepeatedBarriers) {
+  const test::TargetMode target = GetParam();
+  for (const uint32_t fixture : {43u, 45u}) {
+    for (const uint32_t input : {6u, 7u}) {
+      SCOPED_TRACE(fixture);
+      SCOPED_TRACE(input);
+      const std::string name = "native-" + std::to_string(fixture);
+      RunResult before, after;
+      ASSERT_NO_FATAL_FAILURE(run(name, Bootstrap::None, before, target, 2 * target.wave_size, true,
+                                  1, false, 1, {}, input));
+      ASSERT_NO_FATAL_FAILURE(run(name, Bootstrap::Instrumented, after, target,
+                                  2 * target.wave_size, true, 1, false, 1, {}, input));
+      expect_guest_state(before, after);
+      const uint64_t stride = report_row_bytes(after.manifest.sites.size(), true);
+      for (uint32_t wave = 0; wave < 2; ++wave) {
+        const uint64_t row = kReportHeaderBytes + wave * stride;
+        EXPECT_EQ(*wire::read_u32(after.report, row + wire::kRowStatus) & kCompletedRowStatus,
+                  kCompletedRowStatus);
+        EXPECT_EQ(wire::read_u32(after.report, row + wire::kRowFinalPhase),
+                  fixture == 43 ? 1u : input);
+      }
+    }
+  }
 }
 
 TEST_P(ConSanTargetSim, AssemblyAliasPreservesAllGuestRegistersAndPublishesBothWaves) {

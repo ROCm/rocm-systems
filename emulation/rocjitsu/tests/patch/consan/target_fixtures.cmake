@@ -60,13 +60,26 @@ foreach(
             38
             39
             42
+            43
+            44
+            45
+            46
             barrier-max${_barrier_max_below}
             barrier-max${_wave_size}
             barrier-max${_barrier_max_above}
             no-barrier-max${_wave_size}
         )
         if(_gpu STREQUAL "gfx1250")
-            list(APPEND _barrier_cases 9 40 41)
+            list(
+                APPEND _barrier_cases
+                9
+                40
+                41
+                47
+                48
+                49
+                50
+            )
         endif()
         foreach(
             _case

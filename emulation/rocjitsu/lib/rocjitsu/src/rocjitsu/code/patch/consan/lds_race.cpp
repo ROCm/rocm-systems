@@ -24,7 +24,75 @@ Result reject_instruction(InputError &error, InputErrorCode code, std::string me
   return Result::failure();
 }
 
-bool admitted_instruction(const Instruction &instruction) {
+bool admitted_dual_integer_operation(amdgpu::Operation operation) {
+  switch (operation) {
+  case amdgpu::Operation::V_DUAL_LSHRREV_B32:
+  case amdgpu::Operation::V_DUAL_LSHLREV_B32:
+  case amdgpu::Operation::V_DUAL_ADD_NC_U32:
+  case amdgpu::Operation::V_DUAL_BITOP2_B32:
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool admitted_cdna5_instruction(const Instruction &instruction) {
+  if (instruction.raw_encoding() == nullptr || instruction.size() < 4)
+    return false;
+  switch (instruction.amdgpu_operation()) {
+  case amdgpu::Operation::S_SETREG_IMM32_B32:
+    // MODE.REPLAY_MODE only. In particular, this cannot change the VGPR-bank
+    // fields used by the shared callable-state proof. Original mode writes are
+    // retained; the callback's boundary drains still wait for every load.
+    return instruction.size() == 8 && (instruction.raw_encoding()[0] & 0xffffu) == 0x0641u &&
+           instruction.raw_encoding()[1] == 1;
+  case amdgpu::Operation::S_GETREG_B32:
+    // Read the original workgroup/cluster identity, never mutable exception or
+    // instruction-execution status that a callback could change.
+    return instruction.size() == 4 && (instruction.raw_encoding()[0] & 0xffffu) == 0x199cu;
+  case amdgpu::Operation::V_DUAL_LSHRREV_B32:
+  case amdgpu::Operation::V_DUAL_LSHLREV_B32:
+  case amdgpu::Operation::V_DUAL_ADD_NC_U32:
+  case amdgpu::Operation::V_DUAL_BITOP2_B32:
+    return (instruction.flags() & INVALID_VOPD_OPERANDS) == 0 &&
+           admitted_dual_integer_operation(instruction.amdgpu_secondary_operation());
+  case amdgpu::Operation::S_LOAD_B128:
+  case amdgpu::Operation::S_BFE_U32:
+  case amdgpu::Operation::S_ADD_CO_I32:
+  case amdgpu::Operation::S_LSHR_B32:
+  case amdgpu::Operation::S_CSELECT_B32:
+  case amdgpu::Operation::S_CMP_GE_U32:
+  case amdgpu::Operation::S_CMP_LT_I32:
+  case amdgpu::Operation::S_CLAUSE:
+  case amdgpu::Operation::S_LSHL_B32:
+  case amdgpu::Operation::S_LSHL_B64:
+  case amdgpu::Operation::S_ADD_NC_U64:
+  case amdgpu::Operation::V_OR_B32:
+  case amdgpu::Operation::V_MUL_U32_U24:
+  case amdgpu::Operation::V_BFE_U32:
+  case amdgpu::Operation::V_AND_OR_B32:
+  case amdgpu::Operation::V_LSHL_ADD_U32:
+  case amdgpu::Operation::V_MAD_U32_U24:
+  case amdgpu::Operation::V_LSHL_OR_B32:
+  case amdgpu::Operation::V_OR3_B32:
+  case amdgpu::Operation::V_CVT_F16_F32:
+  case amdgpu::Operation::V_WMMA_F32_16X16X32_F16:
+  case amdgpu::Operation::GLOBAL_PREFETCH_B8:
+  case amdgpu::Operation::BUFFER_LOAD_B128:
+  case amdgpu::Operation::BUFFER_STORE_B16:
+  case amdgpu::Operation::V_AND_B32:
+  case amdgpu::Operation::V_ADD_NC_U32:
+    // Physical register bounds and complete preservation are checked separately.
+    // Matrix callbacks additionally require the shared callable-spacing proof.
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool admitted_instruction(const Instruction &instruction, rocjitsu::IsaFamily arch) {
+  if (arch == rocjitsu::IsaFamily::Cdna5 && admitted_cdna5_instruction(instruction))
+    return true;
   switch (instruction.amdgpu_operation()) {
   case amdgpu::Operation::S_MUL_I32:
   case amdgpu::Operation::S_LOAD_DWORD:
@@ -217,6 +285,50 @@ std::optional<RegisterRef> allocated_vgpr_tuple(const Operand *operand, uint32_t
   return reg;
 }
 
+// Only original waits establish guest ordering. Probe envelopes are deliberately
+// absent from this analysis: their stronger drains cannot repair a guest race.
+bool original_zero_lds_wait(const Instruction &instruction, rocjitsu::IsaFamily arch) {
+  if (!uses_split_workgroup_barrier(arch))
+    return instruction.amdgpu_operation() == amdgpu::Operation::S_WAITCNT &&
+           amdgpu::decode_legacy_waitcnt(instruction.raw_encoding()[0] & 0xffff, arch).lgkmcnt == 0;
+  const FailureOr<std::optional<amdgpu::WaitFields>> fields =
+      amdgpu::WaitCounterPolicy::explicit_wait_fields(instruction, arch);
+  return fields.succeeded() && fields.value() &&
+         (*fields.value())[amdgpu::WaitCounterPolicy::counter_index(amdgpu::WaitCounterKind::Ds)] ==
+             0;
+}
+
+// A may-pending lattice with OR joins converges even for the admitted self-loop.
+// An outstanding access on any incoming path makes a barrier unsafe. In
+// particular, a drain on just one side of a diamond cannot certify its join.
+std::unordered_map<const Instruction *, bool>
+original_pending_lds(std::span<BasicBlock *const> blocks, rocjitsu::IsaFamily arch) {
+  std::unordered_map<const BasicBlock *, bool> outgoing;
+  std::unordered_map<const Instruction *, bool> before;
+  for (const BasicBlock *block : blocks)
+    outgoing.emplace(block, false);
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (const BasicBlock *block : blocks) {
+      bool pending = false;
+      for (const BasicBlock *predecessor : block->predecessors())
+        pending |= outgoing.at(predecessor);
+      for (const Instruction &instruction : block->instructions()) {
+        before[&instruction] = pending;
+        if (native_lds_form(instruction).width != 0)
+          pending = true;
+        else if (original_zero_lds_wait(instruction, arch))
+          pending = false;
+      }
+      bool &previous = outgoing.at(block);
+      changed |= previous != pending;
+      previous = pending;
+    }
+  }
+  return before;
+}
+
 } // namespace
 
 Result qualify_lds_race_entry(const InputProgram &program, InputError &error) {
@@ -314,6 +426,10 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
     return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
                               "unmodeled synchronization: " + std::string(name), offset);
   }
+  if (instruction.transfers_to_lds() || instruction.transfers_from_lds()) {
+    return reject_instruction(error, InputErrorCode::UnsupportedAccess,
+                              "unmodeled memory/LDS transfer: " + std::string(name), offset);
+  }
   const uint32_t width = form.width;
   if ((addressing == amdgpu::MemoryAddressing::Lds || addressing == amdgpu::MemoryAddressing::Gds ||
        addressing == amdgpu::MemoryAddressing::DirectLds) &&
@@ -321,7 +437,7 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
     return reject_instruction(error, InputErrorCode::UnsupportedAccess,
                               "unsupported LDS form: " + std::string(name), offset);
   }
-  if (width == 0 && !admitted_instruction(instruction)) {
+  if (width == 0 && !admitted_instruction(instruction, arch)) {
     return reject_instruction(error, InputErrorCode::UnsupportedInstruction,
                               "instruction outside MVP: " + std::string(name), offset);
   }
@@ -400,6 +516,7 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
   uint32_t members = 0;
   const rocjitsu::IsaFamily arch = program.target->arch;
   const bool split = uses_split_workgroup_barrier(arch);
+  const std::unordered_map<const Instruction *, bool> pending = original_pending_lds(blocks, arch);
   for (BasicBlock *block : blocks) {
     std::vector<const Instruction *> instructions;
     for (const Instruction &instruction : block->instructions()) {
@@ -428,18 +545,18 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
           ++wait_index;
         }
       }
-      // Require the original guest drain: DBI envelopes add their own waits,
-      // which must not make an undrained guest barrier qualify.
-      if (index == 0 || wait_index == instructions.size() || intervening_memory_or_barrier ||
-          instructions[index - 1]->size() != 4 || instructions[index]->size() != 4 ||
+      // Prove readiness from original CFG state, including loop backedges.
+      if (wait_index == instructions.size() || intervening_memory_or_barrier ||
+          pending.at(instructions[index]) || instructions[index]->size() != 4 ||
           instructions[wait_index]->size() != 4) {
         return reject_instruction(
             error, InputErrorCode::UnsupportedSynchronization,
-            "requires original LDS drain/barrier groups without intervening memory "
+            "requires no outstanding original LDS and barrier groups without intervening memory "
             "operations or barriers",
             instructions[index]->src_loc());
       }
-      const Instruction &drain = *instructions[index - 1];
+      const bool adjacent = index != 0 && instructions[index - 1]->size() == 4 &&
+                            original_zero_lds_wait(*instructions[index - 1], arch);
       bool valid_group = false;
       if (split) {
         const uint32_t signal = arch == rocjitsu::IsaFamily::Rdna4
@@ -449,18 +566,7 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
                                                         {.ssrc0 = cdna5::OPR_SSRC_NEG_INT_MIN})[0];
         const uint32_t wait_opcode = arch == rocjitsu::IsaFamily::Rdna4 ? rdna4::kSBarrierWaitSopp
                                                                         : cdna5::kSBarrierWaitSopp;
-        const amdgpu::Operation drain_operation = drain.amdgpu_operation();
-        const bool ds_wait = drain_operation == amdgpu::Operation::S_WAIT_DSCNT ||
-                             drain_operation == amdgpu::Operation::S_WAIT_LOADCNT_DSCNT ||
-                             drain_operation == amdgpu::Operation::S_WAIT_STORECNT_DSCNT;
-        const FailureOr<std::optional<amdgpu::WaitFields>> fields =
-            amdgpu::WaitCounterPolicy::explicit_wait_fields(drain, arch);
-        // A combined wait may leave unrelated memory pending, but its original
-        // DS threshold must drain every LDS access before the guest barrier.
-        valid_group = ds_wait && fields.succeeded() && fields.value() &&
-                      (*fields.value())[amdgpu::WaitCounterPolicy::counter_index(
-                          amdgpu::WaitCounterKind::Ds)] == 0 &&
-                      instructions[index]->raw_encoding()[0] == signal &&
+        valid_group = instructions[index]->raw_encoding()[0] == signal &&
                       instructions[wait_index]->raw_encoding()[0] ==
                           build_sopp_encoding(arch, wait_opcode, 0xffff).value();
       } else {
@@ -471,22 +577,20 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
         // LGKM's bit positions differ on gfx9 and gfx11. Decode the original
         // field so stronger waits (including s_waitcnt 0) also qualify.
         valid_group =
-            drain.amdgpu_operation() == amdgpu::Operation::S_WAITCNT &&
-            amdgpu::decode_legacy_waitcnt(drain.raw_encoding()[0] & 0xffff, arch).lgkmcnt == 0 &&
             instructions[index]->raw_encoding()[0] == build_sopp_encoding(arch, opcode, 0).value();
       }
       if (!valid_group) {
-        return reject_instruction(
-            error, InputErrorCode::UnsupportedSynchronization,
-            "requires an original zero LDS drain and canonical full-workgroup "
-            "barrier identity",
-            instructions[index]->src_loc());
+        return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
+                                  "requires a canonical full-workgroup barrier identity",
+                                  instructions[index]->src_loc());
       }
       barrier_blocks.push_back(block);
       program.barriers.push_back(
-          BarrierFacts{.original_drain = instructions[index - 1]->src_loc(),
+          BarrierFacts{.original_drain = adjacent ? instructions[index - 1]->src_loc() : 0,
                        .original_signal = instructions[index]->src_loc(),
-                       .original_wait = instructions[wait_index]->src_loc()});
+                       .original_wait = instructions[wait_index]->src_loc(),
+                       .drain_proof = adjacent ? BarrierDrainProof::AdjacentZeroWait
+                                               : BarrierDrainProof::NoOutstandingLds});
     }
   }
   // One block containing every group gives each completed loop cycle the same
@@ -582,9 +686,26 @@ Result validate_lds_race_accesses(const InputProgram &program, const Manifest &m
                                   std::span<const uint8_t> prepared_text, InputError &error) {
   std::set<uint64_t> barrier_offsets;
   std::set<uint64_t> access_offsets;
+  size_t terminal_bundles = 0;
+  size_t exits = 0;
   for (BasicBlock *block : blocks) {
     for (const Instruction &instruction : block->instructions()) {
       const amdgpu::Operation operation = instruction.amdgpu_operation();
+      if (operation == amdgpu::Operation::S_ENDPGM) {
+        ++exits;
+      }
+      if (operation == amdgpu::Operation::S_SENDMSG) {
+        if (program.terminal_exits.empty() || instruction.src_loc() > prepared_text.size() ||
+            prepared_text.size() - instruction.src_loc() < 8 ||
+            std::memcmp(prepared_text.data() + instruction.src_loc(),
+                        program.image.data() + program.text_file_offset +
+                            program.terminal_exits.front().deallocation,
+                        8) != 0) {
+          return reject(error,
+                        "final terminal deallocation/endpgm bundle differs from original bytes");
+        }
+        ++terminal_bundles;
+      }
       if (operation == amdgpu::Operation::S_BARRIER ||
           operation == amdgpu::Operation::S_BARRIER_SIGNAL ||
           operation == amdgpu::Operation::S_BARRIER_WAIT) {
@@ -605,6 +726,9 @@ Result validate_lds_race_accesses(const InputProgram &program, const Manifest &m
                     prepared_text.data() + barrier.prepared_wait, 4) != 0) {
       return reject(error, "final reachable barrier operations differ from original group");
     }
+  }
+  if (terminal_bundles != program.terminal_exits.size() || exits != program.exit_offsets.size()) {
+    return reject(error, "final terminal exit multiplicity differs from original");
   }
   if (barrier_offsets != expected_barriers) {
     return reject(error, "final reachable barrier multiplicity differs from original");
