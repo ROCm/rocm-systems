@@ -72,6 +72,18 @@ TEST(SystemUnit, DebugDumpXgmiCliOutput) {
   }
 }
 
+// TEMP DIAGNOSTIC -- not for commit. Dumps the real /sys/class/kfd/kfd/topology
+// tree (gpu_id + io_links/*/properties for every node) as a base64 tarball, so
+// it can be extracted from the CI job log afterward and replayed offline via
+// the KfdNodesPathRoot test hook -- no need to re-dispatch CI to try a fix
+// against this exact topology.
+TEST(SystemUnit, DebugDumpKfdTopologySysfs) {
+  std::string out = RunCommandCaptureOutput(
+      "tar czf - -C / sys/class/kfd/kfd/topology sys/class/drm 2>/dev/null | base64 -w 0");
+  std::cerr << "[CPU_LINK_DEBUG][sysfs-capture] ---- BEGIN KFD TOPOLOGY TARBALL ----\n"
+            << out << "\n[CPU_LINK_DEBUG][sysfs-capture] ---- END KFD TOPOLOGY TARBALL ----\n";
+}
+
 // MI450-like topology: GPU node 1 has a direct XGMI io_link to CPU node 0.
 TEST(SystemUnit, DiscoverGpuCpuLinksFindsDirectXgmiCpuLink) {
   FakeSysfsTree tree;
