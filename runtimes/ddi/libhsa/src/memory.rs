@@ -143,6 +143,15 @@ pub(crate) enum AsyncCopyProfiling {
     Enabled,
 }
 
+/// Unlock identifies the host address, so every alias shares one release count.
+#[derive(Clone, Copy)]
+enum HostLockState {
+    /// Successful lock calls not yet matched by an unlock.
+    Locked(usize),
+    /// Final cleanup started; aliases reject access until cleanup succeeds.
+    Retiring,
+}
+
 /// HSA memory handles and metadata around rocddi allocation owners.
 pub(crate) struct MemoryState {
     /// Ordinary HSA allocations keyed by host address.
@@ -153,6 +162,8 @@ pub(crate) struct MemoryState {
     pub(crate) interop_allocations: HashMap<usize, Memory>,
     /// Host ranges locked for GPU access.
     pub(crate) locked_allocations: Vec<LockedMemory>,
+    /// Counts and cleanup state shared by registrations of one host address.
+    host_locks: HashMap<usize, HostLockState>,
     /// Outstanding asynchronous copy borrows per allocation address.
     async_copy_borrows: HashMap<usize, usize>,
     /// Prevents unsafe reuse after uncertain asynchronous copy retirement.
@@ -177,6 +188,7 @@ impl MemoryState {
             ipc_allocations: HashMap::new(),
             interop_allocations: HashMap::new(),
             locked_allocations: Vec::new(),
+            host_locks: HashMap::new(),
             async_copy_borrows: HashMap::new(),
             health,
             async_copy_profiling: AsyncCopyProfiling::Disabled,
@@ -223,6 +235,7 @@ impl MemoryState {
     /// Releases HSA metadata after queues, copies, and signal users stop.
     pub(crate) fn clear(&mut self) {
         self.locked_allocations.clear();
+        self.host_locks.clear();
         // Mappings borrow handles and reservations. Release them first, then
         // the physical handles and finally their reserved address ranges.
         self.vmem_mappings.clear();
@@ -475,6 +488,8 @@ pub(crate) struct LockedMemory {
     allocation: Option<Allocation>,
     /// Host and agent aliases reported by pointer queries.
     pub(crate) description: PointerDescription,
+    /// Native cleanup completed, but the group still needs an address tombstone.
+    retired: bool,
 }
 
 /// Reserved virtual-address interval and the mappings currently occupying it.
@@ -761,6 +776,7 @@ impl LockedMemory {
     ) -> Self {
         Self {
             allocation,
+            retired: false,
             description: PointerDescription {
                 pointer_type: POINTER_TYPE_LOCKED,
                 agent_base: device_base,
