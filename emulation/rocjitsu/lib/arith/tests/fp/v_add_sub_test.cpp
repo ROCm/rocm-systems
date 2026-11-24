@@ -157,6 +157,102 @@ TEST(FpSubrevF16W64Gfx11, Arithmetic) {
       rj_arith_v_subrev_f16_w64, [](double x, double y) { return y - x; }, /*gfx12=*/false);
 }
 
+// gfx1250 keeps the gfx12 model but refuses strict exact until its captures are reviewed.
+TEST(FpAddF16W32Gfx1250, Arithmetic) {
+  rocjitsu::arith::test::check_binary_arithmetic<16, 32>(
+      rj_arith_v_add_f16_w32_gfx1250, [](double x, double y) { return x + y; },
+      /*gfx12=*/true, /*fp_status_supported=*/false, /*compatibility_status=*/false,
+      /*half_exact=*/false);
+}
+
+// RDNA2 keeps the RDNA3 model but refuses strict exact until its captures are reviewed.
+TEST(FpAddF16W32Gfx10, Arithmetic) {
+  rocjitsu::arith::test::check_binary_arithmetic<16, 32>(
+      rj_arith_v_add_f16_w32_gfx10, [](double x, double y) { return x + y; },
+      /*gfx12=*/false, /*fp_status_supported=*/false, /*compatibility_status=*/false,
+      /*half_exact=*/false);
+}
+
+// gfx1250 keeps the gfx12 model but refuses strict exact until its captures are reviewed.
+TEST(FpAddF16W64Gfx1250, Arithmetic) {
+  rocjitsu::arith::test::check_binary_arithmetic<16, 64>(
+      rj_arith_v_add_f16_w64_gfx1250, [](double x, double y) { return x + y; },
+      /*gfx12=*/true, /*fp_status_supported=*/false, /*compatibility_status=*/false,
+      /*half_exact=*/false);
+}
+
+// RDNA2 keeps the RDNA3 model but refuses strict exact until its captures are reviewed.
+TEST(FpAddF16W64Gfx10, Arithmetic) {
+  rocjitsu::arith::test::check_binary_arithmetic<16, 64>(
+      rj_arith_v_add_f16_w64_gfx10, [](double x, double y) { return x + y; },
+      /*gfx12=*/false, /*fp_status_supported=*/false, /*compatibility_status=*/false,
+      /*half_exact=*/false);
+}
+
+// gfx1250 keeps the gfx12 model but refuses strict exact until its captures are reviewed.
+TEST(FpSubF16W32Gfx1250, Arithmetic) {
+  rocjitsu::arith::test::check_binary_arithmetic<16, 32>(
+      rj_arith_v_sub_f16_w32_gfx1250, [](double x, double y) { return x - y; },
+      /*gfx12=*/true, /*fp_status_supported=*/false, /*compatibility_status=*/false,
+      /*half_exact=*/false);
+}
+
+// RDNA2 keeps the RDNA3 model but refuses strict exact until its captures are reviewed.
+TEST(FpSubF16W32Gfx10, Arithmetic) {
+  rocjitsu::arith::test::check_binary_arithmetic<16, 32>(
+      rj_arith_v_sub_f16_w32_gfx10, [](double x, double y) { return x - y; },
+      /*gfx12=*/false, /*fp_status_supported=*/false, /*compatibility_status=*/false,
+      /*half_exact=*/false);
+}
+
+// gfx1250 keeps the gfx12 model but refuses strict exact until its captures are reviewed.
+TEST(FpSubF16W64Gfx1250, Arithmetic) {
+  rocjitsu::arith::test::check_binary_arithmetic<16, 64>(
+      rj_arith_v_sub_f16_w64_gfx1250, [](double x, double y) { return x - y; },
+      /*gfx12=*/true, /*fp_status_supported=*/false, /*compatibility_status=*/false,
+      /*half_exact=*/false);
+}
+
+// RDNA2 keeps the RDNA3 model but refuses strict exact until its captures are reviewed.
+TEST(FpSubF16W64Gfx10, Arithmetic) {
+  rocjitsu::arith::test::check_binary_arithmetic<16, 64>(
+      rj_arith_v_sub_f16_w64_gfx10, [](double x, double y) { return x - y; },
+      /*gfx12=*/false, /*fp_status_supported=*/false, /*compatibility_status=*/false,
+      /*half_exact=*/false);
+}
+
+// gfx1250 keeps the gfx12 model but refuses strict exact until its captures are reviewed.
+TEST(FpSubrevF16W32Gfx1250, Arithmetic) {
+  rocjitsu::arith::test::check_binary_arithmetic<16, 32>(
+      rj_arith_v_subrev_f16_w32_gfx1250, [](double x, double y) { return y - x; },
+      /*gfx12=*/true, /*fp_status_supported=*/false, /*compatibility_status=*/false,
+      /*half_exact=*/false);
+}
+
+// RDNA2 keeps the RDNA3 model but refuses strict exact until its captures are reviewed.
+TEST(FpSubrevF16W32Gfx10, Arithmetic) {
+  rocjitsu::arith::test::check_binary_arithmetic<16, 32>(
+      rj_arith_v_subrev_f16_w32_gfx10, [](double x, double y) { return y - x; },
+      /*gfx12=*/false, /*fp_status_supported=*/false, /*compatibility_status=*/false,
+      /*half_exact=*/false);
+}
+
+// gfx1250 keeps the gfx12 model but refuses strict exact until its captures are reviewed.
+TEST(FpSubrevF16W64Gfx1250, Arithmetic) {
+  rocjitsu::arith::test::check_binary_arithmetic<16, 64>(
+      rj_arith_v_subrev_f16_w64_gfx1250, [](double x, double y) { return y - x; },
+      /*gfx12=*/true, /*fp_status_supported=*/false, /*compatibility_status=*/false,
+      /*half_exact=*/false);
+}
+
+// RDNA2 keeps the RDNA3 model but refuses strict exact until its captures are reviewed.
+TEST(FpSubrevF16W64Gfx10, Arithmetic) {
+  rocjitsu::arith::test::check_binary_arithmetic<16, 64>(
+      rj_arith_v_subrev_f16_w64_gfx10, [](double x, double y) { return y - x; },
+      /*gfx12=*/false, /*fp_status_supported=*/false, /*compatibility_status=*/false,
+      /*half_exact=*/false);
+}
+
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
 TEST(FpSubrevF32W32Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 32>(
@@ -239,8 +335,9 @@ TEST(FpBinaryF32, NaNClampControl) {
   }
 }
 
-// Subtraction negates the subtrahend, including NaNs, without swapping source priority.
-TEST(FpSubF16, CompatibilityNanSigns) {
+// Subtraction negates the subtrahend, including NaNs, without swapping source priority, in
+// Compatibility and strict exact.
+TEST(FpSubF16, NanSigns) {
   using namespace rocjitsu::arith::test;
   constexpr uint16_t inputs[][4] = {
       {0x8000, 0x7e00, 0xfe00, 0x7e00},
@@ -248,42 +345,44 @@ TEST(FpSubF16, CompatibilityNanSigns) {
       {0x7e00, 0x7e00, 0x7e00, 0xfe00},
   };
   for (uint64_t cpu : supported_cpu_levels()) {
-    for (bool reverse : {false, true}) {
-      auto call = reverse ? rj_arith_v_subrev_f16_w32_gfx12 : rj_arith_v_sub_f16_w32_gfx12;
-      for (const auto &sample : inputs) {
-        Registers<3, 32> r;
-        r.v[0][0] = sample[0];
-        r.v[1][0] = sample[1];
-        uint32_t status = 0;
-        ASSERT_EQ(
-            call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, 1, 0, r.v + 2, r.v, r.v + 1, &status),
-            RJ_ARITH_SUCCESS);
-        EXPECT_EQ(r.v[2][0] & 0xffffU, sample[reverse ? 3 : 2]);
+    for (uint64_t semantics : hardware_semantics()) {
+      for (bool reverse : {false, true}) {
+        auto call = reverse ? rj_arith_v_subrev_f16_w32_gfx12 : rj_arith_v_sub_f16_w32_gfx12;
+        for (const auto &sample : inputs) {
+          Registers<3, 32> r;
+          r.v[0][0] = sample[0];
+          r.v[1][0] = sample[1];
+          uint32_t status = 0;
+          ASSERT_EQ(call(cpu | semantics, 1, 0, r.v + 2, r.v, r.v + 1, &status), RJ_ARITH_SUCCESS);
+          EXPECT_EQ(r.v[2][0] & 0xffffU, sample[reverse ? 3 : 2]);
+        }
       }
     }
   }
 }
 
-// Compatibility quiets signaling NaNs on gfx11 only when IEEE is set; with IEEE clear the
-// source is kept, as gfx1100 does.
-TEST(FpBinaryF16, CompatibilitySignalingNan) {
+// gfx11 quiets signaling NaNs only when IEEE is set; with IEEE clear the source is kept, as
+// gfx1100 does, in Compatibility and strict exact alike.
+TEST(FpBinaryF16, SignalingNan) {
   using namespace rocjitsu::arith::test;
   const auto calls = {rj_arith_v_add_f16_w32, rj_arith_v_sub_f16_w32, rj_arith_v_mul_f16_w32};
   for (uint64_t cpu : supported_cpu_levels()) {
-    for (auto call : calls) {
-      for (uint64_t ieee : {uint64_t(0), RJ_ARITH_FP_IEEE_MODE}) {
-        for (uint64_t rounding : {uint64_t(0), RJ_ARITH_FP_ROUND_UP}) {
-          for (uint64_t omod : {uint64_t(0), uint64_t(RJ_ARITH_ALU_OMOD_2)}) {
-            Registers<3, 32> r;
-            r.v[0][0] = 0x3c00U;
-            r.v[1][0] = 0x7c01U;
-            // gfx11 OMOD is enabled by output flushing and IEEE clear.
-            uint64_t flags = cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | ieee | rounding |
-                             (omod ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0);
-            ASSERT_EQ(call(flags, 1, omod, r.v + 2, r.v, r.v + 1, nullptr), RJ_ARITH_SUCCESS);
-            const uint32_t quiet = ieee ? 0x0200U : 0;
-            EXPECT_EQ(r.v[2][0] & 0xffffU,
-                      (call == rj_arith_v_sub_f16_w32 ? 0xfc01U : 0x7c01U) | quiet);
+    for (uint64_t semantics : hardware_semantics()) {
+      for (auto call : calls) {
+        for (uint64_t ieee : {uint64_t(0), RJ_ARITH_FP_IEEE_MODE}) {
+          for (uint64_t rounding : {uint64_t(0), RJ_ARITH_FP_ROUND_UP}) {
+            for (uint64_t omod : {uint64_t(0), uint64_t(RJ_ARITH_ALU_OMOD_2)}) {
+              Registers<3, 32> r;
+              r.v[0][0] = 0x3c00U;
+              r.v[1][0] = 0x7c01U;
+              // gfx11 OMOD is enabled by output flushing and IEEE clear.
+              uint64_t flags = cpu | semantics | ieee | rounding |
+                               (omod ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0);
+              ASSERT_EQ(call(flags, 1, omod, r.v + 2, r.v, r.v + 1, nullptr), RJ_ARITH_SUCCESS);
+              const uint32_t quiet = ieee ? 0x0200U : 0;
+              EXPECT_EQ(r.v[2][0] & 0xffffU,
+                        (call == rj_arith_v_sub_f16_w32 ? 0xfc01U : 0x7c01U) | quiet);
+            }
           }
         }
       }
@@ -407,26 +506,89 @@ const CapturedGfx11 add_f64_lanes[] = {
 
 } // namespace
 
-// Compatibility reproduces captured gfx1100 FP16 ADD/SUB/SUBREV lanes.
+// Compatibility and strict exact reproduce captured gfx1100 FP16 ADD/SUB/SUBREV lanes.
 TEST(FpAddSubF16Gfx11, CapturedSignalingNans) {
-  using rocjitsu::arith::test::check_captured_gfx11;
-  check_captured_gfx11<32, 16>(rj_arith_v_add_f16_w32, add_f16_lanes);
-  check_captured_gfx11<64, 16>(rj_arith_v_add_f16_w64, add_f16_lanes);
-  check_captured_gfx11<32, 16>(rj_arith_v_sub_f16_w32, sub_f16_lanes);
-  check_captured_gfx11<64, 16>(rj_arith_v_sub_f16_w64, sub_f16_lanes);
-  check_captured_gfx11<32, 16>(rj_arith_v_subrev_f16_w32, subrev_f16_lanes);
-  check_captured_gfx11<64, 16>(rj_arith_v_subrev_f16_w64, subrev_f16_lanes);
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 16>(rj_arith_v_add_f16_w32, add_f16_lanes);
+  check_captured_gfx11_exact<64, 16>(rj_arith_v_add_f16_w64, add_f16_lanes);
+  check_captured_gfx11_exact<32, 16>(rj_arith_v_sub_f16_w32, sub_f16_lanes);
+  check_captured_gfx11_exact<64, 16>(rj_arith_v_sub_f16_w64, sub_f16_lanes);
+  check_captured_gfx11_exact<32, 16>(rj_arith_v_subrev_f16_w32, subrev_f16_lanes);
+  check_captured_gfx11_exact<64, 16>(rj_arith_v_subrev_f16_w64, subrev_f16_lanes);
 }
 
-// Compatibility reproduces captured gfx1100 clamped FP16 ADD/SUB/SUBREV NaN lanes.
+// Compatibility and strict exact reproduce captured gfx1100 clamped FP16 ADD/SUB/SUBREV NaN lanes.
 TEST(FpAddSubF16Gfx11, CapturedClampedNans) {
-  using rocjitsu::arith::test::check_captured_gfx11;
-  check_captured_gfx11<32, 16>(rj_arith_v_add_f16_w32, add_f16_clamp_lanes);
-  check_captured_gfx11<64, 16>(rj_arith_v_add_f16_w64, add_f16_clamp_lanes);
-  check_captured_gfx11<32, 16>(rj_arith_v_sub_f16_w32, sub_f16_clamp_lanes);
-  check_captured_gfx11<64, 16>(rj_arith_v_sub_f16_w64, sub_f16_clamp_lanes);
-  check_captured_gfx11<32, 16>(rj_arith_v_subrev_f16_w32, subrev_f16_clamp_lanes);
-  check_captured_gfx11<64, 16>(rj_arith_v_subrev_f16_w64, subrev_f16_clamp_lanes);
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 16>(rj_arith_v_add_f16_w32, add_f16_clamp_lanes);
+  check_captured_gfx11_exact<64, 16>(rj_arith_v_add_f16_w64, add_f16_clamp_lanes);
+  check_captured_gfx11_exact<32, 16>(rj_arith_v_sub_f16_w32, sub_f16_clamp_lanes);
+  check_captured_gfx11_exact<64, 16>(rj_arith_v_sub_f16_w64, sub_f16_clamp_lanes);
+  check_captured_gfx11_exact<32, 16>(rj_arith_v_subrev_f16_w32, subrev_f16_clamp_lanes);
+  check_captured_gfx11_exact<64, 16>(rj_arith_v_subrev_f16_w64, subrev_f16_clamp_lanes);
+}
+
+namespace {
+
+// gfx1100 (W7900, mkm2) Track C corpora, 2026-11-18, dispatch MODE with DX10_CLAMP set and
+// FP16 denormals kept. hw1100-wide-ieee1: with IEEE set the signaling NaN source is quieted
+// (the IEEE-clear rows above keep it). hw1100-wide: 1.0 + 2^-14 and -1.0 + 2^-14 round away
+// from 1.0 only toward +infinity; a kernel that ignores the guest rounding mode fails two rows.
+const CapturedGfx11 add_f16_mode_lanes[] = {
+    {"IeeeSetSignalingNanQuieted", 0, 0x3f0, 0x4b957c01, 0x173b0000, 0, 0xa5a57e01},
+    {"IeeeSetSignalingPayloadQuieted", 0, 0x3f0, 0xf8ae7d55, 0x1a8f0000, 0, 0xa5a57f55},
+    {"OnePlusMinNormalRoundUp", 0, 0x1f5, 0x7e583c00, 0x51e60400, 0, 0xa5a53c01},
+    {"OnePlusMinNormalRoundDown", 0, 0x1fa, 0x7e583c00, 0x51e60400, 0, 0xa5a53c00},
+    {"MinusOnePlusMinNormalRoundUp", 0, 0x1f5, 0x3b1ebc00, 0xa5410400, 0, 0xa5a5bbff},
+    {"MinusOnePlusMinNormalRoundDown", 0, 0x1fa, 0x3b1ebc00, 0xa5410400, 0, 0xa5a5bc00},
+};
+
+// gfx1201 (RX 9070 XT, rj-valu-audit-local hw, 2026-11-05; directed-rounding rows from the
+// R9700 hw-r9700-wide corpus, 2026-11-18), FP16 denormals kept. The first NaN source wins and
+// is quieted (gfx12 quiets regardless of IEEE); a second-source NaN is returned when the first
+// is finite; SUB negates a NaN subtrahend and SUBREV negates a NaN first source. A kernel that
+// lets the host pick the NaN, or that skips quieting, fails these rows.
+const CapturedGfx11 add_f16_gfx12_lanes[] = {
+    {"FirstNanWins", 0, 0xf0, 0x6aed7e55, 0x3a737e00, 0, 0xa5a57e55},
+    {"FirstSignalingNanQuieted", 0, 0xf0, 0x515b7d55, 0xecbf7e00, 0, 0xa5a57f55},
+    {"NegativeSignalingFirstQuieted", 0, 0xf0, 0x2c07fc01, 0xf0a77e00, 0, 0xa5a5fe01},
+    {"SecondNan", 0, 0xf0, 0x3b4f0400, 0xa00c7e00, 0, 0xa5a57e00},
+    {"SignalingNanQuieted", 0, 0xf0, 0x4b957c01, 0x173b0000, 0, 0xa5a57e01},
+    {"OnePlusMinNormalRoundUp", 0, 0xf5, 0x7e583c00, 0x51e60400, 0, 0xa5a53c01},
+    {"OnePlusMinNormalRoundDown", 0, 0xfa, 0x7e583c00, 0x51e60400, 0, 0xa5a53c00},
+    {"MinusOnePlusMinNormalRoundUp", 0, 0xf5, 0x3b1ebc00, 0xa5410400, 0, 0xa5a5bbff},
+    {"MinusOnePlusMinNormalRoundDown", 0, 0xfa, 0x3b1ebc00, 0xa5410400, 0, 0xa5a5bc00},
+    {"ClampNan", RJ_ARITH_ALU_CLAMP, 0xf0, 0x3d3a7e00, 0xa5a90400, 0, 0xa5a50000},
+    {"ClampSignalingNan", RJ_ARITH_ALU_CLAMP, 0xf0, 0xc0b87c01, 0x2dac0400, 0, 0xa5a50000},
+};
+const CapturedGfx11 sub_f16_gfx12_lanes[] = {
+    {"NanSubtrahendNegated", 0, 0xf0, 0x91520400, 0xedac7e00, 0, 0xa5a5fe00},
+    {"NanSubtrahendNegatedNearOne", 0, 0xf0, 0x3e393c00, 0xe9637e00, 0, 0xa5a5fe00},
+};
+const CapturedGfx11 subrev_f16_gfx12_lanes[] = {
+    {"NanFirstSourceNegated", 0, 0xf0, 0xf6077e00, 0xd8700400, 0, 0xa5a5fe00},
+    {"SignalingFirstSourceQuietedNegated", 0, 0xf0, 0x29f07c01, 0xb5880400, 0, 0xa5a5fe01},
+};
+
+} // namespace
+
+// Compatibility and strict exact reproduce captured gfx1100 FP16 ADD lanes with IEEE set and
+// under directed rounding.
+TEST(FpAddF16Gfx11, CapturedIeeeAndDirectedRounding) {
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 16>(rj_arith_v_add_f16_w32, add_f16_mode_lanes);
+  check_captured_gfx11_exact<64, 16>(rj_arith_v_add_f16_w64, add_f16_mode_lanes);
+}
+
+// Compatibility and strict exact reproduce captured gfx1201 FP16 ADD/SUB/SUBREV lanes.
+TEST(FpAddSubF16Gfx12, CapturedNanPriorityAndRounding) {
+  using rocjitsu::arith::test::check_captured_gfx12_exact;
+  check_captured_gfx12_exact<32, 16>(rj_arith_v_add_f16_w32_gfx12, add_f16_gfx12_lanes);
+  check_captured_gfx12_exact<64, 16>(rj_arith_v_add_f16_w64_gfx12, add_f16_gfx12_lanes);
+  check_captured_gfx12_exact<32, 16>(rj_arith_v_sub_f16_w32_gfx12, sub_f16_gfx12_lanes);
+  check_captured_gfx12_exact<64, 16>(rj_arith_v_sub_f16_w64_gfx12, sub_f16_gfx12_lanes);
+  check_captured_gfx12_exact<32, 16>(rj_arith_v_subrev_f16_w32_gfx12, subrev_f16_gfx12_lanes);
+  check_captured_gfx12_exact<64, 16>(rj_arith_v_subrev_f16_w64_gfx12, subrev_f16_gfx12_lanes);
 }
 
 // Compatibility and strict exact reproduce captured gfx1100 FP64 ADD NaN lanes.
@@ -461,8 +623,10 @@ TEST(FpAddF64Gfx11, CapturedDirectedRounding) {
   check_captured_gfx11_exact<64, 64>(rj_arith_v_add_f64_w64, add_f64_rounding_lanes);
 }
 
-// Expected causes retain the inherited bridge classifiers, including their
-// distinction from the separately qualified strict MUL reporting model.
+// ADD/SUB/SUBREV and selection retain the inherited bridge classifiers, as does RDNA3 MUL,
+// which reports nothing for zero times infinity. gfx12 MUL reports the shared hardware
+// classifier: gfx1201 (R9700, 2026-11-18) raises INVALID there, and raises nothing for a
+// quiet NaN times a denormal or when input flushing turns the denormal factor into zero.
 TEST(FpBinaryF32, CompatibilityStatus) {
   using namespace rocjitsu::arith::test;
   struct Case {
@@ -478,11 +642,12 @@ TEST(FpBinaryF32, CompatibilityStatus) {
       {rj_arith_v_sub_f32_w32_gfx12, rj_arith_v_sub_f32_w64_gfx12, 0x7f800000, 0x7f800000, 1},
       {rj_arith_v_subrev_f32_w32_gfx12, rj_arith_v_subrev_f32_w64_gfx12, 0x7f800000, 0x7f800000, 1},
       {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 0, 0x7f800000, 1},
-      {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 1, 0x7fc00000, 2},
+      {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 1, 0x7fc00000, 0},
       {rj_arith_v_mul_f32_w32, rj_arith_v_mul_f32_w64, 0, 0x7f800000, 0},
       {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 0x7f7fffff, 0x40000000, 8,
        RJ_ARITH_ALU_OMOD_HALF},
-      {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 1, 0x3f000000, 0x32, 0,
+      {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 1, 0x3f000000, 0x32},
+      {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 1, 0x3f000000, 0, 0,
        RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS},
       {rj_arith_v_min_num_f32_w32, rj_arith_v_min_num_f32_w64, 0x7f800000, 1, 2},
       {rj_arith_v_maximum_f32_w32, rj_arith_v_maximum_f32_w64, 0x7f800001, 1, 3},

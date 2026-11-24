@@ -105,6 +105,9 @@ class _GuestHelpers:
     def get_gpu_id_from_device_handle(self, _handle):
         return 0
 
+    def get_gpu_driver_info(self, _handle):
+        raise _FakeLibraryException("mock: driver info not supported")
+
     def get_bitmask_ranges(self, bitmask_dict):
         return dict.fromkeys(bitmask_dict, "0-7")
 

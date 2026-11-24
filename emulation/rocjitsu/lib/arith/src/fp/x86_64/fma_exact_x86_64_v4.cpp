@@ -149,17 +149,34 @@ void fma_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instructio
   __m512i out[2];
   for (int k = 0; k < 2; ++k) {
     __mmask16 bad = 0;
-    __m512 aa = prepare_fma_input(_mm512_loadu_si512(a + 16 * k), flags, instruction_flags, 0, bad);
-    __m512 bb = prepare_fma_input(_mm512_loadu_si512(b + 16 * k), flags, instruction_flags, 1, bad);
-    __m512 cc = prepare_fma_input(_mm512_loadu_si512(c + 16 * k), flags, instruction_flags, 2, bad);
-    if (dx9_zero) {
-      const auto zero = _mm512_setzero_ps();
-      auto has_zero =
-          _mm512_cmp_ps_mask(aa, zero, _CMP_EQ_OQ) | _mm512_cmp_ps_mask(bb, zero, _CMP_EQ_OQ);
-      aa = _mm512_mask_mov_ps(aa, has_zero, zero);
-      bb = _mm512_mask_mov_ps(bb, has_zero, _mm512_set1_ps(1));
+    __m512 aa, bb, cc;
+    if (instruction_flags == 0 && !dx9_zero && !(flags & RJ_ARITH_FP_ROUND_MASK)) {
+      aa = _mm512_castsi512_ps(_mm512_loadu_si512(a + 16 * k));
+      bb = _mm512_castsi512_ps(_mm512_loadu_si512(b + 16 * k));
+      cc = _mm512_castsi512_ps(_mm512_loadu_si512(c + 16 * k));
+      // A finite result implies finite unmodified inputs. Subnormal input lanes
+      // need the guest's flush policy, irrespective of the host FP environment.
+      const auto subnormal = [](__m512 value) {
+        const auto mag =
+            _mm512_and_si512(_mm512_castps_si512(value), _mm512_set1_epi32(0x7fffffff));
+        return _mm512_cmplt_epu32_mask(_mm512_sub_epi32(mag, _mm512_set1_epi32(1)),
+                                       _mm512_set1_epi32(0x007fffff));
+      };
+      bad = subnormal(aa) | subnormal(bb) | subnormal(cc);
+      out[k] = fma_result(aa, bb, cc, 0, 0, bad);
+    } else {
+      aa = prepare_fma_input(_mm512_loadu_si512(a + 16 * k), flags, instruction_flags, 0, bad);
+      bb = prepare_fma_input(_mm512_loadu_si512(b + 16 * k), flags, instruction_flags, 1, bad);
+      cc = prepare_fma_input(_mm512_loadu_si512(c + 16 * k), flags, instruction_flags, 2, bad);
+      if (dx9_zero) {
+        const auto zero = _mm512_setzero_ps();
+        auto has_zero =
+            _mm512_cmp_ps_mask(aa, zero, _CMP_EQ_OQ) | _mm512_cmp_ps_mask(bb, zero, _CMP_EQ_OQ);
+        aa = _mm512_mask_mov_ps(aa, has_zero, zero);
+        bb = _mm512_mask_mov_ps(bb, has_zero, _mm512_set1_ps(1));
+      }
+      out[k] = fma_result(aa, bb, cc, flags, instruction_flags, bad);
     }
-    out[k] = fma_result(aa, bb, cc, flags, instruction_flags, bad);
     if (bad) {
       bad &= __mmask16(exec_mask >> (16 * k));
       if (!bad) {

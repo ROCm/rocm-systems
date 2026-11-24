@@ -49,7 +49,8 @@ template <bool Multiply, bool Rdna3>
     if (rocjitsu::arith::reports_fp_status(flags)) {
       for (int lane = 0; lane < 32; ++lane) {
         if ((exec_mask >> lane) & 1) {
-          causes |= rocjitsu::arith::mul_exceptions_f32(a[0][lane], b[0][lane]);
+          causes |=
+              rocjitsu::arith::mul_exceptions_f32(a[0][lane], b[0][lane], flags, instruction_flags);
         }
       }
     }
@@ -297,9 +298,10 @@ int binary_wave64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags
   return RJ_ARITH_SUCCESS;
 }
 
-// Preserve the inherited Compatibility classifier without qualifying explicit mode 3.
-// Source classification precedes aliased writes; DPP stores and MUL causes use
-// different masks when row/bank controls suppress a destination.
+// Compatibility reports the shared hardware MUL classifier in every guest mode without
+// qualifying explicit mode 3 beyond its captured domain; ADD/SUB/SUBREV and selection keep
+// the inherited gfx12 causes. Source classification precedes aliased writes; DPP stores
+// and MUL range causes use different masks when row/bank controls suppress a destination.
 template <rocjitsu::arith::Binary Op, bool Rdna3 = false, bool Gfx1250 = false>
 int binary_policy(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
                   const uint32_t *const *a, const uint32_t *const *b, uint32_t *state,
