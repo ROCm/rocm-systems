@@ -430,10 +430,22 @@ FailureOr<PreparedImageArtifact> lower_image(std::span<const uint8_t> original,
           BasicBlock::build_reachable(object, *decoder, target.arch, entry_offsets);
       if (blocks.failed() || blocks.value().empty())
         return reject(error, "native reachable code cannot be enumerated");
-      for (const std::unique_ptr<BasicBlock> &block : blocks.value())
+      for (const std::unique_ptr<BasicBlock> &block : blocks.value()) {
+        // Text growth can move data sections while these native bytes stay fixed.
+        // Reject PC readers until their data references can be relocated.
+        for (const Instruction &instruction : block->instructions()) {
+          if (instruction.reads_pc()) {
+            error = {.code = InputErrorCode::UnsupportedInstruction,
+                     .text_offset = instruction.src_loc(),
+                     .message = "native entry '" + kernel.kernel_name +
+                                "' reads PC; PC-relative data references are not preserved"};
+            return Result::failure();
+          }
+        }
         row.native_code.push_back({.original_offset = block->start_offset(),
                                    .prepared_offset = block->start_offset(),
                                    .bytes = block->end_offset() - block->start_offset()});
+      }
       std::ranges::sort(row.native_code, {}, &NativeCodeRange::original_offset);
     }
     facts.entries.push_back(std::move(row));

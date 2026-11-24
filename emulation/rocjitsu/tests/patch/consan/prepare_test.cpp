@@ -6,6 +6,7 @@
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/amdhsa_metadata.h"
+#include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/consan/encoding.h"
 #include "rocjitsu/code/consan/image/artifact.h"
@@ -13,7 +14,10 @@
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/consan/prepare.h"
 #include "rocjitsu/code/patch/fault_injection/drop_barrier.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
+#include "rocjitsu/isa/target_registry.h"
 #include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
@@ -214,6 +218,67 @@ TEST_F(ConSanPrepareImage, InvalidOrIncompleteSelectionPublishesNoResult) {
     }
   }
   EXPECT_TRUE(prepare_image(original_, target, selected, error_).failed());
+}
+#endif
+
+#ifdef CONSAN_MULTI_ENTRY_NATIVE_GLOBAL_FIXTURE
+TEST(ConSanPrepareImagePcReads, RejectsNativePcRelativeGlobalStore) {
+  std::ifstream file(CONSAN_MULTI_ENTRY_NATIVE_GLOBAL_FIXTURE, std::ios::binary);
+  const std::vector<uint8_t> original = {std::istreambuf_iterator<char>(file),
+                                         std::istreambuf_iterator<char>()};
+  ASSERT_FALSE(original.empty());
+  const TargetProfile &target = *target_profile("gfx1250");
+  const AmdGpuCodeObject object(original.data(), original.size());
+  ASSERT_TRUE(object.is_valid());
+  ASSERT_EQ(object.text_sections().size(), 1u);
+  const Section &text = *object.text_sections().front();
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(original, text.sectionOffset(), text.size());
+  const std::vector<KernelDescriptorInfo>::const_iterator native =
+      std::ranges::find(kernels, std::string("mk_c"), &KernelDescriptorInfo::kernel_name);
+  ASSERT_NE(native, kernels.end());
+  std::unique_ptr<Decoder> decoder =
+      Decoder::create(default_isa_target_registry(), target.public_id);
+  ASSERT_NE(decoder, nullptr);
+  const std::array<uint64_t, 1> native_entries = {native->entry_text_offset};
+  const FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
+      BasicBlock::build_reachable(object, *decoder, target.arch, native_entries);
+  ASSERT_TRUE(blocks.succeeded());
+  ASSERT_GT(blocks.value().size(), 1u);
+  std::optional<uint64_t> pc_read_offset;
+  for (const std::unique_ptr<BasicBlock> &block : blocks.value())
+    for (const Instruction &instruction : block->instructions())
+      if (instruction.reads_pc())
+        pc_read_offset = instruction.src_loc();
+  ASSERT_TRUE(pc_read_offset);
+  const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+  InputError error;
+  const FailureOr<PreparedImageArtifact> artifact =
+      prepare_image(original, target, selected, error);
+  ASSERT_TRUE(artifact.failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedInstruction);
+  EXPECT_EQ(error.text_offset, pc_read_offset);
+  EXPECT_EQ(error.message,
+            "native entry 'mk_c' reads PC; PC-relative data references are not preserved");
+}
+#endif
+
+#ifdef CONSAN_MULTI_ENTRY_UNREACHABLE_PC_FIXTURE
+TEST(ConSanPrepareImagePcReads, AllowsUnreachableNativePcRead) {
+  std::ifstream file(CONSAN_MULTI_ENTRY_UNREACHABLE_PC_FIXTURE, std::ios::binary);
+  const std::vector<uint8_t> original = {std::istreambuf_iterator<char>(file),
+                                         std::istreambuf_iterator<char>()};
+  ASSERT_FALSE(original.empty());
+  const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+  InputError error;
+  const FailureOr<PreparedImageArtifact> artifact =
+      prepare_image(original, *target_profile("gfx1250"), selected, error);
+  ASSERT_TRUE(artifact.succeeded()) << error.message;
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(verify_artifact_images(artifact.value().facts, original, artifact.value().image,
+                                     diagnostic.emitter())
+                  .succeeded())
+      << diagnostic.message();
 }
 #endif
 

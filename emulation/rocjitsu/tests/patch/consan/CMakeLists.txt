@@ -98,6 +98,8 @@ if(AMDCXX AND EXISTS "${ROCM_PATH}/lib/llvm/bin/ld.lld")
             CONSAN_MULTI_ENTRY_BARRIER_FIXTURE="${_fixture_dir}/multi-entry-barrier.hsaco"
             CONSAN_MULTI_ENTRY_LOOP_FIXTURE="${_fixture_dir}/multi-entry-loop.hsaco"
             CONSAN_MULTI_ENTRY_MIXED_FIXTURE="${_fixture_dir}/multi-entry-mixed.hsaco"
+            CONSAN_MULTI_ENTRY_NATIVE_GLOBAL_FIXTURE="${_fixture_dir}/multi-entry-native-global.hsaco"
+            CONSAN_MULTI_ENTRY_UNREACHABLE_PC_FIXTURE="${_fixture_dir}/multi-entry-unreachable-pc.hsaco"
     )
 else()
     message(

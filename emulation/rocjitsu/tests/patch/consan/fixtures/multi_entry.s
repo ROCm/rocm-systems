@@ -15,6 +15,12 @@
 #ifndef MK_MIXED
 #define MK_MIXED 0
 #endif
+#ifndef MK_NATIVE_GLOBAL
+#define MK_NATIVE_GLOBAL 0
+#endif
+#ifndef MK_UNREACHABLE_PC_READ
+#define MK_UNREACHABLE_PC_READ 0
+#endif
 .amdgcn_target "amdgcn-amd-amdhsa--gfx1250"
 
 .macro wait_all
@@ -135,6 +141,21 @@ mk_c:
   ds_load_b32 v13, v9 offset:32
   wait_all
   global_store_b32 v9, v13, s[16:17]
+#if MK_NATIVE_GLOBAL
+#if MK_UNREACHABLE_PC_READ
+  s_branch .Lnative_global_done
+#else
+  // Keep the PC read in a successor so admission must inspect every block.
+  s_branch .Lnative_global_pc_read
+#endif
+.Lnative_global_pc_read:
+  s_get_pc_i64 s[20:21]
+.Lnative_global_pc:
+  s_add_u32 s20, s20, native_global - .Lnative_global_pc
+  s_addc_u32 s21, s21, 0
+  global_store_b32 v9, v13, s[20:21]
+.Lnative_global_done:
+#endif
   s_mov_b32 exec_lo, s19
   wait_all
   s_wait_storecnt 0
@@ -247,3 +268,13 @@ amdhsa.kernels:
 #endif
 ...
 .end_amdgpu_metadata
+
+#if MK_NATIVE_GLOBAL
+.bss
+.p2align 8
+.local native_global
+.type native_global,@object
+native_global:
+  .zero 8
+.size native_global, .-native_global
+#endif

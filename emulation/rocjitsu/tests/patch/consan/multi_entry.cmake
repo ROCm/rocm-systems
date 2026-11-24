@@ -25,7 +25,11 @@ add_custom_target(consan_multi_entry_fixture DEPENDS ${_multi_image})
 
 # Keep the original ABI/oracle while exercising per-entry Q barrier facts and
 # repeated-site AfterInst maps in one whole image.
-foreach(_variant IN ITEMS barrier loop mixed)
+foreach(
+    _variant
+    IN
+    ITEMS barrier loop mixed native-global unreachable-pc
+)
     set(_variant_object ${_fixture_dir}/multi-entry-${_variant}.o)
     set(_variant_image ${_fixture_dir}/multi-entry-${_variant}.hsaco)
     set(_variant_defines -DMK_BARRIER=1)
@@ -33,6 +37,10 @@ foreach(_variant IN ITEMS barrier loop mixed)
         list(APPEND _variant_defines -DMK_LOOP=1)
     elseif(_variant STREQUAL "mixed")
         list(APPEND _variant_defines -DMK_MIXED=1)
+    elseif(_variant STREQUAL "native-global")
+        set(_variant_defines -DMK_NATIVE_GLOBAL=1)
+    elseif(_variant STREQUAL "unreachable-pc")
+        set(_variant_defines -DMK_NATIVE_GLOBAL=1 -DMK_UNREACHABLE_PC_READ=1)
     endif()
     add_custom_command(
         OUTPUT ${_variant_object}
