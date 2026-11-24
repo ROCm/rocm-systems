@@ -49,8 +49,10 @@ jobs:
           sudo apt-get install -y \
             gcc g++ \
             lcov gcovr \
+            python3-pip \
             libsqlite3-dev libspdlog-dev libfmt-dev nlohmann-json3-dev \
             libgtest-dev libgmock-dev libbenchmark-dev
+          python3 -m pip install -r profilers/profiler-hub/tests/integration/requirements.txt
 
       - name: Pin cmake to the project's minimum
         run: |

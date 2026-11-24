@@ -1,0 +1,11 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Requirements for the profiler-hub integration test suite
+#
+# Install with:
+#   pip install -r requirements.txt
+
+
+# Core testing framework
+pytest>=7.4.0
