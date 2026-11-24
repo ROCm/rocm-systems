@@ -562,6 +562,7 @@ add_executable(
     scalar_buffer_store_test.cpp
     lds_test.cpp
     lds_counter_test.cpp
+    vgpr_writeback_test.cpp
     l2_cache_test.cpp
     vmem_direct_test.cpp
     l2_maintenance_mutex_test.cpp
@@ -592,6 +593,7 @@ add_executable(
     decoder_c_api_test.cpp
     buffer_operand_test.cpp
     buffer_descriptor_vcc_test.cpp
+    vmem_lane_address_test.cpp
     buffer_format_test.cpp
     image_access_test.cpp
     image_addressing_test.cpp

@@ -14,6 +14,7 @@
 #include <cstring>
 #include <functional>
 #include <numeric>
+#include <random>
 #include <vector>
 
 namespace rocjitsu::amdgpu {
@@ -48,17 +49,18 @@ public:
       return std::nullopt;
     return VmRawBackingWriteGate::Permit{};
   }
-  bool copy(uint64_t, uint8_t *target, void *local, std::size_t size, bool into_memory,
-            bool guarded) const override {
+  bool copy(std::span<const Copy> spans, bool into_memory, bool guarded) const override {
     last_guarded = guarded;
-    if (fault_at == copies++)
-      return false;
-    if (during_copy)
-      during_copy();
-    if (into_memory)
-      std::memcpy(target, local, size);
-    else
-      std::memcpy(local, target, size);
+    for (const Copy &span : spans) {
+      if (fault_at == copies++)
+        return false;
+      if (during_copy)
+        during_copy();
+      if (into_memory)
+        std::memcpy(span.host, span.local, span.size);
+      else
+        std::memcpy(span.local, span.host, span.size);
+    }
     return true;
   }
 
@@ -215,6 +217,50 @@ TEST_F(VmemDirectTest, StoreDiscardsACopyAnotherCuFilledDuringTheWrite) {
   // The other CU's L1 may keep its copy until it invalidates, as on hardware;
   // the shared L2 must not serve the pre-store bytes to anyone afterwards.
   EXPECT_TRUE(l2.may_bypass(line, 128));
+}
+
+TEST_F(VmemDirectTest, SwizzledTransfersMatchTheSpanVisit) {
+  std::mt19937_64 rng(11);
+  for (int round = 0; round < 400; ++round) {
+    VectorMemState d(GLOBAL_MEM);
+    d.wf_size = rng() % 2 ? 64 : 32;
+    d.scratch_swizzle_unit = rng() % 2 ? 16 : 4;
+    d.scratch_addr_base_offset = static_cast<uint32_t>(rng() % d.scratch_swizzle_unit);
+    d.scratch_addr_stride = d.wf_size * d.scratch_swizzle_unit;
+    d.elem_size = rng() % 3 ? 4 : 2;
+    d.num_elems = 1 + static_cast<uint32_t>(rng() % 4);
+    d.is_load = rng() % 2;
+    // Full waves with exact interleaving put one element of every lane in one
+    // run and the next element right after it in memory.
+    const bool dense = rng() % 3 == 0;
+    const uint64_t wave = d.wf_size == 64 ? ~uint64_t{0} : 0xffffffffull;
+    const uint64_t lanes = dense ? wave : rng() & wave;
+    if (!dense && rng() % 3 == 0) {
+      d.element_lane_masks.assign(d.num_elems, 0);
+      for (uint32_t e = 0; e < d.num_elems; ++e)
+        d.element_lane_masks[e] = rng();
+    }
+    const uint64_t base = kBase + 0x100 + d.scratch_addr_base_offset;
+    for (uint32_t lane = 0; lane < d.wf_size; ++lane)
+      d.per_lane_addr[lane] = base + lane * d.scratch_swizzle_unit +
+                              (!dense && rng() % 4 == 0 ? rng() % d.scratch_swizzle_unit : 0);
+    const uint32_t payload = d.wf_size * d.num_elems * d.elem_size;
+    std::vector<uint8_t> want_host = backing.host, want_data(payload), got_data(payload);
+    for (uint32_t i = 0; i < payload; ++i)
+      want_data[i] = got_data[i] = static_cast<uint8_t>(rng());
+    d.for_each_swizzled_span(lanes, [&](uint64_t address, uint32_t offset, uint32_t size) {
+      uint8_t *host = want_host.data() + (address - kBase);
+      if (d.is_load)
+        std::memcpy(want_data.data() + offset, host, size);
+      else
+        std::memcpy(host, want_data.data() + offset, size);
+    });
+    ASSERT_EQ(try_direct_swizzled_access(d, lanes, got_data.data(), backing, l1, l2),
+              VmAccessOutcome::Complete)
+        << round;
+    ASSERT_EQ(got_data, want_data) << round;
+    ASSERT_EQ(backing.host, want_host) << round;
+  }
 }
 
 TEST_F(VmemDirectTest, RecheckDropsACopyFilledDuringTheBypassWrite) {

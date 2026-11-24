@@ -28,6 +28,7 @@
 #include "rocjitsu/vm/amdgpu/strided_lane_addresses.h"
 #include "rocjitsu/vm/amdgpu/texel_byte_range.h"
 #include "rocjitsu/vm/amdgpu/translated_local_cache_policy.h"
+#include "rocjitsu/vm/amdgpu/vgpr_writeback.h"
 #include "rocjitsu/vm/graphics/bvh_intersection.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
@@ -531,6 +532,35 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
                                                        : MemoryAccessCompletion::Complete;
 }
 
+/// @brief The shared writeback for one completion, or false when the per-lane
+/// loop still has to take it.
+/// @details Declines a missing format, a block transfer, and a response shorter
+/// than a whole wave: the writeback reads inactive lanes too. The caller has
+/// checked ownership. Completion writes raw storage and sends no register
+/// observation.
+bool write_back_response(const VectorMemState &d, ComputeUnitCore &cu, uint32_t dst_reg_base,
+                         const std::vector<uint8_t> &response, uint64_t result_lanes,
+                         std::optional<vgpr_writeback::DstFormat> format) {
+  // Dispatch admits only Wave32 and Wave64, no wider than Isa::WF_SIZE_MAX,
+  // which is also the VGPR storage's lane count (ComputeUnitCore::dispatch_wf_at).
+  assert((d.wf_size == 32 || d.wf_size == 64) && d.wf_size <= cu.vgpr_storage_lane_count());
+  if (!format || d.is_block_transfer)
+    return false;
+  // The writeback reads whole groups of lanes, inactive ones included.
+  if (response.size() < size_t{d.wf_size} * format->elem_size * format->num_elems)
+    return false;
+  // Mutable raw storage materializes a lazily backed register; with no lanes
+  // to write, leave the destinations as the per-lane loop would.
+  const uint64_t lanes = result_lanes & vgpr_writeback::prefix(d.wf_size);
+  if (lanes == 0)
+    return true;
+  uint8_t *dst[4];
+  for (uint32_t r = 0; r < vgpr_writeback::regs(*format); ++r)
+    dst[r] = cu.raw_vgpr_data(dst_reg_base + r);
+  vgpr_writeback::write_back(*format, dst, cu.sram_ecc(), d.wf_size, lanes, response.data());
+  return true;
+}
+
 MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, ComputeUnitCore &cu,
                                        uint64_t result_lanes,
                                        const MemoryAccessCompletionFactory &take_completion) {
@@ -634,28 +664,16 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       }
     }
   }
-  // A dense halfword load widens into one VGPR or updates the selected half.
-  // Resolve the register and the preservation policy once per wave.
+  // Formats format_of() accepts. The loop below stays for what it declines.
+  const uint32_t result_elems = is_atomic ? 1 : d.num_elems;
+  if (write_back_response(
+          d, cu, d.dst_reg_base, d.response_data, result_lanes,
+          vgpr_writeback::format_of(d.elem_size, result_elems, d.sign_extend, d.d16_hi, d.d16_lo)))
+    return MemoryAccessCompletion::Complete;
+  // Whole dwords format_of() declined, mostly block transfers. Ownership is
+  // already checked, and completion sends no register observation.
   const bool full_wave = (d.wf_size == 32 && result_lanes == UINT32_MAX) ||
                          (d.wf_size == 64 && result_lanes == UINT64_MAX);
-  if (!is_atomic && full_wave && d.elem_size == sizeof(uint16_t) && d.num_elems == 1 &&
-      !d.sign_extend && writes_dword(0) && d.wf_size <= cu.vgpr_storage_lane_count()) {
-    auto *dst = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(d.dst_reg_base));
-    const uint32_t shift = d.d16_hi ? 16 : 0;
-    const uint32_t preserve = (d.d16_hi || d.d16_lo) && !cu.sram_ecc() ? ~(0xffffu << shift) : 0u;
-    for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-      uint16_t halfword;
-      std::memcpy(&halfword, d.response_data.data() + lane * sizeof(halfword), sizeof(halfword));
-      const uint32_t retained = preserve ? (dst[lane] & preserve) : 0;
-      dst[lane] = retained | (static_cast<uint32_t>(halfword) << shift);
-    }
-    return MemoryAccessCompletion::Complete;
-  }
-  // Performance-only fast path for ordinary dword loads. The general completion
-  // path below remains authoritative for atomics, conversions, and partial-register
-  // writes. Ownership is validated above for ordinary loads and per DWORD for
-  // blocks, so this path can use one raw pointer per written register. Memory completion is VM
-  // bookkeeping and deliberately has no instruction-side observation to preserve.
   if (!is_atomic && d.elem_size == sizeof(uint32_t) && !d.sign_extend && !d.d16_hi && !d.d16_lo) {
     for (uint32_t i = 0; i < vgpr_count; ++i) {
       if (!writes_dword(i))
@@ -2163,33 +2181,43 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
   // once a deferred request has been prepared.
   MemoryIngressAdmission ingress;
   bool local_range_admitted = false;
-  if (local_range_handler_ && request_lanes && !swizzled_lanes && d.atomic_op == AtomicOp::NONE &&
+  if (local_range_handler_ && request_lanes && d.atomic_op == AtomicOp::NONE &&
       d.translated.access && d.translated.access->info().legacy_cache_compatible &&
       !d.translated.peer_data_route && d.translated.requests.empty()) {
     uint64_t begin = UINT64_MAX, last = 0;
-    if (request_lanes == UINT64_MAX || request_lanes == UINT32_MAX) {
-      const unsigned lanes = request_lanes == UINT64_MAX ? 64 : 32;
+    const uint64_t box_lanes = request_lanes & ~swizzled_lanes;
+    if (box_lanes == UINT64_MAX || box_lanes == UINT32_MAX) {
+      const unsigned lanes = box_lanes == UINT64_MAX ? 64 : 32;
       for (unsigned lane = 0; lane < lanes; ++lane) {
         begin = std::min(begin, d.per_lane_addr[lane]);
         last = std::max(last, d.per_lane_addr[lane]);
       }
     } else {
-      for (uint64_t mask = request_lanes; mask; mask &= mask - 1) {
+      for (uint64_t mask = box_lanes; mask; mask &= mask - 1) {
         const uint64_t address = d.per_lane_addr[std::countr_zero(mask)];
         begin = std::min(begin, address);
         last = std::max(last, address);
       }
     }
     const uint64_t bytes = uint64_t{d.elem_size} * d.num_elems;
+    uint64_t end = box_lanes && bytes <= UINT64_MAX - last ? last + bytes : 0;
+    bool wrapped = box_lanes && bytes > UINT64_MAX - last;
+    // Interleaved private lanes reach beyond their first element's address.
+    if (swizzled_lanes)
+      d.for_each_swizzled_span(swizzled_lanes, [&](uint64_t address, uint32_t, uint32_t size) {
+        wrapped |= size > UINT64_MAX - address;
+        begin = std::min(begin, address);
+        end = std::max(end, address + size);
+      });
     // Bound speculation across inactive gaps in a strided wave. One grant and
     // a few shared local extents prove a box within an allocation; the
     // exact-lane path below handles wider requests without probing
     // unrequested pages.
     constexpr uint64_t page = IdentityAddressSpaceTranslator::kPageSize;
-    if (bytes && bytes <= UINT64_MAX - last && last + bytes - begin <= (uint64_t{1} << 16) * page) {
+    if (bytes && !wrapped && begin < end && end - begin <= (uint64_t{1} << 16) * page) {
       auto local = local_range_handler_(
           wf.process_id(), *d.translated.access,
-          {begin, last + bytes - begin, d.is_load ? VmAccessKind::Read : VmAccessKind::Write});
+          {begin, end - begin, d.is_load ? VmAccessKind::Read : VmAccessKind::Write});
       if (local && local->outcome == VmAccessOutcome::Complete) {
         ingress = std::move(*local);
         local_range_admitted = true;
@@ -2309,33 +2337,45 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
 
   // Admitted local requests of a functional, unobserved CU may bypass the
   // cache model; any extent, MTYPE, residency or admission doubt declines
-  // before an effect and the request continues below.
-  if (direct_backing_ && local_range_admitted && plain_lanes && !swizzled_lanes &&
-      !wf.raw_cu().debug_active() && wf.raw_cu().plugin_group().empty() &&
-      std::ranges::all_of(d.element_lane_masks.view(),
-                          [&](uint64_t mask) { return (mask & plain_lanes) == plain_lanes; })) {
+  // before an effect and that lane group continues below.
+  bool response_ready = false, plain_direct = false, swizzled_direct = false;
+  if (direct_backing_ && local_range_admitted && !wf.raw_cu().debug_active() &&
+      wf.raw_cu().plugin_group().empty()) {
     if (const VmDirectBacking *backing = d.translated.access->direct_backing()) {
-      if (d.is_load)
+      if (d.is_load) {
         d.response_data.assign(d.wf_size * d.num_elems * d.elem_size, 0);
-      const DirectVectorRequest request{
-          .addrs = d.per_lane_addr.data(),
-          .lanes = plain_lanes,
-          .wf_size = d.wf_size,
-          .elem_size = d.elem_size,
-          .num_elems = d.num_elems,
-          .instruction_mtype = d.mtype,
-          .transactions = l1_->transaction_policy(),
-          .data = d.is_load ? d.response_data.data() : d.store_data.data(),
-          .is_load = d.is_load,
-      };
-      if (const auto outcome = try_direct_vector_access(request, *backing, *l1_, *l2_))
-        return *outcome;
+        response_ready = true;
+      }
+      uint8_t *data = d.is_load ? d.response_data.data() : d.store_data.data();
+      if (swizzled_lanes)
+        swizzled_direct = try_direct_swizzled_access(d, swizzled_lanes, data, *backing, *l1_,
+                                                     *l2_) == VmAccessOutcome::Complete;
+      if (plain_lanes && std::ranges::all_of(d.element_lane_masks.view(), [&](uint64_t mask) {
+            return (mask & plain_lanes) == plain_lanes;
+          })) {
+        const DirectVectorRequest request{
+            .addrs = d.per_lane_addr.data(),
+            .lanes = plain_lanes,
+            .wf_size = d.wf_size,
+            .elem_size = d.elem_size,
+            .num_elems = d.num_elems,
+            .instruction_mtype = d.mtype,
+            .transactions = l1_->transaction_policy(),
+            .data = data,
+            .is_load = d.is_load,
+        };
+        plain_direct =
+            try_direct_vector_access(request, *backing, *l1_, *l2_) == VmAccessOutcome::Complete;
+      }
+      if ((!swizzled_lanes || swizzled_direct) && (!plain_lanes || plain_direct))
+        return VmAccessOutcome::Complete;
     }
   }
 
   if (d.is_load) {
-    d.response_data.assign(d.wf_size * d.num_elems * d.elem_size, 0);
-    if (swizzled_lanes) {
+    if (!response_ready)
+      d.response_data.assign(d.wf_size * d.num_elems * d.elem_size, 0);
+    if (swizzled_lanes && !swizzled_direct) {
       const VmAccessOutcome outcome = l1_->load(
           d.per_lane_addr.data(), swizzled_lanes, d.elem_size, d.num_elems, d.response_data.data(),
           d.mtype, d.non_temporal, d.request_force_l1_bypass, d.wf_size, wf.process_id(), stride,
@@ -2343,7 +2383,7 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     }
-    if (plain_lanes) {
+    if (plain_lanes && !plain_direct) {
       const VmAccessOutcome outcome = l1_->load(
           d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems, d.response_data.data(),
           d.mtype, d.non_temporal, d.request_force_l1_bypass, d.wf_size, wf.process_id(), 0,
@@ -2352,7 +2392,7 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
         return outcome;
     }
   } else {
-    if (swizzled_lanes) {
+    if (swizzled_lanes && !swizzled_direct) {
       const VmAccessOutcome outcome =
           l1_->store(d.per_lane_addr.data(), swizzled_lanes, d.elem_size, d.num_elems,
                      d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(),
@@ -2362,7 +2402,7 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     }
-    if (plain_lanes) {
+    if (plain_lanes && !plain_direct) {
       const VmAccessOutcome outcome =
           l1_->store(d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems,
                      d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(), 0,
@@ -2644,24 +2684,15 @@ LocalMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
     auto &cu = wf.raw_cu();
     const uint32_t vgpr_count = d.ds2_destination_vgpr_count();
     // Both destination ranges were validated before the first writeback.
-    // As in the ordinary dword-load path, VM completion does not emit an
-    // instruction-side register observation. Resolve storage once per register.
-    if (d.atomic_op == AtomicOp::NONE && !d.lds_stack_inputs && d.num_elems == 1 &&
-        (d.elem_size == 4 || d.elem_size == 8) && vgpr_count == d.elem_size / 4 &&
-        d.wf_size <= cu.vgpr_storage_lane_count()) {
-      const uint64_t wave_mask = d.wf_size == 64 ? ~uint64_t{0} : (uint64_t{1} << d.wf_size) - 1;
-      const uint64_t write_mask = d.lane_mask & wave_mask;
-      if (write_mask) {
-        for (uint32_t i = 0; i < vgpr_count; ++i) {
-          auto *destination =
-              reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(d.ds2_dst_reg_base + i));
-          for (uint64_t lanes = write_mask; lanes; lanes &= lanes - 1) {
-            const uint32_t lane = std::countr_zero(lanes);
-            std::memcpy(&destination[lane], &d.ds2_response_data[lane * d.elem_size + i * 4], 4);
-          }
-        }
-      }
-    } else {
+    // Two-address loads and returning atomics are b32 or b64, one element per
+    // lane, written as plain dwords (the loop below neither extends nor merges
+    // d16 halves), which the shared writeback does a wave at a time. LDS stack
+    // inputs return one register whatever their element count.
+    const bool shared = !d.lds_stack_inputs && d.num_elems == 1 && d.elem_size >= 4 &&
+                        vgpr_count == d.elem_size / 4;
+    if (!shared ||
+        !write_back_response(d, cu, d.ds2_dst_reg_base, d.ds2_response_data, d.lane_mask,
+                             vgpr_writeback::format_of(d.elem_size, 1, false, false, false))) {
       for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
         if (!(d.lane_mask & (1ULL << lane)))
           continue;
