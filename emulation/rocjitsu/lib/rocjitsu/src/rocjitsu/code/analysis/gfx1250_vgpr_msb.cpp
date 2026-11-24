@@ -24,18 +24,21 @@ namespace rocjitsu {
 
 bool may_change_vgpr_msb(const Instruction &instruction, rocjitsu::IsaFamily arch,
                          bool setreg_vgpr_msb_fixup) {
-  if (arch != rocjitsu::IsaFamily::Cdna5)
+  if (arch != rocjitsu::IsaFamily::Cdna5) {
     return false;
-  if (instruction.mnemonic() == "s_set_vgpr_msb")
+  }
+  if (instruction.mnemonic() == "s_set_vgpr_msb") {
     return true;
-  if (instruction.mnemonic() != "s_setreg_b32" && instruction.mnemonic() != "s_setreg_imm32_b32")
+  }
+  if (instruction.mnemonic() != "s_setreg_b32" && instruction.mnemonic() != "s_setreg_imm32_b32") {
     return false;
+  }
   const Operand *hwreg = instruction.dst_operand(0);
-  if (hwreg == nullptr)
+  if (hwreg == nullptr) {
     return true;
+  }
   const uint16_t encoding = static_cast<uint16_t>(hwreg->encoding_value());
-  return (setreg_vgpr_msb_fixup &&
-          amdgpu::decode_vgpr_msb_hwreg(encoding).id == amdgpu::MODE_HWREG) ||
+  return (setreg_vgpr_msb_fixup && amdgpu::decode_hwreg_slice(encoding).id == amdgpu::MODE_HWREG) ||
          amdgpu::hwreg_slice_overlaps_vgpr_msb(encoding);
 }
 
@@ -98,8 +101,9 @@ struct VgprMsbState {
                                const amdgpu::VgprMsbBanks &incoming) {
   bool changed = false;
   for (size_t i = 0; i < destination.size(); ++i) {
-    if (destination[i] == incoming[i])
+    if (destination[i] == incoming[i]) {
       continue;
+    }
     if (destination[i].has_value()) {
       destination[i] = std::nullopt;
       changed = true;
@@ -110,8 +114,9 @@ struct VgprMsbState {
 
 /// @brief Join @p incoming into @p destination.
 [[nodiscard]] bool merge_state(VgprMsbState &destination, const VgprMsbState &incoming) {
-  if (!incoming.reachable)
+  if (!incoming.reachable) {
     return false;
+  }
   if (!destination.reachable) {
     destination = incoming;
     return true;
@@ -140,8 +145,9 @@ struct VgprMsbState {
 /// @brief Read a 32-bit little-endian word from the .text image at @p offset.
 /// @returns nullopt when the four bytes are not fully present.
 [[nodiscard]] std::optional<uint32_t> text_word_at(std::span<const uint8_t> text, uint64_t offset) {
-  if (text.empty() || offset + sizeof(uint32_t) > text.size())
+  if (text.empty() || offset + sizeof(uint32_t) > text.size()) {
     return std::nullopt;
+  }
   uint32_t word = 0;
   std::memcpy(&word, text.data() + offset, sizeof(uint32_t));
   return word;
@@ -153,8 +159,9 @@ void transfer_instruction(VgprMsbState &state, const Instruction &inst,
   const amdgpu::VgprMsbBanks incoming_armed_banks = state.armed_banks;
   state.hazard = AdjacentSetVgprMsbHazard::Clear;
   state.armed_banks.fill(std::nullopt);
-  if (!may_change_vgpr_msb(inst, rocjitsu::IsaFamily::Cdna5, setreg_vgpr_msb_fixup))
+  if (!may_change_vgpr_msb(inst, rocjitsu::IsaFamily::Cdna5, setreg_vgpr_msb_fixup)) {
     return;
+  }
   if (inst.opcode() == cdna5::kSSetVgprMsbSopp &&
       inst.amdgpu_operation() == amdgpu::Operation::S_SET_VGPR_MSB) {
     if (setreg_vgpr_msb_fixup && incoming_hazard == AdjacentSetVgprMsbHazard::Armed) {
@@ -179,15 +186,16 @@ void transfer_instruction(VgprMsbState &state, const Instruction &inst,
   }
 
   if (inst.amdgpu_operation() != amdgpu::Operation::S_SETREG_B32 &&
-      inst.amdgpu_operation() != amdgpu::Operation::S_SETREG_IMM32_B32)
+      inst.amdgpu_operation() != amdgpu::Operation::S_SETREG_IMM32_B32) {
     return;
+  }
   const Operand *hwreg_operand = inst.dst_operand(0);
   if (hwreg_operand == nullptr) {
     state.banks.fill(std::nullopt);
     return;
   }
   const uint16_t hwreg = static_cast<uint16_t>(hwreg_operand->encoding_value());
-  const bool writes_mode = amdgpu::decode_vgpr_msb_hwreg(hwreg).id == amdgpu::MODE_HWREG;
+  const bool writes_mode = amdgpu::decode_hwreg_slice(hwreg).id == amdgpu::MODE_HWREG;
 
   if (setreg_vgpr_msb_fixup && writes_mode) {
     if (inst.amdgpu_operation() == amdgpu::Operation::S_SETREG_B32) {
@@ -240,12 +248,14 @@ public:
                                                    amdgpu::VgprMsbRole role) const {
     // Operands tagged None are explicitly outside VGPR_MSB addressing. Their
     // encoded low byte therefore always names bank zero.
-    if (role == amdgpu::VgprMsbRole::None)
+    if (role == amdgpu::VgprMsbRole::None) {
       return uint8_t{0};
+    }
     const auto role_id = role_index(role);
     const auto state = before_.find(&inst);
-    if (!role_id || state == before_.end() || !state->second.reachable)
+    if (!role_id || state == before_.end() || !state->second.reachable) {
       return std::nullopt;
+    }
     return state->second.banks[*role_id];
   }
 
@@ -256,31 +266,38 @@ private:
     std::unordered_map<const BasicBlock *, size_t> block_index;
     block_index.reserve(blocks.size());
     for (size_t i = 0; i < blocks.size(); ++i) {
-      if (blocks[i] != nullptr)
+      if (blocks[i] != nullptr) {
         block_index.emplace(blocks[i], i);
+      }
     }
     const auto entry_it = block_index.find(entry);
-    if (entry_it == block_index.end())
+    if (entry_it == block_index.end()) {
       return;
+    }
 
     std::vector<std::vector<size_t>> successors(blocks.size());
     auto add_edge = [&](const BasicBlock *from, const BasicBlock *to) {
       const auto from_it = block_index.find(from);
       const auto to_it = block_index.find(to);
-      if (from_it == block_index.end() || to_it == block_index.end())
+      if (from_it == block_index.end() || to_it == block_index.end()) {
         return;
+      }
       auto &edges = successors[from_it->second];
-      if (std::ranges::find(edges, to_it->second) == edges.end())
+      if (std::ranges::find(edges, to_it->second) == edges.end()) {
         edges.push_back(to_it->second);
+      }
     };
     for (BasicBlock *block : blocks) {
-      if (block == nullptr)
+      if (block == nullptr) {
         continue;
-      for (BasicBlock *successor : block->successors())
+      }
+      for (BasicBlock *successor : block->successors()) {
         add_edge(block, successor);
+      }
     }
-    for (const ScopedCfgEdge &edge : extra_edges)
+    for (const ScopedCfgEdge &edge : extra_edges) {
       add_edge(edge.from, edge.to);
+    }
 
     std::vector<VgprMsbState> in(blocks.size());
     std::vector<VgprMsbState> out(blocks.size());
@@ -289,8 +306,9 @@ private:
     std::deque<size_t> worklist;
     std::vector<bool> queued(blocks.size(), false);
     auto enqueue = [&](size_t index) {
-      if (index >= queued.size() || queued[index])
+      if (index >= queued.size() || queued[index]) {
         return;
+      }
       queued[index] = true;
       worklist.push_back(index);
     };
@@ -300,8 +318,9 @@ private:
     // so the fixed point below would otherwise never give it a state.
     for (BasicBlock *additional : additional_entries) {
       const auto it = block_index.find(additional);
-      if (it == block_index.end())
+      if (it == block_index.end()) {
         continue;
+      }
       (void)merge_state(in[it->second], entry_state());
       enqueue(it->second);
     }
@@ -311,18 +330,22 @@ private:
       worklist.pop_front();
       queued[index] = false;
       BasicBlock *block = blocks[index];
-      if (block == nullptr || !in[index].reachable)
+      if (block == nullptr || !in[index].reachable) {
         continue;
+      }
 
       VgprMsbState state = in[index];
-      for (const Instruction &inst : block->instructions())
+      for (const Instruction &inst : block->instructions()) {
         transfer_instruction(state, inst, text_, setreg_vgpr_msb_fixup_);
-      if (state == out[index])
+      }
+      if (state == out[index]) {
         continue;
+      }
       out[index] = state;
       for (size_t successor : successors[index]) {
-        if (merge_state(in[successor], state))
+        if (merge_state(in[successor], state)) {
           enqueue(successor);
+        }
       }
     }
 
@@ -330,8 +353,9 @@ private:
     // reached, so queries never observe a transient predecessor ordering.
     for (size_t index = 0; index < blocks.size(); ++index) {
       BasicBlock *block = blocks[index];
-      if (block == nullptr || !in[index].reachable)
+      if (block == nullptr || !in[index].reachable) {
         continue;
+      }
       VgprMsbState state = in[index];
       for (const Instruction &inst : block->instructions()) {
         before_.emplace(&inst, state);

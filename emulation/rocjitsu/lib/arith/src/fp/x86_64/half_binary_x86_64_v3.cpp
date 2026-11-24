@@ -84,7 +84,7 @@ __m256 add(__m256 x, __m256 y, unsigned rounding) {
 // Requires the named CPU features and validated instruction controls.
 template <Binary Op, bool Packed>
 void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
-                           uint32_t *d, const uint32_t *a, const uint32_t *b, bool compatibility,
+                           uint32_t *d, const uint32_t *a, const uint32_t *b, bool exact,
                            bool preserve_input_snan, HalfOutputPolicy output) {
   const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
   constexpr bool arithmetic = rocjitsu::arith::is_arithmetic(Op);
@@ -163,7 +163,7 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
           tiny = rounds_below(value, 0x38800000, rounding);
         }
       }
-      if (arithmetic && compatibility) {
+      if (arithmetic && exact) {
         // Preserve source priority and the explicit subtraction sign flip on NaNs.
         value = _mm256_blendv_ps(value, y, _mm256_cmp_ps(y, y, _CMP_UNORD_Q));
         value = _mm256_blendv_ps(value, x, _mm256_cmp_ps(x, x, _CMP_UNORD_Q));
@@ -173,7 +173,7 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
           // OMOD turns a tiny result into +0, before Compatibility rounds the others.
           value = _mm256_andnot_ps(_mm256_castsi256_ps(tiny), value);
         }
-        if (arithmetic && compatibility && !Packed && !output.scale_before_rounding) {
+        if (arithmetic && exact && !Packed && !output.scale_before_rounding) {
           // Narrow and widen in registers; ordinary Loose needs neither conversion.
           auto narrowed = half_narrow(value, flags & RJ_ARITH_FP16_OVFL, rounding);
           value = _mm256_cvtph_ps(_mm_packus_epi32(_mm256_castsi256_si128(narrowed),

@@ -44,8 +44,9 @@ DecodeResult decode_gfx11_mimg(Decoder &decoder, Builder builder, uint16_t opcod
                                                   .srsrc = encoding.srsrc,
                                                   .tfe = encoding.tfe,
                                                   .lwe = encoding.lwe});
-  if (!encoding.nsa)
+  if (!encoding.nsa) {
     return decoder.decode(base.data(), emit_error);
+  }
   const std::array<uint32_t, 3> words{base[0], base[1], encoding.nsa_word};
   return decoder.decode(words.data(), emit_error);
 }

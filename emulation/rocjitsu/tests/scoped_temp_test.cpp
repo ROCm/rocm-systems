@@ -76,8 +76,9 @@ TEST(ScopedTempFileTest, ReportsWriteFlushFailure) {
   std::filesystem::create_symlink("/dev/full", file.path(), error);
   ASSERT_FALSE(error) << error.message();
   const int probe = ::open(file.path().c_str(), O_WRONLY | O_CLOEXEC);
-  if (probe == -1)
+  if (probe == -1) {
     GTEST_SKIP() << "/dev/full is unavailable for writing";
+  }
   ASSERT_EQ(::close(probe), 0);
   EXPECT_FALSE(file.write("cannot flush to a full device"));
 }

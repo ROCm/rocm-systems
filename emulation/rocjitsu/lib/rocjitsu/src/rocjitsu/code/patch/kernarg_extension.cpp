@@ -11,11 +11,13 @@ namespace rocjitsu {
 namespace {
 
 [[nodiscard]] std::optional<uint32_t> align_up_u32(uint32_t value, uint32_t alignment) {
-  if (!std::has_single_bit(alignment))
+  if (!std::has_single_bit(alignment)) {
     return std::nullopt;
+  }
   const uint32_t mask = alignment - 1u;
-  if (value > std::numeric_limits<uint32_t>::max() - mask)
+  if (value > std::numeric_limits<uint32_t>::max() - mask) {
     return std::nullopt;
+  }
   return (value + mask) & ~mask;
 }
 
@@ -30,18 +32,21 @@ make_kernarg_extension_layout(uint32_t original_kernarg_size,
   // The saved original pointer is part of the extension area. Keep it naturally
   // aligned so the entry prologue can load it with one scalar dwordx2 SMEM op.
   auto cursor = align_up_u32(original_kernarg_size, alignof(uint64_t));
-  if (!cursor)
+  if (!cursor) {
     return std::nullopt;
+  }
   layout.original_kernarg_pointer_offset = *cursor;
-  if (*cursor > std::numeric_limits<uint32_t>::max() - sizeof(uint64_t))
+  if (*cursor > std::numeric_limits<uint32_t>::max() - sizeof(uint64_t)) {
     return std::nullopt;
+  }
   *cursor += static_cast<uint32_t>(sizeof(uint64_t));
 
   layout.payload_offsets.reserve(payloads.size());
   for (const KernargExtensionPayloadLayout &payload : payloads) {
     cursor = align_up_u32(*cursor, payload.alignment);
-    if (!cursor || *cursor > std::numeric_limits<uint32_t>::max() - payload.size)
+    if (!cursor || *cursor > std::numeric_limits<uint32_t>::max() - payload.size) {
       return std::nullopt;
+    }
     layout.payload_offsets.push_back(*cursor);
     *cursor += payload.size;
   }
@@ -55,14 +60,18 @@ bool write_kernarg_extension_wrapper(std::span<uint8_t> wrapper,
                                      const void *original_kernarg,
                                      uint64_t original_kernarg_pointer,
                                      std::span<const KernargExtensionPayloadWrite> payloads) {
-  if (wrapper.size() != layout.wrapper_size)
+  if (wrapper.size() != layout.wrapper_size) {
     return false;
-  if (payloads.size() != layout.payload_offsets.size())
+  }
+  if (payloads.size() != layout.payload_offsets.size()) {
     return false;
-  if (layout.wrapper_size < sizeof(uint64_t))
+  }
+  if (layout.wrapper_size < sizeof(uint64_t)) {
     return false;
-  if (layout.original_kernarg_size != 0 && original_kernarg == nullptr)
+  }
+  if (layout.original_kernarg_size != 0 && original_kernarg == nullptr) {
     return false;
+  }
   // KernargExtensionLayout is public plain data, so a forged/inconsistent layout
   // can reach here without going through make_kernarg_extension_layout. Reject a
   // copy that would overrun the wrapper or overlap the saved original pointer
@@ -77,20 +86,24 @@ bool write_kernarg_extension_wrapper(std::span<uint8_t> wrapper,
   }
 
   std::memset(wrapper.data(), 0, wrapper.size());
-  if (layout.original_kernarg_size != 0)
+  if (layout.original_kernarg_size != 0) {
     std::memcpy(wrapper.data(), original_kernarg, layout.original_kernarg_size);
+  }
   std::memcpy(wrapper.data() + layout.original_kernarg_pointer_offset, &original_kernarg_pointer,
               sizeof(original_kernarg_pointer));
 
   for (size_t i = 0; i < payloads.size(); ++i) {
     const KernargExtensionPayloadWrite &payload = payloads[i];
-    if (payload.size == 0)
+    if (payload.size == 0) {
       continue;
-    if (payload.data == nullptr)
+    }
+    if (payload.data == nullptr) {
       return false;
+    }
     const uint32_t offset = layout.payload_offsets[i];
-    if (offset > layout.wrapper_size || payload.size > layout.wrapper_size - offset)
+    if (offset > layout.wrapper_size || payload.size > layout.wrapper_size - offset) {
       return false;
+    }
     std::memcpy(wrapper.data() + offset, payload.data, payload.size);
   }
   return true;

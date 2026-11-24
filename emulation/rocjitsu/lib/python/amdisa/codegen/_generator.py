@@ -978,13 +978,13 @@ class CodeGenerator:
             stmts.append('flags_ |= ' + ' | '.join(flags) + ';')
         if 'lds' in fields and kind == 'Load':
             if addressing in ('Buffer', 'TypedBuffer'):
-                stmts.append('if (inst_.lds) flags_ |= MEMORY_TO_LDS;')
+                stmts.append('if (inst_.lds) { flags_ |= MEMORY_TO_LDS; }')
             elif sem is not None and self._legacy_flat_lds_load(sem):
                 # The same encoded bit enables scratch VADDR on CDNA3/4.
                 # Reuse the execution predicate for the legacy LDS meaning.
                 stmts.append(
-                    'if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) '
-                    'flags_ |= MEMORY_TO_LDS;'
+                    'if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) { '
+                    'flags_ |= MEMORY_TO_LDS; }'
                 )
         return stmts
 
@@ -1808,7 +1808,9 @@ class CodeGenerator:
         """Render an opcode membership predicate for an encoding feature."""
         lines = [f'bool {inst_enc.fmt_enc_name}::{name}() const {{']
         if selector_condition:
-            lines.extend((f'  if (!({selector_condition}))', '    return false;'))
+            lines.extend(
+                (f'  if (!({selector_condition})) {{', '    return false;', '  }')
+            )
         opcode_max = (
             (1 << inst_enc.op_field_bit_cnt) - 1 if inst_enc.op_field_bit_cnt else None
         )
@@ -7004,11 +7006,6 @@ class CodeGenerator:
               uint64_t hi;
             };
 
-            struct PkU32Pair {
-              uint32_t lo;
-              uint32_t hi;
-            };
-
             uint32_t packed_vgpr_physical_base(const Operand &operand,
                                                const amdgpu::Wavefront &wf) {
               const auto offset = Isa::resolved_vgpr_offset(
@@ -7026,19 +7023,6 @@ class CodeGenerator:
 
               const uint32_t base = packed_vgpr_physical_base(operand, wf);
               return {lo, amdgpu::RegisterAccess(wf).read_vgpr64(base + 2, lane)};
-            }
-
-            PkU32Pair read_pk_u32_pair(const Operand &operand, const amdgpu::Wavefront &wf,
-                                       uint32_t lane) {
-              // Packed 32-bit scalar inputs replicate one word, including special
-              // scalar registers. Only VGPR inputs supply two independent words.
-              const auto reg = operand.to_register_ref();
-              if (!reg || reg->cls != RegClass::VGPR) {
-                const uint32_t value = amdgpu::RegisterAccess(wf).read_lane(operand, lane);
-                return {value, value};
-              }
-              const auto pair = amdgpu::RegisterAccess(wf).read_lane_pair32(operand, lane);
-              return {pair.lo, pair.hi};
             }
 
             void write_pk_u64_pair(const Operand &operand, amdgpu::Wavefront &wf, uint32_t lane,
@@ -7917,7 +7901,6 @@ class CodeGenerator:
                 f'{first}, {second}, {third});'
             )
 
-        from amdisa.codegen.execute.scalar_fp import gen_scalar_fp
         from amdisa.codegen.execute.rj_arith_scalar import (
             FLOAT_ARITHMETIC,
             FLOAT_COMPARISONS,
@@ -7926,15 +7909,18 @@ class CodeGenerator:
         )
         from amdisa.codegen.execute.rj_arith_float import RjArithBody
 
-        if ctx.arch_name == 'rdna4' and inst.name in (
-            FLOAT_ARITHMETIC.keys() | FLOAT_COMPARISONS.keys() | FLOAT_ROUNDING.keys()
+        if ctx.arch_name == 'rdna3_5' or (
+            ctx.arch_name == 'rdna4'
+            and inst.name
+            in (
+                FLOAT_ARITHMETIC.keys()
+                | FLOAT_COMPARISONS.keys()
+                | FLOAT_ROUNDING.keys()
+            )
         ):
             scalar_body = gen_scalar(ctx)
             if scalar_body is not None:
                 return RjArithBody(scalar_body)
-        scalar_fp_body = gen_scalar_fp(ctx)
-        if scalar_fp_body is not None:
-            return scalar_fp_body
 
         if ctx.arch_name == 'cdna1':
             if inst.name.startswith('V_INTERP_'):
@@ -13343,13 +13329,13 @@ class CodeGenerator:
                             # GPUMEM pseudo-operand remains its sole fieldless
                             # memory source.
                             conditional_src_body.append(
-                                'if (inst_.seg != 2) '
-                                'src_operands_[num_src_++] = &flat_scratch;'
+                                'if (inst_.seg != 2) { '
+                                'src_operands_[num_src_++] = &flat_scratch; }'
                             )
                         elif opnd.is_input and _is_optional_vflat_saddr:
                             conditional_src_body.append(
-                                f'if (inst_.saddr != {self._saddr_null_expr(enc.enc_name)}) '
-                                'src_operands_[num_src_++] = &saddr;'
+                                f'if (inst_.saddr != {self._saddr_null_expr(enc.enc_name)}) {{ '
+                                'src_operands_[num_src_++] = &saddr; }'
                             )
                         elif self._output_operand_is_also_source(inst, opnd):
                             # Read/write outputs (FMAC/dot/swap accumulators,
@@ -17094,9 +17080,8 @@ class CodeGenerator:
                         # Failure-only stubs need no DPP/SDWA setup or cleanup.
                         # Conditional rejection retains the modifier wrapper.
                         body_unimplemented = self._is_unimplemented_execute_stub(body)
-                        can_share = (
-                            self._can_share_execute(inst.mnemonic, inst, enc.enc_name)
-                            and 'scalar_fp::' not in body
+                        can_share = self._can_share_execute(
+                            inst.mnemonic, inst, enc.enc_name
                         )
                         # Ops with an arch-portable SIMD fast-path probe must
                         # route through the shared execute template even when
@@ -18100,7 +18085,11 @@ class CodeGenerator:
                         )
                     )
                 from amdisa.codegen.execute.rj_arith_graphics import INTERP_NAMES
-                from amdisa.codegen.execute.rj_arith_compare import COMPARE_NAMES
+                from amdisa.codegen.execute.rj_arith_compare import (
+                    COMPARE_NAMES,
+                    CLASS_COMPARISONS,
+                    supports_integer_compare,
+                )
 
                 if (
                     self.isa_spec.arch_name in ('rdna1', 'rdna2')
@@ -18118,15 +18107,25 @@ class CodeGenerator:
                         ('rocjitsu/isa/arch/amdgpu/cdna3/valu_status.h', False)
                     )
 
-                if self.isa_spec.arch_name in (
-                    'rdna2',
-                    'rdna3',
-                    'rdna3_5',
-                    'rdna4',
-                    'cdna3',
-                    'cdna4',
-                    'cdna5',
-                ) and any(i.name in COMPARE_NAMES for i in all_insts):
+                if (
+                    self.isa_spec.arch_name
+                    in (
+                        'rdna2',
+                        'rdna3',
+                        'rdna3_5',
+                        'rdna4',
+                        'cdna3',
+                        'cdna4',
+                        'cdna5',
+                    )
+                    and any(i.name in COMPARE_NAMES for i in all_insts)
+                ) or (
+                    any(
+                        supports_integer_compare(self.isa_spec.arch_name, i.name)
+                        for i in all_insts
+                    )
+                    or any(i.name in CLASS_COMPARISONS for i in all_insts)
+                ):
                     cpp_includes.append(
                         (
                             'rocjitsu/isa/arch/amdgpu/shared/rj_arith_compare_exec.h',
@@ -18463,6 +18462,18 @@ class CodeGenerator:
                         )
                     )
 
+                if any(
+                    i.name
+                    in ('V_PK_ADD_NC_U64', 'V_PK_SUB_NC_U64', 'V_PK_LSHL_ADD_U64')
+                    for i in all_insts
+                ):
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/rj_arith_packed_u64_exec.h',
+                            False,
+                        )
+                    )
+
                 if self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5') and any(
                     i.name in ('V_PK_FMA_F32', 'V_PK_ADD_F32', 'V_PK_MUL_F32')
                     for i in all_insts
@@ -18552,7 +18563,7 @@ class CodeGenerator:
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
                     )
-                if self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5') and any(
+                if any(
                     i.name
                     in CONVERSION32_NAMES | {'V_CVT_RPI_I32_F32', 'V_CVT_FLR_I32_F32'}
                     for i in all_insts
@@ -18561,8 +18572,7 @@ class CodeGenerator:
                         ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
                     )
                 if (
-                    self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5')
-                    and any((i.name in CONVERSION64_NAMES for i in all_insts))
+                    any((i.name in CONVERSION64_NAMES for i in all_insts))
                     or (
                         self.isa_spec.arch_name in ('rdna3', 'rdna4')
                         and any((i.name in FLOAT_NAMES for i in all_insts))
@@ -18735,15 +18745,6 @@ class CodeGenerator:
                     cpp_includes.append(
                         (
                             'rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h',
-                            False,
-                        )
-                    )
-                if any(
-                    'scalar_fp::' in str(impl) for impl in class_func_impls.execution
-                ):
-                    cpp_includes.append(
-                        (
-                            'rocjitsu/isa/arch/amdgpu/shared/scalar_fp.h',
                             False,
                         )
                     )
@@ -19845,11 +19846,6 @@ class CodeGenerator:
                 ),
                 prefixed_body,
             )
-            if mnemonic.rsplit('_', 1)[0].upper() in FLUSH_NEAREST_F32_OPS:
-                # These mappings ignore guest rounding. Keep output scaling and clamp
-                # under the saved environment too: OMOD can overflow or touch
-                # signaling NaNs, and SIMD clamp compares NaN results.
-                lines.append('  fp_mode::ScopedEnvironment environment(0);')
             alu_classifiers = {
                 'v_mul_f32_vop2': 'classify_mul_f32_vop2',
                 'v_mul_f32_vop3': 'classify_mul_f32_vop3',
@@ -20931,8 +20927,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 mask_init = ''
                 if packed:
                     mask_init = (
-                        f'if (size_bits == 16 && ({condition})) '
-                        'set_register_byte_mask((encoding_value & 128) ? 0xc : 0x3);'
+                        f'if (size_bits == 16 && ({condition})) {{ '
+                        'set_register_byte_mask((encoding_value & 128) ? 0xc : 0x3); }'
                     )
                 decoded_vector.append(
                     f'    if (encoding_value >= {opsel_name}::{pattern.min_enum} && '
@@ -20940,8 +20936,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     f'initialize_vgpr_reference({index});{mask_init}}}\n'
                 )
             validation = (
-                f'    if (!({valid_expr}))\n'
+                f'    if (!({valid_expr})) {{\n'
                 f'      defer_encoding_error(EncodingError::{error});\n'
+                '    }\n'
                 if canonical
                 else ''
             )

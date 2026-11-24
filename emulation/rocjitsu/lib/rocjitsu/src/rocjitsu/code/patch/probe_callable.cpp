@@ -32,8 +32,9 @@ namespace {
 // probe_symbol.cpp; both want the shared ELF visitor noted there.
 template <typename T>
 [[nodiscard]] bool read_pod(std::span<const uint8_t> image, uint64_t offset, T *out) {
-  if (!detail::fits_in_bounds(offset, sizeof(T), image.size()))
+  if (!detail::fits_in_bounds(offset, sizeof(T), image.size())) {
     return false;
+  }
   std::memcpy(out, image.data() + offset, sizeof(T));
   return true;
 }
@@ -66,10 +67,12 @@ template <typename T>
     }
     const bool is_rela = shdr.sh_type == SHT_RELA;
     const bool is_rel = shdr.sh_type == SHT_REL;
-    if (!is_rela && !is_rel)
+    if (!is_rela && !is_rel) {
       continue;
-    if (shdr.sh_info != 0 && shdr.sh_info != sym.section_index)
+    }
+    if (shdr.sh_info != 0 && shdr.sh_info != sym.section_index) {
       continue;
+    }
 
     const uint64_t entsize = is_rela ? sizeof(Elf64_Rela) : sizeof(Elf64_Rel);
     if (shdr.sh_entsize != 0 && shdr.sh_entsize != entsize) {
@@ -134,8 +137,9 @@ bool may_require_cdna5_valu_spacing(const Instruction &inst) {
 
 RegisterSet arg_registers(const ProbeAbi &abi) {
   RegisterSet regs;
-  if (!is_valid_probe_abi(abi) || abi.num_arg_vgprs == 0)
+  if (!is_valid_probe_abi(abi) || abi.num_arg_vgprs == 0) {
     return regs;
+  }
   // Guarded above rather than left to expand(), which floors a zero width at one
   // and would report v[arg_vgpr_base] for a probe passed no arguments at all.
   regs.expand(RegisterRef{RegClass::VGPR, abi.arg_vgpr_base, abi.num_arg_vgprs});
@@ -147,8 +151,9 @@ RegisterSet supplied_registers(const ProbeAbi &abi) {
   // Report nothing rather than guess: a live-in subtraction that excused a
   // register this ABI never committed to writing would excuse the probe reading
   // it cold.
-  if (!is_valid_probe_abi(abi))
+  if (!is_valid_probe_abi(abi)) {
     return regs;
+  }
   regs.expand(probe_link_pair(abi));
   regs |= arg_registers(abi);
   return regs;
@@ -203,8 +208,9 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
     report(error_out, "malformed ELF: section header table out of range");
     return std::nullopt;
   }
-  if (!body_has_relocation(image, ehdr, sym, &has_reloc, error_out))
+  if (!body_has_relocation(image, ehdr, sym, &has_reloc, error_out)) {
     return std::nullopt;
+  }
   if (has_reloc) {
     report(error_out, "probe body has a relocation and is not self-contained");
     return std::nullopt;
@@ -272,7 +278,7 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
     }
     // SGPR restores also use vector instructions through the spill bridge.
     // Widening EXEC cannot make those instructions execute while VSKIP is set.
-    if (may_enable_vskip(*inst, body_bytes, arch)) {
+    if (may_enable_vskip(*inst, body_bytes, arch, w * sizeof(uint32_t))) {
       report(error_out, "probe body may enable VSKIP and suppress the call envelope's restores");
       return std::nullopt;
     }

@@ -323,8 +323,9 @@ private:
              rj_code_target_id_t target);
 
   void note_successor_issue(SuccessorIssue issue) {
-    if (successor_issue_ == SuccessorIssue::None)
+    if (successor_issue_ == SuccessorIssue::None) {
       successor_issue_ = issue;
+    }
   }
 
   void add_instruction(std::unique_ptr<Instruction> inst);

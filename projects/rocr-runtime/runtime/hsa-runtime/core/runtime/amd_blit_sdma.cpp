@@ -475,9 +475,10 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCommand(const void* cmd, size_
   // On agent that does not support platform atomic, we replace it with
   // one or two fence packet(s) to update the signal value. The reason fence
   // is used and not write packet is because the SDMA engine may overlap a
-  // serial copy/write packets.
+  // serial copy/write packets. A signal in device memory loads across the bus,
+  // so only the fences read its value.
   const uint64_t completion_signal_value =
-      static_cast<uint64_t>(out_signal.LoadRelaxed() - 1);
+      platform_atomic_support_ ? 0 : static_cast<uint64_t>(out_signal.LoadRelaxed() - 1);
   const size_t sync_command_size = (platform_atomic_support_)
                                        ? atomic_command_size_
                                        : (completion_signal_value > UINT32_MAX)
@@ -486,10 +487,9 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCommand(const void* cmd, size_
 
   // If the signal is an interrupt signal, we also need to make SDMA engine to
   // send interrupt packet to IH.
+  const uint64_t event_mailbox_ptr = out_signal.signal_.event_mailbox_ptr;
   const size_t interrupt_command_size =
-      (out_signal.signal_.event_mailbox_ptr != 0)
-          ? (fence_command_size_ + trap_command_size_)
-          : 0;
+      (event_mailbox_ptr != 0) ? (fence_command_size_ + trap_command_size_) : 0;
 
   // Add space for acquire or release Hdp flush command
   uint32_t flush_cmd_size = 0;
@@ -640,15 +640,14 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCommand(const void* cmd, size_
   }
 
   // Update mailbox event and send interrupt to IH.
-  if (out_signal.signal_.event_mailbox_ptr != 0) {
-    BuildFenceCommand(command_addr,
-                      reinterpret_cast<uint32_t*>(out_signal.signal_.event_mailbox_ptr),
-                      static_cast<uint32_t>(out_signal.signal_.event_id));
+  if (event_mailbox_ptr != 0) {
+    const uint32_t event_id = out_signal.signal_.event_id;
+    BuildFenceCommand(command_addr, reinterpret_cast<uint32_t*>(event_mailbox_ptr), event_id);
     command_addr += fence_command_size_;
     bytes_written_[wrapped_index] = post_bytes;
     wrapped_index += fence_command_size_;
 
-    BuildTrapCommand(command_addr, out_signal.signal_.event_id);
+    BuildTrapCommand(command_addr, event_id);
     command_addr += trap_command_size_;
     bytes_written_[wrapped_index] = post_bytes;
     wrapped_index += trap_command_size_;
@@ -993,10 +992,9 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitEpilogue(
       ? fence_64b_command_size_
       : (platform_atomic_support_ ? atomic_command_size_ : fence_command_size_);
 
+  const uint64_t event_mailbox_ptr = out_signal.signal_.event_mailbox_ptr;
   const size_t interrupt_command_size =
-      (out_signal.signal_.event_mailbox_ptr != 0)
-          ? (fence_command_size_ + trap_command_size_)
-          : 0;
+      (event_mailbox_ptr != 0) ? (fence_command_size_ + trap_command_size_) : 0;
 
   const uint32_t total_command_size = body_poll_size + gcr_cmd_size +
       total_timestamp_command_size + sync_command_size + interrupt_command_size;
@@ -1068,15 +1066,14 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitEpilogue(
   bytes_written_[wrapped_index] = prior_bytes;
   wrapped_index += sync_command_size;
 
-  if (out_signal.signal_.event_mailbox_ptr != 0) {
-    BuildFenceCommand(command_addr,
-                      reinterpret_cast<uint32_t*>(out_signal.signal_.event_mailbox_ptr),
-                      static_cast<uint32_t>(out_signal.signal_.event_id));
+  if (event_mailbox_ptr != 0) {
+    const uint32_t event_id = out_signal.signal_.event_id;
+    BuildFenceCommand(command_addr, reinterpret_cast<uint32_t*>(event_mailbox_ptr), event_id);
     command_addr += fence_command_size_;
     bytes_written_[wrapped_index] = prior_bytes;
     wrapped_index += fence_command_size_;
 
-    BuildTrapCommand(command_addr, out_signal.signal_.event_id);
+    BuildTrapCommand(command_addr, event_id);
     command_addr += trap_command_size_;
     bytes_written_[wrapped_index] = prior_bytes;
     wrapped_index += trap_command_size_;

@@ -44,7 +44,7 @@ void PM4Packet::InitPM4Header(PM4_TYPE_3_HEADER &header, it_opcode_type opCode) 
 }
 
 void PM4WriteDataPacket::InitPacket(unsigned int *destBuf, void *data) {
-    if (m_FamilyId == FAMILY_GFX125X) {
+    if (m_FamilyId >= FAMILY_GFX125X) {
         PM4WRITE_DATA_GFX125X *pkt;
 
         m_packetSize = offsetof(PM4WRITE_DATA_GFX125X, data) + m_ndw*sizeof(uint32_t);

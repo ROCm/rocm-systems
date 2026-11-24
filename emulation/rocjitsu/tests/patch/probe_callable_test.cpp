@@ -134,8 +134,9 @@ std::vector<uint8_t> make_elf(const std::vector<uint32_t> &body,
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
 
   std::memcpy(image.data() + kTextOffset, body.data(), text_size);
-  if (has_rela)
+  if (has_rela) {
     std::memcpy(image.data() + rela_off, relas.data(), relas.size() * sizeof(Elf64_Rela));
+  }
   std::memcpy(image.data() + shstrtab_off, shstrtab.data(), shstrtab.size());
 
   std::vector<Elf64_Shdr> shdrs(section_count);
@@ -302,6 +303,35 @@ TEST(ProbeCallableTest, RejectsBodyWithCall) {
                                     /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("call"), std::string::npos) << err;
+}
+
+TEST(ProbeCallableTest, RejectsVskipEnablingBodiesAndAcceptsClearControls) {
+  struct Case {
+    std::vector<uint32_t> body;
+    bool accepted;
+  };
+  const std::array<Case, 7> cases = {
+      Case{.body = {0xbf108081u}, .accepted = false},     // s_setvskip 1, 0
+      Case{.body = {0xbf108000u}, .accepted = false},     // s_setvskip s0, 0
+      Case{.body = {0xba000701u, 1u}, .accepted = false}, // s_setreg_imm32_b32 MODE[28], 1
+      Case{.body = {0xb9000701u}, .accepted = false},     // s_setreg_b32 MODE[28], s0
+      Case{.body = {0xbf108080u}, .accepted = true},      // s_setvskip 0, 0
+      Case{.body = {0xba000701u, 0u}, .accepted = true},
+      Case{.body = {0xba000001u, 1u}, .accepted = true}}; // MODE[0] leaves VSKIP unchanged.
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.body.front());
+    std::vector<uint32_t> body = test_case.body;
+    body.push_back(kSSetpcS30S31);
+    const std::vector<uint8_t> image = make_elf(body);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    std::string error;
+    const std::optional<ProbeCallable> callable = build_probe_callable(
+        object, whole_body_symbol(body), rocjitsu::IsaFamily::Cdna2, 0, &error);
+    EXPECT_EQ(callable.has_value(), test_case.accepted) << error;
+    if (!test_case.accepted) {
+      EXPECT_NE(error.find("VSKIP"), std::string::npos) << error;
+    }
+  }
 }
 
 TEST(ProbeCallableTest, RejectsScratchAccess) {

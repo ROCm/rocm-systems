@@ -1,0 +1,21 @@
+{
+    "_comment": "Eight-rank strict single-NVL proxy for an H100 TP4-to-TP4 transport measurement.",
+    "train": {
+        "num_gpus": 4,
+        "tp_size": 4,
+        "cp_size": 1,
+        "ep_size": 1,
+        "pp_size": 1,
+        "fsdp_size": 1,
+        "dp_size": 1
+    },
+    "generation": {
+        "num_gpus": 4,
+        "tp_size": 4,
+        "cp_size": 1,
+        "ep_size": 1,
+        "pp_size": 1,
+        "fsdp_size": 1,
+        "dp_size": 1
+    }
+}

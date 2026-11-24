@@ -38,8 +38,9 @@ inline void append_metadata_integer(std::vector<uint8_t> &bytes, uint32_t value,
     return;
   }
   bytes.push_back(0xce);
-  for (unsigned shift : {24u, 16u, 8u, 0u})
+  for (unsigned shift : {24u, 16u, 8u, 0u}) {
     bytes.push_back(static_cast<uint8_t>(value >> shift));
+  }
 }
 
 inline std::vector<uint8_t> resource_metadata_payload(std::initializer_list<MetadataKernel> kernels,
@@ -81,19 +82,22 @@ inline std::vector<uint8_t> with_metadata_note(const std::vector<uint8_t> &origi
   std::memcpy(note.data(), framing.data(), sizeof(framing));
   note.insert(note.end(), {'A', 'M', 'D', 'G', 'P', 'U', 0, 0});
   note.insert(note.end(), payload.begin(), payload.end());
-  while (note.size() % 4 != 0)
+  while (note.size() % 4 != 0) {
     note.push_back(0);
+  }
   const AmdGpuCodeObject object(original.data(), original.size());
   CodeObjectPatcher patcher(object);
-  if (!patcher.append_nonalloc_section(".note.amdgpu", note, 4))
+  if (!patcher.append_nonalloc_section(".note.amdgpu", note, 4)) {
     return {};
+  }
   std::vector<uint8_t> image = patcher.emit();
   Elf64_Ehdr header{};
   std::memcpy(&header, image.data(), sizeof(header));
   const std::optional<std::vector<Elf64_Shdr>> sections =
       read_elf_table<Elf64_Shdr>(image, header.e_shoff, header.e_shnum, header.e_shentsize);
-  if (!sections || sections->empty())
+  if (!sections || sections->empty()) {
     return {};
+  }
   Elf64_Shdr section = sections->back();
   section.sh_type = SHT_NOTE;
   std::memcpy(image.data() + header.e_shoff + (header.e_shnum - 1) * sizeof(section), &section,
@@ -112,14 +116,16 @@ inline std::vector<uint8_t> with_resource_metadata(const std::vector<uint8_t> &i
 inline std::vector<uint8_t> with_descriptor_metadata(const std::vector<uint8_t> &image,
                                                      rocjitsu::IsaFamily arch) {
   const AmdGpuCodeObject object(image.data(), image.size());
-  if (!object.is_valid() || object.text_sections().size() != 1)
+  if (!object.is_valid() || object.text_sections().size() != 1) {
     return {};
+  }
   const Section &text = *object.text_sections().front();
   const std::vector<KernelDescriptorInfo> kernels =
       scan_kernel_descriptors(image, text.sectionOffset(), text.size());
   const std::optional<uint32_t> sgprs = object.min_kernel_sgpr_count(arch);
-  if (kernels.size() != 1 || !sgprs)
+  if (kernels.size() != 1 || !sgprs) {
     return {};
+  }
   const KernelDescriptorInfo &kernel = kernels.front();
   const amdhsa::kernel_descriptor_t &descriptor = kernel.descriptor;
   const uint32_t granule =

@@ -78,7 +78,6 @@ DISPATCH: dict[str, Callable[[ExecuteContext], str]] = {}
 def _register_handlers() -> None:
     """Populate DISPATCH with handlers from the extracted modules."""
     from amdisa.codegen.execute.vector_cmp import (
-        gen_vector_cmp_class,
         gen_vector_cmpx,
     )
     from amdisa.codegen.execute.vector_special import (
@@ -126,11 +125,7 @@ def _register_handlers() -> None:
     # pseudo_scalar_unary retains its VALU expression/encoding contract but
     # uses ExecModel.SCALAR because the ISA says V_S_* ignores EXEC.
 
-    # Vector compare — vector_cmp, vector_add_co handled by SemaAST pipeline
-    # (_SEMA_CLASSES). vector_cmp_class is NOT: the SemaAST lowering mangles the
-    # operand (a bit_cast<float>(static_cast<uint32_t>(...)) value round-trip)
-    # and always classifies in f32, so the dedicated per-type generator here
-    # (correct f16/f32/f64 qnan masks, full 64-bit f64 read) owns it instead.
+    # Relational CMPX keeps the legacy fallback; CLASS is handled by rj-arith.
     DISPATCH['vector_cmpx'] = lambda c: gen_vector_cmpx(
         c.src_ops,
         c.op,
@@ -141,27 +136,6 @@ def _register_handlers() -> None:
         c.has_abs,
         c.result_writer,
     )
-    DISPATCH['vector_cmp_class'] = lambda c: gen_vector_cmp_class(
-        c.dst_ops,
-        c.src_ops,
-        c.dtype,
-        False,
-        False,
-        c.is_vop3,
-        c.has_abs,
-        c.result_writer,
-    )
-    DISPATCH['vector_cmpx_class'] = lambda c: gen_vector_cmp_class(
-        c.dst_ops,
-        c.src_ops,
-        c.dtype,
-        True,
-        c.cmpx_writes_vcc,
-        c.is_vop3,
-        c.has_abs,
-        c.result_writer,
-    )
-
     # Vector special
     DISPATCH['vector_movrel'] = lambda c: gen_vector_movrel(
         c.dst_ops,

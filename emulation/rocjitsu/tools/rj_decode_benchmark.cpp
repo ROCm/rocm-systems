@@ -106,8 +106,9 @@ void copy_encoding(std::span<const uint32_t> words, std::size_t offset,
   static constexpr std::array<uint32_t, 4> kMutationMasks = {0xffffffffu, 0xff800000u, 0x007fffffu,
                                                              0x9e3779b9u};
   for (std::size_t offset : corpus.valid_offsets) {
-    if (corpus.invalid_encodings.size() >= invalid_limit)
+    if (corpus.invalid_encodings.size() >= invalid_limit) {
       break;
+    }
     std::array<uint32_t, kLookaheadWords> encoding;
     copy_encoding(corpus.words, offset, encoding);
     const uint32_t original = encoding[0];
@@ -172,18 +173,21 @@ void print_measurement(std::string_view name, const Measurement &measurement) {
 
 int main(int argc, char **argv) {
   std::vector<std::string_view> arguments;
-  for (int i = 1; i < argc; ++i)
+  for (int i = 1; i < argc; ++i) {
     arguments.emplace_back(argv[i]);
+  }
   auto report = [](std::string_view message) { std::cerr << message << '\n'; };
   util::DiagnosticEmitter diagnostic(report);
   rocjitsu::cli::Command command{"rj_decode_benchmark"};
   command.set_positional_usage("INPUT");
   rocjitsu::tools::DecodeBenchmarkFlags flags;
-  if (rocjitsu::tools::register_decode_benchmark_flags(command, flags, diagnostic).failed())
+  if (rocjitsu::tools::register_decode_benchmark_flags(command, flags, diagnostic).failed()) {
     return 1;
+  }
   auto parsed = rocjitsu::cli::parse(command, arguments, diagnostic);
-  if (parsed.failed())
+  if (parsed.failed()) {
     return 1;
+  }
   if (flags.help->value()) {
     std::cout << rocjitsu::cli::format_help(command)
               << "\nExactly one INPUT code object is required.\n";
