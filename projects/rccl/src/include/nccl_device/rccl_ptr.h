@@ -1,4 +1,5 @@
-#pragma once
+#ifndef _NCCL_DEVICE_RCCL_PTR_H_
+#define _NCCL_DEVICE_RCCL_PTR_H_
 
 /*
 Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
@@ -49,6 +50,22 @@ using u8_gptr = __attribute__((address_space(1))) uint8_t*;
 #define RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS 0
 #endif
 
+// skip_fence for Simple post-send. Without the builtins, only an
+// unregistered collective (registeredOrP2p == false) may use the cheap fence.
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#define RCCL_USE_CHEAP_POST_SEND_FENCE(cheapOff, registeredOrP2p) (!(cheapOff))
+#else
+#define RCCL_USE_CHEAP_POST_SEND_FENCE(cheapOff, registeredOrP2p) (!(cheapOff) && !(registeredOrP2p))
+#endif
+
+// Point-to-point has no collective work. Registered IPC/NVLS (regUsed) and
+// network (netRegUsed) buffers are cacheable, so both keep the full fence
+// when the builtins are absent. prims_simple.h passes ncclDevWorkColl*.
+template <typename CollWork>
+__host__ __device__ inline bool rcclSimplePostSendRegisteredOrP2p(const CollWork* collWork) {
+  return collWork == nullptr || collWork->regUsed || collWork->netRegUsed;
+}
+
 #ifdef __HIP_DEVICE_COMPILE__
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && \
   __has_builtin(__builtin_amdgcn_cooperative_atomic_load_8x16B) && \
@@ -87,3 +104,5 @@ typedef __attribute__((address_space(1))) v4i* v4i_gptr;
 // Deprecated alias for RCCL_LL_FIFO_SYS_SCOPE; kept for source-level backward
 // compatibility with out-of-tree users of this installed header.
 #define RCCL_LL_FIFO_SYS_SCOPE_LOAD RCCL_LL_FIFO_SYS_SCOPE
+
+#endif // _NCCL_DEVICE_RCCL_PTR_H_

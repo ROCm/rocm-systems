@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 #include "util/result.h"
 
@@ -12,7 +13,6 @@
 #include <optional>
 #include <sstream>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace rocjitsu {
@@ -26,7 +26,7 @@ using amdgpu::WaitCounterPolicy;
 using amdgpu::WaitFields;
 
 [[nodiscard]] inline util::FailureOr<std::string>
-wait_expression(WaitCounterKind counter, uint32_t required_count, rj_code_arch_t arch) {
+wait_expression(WaitCounterKind counter, uint32_t required_count, rocjitsu::IsaFamily arch) {
   const auto model = amdgpu::waitcnt_model(arch);
   if (model.failed())
     return util::Result::failure();
@@ -104,7 +104,6 @@ enum class TrackedRegisterSource {
   Defs,
   Uses,
   VectorUses,
-  StoreDataUses,
 };
 
 struct ClassifiedEvent {
@@ -132,6 +131,8 @@ struct ClassifiedEvent {
   bool check_memory_order = false;
   bool check_program_end = false;
   bool check_counter_parity_order = false;
+  // May use ordinary VMEM writeback while keeping the sample's counter order.
+  bool point_sample_accel = false;
 };
 
 // ISA classification and wait-field decoding have no pending-state or CFG
@@ -140,10 +141,10 @@ struct ClassifiedEvent {
 // Successful empty optionals/vectors represent absent counters, waits, or events.
 struct WaitcheckTarget : WaitCounterPolicy {
   [[nodiscard]] static std::optional<RegisterRef> register_operand(const Operand &operand,
-                                                                   rj_code_arch_t arch);
+                                                                   rocjitsu::IsaFamily arch);
 
   [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
-  embedded_wait_fields(const Instruction &inst, rj_code_arch_t arch);
+  embedded_wait_fields(const Instruction &inst, rocjitsu::IsaFamily arch);
 
   [[nodiscard]] static bool vm_vsrc_event_implied_by_wait(WaitEventKind kind,
                                                           WaitCounterKind counter);
@@ -157,11 +158,11 @@ struct WaitcheckTarget : WaitCounterPolicy {
 
   [[nodiscard]] static std::optional<int64_t> first_barrier_id(const Instruction &inst);
 
-  [[nodiscard]] static bool is_cdna_lds_dma_load(const Instruction &inst, rj_code_arch_t arch);
+  [[nodiscard]] static bool is_cdna_lds_dma_load(const Instruction &inst, rocjitsu::IsaFamily arch);
 
   [[nodiscard]] static std::optional<uint32_t> vinterp_wait_exp(const Instruction &inst);
 
-  [[nodiscard]] static bool is_dsdir(std::string_view mnemonic);
+  [[nodiscard]] static bool is_dsdir(const Instruction &inst);
 
   // GFX11 WAITVDST and GFX12 WAIT_VA_VDST share bits 16-19.
   [[nodiscard]] static std::optional<uint32_t> dsdir_wait_va_vdst(const Instruction &inst);
@@ -169,30 +170,30 @@ struct WaitcheckTarget : WaitCounterPolicy {
   // WAIT_VM_VSRC exists only on GFX12; bit 23 is reserved on GFX11.
   [[nodiscard]] static std::optional<uint32_t> dsdir_wait_vm_vsrc(const Instruction &inst);
 
-  [[nodiscard]] static bool is_scalar_memory_op(std::string_view mnemonic);
+  [[nodiscard]] static bool is_scalar_memory_op(const Instruction &inst);
 
-  [[nodiscard]] static bool is_vmem_store(std::string_view mnemonic);
+  [[nodiscard]] static bool is_vmem_store(const Instruction &inst);
 
-  [[nodiscard]] static bool is_vmem_atomic(std::string_view mnemonic);
+  [[nodiscard]] static bool is_vmem_atomic(const Instruction &inst);
 
-  [[nodiscard]] static bool is_image_atomic(std::string_view mnemonic);
+  [[nodiscard]] static bool is_image_atomic(const Instruction &inst);
 
-  [[nodiscard]] static bool uses_ds_wait_counter(std::string_view mnemonic);
+  [[nodiscard]] static bool uses_ds_wait_counter(const Instruction &inst);
 
-  [[nodiscard]] static bool is_async_lds_load(std::string_view mnemonic);
+  [[nodiscard]] static bool is_async_lds_load(const Instruction &inst);
 
-  [[nodiscard]] static bool is_async_lds_store(std::string_view mnemonic);
+  [[nodiscard]] static bool is_async_lds_store(const Instruction &inst);
 
-  [[nodiscard]] static bool is_tensor_lds_load(std::string_view mnemonic);
+  [[nodiscard]] static bool is_tensor_lds_load(const Instruction &inst);
 
-  [[nodiscard]] static bool is_tensor_lds_store(std::string_view mnemonic);
+  [[nodiscard]] static bool is_tensor_lds_store(const Instruction &inst);
 
   [[nodiscard]] static util::FailureOr<std::vector<ClassifiedEvent>>
-  classify_events(const Instruction &inst, rj_code_arch_t arch);
+  classify_events(const Instruction &inst, rocjitsu::IsaFamily arch);
 
   // Runtime issuers retain the output storage between instructions.
   [[nodiscard]] static util::Result classify_events_into(const Instruction &inst,
-                                                         rj_code_arch_t arch,
+                                                         rocjitsu::IsaFamily arch,
                                                          std::vector<ClassifiedEvent> &events);
 };
 

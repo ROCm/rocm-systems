@@ -167,7 +167,7 @@ public:
   /// acquire a maintenance lease, enter an effect, or access backing/VM.
   void invalidate_range_after_external_write(uint64_t addr, uint32_t size, uint32_t vmid);
 
-  void initialize() override {
+  util::Result initialize(util::DiagnosticEmitter = {}) override {
     for (const std::unique_ptr<simdojo::Port> &port : ports()) {
       if (port->direction() == simdojo::PortDirection::IN && !port->recv_event()->has_handler()) {
         port->recv_event()->set_handler([this](simdojo::Tick, simdojo::Message *message) {
@@ -190,6 +190,7 @@ public:
         });
       }
     }
+    return util::Result::success();
   }
 
   simdojo::Port *req_port() { return req_; }

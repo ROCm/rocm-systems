@@ -325,10 +325,10 @@ def test_cdna3_and_4_lane_special_opcodes_do_not_accept_dpp(opcode):
 )
 def test_legacy_dpp_prohibition_tables(profile, opcode):
     encoding = 'ENC_VOPC' if opcode.startswith(('V_CMP_', 'V_CMPX_')) else 'ENC_VOP1'
-    assert (
-        profile.dpp_opcode_rule(encoding, opcode, src0_size_bits=64)
-        is DppOpcodeRule.FORBID
-    )
+    expected = DppOpcodeRule.FORBID
+    if isinstance(profile, Cdna2Profile) and encoding == 'ENC_VOP1' and 'F64' in opcode:
+        expected = DppOpcodeRule.ROW_SELECT_ONLY
+    assert profile.dpp_opcode_rule(encoding, opcode, src0_size_bits=64) is expected
 
 
 @pytest.mark.parametrize(
@@ -548,7 +548,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     assert 'uint32_t descriptor_vgpr_count_granule_wave64 = 0;' in output
     assert 'MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;' in output
     assert (
-        'case ROCJITSU_CODE_ARCH_CDNA3:\n'
+        'case rocjitsu::IsaFamily::Cdna3:\n'
         '    return {\n'
         '        .supports_wgp_mode = false,\n'
         '        .mode_has_gpr_idx_en = true,\n'
@@ -570,7 +570,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '    };'
     ) in output
     assert (
-        'case ROCJITSU_CODE_ARCH_RDNA4:\n'
+        'case rocjitsu::IsaFamily::Rdna4:\n'
         '    return {\n'
         '        .supports_wgp_mode = true,\n'
         '        .mode_has_gpr_idx_en = false,\n'
@@ -592,7 +592,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '    };'
     ) in output
     assert (
-        'case ROCJITSU_CODE_ARCH_CDNA5:\n'
+        'case rocjitsu::IsaFamily::Cdna5:\n'
         '    return {\n'
         '        .supports_wgp_mode = false,\n'
         '        .mode_has_gpr_idx_en = false,\n'
@@ -626,7 +626,7 @@ def test_isa_properties_codegen_uses_source_arch_for_custom_identity(tmp_path):
 
     output = emit_isa_properties(str(tmp_path), specs).read_text()
 
-    assert 'case ROCJITSU_CODE_ARCH_CDNA5:' in output
+    assert 'case rocjitsu::IsaFamily::Cdna5:' in output
     assert '.max_addressable_vgprs_per_wf = 1024,' in output
 
 

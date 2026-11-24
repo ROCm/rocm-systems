@@ -34,7 +34,7 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         profile = profiles.get(name)
         if profile is None:
             continue
-        enum_name = name.upper()
+        enum_name = name.capitalize()
         supports_wgp_mode = 'true' if profile.supports_wgp_mode else 'false'
         mode_has_gpr_idx_en = 'true' if profile.supports_gpr_idx else 'false'
         descriptor_sgpr_count_encoded = (
@@ -64,7 +64,7 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
             max_addressable_vgprs_per_wf, addressable_vgprs
         )
         cases += [
-            f'  case ROCJITSU_CODE_ARCH_{enum_name}:',
+            f'  case rocjitsu::IsaFamily::{enum_name}:',
             '    return {',
             f'        .supports_wgp_mode = {supports_wgp_mode},',
             f'        .mode_has_gpr_idx_en = {mode_has_gpr_idx_en},',
@@ -96,7 +96,7 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         '#ifndef ROCJITSU_ISA_ARCH_AMDGPU_GENERATED_SHARED_ISA_PROPERTIES_H_',
         '#define ROCJITSU_ISA_ARCH_AMDGPU_GENERATED_SHARED_ISA_PROPERTIES_H_',
         '',
-        '#include "rocjitsu/base/api.h"',
+        '#include "rocjitsu/isa/isa_family.h"',
         '',
         '#include <cstdint>',
         '#include <optional>',
@@ -138,7 +138,7 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         'inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = '
         f'{max_addressable_vgprs_per_wf};',
         '',
-        '[[nodiscard]] constexpr IsaProperties isa_properties(rj_code_arch_t arch) {',
+        '[[nodiscard]] constexpr IsaProperties isa_properties(rocjitsu::IsaFamily arch) {',
         '  switch (arch) {',
         *cases,
         '  default:',
@@ -147,7 +147,7 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         '}',
         '',
         '[[nodiscard]] constexpr std::optional<uint32_t>',
-        'descriptor_vgpr_count_granule_for_wavefront(rj_code_arch_t arch, uint32_t wavefront_size) {',
+        'descriptor_vgpr_count_granule_for_wavefront(rocjitsu::IsaFamily arch, uint32_t wavefront_size) {',
         '  const auto properties = isa_properties(arch);',
         '  if (wavefront_size == 32 && properties.descriptor_vgpr_count_granule_wave32 != 0)',
         '    return properties.descriptor_vgpr_count_granule_wave32;',

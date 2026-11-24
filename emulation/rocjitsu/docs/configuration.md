@@ -1,6 +1,6 @@
 # Configuration
 
-Rocjitsu behavior is configured declaratively in JSON. Simulator configs
+rocjitsu behavior is configured declaratively in JSON. Simulator configs
 specify the component hierarchy, link connectivity, and simulation parameters;
 DBT guest configs select the guest and host targets and execution backend.
 
@@ -43,7 +43,7 @@ The gfx1250 PCI profile intentionally advertises no UVD, VCN, or JPEG hardware.
 Compute-only guests therefore require an AMDGPU kernel containing commit
 `4e07da515d1c` (`drm/amdgpu: enumerate UMSCH HW IP`) or an equivalent backport.
 That change makes multimedia discovery accept a device with no VCN instance.
-Rocjitsu does not emulate a placeholder media block, and adding one would expand
+rocjitsu does not emulate a placeholder media block, and adding one would expand
 the device contract beyond the compute functionality modeled here.
 
 The generic `scripts/run-vfio-guest.py` launcher requires externally prepared
@@ -236,14 +236,15 @@ The single-GPU tables retain these synchronous engine/dispatch pairs (H=0):
 | 8 | 2/7 | 2/7 | 1/8 |
 | 16 | 8/9 | 8/9 | 1/16 |
 | 24 | 8/17 | 8/17 | 1/24 |
-| 32 | 8/17 | 8/25 | 1/24 |
-| 40 and above | 8/17 | 8/33 | 1/24 |
+| 32 | 8/25 | 8/25 | 1/24 |
+| 40 | 8/25 | 8/33 | 1/24 |
+| 48 and above | 8/25 | 8/41 | 1/24 |
 
-The gfx950/gfx1250 tables also contain the [async MMA triples](async-instructions.md#thread-policy).
-gfx950 adds eight helpers at budget 32, selecting 8/17/8; gfx1250 adds eight
-at budget 48, selecting 8/33/8. Larger hosts retain those allocations.
-`async_helper_threads: 0` retains the synchronous choices above. Desktop and MI210 tables stop at 1/24/0;
-CDNA3 stops at 8/17/0.
+At their highest budget, both single-GPU server presets use eight engines.
+gfx950 adds 24 shared CU dispatch workers at budget 32 and gfx1250 adds 40
+at budget 48. All matrix handlers execute on the issuing thread.
+See the [async MMA thread policy](async-instructions.md#thread-policy).
+Desktop and MI210 tables stop at 1/24/0. CDNA3 stops at 8/17/0.
 A budget of 12 selects the eight-thread row.
 
 Print allocations for any target without constructing a simulated GPU:
@@ -290,20 +291,19 @@ so these retained pools do not imply simultaneous execution on every GPU.
 Dispatch workers can accelerate compute batches. The E=1 pin addresses the
 documented RCCL hang; the D=1 default preserves small-collective performance.
 
-Mirage embeds the tables in its RocJITsu backend at build time and
+Mirage embeds the tables in its rocjitsu backend at build time and
 selects them by the agent's GPU target and GPU count. The hardware agent format carries no
 host scheduling policy. Unknown targets use the serial fallback. For multiple
 GPUs, it uses the matching native preset when available. Other GPU counts
 convert each single-GPU granule's budget B to E=1, D=1+floor((B-1)/GPUs) and H=0,
-then leave selection to rocjitsu. B includes helper slots, which become dispatch
-workers in this opt-in path: derived gfx950 tables use a budget of 32 and
-gfx1250 uses 48, while desktop and CDNA3 tables use 24.
+then leave selection to rocjitsu. Derived gfx950 tables use up to 32 threads
+and gfx1250 uses 48, while desktop and CDNA3 tables use 24.
 Its multi-GPU configurations default to E=1/D=1/H=0 for the same reasons. A positive
 engine override can change that pin;
 `num_threads: 0` retains it. Profile options may override `cpu_thread_budget`,
 `num_threads`, `cpu_dispatch_threads` and `async_helper_threads`. A supplied
-config file is used verbatim. Automatic helper selection (-1) preserves the
-multi-GPU H=0 default; a positive override can enable helpers.
+config file is used verbatim. The runtime preserves explicit helper requests for checkpoints and selects
+zero effective helpers while all matrix handlers run synchronously.
 Checkpoints retain the configured requests and tables, including custom tables,
 so restore re-evaluates that policy for the receiving process's affinity. They
 preserve the user's configuration, rather than an exact host allocation or a
@@ -344,6 +344,14 @@ unsupported. Any HW_ID slice touching an unsupported bit rejects the entire
 read; the default 32-bit HW_ID read therefore still warns and writes zero.
 Unknown or unrepresentable identity fields likewise issue an `s_getreg_b32`
 warning and write zero.
+
+RDNA3/RDNA4 `HW_ID1` reports the wave slot, the CU's WGP and its half of it,
+SA_ID and SE_ID. A CU's wave slots alternate between its two SIMDs, so slot
+`s` reads SIMD `s % 2` and WAVE_ID `s / 2`. SIMD_ID, WGP_ID and SA_ID require
+an even shader-array width of at most 32 CUs and at most two arrays per shader
+engine; SE_ID must fit in three bits. DP_RATE reads 1 on gfx11 and gfx12 and
+is unsupported on gfx11.5, which has no measured value. Reads touching an
+unrepresentable field warn and write zero.
 
 Omitted geometry fields inherit defaults selected by `gfx_target_version`.
 For a smaller topology, set both `num_cu_per_sh` and
@@ -430,11 +438,11 @@ outside the contract in every semantics mode. `RJ_FORCE_SCALAR`
 selects rj-arith's baseline CPU path; the test override also applies to existing CUs.
 It does not change semantics.
 
-Scalar FP arithmetic currently retains a guest-rounding limitation from the legacy
-handlers: Compatibility uses nearest-even for scalar F16/F32 add, subtract,
-multiply, and integer-to-F32 conversion. For example, `S_CVT_F32_I32 0x01000001`
-produces `0x4b800000` even with guest rounding toward +infinity; gfx1201 produces
-`0x4b800001`. The corresponding library entry points reject nonzero rounding flags.
+Scalar F16/F32 add, subtract, multiply, FMAC and the rounding conversions follow the
+MODE rounding field of their destination format (MODE[1:0] for FP32, MODE[3:2] for FP16).
+For example, under guest rounding toward +infinity `S_CVT_F32_I32 0x01000001` produces
+`0x4b800001`, as on gfx1201, both in decoded RDNA4 Compatibility, which also records FP
+causes, and through the rj-arith entry points in the configured semantics.
 
 
 ### Memory wait diagnostics

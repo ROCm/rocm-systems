@@ -50,7 +50,7 @@ PopulateAql(const uint32_t* ib_packet, packet_t* aql_packet)
         aql_pm4_ib->reserved[i] = 0;
     }
 
-#if defined(DEBUG_TRACE)
+#if AQLPROFILE_DEBUG_LEVEL > 0
     const uint32_t*    dwords      = (uint32_t*) aql_packet;
     const uint32_t     dword_count = sizeof(*aql_packet) / sizeof(uint32_t);
     std::ostringstream oss;

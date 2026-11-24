@@ -197,9 +197,7 @@ public:
   virtual ~QueueBindingFactory() = default;
 
   /// @brief Create a fully attached binding or reject without leaving processor state.
-  /// @details A factory that propagates an exception must undo its own attachment:
-  /// the registry cannot destroy a binding it has not received. SDMA worker startup
-  /// failures before publication can propagate to the frontend boundary.
+  /// @details Factories must not throw and must undo partial attachment on rejection.
   [[nodiscard]] virtual QueueBindingCreateResult
   create_binding(const QueueRegistrationRequest &request) = 0;
 };
@@ -217,8 +215,12 @@ struct QueueRegistrationRequest {
   std::optional<uint64_t> initial_consumer_cursor = std::nullopt;
   QueueAbi abi = QueueAbi::Generic;
   uint64_t queue_descriptor_address = 0;
+  /// GPU virtual address of the runtime queue exception status word.
   uint64_t exception_status_address = 0;
+  /// Runtime event ID for software queue exceptions.
   uint32_t exception_event_id = 0;
+  /// Software exception route, independent of packet mailbox interrupts.
+  InterruptSink exception_event_sink{};
   uint32_t engine_id = 0;
   bool xcd_fanout = false;
   QueueType type = QueueType::Compute;

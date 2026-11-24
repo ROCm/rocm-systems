@@ -229,21 +229,29 @@ struct ncclMgmtTaskJob {
 ncclResult_t ncclP2PPreconnectFunc(struct ncclAsyncJob* job_) {
   struct ncclPreconnectJob* job = (struct ncclPreconnectJob*)job_;
   struct ncclComm* comm = job->comm;
+  ncclResult_t ret = ncclSuccess;
   // Preconnect is not meant to be captured;
   // swap to relaxed mode so CUDA graph capture works correctly.
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  CUDACHECK(cudaSetDevice(comm->cudaDev));
+  CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, exit);
   if (!job_->isThreadMain && ncclOsCpuCount(comm->cpuAffinity)) ncclOsSetAffinity(comm->cpuAffinity);
-  NCCLCHECK(ncclTransportP2pSetup(comm, NULL, 1));
-  if (comm->p2pNet) NCCLCHECK(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET));
-  if (mode != cudaStreamCaptureModeRelaxed) CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  INFO(
-    NCCL_INIT,
-    "rank %d/%d cudaDev %d nvmlDev %d busId %#llx commId 0x%016llx Send/Recv P2P transport setup complete (p2pNet=%d)",
-    comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, (unsigned long long)comm->busId,
-    (unsigned long long)comm->commHash, comm->p2pNet ? 1 : 0);
-  return ncclSuccess;
+  NCCLCHECKGOTO(ncclTransportP2pSetup(comm, NULL, 1), ret, exit);
+  if (ncclP2pUsesMemcpy()) NCCLCHECKGOTO(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_CE), ret, exit);
+  if (comm->p2pNet) NCCLCHECKGOTO(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET), ret, exit);
+
+exit:
+  if (mode != cudaStreamCaptureModeRelaxed) {
+    cudaError_t err = cudaThreadExchangeStreamCaptureMode(&mode);
+    if (ret == ncclSuccess && err != cudaSuccess) ret = rcclCudaErrorHandler(err);
+  }
+  if (ret == ncclSuccess)
+    INFO(NCCL_INIT,
+         "rank %d/%d cudaDev %d nvmlDev %d busId %#llx commId 0x%016llx Send/Recv P2P transport setup complete "
+         "(p2pNet=%d)",
+         comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, (unsigned long long)comm->busId,
+         (unsigned long long)comm->commHash, comm->p2pNet ? 1 : 0);
+  return ret;
 }
 
 ncclResult_t ncclCollPreconnect(struct ncclComm* comm, bool* algoNeedConnect) {
@@ -310,7 +318,7 @@ ncclResult_t ncclPrepareTasksAndCollPreconnectFunc(struct ncclAsyncJob* job_) {
   memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
   CUDACHECK(cudaSetDevice(comm->cudaDev));
   if (!job_->isThreadMain && ncclOsCpuCount(comm->cpuAffinity)) ncclOsSetAffinity(comm->cpuAffinity);
-  NCCLCHECK(ncclPrepareTasks(comm, algoNeedConnect, &needConnect, job->simInfo));
+  NCCLCHECK(ncclPrepareTasks(comm, algoNeedConnect, &needConnect, /*needGenkDevComm=*/nullptr, job->simInfo));
   // Allow on-demand PAT connection without cuMem support (ROCm default), so PAT QPs can be created lazily.
   if ((comm->cuMemSupport || algoNeedConnect[NCCL_ALGO_PAT]) && needConnect) {
     // Preconnect is not meant to be captured;
@@ -426,7 +434,7 @@ ncclResult_t ncclCommGroupRegisterSymmetric(struct ncclAsyncJob* job_) {
   while (!ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue)) {
     struct ncclDevrCommCreateTask* task = ncclIntruQueueDequeue(&comm->devrState.commCreateTaskQueue);
     ncclResult_t taskRet =
-      ncclDevrCommCreateInternal(comm, task->reqs, task->outDevComm, /*isInternal=*/false, task->deviceCodeVersion);
+      ncclDevrCommCreateInternal(comm, task->reqs, task->outDevComm, task->isInternal, task->deviceCodeVersion);
     freeDevCommRequirements(task->reqs); // free additional task memory for reqs
     free(task);
     NCCLCHECKGOTO(taskRet, ret, fail);
@@ -851,14 +859,42 @@ static void ncclGroupSymmetricJobFree(void* _job) {
   delete job;
 }
 
+// The bootstrap consensus that requires sibling local ranks to prepare concurrently is reached
+// only when the first symmetric kernel can actually be selected. Checking communicator capability
+// alone creates and joins one host thread per local rank for every ordinary collective.
+static bool ncclPlannerMayInitializeSymmetric(struct ncclComm* comm) {
+  if (comm->symkState.initialized) return false;
+  for (struct ncclTaskColl* task = comm->planner.collSorter.head; task != nullptr; task = task->next) {
+    if (task->symkExtract == RCCL_SYMK_EXTRACT_DENY) continue;
+    int tuningFunc = ncclTuningFuncIndex(task->func);
+    if (tuningFunc < 0) continue;
+    // A global forced selection wins over the per-call mask, but the tuning
+    // context still records which implementations that override enabled.
+    rcclTuningMask effAlgMask = comm->tuningContext.forced[tuningFunc] ? rcclTuningMask() : task->algMask;
+    bool symTuningEnabled = false;
+    for (int i = NCCL_TUNING_SYM_KERNEL_ID_OFFSET; i < NCCL_TUNING_CE_METHOD_ID_OFFSET; i++) {
+      if (comm->tuningContext.enabled[i][tuningFunc] && (effAlgMask.none() || effAlgMask.test(i))) {
+        symTuningEnabled = true;
+        break;
+      }
+    }
+    if (!symTuningEnabled) continue;
+    ncclDevRedOp_t symkOp = task->opHost == ncclAvg ? ncclDevSumPostDiv : task->opDev.op;
+    if (ncclSymkAvailable(comm, task->func, symkOp, task->datatype, task->count)) return true;
+  }
+  return false;
+}
+
 static ncclResult_t ncclPrepareTasksAndCollPreconnect(
   struct ncclComm* comm, ncclSimInfo_t* simInfo,
   struct ncclIntruQueue<struct ncclAsyncJob, &ncclAsyncJob::next>* asyncCollJobs) {
-  // Symmetric task selection performs a bootstrap consensus in ncclPrepareTasks.
-  // When this process owns multiple ranks, prepare them concurrently so the
-  // first rank cannot block before its sibling ranks enter the same consensus.
+  CUDACHECK(cudaSetDevice(comm->cudaDev));
+  // Concurrent prepare is needed only while a queued task can still trigger the first symk init consensus.
+  // When this process owns multiple ranks, prepare them concurrently so the first rank cannot
+  // block before its sibling ranks enter the same consensus.
   bool const needsConcurrentSymmetricPrepare =
-    comm->intraRanks > 1 && comm->symmetricSupport && !comm->p2pCrossClique;
+    comm->intraRanks > 1 && comm->symmetricSupport && !comm->p2pCrossClique &&
+    ncclPlannerMayInitializeSymmetric(comm);
   if (needsConcurrentSymmetricPrepare) {
     struct ncclPrepareTasksAndCollPreconnectJob* job;
     NEW_NOTHROW(job, ncclPrepareTasksAndCollPreconnectJob);
@@ -871,12 +907,12 @@ static ncclResult_t ncclPrepareTasksAndCollPreconnect(
     job->simInfo = simInfo;
     ncclIntruQueueEnqueue(asyncCollJobs, &job->base);
   } else {
-    bool needConnect = false;
+    bool needConnect = false, needGenkDevComm = false;
     bool algoNeedConnect[NCCL_NUM_ALGORITHMS];
     memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
 
     CUDACHECK(cudaSetDevice(comm->cudaDev));
-    NCCLCHECK(ncclPrepareTasks(comm, algoNeedConnect, &needConnect, simInfo));
+    NCCLCHECK(ncclPrepareTasks(comm, algoNeedConnect, &needConnect, &needGenkDevComm, simInfo));
 
     // Allow on-demand PAT connection without cuMem support (ROCm default), so PAT QPs can be created lazily.
     if ((comm->cuMemSupport || algoNeedConnect[NCCL_ALGO_PAT]) && needConnect) {
@@ -894,6 +930,19 @@ static ncclResult_t ncclPrepareTasksAndCollPreconnect(
         NCCLCHECK(ret);
       }
       memcpy(job->algoNeedConnect, algoNeedConnect, sizeof(bool) * NCCL_NUM_ALGORITHMS);
+      ncclIntruQueueEnqueue(asyncCollJobs, &job->base);
+    }
+
+    if (needGenkDevComm) {
+      struct ncclGroupSymmetricJob* job;
+      NEW_NOTHROW(job, ncclGroupSymmetricJob);
+      job->base.func = ncclCommGroupRegisterSymmetric;
+      job->base.undo = nullptr;
+      job->base.destructor = ncclGroupSymmetricJobFree;
+      job->base.state = ncclGroupJobRunning;
+      job->base.abortFlag = comm->abortFlag;
+      job->base.abortFlagDev = comm->abortFlagDev;
+      job->comm = comm;
       ncclIntruQueueEnqueue(asyncCollJobs, &job->base);
     }
   }

@@ -4,6 +4,7 @@
 rj_add_object_library(rocjitsu_isa
     decoder.cpp
     execution_backend.cpp
+    isa_family.cpp
     operand.cpp
     rj_decode.cpp
     target_registry.cpp

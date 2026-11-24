@@ -5,15 +5,19 @@
 
 #pragma once
 
+#include <atomic>
 #include <optional>
 
 namespace hipFile {
 
 class Configuration {
 
-    std::optional<bool> m_fastpath_override;
-    std::optional<bool> m_fallback_override;
-    std::optional<bool> m_host_override;
+    // Atomic since the fastpath can be disabled from one thread while other
+    // threads read this flag. This does not prevent stale reads, but it does
+    // prevent a torn read while the flag is being written.
+    std::atomic<std::optional<bool>> m_fastpath_override;
+    std::optional<bool>              m_fallback_override;
+    std::optional<bool>              m_host_override;
 
 public:
     virtual ~Configuration() = default;
@@ -55,6 +59,10 @@ public:
 
     /// @brief Override host backend enablement
     virtual void host(bool enabled) noexcept;
+
+    /// @brief Gets the size of the device stream pool
+    /// @return the size of the device stream pool in bytes
+    virtual size_t deviceStreamPoolSize() const noexcept;
 };
 
 }

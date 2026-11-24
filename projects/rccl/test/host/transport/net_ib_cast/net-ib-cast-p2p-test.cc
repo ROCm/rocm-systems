@@ -92,6 +92,7 @@ class NetIbCastP2pMicrotest : public ::testing::Test {
     memset(rcclTelemetryDevs, 0, sizeof(rcclTelemetryDevs));
     IbCastQpSharingGlobalEnable = false;
     IbCastAinicRoce = IbCastAinicCtsInlineData = false;
+    castGlobalQpSchedParms = {};
     for (auto& e : g_IbCastCommTable) e = {};
     for (int d = 0; d < 2; d++) {
       IbCastDevs[d].stats.fatalErrorCount = 0;
@@ -105,10 +106,13 @@ class NetIbCastP2pMicrotest : public ::testing::Test {
   }
 
   // nqps QPs spread over ndevs fake devices: activeQps[ndevs * q + d] is the q-th QP of device d, as connect.cc
-  // lays them out (IbCastCommBaseGetQpByIndex reads that layout back).
+  // lays them out (IbCastCommBaseGetQpByIndex reads that layout back). With the scheduler off, a request spreads
+  // over every QP (NCCL_IB_SPLIT_DATA_ON_QPS=1); tests of the one-QP-per-device default reset splitDataOnQps.
   void Wire(ncclIbNetCommBase& base, int nqps, int ndevs, int scheme) {
     base.ready = 1;
     base.nqps = nqps;
+    base.nDataQps = ndevs;
+    base.splitDataOnQps = 1;
     base.vProps.ndevs = ndevs;
     base.recvMatchingScheme = scheme;
     for (int d = 0; d < ndevs; d++) {
@@ -476,6 +480,106 @@ TEST_F(NetIbCastP2pIsendMicrotest, Isend_TwoDevices_UsesEachDevicesKeysAndCounts
   EXPECT_EQ(Req(req)->devBases[1], &send_->devs[1].base);
 }
 
+// NCCL_IB_SPLIT_DATA_ON_QPS=0 (the default) with two QPs per device: a request goes over nDataQps QPs, one per
+// device, not over all four.
+TEST_F(NetIbCastP2pIsendMicrotest, Isend_NoSplitOnQps_UsesOneQpPerDevice) {
+  WireSend(4, 2);
+  send_->base.splitDataOnQps = 0;
+  Cts(0, 1, 1, 4096);
+  void* req = nullptr;
+  ASSERT_EQ(Isend(1024, 1, &req), ncclSuccess);
+  ASSERT_EQ(verbs_[0].sends.size(), 1u);
+  ASSERT_EQ(verbs_[1].sends.size(), 1u);
+  EXPECT_EQ(verbs_[0].sends[0].qp, &verbs_[0].qps[0]);
+  EXPECT_EQ(verbs_[1].sends[0].qp, &verbs_[1].qps[0]);
+  EXPECT_EQ(Chain(0, 0)[0].sge.length, 512u);
+  EXPECT_EQ(Chain(1, 0)[0].sge.length, 512u);
+  EXPECT_EQ(Chain(1, 0)[0].sge.addr, (uint64_t)buf_ + 512);
+  EXPECT_EQ(Chain(1, 0)[0].wr.wr.rdma.remote_addr, kRemoteAddr + 512);
+  EXPECT_TRUE(be32toh(Chain(0, 0)[0].wr.imm_data) & WR_IMM_SPLIT_DATA_FLAG);
+  EXPECT_EQ(Req(req)->desc.nqps, 2);
+  EXPECT_EQ(Req(req)->events[0], 1);
+  EXPECT_EQ(Req(req)->events[1], 1);
+}
+
+// Below RCCL_IB_SPLIT_DATA_THRESHOLD the whole send rides the first QP and the others carry empty writes.
+TEST_F(NetIbCastP2pIsendMicrotest, Isend_BelowSplitThreshold_SendsEverythingOnTheFirstQp) {
+  ScopedHook param(g_loadParam, ParamOverride({{"RCCL_IB_SPLIT_DATA_THRESHOLD", 1001}}));
+  WireSend(3);
+  Cts(0, 1, 1, 4096);
+  void* req = nullptr;
+  ASSERT_EQ(Isend(1000, 1, &req), ncclSuccess);
+  ASSERT_EQ(verbs_[0].sends.size(), 3u);
+  EXPECT_EQ(Chain(0, 0)[0].sge.length, 1000u);
+  EXPECT_EQ(Chain(0, 0)[0].sge.addr, (uint64_t)buf_);
+  for (int i = 1; i < 3; i++) {
+    EXPECT_FALSE(Chain(0, i)[0].hasSge) << i;
+    EXPECT_EQ(Chain(0, i)[0].wr.num_sge, 0) << i;
+  }
+  EXPECT_EQ(Req(req)->events[0], 3);
+
+  // At the threshold the send is split evenly again: 384 + 384 + 233.
+  Cts(0, 1, 1, 4096);
+  ASSERT_EQ(Isend(1001, 1, &req), ncclSuccess);
+  ASSERT_EQ(verbs_[0].sends.size(), 6u);
+  EXPECT_EQ(Chain(0, 3)[0].sge.length, 384u);
+  EXPECT_EQ(Chain(0, 4)[0].sge.length, 384u);
+  EXPECT_EQ(Chain(0, 5)[0].sge.length, 233u);
+}
+
+// Raising the threshold must leave the even split intact for everything above it, addresses included: 3000 bytes
+// over 3 QPs chunks to DIVUP(1000) rounded up to 128 = 1024, so 1024 + 1024 + 952 tiling the buffer with no gap and
+// no overlap at either end. Lengths alone do not catch an offset that advances by the wrong chunk.
+TEST_F(NetIbCastP2pIsendMicrotest, Isend_AboveRaisedSplitThreshold_TilesTheBufferExactly) {
+  ScopedHook param(g_loadParam, ParamOverride({{"RCCL_IB_SPLIT_DATA_THRESHOLD", 2048}}));
+  WireSend(3);
+  Cts(0, 1, 1, 4096);
+  void* req = nullptr;
+  ASSERT_EQ(Isend(3000, 1, &req), ncclSuccess);
+  ASSERT_EQ(verbs_[0].sends.size(), 3u);
+
+  const uint32_t lens[] = {1024, 1024, 952};
+  uint64_t offset = 0;
+  for (int i = 0; i < 3; i++) {
+    const auto& c = Chain(0, i)[0];
+    ASSERT_TRUE(c.hasSge) << i;
+    EXPECT_EQ(c.sge.length, lens[i]) << i;
+    EXPECT_EQ(c.sge.addr, (uint64_t)buf_ + offset) << i;
+    EXPECT_EQ(c.wr.wr.rdma.remote_addr, kRemoteAddr + offset) << i;
+    offset += lens[i];
+  }
+  EXPECT_EQ(offset, 3000u);  // every byte covered exactly once
+  EXPECT_EQ(Req(req)->events[0], 3);
+}
+
+// The threshold only applies with the scheduler off: a weighted split still splits a send below it.
+TEST_F(NetIbCastP2pIsendMicrotest, Isend_BelowSplitThresholdWithScheduler_KeepsTheWeightedSplit) {
+  ScopedHook param(g_loadParam, ParamOverride({{"RCCL_IB_SPLIT_DATA_THRESHOLD", 4096}}));
+  WireSend(2);
+  send_->base.schedParmsInit = true;
+  send_->base.schedParms.enable = true;
+  send_->base.schedParms.splitData = true;
+  send_->base.schedParms.splitDataMin = 1;
+  send_->base.schedParms.updateInterval = 1000000000;
+  send_->base.qpTxSchedInit = true;
+  send_->base.qpTxSched[0].weight = 0.75;
+  send_->base.qpTxSched[1].weight = 0.25;
+  Cts(0, 1, 1, 4096);
+  void* req = nullptr;
+  ASSERT_EQ(Isend(1000, 1, &req), ncclSuccess);
+  ASSERT_EQ(verbs_[0].sends.size(), 2u);
+  EXPECT_EQ(Chain(0, 0)[0].sge.length, 640u);
+  EXPECT_EQ(Chain(0, 1)[0].sge.length, 360u);
+
+  // Before the first weights exist, as on a connection's first sends, the split is even: 512 + 488.
+  send_->base.qpTxSchedInit = false;
+  Cts(0, 1, 1, 4096);
+  ASSERT_EQ(Isend(1000, 1, &req), ncclSuccess);
+  ASSERT_EQ(verbs_[0].sends.size(), 4u);
+  EXPECT_EQ(Chain(0, 2)[0].sge.length, 512u);
+  EXPECT_EQ(Chain(0, 3)[0].sge.length, 488u);
+}
+
 // A two-request multi-recv posts only once both sends have matched, as one chain: a write per request, then a
 // write-with-imm that carries both sizes into the receiver's completion record for the slot.
 TEST_F(NetIbCastP2pIsendMicrotest, Isend_MultiRecv_PostsOnceWithTheSizesRecord) {
@@ -572,6 +676,22 @@ TEST_F(NetIbCastP2pIsendMicrotest, Isend_ById_CarriesTheRequestIdAndAPlainWrId) 
   EXPECT_EQ(be32toh(wr.imm_data), 7u);
   EXPECT_EQ(wr.wr_id, 7u);
   EXPECT_EQ(send_->base.remapWrId[0].state, NCCL_NET_IB_REMAP_UNUSED);
+}
+
+// The receiver finds the request at immData % NET_IB_MAX_REQUESTS, so the immediate must keep the id's low 32 bits
+// across 2^32 - 1 and 2^32 for the slot to stay the sender's.
+TEST_F(NetIbCastP2pIsendMicrotest, Isend_ById_ImmediateKeepsTheReceiveSlotPastTheIdWrap) {
+  WireSend(1, 1, BY_ID);
+  const uint64_t heads[] = {UINT32_MAX, (1ull << 32) + 5};
+  for (size_t i = 0; i < sizeof(heads) / sizeof(heads[0]); i++) {
+    send_->base.fifoHead = heads[i];
+    Cts(0, 1, 1, 4096);
+    void* req = nullptr;
+    ASSERT_EQ(Isend(64, 1, &req), ncclSuccess) << i;
+    const uint32_t imm = be32toh(Chain(0, i)[0].wr.imm_data);
+    EXPECT_EQ(imm, (uint32_t)heads[i]) << i;
+    EXPECT_EQ(imm % NET_IB_MAX_REQUESTS, heads[i] % NET_IB_MAX_REQUESTS) << i;
+  }
 }
 
 // A sharing sender stamps its commId into wr_id[63:48] and the receiver's commId into the BY_ID immediate.
@@ -730,6 +850,32 @@ TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_RetransmitAfterTwoSkippedQps_P
 TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_SkipAfterEmptyRepost_AdvancesWithoutSgList) {
   SendThenLose(3, 1, 100);
   EXPECT_FALSE(Chain(0, 0)[0].hasSge);
+}
+
+// A sub-threshold send puts the whole payload on QP 0 and leaves every later QP at length 0, so a delivered QP
+// sitting after one of those zero-length positions makes the skip run on a work request whose sg_list was cleared
+// by the empty post. Three QPs with only the middle one undelivered is the smallest such arrangement.
+TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_SubThresholdRetransmitAcrossAZeroLengthQp_PostsOnlyTheGap) {
+  WireSend(3);
+  send_->base.resiliency = res_.get();
+  Cts(0, 1, 1, 4096);
+  void* req = nullptr;
+  ASSERT_EQ(Isend(32, 1, &req), ncclSuccess);
+  ASSERT_EQ(verbs_[0].sends.size(), 3u);
+  verbs_[0].sends.clear();
+  Req(req)->send.sentData[0] = true;
+  Req(req)->send.sentData[1] = false;
+  Req(req)->send.sentData[2] = true;
+
+  ncclResult_t r = ncclInternalError;
+  CaptureLog([&] { r = IbCastMultiSend(send_.get(), 0, 3, 0, false, false); });
+  ASSERT_EQ(r, ncclSuccess);
+
+  // Only the undelivered QP reposts, and it carries nothing: QP 0 already took the whole payload.
+  ASSERT_EQ(verbs_[0].sends.size(), 1u);
+  EXPECT_EQ(verbs_[0].sends[0].qp, &verbs_[0].qps[1]);
+  EXPECT_FALSE(Chain(0, 0)[0].hasSge);
+  EXPECT_EQ(Chain(0, 0)[0].wr.num_sge, 0);
 }
 
 TEST_F(NetIbCastP2pIsendMicrotest, MultiSend_MoreRequestsThanAMultiRecvHolds_IsRejected) {
@@ -1136,6 +1282,54 @@ TEST_F(NetIbCastP2pIrecvMicrotest, Irecv_ByOrder_TagsRecvsAndTheDrainCtsWithTheR
   EXPECT_EQ(Req(next)->events[0], 1);
 }
 
+// A BY_ORDER sender never takes the scheduler path, even when it is globally on, so it sends over the default
+// nDataQps QPs; the receiver must arm the same QPs or it waits for completions that never come.
+TEST_F(NetIbCastP2pIrecvMicrotest, Irecv_ByOrderWithSchedulerOn_ArmsTheSendersDefaultQps) {
+  castGlobalQpSchedParms.enable = true;
+  WireSend(4, 2, BY_ORDER);
+  send_->base.splitDataOnQps = 0;
+  Cts(0, 1, 1, 4096);
+  void* sreq = nullptr;
+  ASSERT_EQ(Isend(1024, 1, &sreq), ncclSuccess);
+  EXPECT_EQ(Req(sreq)->desc.nqps, 2);
+  for (int d = 0; d < 2; d++) verbs_[d].sends.clear();
+
+  WireRecv(4, 2, BY_ORDER);
+  recv_->base.splitDataOnQps = 0;
+  void* req = nullptr;
+  ASSERT_EQ(Irecv(1, &req), ncclSuccess);
+  ASSERT_EQ(verbs_[0].recvs.size(), 1u);
+  ASSERT_EQ(verbs_[1].recvs.size(), 1u);
+  EXPECT_EQ(verbs_[0].recvs[0].qp, &verbs_[0].qps[0]);
+  EXPECT_EQ(verbs_[1].recvs[0].qp, &verbs_[1].qps[0]);
+
+  // BY_INDEX comms do take the scheduler path, which spreads over every QP.
+  recv_ = std::make_unique<ncclIbRecvComm>();
+  for (int d = 0; d < 2; d++) verbs_[d].recvs.clear();
+  WireRecv(4, 2, BY_INDEX);
+  recv_->base.splitDataOnQps = 0;
+  ASSERT_EQ(Irecv(1, &req), ncclSuccess);
+  EXPECT_EQ(verbs_[0].recvs.size(), 2u);
+  EXPECT_EQ(verbs_[1].recvs.size(), 2u);
+}
+
+// With the scheduler off a BY_INDEX receiver arms the sender's default QPs too: one per device unless
+// NCCL_IB_SPLIT_DATA_ON_QPS=1.
+TEST_F(NetIbCastP2pIrecvMicrotest, Irecv_ByIndexWithSchedulerOff_ArmsOneQpPerDevice) {
+  castGlobalQpSchedParms.enable = false;
+  WireRecv(4, 2, BY_INDEX);
+  recv_->base.splitDataOnQps = 0;
+  void* req = nullptr;
+  ASSERT_EQ(Irecv(1, &req), ncclSuccess);
+  ASSERT_EQ(verbs_[0].recvs.size(), 1u);
+  ASSERT_EQ(verbs_[1].recvs.size(), 1u);
+  EXPECT_EQ(verbs_[0].recvs[0].qp, &verbs_[0].qps[0]);
+  EXPECT_EQ(verbs_[1].recvs[0].qp, &verbs_[1].qps[0]);
+  // One data event per device plus the signalled CTS on device 0.
+  EXPECT_EQ(Req(req)->events[0], 2);
+  EXPECT_EQ(Req(req)->events[1], 1);
+}
+
 // With CTS offload the CTS is a fixed inline-sized write on activeQps[id % nqps], signalled on that QP's own slot.
 TEST_F(NetIbCastP2pIrecvMicrotest, Irecv_CtsOffload_UsesTheQpsSlotAndOneRecv) {
   WireRecv(2, 1, BY_ORDER);
@@ -1292,7 +1486,8 @@ TEST_F(NetIbCastP2pIflushMicrotest, Iflush_ReadsTheLastNonEmptyBufferOnEveryDevi
   }
 }
 
-// With a GPU scratchpad registered, each device first writes it (no completion) and then reads it back.
+// With a GPU scratchpad registered, each device posts the unsignaled write and
+// the signaled read as one chain. PostSend records one send per ibv_post_send.
 TEST_F(NetIbCastP2pIflushMicrotest, Iflush_GpuScratchpad_WritesThenReadsIt) {
   for (int d = 0; d < 2; d++) {
     recv_->devs[d].gpuFlush.gpuFlushGpuMem = &gpuMem_;
@@ -1302,9 +1497,10 @@ TEST_F(NetIbCastP2pIflushMicrotest, Iflush_GpuScratchpad_WritesThenReadsIt) {
   void* req = nullptr;
   ASSERT_EQ(Flush(&req), ncclSuccess);
   for (int d = 0; d < 2; d++) {
-    ASSERT_EQ(verbs_[d].sends.size(), 2u) << d;
+    ASSERT_EQ(verbs_[d].sends.size(), 1u) << d;
+    ASSERT_EQ(Chain(d, 0).size(), 2u) << d;
     const auto& write = Chain(d, 0)[0];
-    const auto& read = Chain(d, 1)[0];
+    const auto& read = Chain(d, 0)[1];
     EXPECT_EQ(write.wr.opcode, IBV_WR_RDMA_WRITE);
     EXPECT_EQ(write.wr.send_flags, 0);
     EXPECT_EQ(write.wr.wr.rdma.remote_addr, (uint64_t)&gpuMem_);
@@ -1320,8 +1516,8 @@ TEST_F(NetIbCastP2pIflushMicrotest, Iflush_GpuScratchpad_WritesThenReadsIt) {
     return std::string(env) == "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING" ? 0 : d;
   });
   ASSERT_EQ(Flush(&req), ncclSuccess);
-  EXPECT_EQ(verbs_[0].sends.size(), 3u);
-  EXPECT_EQ(Chain(0, 2)[0].wr.wr.rdma.remote_addr, (uint64_t)data_[0]);
+  EXPECT_EQ(verbs_[0].sends.size(), 2u);
+  EXPECT_EQ(Chain(0, 1)[0].wr.wr.rdma.remote_addr, (uint64_t)data_[0]);
 }
 
 TEST_F(NetIbCastP2pIflushMicrotest, Iflush_SharingAndFailures) {

@@ -311,7 +311,7 @@ fn counted_inactivation_rejects_without_stopping_shared_indices() {
         assert_eq!(hsa_queue_add_write_index_relaxed(public, 2), 23);
         assert_eq!((*write).load(Ordering::Relaxed), 25);
         assert_eq!(hsa_queue_load_write_index_relaxed(public), 25);
-        let mut state = QueueState::new();
+        let mut state = QueueState::new(4);
         state.counted_queues.insert(public as usize, counted);
         assert_eq!(
             inactivate_unintercepted_queue(&mut state, public),
@@ -437,6 +437,33 @@ fn firmware_queue_errors_map_to_public_status_codes() {
 }
 
 #[test]
+fn kfd_queue_exceptions_preserve_public_status_codes() {
+    for (code, status) in [
+        (1, EXCEPTION),
+        (2, EXCEPTION),
+        (3, EXCEPTION),
+        (4, ILLEGAL_INSTRUCTION),
+        (5, MEMORY_FAULT),
+        (6, MEMORY_APERTURE_VIOLATION),
+        (16, INCOMPATIBLE_ARGUMENTS),
+        (17, INVALID_ALLOCATION),
+        (18, INVALID_CODE_OBJECT),
+        (20, INVALID_PACKET_FORMAT),
+        (21, INVALID_ARGUMENT),
+        (22, INVALID_DISPATCH_PARAMETERS),
+        (23, INVALID_PACKET_FORMAT),
+        (30, ERROR),
+        (33, MEMORY_APERTURE_VIOLATION),
+        (34, ERROR),
+        (35, ERROR),
+        (36, ERROR),
+        (49, ERROR),
+    ] {
+        assert_eq!(event::queue_exception_status(1 << (code - 1)), status);
+    }
+}
+
+#[test]
 /// Verifies that base atomic entry points preserve queue indices.
 fn base_atomic_entry_points_preserve_queue_indices() {
     let mut storage = PublicQueueStorage([0; 256]);
@@ -509,10 +536,36 @@ fn repeated_queue_index_access_does_not_wait_for_the_registry_mutex() {
                 .unwrap();
         });
         ready_rx.recv().unwrap();
-        let guard = crate::runtime::LIFECYCLE.lock().unwrap();
+        let guard = crate::lifecycle::LIFECYCLE.lock().unwrap();
         go_tx.send(()).unwrap();
         let value = done_rx.recv_timeout(Duration::from_millis(200));
         drop(guard);
         assert_eq!(value.unwrap(), 42);
     });
+}
+
+#[test]
+fn scratch_faults_decode_both_extended_dispatch_formats() {
+    #[repr(align(64))]
+    struct Packet([u8; 64]);
+    let mut packet = Packet([0; 64]);
+    packet.0[4..6].copy_from_slice(&64_u16.to_ne_bytes());
+    packet.0[6..8].copy_from_slice(&2_u16.to_ne_bytes());
+    packet.0[8..10].copy_from_slice(&1_u16.to_ne_bytes());
+    packet.0[24..28].copy_from_slice(&256_u32.to_ne_bytes());
+    for (kind, format, expected) in [
+        (2_u16, 0, Some((256, 128))),
+        (0, 3, Some((256, 128))),
+        (0, 4, Some((256, 128))),
+        (0, 2, None),
+        (3, 4, None),
+    ] {
+        packet.0[..2].copy_from_slice(&kind.to_ne_bytes());
+        packet.0[2] = format;
+        // SAFETY: The complete aligned packet is initialized and unpublished.
+        assert_eq!(
+            unsafe { dispatch_scratch_requirements(packet.0.as_ptr() as usize) },
+            expected
+        );
+    }
 }

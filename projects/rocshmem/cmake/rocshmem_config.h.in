@@ -22,31 +22,33 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#cmakedefine PROFILE
-#cmakedefine BUILD_DEBUG_TRACE_HOST
-#cmakedefine BUILD_DEBUG_TRACE_DEVICE
 #cmakedefine BUILD_DEBUG_DEVICE
-#cmakedefine USE_RO
-#cmakedefine USE_HOST_VERBS
-#cmakedefine USE_IPC
-#cmakedefine USE_GDA
-#cmakedefine USE_SDMA
-#cmakedefine USE_TDM
-#cmakedefine USE_THREADS
-#cmakedefine USE_SHARED_CTX
-#cmakedefine USE_WF_COAL
-#cmakedefine HAVE_AMDSMI_GPU_FABRIC_INFO
-#cmakedefine USE_FUNC_CALL
-#cmakedefine USE_SINGLE_NODE
-#cmakedefine USE_HDP_FLUSH
-#cmakedefine USE_HDP_FLUSH_HOST_SIDE
-#cmakedefine GDA_IONIC
+#cmakedefine BUILD_DEBUG_TRACE_DEVICE
+#cmakedefine BUILD_DEBUG_TRACE_HOST
 #cmakedefine GDA_BNXT
+#cmakedefine GDA_IONIC
 #cmakedefine GDA_MLX5
 #cmakedefine GDA_MUX
-#cmakedefine USE_CONSTMEM
-#cmakedefine HAVE_EXTERNAL_MPI
+#cmakedefine HAVE_AMDSMI_GPU_FABRIC_INFO
 #cmakedefine HAVE_DEVICE_MALLOC_UNCACHED
+#cmakedefine HAVE_EXTERNAL_MPI
+#cmakedefine PROFILE
+#cmakedefine ROCSHMEM_ROCPROFILER_REGISTER
+#cmakedefine USE_CONSTMEM
+#cmakedefine USE_FUNC_CALL
+#cmakedefine USE_GDA
+#cmakedefine USE_HDP_FLUSH
+#cmakedefine USE_HDP_FLUSH_HOST_SIDE
+#cmakedefine USE_HOST_VERBS
+#cmakedefine USE_IPC
+#cmakedefine USE_LDS_STAGE
+#cmakedefine USE_RO
+#cmakedefine USE_SDMA
+#cmakedefine USE_SHARED_CTX
+#cmakedefine USE_SINGLE_NODE
+#cmakedefine USE_TDM
+#cmakedefine USE_THREADS
+#cmakedefine USE_WF_COAL
 
 #define ROCSHMEM_VENDOR_MAJOR_VERSION @PROJECT_VERSION_MAJOR@
 #define ROCSHMEM_VENDOR_MINOR_VERSION @PROJECT_VERSION_MINOR@

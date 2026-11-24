@@ -62,6 +62,8 @@ class PrivateGttCopySourceGate;
 class KfdProcess {
 public:
   class PageTableTransaction;
+  struct GpuGrantRange;
+  struct GpuGrantIndex;
   enum class SvmAccessMode { Access, AccessInPlace, NoAccess };
 
   /// @brief Per-GPU state within a process.
@@ -101,7 +103,7 @@ public:
   pid_t client_pid() const { return client_pid_; }
   void set_client_pid(pid_t pid) { client_pid_ = pid; }
 
-  uint32_t open_ref_count() const { return open_ref_count_.load(std::memory_order_relaxed); }
+  uint32_t open_ref_count() const { return open_ref_count_.load(std::memory_order_acquire); }
   void retain_open() { open_ref_count_.fetch_add(1, std::memory_order_relaxed); }
 
   /// @brief Drop one open reference; returns true when the last one is released.
@@ -390,6 +392,14 @@ public:
     return gpu_access_grant_impl(gpu_id, address, size, nullptr);
   }
 
+  /// Bounds of an isolated grant with uniform routing and permissions.
+  GpuGrantDecision gpu_access_grant_bounds(uint32_t gpu_id, uint64_t address, size_t size,
+                                           std::pair<uint64_t, uint64_t> &bounds) const {
+    return gpu_access_grant_impl(gpu_id, address, size, nullptr, false, &bounds);
+  }
+
+  const std::atomic<uint64_t> &gpu_grant_publication() const { return gpu_grant_publication_; }
+
   /// @brief Admit and retain a bounded peer backing for one GPU request.
   /// @details Ordinary CU/SDMA admission avoids owner reference traffic; only
   /// peer preparation asks the same live grant index for a retained backing.
@@ -409,9 +419,10 @@ public:
   }
 
 private:
-  [[nodiscard]] GpuGrantDecision gpu_access_grant_impl(uint32_t gpu_id, uint64_t address,
-                                                       size_t size, GpuBackingLease *backing,
-                                                       bool local_backing = false) const {
+  [[nodiscard]] GpuGrantDecision
+  gpu_access_grant_impl(uint32_t gpu_id, uint64_t address, size_t size, GpuBackingLease *backing,
+                        bool local_backing = false,
+                        std::pair<uint64_t, uint64_t> *bounds = nullptr) const {
     if (size == 0 || size - 1 > UINT64_MAX - address)
       return {};
     std::shared_lock lock(gpu_grants_mutex_);
@@ -456,6 +467,11 @@ private:
       // allocation that overlaps an otherwise valid first one.
       if (range.gpu_va > covered_end || (matched && range.gpu_va < previous_end))
         return decision;
+      if (bounds && !matched && grants->svm_denials.empty() &&
+          (index == 0 || grants->max_end_prefix[index - 1] <= range.gpu_va) &&
+          (index + 1 == grants->ranges.size() || grants->ranges[index + 1].gpu_va >= range_end) &&
+          address >= range.gpu_va && last_byte < range_end)
+        *bounds = {range.gpu_va, range_end};
       if (!matched) {
         decision.domain = range.domain;
         decision.owner_gpu_id = range.owner_gpu_id;
@@ -511,6 +527,13 @@ private:
     }
     if (matched && covered_end <= last_byte)
       return decision;
+    if (bounds && !matched && grants->svm_denials.empty()) {
+      // Queue rings and code can be outside allocated BOs. The gap between
+      // neighboring ranges has one local policy until the next publication.
+      const size_t index = static_cast<size_t>(first - grants->max_end_prefix.begin());
+      *bounds = {index ? grants->max_end_prefix[index - 1] : 0,
+                 index == grants->ranges.size() ? UINT64_MAX : grants->ranges[index].gpu_va};
+    }
     // Queue rings and driver-owned mappings can live outside allocations_.
     // A span crossing grants is valid architecturally, but cannot use one
     // generation to identify every cache line it touches.
@@ -595,12 +618,9 @@ public:
     retired_gpu_ranges_ = std::move(updated);
   }
 
-  /// @brief Replace a tombstone only for bytes claimed by a new allocation.
-  /// @pre The caller holds alloc_mutex_.
-  void claim_gpu_range_locked(uint64_t gpu_va, uint64_t size) {
-    if (size == 0 || size > UINT64_MAX - gpu_va)
-      return;
-    const uint64_t end = gpu_va + size;
+private:
+  /// @pre The caller holds alloc_mutex_ and passes a nonwrapping range.
+  std::vector<GpuGrantRange> retired_ranges_outside_locked(uint64_t gpu_va, uint64_t end) const {
     std::vector<GpuGrantRange> remaining;
     remaining.reserve(retired_gpu_ranges_.size() + 1);
     for (const auto &range : retired_gpu_ranges_) {
@@ -621,6 +641,17 @@ public:
         remaining.push_back(std::move(suffix));
       }
     }
+    return remaining;
+  }
+
+public:
+  /// @brief Replace a tombstone only for bytes claimed by a new allocation.
+  /// @pre The caller holds alloc_mutex_.
+  void claim_gpu_range_locked(uint64_t gpu_va, uint64_t size) {
+    if (size == 0 || size > UINT64_MAX - gpu_va)
+      return;
+    const uint64_t end = gpu_va + size;
+    auto remaining = retired_ranges_outside_locked(gpu_va, end);
     // A new BO or host view at this VA must not inherit an earlier host SVM
     // denial. Prepare both vectors before changing either published state.
     std::vector<GpuSvmDeniedRange> remaining_denials;
@@ -798,6 +829,31 @@ public:
   [[nodiscard]] bool clear_host_svm_policy_locked(uint64_t gpu_va, uint64_t size,
                                                   uint64_t preserve_userptr_handle = 0) {
     const uint64_t end = gpu_va + size;
+    const bool retired_view_removed =
+        std::ranges::any_of(retired_identity_views_, [&](const auto &view) {
+          return view.gpu_va < end && gpu_va < view.gpu_va + view.mapped_bytes;
+        });
+    if (retired_view_removed) {
+      // A fixed BO's denial follows its surviving CPU view, including fragments
+      // left by partial unmaps or replacements of a guarded SVM reservation.
+      std::vector<RetiredIdentityView> remaining_views;
+      remaining_views.reserve(retired_identity_views_.size() + 1);
+      for (const auto &view : retired_identity_views_) {
+        const uint64_t view_end = view.gpu_va + view.mapped_bytes;
+        if (view_end <= gpu_va || end <= view.gpu_va) {
+          remaining_views.push_back(view);
+          continue;
+        }
+        const uint64_t removed_begin = std::max(gpu_va, view.gpu_va);
+        const uint64_t removed_end = std::min(end, view_end);
+        claim_gpu_range_locked(removed_begin, removed_end - removed_begin);
+        if (view.gpu_va < removed_begin)
+          remaining_views.push_back({view.gpu_va, removed_begin - view.gpu_va});
+        if (removed_end < view_end)
+          remaining_views.push_back({removed_end, view_end - removed_end});
+      }
+      retired_identity_views_ = std::move(remaining_views);
+    }
     const auto overlaps = [&](const auto &range) {
       return range.gpu_va < end && gpu_va < range.gpu_va + range.size;
     };
@@ -830,7 +886,7 @@ public:
           return range.host_vma_backed && overlaps(range);
         });
     if (!has_denials && !has_host_tombstones && !has_access)
-      return false;
+      return retired_view_removed;
     std::vector<GpuSvmDeniedRange> remaining;
     if (has_denials) {
       remaining.reserve(svm_denied_ranges_.size() + 1);
@@ -932,14 +988,13 @@ public:
   }
 
 private:
-  void publish_gpu_grants_impl_locked() {
-    if (gpu_grants_poisoned_) {
-      replace_gpu_grants(deny_all_gpu_grants_);
-      return;
-    }
+  std::shared_ptr<const GpuGrantIndex>
+  build_gpu_grant_index_locked(std::span<const GpuGrantRange> retired_ranges) const {
+    if (gpu_grants_poisoned_)
+      return deny_all_gpu_grants_;
     auto next = std::make_shared<GpuGrantIndex>();
     next->svm_denials = svm_denied_ranges_;
-    next->ranges.reserve(allocations_.size() + retired_gpu_ranges_.size());
+    next->ranges.reserve(allocations_.size() + retired_ranges.size());
     for (const auto &[handle, allocation] : allocations_) {
       (void)handle;
       const auto domain =
@@ -950,7 +1005,7 @@ private:
                               allocation.local_backing_owner,
                               allocation.cacheable_peer_for_testing});
     }
-    next->ranges.insert(next->ranges.end(), retired_gpu_ranges_.begin(), retired_gpu_ranges_.end());
+    next->ranges.insert(next->ranges.end(), retired_ranges.begin(), retired_ranges.end());
     std::sort(next->ranges.begin(), next->ranges.end(),
               [](const GpuGrantRange &left, const GpuGrantRange &right) {
                 return left.gpu_va < right.gpu_va;
@@ -988,7 +1043,7 @@ private:
           publish_aliases(range.local_backing_owner, next->local_aliases, true);
       }
     }
-    replace_gpu_grants(std::move(next));
+    return next;
   }
 
 public:
@@ -1385,6 +1440,32 @@ public:
     return PageTableMutationResult::Applied;
   }
 
+  /// @brief Install a GEM mapping and reclaim any freed KFD VA it reuses.
+  /// @pre The caller holds alloc_mutex_ and has preflighted the nonwrapping range
+  ///      under this transaction.
+  PageTableMutationResult map_gem_pages(PageTableTransaction &transaction, uint64_t gpu_va,
+                                        void *host_ptr, size_t size, amdgpu::Mtype mtype,
+                                        HostExtentOwner owner, uint64_t drm_file_id) {
+    const uint64_t end = gpu_va + size;
+    std::vector<GpuGrantRange> remaining;
+    std::shared_ptr<const GpuGrantIndex> grants;
+    if (std::ranges::any_of(retired_gpu_ranges_, [&](const auto &range) {
+          return range.gpu_va < end && gpu_va < range.gpu_va + range.size;
+        })) {
+      // Stage the grant update before editing PTEs. A failed map must leave
+      // the old denials in effect, including on any partially installed PTEs.
+      remaining = retired_ranges_outside_locked(gpu_va, end);
+      grants = build_gpu_grant_index_locked(remaining);
+    }
+    const auto result = map_pages(transaction, gpu_va, host_ptr, size, mtype, owner,
+                                  {VaOwnerKind::Gem, drm_file_id});
+    if (result == PageTableMutationResult::Applied && grants) {
+      retired_gpu_ranges_.swap(remaining);
+      replace_gpu_grants(std::move(grants));
+    }
+    return result;
+  }
+
   /// @brief Unmap pages from this process's GPU page table.
   PageTableMutationResult unmap_pages(uint64_t gpu_va, size_t size, VaOwner va_owner = {}) {
     auto transaction = begin_page_table_transaction();
@@ -1628,6 +1709,7 @@ public:
   // reference count and internal lock serialize CU readers. Keep the index
   // alive under distributed read ownership instead. This is an innermost
   // lock: readers inspect immutable state and never call back into the VM.
+  std::atomic<uint64_t> gpu_grant_publication_{1};
   mutable util::DistributedSharedMutex gpu_grants_mutex_;
   std::shared_ptr<const GpuGrantIndex> gpu_grants_ = std::make_shared<const GpuGrantIndex>();
   std::shared_ptr<const GpuGrantIndex> deny_all_gpu_grants_ = [] {
@@ -1907,6 +1989,9 @@ private:
   void replace_gpu_grants(std::shared_ptr<const GpuGrantIndex> next) {
     std::unique_lock lock(gpu_grants_mutex_);
     gpu_grants_.swap(next);
+    const uint64_t publication = gpu_grant_publication_.load(std::memory_order_relaxed);
+    if (publication != UINT64_MAX)
+      gpu_grant_publication_.store(publication + 1, std::memory_order_release);
     // The parameter releases the old index after the lock. Its last backing
     // owner can unmap memory and acquire locks outside grant publication.
   }
@@ -2048,7 +2133,7 @@ inline void KfdProcess::publish_gpu_grants_locked() {
 inline void KfdProcess::publish_gpu_grants_locked(PageTableTransaction &transaction) {
   if (transaction.process_ != this || !transaction.request_lock_.owns_lock())
     throw std::logic_error("GPU grant publication requires a live page-table transaction");
-  publish_gpu_grants_impl_locked();
+  replace_gpu_grants(build_gpu_grant_index_locked(retired_gpu_ranges_));
 }
 
 } // namespace rocjitsu

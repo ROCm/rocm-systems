@@ -1,9 +1,9 @@
 #ifndef NCCL_DEVICE_SYMMETRIC_DATA_OPS_H_
 #define NCCL_DEVICE_SYMMETRIC_DATA_OPS_H_
 #if defined(__HIP_PLATFORM_AMD__)
-#include "symmetric/primitives.h"
+#include "symmetric/symk.h"
 #else
-#include "primitives.cuh"
+#include "symk.cuh"
 #endif
 
 struct SMemTag {}; // Shared memory

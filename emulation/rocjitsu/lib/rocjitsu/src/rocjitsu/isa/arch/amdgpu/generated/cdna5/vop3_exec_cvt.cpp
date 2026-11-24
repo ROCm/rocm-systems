@@ -8,8 +8,13 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_cdna_unary_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_compare_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_fma64_variants_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_lane_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_wide_conversion_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -927,7 +932,11 @@ void VFrexpExpI32F64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_frexp_exp_i32_f64_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
+  amdgpu::arith::execute_float_unary64(
+      wf, rj_arith_v_frexp_exp_i32_f64_w32_gfx12, rj_arith_v_frexp_exp_i32_f64_w64_gfx12,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, false, /*integer_result=*/true);
 }
 
 RJ_NOINLINE void VFrexpExpI32F64Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -944,7 +953,11 @@ RJ_NOINLINE void VFrexpExpI32F64Vop3::execute_modifier_impl(amdgpu::Wavefront &w
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_frexp_exp_i32_f64_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
+  amdgpu::arith::execute_float_unary64(
+      wf, rj_arith_v_frexp_exp_i32_f64_w32_gfx12, rj_arith_v_frexp_exp_i32_f64_w64_gfx12,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, false, /*integer_result=*/true);
   dpp_write_mask_scope_.restore();
 }
 
@@ -953,7 +966,12 @@ void VFrexpMantF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_frexp_mant_f64_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary64(wf, rj_arith_v_frexp_mant_f64_w32_gfx12,
+                                       rj_arith_v_frexp_mant_f64_w64_gfx12,
+                                       wf.cu().arithmetic_flags(), modifiers, vdst, src0, false);
 }
 
 RJ_NOINLINE void VFrexpMantF64Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -970,7 +988,12 @@ RJ_NOINLINE void VFrexpMantF64Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_frexp_mant_f64_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary64(wf, rj_arith_v_frexp_mant_f64_w32_gfx12,
+                                       rj_arith_v_frexp_mant_f64_w64_gfx12,
+                                       wf.cu().arithmetic_flags(), modifiers, vdst, src0, false);
   dpp_write_mask_scope_.restore();
 }
 
@@ -979,7 +1002,21 @@ void VFrexpExpI32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_frexp_exp_i32_f32_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
+  amdgpu::arith::execute_float_unary32(
+      wf, rj_arith_v_frexp_exp_i32_f32_w32_gfx12, rj_arith_v_frexp_exp_i32_f32_w64_gfx12,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, false, /*guest_rounding=*/false);
 }
 
 RJ_NOINLINE void VFrexpExpI32F32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -998,7 +1035,21 @@ RJ_NOINLINE void VFrexpExpI32F32Vop3::execute_modifier_impl(amdgpu::Wavefront &w
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_frexp_exp_i32_f32_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
+  amdgpu::arith::execute_float_unary32(
+      wf, rj_arith_v_frexp_exp_i32_f32_w32_gfx12, rj_arith_v_frexp_exp_i32_f32_w64_gfx12,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, false, /*guest_rounding=*/false);
   dpp_write_mask_scope_.restore();
 }
 
@@ -1007,7 +1058,22 @@ void VFrexpMantF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_frexp_mant_f32_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_cdna_integral_unary<false, false>(
+      *this, wf, rj_arith_v_frexp_mant_f32_w32_gfx12, rj_arith_v_frexp_mant_f32_w64_gfx12,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0);
 }
 
 RJ_NOINLINE void VFrexpMantF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -1026,7 +1092,22 @@ RJ_NOINLINE void VFrexpMantF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_frexp_mant_f32_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_cdna_integral_unary<false, false>(
+      *this, wf, rj_arith_v_frexp_mant_f32_w32_gfx12, rj_arith_v_frexp_mant_f32_w64_gfx12,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0);
   dpp_write_mask_scope_.restore();
 }
 
@@ -1275,38 +1356,24 @@ void VFrexpMantF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16(
-      [](auto a) { return util::frexp_mant_f32_simd(std::bit_cast<util::native<uint32_t>>(a)); },
-      false, amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()));
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(
-              static_cast<uint32_t>(amdgpu::sdwa::round_f16_result(
-                  *this, wf,
-                  amdgpu::frexp_f32(
-                      amdgpu::source_modifier::apply_to_float(
-                          util::f16_to_f32(static_cast<uint16_t>(
-                              amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
-                                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel,
-                                                                           0),
-                                  input_policy))),
-                          0, inst_.abs, inst_.neg),
-                      wf.fp_denorm_mode_f32())
-                      .mantissa,
-                  wf.fp16_ovfl())),
-              output_policy)));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
+  if (!wf.exec()) {
+    return;
   }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+      ((amdgpu::vop3_opsel(inst_) & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
+      ((amdgpu::vop3_opsel(inst_) & 8) ? RJ_ARITH_ALU_HIGH_D : 0u);
+  amdgpu::arith::execute_cdna_integral_unary<true, false>(
+      *this, wf, rj_arith_v_frexp_mant_f16_w32_gfx12, rj_arith_v_frexp_mant_f16_w64_gfx12,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0);
 }
 
 RJ_NOINLINE void VFrexpMantF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -1327,38 +1394,24 @@ RJ_NOINLINE void VFrexpMantF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16(
-      [](auto a) { return util::frexp_mant_f32_simd(std::bit_cast<util::native<uint32_t>>(a)); },
-      false, amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()));
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(
-              static_cast<uint32_t>(amdgpu::sdwa::round_f16_result(
-                  *this, wf,
-                  amdgpu::frexp_f32(
-                      amdgpu::source_modifier::apply_to_float(
-                          util::f16_to_f32(static_cast<uint16_t>(
-                              amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
-                                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel,
-                                                                           0),
-                                  input_policy))),
-                          0, inst_.abs, inst_.neg),
-                      wf.fp_denorm_mode_f32())
-                      .mantissa,
-                  wf.fp16_ovfl())),
-              output_policy)));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
+  if (!wf.exec()) {
+    return;
   }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+      ((amdgpu::vop3_opsel(inst_) & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
+      ((amdgpu::vop3_opsel(inst_) & 8) ? RJ_ARITH_ALU_HIGH_D : 0u);
+  amdgpu::arith::execute_cdna_integral_unary<true, false>(
+      *this, wf, rj_arith_v_frexp_mant_f16_w32_gfx12, rj_arith_v_frexp_mant_f16_w64_gfx12,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0);
   dpp_write_mask_scope_.restore();
 }
 
@@ -1367,28 +1420,21 @@ void VFrexpExpI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>([&]() -> uint32_t {
-        float s = amdgpu::source_modifier::apply_to_float(
-            util::f16_to_f32(
-                static_cast<uint16_t>(amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
-                    ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-                    input_policy))),
-            0, inst_.abs, inst_.neg);
-        int exp = 0;
-        if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
-          std::frexp(s, &exp);
-        return static_cast<uint16_t>(exp);
-      }()));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u);
+  amdgpu::arith::execute_float_unary16(wf, rj_arith_v_frexp_exp_i16_f16_w32_gfx12,
+                                       rj_arith_v_frexp_exp_i16_f16_w64_gfx12,
+                                       wf.cu().arithmetic_flags(), modifiers, vdst, src0, false,
+                                       /*guest_rounding=*/false, /*zero_extend_low=*/false);
 }
 
 RJ_NOINLINE void VFrexpExpI16F16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -1409,28 +1455,21 @@ RJ_NOINLINE void VFrexpExpI16F16Vop3::execute_modifier_impl(amdgpu::Wavefront &w
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>([&]() -> uint32_t {
-        float s = amdgpu::source_modifier::apply_to_float(
-            util::f16_to_f32(
-                static_cast<uint16_t>(amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
-                    ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-                    input_policy))),
-            0, inst_.abs, inst_.neg);
-        int exp = 0;
-        if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
-          std::frexp(s, &exp);
-        return static_cast<uint16_t>(exp);
-      }()));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u);
+  amdgpu::arith::execute_float_unary16(wf, rj_arith_v_frexp_exp_i16_f16_w32_gfx12,
+                                       rj_arith_v_frexp_exp_i16_f16_w64_gfx12,
+                                       wf.cu().arithmetic_flags(), modifiers, vdst, src0, false,
+                                       /*guest_rounding=*/false, /*zero_extend_low=*/false);
   dpp_write_mask_scope_.restore();
 }
 
@@ -1963,1856 +2002,1065 @@ RJ_NOINLINE void VCvtPkU8F32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32SrPk8Fp4F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 1u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 1u, 1ULL << lane);
-    uint32_t src_words[8] = {};
-    for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      return std::bit_cast<float>(src_words[index]);
-    };
-    uint32_t dst_words[1] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0xfu;
-      uint32_t bit = index * 4u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 4u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp4_e2m1_sr(value, seed));
-      seed = util::prng_advance(seed);
-    }
-    for (uint32_t word = 0; word < 1u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<true, true, 1>(
+      wf, rj_arith_v_cvt_scalef32_sr_pk8_fp4_f32_w32_gfx1250, nullptr, wf.cu().arithmetic_flags(),
+      destination_base, source_a_base, 0, 8, false, &src1, src2);
 }
 
 void VCvtScalef32SrPk8Fp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 2u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
-    uint32_t src_words[8] = {};
-    for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      return std::bit_cast<float>(src_words[index]);
-    };
-    uint32_t dst_words[2] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0xffu;
-      uint32_t bit = index * 8u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 8u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp8_e4m3_sr_mode(value, seed, wf.fp16_ovfl()));
-      seed = util::prng_advance(seed);
-    }
-    for (uint32_t word = 0; word < 2u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<true, true, 2>(
+      wf, rj_arith_v_cvt_scalef32_sr_pk8_fp8_f32_w32_gfx1250, nullptr,
+      wf.cu().arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), destination_base,
+      source_a_base, 0, 8, false, &src1, src2);
 }
 
 void VCvtScalef32SrPk8Bf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 2u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
-    uint32_t src_words[8] = {};
-    for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      return std::bit_cast<float>(src_words[index]);
-    };
-    uint32_t dst_words[2] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0xffu;
-      uint32_t bit = index * 8u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 8u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_bf8_e5m2_sr_mode(value, seed, wf.fp16_ovfl()));
-      seed = util::prng_advance(seed);
-    }
-    for (uint32_t word = 0; word < 2u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<true, true, 2>(
+      wf, rj_arith_v_cvt_scalef32_sr_pk8_bf8_f32_w32_gfx1250, nullptr,
+      wf.cu().arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), destination_base,
+      source_a_base, 0, 8, false, &src1, src2);
 }
 
 void VCvtScalePk8F16Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 1u) || !regs.owns_vgpr_range(dst_base, 4u))
-      continue;
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    auto src_region = regs.read_vgpr_region(src_base, 1u, 1ULL << lane);
-    uint32_t src_payload = src_region.lane(0, lane);
-    auto read_scaled_src = [&](uint32_t index) -> float {
-      uint32_t raw = (src_payload >> (index * 4u)) & 0xfu;
-      return util::fp4_e2m1_to_f32(static_cast<uint8_t>(raw));
-    };
-    auto dst_region = regs.write_vgpr_region(dst_base, 4u, 1ULL << lane);
-    uint32_t dst_words[4] = {};
-    for (uint32_t index = 0; index < 8u; ++index) {
-      uint32_t bits = util::f32_to_f16_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
-      dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
-    }
-    for (uint32_t word = 0; word < 4u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto &cu = wf.cu();
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_base = wf.vgpr_alloc().base + *source_offset;
+  uint64_t flags = cu.arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::execute_wide_scaled_widen<true>(
+      wf, rj_arith_v_cvt_scale_pk8_f16_fp4_w32_gfx1250, nullptr, flags, destination_base,
+      source_base, src1, 4, 0, 1, amdgpu::CvtScaleSelection::f4_f6(inst_.opsel));
 }
 
 void VCvtScalePk8Bf16Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 1u) || !regs.owns_vgpr_range(dst_base, 4u))
-      continue;
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    auto src_region = regs.read_vgpr_region(src_base, 1u, 1ULL << lane);
-    uint32_t src_payload = src_region.lane(0, lane);
-    auto read_scaled_src = [&](uint32_t index) -> float {
-      uint32_t raw = (src_payload >> (index * 4u)) & 0xfu;
-      return util::fp4_e2m1_to_f32(static_cast<uint8_t>(raw));
-    };
-    auto dst_region = regs.write_vgpr_region(dst_base, 4u, 1ULL << lane);
-    uint32_t dst_words[4] = {};
-    for (uint32_t index = 0; index < 8u; ++index) {
-      uint32_t bits = util::f32_to_bf16_rne_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
-      dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
-    }
-    for (uint32_t word = 0; word < 4u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto &cu = wf.cu();
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_base = wf.vgpr_alloc().base + *source_offset;
+  uint64_t flags = cu.arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::execute_wide_scaled_widen<true>(
+      wf, rj_arith_v_cvt_scale_pk8_bf16_fp4_w32_gfx1250, nullptr, flags, destination_base,
+      source_base, src1, 4, 0, 1, amdgpu::CvtScaleSelection::f4_f6(inst_.opsel));
 }
 
 void VCvtScalePk8F32Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 1u) || !regs.owns_vgpr_range(dst_base, 8u))
-      continue;
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    auto src_region = regs.read_vgpr_region(src_base, 1u, 1ULL << lane);
-    uint32_t src_payload = src_region.lane(0, lane);
-    auto read_scaled_src = [&](uint32_t index) -> float {
-      uint32_t raw = (src_payload >> (index * 4u)) & 0xfu;
-      return util::fp4_e2m1_to_f32(static_cast<uint8_t>(raw));
-    };
-    auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_src(index) * scale;
-      dst_region.set_lane(index, lane, std::bit_cast<uint32_t>(value));
-    }
+  auto &cu = wf.cu();
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_base = wf.vgpr_alloc().base + *source_offset;
+  uint64_t flags = cu.arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::execute_wide_scaled_widen<true>(
+      wf, rj_arith_v_cvt_scale_pk8_f32_fp4_w32_gfx1250, nullptr, flags, destination_base,
+      source_base, src1, 8, 0, 1, amdgpu::CvtScaleSelection::f4_f6(inst_.opsel));
 }
 
 void VCvtScalePk8F16Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 2u) || !regs.owns_vgpr_range(dst_base, 4u))
-      continue;
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    auto src_region = regs.read_vgpr_region(src_base, 2u, 1ULL << lane);
-    uint64_t src_payload = src_region.lane64(0, lane);
-    auto read_scaled_src = [&](uint32_t index) -> float {
-      uint32_t raw = static_cast<uint32_t>((src_payload >> (index * 8u)) & 0xffu);
-      return util::fp8_e4m3_to_f32(static_cast<uint8_t>(raw));
-    };
-    auto dst_region = regs.write_vgpr_region(dst_base, 4u, 1ULL << lane);
-    uint32_t dst_words[4] = {};
-    for (uint32_t index = 0; index < 8u; ++index) {
-      uint32_t bits = util::f32_to_f16_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
-      dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
-    }
-    for (uint32_t word = 0; word < 4u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto &cu = wf.cu();
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_base = wf.vgpr_alloc().base + *source_offset;
+  uint64_t flags = cu.arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::execute_wide_scaled_widen<true>(
+      wf, rj_arith_v_cvt_scale_pk8_f16_fp8_w32_gfx1250, nullptr, flags, destination_base,
+      source_base, src1, 4, 0, 2, amdgpu::CvtScaleSelection::f8(inst_.opsel));
 }
 
 void VCvtScalePk8Bf16Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 2u) || !regs.owns_vgpr_range(dst_base, 4u))
-      continue;
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    auto src_region = regs.read_vgpr_region(src_base, 2u, 1ULL << lane);
-    uint64_t src_payload = src_region.lane64(0, lane);
-    auto read_scaled_src = [&](uint32_t index) -> float {
-      uint32_t raw = static_cast<uint32_t>((src_payload >> (index * 8u)) & 0xffu);
-      return util::fp8_e4m3_to_f32(static_cast<uint8_t>(raw));
-    };
-    auto dst_region = regs.write_vgpr_region(dst_base, 4u, 1ULL << lane);
-    uint32_t dst_words[4] = {};
-    for (uint32_t index = 0; index < 8u; ++index) {
-      uint32_t bits = util::f32_to_bf16_rne_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
-      dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
-    }
-    for (uint32_t word = 0; word < 4u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto &cu = wf.cu();
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_base = wf.vgpr_alloc().base + *source_offset;
+  uint64_t flags = cu.arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::execute_wide_scaled_widen<true>(
+      wf, rj_arith_v_cvt_scale_pk8_bf16_fp8_w32_gfx1250, nullptr, flags, destination_base,
+      source_base, src1, 4, 0, 2, amdgpu::CvtScaleSelection::f8(inst_.opsel));
 }
 
 void VCvtScalePk8F32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 2u) || !regs.owns_vgpr_range(dst_base, 8u))
-      continue;
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    auto src_region = regs.read_vgpr_region(src_base, 2u, 1ULL << lane);
-    uint64_t src_payload = src_region.lane64(0, lane);
-    auto read_scaled_src = [&](uint32_t index) -> float {
-      uint32_t raw = static_cast<uint32_t>((src_payload >> (index * 8u)) & 0xffu);
-      return util::fp8_e4m3_to_f32(static_cast<uint8_t>(raw));
-    };
-    auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_src(index) * scale;
-      dst_region.set_lane(index, lane, std::bit_cast<uint32_t>(value));
-    }
+  auto &cu = wf.cu();
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_base = wf.vgpr_alloc().base + *source_offset;
+  uint64_t flags = cu.arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::execute_wide_scaled_widen<true>(
+      wf, rj_arith_v_cvt_scale_pk8_f32_fp8_w32_gfx1250, nullptr, flags, destination_base,
+      source_base, src1, 8, 0, 2, amdgpu::CvtScaleSelection::f8(inst_.opsel));
 }
 
 void VCvtScalePk8F16Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 2u) || !regs.owns_vgpr_range(dst_base, 4u))
-      continue;
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    auto src_region = regs.read_vgpr_region(src_base, 2u, 1ULL << lane);
-    uint64_t src_payload = src_region.lane64(0, lane);
-    auto read_scaled_src = [&](uint32_t index) -> float {
-      uint32_t raw = static_cast<uint32_t>((src_payload >> (index * 8u)) & 0xffu);
-      return util::bf8_e5m2_to_f32(static_cast<uint8_t>(raw));
-    };
-    auto dst_region = regs.write_vgpr_region(dst_base, 4u, 1ULL << lane);
-    uint32_t dst_words[4] = {};
-    for (uint32_t index = 0; index < 8u; ++index) {
-      uint32_t bits = util::f32_to_f16_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
-      dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
-    }
-    for (uint32_t word = 0; word < 4u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto &cu = wf.cu();
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_base = wf.vgpr_alloc().base + *source_offset;
+  uint64_t flags = cu.arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::execute_wide_scaled_widen<true>(
+      wf, rj_arith_v_cvt_scale_pk8_f16_bf8_w32_gfx1250, nullptr, flags, destination_base,
+      source_base, src1, 4, 0, 2, amdgpu::CvtScaleSelection::f8(inst_.opsel));
 }
 
 void VCvtScalePk8Bf16Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 2u) || !regs.owns_vgpr_range(dst_base, 4u))
-      continue;
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    auto src_region = regs.read_vgpr_region(src_base, 2u, 1ULL << lane);
-    uint64_t src_payload = src_region.lane64(0, lane);
-    auto read_scaled_src = [&](uint32_t index) -> float {
-      uint32_t raw = static_cast<uint32_t>((src_payload >> (index * 8u)) & 0xffu);
-      return util::bf8_e5m2_to_f32(static_cast<uint8_t>(raw));
-    };
-    auto dst_region = regs.write_vgpr_region(dst_base, 4u, 1ULL << lane);
-    uint32_t dst_words[4] = {};
-    for (uint32_t index = 0; index < 8u; ++index) {
-      uint32_t bits = util::f32_to_bf16_rne_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
-      dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
-    }
-    for (uint32_t word = 0; word < 4u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto &cu = wf.cu();
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_base = wf.vgpr_alloc().base + *source_offset;
+  uint64_t flags = cu.arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::execute_wide_scaled_widen<true>(
+      wf, rj_arith_v_cvt_scale_pk8_bf16_bf8_w32_gfx1250, nullptr, flags, destination_base,
+      source_base, src1, 4, 0, 2, amdgpu::CvtScaleSelection::f8(inst_.opsel));
 }
 
 void VCvtScalePk8F32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 2u) || !regs.owns_vgpr_range(dst_base, 8u))
-      continue;
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    auto src_region = regs.read_vgpr_region(src_base, 2u, 1ULL << lane);
-    uint64_t src_payload = src_region.lane64(0, lane);
-    auto read_scaled_src = [&](uint32_t index) -> float {
-      uint32_t raw = static_cast<uint32_t>((src_payload >> (index * 8u)) & 0xffu);
-      return util::bf8_e5m2_to_f32(static_cast<uint8_t>(raw));
-    };
-    auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_src(index) * scale;
-      dst_region.set_lane(index, lane, std::bit_cast<uint32_t>(value));
-    }
+  auto &cu = wf.cu();
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_base = wf.vgpr_alloc().base + *source_offset;
+  uint64_t flags = cu.arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::execute_wide_scaled_widen<true>(
+      wf, rj_arith_v_cvt_scale_pk8_f32_bf8_w32_gfx1250, nullptr, flags, destination_base,
+      source_base, src1, 8, 0, 2, amdgpu::CvtScaleSelection::f8(inst_.opsel));
 }
 
 void VCvtScalef32Pk8Fp4F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 1u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 1u, 1ULL << lane);
-    uint32_t src_words[8] = {};
-    for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      return std::bit_cast<float>(src_words[index]);
-    };
-    uint32_t dst_words[1] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0xfu;
-      uint32_t bit = index * 4u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 4u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp4_e2m1_rne(value));
-    }
-    for (uint32_t word = 0; word < 1u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<false, true, 1>(
+      wf, rj_arith_v_cvt_scalef32_pk8_fp4_f32_w32_gfx1250, nullptr, wf.cu().arithmetic_flags(),
+      destination_base, source_a_base, 0, 8, false, nullptr, src1);
 }
 
 void VCvtScalef32Pk8Fp4F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 1u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 1u, 1ULL << lane);
-    uint32_t src_words[4] = {};
-    for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[1] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0xfu;
-      uint32_t bit = index * 4u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 4u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp4_e2m1_rne(value));
-    }
-    for (uint32_t word = 0; word < 1u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<false, true, 1>(
+      wf, rj_arith_v_cvt_scalef32_pk8_fp4_f16_w32_gfx1250, nullptr, wf.cu().arithmetic_flags(),
+      destination_base, source_a_base, 0, 4, false, nullptr, src1);
 }
 
 void VCvtScalef32Pk8Fp8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
-    uint32_t src_words[4] = {};
-    for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[2] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0xffu;
-      uint32_t bit = index * 8u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 8u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp8_e4m3_rne_mode(value, wf.fp16_ovfl()));
-    }
-    for (uint32_t word = 0; word < 2u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<false, true, 2>(
+      wf, rj_arith_v_cvt_scalef32_pk8_fp8_bf16_w32_gfx1250, nullptr,
+      wf.cu().arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), destination_base,
+      source_a_base, 0, 4, false, nullptr, src1);
 }
 
 void VCvtScalef32Pk8Bf8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
-    uint32_t src_words[4] = {};
-    for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[2] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0xffu;
-      uint32_t bit = index * 8u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 8u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_bf8_e5m2_rne_mode(value, wf.fp16_ovfl()));
-    }
-    for (uint32_t word = 0; word < 2u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<false, true, 2>(
+      wf, rj_arith_v_cvt_scalef32_pk8_bf8_bf16_w32_gfx1250, nullptr,
+      wf.cu().arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), destination_base,
+      source_a_base, 0, 4, false, nullptr, src1);
 }
 
 void VCvtScalef32Pk8Fp4Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 1u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 1u, 1ULL << lane);
-    uint32_t src_words[4] = {};
-    for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[1] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0xfu;
-      uint32_t bit = index * 4u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 4u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp4_e2m1_rne(value));
-    }
-    for (uint32_t word = 0; word < 1u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<false, true, 1>(
+      wf, rj_arith_v_cvt_scalef32_pk8_fp4_bf16_w32_gfx1250, nullptr, wf.cu().arithmetic_flags(),
+      destination_base, source_a_base, 0, 4, false, nullptr, src1);
 }
 
 void VCvtScalef32SrPk8Fp4F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 1u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 1u, 1ULL << lane);
-    uint32_t src_words[4] = {};
-    for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[1] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0xfu;
-      uint32_t bit = index * 4u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 4u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp4_e2m1_sr(value, seed));
-      seed = util::prng_advance(seed);
-    }
-    for (uint32_t word = 0; word < 1u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<true, true, 1>(
+      wf, rj_arith_v_cvt_scalef32_sr_pk8_fp4_f16_w32_gfx1250, nullptr, wf.cu().arithmetic_flags(),
+      destination_base, source_a_base, 0, 4, false, &src1, src2);
 }
 
 void VCvtScalef32SrPk8Fp4Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 1u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 1u, 1ULL << lane);
-    uint32_t src_words[4] = {};
-    for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[1] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0xfu;
-      uint32_t bit = index * 4u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 4u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp4_e2m1_sr(value, seed));
-      seed = util::prng_advance(seed);
-    }
-    for (uint32_t word = 0; word < 1u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<true, true, 1>(
+      wf, rj_arith_v_cvt_scalef32_sr_pk8_fp4_bf16_w32_gfx1250, nullptr, wf.cu().arithmetic_flags(),
+      destination_base, source_a_base, 0, 4, false, &src1, src2);
 }
 
 void VCvtScalef32SrPk8Fp8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
-    uint32_t src_words[4] = {};
-    for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[2] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0xffu;
-      uint32_t bit = index * 8u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 8u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp8_e4m3_sr_mode(value, seed, wf.fp16_ovfl()));
-      seed = util::prng_advance(seed);
-    }
-    for (uint32_t word = 0; word < 2u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<true, true, 2>(
+      wf, rj_arith_v_cvt_scalef32_sr_pk8_fp8_f16_w32_gfx1250, nullptr,
+      wf.cu().arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), destination_base,
+      source_a_base, 0, 4, false, &src1, src2);
 }
 
 void VCvtScalef32SrPk8Fp8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
-    uint32_t src_words[4] = {};
-    for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[2] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0xffu;
-      uint32_t bit = index * 8u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 8u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp8_e4m3_sr_mode(value, seed, wf.fp16_ovfl()));
-      seed = util::prng_advance(seed);
-    }
-    for (uint32_t word = 0; word < 2u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<true, true, 2>(
+      wf, rj_arith_v_cvt_scalef32_sr_pk8_fp8_bf16_w32_gfx1250, nullptr,
+      wf.cu().arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), destination_base,
+      source_a_base, 0, 4, false, &src1, src2);
 }
 
 void VCvtScalef32SrPk8Bf8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
-    uint32_t src_words[4] = {};
-    for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[2] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0xffu;
-      uint32_t bit = index * 8u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 8u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_bf8_e5m2_sr_mode(value, seed, wf.fp16_ovfl()));
-      seed = util::prng_advance(seed);
-    }
-    for (uint32_t word = 0; word < 2u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<true, true, 2>(
+      wf, rj_arith_v_cvt_scalef32_sr_pk8_bf8_f16_w32_gfx1250, nullptr,
+      wf.cu().arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), destination_base,
+      source_a_base, 0, 4, false, &src1, src2);
 }
 
 void VCvtScalef32SrPk8Bf8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
-    uint32_t src_words[4] = {};
-    for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[2] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0xffu;
-      uint32_t bit = index * 8u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 8u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_bf8_e5m2_sr_mode(value, seed, wf.fp16_ovfl()));
-      seed = util::prng_advance(seed);
-    }
-    for (uint32_t word = 0; word < 2u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<true, true, 2>(
+      wf, rj_arith_v_cvt_scalef32_sr_pk8_bf8_bf16_w32_gfx1250, nullptr,
+      wf.cu().arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), destination_base,
+      source_a_base, 0, 4, false, &src1, src2);
 }
 
 void VCvtScalef32Pk8Fp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 2u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
-    uint32_t src_words[8] = {};
-    for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      return std::bit_cast<float>(src_words[index]);
-    };
-    uint32_t dst_words[2] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0xffu;
-      uint32_t bit = index * 8u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 8u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp8_e4m3_rne_mode(value, wf.fp16_ovfl()));
-    }
-    for (uint32_t word = 0; word < 2u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<false, true, 2>(
+      wf, rj_arith_v_cvt_scalef32_pk8_fp8_f32_w32_gfx1250, nullptr,
+      wf.cu().arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), destination_base,
+      source_a_base, 0, 8, false, nullptr, src1);
 }
 
 void VCvtScalef32Pk8Fp8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
-    uint32_t src_words[4] = {};
-    for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[2] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0xffu;
-      uint32_t bit = index * 8u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 8u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp8_e4m3_rne_mode(value, wf.fp16_ovfl()));
-    }
-    for (uint32_t word = 0; word < 2u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<false, true, 2>(
+      wf, rj_arith_v_cvt_scalef32_pk8_fp8_f16_w32_gfx1250, nullptr,
+      wf.cu().arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), destination_base,
+      source_a_base, 0, 4, false, nullptr, src1);
 }
 
 void VCvtScalef32Pk8Bf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 2u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
-    uint32_t src_words[8] = {};
-    for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      return std::bit_cast<float>(src_words[index]);
-    };
-    uint32_t dst_words[2] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0xffu;
-      uint32_t bit = index * 8u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 8u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_bf8_e5m2_rne_mode(value, wf.fp16_ovfl()));
-    }
-    for (uint32_t word = 0; word < 2u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<false, true, 2>(
+      wf, rj_arith_v_cvt_scalef32_pk8_bf8_f32_w32_gfx1250, nullptr,
+      wf.cu().arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), destination_base,
+      source_a_base, 0, 8, false, nullptr, src1);
 }
 
 void VCvtScalef32Pk8Bf8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
-    uint32_t src_words[4] = {};
-    for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[2] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0xffu;
-      uint32_t bit = index * 8u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 8u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_bf8_e5m2_rne_mode(value, wf.fp16_ovfl()));
-    }
-    for (uint32_t word = 0; word < 2u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<false, true, 2>(
+      wf, rj_arith_v_cvt_scalef32_pk8_bf8_f16_w32_gfx1250, nullptr,
+      wf.cu().arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), destination_base,
+      source_a_base, 0, 4, false, nullptr, src1);
 }
 
 void VCvtScalePk16F16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 3u) || !regs.owns_vgpr_range(dst_base, 8u))
-      continue;
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    auto src_region = regs.read_vgpr_region(src_base, 3u, 1ULL << lane);
-    uint32_t src_words[4] = {};
-    for (uint32_t word = 0; word < 3u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_src = [&](uint32_t index) -> float {
-      uint32_t bit = index * 6u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      uint32_t raw = src_words[word] >> shift;
-      if (shift > 26u)
-        raw |= src_words[word + 1u] << (32u - shift);
-      raw &= 0x3fu;
-      return util::fp6_e2m3_to_f32(static_cast<uint8_t>(raw));
-    };
-    auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
-    uint32_t dst_words[8] = {};
-    for (uint32_t index = 0; index < 16u; ++index) {
-      uint32_t bits = util::f32_to_f16_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
-      dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
-    }
-    for (uint32_t word = 0; word < 8u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto &cu = wf.cu();
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_base = wf.vgpr_alloc().base + *source_offset;
+  uint64_t flags = cu.arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::execute_wide_scaled_widen<true>(
+      wf, rj_arith_v_cvt_scale_pk16_f16_fp6_w32_gfx1250, nullptr, flags, destination_base,
+      source_base, src1, 8, 0, 3, amdgpu::CvtScaleSelection::f4_f6(inst_.opsel));
 }
 
 void VCvtScalePk16Bf16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 3u) || !regs.owns_vgpr_range(dst_base, 8u))
-      continue;
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    auto src_region = regs.read_vgpr_region(src_base, 3u, 1ULL << lane);
-    uint32_t src_words[4] = {};
-    for (uint32_t word = 0; word < 3u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_src = [&](uint32_t index) -> float {
-      uint32_t bit = index * 6u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      uint32_t raw = src_words[word] >> shift;
-      if (shift > 26u)
-        raw |= src_words[word + 1u] << (32u - shift);
-      raw &= 0x3fu;
-      return util::fp6_e2m3_to_f32(static_cast<uint8_t>(raw));
-    };
-    auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
-    uint32_t dst_words[8] = {};
-    for (uint32_t index = 0; index < 16u; ++index) {
-      uint32_t bits = util::f32_to_bf16_rne_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
-      dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
-    }
-    for (uint32_t word = 0; word < 8u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto &cu = wf.cu();
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_base = wf.vgpr_alloc().base + *source_offset;
+  uint64_t flags = cu.arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::execute_wide_scaled_widen<true>(
+      wf, rj_arith_v_cvt_scale_pk16_bf16_fp6_w32_gfx1250, nullptr, flags, destination_base,
+      source_base, src1, 8, 0, 3, amdgpu::CvtScaleSelection::f4_f6(inst_.opsel));
 }
 
 void VCvtScalePk16F32Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 3u) || !regs.owns_vgpr_range(dst_base, 16u))
-      continue;
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    auto src_region = regs.read_vgpr_region(src_base, 3u, 1ULL << lane);
-    uint32_t src_words[4] = {};
-    for (uint32_t word = 0; word < 3u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_src = [&](uint32_t index) -> float {
-      uint32_t bit = index * 6u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      uint32_t raw = src_words[word] >> shift;
-      if (shift > 26u)
-        raw |= src_words[word + 1u] << (32u - shift);
-      raw &= 0x3fu;
-      return util::fp6_e2m3_to_f32(static_cast<uint8_t>(raw));
-    };
-    auto dst_region = regs.write_vgpr_region(dst_base, 16u, 1ULL << lane);
-    for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_src(index) * scale;
-      dst_region.set_lane(index, lane, std::bit_cast<uint32_t>(value));
-    }
+  auto &cu = wf.cu();
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_base = wf.vgpr_alloc().base + *source_offset;
+  uint64_t flags = cu.arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::execute_wide_scaled_widen<true>(
+      wf, rj_arith_v_cvt_scale_pk16_f32_fp6_w32_gfx1250, nullptr, flags, destination_base,
+      source_base, src1, 16, 0, 3, amdgpu::CvtScaleSelection::f4_f6(inst_.opsel));
 }
 
 void VCvtScalePk16F16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 3u) || !regs.owns_vgpr_range(dst_base, 8u))
-      continue;
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    auto src_region = regs.read_vgpr_region(src_base, 3u, 1ULL << lane);
-    uint32_t src_words[4] = {};
-    for (uint32_t word = 0; word < 3u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_src = [&](uint32_t index) -> float {
-      uint32_t bit = index * 6u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      uint32_t raw = src_words[word] >> shift;
-      if (shift > 26u)
-        raw |= src_words[word + 1u] << (32u - shift);
-      raw &= 0x3fu;
-      return util::bf6_e3m2_to_f32(static_cast<uint8_t>(raw));
-    };
-    auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
-    uint32_t dst_words[8] = {};
-    for (uint32_t index = 0; index < 16u; ++index) {
-      uint32_t bits = util::f32_to_f16_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
-      dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
-    }
-    for (uint32_t word = 0; word < 8u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto &cu = wf.cu();
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_base = wf.vgpr_alloc().base + *source_offset;
+  uint64_t flags = cu.arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::execute_wide_scaled_widen<true>(
+      wf, rj_arith_v_cvt_scale_pk16_f16_bf6_w32_gfx1250, nullptr, flags, destination_base,
+      source_base, src1, 8, 0, 3, amdgpu::CvtScaleSelection::f4_f6(inst_.opsel));
 }
 
 void VCvtScalePk16Bf16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 3u) || !regs.owns_vgpr_range(dst_base, 8u))
-      continue;
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    auto src_region = regs.read_vgpr_region(src_base, 3u, 1ULL << lane);
-    uint32_t src_words[4] = {};
-    for (uint32_t word = 0; word < 3u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_src = [&](uint32_t index) -> float {
-      uint32_t bit = index * 6u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      uint32_t raw = src_words[word] >> shift;
-      if (shift > 26u)
-        raw |= src_words[word + 1u] << (32u - shift);
-      raw &= 0x3fu;
-      return util::bf6_e3m2_to_f32(static_cast<uint8_t>(raw));
-    };
-    auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
-    uint32_t dst_words[8] = {};
-    for (uint32_t index = 0; index < 16u; ++index) {
-      uint32_t bits = util::f32_to_bf16_rne_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
-      dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
-    }
-    for (uint32_t word = 0; word < 8u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto &cu = wf.cu();
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_base = wf.vgpr_alloc().base + *source_offset;
+  uint64_t flags = cu.arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::execute_wide_scaled_widen<true>(
+      wf, rj_arith_v_cvt_scale_pk16_bf16_bf6_w32_gfx1250, nullptr, flags, destination_base,
+      source_base, src1, 8, 0, 3, amdgpu::CvtScaleSelection::f4_f6(inst_.opsel));
 }
 
 void VCvtScalePk16F32Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 3u) || !regs.owns_vgpr_range(dst_base, 16u))
-      continue;
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    auto src_region = regs.read_vgpr_region(src_base, 3u, 1ULL << lane);
-    uint32_t src_words[4] = {};
-    for (uint32_t word = 0; word < 3u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_src = [&](uint32_t index) -> float {
-      uint32_t bit = index * 6u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      uint32_t raw = src_words[word] >> shift;
-      if (shift > 26u)
-        raw |= src_words[word + 1u] << (32u - shift);
-      raw &= 0x3fu;
-      return util::bf6_e3m2_to_f32(static_cast<uint8_t>(raw));
-    };
-    auto dst_region = regs.write_vgpr_region(dst_base, 16u, 1ULL << lane);
-    for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_src(index) * scale;
-      dst_region.set_lane(index, lane, std::bit_cast<uint32_t>(value));
-    }
+  auto &cu = wf.cu();
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_base = wf.vgpr_alloc().base + *source_offset;
+  uint64_t flags = cu.arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::execute_wide_scaled_widen<true>(
+      wf, rj_arith_v_cvt_scale_pk16_f32_bf6_w32_gfx1250, nullptr, flags, destination_base,
+      source_base, src1, 16, 0, 3, amdgpu::CvtScaleSelection::f4_f6(inst_.opsel));
 }
 
 void VCvtScalef32Pk16Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 16u) || !regs.owns_vgpr_range(dst_base, 3u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 16u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
-    uint32_t src_words[16] = {};
-    for (uint32_t word = 0; word < 16u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      return std::bit_cast<float>(src_words[index]);
-    };
-    uint32_t dst_words[3] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0x3fu;
-      uint32_t bit = index * 6u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 6u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp6_e2m3_rne(value));
-    }
-    for (uint32_t word = 0; word < 3u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<false, true>(
+      wf, rj_arith_v_cvt_scalef32_pk16_fp6_f32_w32_gfx1250, nullptr, wf.cu().arithmetic_flags(),
+      destination_base, source_a_base, 0, 16, false, nullptr, src1);
 }
 
 void VCvtScalef32Pk16Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 16u) || !regs.owns_vgpr_range(dst_base, 3u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 16u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
-    uint32_t src_words[16] = {};
-    for (uint32_t word = 0; word < 16u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      return std::bit_cast<float>(src_words[index]);
-    };
-    uint32_t dst_words[3] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0x3fu;
-      uint32_t bit = index * 6u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 6u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_bf6_e3m2_rne(value));
-    }
-    for (uint32_t word = 0; word < 3u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<false, true>(
+      wf, rj_arith_v_cvt_scalef32_pk16_bf6_f32_w32_gfx1250, nullptr, wf.cu().arithmetic_flags(),
+      destination_base, source_a_base, 0, 16, false, nullptr, src1);
 }
 
 void VCvtScalef32Pk16Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
-    uint32_t src_words[8] = {};
-    for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[3] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0x3fu;
-      uint32_t bit = index * 6u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 6u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp6_e2m3_rne(value));
-    }
-    for (uint32_t word = 0; word < 3u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<false, true>(
+      wf, rj_arith_v_cvt_scalef32_pk16_fp6_f16_w32_gfx1250, nullptr, wf.cu().arithmetic_flags(),
+      destination_base, source_a_base, 0, 8, false, nullptr, src1);
 }
 
 void VCvtScalef32Pk16Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
-    uint32_t src_words[8] = {};
-    for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[3] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0x3fu;
-      uint32_t bit = index * 6u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 6u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_bf6_e3m2_rne(value));
-    }
-    for (uint32_t word = 0; word < 3u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<false, true>(
+      wf, rj_arith_v_cvt_scalef32_pk16_bf6_f16_w32_gfx1250, nullptr, wf.cu().arithmetic_flags(),
+      destination_base, source_a_base, 0, 8, false, nullptr, src1);
 }
 
 void VCvtScalef32Pk16Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
-    uint32_t src_words[8] = {};
-    for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[3] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0x3fu;
-      uint32_t bit = index * 6u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 6u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp6_e2m3_rne(value));
-    }
-    for (uint32_t word = 0; word < 3u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<false, true>(
+      wf, rj_arith_v_cvt_scalef32_pk16_fp6_bf16_w32_gfx1250, nullptr, wf.cu().arithmetic_flags(),
+      destination_base, source_a_base, 0, 8, false, nullptr, src1);
 }
 
 void VCvtScalef32Pk16Bf6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
-    uint32_t src_words[8] = {};
-    for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[3] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0x3fu;
-      uint32_t bit = index * 6u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 6u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_bf6_e3m2_rne(value));
-    }
-    for (uint32_t word = 0; word < 3u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<false, true>(
+      wf, rj_arith_v_cvt_scalef32_pk16_bf6_bf16_w32_gfx1250, nullptr, wf.cu().arithmetic_flags(),
+      destination_base, source_a_base, 0, 8, false, nullptr, src1);
 }
 
 void VCvtScalef32SrPk16Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 16u) || !regs.owns_vgpr_range(dst_base, 3u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 16u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
-    uint32_t src_words[16] = {};
-    for (uint32_t word = 0; word < 16u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      return std::bit_cast<float>(src_words[index]);
-    };
-    uint32_t dst_words[3] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0x3fu;
-      uint32_t bit = index * 6u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 6u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp6_e2m3_sr(value, seed));
-      seed = util::prng_advance(seed);
-    }
-    for (uint32_t word = 0; word < 3u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<true, true>(
+      wf, rj_arith_v_cvt_scalef32_sr_pk16_fp6_f32_w32_gfx1250, nullptr, wf.cu().arithmetic_flags(),
+      destination_base, source_a_base, 0, 16, false, &src1, src2);
 }
 
 void VCvtScalef32SrPk16Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 16u) || !regs.owns_vgpr_range(dst_base, 3u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 16u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
-    uint32_t src_words[16] = {};
-    for (uint32_t word = 0; word < 16u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      return std::bit_cast<float>(src_words[index]);
-    };
-    uint32_t dst_words[3] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0x3fu;
-      uint32_t bit = index * 6u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 6u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_bf6_e3m2_sr(value, seed));
-      seed = util::prng_advance(seed);
-    }
-    for (uint32_t word = 0; word < 3u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<true, true>(
+      wf, rj_arith_v_cvt_scalef32_sr_pk16_bf6_f32_w32_gfx1250, nullptr, wf.cu().arithmetic_flags(),
+      destination_base, source_a_base, 0, 16, false, &src1, src2);
 }
 
 void VCvtScalef32SrPk16Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
-    uint32_t src_words[8] = {};
-    for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[3] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0x3fu;
-      uint32_t bit = index * 6u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 6u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp6_e2m3_sr(value, seed));
-      seed = util::prng_advance(seed);
-    }
-    for (uint32_t word = 0; word < 3u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<true, true>(
+      wf, rj_arith_v_cvt_scalef32_sr_pk16_fp6_f16_w32_gfx1250, nullptr, wf.cu().arithmetic_flags(),
+      destination_base, source_a_base, 0, 8, false, &src1, src2);
 }
 
 void VCvtScalef32SrPk16Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
-    uint32_t src_words[8] = {};
-    for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[3] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0x3fu;
-      uint32_t bit = index * 6u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 6u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_bf6_e3m2_sr(value, seed));
-      seed = util::prng_advance(seed);
-    }
-    for (uint32_t word = 0; word < 3u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<true, true>(
+      wf, rj_arith_v_cvt_scalef32_sr_pk16_bf6_f16_w32_gfx1250, nullptr, wf.cu().arithmetic_flags(),
+      destination_base, source_a_base, 0, 8, false, &src1, src2);
 }
 
 void VCvtScalef32SrPk16Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
-    uint32_t src_words[8] = {};
-    for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[3] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0x3fu;
-      uint32_t bit = index * 6u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 6u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp6_e2m3_sr(value, seed));
-      seed = util::prng_advance(seed);
-    }
-    for (uint32_t word = 0; word < 3u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<true, true>(
+      wf, rj_arith_v_cvt_scalef32_sr_pk16_fp6_bf16_w32_gfx1250, nullptr, wf.cu().arithmetic_flags(),
+      destination_base, source_a_base, 0, 8, false, &src1, src2);
 }
 
 void VCvtScalef32SrPk16Bf6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t dst_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t src_base =
-        wf.vgpr_alloc().base +
-        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-    amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
-      continue;
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
-    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
-    uint32_t src_words[8] = {};
-    for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = src_region.lane(word, lane);
-    auto read_scaled_input = [&](uint32_t index) -> float {
-      uint32_t raw = src_words[index / 2u];
-      return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
-    };
-    uint32_t dst_words[3] = {};
-    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {
-      code &= 0x3fu;
-      uint32_t bit = index * 6u;
-      uint32_t word = bit / 32u;
-      uint32_t shift = bit & 31u;
-      dst_words[word] |= code << shift;
-      if (shift + 6u > 32u)
-        dst_words[word + 1u] |= code >> (32u - shift);
-    };
-    for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_bf6_e3m2_sr(value, seed));
-      seed = util::prng_advance(seed);
-    }
-    for (uint32_t word = 0; word < 3u; ++word)
-      dst_region.set_lane(word, lane, dst_words[word]);
+  auto destination_offset =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!destination_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  const uint32_t destination_base = wf.vgpr_alloc().base + *destination_offset;
+  auto source_a_offset =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!source_a_offset) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t source_a_base = wf.vgpr_alloc().base + *source_a_offset;
+  amdgpu::arith::execute_wide_scaled_narrow<true, true>(
+      wf, rj_arith_v_cvt_scalef32_sr_pk16_bf6_bf16_w32_gfx1250, nullptr, wf.cu().arithmetic_flags(),
+      destination_base, source_a_base, 0, 8, false, &src1, src2);
 }
 
 void VCvtPkI16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4491,6 +3739,8 @@ void VCvtPkF16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t flags = wf.cu().arithmetic_flags();
   if (wf.fp16_ovfl())
     flags |= RJ_ARITH_FP16_OVFL;
+  if (!(wf.fp_denorm_mode_f16_f64() & 2))
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
   const uint64_t modifiers = (0u) | ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
                              ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
                              ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |

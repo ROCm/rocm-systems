@@ -8,10 +8,10 @@
 
 #include "sym_kernels.h"
 #if defined(__HIP_PLATFORM_AMD__)
-#include "symmetric/primitives.h"
+#include "symmetric/symk.h"
 #include "symmetric/data_ops.h"
 #else
-#include "primitives.cuh"
+#include "symk.cuh"
 #include "data_ops.cuh"
 #endif
 

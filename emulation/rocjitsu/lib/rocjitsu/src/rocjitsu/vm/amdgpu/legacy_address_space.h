@@ -186,6 +186,8 @@ public:
   /// Local/admitted classification must remain stable while request_mutex is
   /// held shared; callbacks must not acquire that mutex themselves.
   std::function<VmAccessAdmission(uint64_t, std::size_t, VmAccessKind)> access_admission = {};
+  std::shared_ptr<const std::atomic<uint64_t>> local_grant_epoch = {};
+  std::function<VmLocalGrant(uint64_t, std::size_t)> local_grant = {};
   /// Optional nonblocking permit across raw admission and backing mutation.
   std::shared_ptr<VmRawBackingWriteGate> raw_write_gate = {};
   /// Copied grant metadata; classification must not retain a backing owner.
@@ -237,10 +239,31 @@ struct LegacyTransferStep {
 /// real hardware where the VMID travels with each request through the memory
 /// hierarchy.
 class LegacyAddressSpace {
+  class PteCacheSet;
+  // Borrowed command-local owner; trivial TLS does not retain the library.
+  inline static thread_local std::unique_ptr<PteCacheSet> *scoped_pte_caches_ = nullptr;
+
 public:
   static constexpr uint64_t PAGE_SHIFT = simdojo::SparseMemory::PAGE_SHIFT;
   static constexpr uint64_t PAGE_SIZE = simdojo::SparseMemory::PAGE_SIZE;
   static constexpr uint64_t PAGE_MASK = PAGE_SIZE - 1;
+
+  /// @brief Bound host-command translations to the call instead of the host thread.
+  /// @details Worker threads keep their persistent cache outside this scope.
+  /// Nested commands restore the previous owner, including during unwinding.
+  class ScopedPteCache {
+  public:
+    ScopedPteCache() : previous_(std::exchange(scoped_pte_caches_, &caches_)) {}
+    ~ScopedPteCache() { scoped_pte_caches_ = previous_; }
+    ScopedPteCache(const ScopedPteCache &) = delete;
+    ScopedPteCache &operator=(const ScopedPteCache &) = delete;
+
+  private:
+    // Allocated only when this command translates mapped GPU memory.
+    std::unique_ptr<PteCacheSet> caches_;
+    // Borrowed enclosing command owner, or null for ordinary worker caching.
+    std::unique_ptr<PteCacheSet> *previous_;
+  };
 
   class PageTableRequestGuard {
   public:
@@ -274,11 +297,13 @@ public:
                        : std::shared_lock<util::DistributedSharedMutex>{}) {}
 
     void bind(LegacyPageTable *page_table, util::DistributedSharedMutex *page_table_mutex,
-              const uint64_t *generation, uint64_t registry_generation) {
+              const uint64_t *generation, uint64_t registry_generation,
+              const LegacyPageTableCacheState *policies) {
       page_table_ = page_table;
       page_table_mutex_ = page_table_mutex;
       generation_ = generation;
       registry_generation_ = registry_generation;
+      policies_ = policies;
     }
 
     std::shared_ptr<util::DistributedSharedMutex> mutex_;
@@ -287,6 +312,7 @@ public:
     util::DistributedSharedMutex *page_table_mutex_ = nullptr;
     const uint64_t *generation_ = nullptr;
     uint64_t registry_generation_ = 0;
+    const LegacyPageTableCacheState *policies_ = nullptr;
   };
 
   explicit LegacyAddressSpace(GpuMemory &backing)
@@ -294,6 +320,8 @@ public:
         instance_id_(next_instance_id_.fetch_add(1, std::memory_order_relaxed)) {
     rocjitsu::install_host_access_guard();
   }
+
+  uint64_t instance_id() const { return instance_id_; }
 
   /// @brief Register a process's page table in the VMID table.
   /// @param generation Optional mutation counter used by translation caches.
@@ -348,7 +376,7 @@ public:
       if (it == vmid_table_.end() || it->second.request_mutex != expected)
         return {};
       guard.bind(it->second.page_table, it->second.mutex, it->second.generation,
-                 vmid_registry_generation_);
+                 vmid_registry_generation_, it->second.page_table_cache_state.get());
       return guard;
     }
     while (true) {
@@ -366,7 +394,7 @@ public:
       auto it = vmid_table_.find(vmid);
       if (it != vmid_table_.end() && it->second.request_mutex == request_mutex) {
         guard.bind(it->second.page_table, it->second.mutex, it->second.generation,
-                   vmid_registry_generation_);
+                   vmid_registry_generation_, it->second.page_table_cache_state.get());
         return guard;
       }
     }
@@ -386,7 +414,7 @@ public:
       auto it = vmid_table_.find(vmid);
       if (it != vmid_table_.end() && it->second.request_mutex == guard.mutex_) {
         guard.bind(it->second.page_table, it->second.mutex, it->second.generation,
-                   vmid_registry_generation_);
+                   vmid_registry_generation_, it->second.page_table_cache_state.get());
         return true;
       }
       guard.lock_.unlock();
@@ -645,6 +673,13 @@ public:
       });
     });
   }
+
+  /// Check an ordinary local VRAM instruction against one stable page table.
+  /// Complex extents fall back to the general per-span translation path.
+  bool local_ingress_mapped(std::span<const MemoryIngressSpan> spans, uint64_t begin, uint64_t end,
+                            uint32_t vmid,
+                            const std::shared_ptr<util::DistributedSharedMutex> &expected,
+                            const std::shared_ptr<LegacyPageTableCacheState> &policies) const;
 
   /// @brief Return whether a GPU VA has a VMID page-table mapping.
   bool is_mapped(uint64_t addr, uint32_t vmid = 0) const {
@@ -1208,7 +1243,7 @@ public:
             }
           }
           std::lock_guard transaction_lock(
-              backing_atomic_mutex(reinterpret_cast<uintptr_t>(target)));
+              backing_atomic_mutex(host_backing_key(reinterpret_cast<uintptr_t>(target))));
           if (size == sizeof(uint64_t)) {
             value = std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(target))
                         .load(std::memory_order_acquire);
@@ -1720,6 +1755,12 @@ private:
   friend class GpuVm;
   friend class LegacyAddressSpaceTestAccess;
 
+#if defined(RJ_GPU_MEMORY_WITH_ASAN)
+  static constexpr bool kCheckAsanBacking = true;
+#else
+  static constexpr bool kCheckAsanBacking = false;
+#endif
+
   void set_default_passthrough(bool passthrough) {
     std::unique_lock lock(vmid_mutex_);
     default_passthrough_ = passthrough;
@@ -1798,6 +1839,55 @@ private:
     return backing_atomic_mutexes()[index].mutex;
   }
 
+  struct BackingKeyRange {
+    uintptr_t begin = 0;
+    uintptr_t end = 0;
+    uintptr_t mask = UINTPTR_MAX;
+    uintptr_t delta = 0;
+  };
+
+  // The mapping lease pins both the address and the generation of the
+  // identity used to synchronize it. The range cache is per host thread.
+  static BackingKeyRange find_backing_key_range(uintptr_t address, uint64_t generation);
+
+  static const BackingKeyRange &observed_backing_key_range(uintptr_t address, uint64_t generation) {
+    struct Cache {
+      uint64_t generation = 0;
+      BackingKeyRange range;
+    };
+    static thread_local Cache cache;
+    auto &range = cache.range;
+    if (cache.generation != generation || address < range.begin || address >= range.end) {
+      range = find_backing_key_range(address, generation);
+      cache.generation = generation;
+    }
+    return range;
+  }
+
+  static uintptr_t host_backing_key(uintptr_t address) {
+    const auto &mapping = rocjitsu::host_mapping_lock();
+    // Embedders can create aliases through libc without taking our mapping
+    // lock. Use one namespace based on in-page offsets in that mode.
+    if (!mapping.mapping_changes_observed())
+      return address & PAGE_MASK;
+    const auto &range = observed_backing_key_range(address, mapping.generation());
+    return (address & range.mask) + range.delta;
+  }
+
+  static std::pair<size_t, size_t> backing_copy_stripes(const uint8_t *host, size_t size,
+                                                        const auto &backing_key) {
+    const auto first = reinterpret_cast<uintptr_t>(host);
+    const auto last = first + size - 1;
+    const auto first_key = backing_key(first);
+    // File-backed offsets and host pointers have the same page alignment.
+    // A transfer crossing host pages may reach two unrelated mappings.
+    const auto last_key =
+        ((first ^ last) & ~uintptr_t{PAGE_MASK}) == 0 ? first_key + size - 1 : backing_key(last);
+    const auto first_index = backing_atomic_mutex_index(first_key);
+    const auto last_index = backing_atomic_mutex_index(last_key);
+    return {std::min(first_index, last_index), std::max(first_index, last_index)};
+  }
+
   static BackingStripeLock &backing_atomic_mutex(uintptr_t key) {
     return backing_atomic_mutex_at(backing_atomic_mutex_index(key));
   }
@@ -1813,10 +1903,7 @@ private:
     if (size == 0)
       return true;
     if (size == transactions_.chunk_size(address, size)) {
-      size_t first = backing_atomic_mutex_index(reinterpret_cast<uintptr_t>(host));
-      size_t last = backing_atomic_mutex_index(reinterpret_cast<uintptr_t>(host + size - 1));
-      if (last < first)
-        std::swap(first, last);
+      const auto [first, last] = backing_copy_stripes(host, size, host_backing_key);
       std::lock_guard first_lock(backing_atomic_mutex_at(first));
       std::unique_lock<BackingStripeLock> last_lock;
       if (last != first)
@@ -1841,15 +1928,25 @@ private:
     std::unique_lock<BackingStripeLock> first_lock;
     std::unique_lock<BackingStripeLock> last_lock;
     const auto copy = [&] {
+      // The caller's mapping lease keeps each identity range valid throughout
+      // the copy. Apply its mask at each address so the fallback wraps at
+      // host-page boundaries.
+      const auto &mapping = rocjitsu::host_mapping_lock();
+      const bool observed = mapping.mapping_changes_observed();
+      const auto generation = mapping.generation();
+      BackingKeyRange range{.end = observed ? 0 : UINTPTR_MAX, .mask = PAGE_MASK};
+      const auto backing_key = [&](uintptr_t target) {
+        if (target >= range.end && observed)
+          range = observed_backing_key_range(target, generation);
+        return (target & range.mask) + range.delta;
+      };
+
       size_t copied = 0;
       while (copied < size) {
         const size_t chunk = transactions_.chunk_size(address + copied, size - copied);
         auto *target = host + copied;
         auto *value = static_cast<uint8_t *>(local) + copied;
-        size_t first = backing_atomic_mutex_index(reinterpret_cast<uintptr_t>(target));
-        size_t last = backing_atomic_mutex_index(reinterpret_cast<uintptr_t>(target + chunk - 1));
-        if (last < first)
-          std::swap(first, last);
+        const auto [first, last] = backing_copy_stripes(target, chunk, backing_key);
         first_lock = std::unique_lock(backing_atomic_mutex_at(first));
         if (last != first)
           last_lock = std::unique_lock(backing_atomic_mutex_at(last));
@@ -1879,7 +1976,8 @@ private:
   /// interposed mapping changes from racing the operation.
   template <typename F>
   [[nodiscard]] static bool atomic_rmw_mapped(uint8_t *target, uint32_t size, F &fn) {
-    std::lock_guard lock(backing_atomic_mutex(reinterpret_cast<uintptr_t>(target)));
+    std::lock_guard lock(
+        backing_atomic_mutex(host_backing_key(reinterpret_cast<uintptr_t>(target))));
     return rocjitsu::with_host_access_guard([&] {
       if (size == sizeof(uint64_t)) {
         std::atomic_ref atomic(*reinterpret_cast<uint64_t *>(target));
@@ -2102,8 +2200,8 @@ private:
     lock_indices.fill(kBackingAtomicLockStripes);
     for (size_t i = 0; i < span_count; ++i) {
       for (size_t byte = 0; byte < spans[i].size; ++byte) {
-        const size_t index =
-            backing_atomic_mutex_index(reinterpret_cast<uintptr_t>(spans[i].host_ptr + byte));
+        const size_t index = backing_atomic_mutex_index(
+            host_backing_key(reinterpret_cast<uintptr_t>(spans[i].host_ptr + byte)));
         if (std::ranges::find(lock_indices, index) != lock_indices.end())
           continue;
         auto free_slot = std::ranges::find(lock_indices, kBackingAtomicLockStripes);
@@ -2390,8 +2488,9 @@ private:
   /// access that caused it, which is the whole problem: this class turns other
   /// components' bugs into host crashes.
   ///
-  /// Probe through the guarded host-access path rather than trusting the
-  /// address. This reports failure for a hole, for a PROT_NONE reservation --
+  /// Recovery-enabled builds probe through the guarded host-access path;
+  /// otherwise consult host mapping metadata. This reports failure for a hole,
+  /// for a PROT_NONE reservation --
   /// the shape the ROCm runtime leaves behind when it reserves a VA aperture,
   /// and the shape an unresolved GPU VA most often lands in -- and for an
   /// address never mapped at all. It also works when a container security
@@ -2408,11 +2507,11 @@ private:
   static bool identity_page_is_accessible(const uint8_t *page) {
     if (page == nullptr)
       return false;
-#if defined(RJ_GPU_MEMORY_WITH_TSAN)
-    // A probe is metadata-only. Touching an application byte merely to ask
-    // whether its VMA is readable creates an unsynchronized read in TSan when
-    // the host is still initializing that allocation. Consult the kernel's
-    // mapping metadata instead; the actual GPU access remains guarded.
+#if defined(RJ_GPU_MEMORY_WITH_TSAN) || defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
+    // Without recovery, an availability probe must not dereference an unknown
+    // page. TSan also requires a metadata-only probe: touching an application
+    // byte races host initialization. Actual transfers use the configured
+    // host-access policy.
     const PageWritability writability = host_page_writability(page);
     return writability == PageWritability::Writable || writability == PageWritability::ReadOnly;
 #else
@@ -2553,62 +2652,7 @@ private:
   ///   this path:  page table lock -> close() -> descriptor lock
   ///   GEM_VA:     descriptor lock -> map_pages() -> page table lock
   /// Nothing about reading procfs wants the hooks, so it does not call them.
-  static PageWritability host_page_writability(const uint8_t *page) {
-    if (page == nullptr)
-      return PageWritability::Inaccessible;
-    if (proc_maps_open_failure_for_test_.load(std::memory_order_relaxed))
-      return PageWritability::Indeterminate;
-    const auto address = reinterpret_cast<uintptr_t>(page);
-    const long fd = ::syscall(SYS_openat, AT_FDCWD, "/proc/self/maps", O_RDONLY | O_CLOEXEC);
-    if (fd < 0)
-      return PageWritability::Indeterminate;
-
-    // Parsed incrementally: the table can be large, and a line may straddle
-    // reads, so keep any partial tail and prepend it to the next chunk.
-    std::string pending;
-    char chunk[8192];
-    PageWritability answer = PageWritability::Indeterminate;
-    for (bool reading = true; reading;) {
-      const long got = ::syscall(SYS_read, static_cast<int>(fd), chunk, sizeof(chunk));
-      if (got < 0) {
-        // A signal arriving mid-read says nothing about the mapping.
-        if (errno == EINTR)
-          continue;
-        break;
-      }
-      if (got == 0) {
-        // Walked the whole table without covering the address: nothing is
-        // mapped there, which is a definite answer rather than a failure.
-        answer = PageWritability::Inaccessible;
-        break;
-      }
-      pending.append(chunk, static_cast<size_t>(got));
-      size_t line_begin = 0;
-      for (size_t newline = pending.find('\n', line_begin); newline != std::string::npos;
-           newline = pending.find('\n', line_begin)) {
-        const std::string line(pending, line_begin, newline - line_begin);
-        line_begin = newline + 1;
-        uintptr_t begin = 0;
-        uintptr_t end = 0;
-        char permissions[5] = {};
-        if (std::sscanf(line.c_str(), "%zx-%zx %4s", &begin, &end, permissions) != 3)
-          continue;
-        if (address < begin || address >= end)
-          continue;
-        // A mapping that permits neither read nor write -- a PROT_NONE
-        // reservation, the shape the runtime leaves behind around an aperture
-        // -- is absent as far as the GPU is concerned, not merely protected.
-        answer = permissions[1] == 'w'   ? PageWritability::Writable
-                 : permissions[0] == 'r' ? PageWritability::ReadOnly
-                                         : PageWritability::Inaccessible;
-        reading = false;
-        break;
-      }
-      pending.erase(0, line_begin);
-    }
-    ::syscall(SYS_close, static_cast<int>(fd));
-    return answer;
-  }
+  static PageWritability host_page_writability(const uint8_t *page, uintptr_t *vma_end = nullptr);
 
   inline static std::atomic<bool> proc_maps_open_failure_for_test_{false};
 
@@ -2779,17 +2823,44 @@ private:
 
   class PteCacheSet {
   public:
+    struct Coverage {
+      // Legacy memory instance whose PTEs established the mapping.
+      uint64_t memory = 0;
+      // Page-table policy generation under which the run was observed.
+      uint64_t generation = 0;
+      // First GPU byte covered by the run.
+      uint64_t begin = 0;
+      // Exclusive end of the covered GPU run.
+      uint64_t end = 0;
+      // Process address space containing the run.
+      uint32_t vmid = 0;
+      // Retains the policy epoch used to validate cached coverage.
+      std::shared_ptr<LegacyPageTableCacheState> policies;
+      // Driver-owned mappings have stable write permissions.
+      bool driver_owned = false;
+      // First host byte, or zero when the run is not contiguous on the host.
+      uintptr_t host_begin = 0;
+    };
     static constexpr size_t kEntryCount = 64;
     static_assert((kEntryCount & (kEntryCount - 1)) == 0);
     std::array<PteCache, kEntryCount> entries;
+    // Local ingress coverage shares the PTE cache's command/worker lifetime.
+    std::array<Coverage, 8> coverage_runs;
+    // Round-robin replacement position in coverage_runs.
+    unsigned next_coverage = 0;
   };
 
-  /// @brief This thread's PTE cache, shared by every with_page_mapping caller.
+  /// @brief The command's PTE cache, or this worker thread's persistent cache.
   /// @details glibc carves static TLS out of every thread's stack, including
   /// application threads that never touch emulated memory, so the cache lives
   /// on the heap. A thread_local block per template instantiation once made
   /// glibc refuse a 64 KiB thread stack in any process that preloads rocJITsu.
   static PteCacheSet &thread_pte_caches() {
+    if (scoped_pte_caches_) {
+      if (!*scoped_pte_caches_)
+        *scoped_pte_caches_ = std::make_unique<PteCacheSet>();
+      return **scoped_pte_caches_;
+    }
     thread_local std::unique_ptr<PteCacheSet> caches;
     if (!caches)
       caches = std::make_unique<PteCacheSet>();
@@ -3547,6 +3618,7 @@ private:
     if (pid <= 0)
       return false;
     if (pid == getpid()) {
+      const auto mapping = rocjitsu::host_mapping_lock().lock_shared();
       const bool copied =
           copy_backing_bytes(addr, reinterpret_cast<uint8_t *>(addr), dst, len, false);
       if (!copied)
@@ -3579,6 +3651,7 @@ private:
     if (pid <= 0)
       return false;
     if (pid == getpid()) {
+      const auto mapping = rocjitsu::host_mapping_lock().lock_shared();
       return copy_backing_bytes(addr, reinterpret_cast<uint8_t *>(addr), const_cast<void *>(src),
                                 len, true);
     }

@@ -100,6 +100,7 @@ nav:
       - DBT guest mode: rocjitsu_dbt_guest.md
       - Binary instrumentation: dbi-design.md
       - Instrumentation overview: dbi-overview.md
+      - Fault injection: fault-injection.md
       - Execution plugins: plugins.md
       - ISA code generation: codegen.md
       - ISA target providers: isa-target-providers.md
@@ -111,12 +112,6 @@ nav:
       - Memory wait coverage: memory-wait-counter-coverage.md
   - Project:
       - Blog: blog/index.md
-      - Pod qualification:
-          - RCCL result (2026-10-14): same-host-pod-rccl-result-20261014.md
-          - RCCL result (2026-10-15): same-host-pod-rccl-result-20261015.md
-          - RCCL result (2026-10-19): same-host-pod-rccl-result-20261019.md
-          - Stock-driver hardware path: stock-driver-hardware-path-20261014.md
-          - Unpatched AMDGPU ablation: unpatched-amdgpu-pod-ablation-20261015.md
 extra:
   social:
     - icon: fontawesome/brands/github

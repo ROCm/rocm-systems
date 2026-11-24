@@ -41,7 +41,12 @@ Key invariants verified:
   * CSV  — counters_collection averages a counter over kernel-replay passes for the
            latest schema instead of summing them, and pmc_events reports each pass.
   * Perfetto — counter values for the latest schema are those pass means.
+    * CSV  — PC-sampling files absent before 3.1.0; present with their documented
+                     columns from 3.1.0.
   * Perfetto — .pftrace exists and is non-empty for every schema.
+  * CSV / Perfetto / OTF2 — kernel dispatch pipe_id absent for schemas < 3.1.1;
+            present for the latest schema: on every CSV row (-1 when unknown), and in
+            Perfetto and OTF2 only for dispatches whose pipe is known.
   * OTF2 — "HIP Graph Launch" locations absent for pre-latest schemas;
             present for the latest schema (requires the ``otf2`` package).
 
@@ -93,6 +98,37 @@ def _otf2_location_names(otf2_path: Path) -> list:
 
     _, readers = OTF2Reader(str(otf2_path)).read()
     return [str(loc.name) for loc in readers[0].definitions.locations]
+
+
+def _pftrace_kernel_pipe_ids(pftrace_path: Path) -> tuple:
+    """Return (kernel dispatch slice count, sorted pipe_id values) from a Perfetto trace."""
+    from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
+
+    with PerfettoReader(str(pftrace_path)) as reader:
+        kernels = reader.query_tp(
+            "SELECT id FROM slice WHERE category = 'kernel_dispatch'"
+        )
+        pipe_ids = reader.query_tp("""
+            SELECT args.int_value FROM slice JOIN args USING(arg_set_id)
+            WHERE slice.category = 'kernel_dispatch' AND args.key = 'debug.pipe_id'
+            """)
+    return len(kernels), sorted(int(v) for v in pipe_ids.get("int_value", []))
+
+
+def _otf2_kernel_pipe_ids(otf2_path: Path) -> tuple:
+    """Return (kernel dispatch region count, sorted pipe_id values) from an OTF2 trace."""
+    from rocprofiler_sdk.pytest_utils.otf2_reader import OTF2Reader
+
+    df, _ = OTF2Reader(str(otf2_path)).read()
+    kernels = df[df["category"] == "kernel_dispatch"]
+    pipe_ids = [
+        value
+        for attribute_sets in kernels["attributes"]
+        for attribute_set in attribute_sets
+        for attribute, value in attribute_set.items()
+        if attribute.name == "pipe_id"
+    ]
+    return len(kernels), sorted(pipe_ids)
 
 
 # ---------------------------------------------------------------------------
@@ -360,7 +396,10 @@ def test_counters_collection_schema_unchanged_from_3_0_5(output_root, latest_sch
 
 
 def test_pmc_events_replay_pass_absent_before_3_0_6(output_root, old_schema):
-    """Archived schemas must retain their original pmc_events columns."""
+    """Schemas before 3.0.6 must retain their original pmc_events columns."""
+    if tuple(map(int, old_schema.split("."))) >= (3, 0, 6):
+        return test_pmc_events_report_replay_pass(output_root, old_schema)
+
     db_path = (
         output_root / old_schema / "db" / f"schema_{old_schema.replace('.', '_')}.db"
     )
@@ -412,6 +451,107 @@ def test_pmc_events_report_replay_pass(output_root, latest_schema):
 
 
 # ---------------------------------------------------------------------------
+# CSV tests — schema 3.1.0 (PC sampling output)
+# ---------------------------------------------------------------------------
+
+_PC_SAMPLING_CSVS = (
+    "out_pc_sampling_host_trap_trace.csv",
+    "out_pc_sampling_stochastic_trace.csv",
+)
+_PC_SAMPLING_COLUMNS = [
+    "guid",
+    "sample_timestamp",
+    "exec_mask",
+    "dispatch_id",
+    "instruction",
+    "instruction_comment",
+    "correlation_id",
+]
+_PC_SAMPLING_STOCHASTIC_COLUMNS = _PC_SAMPLING_COLUMNS + [
+    "wave_issued_instruction",
+    "instruction_type",
+    "stall_reason",
+    "wave_count",
+]
+
+
+def test_csv_for_schema_3_1_0_changes_absent(output_root, old_schema):
+    """PC-sampling CSVs must not be produced for pre-3.1.0 schemas."""
+    if tuple(map(int, old_schema.split("."))) >= (3, 1, 0):
+        return test_csv_for_schema_3_1_0_changes_present(output_root, old_schema)
+
+    for name in _PC_SAMPLING_CSVS:
+        assert not (
+            output_root / old_schema / "csv" / name
+        ).exists(), f"{name} should not be created for schema {old_schema}"
+
+
+def test_csv_for_schema_3_1_0_changes_present(output_root, latest_schema):
+    """Schema 3.1.0 PC samples are exported with their documented columns."""
+    csv_dir = output_root / latest_schema / "csv"
+    host_trap, stochastic = (csv_dir / name for name in _PC_SAMPLING_CSVS)
+    for path in (host_trap, stochastic):
+        assert path.exists(), f"{path.name} not found for schema {latest_schema}"
+
+    assert _csv_columns(host_trap) == _PC_SAMPLING_COLUMNS
+    assert _csv_columns(stochastic) == _PC_SAMPLING_STOCHASTIC_COLUMNS
+    # Stored disassembly is served, and the full 64-bit mask is exported exactly.
+    assert _csv_column_values(host_trap, "instruction") == ["s_nop 0"]
+    assert _csv_column_values(host_trap, "exec_mask") == ["18446744073709551615"]
+    assert _csv_column_values(stochastic, "instruction_type") == [
+        "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU"
+    ]
+    assert _csv_column_values(stochastic, "wave_count") == ["4"]
+    # The fixture's code object cannot be read, so the PC is reported undecoded.
+    assert _csv_column_values(stochastic, "instruction") == [""]
+    assert _csv_column_values(stochastic, "instruction_comment")[0].startswith(
+        "Decode unavailable"
+    )
+
+
+# ---------------------------------------------------------------------------
+# CSV tests — schema 3.1.1 (kernel dispatch pipe_id)
+# ---------------------------------------------------------------------------
+
+
+def test_csv_for_schema_3_1_1_changes_absent(output_root, old_schema):
+    """Schema 3.1.1 additions must be absent for pre-3.1.1 schemas.
+
+    Verifies that the pipe_id column is not in the kernel trace CSV.
+    """
+    if tuple(map(int, old_schema.split("."))) >= (3, 1, 1):
+        print(
+            f"Schema {old_schema} is newer than 3.1.1, calling test_csv_for_schema_3_1_1_changes_present instead"
+        )
+        return test_csv_for_schema_3_1_1_changes_present(output_root, old_schema)
+
+    kernel_csv = output_root / old_schema / "csv" / "out_kernel_trace.csv"
+    assert (
+        kernel_csv.exists()
+    ), f"out_kernel_trace.csv not found for schema {old_schema}: {kernel_csv}"
+    assert "pipe_id" not in _csv_columns(
+        kernel_csv
+    ), f"pipe_id unexpectedly present in kernel CSV for schema {old_schema}"
+
+
+def test_csv_for_schema_3_1_1_changes_present(output_root, latest_schema):
+    """Schema 3.1.1 additions must be present for the latest schema.
+
+    Verifies that the kernel trace CSV carries pipe_id, including the -1 (unknown) default.
+    """
+    kernel_csv = output_root / latest_schema / "csv" / "out_kernel_trace.csv"
+    assert (
+        kernel_csv.exists()
+    ), f"out_kernel_trace.csv not found for schema {latest_schema}: {kernel_csv}"
+    with open(kernel_csv) as fh:
+        pipe_ids = sorted(int(row["Pipe_Id"]) for row in csv_mod.DictReader(fh))
+    assert pipe_ids == [
+        -1,
+        2,
+    ], f"unexpected pipe_id values in kernel CSV for schema {latest_schema}: {pipe_ids}"
+
+
+# ---------------------------------------------------------------------------
 # Perfetto tests — old schemas
 # ---------------------------------------------------------------------------
 
@@ -460,6 +600,52 @@ def test_pftrace_counter_values_average_replay_passes(output_root, latest_schema
         "debug.GRBM_COUNT": {1000.0},
         "debug.SQ_INSTS_SALU": {5.5},
     }, f"unexpected Perfetto counter values for schema {latest_schema}: {values}"
+
+
+# ---------------------------------------------------------------------------
+# Perfetto tests — schema 3.1.1 (kernel dispatch pipe_id)
+# ---------------------------------------------------------------------------
+
+
+def test_pftrace_for_schema_3_1_1_changes_absent(output_root, old_schema):
+    """Schema 3.1.1 additions must be absent for pre-3.1.1 schemas.
+
+    Verifies that kernel dispatch slices carry no pipe_id annotation.
+    """
+    pytest.importorskip("perfetto", reason="perfetto package not installed")
+    if tuple(map(int, old_schema.split("."))) >= (3, 1, 1):
+        print(
+            f"Schema {old_schema} is newer than 3.1.1, calling test_pftrace_for_schema_3_1_1_changes_present instead"
+        )
+        return test_pftrace_for_schema_3_1_1_changes_present(output_root, old_schema)
+
+    pftrace = output_root / old_schema / "pftrace" / "out_results.pftrace"
+    assert pftrace.exists(), f".pftrace not found for schema {old_schema}: {pftrace}"
+    num_kernels, pipe_ids = _pftrace_kernel_pipe_ids(pftrace)
+    assert (
+        num_kernels > 0
+    ), f"no kernel dispatch slices in .pftrace for schema {old_schema}"
+    assert (
+        not pipe_ids
+    ), f"pipe_id unexpectedly present in .pftrace for schema {old_schema}: {pipe_ids}"
+
+
+def test_pftrace_for_schema_3_1_1_changes_present(output_root, latest_schema):
+    """Schema 3.1.1 additions must be present for the latest schema.
+
+    Verifies that only kernel dispatch slices with a known pipe carry pipe_id, and that the
+    dispatch whose pipe is unknown stays in the trace without it.
+    """
+    pytest.importorskip("perfetto", reason="perfetto package not installed")
+    pftrace = output_root / latest_schema / "pftrace" / "out_results.pftrace"
+    assert pftrace.exists(), f".pftrace not found for schema {latest_schema}: {pftrace}"
+    num_kernels, pipe_ids = _pftrace_kernel_pipe_ids(pftrace)
+    assert (
+        num_kernels == 2
+    ), f"expected 2 kernel dispatch slices in .pftrace for schema {latest_schema}: {num_kernels}"
+    assert pipe_ids == [
+        2
+    ], f"unexpected pipe_id values in .pftrace for schema {latest_schema}: {pipe_ids}"
 
 
 # ---------------------------------------------------------------------------
@@ -528,6 +714,54 @@ def test_otf2_graph_launch_locations_latest(output_root, latest_schema):
         f"Expected 'HIP Graph Launch' OTF2 locations for schema {latest_schema} "
         f"but none found.  All locations: {loc_names}"
     )
+
+
+# ---------------------------------------------------------------------------
+# OTF2 tests — schema 3.1.1 (kernel dispatch pipe_id)
+# ---------------------------------------------------------------------------
+
+
+def test_otf2_for_schema_3_1_1_changes_absent(output_root, old_schema):
+    """Schema 3.1.1 additions must be absent for pre-3.1.1 schemas.
+
+    Verifies that kernel dispatch regions carry no pipe_id attribute.
+    """
+    pytest.importorskip("otf2", reason="otf2 package not installed")
+    if tuple(map(int, old_schema.split("."))) >= (3, 1, 1):
+        print(
+            f"Schema {old_schema} is newer than 3.1.1, calling test_otf2_for_schema_3_1_1_changes_present instead"
+        )
+        return test_otf2_for_schema_3_1_1_changes_present(output_root, old_schema)
+
+    otf2_path = output_root / old_schema / "otf2" / "out_results.otf2"
+    assert (
+        otf2_path.exists()
+    ), f"OTF2 output not found for schema {old_schema}: {otf2_path}"
+    num_kernels, pipe_ids = _otf2_kernel_pipe_ids(otf2_path)
+    assert num_kernels > 0, f"no kernel dispatch regions in OTF2 for schema {old_schema}"
+    assert (
+        not pipe_ids
+    ), f"pipe_id unexpectedly present in OTF2 for schema {old_schema}: {pipe_ids}"
+
+
+def test_otf2_for_schema_3_1_1_changes_present(output_root, latest_schema):
+    """Schema 3.1.1 additions must be present for the latest schema.
+
+    Verifies that only kernel dispatch regions with a known pipe carry pipe_id, and that the
+    dispatch whose pipe is unknown stays in the trace without it.
+    """
+    pytest.importorskip("otf2", reason="otf2 package not installed")
+    otf2_path = output_root / latest_schema / "otf2" / "out_results.otf2"
+    assert (
+        otf2_path.exists()
+    ), f"OTF2 output not found for schema {latest_schema}: {otf2_path}"
+    num_kernels, pipe_ids = _otf2_kernel_pipe_ids(otf2_path)
+    assert (
+        num_kernels == 2
+    ), f"expected 2 kernel dispatch regions in OTF2 for schema {latest_schema}: {num_kernels}"
+    assert pipe_ids == [
+        2
+    ], f"unexpected pipe_id values in OTF2 for schema {latest_schema}: {pipe_ids}"
 
 
 if __name__ == "__main__":

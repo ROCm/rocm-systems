@@ -15,15 +15,7 @@
 
 #include "sym_kernels.h"
 
-// Neuter __global__: a real definition needs hipLaunchKernel/__hipRegisterFunction, unavailable under -no-hip-rt.
-#undef __global__
-#define __global__
-
-#include "fakes/sym_kernels_test_stubs.h"
-
-#include SYM_KERNELS_HOST_CC_PATH
-
-#undef __global__
+#include "fakes/sym_kernels_host_include.h"
 
 namespace {
 
@@ -158,6 +150,22 @@ const std::vector<ExpectedKernelCase>& ValidCases() {
       {"AllReduce_RSxLD_AGxST_sum_f8e5m2", ncclSymkKernelId_AllReduce_RSxLD_AGxST, ncclDevSum, ncclFloat8e5m2,
        (void*)ncclSymkDevKernel_AllReduce_RSxLD_AGxST_sum_f8e5m2,
        (void*)ncclSymkDevKernel_AllReduce_RSxLD_AGxST_sum_f8e5m2_profile},
+
+      {"AllReduce_HierLsaLDST_sum_f32", ncclSymkKernelId_AllReduce_HierLsaLDST, ncclDevSum, ncclFloat32,
+       (void*)ncclSymkDevKernel_AllReduce_HierLsaLDST_sum_f32,
+       (void*)ncclSymkDevKernel_AllReduce_HierLsaLDST_sum_f32_profile},
+      {"AllReduce_HierLsaLDST_sum_f16", ncclSymkKernelId_AllReduce_HierLsaLDST, ncclDevSum, ncclFloat16,
+       (void*)ncclSymkDevKernel_AllReduce_HierLsaLDST_sum_f16,
+       (void*)ncclSymkDevKernel_AllReduce_HierLsaLDST_sum_f16_profile},
+      {"AllReduce_HierLsaLDST_sum_bf16", ncclSymkKernelId_AllReduce_HierLsaLDST, ncclDevSum, ncclBfloat16,
+       (void*)ncclSymkDevKernel_AllReduce_HierLsaLDST_sum_bf16,
+       (void*)ncclSymkDevKernel_AllReduce_HierLsaLDST_sum_bf16_profile},
+      {"AllReduce_HierLsaLDST_sum_f8e4m3", ncclSymkKernelId_AllReduce_HierLsaLDST, ncclDevSum, ncclFloat8e4m3,
+       (void*)ncclSymkDevKernel_AllReduce_HierLsaLDST_sum_f8e4m3,
+       (void*)ncclSymkDevKernel_AllReduce_HierLsaLDST_sum_f8e4m3_profile},
+      {"AllReduce_HierLsaLDST_sum_f8e5m2", ncclSymkKernelId_AllReduce_HierLsaLDST, ncclDevSum, ncclFloat8e5m2,
+       (void*)ncclSymkDevKernel_AllReduce_HierLsaLDST_sum_f8e5m2,
+       (void*)ncclSymkDevKernel_AllReduce_HierLsaLDST_sum_f8e5m2_profile},
 
       {"ReduceScatter_LL_sum_f32", ncclSymkKernelId_ReduceScatter_LL, ncclDevSum, ncclFloat32,
        (void*)ncclSymkDevKernel_ReduceScatter_LL_sum_f32, (void*)ncclSymkDevKernel_ReduceScatter_LL_sum_f32_profile},
@@ -327,8 +335,9 @@ const std::vector<InvalidKernelCase>& InvalidCases() {
       // Outer switch(id) default: the sentinel past the last real enumerator.
       {"UnimplementedId_Count", ncclSymkKernelId_Count, ncclDevSum, ncclFloat32},
       // Outer switch(id) default: an in-range value that is not an enumerator. Casting -1 would fall
-      // outside the enum's [0,31] value range, which is undefined per C++17, not unspecified.
-      {"UnimplementedId_InRangeNonEnumerator", (ncclSymkKernelId)31, ncclDevSum, ncclFloat32},
+      // outside the enum's value range, which is undefined per C++17, not unspecified.
+      {"UnimplementedId_InRangeNonEnumerator", (ncclSymkKernelId)(ncclSymkKernelId_Count + 1), ncclDevSum,
+       ncclFloat32},
 
       // Inner switch(red) default: a real ncclDevRedOp_t this id has no case for.
       {"AllReduce_AGxLL_R_UnknownRed_Prod", ncclSymkKernelId_AllReduce_AGxLL_R, ncclDevProd, ncclFloat32},

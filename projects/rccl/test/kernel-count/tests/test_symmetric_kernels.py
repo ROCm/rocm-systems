@@ -36,10 +36,10 @@ GENERATE_PY = RCCL_ROOT / "src" / "device" / "symmetric" / "generate.py"
 # If a change moves these numbers, update them here AND explain in the PR
 # description WHY. Do not blind-update.
 # ---------------------------------------------------------------------------
-EXPECTED_TOTAL = 49
+EXPECTED_TOTAL = 54
 EXPECTED_PER_COLL = {
     "AllGather": 4,
-    "AllReduce": 10,
+    "AllReduce": 15,
     "ReduceScatter": 35,
 }
 EXPECTED_DIMS = {
@@ -62,10 +62,10 @@ EXPECTED_DIMS = {
 # arch from one that only asks whether any target was given.
 GPU_TARGETS_WITHOUT_TDM = "gfx942;gfx950"
 GPU_TARGETS_WITH_TDM = "gfx942;gfx1250"
-EXPECTED_TDM_TOTAL = 66
+EXPECTED_TDM_TOTAL = 71
 EXPECTED_TDM_PER_COLL = {
     "AllGather": 6,
-    "AllReduce": 15,
+    "AllReduce": 20,
     "ReduceScatter": 45,
 }
 EXPECTED_TDM_ALGOS = {"TmaST", "HierLsaTmaST", "RSxTmaLD_AGxTmaST", "TmaLD"}
@@ -302,15 +302,16 @@ def test_requirements_entries_are_ordered_and_indexed_correctly(sym_host):
 @pytest.mark.symmetric_generator
 def test_requirements_values_match_required_cuda(sym_host, sym_module):
     entries = _requirements_entries(sym_host)
-    kernel_list = list(sym_module.enumerate_kernels())
+    # The emitted tables cover only what is built (kernels_to_build), not every enumerated kernel.
+    kernel_list = list(sym_module.kernels_to_build)
     assert len(entries) == len(kernel_list), (
-        "ncclSymkKernelRequirements[] has %d entries, enumerate_kernels() yields %d" % (len(entries), len(kernel_list))
+        "ncclSymkKernelRequirements[] has %d entries, kernels_to_build has %d" % (len(entries), len(kernel_list))
     )
     mismatches = []
     for (emitted_cudart, index, name), k in zip(entries, kernel_list):
         # Anchors the zip to identity: only 3 distinct cudart values exist, so a reorder could hide behind one.
         assert name == sym_module.kernel_cname(k), (
-            "position %d: ncclSymkKernelRequirements[] names %r, enumerate_kernels() yields %r"
+            "position %d: ncclSymkKernelRequirements[] names %r, kernels_to_build has %r"
             % (index, name, sym_module.kernel_cname(k))
         )
         expected_cudart, _, _ = sym_module.required_cuda(k)

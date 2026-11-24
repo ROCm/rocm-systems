@@ -8,7 +8,8 @@ device_memory:
   Unit_Device_memcpy_Negative_Parameters_RTC:
     <<: *level_default
     tags: [device_lang]
-  Unit_Device_memset_Positive: *level_default
+  Unit_Device_memset_Positive:
+    <<: *level_default
   Unit_Device_memset_Negative_Parameters_RTC:
     <<: *level_default
     tags: [device_lang]

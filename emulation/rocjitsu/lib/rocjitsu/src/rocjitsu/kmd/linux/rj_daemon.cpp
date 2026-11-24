@@ -3,6 +3,7 @@
 
 #include "rocjitsu/daemon/rj_daemon.h"
 
+#include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/rpc.h"
@@ -34,6 +35,7 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/un.h>
 #include <system_error>
 #include <thread>
@@ -425,15 +427,17 @@ private:
     RpcMunmapRequest request{};
     if (!rpc_recv_exact(client_fd_, &request, sizeof(request)))
       return RequestDisposition::Disconnect;
-    rj_vm_unmap_t unmap{.addr = request.addr, .length = request.length};
-    const rj_status_t status = rj_vm_device_unmap_as(daemon_->vm, process_id_, &unmap);
-    const int unmap_errno = errno;
-    if (status != ROCJITSU_STATUS_SUCCESS && status != ROCJITSU_STATUS_ERROR)
-      return RequestDisposition::Disconnect;
+    // RPC_MMAP installs independent views in the two processes. A client VA
+    // cannot identify a daemon mapping. Let the interposer unmap its local
+    // view and report the host VMA change for any affected SVM policy.
     RpcHeader response{};
     response.opcode = header.opcode;
     response.request_id = header.request_id;
-    response.result = status == ROCJITSU_STATUS_SUCCESS ? 0 : -unmap_errno;
+    const long page = sysconf(_SC_PAGESIZE);
+    const bool valid_range = page > 0 && request.addr % static_cast<uint64_t>(page) == 0 &&
+                             request.length != 0 &&
+                             request.length <= (UINT64_MAX - request.addr) / page * page;
+    response.result = valid_range ? -ENOENT : -EINVAL;
     return rpc_send_exact(client_fd_, &response, sizeof(response)) ? RequestDisposition::Continue
                                                                    : RequestDisposition::Disconnect;
   }
@@ -521,14 +525,18 @@ private:
             if (end < old_end)
               updated.push_back({entry.drm_file_id, end, old_end - end, entry.backing});
           }
+          auto mapping_lock = host_mapping_lock().lock_exclusive();
           void *host = map_memory_backing(nullptr, request.map_size, PROT_READ | PROT_WRITE,
                                           MAP_SHARED, input_fds.notifier.get(),
                                           static_cast<off_t>(request.offset_in_bo));
+          mapping_lock.unlock();
           if (host == MAP_FAILED) {
             response.result = -errno;
           } else {
-            std::shared_ptr<void> backing(
-                host, [size = request.map_size](void *ptr) { ::munmap(ptr, size); });
+            std::shared_ptr<void> backing(host, [size = request.map_size](void *ptr) {
+              auto lock = host_mapping_lock().lock_exclusive();
+              ::syscall(SYS_munmap, ptr, size);
+            });
             auto transaction = driver->begin_gem_va_transaction(process_id_);
             response.result =
                 transaction

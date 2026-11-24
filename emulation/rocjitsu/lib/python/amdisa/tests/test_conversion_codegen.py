@@ -10,7 +10,6 @@ from amdisa.codegen.execute.sema_lower import lower_sema_block
 from amdisa.codegen.execute.simd_codegen import local_coverage_probe, simd_probe_line
 from amdisa.codegen.execute.vector_special import (
     gen_vector_cvt_pk,
-    gen_vector_cvt_scale,
 )
 from amdisa.sema_derive import derive_sema_block
 from amdisa.sema_enrich import enrich_block
@@ -127,14 +126,7 @@ def test_float_to_float_vop3_passes_every_modifier_to_one_stage_object(name, for
         assert host not in cpp
 
 
-def test_f64_conversion_simd_uses_raw_lane_glue():
-    assert simd_probe_line('v_cvt_f32_f64_vop1') == (
-        '  ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64(conversion);'
-    )
-    # A floating source's ABS/NEG/OMOD/CLAMP travel in the shared object.
-    assert simd_probe_line('v_cvt_f64_f32_vop3') == (
-        '  ROCJITSU_TRY_SIMD_CONVERSION_TO_F64(conversion);'
-    )
+def test_half_conversion_simd_uses_raw_lane_glue():
     f16 = simd_probe_line('v_cvt_f16_f32_vop3', true16_vop3=True)
     assert f16 == (
         '  if (amdgpu::try_execute_words_simd<1, false, true, 0>(inst, wf, conversion))'
@@ -223,7 +215,3 @@ def test_cdna5_uses_shared_narrowing_for_non_scaled_ocp_conversions(fmt, helper)
         ['dst'], ['a'], 'vector_cvt_pk', f'f32_{fmt}', arch_name='cdna5'
     )
     assert f'util::{helper}_to_f32' in widened
-    scaled = gen_vector_cvt_scale(
-        ['dst'], ['a', 'b', 'c'], 'vector_cvt_scale', f'pack_pk8_{fmt}_f32', 'cdna5'
-    )
-    assert f'util::f32_to_{helper}_rne_mode' in scaled
