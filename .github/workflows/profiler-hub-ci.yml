@@ -56,7 +56,7 @@ jobs:
           sudo apt-get install -y \
             ${{ matrix.compiler.pkg }} \
             libsqlite3-dev libspdlog-dev libfmt-dev nlohmann-json3-dev \
-            libgtest-dev libgmock-dev libbenchmark-dev
+            libgtest-dev libgmock-dev libbenchmark-dev tcl
 
       - name: Pin cmake to the project's minimum
         run: |

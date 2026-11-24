@@ -43,16 +43,22 @@ else()
         "Upstream SQLite3 git tag to check out"
     )
 
-    # Windows amalgamation zip. Bump URL + SHA256 together with SQLITE3_GIT_TAG.
+    # Amalgamation zip used on Windows, or when PROFILER_HUB_SQLITE3_FROM_GIT is
+    # OFF. Bump URL + SHA256 together with SQLITE3_GIT_TAG.
     set(SQLITE3_AMALGAMATION_URL
         "https://www.sqlite.org/2024/sqlite-amalgamation-3450300.zip"
         CACHE STRING
-        "URL of the prebuilt sqlite.org amalgamation zip used on Windows"
+        "URL of the prebuilt sqlite.org amalgamation zip used on Windows or when PROFILER_HUB_SQLITE3_FROM_GIT is OFF"
     )
     set(SQLITE3_AMALGAMATION_SHA256
         "ea170e73e447703e8359308ca2e4366a3ae0c4304a8665896f068c736781c651"
         CACHE STRING
         "Expected SHA256 of SQLITE3_AMALGAMATION_URL"
+    )
+    option(
+        PROFILER_HUB_SQLITE3_FROM_GIT
+        "Generate the SQLite3 amalgamation from the upstream git repo instead of downloading it. Needs git, make, and tclsh. Ignored on Windows."
+        ON
     )
 
     # Generating the amalgamation from git runs upstream autotools, which needs
