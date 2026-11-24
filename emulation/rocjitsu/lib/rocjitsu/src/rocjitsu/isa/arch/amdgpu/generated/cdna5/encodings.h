@@ -390,11 +390,13 @@ public:
                                   int num_encoded_sources = 1) {
     const auto &inst_ = *inst;
     if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
-        ((num_encoded_sources > 0 && inst_.ssrc0 == 255))) [[unlikely]]
+        ((num_encoded_sources > 0 && inst_.ssrc0 == 255))) [[unlikely]] {
       return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    }
     if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
-        ((num_encoded_sources > 0 && inst_.ssrc0 == 254))) [[unlikely]]
+        ((num_encoded_sources > 0 && inst_.ssrc0 == 254))) [[unlikely]] {
       return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    }
     return Result::success();
   }
   bool default_encoding();
@@ -418,12 +420,14 @@ public:
     const auto &inst_ = *inst;
     if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
         ((num_encoded_sources > 0 && inst_.ssrc0 == 255) ||
-         (num_encoded_sources > 1 && inst_.ssrc1 == 255))) [[unlikely]]
+         (num_encoded_sources > 1 && inst_.ssrc1 == 255))) [[unlikely]] {
       return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    }
     if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
         ((num_encoded_sources > 0 && inst_.ssrc0 == 254) ||
-         (num_encoded_sources > 1 && inst_.ssrc1 == 254))) [[unlikely]]
+         (num_encoded_sources > 1 && inst_.ssrc1 == 254))) [[unlikely]] {
       return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    }
     return Result::success();
   }
   bool default_encoding();
@@ -470,12 +474,14 @@ public:
     const auto &inst_ = *inst;
     if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
         ((num_encoded_sources > 0 && inst_.ssrc0 == 255) ||
-         (num_encoded_sources > 1 && inst_.ssrc1 == 255))) [[unlikely]]
+         (num_encoded_sources > 1 && inst_.ssrc1 == 255))) [[unlikely]] {
       return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    }
     if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
         ((num_encoded_sources > 0 && inst_.ssrc0 == 254) ||
-         (num_encoded_sources > 1 && inst_.ssrc1 == 254))) [[unlikely]]
+         (num_encoded_sources > 1 && inst_.ssrc1 == 254))) [[unlikely]] {
       return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    }
     return Result::success();
   }
   bool default_encoding();
@@ -498,12 +504,14 @@ public:
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
-    if (inst->soffset != OPR_SMEM_OFFSET_NULL && inst->ioffset)
+    if (inst->soffset != OPR_SMEM_OFFSET_NULL && inst->ioffset) {
       out += " offset:" + std::to_string(inst->ioffset);
+    }
     amdgpu::append_gfx12_cache_policy(out, inst->th, inst->scope,
                                       amdgpu::Gfx12TemporalHintKind::Load);
-    if (inst->nv)
+    if (inst->nv) {
       out += " nv";
+    }
   }
   using OpEncoding = SmemMachineInst;
   const OpEncoding inst_;
@@ -544,20 +552,24 @@ public:
                                   int num_encoded_sources = 1) {
     const auto &inst_ = *inst;
     if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
-        ((num_encoded_sources > 0 && inst_.src0 == 255))) [[unlikely]]
+        ((num_encoded_sources > 0 && inst_.src0 == 255))) [[unlikely]] {
       return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    }
     if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
-        ((num_encoded_sources > 0 && inst_.src0 == 254))) [[unlikely]]
+        ((num_encoded_sources > 0 && inst_.src0 == 254))) [[unlikely]] {
       return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    }
     return Result::success();
   }
   void build_modifiers(std::string &out) const override {
-    if (has_encoded_dpp())
+    if (has_encoded_dpp()) {
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,
                                             amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
-    if (has_encoded_dpp8())
+    }
+    if (has_encoded_dpp8()) {
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
@@ -625,20 +637,24 @@ public:
                                   int num_encoded_sources = 1) {
     const auto &inst_ = *inst;
     if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
-        ((num_encoded_sources > 0 && inst_.src0 == 255))) [[unlikely]]
+        ((num_encoded_sources > 0 && inst_.src0 == 255))) [[unlikely]] {
       return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    }
     if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
-        ((num_encoded_sources > 0 && inst_.src0 == 254))) [[unlikely]]
+        ((num_encoded_sources > 0 && inst_.src0 == 254))) [[unlikely]] {
       return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    }
     return Result::success();
   }
   void build_modifiers(std::string &out) const override {
-    if (has_encoded_dpp())
+    if (has_encoded_dpp()) {
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,
                                             amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
-    if (has_encoded_dpp8())
+    }
+    if (has_encoded_dpp8()) {
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+    }
   }
   bool default_encoding();
   bool has_lit();
@@ -702,20 +718,24 @@ public:
                                   int num_encoded_sources = 1) {
     const auto &inst_ = *inst;
     if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
-        ((num_encoded_sources > 0 && inst_.src0 == 255))) [[unlikely]]
+        ((num_encoded_sources > 0 && inst_.src0 == 255))) [[unlikely]] {
       return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    }
     if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
-        ((num_encoded_sources > 0 && inst_.src0 == 254))) [[unlikely]]
+        ((num_encoded_sources > 0 && inst_.src0 == 254))) [[unlikely]] {
       return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    }
     return Result::success();
   }
   void build_modifiers(std::string &out) const override {
-    if (has_encoded_dpp())
+    if (has_encoded_dpp()) {
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,
                                             amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
-    if (has_encoded_dpp8())
+    }
+    if (has_encoded_dpp8()) {
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
@@ -790,16 +810,19 @@ public:
     if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
         ((num_encoded_sources > 0 && inst_.src0 == 255) ||
          (num_encoded_sources > 1 && inst_.src1 == 255) ||
-         (num_encoded_sources > 2 && inst_.src2 == 255))) [[unlikely]]
+         (num_encoded_sources > 2 && inst_.src2 == 255))) [[unlikely]] {
       return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    }
     if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
         ((num_encoded_sources > 0 && inst_.src0 == 254) ||
          (num_encoded_sources > 1 && inst_.src1 == 254) ||
-         (num_encoded_sources > 2 && inst_.src2 == 254))) [[unlikely]]
+         (num_encoded_sources > 2 && inst_.src2 == 254))) [[unlikely]] {
       return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    }
     if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
-        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
+        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]] {
       return emit_error.emit() << "DPP and literal operands cannot be combined";
+    }
     return Result::success();
   }
   void build_modifiers(std::string &out) const override {
@@ -807,12 +830,14 @@ public:
     (void)inst;
     amdgpu::vop::append_vop3_disassembly(out, inst->opsel, inst->clamp, inst->omod,
                                          vop3_encoded_source_count(), displays_vop3_op_sel());
-    if (has_encoded_dpp())
+    if (has_encoded_dpp()) {
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,
                                             amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
-    if (has_encoded_dpp8())
+    }
+    if (has_encoded_dpp8()) {
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
@@ -898,21 +923,25 @@ public:
     if (extension_policy == ExtensionDecodePolicy::Decode) {
       if ((num_encoded_sources > 0 && inst_.src0 == 254) ||
           (num_encoded_sources > 1 && inst_.src1 == 254) ||
-          (num_encoded_sources > 2 && inst_.src2 == 254)) [[unlikely]]
+          (num_encoded_sources > 2 && inst_.src2 == 254)) [[unlikely]] {
         return emit_error.emit() << "Vop3p does not support Literal64";
+      }
       if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
           ((num_encoded_sources > 0 && inst_.src0 == 255) ||
            (num_encoded_sources > 1 && inst_.src1 == 255) ||
-           (num_encoded_sources > 2 && inst_.src2 == 255))) [[unlikely]]
+           (num_encoded_sources > 2 && inst_.src2 == 255))) [[unlikely]] {
         return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+      }
       if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
           ((num_encoded_sources > 0 && inst_.src0 == 254) ||
            (num_encoded_sources > 1 && inst_.src1 == 254) ||
-           (num_encoded_sources > 2 && inst_.src2 == 254))) [[unlikely]]
+           (num_encoded_sources > 2 && inst_.src2 == 254))) [[unlikely]] {
         return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+      }
       if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
-          (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
+          (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]] {
         return emit_error.emit() << "DPP and literal operands cannot be combined";
+      }
     }
     return Result::success();
   }
@@ -929,12 +958,14 @@ public:
             inst_.op == 126,
         !((inst_.op >= 59 && inst_.op <= 60) || (inst_.op >= 75 && inst_.op <= 79) ||
           inst_.op == 126));
-    if (has_encoded_dpp())
+    if (has_encoded_dpp()) {
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,
                                             amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
-    if (has_encoded_dpp8())
+    }
+    if (has_encoded_dpp8()) {
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
@@ -971,12 +1002,15 @@ public:
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
-    if (inst->offen)
+    if (inst->offen) {
       out += " offen";
-    if (inst->idxen)
+    }
+    if (inst->idxen) {
       out += " idxen";
-    if (inst->ioffset)
+    }
+    if (inst->ioffset) {
       out += " offset:" + std::to_string(inst->ioffset);
+    }
     amdgpu::Gfx12TemporalHintKind hint_kind = amdgpu::Gfx12TemporalHintKind::Load;
     switch (inst->op) {
     case 51:
@@ -1031,8 +1065,9 @@ public:
       break;
     }
     amdgpu::append_gfx12_cache_policy(out, inst->th, inst->scope, hint_kind);
-    if (inst->nv)
+    if (inst->nv) {
       out += " nv";
+    }
   }
   using OpEncoding = VbufferMachineInst;
   const OpEncoding inst_;
@@ -1053,8 +1088,9 @@ public:
       break;
     }
     amdgpu::append_gfx12_cache_policy(out, inst->th, inst->scope, hint_kind);
-    if (inst->nv)
+    if (inst->nv) {
       out += " nv";
+    }
   }
   using OpEncoding = VimageMachineInst;
   const OpEncoding inst_;
@@ -1120,8 +1156,9 @@ public:
       break;
     }
     amdgpu::append_gfx12_cache_policy(out, inst->th, inst->scope, hint_kind);
-    if (inst->nv)
+    if (inst->nv) {
       out += " nv";
+    }
   }
   using OpEncoding = VflatMachineInst;
   const OpEncoding inst_;
@@ -1150,8 +1187,9 @@ public:
       break;
     }
     amdgpu::append_gfx12_cache_policy(out, inst->th, inst->scope, hint_kind);
-    if (inst->nv)
+    if (inst->nv) {
       out += " nv";
+    }
   }
   using OpEncoding = VscratchMachineInst;
   const OpEncoding inst_;
@@ -1223,8 +1261,9 @@ public:
       break;
     }
     amdgpu::append_gfx12_cache_policy(out, inst->th, inst->scope, hint_kind);
-    if (inst->nv)
+    if (inst->nv) {
       out += " nv";
+    }
   }
   using OpEncoding = VglobalMachineInst;
   const OpEncoding inst_;
@@ -1268,16 +1307,19 @@ public:
     if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
         ((num_encoded_sources > 0 && inst_.src0 == 255) ||
          (num_encoded_sources > 1 && inst_.src1 == 255) ||
-         (num_encoded_sources > 2 && inst_.src2 == 255))) [[unlikely]]
+         (num_encoded_sources > 2 && inst_.src2 == 255))) [[unlikely]] {
       return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    }
     if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
         ((num_encoded_sources > 0 && inst_.src0 == 254) ||
          (num_encoded_sources > 1 && inst_.src1 == 254) ||
-         (num_encoded_sources > 2 && inst_.src2 == 254))) [[unlikely]]
+         (num_encoded_sources > 2 && inst_.src2 == 254))) [[unlikely]] {
       return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    }
     if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
-        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
+        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]] {
       return emit_error.emit() << "DPP and literal operands cannot be combined";
+    }
     return Result::success();
   }
   void build_modifiers(std::string &out) const override {
@@ -1285,12 +1327,14 @@ public:
     (void)inst;
     amdgpu::vop::append_vop3_disassembly(out, 0, inst->clamp, inst->omod,
                                          vop3_encoded_source_count(), false);
-    if (has_encoded_dpp())
+    if (has_encoded_dpp()) {
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,
                                             amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
-    if (has_encoded_dpp8())
+    }
+    if (has_encoded_dpp8()) {
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;

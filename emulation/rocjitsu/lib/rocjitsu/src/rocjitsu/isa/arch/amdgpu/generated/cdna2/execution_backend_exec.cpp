@@ -41,8 +41,9 @@ template <typename Derived> void execute_with_backend(Instruction &instruction, 
   // indexed SOP1/VOP1 sources). Re-enter the ISA scope so those
   // operands capture the same backend as decode-time operands.
   ScopedIsaExecutionBackend scope(&execution_backend());
-  if ((instruction.flags() & VALU) && !valu_destinations_in_range(instruction, wf))
+  if ((instruction.flags() & VALU) && !valu_destinations_in_range(instruction, wf)) {
     return;
+  }
   if (instruction.is_memory_op() && wf.memory_destination_out_of_range(instruction)) [[unlikely]] {
     execute_with_empty_memory_mask(static_cast<Derived &>(instruction), wf);
     return;

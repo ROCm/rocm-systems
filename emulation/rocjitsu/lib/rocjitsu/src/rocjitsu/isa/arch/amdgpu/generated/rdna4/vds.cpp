@@ -39,8 +39,9 @@ namespace detail {
 DecodeResult decodeDsAddU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_add_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAddU32Vds>(opcode);
 }
 } // namespace detail
@@ -71,8 +72,9 @@ namespace detail {
 DecodeResult decodeDsSubU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_sub_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsSubU32Vds>(opcode);
 }
 } // namespace detail
@@ -103,8 +105,9 @@ namespace detail {
 DecodeResult decodeDsRsubU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_rsub_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsRsubU32Vds>(opcode);
 }
 } // namespace detail
@@ -135,8 +138,9 @@ namespace detail {
 DecodeResult decodeDsIncU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_inc_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsIncU32Vds>(opcode);
 }
 } // namespace detail
@@ -167,8 +171,9 @@ namespace detail {
 DecodeResult decodeDsDecU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_dec_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsDecU32Vds>(opcode);
 }
 } // namespace detail
@@ -199,8 +204,9 @@ namespace detail {
 DecodeResult decodeDsMinI32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_min_i32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinI32Vds>(opcode);
 }
 } // namespace detail
@@ -231,8 +237,9 @@ namespace detail {
 DecodeResult decodeDsMaxI32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_max_i32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxI32Vds>(opcode);
 }
 } // namespace detail
@@ -263,8 +270,9 @@ namespace detail {
 DecodeResult decodeDsMinU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_min_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinU32Vds>(opcode);
 }
 } // namespace detail
@@ -295,8 +303,9 @@ namespace detail {
 DecodeResult decodeDsMaxU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_max_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxU32Vds>(opcode);
 }
 } // namespace detail
@@ -327,8 +336,9 @@ namespace detail {
 DecodeResult decodeDsAndB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_and_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAndB32Vds>(opcode);
 }
 } // namespace detail
@@ -359,8 +369,9 @@ namespace detail {
 DecodeResult decodeDsOrB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_or_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsOrB32Vds>(opcode);
 }
 } // namespace detail
@@ -391,8 +402,9 @@ namespace detail {
 DecodeResult decodeDsXorB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_xor_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsXorB32Vds>(opcode);
 }
 } // namespace detail
@@ -425,8 +437,9 @@ namespace detail {
 DecodeResult decodeDsMskorB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_mskor_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMskorB32Vds>(opcode);
 }
 } // namespace detail
@@ -455,8 +468,9 @@ namespace detail {
 DecodeResult decodeDsStoreB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_store_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsStoreB32Vds>(opcode);
 }
 } // namespace detail
@@ -488,8 +502,9 @@ DecodeResult decodeDsStore2addrB32Vds(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_store_2addr_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsStore2addrB32Vds>(opcode);
 }
 } // namespace detail
@@ -521,8 +536,9 @@ DecodeResult decodeDsStore2addrStride64B32Vds(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_store_2addr_stride64_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsStore2addrStride64B32Vds>(opcode);
 }
 } // namespace detail
@@ -556,8 +572,9 @@ DecodeResult decodeDsCmpstoreB32Vds(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_cmpstore_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsCmpstoreB32Vds>(opcode);
 }
 } // namespace detail
@@ -588,8 +605,9 @@ namespace detail {
 DecodeResult decodeDsMinNumF32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_min_num_f32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinNumF32Vds>(opcode);
 }
 } // namespace detail
@@ -620,8 +638,9 @@ namespace detail {
 DecodeResult decodeDsMaxNumF32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_max_num_f32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxNumF32Vds>(opcode);
 }
 } // namespace detail
@@ -640,8 +659,9 @@ namespace detail {
 DecodeResult decodeDsNopVds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_nop", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsNopVds>(opcode);
 }
 } // namespace detail
@@ -672,8 +692,9 @@ namespace detail {
 DecodeResult decodeDsAddF32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_add_f32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAddF32Vds>(opcode);
 }
 } // namespace detail
@@ -703,8 +724,9 @@ namespace detail {
 DecodeResult decodeDsStoreB8Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_store_b8", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsStoreB8Vds>(opcode);
 }
 } // namespace detail
@@ -734,8 +756,9 @@ namespace detail {
 DecodeResult decodeDsStoreB16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_store_b16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsStoreB16Vds>(opcode);
 }
 } // namespace detail
@@ -768,8 +791,9 @@ namespace detail {
 DecodeResult decodeDsAddRtnU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_add_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAddRtnU32Vds>(opcode);
 }
 } // namespace detail
@@ -802,8 +826,9 @@ namespace detail {
 DecodeResult decodeDsSubRtnU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_sub_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsSubRtnU32Vds>(opcode);
 }
 } // namespace detail
@@ -837,8 +862,9 @@ DecodeResult decodeDsRsubRtnU32Vds(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_rsub_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsRsubRtnU32Vds>(opcode);
 }
 } // namespace detail
@@ -871,8 +897,9 @@ namespace detail {
 DecodeResult decodeDsIncRtnU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_inc_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsIncRtnU32Vds>(opcode);
 }
 } // namespace detail
@@ -905,8 +932,9 @@ namespace detail {
 DecodeResult decodeDsDecRtnU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_dec_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsDecRtnU32Vds>(opcode);
 }
 } // namespace detail
@@ -939,8 +967,9 @@ namespace detail {
 DecodeResult decodeDsMinRtnI32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_min_rtn_i32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinRtnI32Vds>(opcode);
 }
 } // namespace detail
@@ -973,8 +1002,9 @@ namespace detail {
 DecodeResult decodeDsMaxRtnI32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_max_rtn_i32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxRtnI32Vds>(opcode);
 }
 } // namespace detail
@@ -1007,8 +1037,9 @@ namespace detail {
 DecodeResult decodeDsMinRtnU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_min_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinRtnU32Vds>(opcode);
 }
 } // namespace detail
@@ -1041,8 +1072,9 @@ namespace detail {
 DecodeResult decodeDsMaxRtnU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_max_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxRtnU32Vds>(opcode);
 }
 } // namespace detail
@@ -1075,8 +1107,9 @@ namespace detail {
 DecodeResult decodeDsAndRtnB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_and_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAndRtnB32Vds>(opcode);
 }
 } // namespace detail
@@ -1109,8 +1142,9 @@ namespace detail {
 DecodeResult decodeDsOrRtnB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_or_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsOrRtnB32Vds>(opcode);
 }
 } // namespace detail
@@ -1143,8 +1177,9 @@ namespace detail {
 DecodeResult decodeDsXorRtnB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_xor_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsXorRtnB32Vds>(opcode);
 }
 } // namespace detail
@@ -1180,8 +1215,9 @@ DecodeResult decodeDsMskorRtnB32Vds(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_mskor_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMskorRtnB32Vds>(opcode);
 }
 } // namespace detail
@@ -1215,8 +1251,9 @@ DecodeResult decodeDsStorexchgRtnB32Vds(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_storexchg_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsStorexchgRtnB32Vds>(opcode);
 }
 } // namespace detail
@@ -1252,8 +1289,9 @@ DecodeResult decodeDsStorexchg2addrRtnB32Vds(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_storexchg_2addr_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsStorexchg2addrRtnB32Vds>(opcode);
 }
 } // namespace detail
@@ -1290,8 +1328,9 @@ DecodeResult decodeDsStorexchg2addrStride64RtnB32Vds(const MachineInst *opcode,
   Result validation =
       Vds::validate_encoding("ds_storexchg_2addr_stride64_rtn_b32",
                              reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsStorexchg2addrStride64RtnB32Vds>(opcode);
 }
 } // namespace detail
@@ -1327,8 +1366,9 @@ DecodeResult decodeDsCmpstoreRtnB32Vds(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_cmpstore_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsCmpstoreRtnB32Vds>(opcode);
 }
 } // namespace detail
@@ -1362,8 +1402,9 @@ DecodeResult decodeDsMinNumRtnF32Vds(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_min_num_rtn_f32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinNumRtnF32Vds>(opcode);
 }
 } // namespace detail
@@ -1397,8 +1438,9 @@ DecodeResult decodeDsMaxNumRtnF32Vds(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_max_num_rtn_f32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxNumRtnF32Vds>(opcode);
 }
 } // namespace detail
@@ -1423,8 +1465,9 @@ DecodeResult decodeDsSwizzleB32Vds(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_swizzle_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsSwizzleB32Vds>(opcode);
 }
 } // namespace detail
@@ -1454,8 +1497,9 @@ namespace detail {
 DecodeResult decodeDsLoadB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_load_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsLoadB32Vds>(opcode);
 }
 } // namespace detail
@@ -1485,8 +1529,9 @@ DecodeResult decodeDsLoad2addrB32Vds(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_load_2addr_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsLoad2addrB32Vds>(opcode);
 }
 } // namespace detail
@@ -1516,8 +1561,9 @@ DecodeResult decodeDsLoad2addrStride64B32Vds(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_load_2addr_stride64_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsLoad2addrStride64B32Vds>(opcode);
 }
 } // namespace detail
@@ -1547,8 +1593,9 @@ namespace detail {
 DecodeResult decodeDsLoadI8Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_load_i8", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsLoadI8Vds>(opcode);
 }
 } // namespace detail
@@ -1578,8 +1625,9 @@ namespace detail {
 DecodeResult decodeDsLoadU8Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_load_u8", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsLoadU8Vds>(opcode);
 }
 } // namespace detail
@@ -1609,8 +1657,9 @@ namespace detail {
 DecodeResult decodeDsLoadI16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_load_i16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsLoadI16Vds>(opcode);
 }
 } // namespace detail
@@ -1640,8 +1689,9 @@ namespace detail {
 DecodeResult decodeDsLoadU16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_load_u16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsLoadU16Vds>(opcode);
 }
 } // namespace detail
@@ -1670,8 +1720,9 @@ namespace detail {
 DecodeResult decodeDsConsumeVds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_consume", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsConsumeVds>(opcode);
 }
 } // namespace detail
@@ -1700,8 +1751,9 @@ namespace detail {
 DecodeResult decodeDsAppendVds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_append", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAppendVds>(opcode);
 }
 } // namespace detail
@@ -1732,8 +1784,9 @@ namespace detail {
 DecodeResult decodeDsAddU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_add_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAddU64Vds>(opcode);
 }
 } // namespace detail
@@ -1764,8 +1817,9 @@ namespace detail {
 DecodeResult decodeDsSubU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_sub_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsSubU64Vds>(opcode);
 }
 } // namespace detail
@@ -1796,8 +1850,9 @@ namespace detail {
 DecodeResult decodeDsRsubU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_rsub_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsRsubU64Vds>(opcode);
 }
 } // namespace detail
@@ -1828,8 +1883,9 @@ namespace detail {
 DecodeResult decodeDsIncU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_inc_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsIncU64Vds>(opcode);
 }
 } // namespace detail
@@ -1860,8 +1916,9 @@ namespace detail {
 DecodeResult decodeDsDecU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_dec_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsDecU64Vds>(opcode);
 }
 } // namespace detail
@@ -1892,8 +1949,9 @@ namespace detail {
 DecodeResult decodeDsMinI64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_min_i64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinI64Vds>(opcode);
 }
 } // namespace detail
@@ -1924,8 +1982,9 @@ namespace detail {
 DecodeResult decodeDsMaxI64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_max_i64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxI64Vds>(opcode);
 }
 } // namespace detail
@@ -1956,8 +2015,9 @@ namespace detail {
 DecodeResult decodeDsMinU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_min_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinU64Vds>(opcode);
 }
 } // namespace detail
@@ -1988,8 +2048,9 @@ namespace detail {
 DecodeResult decodeDsMaxU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_max_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxU64Vds>(opcode);
 }
 } // namespace detail
@@ -2020,8 +2081,9 @@ namespace detail {
 DecodeResult decodeDsAndB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_and_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAndB64Vds>(opcode);
 }
 } // namespace detail
@@ -2052,8 +2114,9 @@ namespace detail {
 DecodeResult decodeDsOrB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_or_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsOrB64Vds>(opcode);
 }
 } // namespace detail
@@ -2084,8 +2147,9 @@ namespace detail {
 DecodeResult decodeDsXorB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_xor_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsXorB64Vds>(opcode);
 }
 } // namespace detail
@@ -2118,8 +2182,9 @@ namespace detail {
 DecodeResult decodeDsMskorB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_mskor_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMskorB64Vds>(opcode);
 }
 } // namespace detail
@@ -2148,8 +2213,9 @@ namespace detail {
 DecodeResult decodeDsStoreB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_store_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsStoreB64Vds>(opcode);
 }
 } // namespace detail
@@ -2181,8 +2247,9 @@ DecodeResult decodeDsStore2addrB64Vds(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_store_2addr_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsStore2addrB64Vds>(opcode);
 }
 } // namespace detail
@@ -2214,8 +2281,9 @@ DecodeResult decodeDsStore2addrStride64B64Vds(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_store_2addr_stride64_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsStore2addrStride64B64Vds>(opcode);
 }
 } // namespace detail
@@ -2249,8 +2317,9 @@ DecodeResult decodeDsCmpstoreB64Vds(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_cmpstore_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsCmpstoreB64Vds>(opcode);
 }
 } // namespace detail
@@ -2281,8 +2350,9 @@ namespace detail {
 DecodeResult decodeDsMinNumF64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_min_num_f64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinNumF64Vds>(opcode);
 }
 } // namespace detail
@@ -2313,8 +2383,9 @@ namespace detail {
 DecodeResult decodeDsMaxNumF64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_max_num_f64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxNumF64Vds>(opcode);
 }
 } // namespace detail
@@ -2347,8 +2418,9 @@ namespace detail {
 DecodeResult decodeDsAddRtnU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_add_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAddRtnU64Vds>(opcode);
 }
 } // namespace detail
@@ -2381,8 +2453,9 @@ namespace detail {
 DecodeResult decodeDsSubRtnU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_sub_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsSubRtnU64Vds>(opcode);
 }
 } // namespace detail
@@ -2416,8 +2489,9 @@ DecodeResult decodeDsRsubRtnU64Vds(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_rsub_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsRsubRtnU64Vds>(opcode);
 }
 } // namespace detail
@@ -2450,8 +2524,9 @@ namespace detail {
 DecodeResult decodeDsIncRtnU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_inc_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsIncRtnU64Vds>(opcode);
 }
 } // namespace detail
@@ -2484,8 +2559,9 @@ namespace detail {
 DecodeResult decodeDsDecRtnU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_dec_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsDecRtnU64Vds>(opcode);
 }
 } // namespace detail
@@ -2518,8 +2594,9 @@ namespace detail {
 DecodeResult decodeDsMinRtnI64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_min_rtn_i64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinRtnI64Vds>(opcode);
 }
 } // namespace detail
@@ -2552,8 +2629,9 @@ namespace detail {
 DecodeResult decodeDsMaxRtnI64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_max_rtn_i64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxRtnI64Vds>(opcode);
 }
 } // namespace detail
@@ -2586,8 +2664,9 @@ namespace detail {
 DecodeResult decodeDsMinRtnU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_min_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinRtnU64Vds>(opcode);
 }
 } // namespace detail
@@ -2620,8 +2699,9 @@ namespace detail {
 DecodeResult decodeDsMaxRtnU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_max_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxRtnU64Vds>(opcode);
 }
 } // namespace detail
@@ -2654,8 +2734,9 @@ namespace detail {
 DecodeResult decodeDsAndRtnB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_and_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAndRtnB64Vds>(opcode);
 }
 } // namespace detail
@@ -2688,8 +2769,9 @@ namespace detail {
 DecodeResult decodeDsOrRtnB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_or_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsOrRtnB64Vds>(opcode);
 }
 } // namespace detail
@@ -2722,8 +2804,9 @@ namespace detail {
 DecodeResult decodeDsXorRtnB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_xor_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsXorRtnB64Vds>(opcode);
 }
 } // namespace detail
@@ -2759,8 +2842,9 @@ DecodeResult decodeDsMskorRtnB64Vds(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_mskor_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMskorRtnB64Vds>(opcode);
 }
 } // namespace detail
@@ -2794,8 +2878,9 @@ DecodeResult decodeDsStorexchgRtnB64Vds(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_storexchg_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsStorexchgRtnB64Vds>(opcode);
 }
 } // namespace detail
@@ -2831,8 +2916,9 @@ DecodeResult decodeDsStorexchg2addrRtnB64Vds(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_storexchg_2addr_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsStorexchg2addrRtnB64Vds>(opcode);
 }
 } // namespace detail
@@ -2869,8 +2955,9 @@ DecodeResult decodeDsStorexchg2addrStride64RtnB64Vds(const MachineInst *opcode,
   Result validation =
       Vds::validate_encoding("ds_storexchg_2addr_stride64_rtn_b64",
                              reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsStorexchg2addrStride64RtnB64Vds>(opcode);
 }
 } // namespace detail
@@ -2906,8 +2993,9 @@ DecodeResult decodeDsCmpstoreRtnB64Vds(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_cmpstore_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsCmpstoreRtnB64Vds>(opcode);
 }
 } // namespace detail
@@ -2941,8 +3029,9 @@ DecodeResult decodeDsMinNumRtnF64Vds(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_min_num_rtn_f64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinNumRtnF64Vds>(opcode);
 }
 } // namespace detail
@@ -2976,8 +3065,9 @@ DecodeResult decodeDsMaxNumRtnF64Vds(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_max_num_rtn_f64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxNumRtnF64Vds>(opcode);
 }
 } // namespace detail
@@ -3007,8 +3097,9 @@ namespace detail {
 DecodeResult decodeDsLoadB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_load_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsLoadB64Vds>(opcode);
 }
 } // namespace detail
@@ -3038,8 +3129,9 @@ DecodeResult decodeDsLoad2addrB64Vds(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_load_2addr_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsLoad2addrB64Vds>(opcode);
 }
 } // namespace detail
@@ -3069,8 +3161,9 @@ DecodeResult decodeDsLoad2addrStride64B64Vds(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_load_2addr_stride64_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsLoad2addrStride64B64Vds>(opcode);
 }
 } // namespace detail
@@ -3103,8 +3196,9 @@ namespace detail {
 DecodeResult decodeDsAddRtnF32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_add_rtn_f32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAddRtnF32Vds>(opcode);
 }
 } // namespace detail
@@ -3138,8 +3232,9 @@ DecodeResult decodeDsCondxchg32RtnB64Vds(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_condxchg32_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsCondxchg32RtnB64Vds>(opcode);
 }
 } // namespace detail
@@ -3171,8 +3266,9 @@ DecodeResult decodeDsCondSubU32Vds(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_cond_sub_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsCondSubU32Vds>(opcode);
 }
 } // namespace detail
@@ -3204,8 +3300,9 @@ DecodeResult decodeDsSubClampU32Vds(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_sub_clamp_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsSubClampU32Vds>(opcode);
 }
 } // namespace detail
@@ -3236,8 +3333,9 @@ namespace detail {
 DecodeResult decodeDsPkAddF16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_pk_add_f16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsPkAddF16Vds>(opcode);
 }
 } // namespace detail
@@ -3268,8 +3366,9 @@ namespace detail {
 DecodeResult decodeDsPkAddBf16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_pk_add_bf16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsPkAddBf16Vds>(opcode);
 }
 } // namespace detail
@@ -3301,8 +3400,9 @@ DecodeResult decodeDsStoreB8D16HiVds(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_store_b8_d16_hi", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsStoreB8D16HiVds>(opcode);
 }
 } // namespace detail
@@ -3334,8 +3434,9 @@ DecodeResult decodeDsStoreB16D16HiVds(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_store_b16_d16_hi", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsStoreB16D16HiVds>(opcode);
 }
 } // namespace detail
@@ -3365,16 +3466,18 @@ namespace detail {
 DecodeResult decodeDsLoadU8D16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_load_u8_d16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsLoadU8D16Vds>(opcode);
 }
 } // namespace detail
 
 void DsLoadU8D16Vds::implicit_uses(RegisterSet &uses) const {
   Vds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 DsLoadU8D16HiVds::DsLoadU8D16HiVds(const MachineInst *inst)
@@ -3403,16 +3506,18 @@ DecodeResult decodeDsLoadU8D16HiVds(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_load_u8_d16_hi", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsLoadU8D16HiVds>(opcode);
 }
 } // namespace detail
 
 void DsLoadU8D16HiVds::implicit_uses(RegisterSet &uses) const {
   Vds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 DsLoadI8D16Vds::DsLoadI8D16Vds(const MachineInst *inst)
@@ -3440,16 +3545,18 @@ namespace detail {
 DecodeResult decodeDsLoadI8D16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_load_i8_d16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsLoadI8D16Vds>(opcode);
 }
 } // namespace detail
 
 void DsLoadI8D16Vds::implicit_uses(RegisterSet &uses) const {
   Vds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 DsLoadI8D16HiVds::DsLoadI8D16HiVds(const MachineInst *inst)
@@ -3478,16 +3585,18 @@ DecodeResult decodeDsLoadI8D16HiVds(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_load_i8_d16_hi", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsLoadI8D16HiVds>(opcode);
 }
 } // namespace detail
 
 void DsLoadI8D16HiVds::implicit_uses(RegisterSet &uses) const {
   Vds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 DsLoadU16D16Vds::DsLoadU16D16Vds(const MachineInst *inst)
@@ -3516,16 +3625,18 @@ DecodeResult decodeDsLoadU16D16Vds(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_load_u16_d16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsLoadU16D16Vds>(opcode);
 }
 } // namespace detail
 
 void DsLoadU16D16Vds::implicit_uses(RegisterSet &uses) const {
   Vds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 DsLoadU16D16HiVds::DsLoadU16D16HiVds(const MachineInst *inst)
@@ -3554,16 +3665,18 @@ DecodeResult decodeDsLoadU16D16HiVds(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_load_u16_d16_hi", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsLoadU16D16HiVds>(opcode);
 }
 } // namespace detail
 
 void DsLoadU16D16HiVds::implicit_uses(RegisterSet &uses) const {
   Vds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 DsCondSubRtnU32Vds::DsCondSubRtnU32Vds(const MachineInst *inst)
@@ -3595,8 +3708,9 @@ DecodeResult decodeDsCondSubRtnU32Vds(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_cond_sub_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsCondSubRtnU32Vds>(opcode);
 }
 } // namespace detail
@@ -3630,8 +3744,9 @@ DecodeResult decodeDsSubClampRtnU32Vds(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_sub_clamp_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsSubClampRtnU32Vds>(opcode);
 }
 } // namespace detail
@@ -3665,8 +3780,9 @@ DecodeResult decodeDsPkAddRtnF16Vds(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_pk_add_rtn_f16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsPkAddRtnF16Vds>(opcode);
 }
 } // namespace detail
@@ -3700,8 +3816,9 @@ DecodeResult decodeDsPkAddRtnBf16Vds(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_pk_add_rtn_bf16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsPkAddRtnBf16Vds>(opcode);
 }
 } // namespace detail
@@ -3731,8 +3848,9 @@ DecodeResult decodeDsStoreAddtidB32Vds(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_store_addtid_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsStoreAddtidB32Vds>(opcode);
 }
 } // namespace detail
@@ -3762,8 +3880,9 @@ DecodeResult decodeDsLoadAddtidB32Vds(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_load_addtid_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsLoadAddtidB32Vds>(opcode);
 }
 } // namespace detail
@@ -3790,8 +3909,9 @@ DecodeResult decodeDsPermuteB32Vds(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_permute_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsPermuteB32Vds>(opcode);
 }
 } // namespace detail
@@ -3818,8 +3938,9 @@ DecodeResult decodeDsBpermuteB32Vds(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_bpermute_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsBpermuteB32Vds>(opcode);
 }
 } // namespace detail
@@ -3846,8 +3967,9 @@ DecodeResult decodeDsBpermuteFiB32Vds(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_bpermute_fi_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsBpermuteFiB32Vds>(opcode);
 }
 } // namespace detail
@@ -3876,8 +3998,9 @@ namespace detail {
 DecodeResult decodeDsStoreB96Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_store_b96", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsStoreB96Vds>(opcode);
 }
 } // namespace detail
@@ -3906,8 +4029,9 @@ namespace detail {
 DecodeResult decodeDsStoreB128Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_store_b128", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsStoreB128Vds>(opcode);
 }
 } // namespace detail
@@ -3940,8 +4064,9 @@ DecodeResult decodeDsBvhStackPush4Pop1RtnB32Vds(const MachineInst *opcode,
   Result validation =
       Vds::validate_encoding("ds_bvh_stack_push4_pop1_rtn_b32",
                              reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsBvhStackPush4Pop1RtnB32Vds>(opcode);
 }
 } // namespace detail
@@ -3974,8 +4099,9 @@ DecodeResult decodeDsBvhStackPush8Pop1RtnB32Vds(const MachineInst *opcode,
   Result validation =
       Vds::validate_encoding("ds_bvh_stack_push8_pop1_rtn_b32",
                              reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsBvhStackPush8Pop1RtnB32Vds>(opcode);
 }
 } // namespace detail
@@ -4008,8 +4134,9 @@ DecodeResult decodeDsBvhStackPush8Pop2RtnB64Vds(const MachineInst *opcode,
   Result validation =
       Vds::validate_encoding("ds_bvh_stack_push8_pop2_rtn_b64",
                              reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsBvhStackPush8Pop2RtnB64Vds>(opcode);
 }
 } // namespace detail
@@ -4039,8 +4166,9 @@ namespace detail {
 DecodeResult decodeDsLoadB96Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_load_b96", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsLoadB96Vds>(opcode);
 }
 } // namespace detail
@@ -4070,8 +4198,9 @@ namespace detail {
 DecodeResult decodeDsLoadB128Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vds::validate_encoding(
       "ds_load_b128", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsLoadB128Vds>(opcode);
 }
 } // namespace detail

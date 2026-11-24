@@ -27,8 +27,9 @@ struct InstructionLegalization {
   uint16_t target_opcode;
 
   constexpr auto operator<=>(const InstructionLegalization &rhs) const {
-    if (auto cmp = src_encoding_id <=> rhs.src_encoding_id; cmp != 0)
+    if (auto cmp = src_encoding_id <=> rhs.src_encoding_id; cmp != 0) {
       return cmp;
+    }
     return src_opcode <=> rhs.src_opcode;
   }
   constexpr bool operator==(const InstructionLegalization &rhs) const {
@@ -43,8 +44,9 @@ inline const InstructionLegalization *lookup(std::span<const InstructionLegaliza
                               .action = Action::Illegal,
                               .target_opcode = 0};
   auto it = std::ranges::lower_bound(table, key);
-  if (it != table.end() && *it == key)
+  if (it != table.end() && *it == key) {
     return &*it;
+  }
   return nullptr;
 }
 

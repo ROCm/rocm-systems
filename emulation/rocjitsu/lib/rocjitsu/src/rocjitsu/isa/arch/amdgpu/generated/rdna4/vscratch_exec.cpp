@@ -154,8 +154,9 @@ void ScratchStoreB8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec, 0x1);
   d->store_data.resize(wf.wf_size() * 1);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = data.lane(0, lane);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
@@ -177,8 +178,9 @@ void ScratchStoreB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec, 0x3);
   d->store_data.resize(wf.wf_size() * 2);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = data.lane(0, lane);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
@@ -199,8 +201,9 @@ void ScratchStoreB32Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
   d->store_data.resize(wf.wf_size() * 4);
-  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -218,8 +221,9 @@ void ScratchStoreB64Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 2, exec);
   d->store_data.resize(wf.wf_size() * 8);
-  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -237,8 +241,9 @@ void ScratchStoreB96Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 3, exec);
   d->store_data.resize(wf.wf_size() * 12);
-  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -256,8 +261,9 @@ void ScratchStoreB128Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 4, exec);
   d->store_data.resize(wf.wf_size() * 16);
-  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -368,8 +374,9 @@ void ScratchStoreD16HiB8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec, 0x4);
   d->store_data.resize(wf.wf_size() * 1);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = data.lane(0, lane);
     val0 >>= 16;
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
@@ -392,8 +399,9 @@ void ScratchStoreD16HiB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec, 0xc);
   d->store_data.resize(wf.wf_size() * 2);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = data.lane(0, lane);
     val0 >>= 16;
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
@@ -432,13 +440,15 @@ void ScratchStoreBlockVscratch::execute_impl(amdgpu::Wavefront &wf) {
   d->store_data.resize(wf.wf_size() * block_bytes);
   const amdgpu::RegisterAccess registers(wf);
   for (uint32_t i = 0; i < amdgpu::kBlockDwordCount; ++i) {
-    if (!d->block_dword_enabled(i))
+    if (!d->block_dword_enabled(i)) {
       continue;
+    }
     const auto source = registers.block_store_source_vgpr(data_base + i);
     auto data = registers.read_vgpr_region(source, 1, d->lane_mask);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      if (!(d->lane_mask & (uint64_t{1} << lane)))
+      if (!(d->lane_mask & (uint64_t{1} << lane))) {
         continue;
+      }
       const uint32_t value = data.lane(0, lane);
       std::memcpy(&d->store_data[lane * block_bytes + i * sizeof(value)], &value, sizeof(value));
     }

@@ -258,10 +258,12 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
 [[nodiscard]] constexpr std::optional<uint32_t>
 descriptor_vgpr_count_granule_for_wavefront(rocjitsu::IsaFamily arch, uint32_t wavefront_size) {
   const auto properties = isa_properties(arch);
-  if (wavefront_size == 32 && properties.descriptor_vgpr_count_granule_wave32 != 0)
+  if (wavefront_size == 32 && properties.descriptor_vgpr_count_granule_wave32 != 0) {
     return properties.descriptor_vgpr_count_granule_wave32;
-  if (wavefront_size == 64 && properties.descriptor_vgpr_count_granule_wave64 != 0)
+  }
+  if (wavefront_size == 64 && properties.descriptor_vgpr_count_granule_wave64 != 0) {
     return properties.descriptor_vgpr_count_granule_wave64;
+  }
   return std::nullopt;
 }
 

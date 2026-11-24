@@ -64,16 +64,18 @@ void SWaitIdleSopp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SWaitEventSopp::execute_impl(amdgpu::Wavefront &wf) {
-  if (wf.waits_for_export_grant(simm16.encoding_value_))
+  if (wf.waits_for_export_grant(simm16.encoding_value_)) {
     wf.set_state(amdgpu::WfState::EXPORT_WAIT);
+  }
 }
 
 void STrapSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_trap_sopp(*this, wf); }
 
 void SRoundModeSopp::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t mode = wf.mode_raw();
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status = rj_arith_s_round_mode(wf.cu().arithmetic_flags(), 0,
                                            uint16_t(simm16.encoding_value()), &mode);
   if (status != RJ_ARITH_SUCCESS) {
@@ -86,8 +88,9 @@ void SRoundModeSopp::execute_impl(amdgpu::Wavefront &wf) {
 
 void SDenormModeSopp::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t mode = wf.mode_raw();
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status = rj_arith_s_denorm_mode(wf.cu().arithmetic_flags(), 0,
                                             uint16_t(simm16.encoding_value()), &mode);
   if (status != RJ_ARITH_SUCCESS) {

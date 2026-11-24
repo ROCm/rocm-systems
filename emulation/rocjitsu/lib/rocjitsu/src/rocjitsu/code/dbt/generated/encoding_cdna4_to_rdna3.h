@@ -383,8 +383,9 @@ inline TranslationResult encode_flat_rdna3(const FlatFields &f, uint16_t dst_op)
   dst.glc = 0;
   dst.slc = 0;
   dst.sve = 0;
-  if (dst.saddr == 0x7F)
+  if (dst.saddr == 0x7F) {
     dst.saddr = 0x7C;
+  }
   const auto words = rocjitsu::rdna3::build_flat(dst_op, dst);
   TranslationResult r{};
   r.word_count = uint8_t{2};
@@ -407,8 +408,9 @@ inline TranslationResult encode_flat_glbl_rdna3(const FlatGlblFields &f, uint16_
   dst.dlc = 0;
   dst.glc = 0;
   dst.slc = 0;
-  if (dst.saddr == 0x7F)
+  if (dst.saddr == 0x7F) {
     dst.saddr = 0x7C;
+  }
   TranslationResult r{};
   r.word_count = uint8_t{2};
   std::memcpy(r.words, &dst, sizeof(dst));
@@ -429,8 +431,9 @@ inline TranslationResult encode_flat_scratch_rdna3(const FlatScratchFields &f, u
   dst.dlc = 0;
   dst.glc = 0;
   dst.slc = 0;
-  if (dst.saddr == 0x7F)
+  if (dst.saddr == 0x7F) {
     dst.saddr = 0x7C;
+  }
   TranslationResult r{};
   r.word_count = uint8_t{2};
   std::memcpy(r.words, &dst, sizeof(dst));
@@ -450,8 +453,9 @@ inline TranslationResult encode_mubuf_rdna3(const MubufFields &f, uint16_t dst_o
   dst.dlc = 0;
   dst.glc = 0;
   dst.tfe = 0;
-  if (dst.soffset == 0x7F)
+  if (dst.soffset == 0x7F) {
     dst.soffset = 0x7C;
+  }
   const auto words = rocjitsu::rdna3::build_mubuf(dst_op, dst);
   TranslationResult r{};
   r.word_count = uint8_t{2};
@@ -468,10 +472,12 @@ inline TranslationResult encode_smem_rdna3(const SmemFields &f, uint16_t dst_op)
   dst.offset = f.ioffset & 0x1FFFFF;
   dst.soffset = f.soffset & 0x7F;
   dst.dlc = 0;
-  if (dst.soffset == 0x7F)
+  if (dst.soffset == 0x7F) {
     dst.soffset = 0x7C;
-  if (f.soffset_en == 0)
+  }
+  if (f.soffset_en == 0) {
     dst.soffset = 0x7C;
+  }
   const auto words = rocjitsu::rdna3::build_smem(dst_op, dst);
   TranslationResult r{};
   r.word_count = uint8_t{2};
@@ -606,28 +612,39 @@ inline TranslationResult translate_encoding_cdna4_to_rdna3(uint32_t encoding_id,
   default:
     break;
   }
-  if ((encoding_id & 0x1FC) == kEnc_VOPC)
+  if ((encoding_id & 0x1FC) == kEnc_VOPC) {
     return translate_encoding_cdna4_to_rdna3(kEnc_VOPC, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x1FC) == kEnc_VOP1)
+  }
+  if ((encoding_id & 0x1FC) == kEnc_VOP1) {
     return translate_encoding_cdna4_to_rdna3(kEnc_VOP1, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x1F8) == kEnc_SMEM)
+  }
+  if ((encoding_id & 0x1F8) == kEnc_SMEM) {
     return translate_encoding_cdna4_to_rdna3(kEnc_SMEM, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x1F8) == kEnc_VOP3)
+  }
+  if ((encoding_id & 0x1F8) == kEnc_VOP3) {
     return translate_encoding_cdna4_to_rdna3(kEnc_VOP3, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x1F8) == kEnc_VOP3_SDST_ENC)
+  }
+  if ((encoding_id & 0x1F8) == kEnc_VOP3_SDST_ENC) {
     return translate_encoding_cdna4_to_rdna3(kEnc_VOP3_SDST_ENC, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x1F8) == kEnc_DS)
+  }
+  if ((encoding_id & 0x1F8) == kEnc_DS) {
     return translate_encoding_cdna4_to_rdna3(kEnc_DS, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x1F8) == kEnc_FLAT)
+  }
+  if ((encoding_id & 0x1F8) == kEnc_FLAT) {
     return translate_encoding_cdna4_to_rdna3(kEnc_FLAT, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x1F8) == kEnc_MUBUF)
+  }
+  if ((encoding_id & 0x1F8) == kEnc_MUBUF) {
     return translate_encoding_cdna4_to_rdna3(kEnc_MUBUF, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x1E0) == kEnc_SOPK)
+  }
+  if ((encoding_id & 0x1E0) == kEnc_SOPK) {
     return translate_encoding_cdna4_to_rdna3(kEnc_SOPK, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x180) == kEnc_SOP2)
+  }
+  if ((encoding_id & 0x180) == kEnc_SOP2) {
     return translate_encoding_cdna4_to_rdna3(kEnc_SOP2, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x100) == kEnc_VOP2)
+  }
+  if ((encoding_id & 0x100) == kEnc_VOP2) {
     return translate_encoding_cdna4_to_rdna3(kEnc_VOP2, w0, w1, w2, dst_op);
+  }
   return {};
 }
 

@@ -346,8 +346,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vop2::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp || modifiers.dpp8)
+    if (modifiers.dpp || modifiers.dpp8) {
       modifiers.src0 = &vsrc1;
+    }
   }
   Operand vdst;
   Operand vcc;
@@ -389,8 +390,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vop2::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp || modifiers.dpp8)
+    if (modifiers.dpp || modifiers.dpp8) {
       modifiers.src0 = &vsrc1;
+    }
   }
   Operand vdst;
   Operand src0;

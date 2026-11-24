@@ -16,8 +16,9 @@ namespace rdna3_5 {
 namespace {
 std::string reg_name(const char *prefix, int reg_num, int size_bits) {
   int count = size_bits / 32;
-  if (count <= 1)
+  if (count <= 1) {
     return prefix + std::to_string(reg_num);
+  }
   return std::string(prefix) + "[" + std::to_string(reg_num) + ":" +
          std::to_string(reg_num + count - 1) + "]";
 }
@@ -29,31 +30,38 @@ struct Packed16VgprSource {
 
 std::optional<Packed16VgprSource> packed_16bit_vgpr_source(bool packed_16bit_source, int size_bits,
                                                            OperandType opr_type, int ev) {
-  if (!packed_16bit_source || size_bits != 16)
+  if (!packed_16bit_source || size_bits != 16) {
     return std::nullopt;
+  }
   int selector_base;
-  if (opr_type == OperandType::OPR_VGPR)
+  if (opr_type == OperandType::OPR_VGPR) {
     selector_base = 0;
-  else if (opr_type == OperandType::OPR_SRC)
+  } else if (opr_type == OperandType::OPR_SRC) {
     selector_base = 256;
-  else
+  } else {
     return std::nullopt;
+  }
   int selector = ev - selector_base;
-  if (selector >= 0 && selector <= 127)
+  if (selector >= 0 && selector <= 127) {
     return Packed16VgprSource{static_cast<uint32_t>(selector), 0};
-  if (selector >= 128 && selector <= 255)
+  }
+  if (selector >= 128 && selector <= 255) {
     return Packed16VgprSource{static_cast<uint32_t>(selector - 128), 16};
+  }
   return std::nullopt;
 }
 
 std::optional<Packed16VgprSource> packed_16bit_vgpr_dst(bool packed_16bit_dst, int size_bits,
                                                         OperandType opr_type, int ev) {
-  if (!packed_16bit_dst || size_bits != 16 || opr_type != OperandType::OPR_VGPR)
+  if (!packed_16bit_dst || size_bits != 16 || opr_type != OperandType::OPR_VGPR) {
     return std::nullopt;
-  if (ev >= 0 && ev <= 127)
+  }
+  if (ev >= 0 && ev <= 127) {
     return Packed16VgprSource{static_cast<uint32_t>(ev), 0};
-  if (ev >= 128 && ev <= 255)
+  }
+  if (ev >= 128 && ev <= 255) {
     return Packed16VgprSource{static_cast<uint32_t>(ev - 128), 16};
+  }
   return std::nullopt;
 }
 } // namespace
@@ -66,67 +74,81 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
   constexpr bool packed_16bit_dst = false;
   switch (opr_type) {
   case OperandType::OPR_ATTR:
-    if (!((encoding_value >= 0 && encoding_value <= 32)))
+    if (!((encoding_value >= 0 && encoding_value <= 32))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_DSMEM:
-    if (!((encoding_value >= 0 && encoding_value <= 0)))
+    if (!((encoding_value >= 0 && encoding_value <= 0))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_EXEC:
-    if (!((encoding_value >= 126 && encoding_value <= 126)))
+    if (!((encoding_value >= 126 && encoding_value <= 126))) {
       defer_encoding_error(EncodingError::InvalidExecSelector);
+    }
     break;
   case OperandType::OPR_FLAT_SCRATCH:
-    if (!((encoding_value >= 0 && encoding_value <= 0)))
+    if (!((encoding_value >= 0 && encoding_value <= 0))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_GPUMEM:
-    if (!((encoding_value >= 0 && encoding_value <= 0)))
+    if (!((encoding_value >= 0 && encoding_value <= 0))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_PC:
-    if (!((encoding_value >= 0 && encoding_value <= 0)))
+    if (!((encoding_value >= 0 && encoding_value <= 0))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_SDST:
-    if (!((encoding_value >= 0 && encoding_value <= 127)))
+    if (!((encoding_value >= 0 && encoding_value <= 127))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_SDST_EXEC:
-    if (!((encoding_value >= 126 && encoding_value <= 127)))
+    if (!((encoding_value >= 126 && encoding_value <= 127))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_SDST_M0:
-    if (!((encoding_value >= 125 && encoding_value <= 125)))
+    if (!((encoding_value >= 125 && encoding_value <= 125))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_SDST_NULL:
-    if (!((encoding_value >= 124 && encoding_value <= 124)))
+    if (!((encoding_value >= 124 && encoding_value <= 124))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_SMEM_OFFSET:
-    if (!((encoding_value >= 0 && encoding_value <= 125)))
+    if (!((encoding_value >= 0 && encoding_value <= 125))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_SRC:
     if (!((encoding_value >= 0 && encoding_value <= 208) ||
           (encoding_value >= 235 && encoding_value <= 238) ||
           (encoding_value >= 240 && encoding_value <= 248) ||
           (encoding_value >= 253 && encoding_value <= 253) ||
-          (encoding_value >= 255 && encoding_value <= 511)))
+          (encoding_value >= 255 && encoding_value <= 511))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     if (encoding_value >= OpSelSrc::OPR_SRC_VGPR_MIN &&
         encoding_value <= OpSelSrc::OPR_SRC_VGPR_MAX) {
       initialize_vgpr_reference((encoding_value - OpSelSrc::OPR_SRC_VGPR_MIN + 0) &
                                 ((size_bits == 16 && (packed_16bit_source)) ? 127 : 255));
-      if (size_bits == 16 && (packed_16bit_source))
+      if (size_bits == 16 && (packed_16bit_source)) {
         set_register_byte_mask((encoding_value & 128) ? 0xc : 0x3);
+      }
     }
     break;
   case OperandType::OPR_SRC_VGPR:
-    if (!((encoding_value >= 256 && encoding_value <= 511)))
+    if (!((encoding_value >= 256 && encoding_value <= 511))) {
       defer_encoding_error(EncodingError::InvalidVgprSourceSelector);
+    }
     if (encoding_value >= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN &&
         encoding_value <= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX) {
       initialize_vgpr_reference(encoding_value - OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN + 0);
@@ -135,8 +157,9 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
   case OperandType::OPR_SRC_VGPR_OR_INLINE:
     if (!((encoding_value >= 128 && encoding_value <= 208) ||
           (encoding_value >= 240 && encoding_value <= 248) ||
-          (encoding_value >= 256 && encoding_value <= 511)))
+          (encoding_value >= 256 && encoding_value <= 511))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     if (encoding_value >= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MIN &&
         encoding_value <= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MAX) {
       initialize_vgpr_reference(encoding_value -
@@ -144,52 +167,61 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
     }
     break;
   case OperandType::OPR_SREG:
-    if (!((encoding_value >= 0 && encoding_value <= 124)))
+    if (!((encoding_value >= 0 && encoding_value <= 124))) {
       defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
+    }
     break;
   case OperandType::OPR_SREG_M0_INL:
     if (!((encoding_value >= 0 && encoding_value <= 125) ||
           (encoding_value >= 128 && encoding_value <= 208) ||
-          (encoding_value >= 240 && encoding_value <= 248)))
+          (encoding_value >= 240 && encoding_value <= 248))) {
       defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
+    }
     break;
   case OperandType::OPR_SSRC:
     if (!((encoding_value >= 0 && encoding_value <= 208) ||
           (encoding_value >= 235 && encoding_value <= 238) ||
           (encoding_value >= 240 && encoding_value <= 248) ||
           (encoding_value >= 253 && encoding_value <= 253) ||
-          (encoding_value >= 255 && encoding_value <= 255)))
+          (encoding_value >= 255 && encoding_value <= 255))) {
       defer_encoding_error(EncodingError::InvalidScalarSourceSelector);
+    }
     break;
   case OperandType::OPR_SSRC_LANESEL:
     if (!((encoding_value >= 0 && encoding_value <= 125) ||
-          (encoding_value >= 128 && encoding_value <= 192)))
+          (encoding_value >= 128 && encoding_value <= 192))) {
       defer_encoding_error(EncodingError::InvalidLaneSelector);
+    }
     break;
   case OperandType::OPR_SSRC_SPECIAL_SCC:
-    if (!((encoding_value >= 253 && encoding_value <= 253)))
+    if (!((encoding_value >= 253 && encoding_value <= 253))) {
       defer_encoding_error(EncodingError::InvalidScalarSourceSelector);
+    }
     break;
   case OperandType::OPR_TGT:
     if (!((encoding_value >= 0 && encoding_value <= 8) ||
           (encoding_value >= 12 && encoding_value <= 16) ||
-          (encoding_value >= 20 && encoding_value <= 22)))
+          (encoding_value >= 20 && encoding_value <= 22))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_VCC:
-    if (!((encoding_value >= 106 && encoding_value <= 106)))
+    if (!((encoding_value >= 106 && encoding_value <= 106))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_VGPR:
-    if (!((encoding_value >= 0 && encoding_value <= 255)))
+    if (!((encoding_value >= 0 && encoding_value <= 255))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     if (encoding_value >= OpSelVgpr::OPR_VGPR_VGPR_MIN &&
         encoding_value <= OpSelVgpr::OPR_VGPR_VGPR_MAX) {
       initialize_vgpr_reference(
           (encoding_value - OpSelVgpr::OPR_VGPR_VGPR_MIN + 0) &
           ((size_bits == 16 && (packed_16bit_source || packed_16bit_dst)) ? 127 : 255));
-      if (size_bits == 16 && (packed_16bit_source || packed_16bit_dst))
+      if (size_bits == 16 && (packed_16bit_source || packed_16bit_dst)) {
         set_register_byte_mask((encoding_value & 128) ? 0xc : 0x3);
+      }
     }
     break;
   default:
@@ -206,67 +238,81 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
       packed_16bit_source_(packed_16bit_source), packed_16bit_dst_(packed_16bit_dst) {
   switch (opr_type) {
   case OperandType::OPR_ATTR:
-    if (!((encoding_value >= 0 && encoding_value <= 32)))
+    if (!((encoding_value >= 0 && encoding_value <= 32))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_DSMEM:
-    if (!((encoding_value >= 0 && encoding_value <= 0)))
+    if (!((encoding_value >= 0 && encoding_value <= 0))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_EXEC:
-    if (!((encoding_value >= 126 && encoding_value <= 126)))
+    if (!((encoding_value >= 126 && encoding_value <= 126))) {
       defer_encoding_error(EncodingError::InvalidExecSelector);
+    }
     break;
   case OperandType::OPR_FLAT_SCRATCH:
-    if (!((encoding_value >= 0 && encoding_value <= 0)))
+    if (!((encoding_value >= 0 && encoding_value <= 0))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_GPUMEM:
-    if (!((encoding_value >= 0 && encoding_value <= 0)))
+    if (!((encoding_value >= 0 && encoding_value <= 0))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_PC:
-    if (!((encoding_value >= 0 && encoding_value <= 0)))
+    if (!((encoding_value >= 0 && encoding_value <= 0))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_SDST:
-    if (!((encoding_value >= 0 && encoding_value <= 127)))
+    if (!((encoding_value >= 0 && encoding_value <= 127))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_SDST_EXEC:
-    if (!((encoding_value >= 126 && encoding_value <= 127)))
+    if (!((encoding_value >= 126 && encoding_value <= 127))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_SDST_M0:
-    if (!((encoding_value >= 125 && encoding_value <= 125)))
+    if (!((encoding_value >= 125 && encoding_value <= 125))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_SDST_NULL:
-    if (!((encoding_value >= 124 && encoding_value <= 124)))
+    if (!((encoding_value >= 124 && encoding_value <= 124))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_SMEM_OFFSET:
-    if (!((encoding_value >= 0 && encoding_value <= 125)))
+    if (!((encoding_value >= 0 && encoding_value <= 125))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_SRC:
     if (!((encoding_value >= 0 && encoding_value <= 208) ||
           (encoding_value >= 235 && encoding_value <= 238) ||
           (encoding_value >= 240 && encoding_value <= 248) ||
           (encoding_value >= 253 && encoding_value <= 253) ||
-          (encoding_value >= 255 && encoding_value <= 511)))
+          (encoding_value >= 255 && encoding_value <= 511))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     if (encoding_value >= OpSelSrc::OPR_SRC_VGPR_MIN &&
         encoding_value <= OpSelSrc::OPR_SRC_VGPR_MAX) {
       initialize_vgpr_reference((encoding_value - OpSelSrc::OPR_SRC_VGPR_MIN + 0) &
                                 ((size_bits == 16 && (packed_16bit_source)) ? 127 : 255));
-      if (size_bits == 16 && (packed_16bit_source))
+      if (size_bits == 16 && (packed_16bit_source)) {
         set_register_byte_mask((encoding_value & 128) ? 0xc : 0x3);
+      }
     }
     break;
   case OperandType::OPR_SRC_VGPR:
-    if (!((encoding_value >= 256 && encoding_value <= 511)))
+    if (!((encoding_value >= 256 && encoding_value <= 511))) {
       defer_encoding_error(EncodingError::InvalidVgprSourceSelector);
+    }
     if (encoding_value >= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN &&
         encoding_value <= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX) {
       initialize_vgpr_reference(encoding_value - OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN + 0);
@@ -275,8 +321,9 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
   case OperandType::OPR_SRC_VGPR_OR_INLINE:
     if (!((encoding_value >= 128 && encoding_value <= 208) ||
           (encoding_value >= 240 && encoding_value <= 248) ||
-          (encoding_value >= 256 && encoding_value <= 511)))
+          (encoding_value >= 256 && encoding_value <= 511))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     if (encoding_value >= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MIN &&
         encoding_value <= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MAX) {
       initialize_vgpr_reference(encoding_value -
@@ -284,52 +331,61 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
     }
     break;
   case OperandType::OPR_SREG:
-    if (!((encoding_value >= 0 && encoding_value <= 124)))
+    if (!((encoding_value >= 0 && encoding_value <= 124))) {
       defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
+    }
     break;
   case OperandType::OPR_SREG_M0_INL:
     if (!((encoding_value >= 0 && encoding_value <= 125) ||
           (encoding_value >= 128 && encoding_value <= 208) ||
-          (encoding_value >= 240 && encoding_value <= 248)))
+          (encoding_value >= 240 && encoding_value <= 248))) {
       defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
+    }
     break;
   case OperandType::OPR_SSRC:
     if (!((encoding_value >= 0 && encoding_value <= 208) ||
           (encoding_value >= 235 && encoding_value <= 238) ||
           (encoding_value >= 240 && encoding_value <= 248) ||
           (encoding_value >= 253 && encoding_value <= 253) ||
-          (encoding_value >= 255 && encoding_value <= 255)))
+          (encoding_value >= 255 && encoding_value <= 255))) {
       defer_encoding_error(EncodingError::InvalidScalarSourceSelector);
+    }
     break;
   case OperandType::OPR_SSRC_LANESEL:
     if (!((encoding_value >= 0 && encoding_value <= 125) ||
-          (encoding_value >= 128 && encoding_value <= 192)))
+          (encoding_value >= 128 && encoding_value <= 192))) {
       defer_encoding_error(EncodingError::InvalidLaneSelector);
+    }
     break;
   case OperandType::OPR_SSRC_SPECIAL_SCC:
-    if (!((encoding_value >= 253 && encoding_value <= 253)))
+    if (!((encoding_value >= 253 && encoding_value <= 253))) {
       defer_encoding_error(EncodingError::InvalidScalarSourceSelector);
+    }
     break;
   case OperandType::OPR_TGT:
     if (!((encoding_value >= 0 && encoding_value <= 8) ||
           (encoding_value >= 12 && encoding_value <= 16) ||
-          (encoding_value >= 20 && encoding_value <= 22)))
+          (encoding_value >= 20 && encoding_value <= 22))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_VCC:
-    if (!((encoding_value >= 106 && encoding_value <= 106)))
+    if (!((encoding_value >= 106 && encoding_value <= 106))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     break;
   case OperandType::OPR_VGPR:
-    if (!((encoding_value >= 0 && encoding_value <= 255)))
+    if (!((encoding_value >= 0 && encoding_value <= 255))) {
       defer_encoding_error(EncodingError::InvalidSelector);
+    }
     if (encoding_value >= OpSelVgpr::OPR_VGPR_VGPR_MIN &&
         encoding_value <= OpSelVgpr::OPR_VGPR_VGPR_MAX) {
       initialize_vgpr_reference(
           (encoding_value - OpSelVgpr::OPR_VGPR_VGPR_MIN + 0) &
           ((size_bits == 16 && (packed_16bit_source || packed_16bit_dst)) ? 127 : 255));
-      if (size_bits == 16 && (packed_16bit_source || packed_16bit_dst))
+      if (size_bits == 16 && (packed_16bit_source || packed_16bit_dst)) {
         set_register_byte_mask((encoding_value & 128) ? 0xc : 0x3);
+      }
     }
     break;
   default:
@@ -380,471 +436,649 @@ uint64_t Operand::widened_literal32_value() const {
 }
 
 std::optional<uint64_t> Operand::literal64_value() const {
-  if (!has_literal64_)
+  if (!has_literal64_) {
     return std::nullopt;
+  }
   return literal64_value_;
 }
 
 std::optional<uint64_t> Operand::const_value() const {
-  if (has_literal64_)
+  if (has_literal64_) {
     return literal64_value_;
-  if (is_immediate_type(opr_type_))
+  }
+  if (is_immediate_type(opr_type_)) {
     return static_cast<uint64_t>(static_cast<uint32_t>(encoding_value_));
-  if (to_register_ref())
+  }
+  if (to_register_ref()) {
     return std::nullopt;
+  }
   return amdgpu::resolve_src_scalar_statically(encoding_value_);
 }
 
 std::string Operand::name() const {
-  if (has_literal64_)
+  if (has_literal64_) {
     return std::format("0x{:x}", literal64_value_);
-  if (has_literal16_display_)
+  }
+  if (has_literal16_display_) {
     return std::format("0x{:x}", literal16_display_value_);
+  }
   if (auto packed =
-          packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_))
+          packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_)) {
     return std::format("v{}.{}", packed->reg, packed->shift ? "h" : "l");
+  }
   if (auto packed =
-          packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_))
+          packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
     return std::format("v{}.{}", packed->reg, packed->shift ? "h" : "l");
+  }
   switch (opr_type_) {
   case OperandType::OPR_ATTR: {
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR0)
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR0) {
       return "attr0";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR1)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR1) {
       return "attr1";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR2)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR2) {
       return "attr2";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR3)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR3) {
       return "attr3";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR4)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR4) {
       return "attr4";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR5)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR5) {
       return "attr5";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR6)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR6) {
       return "attr6";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR7)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR7) {
       return "attr7";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR8)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR8) {
       return "attr8";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR9)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR9) {
       return "attr9";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR10)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR10) {
       return "attr10";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR11)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR11) {
       return "attr11";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR12)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR12) {
       return "attr12";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR13)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR13) {
       return "attr13";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR14)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR14) {
       return "attr14";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR15)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR15) {
       return "attr15";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR16)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR16) {
       return "attr16";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR17)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR17) {
       return "attr17";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR18)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR18) {
       return "attr18";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR19)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR19) {
       return "attr19";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR20)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR20) {
       return "attr20";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR21)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR21) {
       return "attr21";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR22)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR22) {
       return "attr22";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR23)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR23) {
       return "attr23";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR24)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR24) {
       return "attr24";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR25)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR25) {
       return "attr25";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR26)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR26) {
       return "attr26";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR27)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR27) {
       return "attr27";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR28)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR28) {
       return "attr28";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR29)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR29) {
       return "attr29";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR30)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR30) {
       return "attr30";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR31)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR31) {
       return "attr31";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR32)
+    }
+    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR32) {
       return "attr32";
+    }
     break;
   }
   case OperandType::OPR_DSMEM: {
-    if (encoding_value_ == OpSelDsmem::OPR_DSMEM_DSMEM)
+    if (encoding_value_ == OpSelDsmem::OPR_DSMEM_DSMEM) {
       return "dsmem";
+    }
     break;
   }
   case OperandType::OPR_EXEC: {
-    if (encoding_value_ == OpSelExec::OPR_EXEC_EXEC)
+    if (encoding_value_ == OpSelExec::OPR_EXEC_EXEC) {
       return "exec";
+    }
     break;
   }
   case OperandType::OPR_FLAT_SCRATCH: {
-    if (encoding_value_ == OpSelFlatScratch::OPR_FLAT_SCRATCH_FLAT_SCRATCH)
+    if (encoding_value_ == OpSelFlatScratch::OPR_FLAT_SCRATCH_FLAT_SCRATCH) {
       return "flat_scratch";
+    }
     break;
   }
   case OperandType::OPR_GPUMEM: {
-    if (encoding_value_ == OpSelGpumem::OPR_GPUMEM_GPUMEM)
+    if (encoding_value_ == OpSelGpumem::OPR_GPUMEM_GPUMEM) {
       return "gpumem";
+    }
     break;
   }
   case OperandType::OPR_PC: {
-    if (encoding_value_ == OpSelPc::OPR_PC_PC)
+    if (encoding_value_ == OpSelPc::OPR_PC_PC) {
       return "pc";
+    }
     break;
   }
   case OperandType::OPR_SDST: {
     if (encoding_value_ >= OpSelSdst::OPR_SDST_SGPR_MIN &&
-        encoding_value_ <= OpSelSdst::OPR_SDST_SGPR_MAX)
+        encoding_value_ <= OpSelSdst::OPR_SDST_SGPR_MAX) {
       return reg_name("s", encoding_value_ - OpSelSdst::OPR_SDST_SGPR_MIN, size_bits_);
+    }
     if (encoding_value_ >= OpSelSdst::OPR_SDST_TTMP_MIN &&
-        encoding_value_ <= OpSelSdst::OPR_SDST_TTMP_MAX)
+        encoding_value_ <= OpSelSdst::OPR_SDST_TTMP_MAX) {
       return reg_name("ttmp", encoding_value_ - OpSelSdst::OPR_SDST_TTMP_MIN, size_bits_);
-    if (encoding_value_ == OpSelSdst::OPR_SDST_VCC_LO)
+    }
+    if (encoding_value_ == OpSelSdst::OPR_SDST_VCC_LO) {
       return "vcc_lo";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_VCC_HI)
+    }
+    if (encoding_value_ == OpSelSdst::OPR_SDST_VCC_HI) {
       return "vcc_hi";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_NULL)
+    }
+    if (encoding_value_ == OpSelSdst::OPR_SDST_NULL) {
       return "null";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_M0)
+    }
+    if (encoding_value_ == OpSelSdst::OPR_SDST_M0) {
       return "m0";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO)
+    }
+    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO) {
       return "exec_lo";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
+    }
+    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI) {
       return "exec_hi";
+    }
     break;
   }
   case OperandType::OPR_SDST_EXEC: {
-    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO)
+    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO) {
       return "exec_lo";
-    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
+    }
+    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI) {
       return "exec_hi";
+    }
     break;
   }
   case OperandType::OPR_SDST_M0: {
-    if (encoding_value_ == OpSelSdstM0::OPR_SDST_M0_M0)
+    if (encoding_value_ == OpSelSdstM0::OPR_SDST_M0_M0) {
       return "m0";
+    }
     break;
   }
   case OperandType::OPR_SDST_NULL: {
-    if (encoding_value_ == OpSelSdstNull::OPR_SDST_NULL_NULL)
+    if (encoding_value_ == OpSelSdstNull::OPR_SDST_NULL_NULL) {
       return "null";
+    }
     break;
   }
   case OperandType::OPR_SMEM_OFFSET: {
     if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN &&
-        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MAX)
+        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MAX) {
       return reg_name("s", encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN, size_bits_);
+    }
     if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN &&
-        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MAX)
+        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MAX) {
       return reg_name("ttmp", encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN,
                       size_bits_);
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_VCC_LO)
+    }
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_VCC_LO) {
       return "vcc_lo";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_VCC_HI)
+    }
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_VCC_HI) {
       return "vcc_hi";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_NULL)
+    }
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_NULL) {
       return "null";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_M0)
+    }
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_M0) {
       return "m0";
+    }
     break;
   }
   case OperandType::OPR_SRC: {
     if (encoding_value_ >= OpSelSrc::OPR_SRC_SGPR_MIN &&
-        encoding_value_ <= OpSelSrc::OPR_SRC_SGPR_MAX)
+        encoding_value_ <= OpSelSrc::OPR_SRC_SGPR_MAX) {
       return reg_name("s", encoding_value_ - OpSelSrc::OPR_SRC_SGPR_MIN, size_bits_);
+    }
     if (encoding_value_ >= OpSelSrc::OPR_SRC_TTMP_MIN &&
-        encoding_value_ <= OpSelSrc::OPR_SRC_TTMP_MAX)
+        encoding_value_ <= OpSelSrc::OPR_SRC_TTMP_MAX) {
       return reg_name("ttmp", encoding_value_ - OpSelSrc::OPR_SRC_TTMP_MIN, size_bits_);
-    if (encoding_value_ == OpSelSrc::OPR_SRC_VCC_LO)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_VCC_LO) {
       return "vcc_lo";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_VCC_HI)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_VCC_HI) {
       return "vcc_hi";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_NULL)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_NULL) {
       return "null";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_M0)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_M0) {
       return "m0";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO) {
       return "exec_lo";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_HI)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_HI) {
       return "exec_hi";
+    }
     if (encoding_value_ >= OpSelSrc::OPR_SRC_POS_INT_MIN &&
-        encoding_value_ <= OpSelSrc::OPR_SRC_POS_INT_MAX)
+        encoding_value_ <= OpSelSrc::OPR_SRC_POS_INT_MAX) {
       return std::to_string(encoding_value_ - OpSelSrc::OPR_SRC_POS_INT_MIN);
+    }
     if (encoding_value_ >= OpSelSrc::OPR_SRC_NEG_INT_MIN &&
-        encoding_value_ <= OpSelSrc::OPR_SRC_NEG_INT_MAX)
+        encoding_value_ <= OpSelSrc::OPR_SRC_NEG_INT_MAX) {
       return std::to_string(-(encoding_value_ - OpSelSrc::OPR_SRC_NEG_INT_MIN + 1));
-    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_HALF)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_HALF) {
       return "0.5";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_NEG_HALF)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_NEG_HALF) {
       return "-0.5";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_ONE)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_ONE) {
       return "1.0";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_NEG_ONE)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_NEG_ONE) {
       return "-1.0";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_TWO)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_TWO) {
       return "2.0";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_NEG_TWO)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_NEG_TWO) {
       return "-2.0";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_FOUR)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_FOUR) {
       return "4.0";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_NEG_FOUR)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_NEG_FOUR) {
       return "-4.0";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_ONE_OVER_TWO_PI)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_ONE_OVER_TWO_PI) {
       return "0.15915494";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SCC)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SCC) {
       return "src_scc";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SHARED_BASE)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SHARED_BASE) {
       return "src_shared_base";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SHARED_LIMIT)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SHARED_LIMIT) {
       return "src_shared_limit";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_PRIVATE_BASE)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_PRIVATE_BASE) {
       return "src_private_base";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_PRIVATE_LIMIT)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_PRIVATE_LIMIT) {
       return "src_private_limit";
+    }
     if (encoding_value_ >= OpSelSrc::OPR_SRC_VGPR_MIN &&
-        encoding_value_ <= OpSelSrc::OPR_SRC_VGPR_MAX)
+        encoding_value_ <= OpSelSrc::OPR_SRC_VGPR_MAX) {
       return reg_name("v", encoding_value_ - OpSelSrc::OPR_SRC_VGPR_MIN, size_bits_);
-    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_LITERAL)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_LITERAL) {
       return "literal";
+    }
     break;
   }
   case OperandType::OPR_SRC_VGPR: {
     if (encoding_value_ >= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN &&
-        encoding_value_ <= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX)
+        encoding_value_ <= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX) {
       return reg_name("v", encoding_value_ - OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN, size_bits_);
+    }
     break;
   }
   case OperandType::OPR_SRC_VGPR_OR_INLINE: {
     if (encoding_value_ >= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_POS_INT_MIN &&
-        encoding_value_ <= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_POS_INT_MAX)
+        encoding_value_ <= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_POS_INT_MAX) {
       return std::to_string(encoding_value_ -
                             OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_POS_INT_MIN);
+    }
     if (encoding_value_ >= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_NEG_INT_MIN &&
-        encoding_value_ <= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_NEG_INT_MAX)
+        encoding_value_ <= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_NEG_INT_MAX) {
       return std::to_string(
           -(encoding_value_ - OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_NEG_INT_MIN + 1));
-    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_HALF)
+    }
+    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_HALF) {
       return "0.5";
-    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_NEG_HALF)
+    }
+    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_NEG_HALF) {
       return "-0.5";
-    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_ONE)
+    }
+    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_ONE) {
       return "1.0";
-    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_NEG_ONE)
+    }
+    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_NEG_ONE) {
       return "-1.0";
-    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_TWO)
+    }
+    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_TWO) {
       return "2.0";
-    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_NEG_TWO)
+    }
+    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_NEG_TWO) {
       return "-2.0";
-    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_FOUR)
+    }
+    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_FOUR) {
       return "4.0";
-    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_NEG_FOUR)
+    }
+    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_NEG_FOUR) {
       return "-4.0";
-    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_ONE_OVER_TWO_PI)
+    }
+    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_ONE_OVER_TWO_PI) {
       return "0.15915494";
+    }
     if (encoding_value_ >= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MIN &&
-        encoding_value_ <= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MAX)
+        encoding_value_ <= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MAX) {
       return reg_name("v", encoding_value_ - OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MIN,
                       size_bits_);
+    }
     break;
   }
   case OperandType::OPR_SREG: {
     if (encoding_value_ >= OpSelSreg::OPR_SREG_SGPR_MIN &&
-        encoding_value_ <= OpSelSreg::OPR_SREG_SGPR_MAX)
+        encoding_value_ <= OpSelSreg::OPR_SREG_SGPR_MAX) {
       return reg_name("s", encoding_value_ - OpSelSreg::OPR_SREG_SGPR_MIN, size_bits_);
+    }
     if (encoding_value_ >= OpSelSreg::OPR_SREG_TTMP_MIN &&
-        encoding_value_ <= OpSelSreg::OPR_SREG_TTMP_MAX)
+        encoding_value_ <= OpSelSreg::OPR_SREG_TTMP_MAX) {
       return reg_name("ttmp", encoding_value_ - OpSelSreg::OPR_SREG_TTMP_MIN, size_bits_);
-    if (encoding_value_ == OpSelSreg::OPR_SREG_VCC_LO)
+    }
+    if (encoding_value_ == OpSelSreg::OPR_SREG_VCC_LO) {
       return "vcc_lo";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_VCC_HI)
+    }
+    if (encoding_value_ == OpSelSreg::OPR_SREG_VCC_HI) {
       return "vcc_hi";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_NULL)
+    }
+    if (encoding_value_ == OpSelSreg::OPR_SREG_NULL) {
       return "null";
+    }
     break;
   }
   case OperandType::OPR_SREG_M0_INL: {
     if (encoding_value_ >= OpSelSregM0Inl::OPR_SREG_M0_INL_SGPR_MIN &&
-        encoding_value_ <= OpSelSregM0Inl::OPR_SREG_M0_INL_SGPR_MAX)
+        encoding_value_ <= OpSelSregM0Inl::OPR_SREG_M0_INL_SGPR_MAX) {
       return reg_name("s", encoding_value_ - OpSelSregM0Inl::OPR_SREG_M0_INL_SGPR_MIN, size_bits_);
+    }
     if (encoding_value_ >= OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MIN &&
-        encoding_value_ <= OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MAX)
+        encoding_value_ <= OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MAX) {
       return reg_name("ttmp", encoding_value_ - OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MIN,
                       size_bits_);
-    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_VCC_LO)
+    }
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_VCC_LO) {
       return "vcc_lo";
-    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_VCC_HI)
+    }
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_VCC_HI) {
       return "vcc_hi";
-    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_NULL)
+    }
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_NULL) {
       return "null";
-    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_M0)
+    }
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_M0) {
       return "m0";
+    }
     if (encoding_value_ >= OpSelSregM0Inl::OPR_SREG_M0_INL_POS_INT_MIN &&
-        encoding_value_ <= OpSelSregM0Inl::OPR_SREG_M0_INL_POS_INT_MAX)
+        encoding_value_ <= OpSelSregM0Inl::OPR_SREG_M0_INL_POS_INT_MAX) {
       return std::to_string(encoding_value_ - OpSelSregM0Inl::OPR_SREG_M0_INL_POS_INT_MIN);
+    }
     if (encoding_value_ >= OpSelSregM0Inl::OPR_SREG_M0_INL_NEG_INT_MIN &&
-        encoding_value_ <= OpSelSregM0Inl::OPR_SREG_M0_INL_NEG_INT_MAX)
+        encoding_value_ <= OpSelSregM0Inl::OPR_SREG_M0_INL_NEG_INT_MAX) {
       return std::to_string(-(encoding_value_ - OpSelSregM0Inl::OPR_SREG_M0_INL_NEG_INT_MIN + 1));
-    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_FLOAT_HALF)
+    }
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_FLOAT_HALF) {
       return "0.5";
-    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_FLOAT_NEG_HALF)
+    }
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_FLOAT_NEG_HALF) {
       return "-0.5";
-    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_FLOAT_ONE)
+    }
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_FLOAT_ONE) {
       return "1.0";
-    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_FLOAT_NEG_ONE)
+    }
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_FLOAT_NEG_ONE) {
       return "-1.0";
-    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_FLOAT_TWO)
+    }
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_FLOAT_TWO) {
       return "2.0";
-    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_FLOAT_NEG_TWO)
+    }
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_FLOAT_NEG_TWO) {
       return "-2.0";
-    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_FLOAT_FOUR)
+    }
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_FLOAT_FOUR) {
       return "4.0";
-    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_FLOAT_NEG_FOUR)
+    }
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_FLOAT_NEG_FOUR) {
       return "-4.0";
-    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_FLOAT_ONE_OVER_TWO_PI)
+    }
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_FLOAT_ONE_OVER_TWO_PI) {
       return "0.15915494";
+    }
     break;
   }
   case OperandType::OPR_SSRC: {
     if (encoding_value_ >= OpSelSsrc::OPR_SSRC_SGPR_MIN &&
-        encoding_value_ <= OpSelSsrc::OPR_SSRC_SGPR_MAX)
+        encoding_value_ <= OpSelSsrc::OPR_SSRC_SGPR_MAX) {
       return reg_name("s", encoding_value_ - OpSelSsrc::OPR_SSRC_SGPR_MIN, size_bits_);
+    }
     if (encoding_value_ >= OpSelSsrc::OPR_SSRC_TTMP_MIN &&
-        encoding_value_ <= OpSelSsrc::OPR_SSRC_TTMP_MAX)
+        encoding_value_ <= OpSelSsrc::OPR_SSRC_TTMP_MAX) {
       return reg_name("ttmp", encoding_value_ - OpSelSsrc::OPR_SSRC_TTMP_MIN, size_bits_);
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_VCC_LO)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_VCC_LO) {
       return "vcc_lo";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_VCC_HI)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_VCC_HI) {
       return "vcc_hi";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_NULL)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_NULL) {
       return "null";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_M0)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_M0) {
       return "m0";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO) {
       return "exec_lo";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_HI)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_HI) {
       return "exec_hi";
+    }
     if (encoding_value_ >= OpSelSsrc::OPR_SSRC_POS_INT_MIN &&
-        encoding_value_ <= OpSelSsrc::OPR_SSRC_POS_INT_MAX)
+        encoding_value_ <= OpSelSsrc::OPR_SSRC_POS_INT_MAX) {
       return std::to_string(encoding_value_ - OpSelSsrc::OPR_SSRC_POS_INT_MIN);
+    }
     if (encoding_value_ >= OpSelSsrc::OPR_SSRC_NEG_INT_MIN &&
-        encoding_value_ <= OpSelSsrc::OPR_SSRC_NEG_INT_MAX)
+        encoding_value_ <= OpSelSsrc::OPR_SSRC_NEG_INT_MAX) {
       return std::to_string(-(encoding_value_ - OpSelSsrc::OPR_SSRC_NEG_INT_MIN + 1));
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_HALF)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_HALF) {
       return "0.5";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_NEG_HALF)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_NEG_HALF) {
       return "-0.5";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_ONE)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_ONE) {
       return "1.0";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_NEG_ONE)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_NEG_ONE) {
       return "-1.0";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_TWO)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_TWO) {
       return "2.0";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_NEG_TWO)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_NEG_TWO) {
       return "-2.0";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_FOUR)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_FOUR) {
       return "4.0";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_NEG_FOUR)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_NEG_FOUR) {
       return "-4.0";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_ONE_OVER_TWO_PI)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_ONE_OVER_TWO_PI) {
       return "0.15915494";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SCC)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SCC) {
       return "src_scc";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SHARED_BASE)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SHARED_BASE) {
       return "src_shared_base";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SHARED_LIMIT)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SHARED_LIMIT) {
       return "src_shared_limit";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_PRIVATE_BASE)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_PRIVATE_BASE) {
       return "src_private_base";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_PRIVATE_LIMIT)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_PRIVATE_LIMIT) {
       return "src_private_limit";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_LITERAL)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_LITERAL) {
       return "literal";
+    }
     break;
   }
   case OperandType::OPR_SSRC_LANESEL: {
-    if (encoding_value_ == 192u)
+    if (encoding_value_ == 192u) {
       return "64";
+    }
     if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN &&
-        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MAX)
+        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MAX) {
       return reg_name("s", encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN,
                       size_bits_);
+    }
     if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN &&
-        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MAX)
+        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MAX) {
       return reg_name("ttmp", encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN,
                       size_bits_);
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_VCC_LO)
+    }
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_VCC_LO) {
       return "vcc_lo";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_VCC_HI)
+    }
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_VCC_HI) {
       return "vcc_hi";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_NULL)
+    }
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_NULL) {
       return "null";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_M0)
+    }
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_M0) {
       return "m0";
+    }
     if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_POS_INT_MIN &&
-        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_POS_INT_MAX)
+        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_POS_INT_MAX) {
       return std::to_string(encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_POS_INT_MIN);
+    }
     break;
   }
   case OperandType::OPR_SSRC_SPECIAL_SCC: {
-    if (encoding_value_ == OpSelSsrcSpecialScc::OPR_SSRC_SPECIAL_SCC_SRC_SCC)
+    if (encoding_value_ == OpSelSsrcSpecialScc::OPR_SSRC_SPECIAL_SCC_SRC_SCC) {
       return "src_scc";
+    }
     break;
   }
   case OperandType::OPR_TGT: {
-    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT0)
+    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT0) {
       return "mrt0";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT1)
+    }
+    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT1) {
       return "mrt1";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT2)
+    }
+    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT2) {
       return "mrt2";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT3)
+    }
+    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT3) {
       return "mrt3";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT4)
+    }
+    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT4) {
       return "mrt4";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT5)
+    }
+    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT5) {
       return "mrt5";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT6)
+    }
+    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT6) {
       return "mrt6";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT7)
+    }
+    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT7) {
       return "mrt7";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_MRTZ)
+    }
+    if (encoding_value_ == OpSelTgt::OPR_TGT_MRTZ) {
       return "mrtz";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_POS0)
+    }
+    if (encoding_value_ == OpSelTgt::OPR_TGT_POS0) {
       return "pos0";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_POS1)
+    }
+    if (encoding_value_ == OpSelTgt::OPR_TGT_POS1) {
       return "pos1";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_POS2)
+    }
+    if (encoding_value_ == OpSelTgt::OPR_TGT_POS2) {
       return "pos2";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_POS3)
+    }
+    if (encoding_value_ == OpSelTgt::OPR_TGT_POS3) {
       return "pos3";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_POS4)
+    }
+    if (encoding_value_ == OpSelTgt::OPR_TGT_POS4) {
       return "pos4";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_PRIM)
+    }
+    if (encoding_value_ == OpSelTgt::OPR_TGT_PRIM) {
       return "prim";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_DUAL_SRC_BLEND0)
+    }
+    if (encoding_value_ == OpSelTgt::OPR_TGT_DUAL_SRC_BLEND0) {
       return "dual_src_blend0";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_DUAL_SRC_BLEND1)
+    }
+    if (encoding_value_ == OpSelTgt::OPR_TGT_DUAL_SRC_BLEND1) {
       return "dual_src_blend1";
+    }
     break;
   }
   case OperandType::OPR_VCC: {
-    if (encoding_value_ == OpSelVcc::OPR_VCC_VCC)
+    if (encoding_value_ == OpSelVcc::OPR_VCC_VCC) {
       return "vcc";
+    }
     break;
   }
   case OperandType::OPR_VGPR: {
     if (encoding_value_ >= OpSelVgpr::OPR_VGPR_VGPR_MIN &&
-        encoding_value_ <= OpSelVgpr::OPR_VGPR_VGPR_MAX)
+        encoding_value_ <= OpSelVgpr::OPR_VGPR_VGPR_MAX) {
       return reg_name("v", encoding_value_ - OpSelVgpr::OPR_VGPR_VGPR_MIN, size_bits_);
+    }
     break;
   }
   case OperandType::OPR_CLAUSE:
@@ -877,8 +1111,9 @@ std::string Operand::name() const {
       break;
     }
     const uint32_t value = static_cast<uint32_t>(encoding_value_) & 0xFFFF;
-    if (value <= 0xFF)
+    if (value <= 0xFF) {
       return std::format("sendmsg({}, 0, 0)", value);
+    }
     return std::to_string(encoding_value_);
   }
   case OperandType::OPR_SIMM16:
@@ -904,8 +1139,9 @@ std::string Operand::name() const {
 }
 
 std::optional<RegisterRef> Operand::to_register_ref() const {
-  if (size_bits_ == 0)
+  if (size_bits_ == 0) {
     return std::nullopt;
+  }
   // A fieldless operand (no MR ISA encoding field: a hardwired
   // register/side effect like VCC/EXEC/SCC, or the fieldless image
   // address) never denotes a def-use-tracked register: its
@@ -914,16 +1150,19 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
   // Making this explicit keeps every fieldless operand inert by
   // design (not by per-type coincidence) if it is placed in the
   // operand arrays.
-  if (fieldless_)
+  if (fieldless_) {
     return std::nullopt;
+  }
   // Liveness tracks operands as contiguous 32-bit register lanes.
   const auto reg_width = static_cast<uint8_t>(size_bits_ > 32 ? size_bits_ / 32 : 1);
   if (auto packed =
-          packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_))
+          packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_)) {
     return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(packed->reg), reg_width};
+  }
   if (auto packed =
-          packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_))
+          packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
     return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(packed->reg), reg_width};
+  }
   switch (opr_type_) {
   case OperandType::OPR_ATTR: {
     break;
@@ -932,8 +1171,9 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
     break;
   }
   case OperandType::OPR_EXEC: {
-    if (encoding_value_ == OpSelExec::OPR_EXEC_EXEC)
+    if (encoding_value_ == OpSelExec::OPR_EXEC_EXEC) {
       return RegisterRef{RegClass::EXEC, 0, reg_width};
+    }
     break;
   }
   case OperandType::OPR_FLAT_SCRATCH: {
@@ -947,26 +1187,32 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
   }
   case OperandType::OPR_SDST: {
     if (encoding_value_ >= OpSelSdst::OPR_SDST_SGPR_MIN &&
-        encoding_value_ <= OpSelSdst::OPR_SDST_SGPR_MAX)
+        encoding_value_ <= OpSelSdst::OPR_SDST_SGPR_MAX) {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSdst::OPR_SDST_SGPR_MIN),
                          reg_width};
+    }
     if (encoding_value_ >= OpSelSdst::OPR_SDST_TTMP_MIN &&
-        encoding_value_ <= OpSelSdst::OPR_SDST_TTMP_MAX)
+        encoding_value_ <= OpSelSdst::OPR_SDST_TTMP_MAX) {
       return RegisterRef{RegClass::TTMP,
                          static_cast<uint16_t>(encoding_value_ - OpSelSdst::OPR_SDST_TTMP_MIN),
                          reg_width};
-    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO)
+    }
+    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO) {
       return RegisterRef{RegClass::EXEC, 0, reg_width};
-    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
+    }
+    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI) {
       return RegisterRef{RegClass::EXEC, 1, reg_width};
+    }
     break;
   }
   case OperandType::OPR_SDST_EXEC: {
-    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO)
+    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO) {
       return RegisterRef{RegClass::EXEC, 0, reg_width};
-    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
+    }
+    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI) {
       return RegisterRef{RegClass::EXEC, 1, reg_width};
+    }
     break;
   }
   case OperandType::OPR_SDST_M0: {
@@ -977,117 +1223,136 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
   }
   case OperandType::OPR_SMEM_OFFSET: {
     if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN &&
-        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MAX)
+        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MAX) {
       return RegisterRef{
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN),
           reg_width};
+    }
     if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN &&
-        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MAX)
+        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MAX) {
       return RegisterRef{
           RegClass::TTMP,
           static_cast<uint16_t>(encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN),
           reg_width};
+    }
     break;
   }
   case OperandType::OPR_SRC: {
     if (encoding_value_ >= OpSelSrc::OPR_SRC_SGPR_MIN &&
-        encoding_value_ <= OpSelSrc::OPR_SRC_SGPR_MAX)
+        encoding_value_ <= OpSelSrc::OPR_SRC_SGPR_MAX) {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSrc::OPR_SRC_SGPR_MIN),
                          reg_width};
+    }
     if (encoding_value_ >= OpSelSrc::OPR_SRC_TTMP_MIN &&
-        encoding_value_ <= OpSelSrc::OPR_SRC_TTMP_MAX)
+        encoding_value_ <= OpSelSrc::OPR_SRC_TTMP_MAX) {
       return RegisterRef{RegClass::TTMP,
                          static_cast<uint16_t>(encoding_value_ - OpSelSrc::OPR_SRC_TTMP_MIN),
                          reg_width};
-    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO) {
       return RegisterRef{RegClass::EXEC, 0, reg_width};
-    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_HI)
+    }
+    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_HI) {
       return RegisterRef{RegClass::EXEC, 1, reg_width};
+    }
     if (encoding_value_ >= OpSelSrc::OPR_SRC_VGPR_MIN &&
-        encoding_value_ <= OpSelSrc::OPR_SRC_VGPR_MAX)
+        encoding_value_ <= OpSelSrc::OPR_SRC_VGPR_MAX) {
       return RegisterRef{RegClass::VGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSrc::OPR_SRC_VGPR_MIN),
                          reg_width};
+    }
     break;
   }
   case OperandType::OPR_SRC_VGPR: {
     if (encoding_value_ >= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN &&
-        encoding_value_ <= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX)
+        encoding_value_ <= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX) {
       return RegisterRef{
           RegClass::VGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN), reg_width};
+    }
     break;
   }
   case OperandType::OPR_SRC_VGPR_OR_INLINE: {
     if (encoding_value_ >= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MIN &&
-        encoding_value_ <= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MAX)
+        encoding_value_ <= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MAX) {
       return RegisterRef{
           RegClass::VGPR,
           static_cast<uint16_t>(encoding_value_ -
                                 OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MIN),
           reg_width};
+    }
     break;
   }
   case OperandType::OPR_SREG: {
     if (encoding_value_ >= OpSelSreg::OPR_SREG_SGPR_MIN &&
-        encoding_value_ <= OpSelSreg::OPR_SREG_SGPR_MAX)
+        encoding_value_ <= OpSelSreg::OPR_SREG_SGPR_MAX) {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSreg::OPR_SREG_SGPR_MIN),
                          reg_width};
+    }
     if (encoding_value_ >= OpSelSreg::OPR_SREG_TTMP_MIN &&
-        encoding_value_ <= OpSelSreg::OPR_SREG_TTMP_MAX)
+        encoding_value_ <= OpSelSreg::OPR_SREG_TTMP_MAX) {
       return RegisterRef{RegClass::TTMP,
                          static_cast<uint16_t>(encoding_value_ - OpSelSreg::OPR_SREG_TTMP_MIN),
                          reg_width};
+    }
     break;
   }
   case OperandType::OPR_SREG_M0_INL: {
     if (encoding_value_ >= OpSelSregM0Inl::OPR_SREG_M0_INL_SGPR_MIN &&
-        encoding_value_ <= OpSelSregM0Inl::OPR_SREG_M0_INL_SGPR_MAX)
+        encoding_value_ <= OpSelSregM0Inl::OPR_SREG_M0_INL_SGPR_MAX) {
       return RegisterRef{
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSregM0Inl::OPR_SREG_M0_INL_SGPR_MIN),
           reg_width};
+    }
     if (encoding_value_ >= OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MIN &&
-        encoding_value_ <= OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MAX)
+        encoding_value_ <= OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MAX) {
       return RegisterRef{
           RegClass::TTMP,
           static_cast<uint16_t>(encoding_value_ - OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MIN),
           reg_width};
+    }
     break;
   }
   case OperandType::OPR_SSRC: {
     if (encoding_value_ >= OpSelSsrc::OPR_SSRC_SGPR_MIN &&
-        encoding_value_ <= OpSelSsrc::OPR_SSRC_SGPR_MAX)
+        encoding_value_ <= OpSelSsrc::OPR_SSRC_SGPR_MAX) {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSsrc::OPR_SSRC_SGPR_MIN),
                          reg_width};
+    }
     if (encoding_value_ >= OpSelSsrc::OPR_SSRC_TTMP_MIN &&
-        encoding_value_ <= OpSelSsrc::OPR_SSRC_TTMP_MAX)
+        encoding_value_ <= OpSelSsrc::OPR_SSRC_TTMP_MAX) {
       return RegisterRef{RegClass::TTMP,
                          static_cast<uint16_t>(encoding_value_ - OpSelSsrc::OPR_SSRC_TTMP_MIN),
                          reg_width};
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO) {
       return RegisterRef{RegClass::EXEC, 0, reg_width};
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_HI)
+    }
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_HI) {
       return RegisterRef{RegClass::EXEC, 1, reg_width};
+    }
     break;
   }
   case OperandType::OPR_SSRC_LANESEL: {
     if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN &&
-        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MAX)
+        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MAX) {
       return RegisterRef{
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN),
           reg_width};
+    }
     if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN &&
-        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MAX)
+        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MAX) {
       return RegisterRef{
           RegClass::TTMP,
           static_cast<uint16_t>(encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN),
           reg_width};
+    }
     break;
   }
   case OperandType::OPR_SSRC_SPECIAL_SCC: {
@@ -1101,10 +1366,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
   }
   case OperandType::OPR_VGPR: {
     if (encoding_value_ >= OpSelVgpr::OPR_VGPR_VGPR_MIN &&
-        encoding_value_ <= OpSelVgpr::OPR_VGPR_VGPR_MAX)
+        encoding_value_ <= OpSelVgpr::OPR_VGPR_VGPR_MAX) {
       return RegisterRef{RegClass::VGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelVgpr::OPR_VGPR_VGPR_MIN),
                          reg_width};
+    }
     break;
   }
   default:
@@ -1309,43 +1575,49 @@ amdgpu::VgprStoragePair64 Operand::simd_vgpr_storage64_mut_impl(amdgpu::Wavefron
 void Operand::simd_notify_read_impl(const amdgpu::Wavefront &wf, uint64_t lane_mask,
                                     uint8_t byte_mask) const {
   if (decltype(ExecutionBackend::simd_notify_read) callback =
-          execution_backend_ ? execution_backend_->simd_notify_read : nullptr)
+          execution_backend_ ? execution_backend_->simd_notify_read : nullptr) {
     (this->*callback)(wf, lane_mask, byte_mask);
+  }
 }
 
 void Operand::simd_notify_read_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
                                         uint8_t byte_mask) const {
   if (decltype(ExecutionBackend::simd_notify_read_mut) callback =
-          execution_backend_ ? execution_backend_->simd_notify_read_mut : nullptr)
+          execution_backend_ ? execution_backend_->simd_notify_read_mut : nullptr) {
     (this->*callback)(wf, lane_mask, byte_mask);
+  }
 }
 
 void Operand::simd_notify_read64_impl(const amdgpu::Wavefront &wf, uint64_t lane_mask,
                                       uint8_t byte_mask) const {
   if (decltype(ExecutionBackend::simd_notify_read64) callback =
-          execution_backend_ ? execution_backend_->simd_notify_read64 : nullptr)
+          execution_backend_ ? execution_backend_->simd_notify_read64 : nullptr) {
     (this->*callback)(wf, lane_mask, byte_mask);
+  }
 }
 
 void Operand::simd_notify_read64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
                                           uint8_t byte_mask) const {
   if (decltype(ExecutionBackend::simd_notify_read64_mut) callback =
-          execution_backend_ ? execution_backend_->simd_notify_read64_mut : nullptr)
+          execution_backend_ ? execution_backend_->simd_notify_read64_mut : nullptr) {
     (this->*callback)(wf, lane_mask, byte_mask);
+  }
 }
 
 void Operand::simd_notify_write_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
                                          uint8_t byte_mask) const {
   if (decltype(ExecutionBackend::simd_notify_write_mut) callback =
-          execution_backend_ ? execution_backend_->simd_notify_write_mut : nullptr)
+          execution_backend_ ? execution_backend_->simd_notify_write_mut : nullptr) {
     (this->*callback)(wf, lane_mask, byte_mask);
+  }
 }
 
 void Operand::simd_notify_write64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
                                            uint8_t byte_mask) const {
   if (decltype(ExecutionBackend::simd_notify_write64_mut) callback =
-          execution_backend_ ? execution_backend_->simd_notify_write64_mut : nullptr)
+          execution_backend_ ? execution_backend_->simd_notify_write64_mut : nullptr) {
     (this->*callback)(wf, lane_mask, byte_mask);
+  }
 }
 
 } // namespace rdna3_5

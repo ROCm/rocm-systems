@@ -978,13 +978,13 @@ class CodeGenerator:
             stmts.append('flags_ |= ' + ' | '.join(flags) + ';')
         if 'lds' in fields and kind == 'Load':
             if addressing in ('Buffer', 'TypedBuffer'):
-                stmts.append('if (inst_.lds) flags_ |= MEMORY_TO_LDS;')
+                stmts.append('if (inst_.lds) { flags_ |= MEMORY_TO_LDS; }')
             elif sem is not None and self._legacy_flat_lds_load(sem):
                 # The same encoded bit enables scratch VADDR on CDNA3/4.
                 # Reuse the execution predicate for the legacy LDS meaning.
                 stmts.append(
-                    'if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) '
-                    'flags_ |= MEMORY_TO_LDS;'
+                    'if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) { '
+                    'flags_ |= MEMORY_TO_LDS; }'
                 )
         return stmts
 
@@ -1808,7 +1808,9 @@ class CodeGenerator:
         """Render an opcode membership predicate for an encoding feature."""
         lines = [f'bool {inst_enc.fmt_enc_name}::{name}() const {{']
         if selector_condition:
-            lines.extend((f'  if (!({selector_condition}))', '    return false;'))
+            lines.extend(
+                (f'  if (!({selector_condition})) {{', '    return false;', '  }')
+            )
         opcode_max = (
             (1 << inst_enc.op_field_bit_cnt) - 1 if inst_enc.op_field_bit_cnt else None
         )
@@ -13327,13 +13329,13 @@ class CodeGenerator:
                             # GPUMEM pseudo-operand remains its sole fieldless
                             # memory source.
                             conditional_src_body.append(
-                                'if (inst_.seg != 2) '
-                                'src_operands_[num_src_++] = &flat_scratch;'
+                                'if (inst_.seg != 2) { '
+                                'src_operands_[num_src_++] = &flat_scratch; }'
                             )
                         elif opnd.is_input and _is_optional_vflat_saddr:
                             conditional_src_body.append(
-                                f'if (inst_.saddr != {self._saddr_null_expr(enc.enc_name)}) '
-                                'src_operands_[num_src_++] = &saddr;'
+                                f'if (inst_.saddr != {self._saddr_null_expr(enc.enc_name)}) {{ '
+                                'src_operands_[num_src_++] = &saddr; }'
                             )
                         elif self._output_operand_is_also_source(inst, opnd):
                             # Read/write outputs (FMAC/dot/swap accumulators,
@@ -20925,8 +20927,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 mask_init = ''
                 if packed:
                     mask_init = (
-                        f'if (size_bits == 16 && ({condition})) '
-                        'set_register_byte_mask((encoding_value & 128) ? 0xc : 0x3);'
+                        f'if (size_bits == 16 && ({condition})) {{ '
+                        'set_register_byte_mask((encoding_value & 128) ? 0xc : 0x3); }'
                     )
                 decoded_vector.append(
                     f'    if (encoding_value >= {opsel_name}::{pattern.min_enum} && '
@@ -20934,8 +20936,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     f'initialize_vgpr_reference({index});{mask_init}}}\n'
                 )
             validation = (
-                f'    if (!({valid_expr}))\n'
+                f'    if (!({valid_expr})) {{\n'
                 f'      defer_encoding_error(EncodingError::{error});\n'
+                '    }\n'
                 if canonical
                 else ''
             )

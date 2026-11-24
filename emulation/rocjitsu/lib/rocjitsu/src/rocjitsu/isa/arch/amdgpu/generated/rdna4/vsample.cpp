@@ -17,10 +17,11 @@ namespace rdna4 {
 
 void Vsample::append_src_operand(std::string &out, uint8_t index) const {
   // LLVM spells the full resource tuple even when R128 reads four SGPRs.
-  if (index == 1 && inst_.r128)
+  if (index == 1 && inst_.r128) {
     out += Operand(256, OperandType::OPR_SREG, inst_.rsrc).name();
-  else
+  } else {
     Instruction::append_src_operand(out, index);
+  }
 }
 
 namespace {
@@ -29,20 +30,24 @@ bool mimg_has_status(const MimgMachineInst *inst, bool sampler) {
   // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
   // can still return status for samplers. Both share one DWORD.
   bool status = false;
-  if constexpr (requires { inst->tfe; })
+  if constexpr (requires { inst->tfe; }) {
     status = inst->tfe && inst->dmask;
-  if constexpr (requires { inst->lwe; })
+  }
+  if constexpr (requires { inst->lwe; }) {
     status = status || (sampler && inst->lwe);
+  }
   return status;
 }
 template <typename MimgMachineInst>
 uint32_t mimg_vdata_bits(const MimgMachineInst *inst, bool gather4, bool d16_allowed,
                          bool status_allowed, bool sampler) {
   uint32_t words = gather4 ? 4u : std::max(1, std::popcount(uint32_t{inst->dmask}));
-  if (d16_allowed && inst->d16)
+  if (d16_allowed && inst->d16) {
     words = (words + 1) / 2;
-  if (status_allowed && mimg_has_status(inst, sampler))
+  }
+  if (status_allowed && mimg_has_status(inst, sampler)) {
     ++words;
+  }
   return words * 32;
 }
 } // namespace
@@ -71,8 +76,9 @@ DecodeResult decodeImageMsaaLoadVsample(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_msaa_load", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageMsaaLoadVsample>(opcode);
 }
 } // namespace detail
@@ -93,10 +99,11 @@ ImageSampleVsample::ImageSampleVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, true))
+  if (mimg_has_status(&inst_, true)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
-  else if (inst_.tfe)
+  } else if (inst_.tfe) {
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -121,8 +128,9 @@ void ImageSampleVsample::append_src_operand(std::string &out, uint8_t operand_in
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -132,23 +140,27 @@ void ImageSampleVsample::implicit_uses(RegisterSet &uses) const {
   Vsample::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
   implicit_preservation_uses(uses);
 }
 
 bool ImageSampleVsample::implicit_preservation_uses(RegisterSet &preservation_uses) const {
   const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
-  if (inst_.d16 && (components & 1u))
+  if (inst_.d16 && (components & 1u)) {
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
       const auto registers = amdgpu::gfx12_image_address_registers(inst_);
       const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-      for (uint32_t index = 0; index < count; ++index)
-        if (registers[index] == preserved.index)
+      for (uint32_t index = 0; index < count; ++index) {
+        if (registers[index] == preserved.index) {
           return true;
+        }
+      }
       preservation_uses.expand(preserved);
     }
+  }
   return true;
 }
 
@@ -161,8 +173,9 @@ DecodeResult decodeImageSampleVsample(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleVsample>(opcode);
 }
 } // namespace detail
@@ -183,10 +196,11 @@ ImageSampleDVsample::ImageSampleDVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, true))
+  if (mimg_has_status(&inst_, true)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
-  else if (inst_.tfe)
+  } else if (inst_.tfe) {
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -213,8 +227,9 @@ void ImageSampleDVsample::append_src_operand(std::string &out, uint8_t operand_i
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -226,25 +241,29 @@ void ImageSampleDVsample::implicit_uses(RegisterSet &uses) const {
   const uint32_t count = (2 * amdgpu::image_derivative_component_count(inst_.dim) +
                           (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 0u + 1) / 2
                                      : amdgpu::image_coordinate_count(inst_.dim) + 0u));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
   implicit_preservation_uses(uses);
 }
 
 bool ImageSampleDVsample::implicit_preservation_uses(RegisterSet &preservation_uses) const {
   const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
-  if (inst_.d16 && (components & 1u))
+  if (inst_.d16 && (components & 1u)) {
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
       const auto registers = amdgpu::gfx12_image_address_registers(inst_);
       const uint32_t count = (2 * amdgpu::image_derivative_component_count(inst_.dim) +
                               (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 0u + 1) / 2
                                          : amdgpu::image_coordinate_count(inst_.dim) + 0u));
-      for (uint32_t index = 0; index < count; ++index)
-        if (registers[index] == preserved.index)
+      for (uint32_t index = 0; index < count; ++index) {
+        if (registers[index] == preserved.index) {
           return true;
+        }
+      }
       preservation_uses.expand(preserved);
     }
+  }
   return true;
 }
 
@@ -257,8 +276,9 @@ DecodeResult decodeImageSampleDVsample(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_d", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleDVsample>(opcode);
 }
 } // namespace detail
@@ -279,10 +299,11 @@ ImageSampleLVsample::ImageSampleLVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, true))
+  if (mimg_has_status(&inst_, true)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
-  else if (inst_.tfe)
+  } else if (inst_.tfe) {
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -308,8 +329,9 @@ void ImageSampleLVsample::append_src_operand(std::string &out, uint8_t operand_i
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -320,25 +342,29 @@ void ImageSampleLVsample::implicit_uses(RegisterSet &uses) const {
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
                                           : amdgpu::image_coordinate_count(inst_.dim) + 1u));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
   implicit_preservation_uses(uses);
 }
 
 bool ImageSampleLVsample::implicit_preservation_uses(RegisterSet &preservation_uses) const {
   const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
-  if (inst_.d16 && (components & 1u))
+  if (inst_.d16 && (components & 1u)) {
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
       const auto registers = amdgpu::gfx12_image_address_registers(inst_);
       const uint32_t count =
           (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
                            : amdgpu::image_coordinate_count(inst_.dim) + 1u));
-      for (uint32_t index = 0; index < count; ++index)
-        if (registers[index] == preserved.index)
+      for (uint32_t index = 0; index < count; ++index) {
+        if (registers[index] == preserved.index) {
           return true;
+        }
+      }
       preservation_uses.expand(preserved);
     }
+  }
   return true;
 }
 
@@ -351,8 +377,9 @@ DecodeResult decodeImageSampleLVsample(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_l", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleLVsample>(opcode);
 }
 } // namespace detail
@@ -383,8 +410,9 @@ DecodeResult decodeImageSampleBVsample(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_b", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleBVsample>(opcode);
 }
 } // namespace detail
@@ -405,10 +433,11 @@ ImageSampleLzVsample::ImageSampleLzVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, true))
+  if (mimg_has_status(&inst_, true)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
-  else if (inst_.tfe)
+  } else if (inst_.tfe) {
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -433,8 +462,9 @@ void ImageSampleLzVsample::append_src_operand(std::string &out, uint8_t operand_
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -444,23 +474,27 @@ void ImageSampleLzVsample::implicit_uses(RegisterSet &uses) const {
   Vsample::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
   implicit_preservation_uses(uses);
 }
 
 bool ImageSampleLzVsample::implicit_preservation_uses(RegisterSet &preservation_uses) const {
   const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
-  if (inst_.d16 && (components & 1u))
+  if (inst_.d16 && (components & 1u)) {
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
       const auto registers = amdgpu::gfx12_image_address_registers(inst_);
       const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-      for (uint32_t index = 0; index < count; ++index)
-        if (registers[index] == preserved.index)
+      for (uint32_t index = 0; index < count; ++index) {
+        if (registers[index] == preserved.index) {
           return true;
+        }
+      }
       preservation_uses.expand(preserved);
     }
+  }
   return true;
 }
 
@@ -473,8 +507,9 @@ DecodeResult decodeImageSampleLzVsample(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_lz", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleLzVsample>(opcode);
 }
 } // namespace detail
@@ -505,8 +540,9 @@ DecodeResult decodeImageSampleCVsample(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_c", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCVsample>(opcode);
 }
 } // namespace detail
@@ -537,8 +573,9 @@ DecodeResult decodeImageSampleCDVsample(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_c_d", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCDVsample>(opcode);
 }
 } // namespace detail
@@ -569,8 +606,9 @@ DecodeResult decodeImageSampleCLVsample(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_c_l", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCLVsample>(opcode);
 }
 } // namespace detail
@@ -601,8 +639,9 @@ DecodeResult decodeImageSampleCBVsample(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_c_b", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCBVsample>(opcode);
 }
 } // namespace detail
@@ -633,8 +672,9 @@ DecodeResult decodeImageSampleCLzVsample(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_c_lz", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCLzVsample>(opcode);
 }
 } // namespace detail
@@ -665,8 +705,9 @@ DecodeResult decodeImageSampleOVsample(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleOVsample>(opcode);
 }
 } // namespace detail
@@ -697,8 +738,9 @@ DecodeResult decodeImageSampleDOVsample(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_d_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleDOVsample>(opcode);
 }
 } // namespace detail
@@ -729,8 +771,9 @@ DecodeResult decodeImageSampleLOVsample(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_l_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleLOVsample>(opcode);
 }
 } // namespace detail
@@ -761,8 +804,9 @@ DecodeResult decodeImageSampleBOVsample(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_b_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleBOVsample>(opcode);
 }
 } // namespace detail
@@ -793,8 +837,9 @@ DecodeResult decodeImageSampleLzOVsample(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_lz_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleLzOVsample>(opcode);
 }
 } // namespace detail
@@ -825,8 +870,9 @@ DecodeResult decodeImageSampleCOVsample(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_c_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCOVsample>(opcode);
 }
 } // namespace detail
@@ -857,8 +903,9 @@ DecodeResult decodeImageSampleCDOVsample(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_c_d_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCDOVsample>(opcode);
 }
 } // namespace detail
@@ -889,8 +936,9 @@ DecodeResult decodeImageSampleCLOVsample(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_c_l_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCLOVsample>(opcode);
 }
 } // namespace detail
@@ -921,8 +969,9 @@ DecodeResult decodeImageSampleCBOVsample(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_c_b_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCBOVsample>(opcode);
 }
 } // namespace detail
@@ -953,8 +1002,9 @@ DecodeResult decodeImageSampleCLzOVsample(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_c_lz_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCLzOVsample>(opcode);
 }
 } // namespace detail
@@ -975,10 +1025,11 @@ ImageGather4Vsample::ImageGather4Vsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, true))
+  if (mimg_has_status(&inst_, true)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
-  else if (inst_.tfe)
+  } else if (inst_.tfe) {
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1003,8 +1054,9 @@ void ImageGather4Vsample::append_src_operand(std::string &out, uint8_t operand_i
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -1014,8 +1066,9 @@ void ImageGather4Vsample::implicit_uses(RegisterSet &uses) const {
   Vsample::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageGather4Vsample::tracks_explicit_source(uint8_t operand_index) const {
@@ -1027,8 +1080,9 @@ DecodeResult decodeImageGather4Vsample(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_gather4", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4Vsample>(opcode);
 }
 } // namespace detail
@@ -1049,10 +1103,11 @@ ImageGather4LVsample::ImageGather4LVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, true))
+  if (mimg_has_status(&inst_, true)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
-  else if (inst_.tfe)
+  } else if (inst_.tfe) {
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1078,8 +1133,9 @@ void ImageGather4LVsample::append_src_operand(std::string &out, uint8_t operand_
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -1090,8 +1146,9 @@ void ImageGather4LVsample::implicit_uses(RegisterSet &uses) const {
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
                                           : amdgpu::image_coordinate_count(inst_.dim) + 1u));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageGather4LVsample::tracks_explicit_source(uint8_t operand_index) const {
@@ -1103,8 +1160,9 @@ DecodeResult decodeImageGather4LVsample(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_gather4_l", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4LVsample>(opcode);
 }
 } // namespace detail
@@ -1135,8 +1193,9 @@ DecodeResult decodeImageGather4BVsample(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_gather4_b", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4BVsample>(opcode);
 }
 } // namespace detail
@@ -1157,10 +1216,11 @@ ImageGather4LzVsample::ImageGather4LzVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, true))
+  if (mimg_has_status(&inst_, true)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
-  else if (inst_.tfe)
+  } else if (inst_.tfe) {
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1185,8 +1245,9 @@ void ImageGather4LzVsample::append_src_operand(std::string &out, uint8_t operand
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -1196,8 +1257,9 @@ void ImageGather4LzVsample::implicit_uses(RegisterSet &uses) const {
   Vsample::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageGather4LzVsample::tracks_explicit_source(uint8_t operand_index) const {
@@ -1209,8 +1271,9 @@ DecodeResult decodeImageGather4LzVsample(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_gather4_lz", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4LzVsample>(opcode);
 }
 } // namespace detail
@@ -1241,8 +1304,9 @@ DecodeResult decodeImageGather4CVsample(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_gather4_c", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4CVsample>(opcode);
 }
 } // namespace detail
@@ -1273,8 +1337,9 @@ DecodeResult decodeImageGather4CLzVsample(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_gather4_c_lz", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4CLzVsample>(opcode);
 }
 } // namespace detail
@@ -1305,8 +1370,9 @@ DecodeResult decodeImageGather4OVsample(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_gather4_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4OVsample>(opcode);
 }
 } // namespace detail
@@ -1337,8 +1403,9 @@ DecodeResult decodeImageGather4LzOVsample(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_gather4_lz_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4LzOVsample>(opcode);
 }
 } // namespace detail
@@ -1369,8 +1436,9 @@ DecodeResult decodeImageGather4CLzOVsample(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_gather4_c_lz_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4CLzOVsample>(opcode);
 }
 } // namespace detail
@@ -1401,8 +1469,9 @@ DecodeResult decodeImageGetLodVsample(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_get_lod", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGetLodVsample>(opcode);
 }
 } // namespace detail
@@ -1433,8 +1502,9 @@ DecodeResult decodeImageSampleDG16Vsample(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_d_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleDG16Vsample>(opcode);
 }
 } // namespace detail
@@ -1465,8 +1535,9 @@ DecodeResult decodeImageSampleCDG16Vsample(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_c_d_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCDG16Vsample>(opcode);
 }
 } // namespace detail
@@ -1497,8 +1568,9 @@ DecodeResult decodeImageSampleDOG16Vsample(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_d_o_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleDOG16Vsample>(opcode);
 }
 } // namespace detail
@@ -1529,8 +1601,9 @@ DecodeResult decodeImageSampleCDOG16Vsample(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_c_d_o_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCDOG16Vsample>(opcode);
 }
 } // namespace detail
@@ -1561,8 +1634,9 @@ DecodeResult decodeImageSampleClVsample(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleClVsample>(opcode);
 }
 } // namespace detail
@@ -1593,8 +1667,9 @@ DecodeResult decodeImageSampleDClVsample(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_d_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleDClVsample>(opcode);
 }
 } // namespace detail
@@ -1625,8 +1700,9 @@ DecodeResult decodeImageSampleBClVsample(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_b_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleBClVsample>(opcode);
 }
 } // namespace detail
@@ -1657,8 +1733,9 @@ DecodeResult decodeImageSampleCClVsample(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_c_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCClVsample>(opcode);
 }
 } // namespace detail
@@ -1689,8 +1766,9 @@ DecodeResult decodeImageSampleCDClVsample(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_c_d_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCDClVsample>(opcode);
 }
 } // namespace detail
@@ -1721,8 +1799,9 @@ DecodeResult decodeImageSampleCBClVsample(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_c_b_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCBClVsample>(opcode);
 }
 } // namespace detail
@@ -1753,8 +1832,9 @@ DecodeResult decodeImageSampleClOVsample(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_cl_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleClOVsample>(opcode);
 }
 } // namespace detail
@@ -1785,8 +1865,9 @@ DecodeResult decodeImageSampleDClOVsample(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_d_cl_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleDClOVsample>(opcode);
 }
 } // namespace detail
@@ -1817,8 +1898,9 @@ DecodeResult decodeImageSampleBClOVsample(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_b_cl_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleBClOVsample>(opcode);
 }
 } // namespace detail
@@ -1849,8 +1931,9 @@ DecodeResult decodeImageSampleCClOVsample(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_c_cl_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCClOVsample>(opcode);
 }
 } // namespace detail
@@ -1881,8 +1964,9 @@ DecodeResult decodeImageSampleCDClOVsample(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_c_d_cl_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCDClOVsample>(opcode);
 }
 } // namespace detail
@@ -1913,8 +1997,9 @@ DecodeResult decodeImageSampleCBClOVsample(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_c_b_cl_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCBClOVsample>(opcode);
 }
 } // namespace detail
@@ -1945,8 +2030,9 @@ DecodeResult decodeImageSampleCDClG16Vsample(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_c_d_cl_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCDClG16Vsample>(opcode);
 }
 } // namespace detail
@@ -1977,8 +2063,9 @@ DecodeResult decodeImageSampleDClOG16Vsample(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_d_cl_o_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleDClOG16Vsample>(opcode);
 }
 } // namespace detail
@@ -2011,8 +2098,9 @@ DecodeResult decodeImageSampleCDClOG16Vsample(const MachineInst *opcode,
   Result validation =
       Vsample::validate_encoding("image_sample_c_d_cl_o_g16",
                                  reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCDClOG16Vsample>(opcode);
 }
 } // namespace detail
@@ -2043,8 +2131,9 @@ DecodeResult decodeImageSampleDClG16Vsample(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_sample_d_cl_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleDClG16Vsample>(opcode);
 }
 } // namespace detail
@@ -2075,8 +2164,9 @@ DecodeResult decodeImageGather4ClVsample(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_gather4_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4ClVsample>(opcode);
 }
 } // namespace detail
@@ -2107,8 +2197,9 @@ DecodeResult decodeImageGather4BClVsample(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_gather4_b_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4BClVsample>(opcode);
 }
 } // namespace detail
@@ -2139,8 +2230,9 @@ DecodeResult decodeImageGather4CClVsample(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_gather4_c_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4CClVsample>(opcode);
 }
 } // namespace detail
@@ -2171,8 +2263,9 @@ DecodeResult decodeImageGather4CLVsample(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_gather4_c_l", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4CLVsample>(opcode);
 }
 } // namespace detail
@@ -2203,8 +2296,9 @@ DecodeResult decodeImageGather4CBVsample(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_gather4_c_b", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4CBVsample>(opcode);
 }
 } // namespace detail
@@ -2235,8 +2329,9 @@ DecodeResult decodeImageGather4CBClVsample(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_gather4_c_b_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4CBClVsample>(opcode);
 }
 } // namespace detail
@@ -2267,8 +2362,9 @@ DecodeResult decodeImageGather4hVsample(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vsample::validate_encoding(
       "image_gather4h", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4hVsample>(opcode);
 }
 } // namespace detail

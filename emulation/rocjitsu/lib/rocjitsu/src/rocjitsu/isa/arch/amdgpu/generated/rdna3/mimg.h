@@ -21,8 +21,9 @@ public:
   ImageLoadMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe)
+    if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe) {
       modifiers.image_transfer_dim = inst_.dim;
+    }
     modifiers.image_resource = &srsrc;
     modifiers.image_reads_address = inst_.dmask;
     modifiers.image_address = &vaddr;
@@ -30,8 +31,9 @@ public:
         amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -53,8 +55,9 @@ public:
         amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -150,8 +153,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.image_store_data = &vdata;
-    if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe)
+    if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe) {
       modifiers.image_transfer_dim = inst_.dim;
+    }
     modifiers.image_resource = &srsrc;
     modifiers.image_reads_address = inst_.dmask;
     modifiers.image_address = &vaddr;
@@ -159,8 +163,9 @@ public:
         amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u)) {
       modifiers.packed_store_data = &vdata;
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool tracks_explicit_source(uint8_t operand_index) const override;
@@ -182,8 +187,9 @@ public:
         amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u)) {
       modifiers.packed_store_data = &vdata;
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool tracks_explicit_source(uint8_t operand_index) const override;
@@ -655,8 +661,9 @@ public:
         amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -694,8 +701,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 0 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -732,8 +740,9 @@ public:
         amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -775,8 +784,9 @@ public:
     modifiers.image_prefix_words = 1;
     modifiers.image_prefix_low16_words =
         amdgpu::image_prefix_low16_words(1, 0, inst_.a16, true, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -813,8 +823,9 @@ public:
         amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -854,8 +865,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -896,8 +908,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 1 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -938,8 +951,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -982,8 +996,9 @@ public:
     modifiers.image_prefix_words = 2;
     modifiers.image_prefix_low16_words =
         amdgpu::image_prefix_low16_words(2, 0, inst_.a16, true, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -1023,8 +1038,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -1064,8 +1080,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -1106,8 +1123,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 1 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -1148,8 +1166,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -1192,8 +1211,9 @@ public:
     modifiers.image_prefix_words = 2;
     modifiers.image_prefix_low16_words =
         amdgpu::image_prefix_low16_words(2, 0, inst_.a16, true, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -1233,8 +1253,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -1275,8 +1296,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 2;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -1318,8 +1340,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 2 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -1361,8 +1384,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 2;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -1406,8 +1430,9 @@ public:
     modifiers.image_prefix_words = 3;
     modifiers.image_prefix_low16_words =
         amdgpu::image_prefix_low16_words(3, 0, inst_.a16, true, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -1448,8 +1473,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 2;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -1846,8 +1872,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         0, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -1893,8 +1920,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         1, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -1940,8 +1968,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         1, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -1989,8 +2018,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         2, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -2027,8 +2057,9 @@ public:
         amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -2067,8 +2098,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 0 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -2108,8 +2140,9 @@ public:
     modifiers.image_prefix_words = 1;
     modifiers.image_prefix_low16_words =
         amdgpu::image_prefix_low16_words(1, 0, inst_.a16, true, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -2148,8 +2181,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -2189,8 +2223,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 1 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -2232,8 +2267,9 @@ public:
     modifiers.image_prefix_words = 2;
     modifiers.image_prefix_low16_words =
         amdgpu::image_prefix_low16_words(2, 0, inst_.a16, true, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -2272,8 +2308,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -2313,8 +2350,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 1 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -2356,8 +2394,9 @@ public:
     modifiers.image_prefix_words = 2;
     modifiers.image_prefix_low16_words =
         amdgpu::image_prefix_low16_words(2, 0, inst_.a16, true, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -2397,8 +2436,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 2;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -2440,8 +2480,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 2 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -2483,8 +2524,9 @@ public:
     modifiers.image_prefix_words = 3;
     modifiers.image_prefix_low16_words =
         amdgpu::image_prefix_low16_words(3, 0, inst_.a16, true, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -2530,8 +2572,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         1, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -2575,8 +2618,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         1, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -2623,8 +2667,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         2, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -2668,8 +2713,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         0, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;

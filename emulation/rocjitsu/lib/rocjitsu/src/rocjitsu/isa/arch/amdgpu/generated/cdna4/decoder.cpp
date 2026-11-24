@@ -82,8 +82,9 @@ bool isMfmaScaleF8f6f4Vop3px2(const MachineInst *opcode) {
   constexpr uint32_t PREFIX_OP = 44;
   auto enc0 = (opcode[0] >> 23) & 0x1FFu;
   auto op0 = (opcode[0] >> 16) & 0x7Fu;
-  if (enc0 != VOP3P_MFMA_ENC || op0 != PREFIX_OP)
+  if (enc0 != VOP3P_MFMA_ENC || op0 != PREFIX_OP) {
     return false;
+  }
   auto enc2 = (opcode[2] >> 23) & 0x1FFu;
   auto op2 = (opcode[2] >> 16) & 0x7Fu;
   auto abid2 = (opcode[2] >> 11) & 0xFu;
@@ -93,11 +94,13 @@ bool isMfmaScaleF8f6f4Vop3px2(const MachineInst *opcode) {
 bool isValidMfmaScaleF8f6f4(const MachineInst *opcode) {
   auto scale_src0 = opcode[1] & 0x1FFu;
   auto scale_src1 = (opcode[1] >> 9) & 0x1FFu;
-  if (!isLegalMfmaScaleF8f6f4Selector(scale_src0) || !isLegalMfmaScaleF8f6f4Selector(scale_src1))
+  if (!isLegalMfmaScaleF8f6f4Selector(scale_src0) || !isLegalMfmaScaleF8f6f4Selector(scale_src1)) {
     return false;
+  }
   auto suffix = *reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode + 2);
-  if (!isLegalMfmaF8f6f4Format(suffix.cbsz) || !isLegalMfmaF8f6f4Format(suffix.blgp))
+  if (!isLegalMfmaF8f6f4Format(suffix.cbsz) || !isLegalMfmaF8f6f4Format(suffix.blgp)) {
     return false;
+  }
   auto neg = (opcode[1] >> 29) & 0x7u;
   auto neg_hi = (opcode[0] >> 8) & 0x7u;
   return (neg & 0x3u) == 0 && (neg_hi & 0x3u) == 0;
@@ -111,13 +114,16 @@ DecodeResult Decoder::decode(const MachineInst *opcode, const DecodeErrorEmitter
 
 DecodeResult DecoderImpl::decode(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   if (isMfmaScaleF8f6f4Vop3px2(opcode)) {
-    if (!isValidMfmaScaleF8f6f4(opcode))
+    if (!isValidMfmaScaleF8f6f4(opcode)) {
       return decodeInvalid(opcode, emit_error);
+    }
     auto op2 = (opcode[2] >> 16) & 0x7Fu;
-    if (op2 == 45)
+    if (op2 == 45) {
       return std::make_unique<VMfmaScaleF3216x16x128F8f6f4Vop3px2>(opcode);
-    if (op2 == 46)
+    }
+    if (op2 == 46) {
       return std::make_unique<VMfmaScaleF3232x32x64F8f6f4Vop3px2>(opcode);
+    }
     return decodeInvalid(opcode, emit_error);
   }
   Sop1MachineInst op = std::bit_cast<decltype(op)>(*opcode);
@@ -221,12 +227,15 @@ DecodeResult DecoderImpl::decodeVop3pX2Prefix(const MachineInst *opcode,
 DecodeResult DecoderImpl::decodeCdna4MfmaF8f6f4Suffix(const MachineInst *opcode,
                                                       const DecodeErrorEmitter &emit_error) {
   auto op = *reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode);
-  if (op.abid != 0u || !isLegalMfmaF8f6f4Format(op.cbsz) || !isLegalMfmaF8f6f4Format(op.blgp))
+  if (op.abid != 0u || !isLegalMfmaF8f6f4Format(op.cbsz) || !isLegalMfmaF8f6f4Format(op.blgp)) {
     return decodeInvalid(opcode, emit_error);
-  if (op.op == 45)
+  }
+  if (op.op == 45) {
     return std::make_unique<VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode);
-  if (op.op == 46)
+  }
+  if (op.op == 46) {
     return std::make_unique<VMfmaF3232x32x64F8f6f4Vop3pMfma>(opcode);
+  }
   return decodeInvalid(opcode, emit_error);
 }
 
@@ -252,46 +261,56 @@ DecodeResult DecoderImpl::subDecodeFlat(const MachineInst *opcode,
 
 DecodeResult DecoderImpl::decodeFlatSegment38(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2)
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2) {
     return detail::decodeGlobalLoadLdsUbyteFlat(opcode, emit_error);
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1)
+  }
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1) {
     return detail::decodeScratchLoadLdsUbyteFlat(opcode, emit_error);
+  }
   return decodeInvalid(opcode, emit_error);
 }
 
 DecodeResult DecoderImpl::decodeFlatSegment39(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2)
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2) {
     return detail::decodeGlobalLoadLdsSbyteFlat(opcode, emit_error);
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1)
+  }
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1) {
     return detail::decodeScratchLoadLdsSbyteFlat(opcode, emit_error);
+  }
   return decodeInvalid(opcode, emit_error);
 }
 
 DecodeResult DecoderImpl::decodeFlatSegment40(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2)
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2) {
     return detail::decodeGlobalLoadLdsUshortFlat(opcode, emit_error);
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1)
+  }
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1) {
     return detail::decodeScratchLoadLdsUshortFlat(opcode, emit_error);
+  }
   return decodeInvalid(opcode, emit_error);
 }
 
 DecodeResult DecoderImpl::decodeFlatSegment41(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2)
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2) {
     return detail::decodeGlobalLoadLdsSshortFlat(opcode, emit_error);
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1)
+  }
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1) {
     return detail::decodeScratchLoadLdsSshortFlat(opcode, emit_error);
+  }
   return decodeInvalid(opcode, emit_error);
 }
 
 DecodeResult DecoderImpl::decodeFlatSegment42(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2)
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2) {
     return detail::decodeGlobalLoadLdsDwordFlat(opcode, emit_error);
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1)
+  }
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1) {
     return detail::decodeScratchLoadLdsDwordFlat(opcode, emit_error);
+  }
   return decodeInvalid(opcode, emit_error);
 }
 

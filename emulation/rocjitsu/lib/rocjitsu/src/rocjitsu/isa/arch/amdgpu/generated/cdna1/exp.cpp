@@ -38,8 +38,9 @@ namespace detail {
 DecodeResult decodeExpExp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation =
       Exp::validate_encoding("exp", reinterpret_cast<const Exp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ExpExp>(opcode);
 }
 } // namespace detail

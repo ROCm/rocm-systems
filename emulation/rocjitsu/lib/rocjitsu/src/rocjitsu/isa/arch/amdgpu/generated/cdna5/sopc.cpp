@@ -23,10 +23,11 @@ SCmpEqI32Sopc::SCmpEqI32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -34,10 +35,11 @@ SCmpEqI32Sopc::SCmpEqI32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -54,13 +56,15 @@ DecodeResult decodeSCmpEqI32Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_eq_i32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_EQ_I32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpEqI32Sopc>(opcode);
 }
 } // namespace detail
@@ -76,10 +80,11 @@ SCmpLgI32Sopc::SCmpLgI32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -87,10 +92,11 @@ SCmpLgI32Sopc::SCmpLgI32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -107,13 +113,15 @@ DecodeResult decodeSCmpLgI32Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_lg_i32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_LG_I32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpLgI32Sopc>(opcode);
 }
 } // namespace detail
@@ -129,10 +137,11 @@ SCmpGtI32Sopc::SCmpGtI32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -140,10 +149,11 @@ SCmpGtI32Sopc::SCmpGtI32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -160,13 +170,15 @@ DecodeResult decodeSCmpGtI32Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_gt_i32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_GT_I32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpGtI32Sopc>(opcode);
 }
 } // namespace detail
@@ -182,10 +194,11 @@ SCmpGeI32Sopc::SCmpGeI32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -193,10 +206,11 @@ SCmpGeI32Sopc::SCmpGeI32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -213,13 +227,15 @@ DecodeResult decodeSCmpGeI32Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_ge_i32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_GE_I32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpGeI32Sopc>(opcode);
 }
 } // namespace detail
@@ -235,10 +251,11 @@ SCmpLtI32Sopc::SCmpLtI32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -246,10 +263,11 @@ SCmpLtI32Sopc::SCmpLtI32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -266,13 +284,15 @@ DecodeResult decodeSCmpLtI32Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_lt_i32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_LT_I32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpLtI32Sopc>(opcode);
 }
 } // namespace detail
@@ -288,10 +308,11 @@ SCmpLeI32Sopc::SCmpLeI32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -299,10 +320,11 @@ SCmpLeI32Sopc::SCmpLeI32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -319,13 +341,15 @@ DecodeResult decodeSCmpLeI32Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_le_i32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_LE_I32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpLeI32Sopc>(opcode);
 }
 } // namespace detail
@@ -341,10 +365,11 @@ SCmpEqU32Sopc::SCmpEqU32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -352,10 +377,11 @@ SCmpEqU32Sopc::SCmpEqU32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -372,13 +398,15 @@ DecodeResult decodeSCmpEqU32Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_eq_u32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_EQ_U32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpEqU32Sopc>(opcode);
 }
 } // namespace detail
@@ -394,10 +422,11 @@ SCmpLgU32Sopc::SCmpLgU32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -405,10 +434,11 @@ SCmpLgU32Sopc::SCmpLgU32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -425,13 +455,15 @@ DecodeResult decodeSCmpLgU32Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_lg_u32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_LG_U32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpLgU32Sopc>(opcode);
 }
 } // namespace detail
@@ -447,10 +479,11 @@ SCmpGtU32Sopc::SCmpGtU32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -458,10 +491,11 @@ SCmpGtU32Sopc::SCmpGtU32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -478,13 +512,15 @@ DecodeResult decodeSCmpGtU32Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_gt_u32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_GT_U32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpGtU32Sopc>(opcode);
 }
 } // namespace detail
@@ -500,10 +536,11 @@ SCmpGeU32Sopc::SCmpGeU32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -511,10 +548,11 @@ SCmpGeU32Sopc::SCmpGeU32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -531,13 +569,15 @@ DecodeResult decodeSCmpGeU32Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_ge_u32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_GE_U32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpGeU32Sopc>(opcode);
 }
 } // namespace detail
@@ -553,10 +593,11 @@ SCmpLtU32Sopc::SCmpLtU32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -564,10 +605,11 @@ SCmpLtU32Sopc::SCmpLtU32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -584,13 +626,15 @@ DecodeResult decodeSCmpLtU32Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_lt_u32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_LT_U32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpLtU32Sopc>(opcode);
 }
 } // namespace detail
@@ -606,10 +650,11 @@ SCmpLeU32Sopc::SCmpLeU32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -617,10 +662,11 @@ SCmpLeU32Sopc::SCmpLeU32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -637,13 +683,15 @@ DecodeResult decodeSCmpLeU32Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_le_u32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_LE_U32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpLeU32Sopc>(opcode);
 }
 } // namespace detail
@@ -659,10 +707,11 @@ SBitcmp0B32Sopc::SBitcmp0B32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -670,10 +719,11 @@ SBitcmp0B32Sopc::SBitcmp0B32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -691,13 +741,15 @@ DecodeResult decodeSBitcmp0B32Sopc(const MachineInst *opcode,
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_bitcmp0_b32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_BITCMP0_B32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SBitcmp0B32Sopc>(opcode);
 }
 } // namespace detail
@@ -713,10 +765,11 @@ SBitcmp1B32Sopc::SBitcmp1B32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -724,10 +777,11 @@ SBitcmp1B32Sopc::SBitcmp1B32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -745,13 +799,15 @@ DecodeResult decodeSBitcmp1B32Sopc(const MachineInst *opcode,
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_bitcmp1_b32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_BITCMP1_B32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SBitcmp1B32Sopc>(opcode);
 }
 } // namespace detail
@@ -767,11 +823,12 @@ SBitcmp0B64Sopc::SBitcmp0B64Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -779,10 +836,11 @@ SBitcmp0B64Sopc::SBitcmp0B64Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -800,13 +858,15 @@ DecodeResult decodeSBitcmp0B64Sopc(const MachineInst *opcode,
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_bitcmp0_b64", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_BITCMP0_B64 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SBitcmp0B64Sopc>(opcode);
 }
 } // namespace detail
@@ -822,11 +882,12 @@ SBitcmp1B64Sopc::SBitcmp1B64Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -834,10 +895,11 @@ SBitcmp1B64Sopc::SBitcmp1B64Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -855,13 +917,15 @@ DecodeResult decodeSBitcmp1B64Sopc(const MachineInst *opcode,
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_bitcmp1_b64", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_BITCMP1_B64 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SBitcmp1B64Sopc>(opcode);
 }
 } // namespace detail
@@ -877,11 +941,12 @@ SCmpEqU64Sopc::SCmpEqU64Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -889,11 +954,12 @@ SCmpEqU64Sopc::SCmpEqU64Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -910,13 +976,15 @@ DecodeResult decodeSCmpEqU64Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_eq_u64", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_EQ_U64 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpEqU64Sopc>(opcode);
 }
 } // namespace detail
@@ -932,11 +1000,12 @@ SCmpLgU64Sopc::SCmpLgU64Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -944,11 +1013,12 @@ SCmpLgU64Sopc::SCmpLgU64Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -965,13 +1035,15 @@ DecodeResult decodeSCmpLgU64Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_lg_u64", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_LG_U64 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpLgU64Sopc>(opcode);
 }
 } // namespace detail
@@ -987,10 +1059,11 @@ SCmpLtF32Sopc::SCmpLtF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -998,10 +1071,11 @@ SCmpLtF32Sopc::SCmpLtF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1018,13 +1092,15 @@ DecodeResult decodeSCmpLtF32Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_lt_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_LT_F32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpLtF32Sopc>(opcode);
 }
 } // namespace detail
@@ -1040,11 +1116,12 @@ SCmpLtF16Sopc::SCmpLtF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1052,11 +1129,12 @@ SCmpLtF16Sopc::SCmpLtF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1073,13 +1151,15 @@ DecodeResult decodeSCmpLtF16Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_lt_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_LT_F16 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpLtF16Sopc>(opcode);
 }
 } // namespace detail
@@ -1095,10 +1175,11 @@ SCmpEqF32Sopc::SCmpEqF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1106,10 +1187,11 @@ SCmpEqF32Sopc::SCmpEqF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1126,13 +1208,15 @@ DecodeResult decodeSCmpEqF32Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_eq_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_EQ_F32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpEqF32Sopc>(opcode);
 }
 } // namespace detail
@@ -1148,11 +1232,12 @@ SCmpEqF16Sopc::SCmpEqF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1160,11 +1245,12 @@ SCmpEqF16Sopc::SCmpEqF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1181,13 +1267,15 @@ DecodeResult decodeSCmpEqF16Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_eq_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_EQ_F16 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpEqF16Sopc>(opcode);
 }
 } // namespace detail
@@ -1203,10 +1291,11 @@ SCmpLeF32Sopc::SCmpLeF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1214,10 +1303,11 @@ SCmpLeF32Sopc::SCmpLeF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1234,13 +1324,15 @@ DecodeResult decodeSCmpLeF32Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_le_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_LE_F32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpLeF32Sopc>(opcode);
 }
 } // namespace detail
@@ -1256,11 +1348,12 @@ SCmpLeF16Sopc::SCmpLeF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1268,11 +1361,12 @@ SCmpLeF16Sopc::SCmpLeF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1289,13 +1383,15 @@ DecodeResult decodeSCmpLeF16Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_le_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_LE_F16 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpLeF16Sopc>(opcode);
 }
 } // namespace detail
@@ -1311,10 +1407,11 @@ SCmpGtF32Sopc::SCmpGtF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1322,10 +1419,11 @@ SCmpGtF32Sopc::SCmpGtF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1342,13 +1440,15 @@ DecodeResult decodeSCmpGtF32Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_gt_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_GT_F32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpGtF32Sopc>(opcode);
 }
 } // namespace detail
@@ -1364,11 +1464,12 @@ SCmpGtF16Sopc::SCmpGtF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1376,11 +1477,12 @@ SCmpGtF16Sopc::SCmpGtF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1397,13 +1499,15 @@ DecodeResult decodeSCmpGtF16Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_gt_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_GT_F16 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpGtF16Sopc>(opcode);
 }
 } // namespace detail
@@ -1419,10 +1523,11 @@ SCmpLgF32Sopc::SCmpLgF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1430,10 +1535,11 @@ SCmpLgF32Sopc::SCmpLgF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1450,13 +1556,15 @@ DecodeResult decodeSCmpLgF32Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_lg_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_LG_F32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpLgF32Sopc>(opcode);
 }
 } // namespace detail
@@ -1472,11 +1580,12 @@ SCmpLgF16Sopc::SCmpLgF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1484,11 +1593,12 @@ SCmpLgF16Sopc::SCmpLgF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1505,13 +1615,15 @@ DecodeResult decodeSCmpLgF16Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_lg_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_LG_F16 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpLgF16Sopc>(opcode);
 }
 } // namespace detail
@@ -1527,10 +1639,11 @@ SCmpGeF32Sopc::SCmpGeF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1538,10 +1651,11 @@ SCmpGeF32Sopc::SCmpGeF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1558,13 +1672,15 @@ DecodeResult decodeSCmpGeF32Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_ge_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_GE_F32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpGeF32Sopc>(opcode);
 }
 } // namespace detail
@@ -1580,11 +1696,12 @@ SCmpGeF16Sopc::SCmpGeF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1592,11 +1709,12 @@ SCmpGeF16Sopc::SCmpGeF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1613,13 +1731,15 @@ DecodeResult decodeSCmpGeF16Sopc(const MachineInst *opcode, const DecodeErrorEmi
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_ge_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_GE_F16 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpGeF16Sopc>(opcode);
 }
 } // namespace detail
@@ -1635,10 +1755,11 @@ SCmpOF32Sopc::SCmpOF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1646,10 +1767,11 @@ SCmpOF32Sopc::SCmpOF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1666,13 +1788,15 @@ DecodeResult decodeSCmpOF32Sopc(const MachineInst *opcode, const DecodeErrorEmit
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_o_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_O_F32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpOF32Sopc>(opcode);
 }
 } // namespace detail
@@ -1688,11 +1812,12 @@ SCmpOF16Sopc::SCmpOF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1700,11 +1825,12 @@ SCmpOF16Sopc::SCmpOF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1721,13 +1847,15 @@ DecodeResult decodeSCmpOF16Sopc(const MachineInst *opcode, const DecodeErrorEmit
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_o_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_O_F16 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpOF16Sopc>(opcode);
 }
 } // namespace detail
@@ -1743,10 +1871,11 @@ SCmpUF32Sopc::SCmpUF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1754,10 +1883,11 @@ SCmpUF32Sopc::SCmpUF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1774,13 +1904,15 @@ DecodeResult decodeSCmpUF32Sopc(const MachineInst *opcode, const DecodeErrorEmit
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_u_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_U_F32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpUF32Sopc>(opcode);
 }
 } // namespace detail
@@ -1796,11 +1928,12 @@ SCmpUF16Sopc::SCmpUF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1808,11 +1941,12 @@ SCmpUF16Sopc::SCmpUF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1829,13 +1963,15 @@ DecodeResult decodeSCmpUF16Sopc(const MachineInst *opcode, const DecodeErrorEmit
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_u_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_U_F16 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpUF16Sopc>(opcode);
 }
 } // namespace detail
@@ -1851,10 +1987,11 @@ SCmpNgeF32Sopc::SCmpNgeF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1862,10 +1999,11 @@ SCmpNgeF32Sopc::SCmpNgeF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1882,13 +2020,15 @@ DecodeResult decodeSCmpNgeF32Sopc(const MachineInst *opcode, const DecodeErrorEm
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_nge_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_NGE_F32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpNgeF32Sopc>(opcode);
 }
 } // namespace detail
@@ -1904,11 +2044,12 @@ SCmpNgeF16Sopc::SCmpNgeF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1916,11 +2057,12 @@ SCmpNgeF16Sopc::SCmpNgeF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1937,13 +2079,15 @@ DecodeResult decodeSCmpNgeF16Sopc(const MachineInst *opcode, const DecodeErrorEm
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_nge_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_NGE_F16 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpNgeF16Sopc>(opcode);
 }
 } // namespace detail
@@ -1959,10 +2103,11 @@ SCmpNlgF32Sopc::SCmpNlgF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1970,10 +2115,11 @@ SCmpNlgF32Sopc::SCmpNlgF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1990,13 +2136,15 @@ DecodeResult decodeSCmpNlgF32Sopc(const MachineInst *opcode, const DecodeErrorEm
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_nlg_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_NLG_F32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpNlgF32Sopc>(opcode);
 }
 } // namespace detail
@@ -2012,11 +2160,12 @@ SCmpNlgF16Sopc::SCmpNlgF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2024,11 +2173,12 @@ SCmpNlgF16Sopc::SCmpNlgF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2045,13 +2195,15 @@ DecodeResult decodeSCmpNlgF16Sopc(const MachineInst *opcode, const DecodeErrorEm
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_nlg_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_NLG_F16 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpNlgF16Sopc>(opcode);
 }
 } // namespace detail
@@ -2067,10 +2219,11 @@ SCmpNgtF32Sopc::SCmpNgtF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2078,10 +2231,11 @@ SCmpNgtF32Sopc::SCmpNgtF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2098,13 +2252,15 @@ DecodeResult decodeSCmpNgtF32Sopc(const MachineInst *opcode, const DecodeErrorEm
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_ngt_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_NGT_F32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpNgtF32Sopc>(opcode);
 }
 } // namespace detail
@@ -2120,11 +2276,12 @@ SCmpNgtF16Sopc::SCmpNgtF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2132,11 +2289,12 @@ SCmpNgtF16Sopc::SCmpNgtF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2153,13 +2311,15 @@ DecodeResult decodeSCmpNgtF16Sopc(const MachineInst *opcode, const DecodeErrorEm
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_ngt_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_NGT_F16 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpNgtF16Sopc>(opcode);
 }
 } // namespace detail
@@ -2175,10 +2335,11 @@ SCmpNleF32Sopc::SCmpNleF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2186,10 +2347,11 @@ SCmpNleF32Sopc::SCmpNleF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2206,13 +2368,15 @@ DecodeResult decodeSCmpNleF32Sopc(const MachineInst *opcode, const DecodeErrorEm
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_nle_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_NLE_F32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpNleF32Sopc>(opcode);
 }
 } // namespace detail
@@ -2228,11 +2392,12 @@ SCmpNleF16Sopc::SCmpNleF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2240,11 +2405,12 @@ SCmpNleF16Sopc::SCmpNleF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2261,13 +2427,15 @@ DecodeResult decodeSCmpNleF16Sopc(const MachineInst *opcode, const DecodeErrorEm
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_nle_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_NLE_F16 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpNleF16Sopc>(opcode);
 }
 } // namespace detail
@@ -2283,10 +2451,11 @@ SCmpNeqF32Sopc::SCmpNeqF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2294,10 +2463,11 @@ SCmpNeqF32Sopc::SCmpNeqF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2314,13 +2484,15 @@ DecodeResult decodeSCmpNeqF32Sopc(const MachineInst *opcode, const DecodeErrorEm
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_neq_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_NEQ_F32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpNeqF32Sopc>(opcode);
 }
 } // namespace detail
@@ -2336,11 +2508,12 @@ SCmpNeqF16Sopc::SCmpNeqF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2348,11 +2521,12 @@ SCmpNeqF16Sopc::SCmpNeqF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2369,13 +2543,15 @@ DecodeResult decodeSCmpNeqF16Sopc(const MachineInst *opcode, const DecodeErrorEm
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_neq_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_NEQ_F16 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpNeqF16Sopc>(opcode);
 }
 } // namespace detail
@@ -2391,10 +2567,11 @@ SCmpNltF32Sopc::SCmpNltF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2402,10 +2579,11 @@ SCmpNltF32Sopc::SCmpNltF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2422,13 +2600,15 @@ DecodeResult decodeSCmpNltF32Sopc(const MachineInst *opcode, const DecodeErrorEm
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_nlt_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_NLT_F32 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpNltF32Sopc>(opcode);
 }
 } // namespace detail
@@ -2444,11 +2624,12 @@ SCmpNltF16Sopc::SCmpNltF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2456,11 +2637,12 @@ SCmpNltF16Sopc::SCmpNltF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2477,13 +2659,15 @@ DecodeResult decodeSCmpNltF16Sopc(const MachineInst *opcode, const DecodeErrorEm
   const auto *inst = opcode;
   Result validation = Sopc::validate_encoding(
       "s_cmp_nlt_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if ((reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 255 ||
        reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 255) &&
       (reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc0 == 254 ||
-       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]]
+       reinterpret_cast<const Sopc::OpEncoding *>(inst)->ssrc1 == 254)) [[unlikely]] {
     return emit_error.emit() << "S_CMP_NLT_F16 may not mix 32-bit and 64-bit literals";
+  }
   return std::make_unique<SCmpNltF16Sopc>(opcode);
 }
 } // namespace detail

@@ -15,10 +15,12 @@ namespace cdna5 {
 
 namespace {
 uint32_t vbuffer_vaddr_bits(const VbufferMachineInst *inst) {
-  if (inst->idxen && inst->offen)
+  if (inst->idxen && inst->offen) {
     return 64;
-  if (inst->idxen || inst->offen)
+  }
+  if (inst->idxen || inst->offen) {
     return 32;
+  }
   return 0;
 }
 } // namespace
@@ -44,8 +46,9 @@ BufferLoadU8Vbuffer::BufferLoadU8Vbuffer(const MachineInst *inst)
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= CONDITIONAL_MEMORY_LANES;
-  if (!inst_.tfe)
+  if (!inst_.tfe) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -58,8 +61,9 @@ DecodeResult decodeBufferLoadU8Vbuffer(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_u8", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadU8Vbuffer>(opcode);
 }
 } // namespace detail
@@ -85,8 +89,9 @@ BufferLoadI8Vbuffer::BufferLoadI8Vbuffer(const MachineInst *inst)
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= CONDITIONAL_MEMORY_LANES;
-  if (!inst_.tfe)
+  if (!inst_.tfe) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -99,8 +104,9 @@ DecodeResult decodeBufferLoadI8Vbuffer(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_i8", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadI8Vbuffer>(opcode);
 }
 } // namespace detail
@@ -126,8 +132,9 @@ BufferLoadU16Vbuffer::BufferLoadU16Vbuffer(const MachineInst *inst)
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= CONDITIONAL_MEMORY_LANES;
-  if (!inst_.tfe)
+  if (!inst_.tfe) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -140,8 +147,9 @@ DecodeResult decodeBufferLoadU16Vbuffer(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_u16", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadU16Vbuffer>(opcode);
 }
 } // namespace detail
@@ -167,8 +175,9 @@ BufferLoadI16Vbuffer::BufferLoadI16Vbuffer(const MachineInst *inst)
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= CONDITIONAL_MEMORY_LANES;
-  if (!inst_.tfe)
+  if (!inst_.tfe) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -181,8 +190,9 @@ DecodeResult decodeBufferLoadI16Vbuffer(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_i16", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadI16Vbuffer>(opcode);
 }
 } // namespace detail
@@ -208,8 +218,9 @@ BufferLoadB32Vbuffer::BufferLoadB32Vbuffer(const MachineInst *inst)
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= CONDITIONAL_MEMORY_LANES;
-  if (!inst_.tfe)
+  if (!inst_.tfe) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -222,8 +233,9 @@ DecodeResult decodeBufferLoadB32Vbuffer(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_b32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadB32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -249,8 +261,9 @@ BufferLoadB64Vbuffer::BufferLoadB64Vbuffer(const MachineInst *inst)
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= CONDITIONAL_MEMORY_LANES;
-  if (!inst_.tfe)
+  if (!inst_.tfe) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -263,8 +276,9 @@ DecodeResult decodeBufferLoadB64Vbuffer(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_b64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadB64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -290,8 +304,9 @@ BufferLoadB96Vbuffer::BufferLoadB96Vbuffer(const MachineInst *inst)
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= CONDITIONAL_MEMORY_LANES;
-  if (!inst_.tfe)
+  if (!inst_.tfe) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -304,8 +319,9 @@ DecodeResult decodeBufferLoadB96Vbuffer(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_b96", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadB96Vbuffer>(opcode);
 }
 } // namespace detail
@@ -331,8 +347,9 @@ BufferLoadB128Vbuffer::BufferLoadB128Vbuffer(const MachineInst *inst)
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= CONDITIONAL_MEMORY_LANES;
-  if (!inst_.tfe)
+  if (!inst_.tfe) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -345,8 +362,9 @@ DecodeResult decodeBufferLoadB128Vbuffer(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_b128", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadB128Vbuffer>(opcode);
 }
 } // namespace detail
@@ -385,8 +403,9 @@ DecodeResult decodeBufferStoreB8Vbuffer(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_store_b8", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreB8Vbuffer>(opcode);
 }
 } // namespace detail
@@ -425,8 +444,9 @@ DecodeResult decodeBufferStoreB16Vbuffer(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_store_b16", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreB16Vbuffer>(opcode);
 }
 } // namespace detail
@@ -464,8 +484,9 @@ DecodeResult decodeBufferStoreB32Vbuffer(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_store_b32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreB32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -503,8 +524,9 @@ DecodeResult decodeBufferStoreB64Vbuffer(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_store_b64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreB64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -542,8 +564,9 @@ DecodeResult decodeBufferStoreB96Vbuffer(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_store_b96", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreB96Vbuffer>(opcode);
 }
 } // namespace detail
@@ -581,8 +604,9 @@ DecodeResult decodeBufferStoreB128Vbuffer(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_store_b128", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreB128Vbuffer>(opcode);
 }
 } // namespace detail
@@ -621,8 +645,9 @@ DecodeResult decodeBufferLoadD16U8Vbuffer(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_d16_u8", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadD16U8Vbuffer>(opcode);
 }
 } // namespace detail
@@ -661,8 +686,9 @@ DecodeResult decodeBufferLoadD16I8Vbuffer(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_d16_i8", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadD16I8Vbuffer>(opcode);
 }
 } // namespace detail
@@ -701,8 +727,9 @@ DecodeResult decodeBufferLoadD16B16Vbuffer(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_d16_b16", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadD16B16Vbuffer>(opcode);
 }
 } // namespace detail
@@ -741,8 +768,9 @@ DecodeResult decodeBufferLoadD16HiU8Vbuffer(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_d16_hi_u8", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadD16HiU8Vbuffer>(opcode);
 }
 } // namespace detail
@@ -781,8 +809,9 @@ DecodeResult decodeBufferLoadD16HiI8Vbuffer(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_d16_hi_i8", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadD16HiI8Vbuffer>(opcode);
 }
 } // namespace detail
@@ -821,8 +850,9 @@ DecodeResult decodeBufferLoadD16HiB16Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_load_d16_hi_b16", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferLoadD16HiB16Vbuffer>(opcode);
 }
 } // namespace detail
@@ -862,8 +892,9 @@ DecodeResult decodeBufferStoreD16HiB8Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_store_d16_hi_b8", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreD16HiB8Vbuffer>(opcode);
 }
 } // namespace detail
@@ -903,8 +934,9 @@ DecodeResult decodeBufferStoreD16HiB16Vbuffer(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_store_d16_hi_b16", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferStoreD16HiB16Vbuffer>(opcode);
 }
 } // namespace detail
@@ -926,8 +958,9 @@ BufferAtomicSwapB32Vbuffer::BufferAtomicSwapB32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -948,8 +981,9 @@ DecodeResult decodeBufferAtomicSwapB32Vbuffer(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_swap_b32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicSwapB32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -972,8 +1006,9 @@ BufferAtomicCmpswapB32Vbuffer::BufferAtomicCmpswapB32Vbuffer(const MachineInst *
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -996,8 +1031,9 @@ DecodeResult decodeBufferAtomicCmpswapB32Vbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_atomic_cmpswap_b32",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicCmpswapB32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1019,8 +1055,9 @@ BufferAtomicAddU32Vbuffer::BufferAtomicAddU32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1041,8 +1078,9 @@ DecodeResult decodeBufferAtomicAddU32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_add_u32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicAddU32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1064,8 +1102,9 @@ BufferAtomicSubU32Vbuffer::BufferAtomicSubU32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1086,8 +1125,9 @@ DecodeResult decodeBufferAtomicSubU32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_sub_u32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicSubU32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1109,8 +1149,9 @@ BufferAtomicSubClampU32Vbuffer::BufferAtomicSubClampU32Vbuffer(const MachineInst
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1132,8 +1173,9 @@ DecodeResult decodeBufferAtomicSubClampU32Vbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_atomic_sub_clamp_u32",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicSubClampU32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1155,8 +1197,9 @@ BufferAtomicMinI32Vbuffer::BufferAtomicMinI32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1177,8 +1220,9 @@ DecodeResult decodeBufferAtomicMinI32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_min_i32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMinI32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1200,8 +1244,9 @@ BufferAtomicMinU32Vbuffer::BufferAtomicMinU32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1222,8 +1267,9 @@ DecodeResult decodeBufferAtomicMinU32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_min_u32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMinU32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1245,8 +1291,9 @@ BufferAtomicMaxI32Vbuffer::BufferAtomicMaxI32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1267,8 +1314,9 @@ DecodeResult decodeBufferAtomicMaxI32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_max_i32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMaxI32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1290,8 +1338,9 @@ BufferAtomicMaxU32Vbuffer::BufferAtomicMaxU32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1312,8 +1361,9 @@ DecodeResult decodeBufferAtomicMaxU32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_max_u32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMaxU32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1335,8 +1385,9 @@ BufferAtomicAndB32Vbuffer::BufferAtomicAndB32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1357,8 +1408,9 @@ DecodeResult decodeBufferAtomicAndB32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_and_b32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicAndB32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1380,8 +1432,9 @@ BufferAtomicOrB32Vbuffer::BufferAtomicOrB32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1402,8 +1455,9 @@ DecodeResult decodeBufferAtomicOrB32Vbuffer(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_or_b32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicOrB32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1425,8 +1479,9 @@ BufferAtomicXorB32Vbuffer::BufferAtomicXorB32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1447,8 +1502,9 @@ DecodeResult decodeBufferAtomicXorB32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_xor_b32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicXorB32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1470,8 +1526,9 @@ BufferAtomicIncU32Vbuffer::BufferAtomicIncU32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1492,8 +1549,9 @@ DecodeResult decodeBufferAtomicIncU32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_inc_u32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicIncU32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1515,8 +1573,9 @@ BufferAtomicDecU32Vbuffer::BufferAtomicDecU32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1537,8 +1596,9 @@ DecodeResult decodeBufferAtomicDecU32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_dec_u32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicDecU32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1560,8 +1620,9 @@ BufferAtomicSwapB64Vbuffer::BufferAtomicSwapB64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1582,8 +1643,9 @@ DecodeResult decodeBufferAtomicSwapB64Vbuffer(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_swap_b64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicSwapB64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1606,8 +1668,9 @@ BufferAtomicCmpswapB64Vbuffer::BufferAtomicCmpswapB64Vbuffer(const MachineInst *
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1630,8 +1693,9 @@ DecodeResult decodeBufferAtomicCmpswapB64Vbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_atomic_cmpswap_b64",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicCmpswapB64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1653,8 +1717,9 @@ BufferAtomicAddU64Vbuffer::BufferAtomicAddU64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1675,8 +1740,9 @@ DecodeResult decodeBufferAtomicAddU64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_add_u64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicAddU64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1698,8 +1764,9 @@ BufferAtomicSubU64Vbuffer::BufferAtomicSubU64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1720,8 +1787,9 @@ DecodeResult decodeBufferAtomicSubU64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_sub_u64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicSubU64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1743,8 +1811,9 @@ BufferAtomicMinI64Vbuffer::BufferAtomicMinI64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1765,8 +1834,9 @@ DecodeResult decodeBufferAtomicMinI64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_min_i64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMinI64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1788,8 +1858,9 @@ BufferAtomicMinU64Vbuffer::BufferAtomicMinU64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1810,8 +1881,9 @@ DecodeResult decodeBufferAtomicMinU64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_min_u64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMinU64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1833,8 +1905,9 @@ BufferAtomicMaxI64Vbuffer::BufferAtomicMaxI64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1855,8 +1928,9 @@ DecodeResult decodeBufferAtomicMaxI64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_max_i64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMaxI64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1878,8 +1952,9 @@ BufferAtomicMaxU64Vbuffer::BufferAtomicMaxU64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1900,8 +1975,9 @@ DecodeResult decodeBufferAtomicMaxU64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_max_u64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMaxU64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1923,8 +1999,9 @@ BufferAtomicAndB64Vbuffer::BufferAtomicAndB64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1945,8 +2022,9 @@ DecodeResult decodeBufferAtomicAndB64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_and_b64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicAndB64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -1968,8 +2046,9 @@ BufferAtomicOrB64Vbuffer::BufferAtomicOrB64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1990,8 +2069,9 @@ DecodeResult decodeBufferAtomicOrB64Vbuffer(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_or_b64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicOrB64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2013,8 +2093,9 @@ BufferAtomicXorB64Vbuffer::BufferAtomicXorB64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2035,8 +2116,9 @@ DecodeResult decodeBufferAtomicXorB64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_xor_b64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicXorB64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2058,8 +2140,9 @@ BufferAtomicIncU64Vbuffer::BufferAtomicIncU64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2080,8 +2163,9 @@ DecodeResult decodeBufferAtomicIncU64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_inc_u64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicIncU64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2103,8 +2187,9 @@ BufferAtomicDecU64Vbuffer::BufferAtomicDecU64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2125,8 +2210,9 @@ DecodeResult decodeBufferAtomicDecU64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_dec_u64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicDecU64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2148,8 +2234,9 @@ BufferAtomicCondSubU32Vbuffer::BufferAtomicCondSubU32Vbuffer(const MachineInst *
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2171,8 +2258,9 @@ DecodeResult decodeBufferAtomicCondSubU32Vbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_atomic_cond_sub_u32",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicCondSubU32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2194,8 +2282,9 @@ BufferAtomicMinNumF32Vbuffer::BufferAtomicMinNumF32Vbuffer(const MachineInst *in
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2217,8 +2306,9 @@ DecodeResult decodeBufferAtomicMinNumF32Vbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_atomic_min_num_f32",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMinNumF32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2240,8 +2330,9 @@ BufferAtomicMaxNumF32Vbuffer::BufferAtomicMaxNumF32Vbuffer(const MachineInst *in
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2263,8 +2354,9 @@ DecodeResult decodeBufferAtomicMaxNumF32Vbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_atomic_max_num_f32",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMaxNumF32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2286,8 +2378,9 @@ BufferAtomicAddF64Vbuffer::BufferAtomicAddF64Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2308,8 +2401,9 @@ DecodeResult decodeBufferAtomicAddF64Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_add_f64", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicAddF64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2331,8 +2425,9 @@ BufferAtomicAddF32Vbuffer::BufferAtomicAddF32Vbuffer(const MachineInst *inst)
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2353,8 +2448,9 @@ DecodeResult decodeBufferAtomicAddF32Vbuffer(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vbuffer::validate_encoding(
       "buffer_atomic_add_f32", reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicAddF32Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2376,8 +2472,9 @@ BufferAtomicPkAddF16Vbuffer::BufferAtomicPkAddF16Vbuffer(const MachineInst *inst
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2399,8 +2496,9 @@ DecodeResult decodeBufferAtomicPkAddF16Vbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_atomic_pk_add_f16",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicPkAddF16Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2422,8 +2520,9 @@ BufferAtomicPkAddBf16Vbuffer::BufferAtomicPkAddBf16Vbuffer(const MachineInst *in
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2445,8 +2544,9 @@ DecodeResult decodeBufferAtomicPkAddBf16Vbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_atomic_pk_add_bf16",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicPkAddBf16Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2468,8 +2568,9 @@ BufferAtomicMinNumF64Vbuffer::BufferAtomicMinNumF64Vbuffer(const MachineInst *in
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2491,8 +2592,9 @@ DecodeResult decodeBufferAtomicMinNumF64Vbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_atomic_min_num_f64",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMinNumF64Vbuffer>(opcode);
 }
 } // namespace detail
@@ -2514,8 +2616,9 @@ BufferAtomicMaxNumF64Vbuffer::BufferAtomicMaxNumF64Vbuffer(const MachineInst *in
   src_operands_[4] = &gpumem_in;
   num_src_ = 5;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2537,8 +2640,9 @@ DecodeResult decodeBufferAtomicMaxNumF64Vbuffer(const MachineInst *opcode,
   Result validation =
       Vbuffer::validate_encoding("buffer_atomic_max_num_f64",
                                  reinterpret_cast<const Vbuffer::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<BufferAtomicMaxNumF64Vbuffer>(opcode);
 }
 } // namespace detail

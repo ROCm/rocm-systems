@@ -69,11 +69,13 @@ uint32_t Vopd::bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table) {
 uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t lane,
                             uint32_t &causes) {
   uint32_t src0 = amdgpu::RegisterAccess(wf).read_lane(*slot.src0, lane);
-  if (uses_src_neg_modifier(slot.op))
+  if (uses_src_neg_modifier(slot.op)) {
     src0 = apply_neg(src0, slot.neg, 0);
+  }
   // MOV has no src1: its unused encoding bits may name a pending register.
-  if (slot.op == kVopdMovB32)
+  if (slot.op == kVopdMovB32) {
     return src0;
+  }
   uint32_t src1 = amdgpu::RegisterAccess(wf).read_lane(*slot.src1, lane);
   uint32_t src2 = slot.has_src2_operand ? amdgpu::RegisterAccess(wf).read_lane(*slot.src2, lane)
                                         : slot.src2_imm;
@@ -83,12 +85,14 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
   }
 
   if (slot.op <= kVopdSubrevF32) {
-    if (slot.op == kVopdFmacF32)
+    if (slot.op == kVopdFmacF32) {
       src2 = amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane);
+    }
     const auto in = rdna3_5::dual_fma_inputs(slot.op, src0, src1, src2);
     const uint32_t result = rdna3_5::evaluate_fma(in, wf);
-    if (!wf.dx10_clamp())
+    if (!wf.dx10_clamp()) {
       causes |= rdna3_5::fma_flags(in, result, wf);
+    }
     return result;
   }
 
@@ -127,8 +131,9 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
     if (slot.src0->opr_type_ == OperandType::OPR_SRC &&
         amdgpu::dot2_src_needs_half_replication(slot.src0->encoding_value())) {
       uint32_t half = src0 & 0xffffu;
-      if (amdgpu::is_inline_float_src(slot.src0->encoding_value()))
+      if (amdgpu::is_inline_float_src(slot.src0->encoding_value())) {
         half = util::f32_to_f16(std::bit_cast<float>(src0));
+      }
       src0 = half * 0x10001u;
     }
     const uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane);
@@ -138,8 +143,9 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
     if (slot.src0->opr_type_ == OperandType::OPR_SRC &&
         amdgpu::dot2_src_needs_half_replication(slot.src0->encoding_value())) {
       uint32_t half = src0 & 0xffffu;
-      if (amdgpu::is_inline_float_src(slot.src0->encoding_value()))
+      if (amdgpu::is_inline_float_src(slot.src0->encoding_value())) {
         half = src0 >> 16;
+      }
       src0 = half * 0x10001u;
     }
     const uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane);
@@ -157,21 +163,26 @@ void Vopd::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   if (amdgpu::try_execute_vopd_integer_pair_simd<kVopdMovB32, kVopdAddNcU32, kVopdLshlrevB32>(
-          wf, x_, y_))
+          wf, x_, y_)) {
     return;
-  if (amdgpu::try_execute_vopd_simd<false, true>(x_, y_, wf))
+  }
+  if (amdgpu::try_execute_vopd_simd<false, true>(x_, y_, wf)) {
     return;
+  }
   uint32_t causes = 0;
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t x_result = execute_slot(x_, wf, lane, causes);
-    if (wf.instruction_execution_failed())
+    if (wf.instruction_execution_failed()) {
       return;
+    }
     uint32_t y_result = execute_slot(y_, wf, lane, causes);
-    if (wf.instruction_execution_failed())
+    if (wf.instruction_execution_failed()) {
       return;
+    }
     amdgpu::RegisterAccess(wf).write_lane(*x_.dst, lane, x_result);
     amdgpu::RegisterAccess(wf).write_lane(*y_.dst, lane, y_result);
   }

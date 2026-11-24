@@ -90,8 +90,9 @@ void ImageLoadPckMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -118,8 +119,9 @@ void ImageLoadPckSgnMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, true)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -146,8 +148,9 @@ void ImageLoadMipPckMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -174,8 +177,9 @@ void ImageLoadMipPckSgnMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, true)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -249,8 +253,9 @@ void ImageStorePckMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -276,8 +281,9 @@ void ImageStoreMipPckMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -311,8 +317,9 @@ void ImageAtomicSwapMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -340,8 +347,9 @@ void ImageAtomicCmpswapMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -369,8 +377,9 @@ void ImageAtomicAddMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -398,8 +407,9 @@ void ImageAtomicSubMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -427,8 +437,9 @@ void ImageAtomicSminMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -456,8 +467,9 @@ void ImageAtomicUminMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -485,8 +497,9 @@ void ImageAtomicSmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -514,8 +527,9 @@ void ImageAtomicUmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -543,8 +557,9 @@ void ImageAtomicAndMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -572,8 +587,9 @@ void ImageAtomicOrMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -601,8 +617,9 @@ void ImageAtomicXorMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -630,8 +647,9 @@ void ImageAtomicIncMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -659,8 +677,9 @@ void ImageAtomicDecMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 

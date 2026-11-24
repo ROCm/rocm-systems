@@ -43,8 +43,9 @@ bool is_valid_opcode(uint16_t opcode, uint64_t mask) {
 
 Operand make_src0(uint32_t bits, [[maybe_unused]] bool vopd3, bool use_literal, uint32_t literal,
                   uint16_t encoded) {
-  if (use_literal && encoded == 255)
+  if (use_literal && encoded == 255) {
     return Operand(bits, OperandType::OPR_SIMM32, static_cast<int>(literal));
+  }
   return Operand(bits, OperandType::OPR_SRC, encoded);
 }
 
@@ -137,8 +138,9 @@ amdgpu::Operation Vopd::operation(uint16_t op) {
 }
 
 void Vopd::implicit_uses(RegisterSet &uses) const {
-  if (x_.uses_vcc || y_.uses_vcc)
+  if (x_.uses_vcc || y_.uses_vcc) {
     uses.expand(RegisterRef{RegClass::VCC, 0, 1});
+  }
 }
 
 Result Vopd::validate_encoding(const MachineInst *inst, const util::DiagnosticEmitter &emit_error) {
@@ -148,14 +150,17 @@ Result Vopd::validate_encoding(const MachineInst *inst, const util::DiagnosticEm
 
   const uint16_t opx = static_cast<uint16_t>((word0 >> 22) & 0xF);
   const uint16_t opy = static_cast<uint16_t>((word0 >> 17) & 0x1F);
-  if (!is_valid_opcode(opx, kVopdXOpcodeMask)) [[unlikely]]
+  if (!is_valid_opcode(opx, kVopdXOpcodeMask)) [[unlikely]] {
     return emit_error.emit() << "invalid VOPD X opcode";
-  if (!is_valid_opcode(opy, kVopdYOpcodeMask)) [[unlikely]]
+  }
+  if (!is_valid_opcode(opy, kVopdYOpcodeMask)) [[unlikely]] {
     return emit_error.emit() << "invalid VOPD Y opcode";
+  }
   const uint16_t srcx0 = static_cast<uint16_t>(word0 & 0x1FF);
   const uint16_t srcy0 = static_cast<uint16_t>(word1 & 0x1FF);
-  if (srcx0 == 254 || srcy0 == 254) [[unlikely]]
+  if (srcx0 == 254 || srcy0 == 254) [[unlikely]] {
     return emit_error.emit() << "VOPD does not support 64-bit literals";
+  }
   return Result::success();
 }
 
@@ -222,16 +227,18 @@ Vopd::Vopd(const MachineInst *inst)
   const auto bank_conflict = [](const Operand &a, const Operand &b) {
     const auto ar = a.to_register_ref();
     const auto br = b.to_register_ref();
-    if (!ar || !br || ar->cls != RegClass::VGPR || br->cls != RegClass::VGPR)
+    if (!ar || !br || ar->cls != RegClass::VGPR || br->cls != RegClass::VGPR) {
       return false;
+    }
     const unsigned x = ar->index;
     const unsigned y = br->index;
     const bool shared = false && x == y && a.size_bits() == b.size_bits();
     const auto bank_mask = [](unsigned index, unsigned bits) {
       unsigned mask = 1u << (index % 4);
       // F64 sources occupy two adjacent 32-bit VGPR banks.
-      if (bits == 64)
+      if (bits == 64) {
         mask |= 1u << ((index + 1) % 4);
+      }
       return mask;
     };
     return !shared && (bank_mask(x, a.size_bits()) & bank_mask(y, b.size_bits())) != 0;
@@ -242,19 +249,23 @@ Vopd::Vopd(const MachineInst *inst)
   const auto uses_src1_port = [=](const Slot &slot) {
     return slot.op != kVopdMovB32 && (vopd3 || slot.op != kVopdFmamkF32);
   };
-  if (uses_src1_port(x_) && uses_src1_port(y_))
+  if (uses_src1_port(x_) && uses_src1_port(y_)) {
     invalid |= bank_conflict(srcx1_, srcy1_);
+  }
   if (vopd3) {
     // Only explicit SRC2 operands; no inferred implicit port usage.
-    if (x_.has_src2_operand && y_.has_src2_operand)
+    if (x_.has_src2_operand && y_.has_src2_operand) {
       invalid |= bank_conflict(srcx2_, srcy2_);
+    }
   } else {
     const auto src2_port = [](const Slot &slot) -> const Operand * {
-      if (slot.op == kVopdFmamkF32)
+      if (slot.op == kVopdFmamkF32) {
         return slot.src1;
+      }
       if (slot.op == kVopdFmacF32 || slot.op == kVopdDot2AccF32F16 ||
-          slot.op == kVopdDot2AccF32Bf16)
+          slot.op == kVopdDot2AccF32Bf16) {
         return slot.dst;
+      }
       return nullptr;
     };
     const Operand *x = src2_port(x_);
@@ -273,23 +284,28 @@ Vopd::Vopd(const MachineInst *inst)
   for (unsigned i = 0; i < num_src_; ++i) {
     const auto &source = *src_operands_[i];
     const auto reg = source.to_register_ref();
-    if ((reg && reg->cls == RegClass::VGPR) || source.const_value())
+    if ((reg && reg->cls == RegClass::VGPR) || source.const_value()) {
       continue;
+    }
     int selector = source.encoding_value();
     // Only GFX12 explicitly qualifies EXEC/SCC as scalar inputs.
-    if (false && (selector == 126 || selector == 127 || selector == 253))
+    if (false && (selector == 126 || selector == 127 || selector == 253)) {
       selector = 126;
-    else if (selector < 0 || selector >= 124)
+    } else if (selector < 0 || selector >= 124) {
       continue;
+    }
     bool seen = false;
-    for (unsigned j = 0; j < scalar_count; ++j)
+    for (unsigned j = 0; j < scalar_count; ++j) {
       seen |= scalar_selectors[j] == selector;
-    if (!seen)
+    }
+    if (!seen) {
       scalar_selectors[scalar_count++] = selector;
+    }
   }
   invalid |= scalar_count + unsigned(has_literal_) > 2;
-  if (invalid)
+  if (invalid) {
     flags_ |= INVALID_VOPD_OPERANDS;
+  }
   mnemonic_storage_ = std::string(op_name(opx_)) + " :: " + op_name(opy_);
   mnemonic_ = mnemonic_storage_;
 }
@@ -317,8 +333,9 @@ void Vopd::init_operands() {
   num_src_ = 0;
 
   const auto add_src = [this](Operand *op) {
-    if (op)
+    if (op) {
       src_operands_[num_src_++] = op;
+    }
   };
   const auto add_slot_sources = [&](const Slot &slot) {
     switch (slot.op) {
@@ -335,8 +352,9 @@ void Vopd::init_operands() {
     case kVopdCndmaskB32:
       add_src(slot.src0);
       add_src(slot.src1);
-      if (!slot.uses_vcc)
+      if (!slot.uses_vcc) {
         add_src(slot.src2);
+      }
       break;
     default:
       add_src(slot.src0);
@@ -350,8 +368,9 @@ void Vopd::init_operands() {
   const auto direct_slot = [](uint16_t op) {
     return op == kVopdFmacF32 || op == kVopdMovB32 || op == kVopdAddNcU32 || op == kVopdLshlrevB32;
   };
-  if (direct_slot(x_.op) && direct_slot(y_.op))
+  if (direct_slot(x_.op) && direct_slot(y_.op)) {
     flags_ |= DIRECT_REGISTER_ACCESSES;
+  }
 }
 
 std::string Vopd::format_slot(const Slot &slot) const {
@@ -363,8 +382,9 @@ std::string Vopd::format_slot(const Slot &slot) const {
     break;
   case kVopdCndmaskB32:
     out += operand_list(*slot.dst, *slot.src0, *slot.src1);
-    if (!slot.uses_vcc)
+    if (!slot.uses_vcc) {
       out += ", " + slot.src2->name();
+    }
     break;
   case kVopdFmaakF32:
     out += operand_list(*slot.dst, *slot.src0, *slot.src1);

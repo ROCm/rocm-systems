@@ -39,8 +39,9 @@ DecodeResult decodeLdsParamLoadLdsdir(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Ldsdir::validate_encoding(
       "lds_param_load", reinterpret_cast<const Ldsdir::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<LdsParamLoadLdsdir>(opcode);
 }
 } // namespace detail
@@ -70,8 +71,9 @@ DecodeResult decodeLdsDirectLoadLdsdir(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Ldsdir::validate_encoding(
       "lds_direct_load", reinterpret_cast<const Ldsdir::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<LdsDirectLoadLdsdir>(opcode);
 }
 } // namespace detail

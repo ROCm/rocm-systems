@@ -21,8 +21,9 @@ public:
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
     modifiers.constant_float_compare = true;
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -38,8 +39,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -55,8 +57,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -72,8 +75,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -89,8 +93,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -106,8 +111,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -123,8 +129,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -140,8 +147,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -157,8 +165,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -174,8 +183,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -191,8 +201,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -208,8 +219,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -225,8 +237,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -242,8 +255,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -259,8 +273,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -277,8 +292,9 @@ public:
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
     modifiers.constant_float_compare = true;
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -295,8 +311,9 @@ public:
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
     modifiers.constant_float_compare = true;
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -312,8 +329,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -329,8 +347,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -346,8 +365,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -363,8 +383,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -380,8 +401,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -397,8 +419,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -414,8 +437,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -431,8 +455,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -448,8 +473,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -465,8 +491,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -482,8 +509,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -499,8 +527,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -516,8 +545,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -533,8 +563,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -551,8 +582,9 @@ public:
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
     modifiers.constant_float_compare = true;
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand vcc;
   Operand src0;
@@ -1232,8 +1264,9 @@ public:
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
     modifiers.constant_float_compare = true;
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1250,8 +1283,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1268,8 +1302,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1286,8 +1321,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1304,8 +1340,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1322,8 +1359,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1340,8 +1378,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1358,8 +1397,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1376,8 +1416,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1394,8 +1435,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1412,8 +1454,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1430,8 +1473,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1448,8 +1492,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1466,8 +1511,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1484,8 +1530,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1503,8 +1550,9 @@ public:
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
     modifiers.constant_float_compare = true;
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1522,8 +1570,9 @@ public:
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
     modifiers.constant_float_compare = true;
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1540,8 +1589,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1558,8 +1608,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1576,8 +1627,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1594,8 +1646,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1612,8 +1665,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1630,8 +1684,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1648,8 +1703,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1666,8 +1722,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1684,8 +1741,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1702,8 +1760,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1720,8 +1779,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1738,8 +1798,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1756,8 +1817,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1774,8 +1836,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;
@@ -1793,8 +1856,9 @@ public:
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vopc::amdgpu_register_modifiers(modifiers);
     modifiers.constant_float_compare = true;
-    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2))
+    if (modifiers.dpp && !((dpp_modifiers_.absolute | dpp_modifiers_.negate) & 2)) {
       modifiers.dpp_masked_compare_rhs = &vsrc1;
+    }
   }
   Operand exec;
   Operand src0;

@@ -36,8 +36,9 @@ DecodeResult decodeVInterpP1F32Vintrp(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vintrp::validate_encoding(
       "v_interp_p1_f32", reinterpret_cast<const Vintrp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VInterpP1F32Vintrp>(opcode);
 }
 } // namespace detail
@@ -67,8 +68,9 @@ DecodeResult decodeVInterpP2F32Vintrp(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vintrp::validate_encoding(
       "v_interp_p2_f32", reinterpret_cast<const Vintrp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VInterpP2F32Vintrp>(opcode);
 }
 } // namespace detail
@@ -97,8 +99,9 @@ DecodeResult decodeVInterpMovF32Vintrp(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vintrp::validate_encoding(
       "v_interp_mov_f32", reinterpret_cast<const Vintrp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VInterpMovF32Vintrp>(opcode);
 }
 } // namespace detail

@@ -71,8 +71,9 @@ void ImageSampleVsample::execute_impl(amdgpu::Wavefront &wf) {
                                       .lwe = bool(inst_.lwe),
                                       .unorm = bool(inst_.unorm)},
                                      inst_.samp, amdgpu::ImageSampleMode::Implicit)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -121,8 +122,9 @@ void ImageSampleDVsample::execute_impl(amdgpu::Wavefront &wf) {
                                       .lwe = bool(inst_.lwe),
                                       .unorm = bool(inst_.unorm)},
                                      inst_.samp, amdgpu::ImageSampleMode::Derivatives)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -171,8 +173,9 @@ void ImageSampleLVsample::execute_impl(amdgpu::Wavefront &wf) {
                                       .lwe = bool(inst_.lwe),
                                       .unorm = bool(inst_.unorm)},
                                      inst_.samp, amdgpu::ImageSampleMode::Explicit)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -226,8 +229,9 @@ void ImageSampleLzVsample::execute_impl(amdgpu::Wavefront &wf) {
                                       .lwe = bool(inst_.lwe),
                                       .unorm = bool(inst_.unorm)},
                                      inst_.samp, amdgpu::ImageSampleMode::Zero)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -352,8 +356,9 @@ void ImageGather4Vsample::execute_impl(amdgpu::Wavefront &wf) {
                                       .unorm = bool(inst_.unorm),
                                       .gather = true},
                                      inst_.samp, amdgpu::ImageSampleMode::Implicit)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -403,8 +408,9 @@ void ImageGather4LVsample::execute_impl(amdgpu::Wavefront &wf) {
                                       .unorm = bool(inst_.unorm),
                                       .gather = true},
                                      inst_.samp, amdgpu::ImageSampleMode::Explicit)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -459,8 +465,9 @@ void ImageGather4LzVsample::execute_impl(amdgpu::Wavefront &wf) {
                                       .unorm = bool(inst_.unorm),
                                       .gather = true},
                                      inst_.samp, amdgpu::ImageSampleMode::Zero)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 

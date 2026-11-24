@@ -147,7 +147,7 @@ def test_legacy_flat_lds_transfer_reuses_the_execution_predicate():
         )
     )
     assert (
-        'if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) flags_ |= MEMORY_TO_LDS;'
+        'if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) { flags_ |= MEMORY_TO_LDS; }'
         in statements
     )
 

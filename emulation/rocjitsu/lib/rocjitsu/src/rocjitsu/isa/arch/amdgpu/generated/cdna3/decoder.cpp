@@ -186,46 +186,56 @@ DecodeResult DecoderImpl::subDecodeFlat(const MachineInst *opcode,
 
 DecodeResult DecoderImpl::decodeFlatSegment38(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2)
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2) {
     return detail::decodeGlobalLoadLdsUbyteFlat(opcode, emit_error);
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1)
+  }
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1) {
     return detail::decodeScratchLoadLdsUbyteFlat(opcode, emit_error);
+  }
   return decodeInvalid(opcode, emit_error);
 }
 
 DecodeResult DecoderImpl::decodeFlatSegment39(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2)
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2) {
     return detail::decodeGlobalLoadLdsSbyteFlat(opcode, emit_error);
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1)
+  }
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1) {
     return detail::decodeScratchLoadLdsSbyteFlat(opcode, emit_error);
+  }
   return decodeInvalid(opcode, emit_error);
 }
 
 DecodeResult DecoderImpl::decodeFlatSegment40(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2)
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2) {
     return detail::decodeGlobalLoadLdsUshortFlat(opcode, emit_error);
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1)
+  }
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1) {
     return detail::decodeScratchLoadLdsUshortFlat(opcode, emit_error);
+  }
   return decodeInvalid(opcode, emit_error);
 }
 
 DecodeResult DecoderImpl::decodeFlatSegment41(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2)
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2) {
     return detail::decodeGlobalLoadLdsSshortFlat(opcode, emit_error);
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1)
+  }
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1) {
     return detail::decodeScratchLoadLdsSshortFlat(opcode, emit_error);
+  }
   return decodeInvalid(opcode, emit_error);
 }
 
 DecodeResult DecoderImpl::decodeFlatSegment42(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2)
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2) {
     return detail::decodeGlobalLoadLdsDwordFlat(opcode, emit_error);
-  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1)
+  }
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1) {
     return detail::decodeScratchLoadLdsDwordFlat(opcode, emit_error);
+  }
   return decodeInvalid(opcode, emit_error);
 }
 

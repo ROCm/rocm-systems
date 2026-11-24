@@ -20,8 +20,9 @@ void Mimg::append_dst_operand(std::string &out, uint8_t index) const {
   if (flags_ & CONDITIONAL_LAST_VGPR_DEF) {
     const auto *data = static_cast<const IsaOperand<Isa> *>(dst_operands_[index]);
     out += Operand(data->size_bits() - 32, data->opr_type_, data->encoding_value()).name();
-  } else
+  } else {
     Instruction::append_dst_operand(out, index);
+  }
 }
 
 namespace {
@@ -30,20 +31,24 @@ bool mimg_has_status(const MimgMachineInst *inst, bool sampler) {
   // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
   // can still return status for samplers. Both share one DWORD.
   bool status = false;
-  if constexpr (requires { inst->tfe; })
+  if constexpr (requires { inst->tfe; }) {
     status = inst->tfe && inst->dmask;
-  if constexpr (requires { inst->lwe; })
+  }
+  if constexpr (requires { inst->lwe; }) {
     status = status || (sampler && inst->lwe);
+  }
   return status;
 }
 template <typename MimgMachineInst>
 uint32_t mimg_vdata_bits(const MimgMachineInst *inst, bool gather4, bool d16_allowed,
                          bool status_allowed, bool sampler) {
   uint32_t words = gather4 ? 4u : std::max(1, std::popcount(uint32_t{inst->dmask}));
-  if (d16_allowed && inst->d16)
+  if (d16_allowed && inst->d16) {
     words = (words + 1) / 2;
-  if (status_allowed && mimg_has_status(inst, sampler))
+  }
+  if (status_allowed && mimg_has_status(inst, sampler)) {
     ++words;
+  }
   return words * 32;
 }
 } // namespace
@@ -65,8 +70,9 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (mimg_has_status(&inst_, false))
+  if (mimg_has_status(&inst_, false)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -78,8 +84,9 @@ void ImageLoadMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageLoadMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -90,8 +97,9 @@ namespace detail {
 DecodeResult decodeImageLoadMimg(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_load", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageLoadMimg>(opcode);
 }
 } // namespace detail
@@ -114,8 +122,9 @@ ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (mimg_has_status(&inst_, false))
+  if (mimg_has_status(&inst_, false)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -127,8 +136,9 @@ void ImageLoadMipMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (0u + (inst_.a16 ? (3u + 1u + 1) / 2 : 3u + 1u));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageLoadMipMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -140,8 +150,9 @@ DecodeResult decodeImageLoadMipMimg(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_load_mip", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageLoadMipMimg>(opcode);
 }
 } // namespace detail
@@ -163,8 +174,9 @@ ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (mimg_has_status(&inst_, false))
+  if (mimg_has_status(&inst_, false)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -176,8 +188,9 @@ void ImageLoadPckMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageLoadPckMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -189,8 +202,9 @@ DecodeResult decodeImageLoadPckMimg(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_load_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageLoadPckMimg>(opcode);
 }
 } // namespace detail
@@ -212,8 +226,9 @@ ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (mimg_has_status(&inst_, false))
+  if (mimg_has_status(&inst_, false)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -225,8 +240,9 @@ void ImageLoadPckSgnMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageLoadPckSgnMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -238,8 +254,9 @@ DecodeResult decodeImageLoadPckSgnMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_load_pck_sgn", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageLoadPckSgnMimg>(opcode);
 }
 } // namespace detail
@@ -262,8 +279,9 @@ ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (mimg_has_status(&inst_, false))
+  if (mimg_has_status(&inst_, false)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -275,8 +293,9 @@ void ImageLoadMipPckMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (0u + (inst_.a16 ? (3u + 1u + 1) / 2 : 3u + 1u));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageLoadMipPckMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -288,8 +307,9 @@ DecodeResult decodeImageLoadMipPckMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_load_mip_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageLoadMipPckMimg>(opcode);
 }
 } // namespace detail
@@ -312,8 +332,9 @@ ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (mimg_has_status(&inst_, false))
+  if (mimg_has_status(&inst_, false)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -325,8 +346,9 @@ void ImageLoadMipPckSgnMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (0u + (inst_.a16 ? (3u + 1u + 1) / 2 : 3u + 1u));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageLoadMipPckSgnMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -338,8 +360,9 @@ DecodeResult decodeImageLoadMipPckSgnMimg(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_load_mip_pck_sgn", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageLoadMipPckSgnMimg>(opcode);
 }
 } // namespace detail
@@ -372,8 +395,9 @@ void ImageStoreMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageStoreMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -384,8 +408,9 @@ namespace detail {
 DecodeResult decodeImageStoreMimg(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_store", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageStoreMimg>(opcode);
 }
 } // namespace detail
@@ -419,8 +444,9 @@ void ImageStoreMipMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (0u + (inst_.a16 ? (3u + 1u + 1) / 2 : 3u + 1u));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageStoreMipMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -432,8 +458,9 @@ DecodeResult decodeImageStoreMipMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_store_mip", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageStoreMipMimg>(opcode);
 }
 } // namespace detail
@@ -466,8 +493,9 @@ void ImageStorePckMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageStorePckMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -479,8 +507,9 @@ DecodeResult decodeImageStorePckMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_store_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageStorePckMimg>(opcode);
 }
 } // namespace detail
@@ -514,8 +543,9 @@ void ImageStoreMipPckMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (0u + (inst_.a16 ? (3u + 1u + 1) / 2 : 3u + 1u));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageStoreMipPckMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -527,8 +557,9 @@ DecodeResult decodeImageStoreMipPckMimg(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_store_mip_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageStoreMipPckMimg>(opcode);
 }
 } // namespace detail
@@ -559,8 +590,9 @@ DecodeResult decodeImageGetResinfoMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_get_resinfo", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGetResinfoMimg>(opcode);
 }
 } // namespace detail
@@ -585,8 +617,9 @@ ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
@@ -600,8 +633,9 @@ void ImageAtomicSwapMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicSwapMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -613,8 +647,9 @@ DecodeResult decodeImageAtomicSwapMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_swap", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicSwapMimg>(opcode);
 }
 } // namespace detail
@@ -646,8 +681,9 @@ ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
@@ -661,8 +697,9 @@ void ImageAtomicCmpswapMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicCmpswapMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -674,8 +711,9 @@ DecodeResult decodeImageAtomicCmpswapMimg(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_cmpswap", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicCmpswapMimg>(opcode);
 }
 } // namespace detail
@@ -700,8 +738,9 @@ ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
@@ -715,8 +754,9 @@ void ImageAtomicAddMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicAddMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -728,8 +768,9 @@ DecodeResult decodeImageAtomicAddMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_add", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicAddMimg>(opcode);
 }
 } // namespace detail
@@ -754,8 +795,9 @@ ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
@@ -769,8 +811,9 @@ void ImageAtomicSubMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicSubMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -782,8 +825,9 @@ DecodeResult decodeImageAtomicSubMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_sub", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicSubMimg>(opcode);
 }
 } // namespace detail
@@ -808,8 +852,9 @@ ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
@@ -823,8 +868,9 @@ void ImageAtomicSminMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicSminMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -836,8 +882,9 @@ DecodeResult decodeImageAtomicSminMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_smin", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicSminMimg>(opcode);
 }
 } // namespace detail
@@ -862,8 +909,9 @@ ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
@@ -877,8 +925,9 @@ void ImageAtomicUminMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicUminMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -890,8 +939,9 @@ DecodeResult decodeImageAtomicUminMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_umin", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicUminMimg>(opcode);
 }
 } // namespace detail
@@ -916,8 +966,9 @@ ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
@@ -931,8 +982,9 @@ void ImageAtomicSmaxMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicSmaxMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -944,8 +996,9 @@ DecodeResult decodeImageAtomicSmaxMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_smax", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicSmaxMimg>(opcode);
 }
 } // namespace detail
@@ -970,8 +1023,9 @@ ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
@@ -985,8 +1039,9 @@ void ImageAtomicUmaxMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicUmaxMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -998,8 +1053,9 @@ DecodeResult decodeImageAtomicUmaxMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_umax", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicUmaxMimg>(opcode);
 }
 } // namespace detail
@@ -1024,8 +1080,9 @@ ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
@@ -1039,8 +1096,9 @@ void ImageAtomicAndMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicAndMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -1052,8 +1110,9 @@ DecodeResult decodeImageAtomicAndMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_and", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicAndMimg>(opcode);
 }
 } // namespace detail
@@ -1078,8 +1137,9 @@ ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
@@ -1093,8 +1153,9 @@ void ImageAtomicOrMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicOrMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -1106,8 +1167,9 @@ DecodeResult decodeImageAtomicOrMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_or", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicOrMimg>(opcode);
 }
 } // namespace detail
@@ -1132,8 +1194,9 @@ ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
@@ -1147,8 +1210,9 @@ void ImageAtomicXorMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicXorMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -1160,8 +1224,9 @@ DecodeResult decodeImageAtomicXorMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_xor", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicXorMimg>(opcode);
 }
 } // namespace detail
@@ -1186,8 +1251,9 @@ ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
@@ -1201,8 +1267,9 @@ void ImageAtomicIncMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicIncMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -1214,8 +1281,9 @@ DecodeResult decodeImageAtomicIncMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_inc", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicIncMimg>(opcode);
 }
 } // namespace detail
@@ -1240,8 +1308,9 @@ ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
@@ -1255,8 +1324,9 @@ void ImageAtomicDecMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicDecMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -1268,8 +1338,9 @@ DecodeResult decodeImageAtomicDecMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_dec", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicDecMimg>(opcode);
 }
 } // namespace detail
@@ -1293,8 +1364,9 @@ ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  if (mimg_has_status(&inst_, true))
+  if (mimg_has_status(&inst_, true)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1306,8 +1378,9 @@ void ImageSampleMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageSampleMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -1319,8 +1392,9 @@ DecodeResult decodeImageSampleMimg(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleMimg>(opcode);
 }
 } // namespace detail

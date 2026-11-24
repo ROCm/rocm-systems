@@ -33,8 +33,9 @@ FlatLoadU8Vflat::FlatLoadU8Vflat(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
@@ -50,8 +51,9 @@ DecodeResult decodeFlatLoadU8Vflat(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_load_u8", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatLoadU8Vflat>(opcode);
 }
 } // namespace detail
@@ -69,8 +71,9 @@ FlatLoadI8Vflat::FlatLoadI8Vflat(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
@@ -86,8 +89,9 @@ DecodeResult decodeFlatLoadI8Vflat(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_load_i8", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatLoadI8Vflat>(opcode);
 }
 } // namespace detail
@@ -105,8 +109,9 @@ FlatLoadU16Vflat::FlatLoadU16Vflat(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
@@ -122,8 +127,9 @@ DecodeResult decodeFlatLoadU16Vflat(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_load_u16", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatLoadU16Vflat>(opcode);
 }
 } // namespace detail
@@ -141,8 +147,9 @@ FlatLoadI16Vflat::FlatLoadI16Vflat(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
@@ -158,8 +165,9 @@ DecodeResult decodeFlatLoadI16Vflat(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_load_i16", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatLoadI16Vflat>(opcode);
 }
 } // namespace detail
@@ -177,8 +185,9 @@ FlatLoadB32Vflat::FlatLoadB32Vflat(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
@@ -194,8 +203,9 @@ DecodeResult decodeFlatLoadB32Vflat(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_load_b32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatLoadB32Vflat>(opcode);
 }
 } // namespace detail
@@ -213,8 +223,9 @@ FlatLoadB64Vflat::FlatLoadB64Vflat(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
@@ -230,8 +241,9 @@ DecodeResult decodeFlatLoadB64Vflat(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_load_b64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatLoadB64Vflat>(opcode);
 }
 } // namespace detail
@@ -249,8 +261,9 @@ FlatLoadB96Vflat::FlatLoadB96Vflat(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
@@ -266,8 +279,9 @@ DecodeResult decodeFlatLoadB96Vflat(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_load_b96", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatLoadB96Vflat>(opcode);
 }
 } // namespace detail
@@ -285,8 +299,9 @@ FlatLoadB128Vflat::FlatLoadB128Vflat(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
@@ -302,8 +317,9 @@ DecodeResult decodeFlatLoadB128Vflat(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_load_b128", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatLoadB128Vflat>(opcode);
 }
 } // namespace detail
@@ -321,8 +337,9 @@ FlatStoreB8Vflat::FlatStoreB8Vflat(const MachineInst *inst)
   dst_operands_[0] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vsrc.set_register_byte_mask(0x1);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
@@ -339,8 +356,9 @@ DecodeResult decodeFlatStoreB8Vflat(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_store_b8", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatStoreB8Vflat>(opcode);
 }
 } // namespace detail
@@ -358,8 +376,9 @@ FlatStoreB16Vflat::FlatStoreB16Vflat(const MachineInst *inst)
   dst_operands_[0] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vsrc.set_register_byte_mask(0x3);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
@@ -376,8 +395,9 @@ DecodeResult decodeFlatStoreB16Vflat(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_store_b16", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatStoreB16Vflat>(opcode);
 }
 } // namespace detail
@@ -395,8 +415,9 @@ FlatStoreB32Vflat::FlatStoreB32Vflat(const MachineInst *inst)
   dst_operands_[0] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED},
@@ -412,8 +433,9 @@ DecodeResult decodeFlatStoreB32Vflat(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_store_b32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatStoreB32Vflat>(opcode);
 }
 } // namespace detail
@@ -431,8 +453,9 @@ FlatStoreB64Vflat::FlatStoreB64Vflat(const MachineInst *inst)
   dst_operands_[0] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED},
@@ -448,8 +471,9 @@ DecodeResult decodeFlatStoreB64Vflat(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_store_b64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatStoreB64Vflat>(opcode);
 }
 } // namespace detail
@@ -467,8 +491,9 @@ FlatStoreB96Vflat::FlatStoreB96Vflat(const MachineInst *inst)
   dst_operands_[0] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED},
@@ -484,8 +509,9 @@ DecodeResult decodeFlatStoreB96Vflat(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_store_b96", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatStoreB96Vflat>(opcode);
 }
 } // namespace detail
@@ -503,8 +529,9 @@ FlatStoreB128Vflat::FlatStoreB128Vflat(const MachineInst *inst)
   dst_operands_[0] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED},
@@ -520,8 +547,9 @@ DecodeResult decodeFlatStoreB128Vflat(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_store_b128", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatStoreB128Vflat>(opcode);
 }
 } // namespace detail
@@ -539,8 +567,9 @@ FlatLoadD16U8Vflat::FlatLoadD16U8Vflat(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
@@ -557,16 +586,18 @@ DecodeResult decodeFlatLoadD16U8Vflat(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_load_d16_u8", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatLoadD16U8Vflat>(opcode);
 }
 } // namespace detail
 
 void FlatLoadD16U8Vflat::implicit_uses(RegisterSet &uses) const {
   Vflat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
@@ -582,8 +613,9 @@ FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
@@ -600,16 +632,18 @@ DecodeResult decodeFlatLoadD16I8Vflat(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_load_d16_i8", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatLoadD16I8Vflat>(opcode);
 }
 } // namespace detail
 
 void FlatLoadD16I8Vflat::implicit_uses(RegisterSet &uses) const {
   Vflat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
@@ -625,8 +659,9 @@ FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
@@ -643,16 +678,18 @@ DecodeResult decodeFlatLoadD16B16Vflat(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_load_d16_b16", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatLoadD16B16Vflat>(opcode);
 }
 } // namespace detail
 
 void FlatLoadD16B16Vflat::implicit_uses(RegisterSet &uses) const {
   Vflat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
@@ -668,8 +705,9 @@ FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
@@ -686,16 +724,18 @@ DecodeResult decodeFlatLoadD16HiU8Vflat(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_load_d16_hi_u8", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatLoadD16HiU8Vflat>(opcode);
 }
 } // namespace detail
 
 void FlatLoadD16HiU8Vflat::implicit_uses(RegisterSet &uses) const {
   Vflat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
@@ -711,8 +751,9 @@ FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
@@ -729,16 +770,18 @@ DecodeResult decodeFlatLoadD16HiI8Vflat(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_load_d16_hi_i8", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatLoadD16HiI8Vflat>(opcode);
 }
 } // namespace detail
 
 void FlatLoadD16HiI8Vflat::implicit_uses(RegisterSet &uses) const {
   Vflat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
@@ -754,8 +797,9 @@ FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
@@ -772,16 +816,18 @@ DecodeResult decodeFlatLoadD16HiB16Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_load_d16_hi_b16", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatLoadD16HiB16Vflat>(opcode);
 }
 } // namespace detail
 
 void FlatLoadD16HiB16Vflat::implicit_uses(RegisterSet &uses) const {
   Vflat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 FlatStoreD16HiB8Vflat::FlatStoreD16HiB8Vflat(const MachineInst *inst)
@@ -797,8 +843,9 @@ FlatStoreD16HiB8Vflat::FlatStoreD16HiB8Vflat(const MachineInst *inst)
   dst_operands_[0] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vsrc.set_register_byte_mask(0x4);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
@@ -816,8 +863,9 @@ DecodeResult decodeFlatStoreD16HiB8Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_store_d16_hi_b8", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatStoreD16HiB8Vflat>(opcode);
 }
 } // namespace detail
@@ -835,8 +883,9 @@ FlatStoreD16HiB16Vflat::FlatStoreD16HiB16Vflat(const MachineInst *inst)
   dst_operands_[0] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vsrc.set_register_byte_mask(0xc);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
@@ -854,8 +903,9 @@ DecodeResult decodeFlatStoreD16HiB16Vflat(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_store_d16_hi_b16", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatStoreD16HiB16Vflat>(opcode);
 }
 } // namespace detail
@@ -875,10 +925,12 @@ FlatAtomicSwapB32Vflat::FlatAtomicSwapB32Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -899,8 +951,9 @@ DecodeResult decodeFlatAtomicSwapB32Vflat(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_swap_b32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicSwapB32Vflat>(opcode);
 }
 } // namespace detail
@@ -920,10 +973,12 @@ FlatAtomicCmpswapB32Vflat::FlatAtomicCmpswapB32Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -944,8 +999,9 @@ DecodeResult decodeFlatAtomicCmpswapB32Vflat(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_cmpswap_b32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicCmpswapB32Vflat>(opcode);
 }
 } // namespace detail
@@ -965,10 +1021,12 @@ FlatAtomicAddU32Vflat::FlatAtomicAddU32Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -989,8 +1047,9 @@ DecodeResult decodeFlatAtomicAddU32Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_add_u32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicAddU32Vflat>(opcode);
 }
 } // namespace detail
@@ -1010,10 +1069,12 @@ FlatAtomicSubU32Vflat::FlatAtomicSubU32Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1034,8 +1095,9 @@ DecodeResult decodeFlatAtomicSubU32Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_sub_u32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicSubU32Vflat>(opcode);
 }
 } // namespace detail
@@ -1055,10 +1117,12 @@ FlatAtomicSubClampU32Vflat::FlatAtomicSubClampU32Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1079,8 +1143,9 @@ DecodeResult decodeFlatAtomicSubClampU32Vflat(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_sub_clamp_u32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicSubClampU32Vflat>(opcode);
 }
 } // namespace detail
@@ -1100,10 +1165,12 @@ FlatAtomicMinI32Vflat::FlatAtomicMinI32Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1124,8 +1191,9 @@ DecodeResult decodeFlatAtomicMinI32Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_min_i32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicMinI32Vflat>(opcode);
 }
 } // namespace detail
@@ -1145,10 +1213,12 @@ FlatAtomicMinU32Vflat::FlatAtomicMinU32Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1169,8 +1239,9 @@ DecodeResult decodeFlatAtomicMinU32Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_min_u32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicMinU32Vflat>(opcode);
 }
 } // namespace detail
@@ -1190,10 +1261,12 @@ FlatAtomicMaxI32Vflat::FlatAtomicMaxI32Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1214,8 +1287,9 @@ DecodeResult decodeFlatAtomicMaxI32Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_max_i32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicMaxI32Vflat>(opcode);
 }
 } // namespace detail
@@ -1235,10 +1309,12 @@ FlatAtomicMaxU32Vflat::FlatAtomicMaxU32Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1259,8 +1335,9 @@ DecodeResult decodeFlatAtomicMaxU32Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_max_u32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicMaxU32Vflat>(opcode);
 }
 } // namespace detail
@@ -1280,10 +1357,12 @@ FlatAtomicAndB32Vflat::FlatAtomicAndB32Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1304,8 +1383,9 @@ DecodeResult decodeFlatAtomicAndB32Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_and_b32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicAndB32Vflat>(opcode);
 }
 } // namespace detail
@@ -1325,10 +1405,12 @@ FlatAtomicOrB32Vflat::FlatAtomicOrB32Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1349,8 +1431,9 @@ DecodeResult decodeFlatAtomicOrB32Vflat(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_or_b32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicOrB32Vflat>(opcode);
 }
 } // namespace detail
@@ -1370,10 +1453,12 @@ FlatAtomicXorB32Vflat::FlatAtomicXorB32Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1394,8 +1479,9 @@ DecodeResult decodeFlatAtomicXorB32Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_xor_b32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicXorB32Vflat>(opcode);
 }
 } // namespace detail
@@ -1415,10 +1501,12 @@ FlatAtomicIncU32Vflat::FlatAtomicIncU32Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1439,8 +1527,9 @@ DecodeResult decodeFlatAtomicIncU32Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_inc_u32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicIncU32Vflat>(opcode);
 }
 } // namespace detail
@@ -1460,10 +1549,12 @@ FlatAtomicDecU32Vflat::FlatAtomicDecU32Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1484,8 +1575,9 @@ DecodeResult decodeFlatAtomicDecU32Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_dec_u32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicDecU32Vflat>(opcode);
 }
 } // namespace detail
@@ -1505,10 +1597,12 @@ FlatAtomicSwapB64Vflat::FlatAtomicSwapB64Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1529,8 +1623,9 @@ DecodeResult decodeFlatAtomicSwapB64Vflat(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_swap_b64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicSwapB64Vflat>(opcode);
 }
 } // namespace detail
@@ -1550,10 +1645,12 @@ FlatAtomicCmpswapB64Vflat::FlatAtomicCmpswapB64Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1574,8 +1671,9 @@ DecodeResult decodeFlatAtomicCmpswapB64Vflat(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_cmpswap_b64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicCmpswapB64Vflat>(opcode);
 }
 } // namespace detail
@@ -1595,10 +1693,12 @@ FlatAtomicAddU64Vflat::FlatAtomicAddU64Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1619,8 +1719,9 @@ DecodeResult decodeFlatAtomicAddU64Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_add_u64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicAddU64Vflat>(opcode);
 }
 } // namespace detail
@@ -1640,10 +1741,12 @@ FlatAtomicSubU64Vflat::FlatAtomicSubU64Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1664,8 +1767,9 @@ DecodeResult decodeFlatAtomicSubU64Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_sub_u64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicSubU64Vflat>(opcode);
 }
 } // namespace detail
@@ -1685,10 +1789,12 @@ FlatAtomicMinI64Vflat::FlatAtomicMinI64Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1709,8 +1815,9 @@ DecodeResult decodeFlatAtomicMinI64Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_min_i64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicMinI64Vflat>(opcode);
 }
 } // namespace detail
@@ -1730,10 +1837,12 @@ FlatAtomicMinU64Vflat::FlatAtomicMinU64Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1754,8 +1863,9 @@ DecodeResult decodeFlatAtomicMinU64Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_min_u64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicMinU64Vflat>(opcode);
 }
 } // namespace detail
@@ -1775,10 +1885,12 @@ FlatAtomicMaxI64Vflat::FlatAtomicMaxI64Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1799,8 +1911,9 @@ DecodeResult decodeFlatAtomicMaxI64Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_max_i64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicMaxI64Vflat>(opcode);
 }
 } // namespace detail
@@ -1820,10 +1933,12 @@ FlatAtomicMaxU64Vflat::FlatAtomicMaxU64Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1844,8 +1959,9 @@ DecodeResult decodeFlatAtomicMaxU64Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_max_u64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicMaxU64Vflat>(opcode);
 }
 } // namespace detail
@@ -1865,10 +1981,12 @@ FlatAtomicAndB64Vflat::FlatAtomicAndB64Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1889,8 +2007,9 @@ DecodeResult decodeFlatAtomicAndB64Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_and_b64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicAndB64Vflat>(opcode);
 }
 } // namespace detail
@@ -1910,10 +2029,12 @@ FlatAtomicOrB64Vflat::FlatAtomicOrB64Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1934,8 +2055,9 @@ DecodeResult decodeFlatAtomicOrB64Vflat(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_or_b64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicOrB64Vflat>(opcode);
 }
 } // namespace detail
@@ -1955,10 +2077,12 @@ FlatAtomicXorB64Vflat::FlatAtomicXorB64Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -1979,8 +2103,9 @@ DecodeResult decodeFlatAtomicXorB64Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_xor_b64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicXorB64Vflat>(opcode);
 }
 } // namespace detail
@@ -2000,10 +2125,12 @@ FlatAtomicIncU64Vflat::FlatAtomicIncU64Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -2024,8 +2151,9 @@ DecodeResult decodeFlatAtomicIncU64Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_inc_u64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicIncU64Vflat>(opcode);
 }
 } // namespace detail
@@ -2045,10 +2173,12 @@ FlatAtomicDecU64Vflat::FlatAtomicDecU64Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -2069,8 +2199,9 @@ DecodeResult decodeFlatAtomicDecU64Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_dec_u64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicDecU64Vflat>(opcode);
 }
 } // namespace detail
@@ -2090,10 +2221,12 @@ FlatAtomicCondSubU32Vflat::FlatAtomicCondSubU32Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -2114,8 +2247,9 @@ DecodeResult decodeFlatAtomicCondSubU32Vflat(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_cond_sub_u32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicCondSubU32Vflat>(opcode);
 }
 } // namespace detail
@@ -2135,10 +2269,12 @@ FlatAtomicMinNumF32Vflat::FlatAtomicMinNumF32Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -2159,8 +2295,9 @@ DecodeResult decodeFlatAtomicMinNumF32Vflat(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_min_num_f32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicMinNumF32Vflat>(opcode);
 }
 } // namespace detail
@@ -2180,10 +2317,12 @@ FlatAtomicMaxNumF32Vflat::FlatAtomicMaxNumF32Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -2204,8 +2343,9 @@ DecodeResult decodeFlatAtomicMaxNumF32Vflat(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_max_num_f32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicMaxNumF32Vflat>(opcode);
 }
 } // namespace detail
@@ -2225,10 +2365,12 @@ FlatAtomicAddF32Vflat::FlatAtomicAddF32Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -2249,8 +2391,9 @@ DecodeResult decodeFlatAtomicAddF32Vflat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_add_f32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicAddF32Vflat>(opcode);
 }
 } // namespace detail
@@ -2270,10 +2413,12 @@ FlatAtomicPkAddF16Vflat::FlatAtomicPkAddF16Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -2294,8 +2439,9 @@ DecodeResult decodeFlatAtomicPkAddF16Vflat(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_pk_add_f16", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicPkAddF16Vflat>(opcode);
 }
 } // namespace detail
@@ -2315,10 +2461,12 @@ FlatAtomicPkAddBf16Vflat::FlatAtomicPkAddBf16Vflat(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != 124 && inst_.saddr != 127)
+  if (inst_.saddr != 124 && inst_.saddr != 127) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   set_memory_issue_info(
@@ -2339,8 +2487,9 @@ DecodeResult decodeFlatAtomicPkAddBf16Vflat(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vflat::validate_encoding(
       "flat_atomic_pk_add_bf16", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<FlatAtomicPkAddBf16Vflat>(opcode);
 }
 } // namespace detail

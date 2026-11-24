@@ -29,8 +29,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -53,8 +54,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -78,8 +80,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -103,8 +106,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -127,8 +131,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -151,8 +156,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -176,8 +182,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u)) {
       modifiers.packed_store_data = &vdata;
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -199,8 +206,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u)) {
       modifiers.packed_store_data = &vdata;
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -223,8 +231,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u)) {
       modifiers.packed_store_data = &vdata;
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -246,8 +255,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u)) {
       modifiers.packed_store_data = &vdata;
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -702,8 +712,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -739,8 +750,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -777,8 +789,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 0 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -815,8 +828,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 0 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -852,8 +866,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -892,8 +907,9 @@ public:
     modifiers.image_prefix_words = 1;
     modifiers.image_prefix_low16_words =
         amdgpu::image_prefix_low16_words(1, 0, inst_.a16, true, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -932,8 +948,9 @@ public:
     modifiers.image_prefix_words = 1;
     modifiers.image_prefix_low16_words =
         amdgpu::image_prefix_low16_words(1, 0, inst_.a16, true, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -969,8 +986,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1007,8 +1025,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1045,8 +1064,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1083,8 +1103,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 1 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1121,8 +1142,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 1 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1159,8 +1181,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1199,8 +1222,9 @@ public:
     modifiers.image_prefix_words = 2;
     modifiers.image_prefix_low16_words =
         amdgpu::image_prefix_low16_words(2, 0, inst_.a16, true, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1239,8 +1263,9 @@ public:
     modifiers.image_prefix_words = 2;
     modifiers.image_prefix_low16_words =
         amdgpu::image_prefix_low16_words(2, 0, inst_.a16, true, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1277,8 +1302,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1315,8 +1341,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1353,8 +1380,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1391,8 +1419,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 1 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1429,8 +1458,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 1 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1467,8 +1497,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1507,8 +1538,9 @@ public:
     modifiers.image_prefix_words = 2;
     modifiers.image_prefix_low16_words =
         amdgpu::image_prefix_low16_words(2, 0, inst_.a16, true, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1547,8 +1579,9 @@ public:
     modifiers.image_prefix_words = 2;
     modifiers.image_prefix_low16_words =
         amdgpu::image_prefix_low16_words(2, 0, inst_.a16, true, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1585,8 +1618,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1623,8 +1657,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 2;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1661,8 +1696,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 2;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1699,8 +1735,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 2 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1737,8 +1774,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 2 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1775,8 +1813,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 2;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1815,8 +1854,9 @@ public:
     modifiers.image_prefix_words = 3;
     modifiers.image_prefix_low16_words =
         amdgpu::image_prefix_low16_words(3, 0, inst_.a16, true, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1855,8 +1895,9 @@ public:
     modifiers.image_prefix_words = 3;
     modifiers.image_prefix_low16_words =
         amdgpu::image_prefix_low16_words(3, 0, inst_.a16, true, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1893,8 +1934,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 2;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -1987,8 +2029,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -2012,8 +2055,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -2248,8 +2292,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -2272,8 +2317,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -2511,8 +2557,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u)) {
       modifiers.packed_store_data = &vdata;
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -2535,8 +2582,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u)) {
       modifiers.packed_store_data = &vdata;
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -2772,8 +2820,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u)) {
       modifiers.packed_store_data = &vdata;
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -2795,8 +2844,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u)) {
       modifiers.packed_store_data = &vdata;
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3103,8 +3153,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 0 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3141,8 +3192,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 0 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3179,8 +3231,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 1 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3217,8 +3270,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 1 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3255,8 +3309,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 1 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3293,8 +3348,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 1 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3331,8 +3387,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 2 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3369,8 +3426,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     modifiers.image_prefix_words = 2 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3395,8 +3453,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3420,8 +3479,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3444,8 +3504,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3468,8 +3529,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3493,8 +3555,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u)) {
       modifiers.packed_store_data = &vdata;
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3517,8 +3580,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u)) {
       modifiers.packed_store_data = &vdata;
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3540,8 +3604,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u)) {
       modifiers.packed_store_data = &vdata;
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3563,8 +3628,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u)) {
       modifiers.packed_store_data = &vdata;
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3587,8 +3653,9 @@ public:
         amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3628,8 +3695,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         0, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3670,8 +3738,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         0, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3712,8 +3781,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         1, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3754,8 +3824,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         1, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3796,8 +3867,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         1, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3838,8 +3910,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         1, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3880,8 +3953,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         2, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3922,8 +3996,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         2, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -3986,8 +4061,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         0, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -4028,8 +4104,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         0, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -4070,8 +4147,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         1, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -4112,8 +4190,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         1, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, false);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -4154,8 +4233,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         1, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -4196,8 +4276,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         1, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -4238,8 +4319,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         2, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -4280,8 +4362,9 @@ public:
                     amdgpu::image_derivative_component_count(inst_.dim), true);
     modifiers.image_prefix_low16_words = amdgpu::image_prefix_low16_words(
         2, amdgpu::image_derivative_component_count(inst_.dim), inst_.a16, false, true);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
+    }
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
   void implicit_uses(RegisterSet &uses) const override;
