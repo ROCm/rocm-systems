@@ -10,6 +10,7 @@ import sys
 import traceback
 import warnings
 from pathlib import Path
+from typing import Tuple
 
 # Suppress pandas FutureWarning about chained assignment
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -213,7 +214,7 @@ def main() -> None:
     sys.exit(0)
 
 
-def _numeric_version(version: str):
+def _numeric_version(version: str) -> Tuple[int, ...]:
     """Integer parts of the public dotted version, ignoring a '+' suffix.
 
     2.13.0+rocm7.15.0a20260728 is (2, 13, 0).
