@@ -51,10 +51,11 @@ GpuAliasIngressGate::try_acquire_local(Key key, LocalCache &cache) noexcept {
       try {
         if (!worker || worker->gate.get() != this)
           worker = std::make_shared<LocalCache::Owner>(shared_from_this());
-        std::function<void()> done = [&slot] { release_local(slot); };
         slot.owner = {worker, this};
         slot.key = key;
-        return amdgpu::MemoryIngressPermit(std::move(done));
+        return amdgpu::MemoryIngressPermit(
+            [](void *released) noexcept { release_local(*static_cast<LocalSlot *>(released)); },
+            &slot);
       } catch (...) {
         return std::nullopt;
       }

@@ -431,3 +431,76 @@ TEST(VmemLaneAddressTest, Cdna5GlobalAndFlatMatchPerLaneLoop) {
 }
 
 } // namespace
+
+namespace {
+
+// The linear CDNA buffer shortcut must agree with the per-lane offset, range
+// and address rules whenever it accepts, and refuse whenever any active lane
+// would be clamped.
+TEST(Gfx9LinearBufferLanesTest, MatchesThePerLaneRulesOrDeclines) {
+  using namespace rocjitsu::amdgpu::addr_calc;
+  std::mt19937_64 rng(0x5eed);
+  int accepted = 0, declined = 0;
+  for (int round = 0; round < 20000; ++round) {
+    const uint32_t wf_size = rng() & 1 ? 64 : 32;
+    const uint64_t exec = wf_size == 64 ? rng() : rng() & UINT32_MAX;
+    const bool offen = rng() % 4 != 0;
+    const uint32_t elem_size = 1u << (rng() % 3);
+    const uint32_t num_elems = 1 + rng() % 4;
+    const uint32_t bytes = elem_size * num_elems;
+    const uint32_t num_records =
+        static_cast<uint32_t>(rng() % 3 == 0 ? rng() : 4096 + rng() % 4096);
+    const uint32_t inst_offset = rng() % 4096;
+    const uint32_t soffset = rng() % 8 == 0 ? static_cast<uint32_t>(rng()) : rng() % 512;
+    const uint64_t base = rng() & ((uint64_t{1} << 48) - 1);
+    std::array<uint32_t, 64> offsets;
+    const uint32_t kind = rng() % 4;
+    for (uint32_t lane = 0; lane < 64; ++lane)
+      offsets[lane] = kind == 0 ? static_cast<uint32_t>(rng())
+                      // VOFFSET + inst_offset wraps in 32 bits back into the buffer.
+                      : kind == 1 ? static_cast<uint32_t>(0x100000000ull - inst_offset + lane * 4)
+                                  : static_cast<uint32_t>(lane * 4 + rng() % 4096 +
+                                                          (rng() % 64 == 0 ? 0xffff0000u : 0));
+    std::array<uint64_t, 64> addresses;
+    addresses.fill(0xdead);
+    const bool fast = gfx9_linear_buffer_lanes(
+        offen ? std::span<const uint32_t>(offsets.data(), wf_size) : std::span<const uint32_t>{},
+        exec, wf_size, inst_offset, soffset, base, num_records, bytes, addresses);
+    const Gfx9BufferResource srd{.stride = 0,
+                                 .swizzle_enable = false,
+                                 .add_tid_when_indexed = false,
+                                 .data_format = 4,
+                                 .index_stride = 8,
+                                 .add_tid_enable = false};
+    bool all_in_range = true;
+    for (uint32_t lane = 0; lane < wf_size; ++lane) {
+      if (!((exec >> lane) & 1))
+        continue;
+      const uint32_t offset_part = buffer_offset_part(offen ? offsets[lane] : 0, inst_offset);
+      const uint64_t total =
+          gfx9_buffer_lane_offset(srd, false, false, 0, offset_part, soffset, lane);
+      const uint32_t in_range =
+          gfx9_buffer_elems_in_range({.add_tid_enable = false,
+                                      .idxen = false,
+                                      .stride = 0,
+                                      .num_records = num_records,
+                                      .index = 0,
+                                      .byte_offset = uint64_t{offset_part} + soffset},
+                                     elem_size, num_elems);
+      all_in_range &= in_range == num_elems;
+      if (fast)
+        ASSERT_EQ(addresses[lane],
+                  buffer_access_address(rocjitsu::IsaFamily::Cdna4, base + total, elem_size))
+            << round << " lane " << lane;
+    }
+    ASSERT_EQ(fast, all_in_range) << round;
+    for (uint32_t lane = 0; lane < wf_size; ++lane)
+      if (!fast || !((exec >> lane) & 1))
+        ASSERT_EQ(addresses[lane], 0xdeadu) << "inactive or declined lanes stay untouched";
+    (fast ? accepted : declined) += 1;
+  }
+  EXPECT_GT(accepted, 1000);
+  EXPECT_GT(declined, 1000);
+}
+
+} // namespace

@@ -1461,6 +1461,10 @@ TEST(DecodedInstructionCacheTest, RetiredVectorStateResetsSemanticsAndReusesClea
   state->translated.initialized = true;
   state->translated.atomic_loaded = true;
   state->element_lane_masks.assign(32, 3);
+  state->ds2_per_lane_addr[5] = 0x1234;
+  state->per_lane_lds_addr.fill(0x40);
+  state->per_lane_lds_src_bytes[63] = 4;
+  const uint64_t *ds2_storage = state->ds2_per_lane_addr.data();
   const std::array<const uint8_t *, 5> buffers{
       state->response_data.data(), state->store_data.data(), state->ds2_response_data.data(),
       state->ds2_store_data.data(), state->translated.reordered_data.data()};
@@ -1490,6 +1494,11 @@ TEST(DecodedInstructionCacheTest, RetiredVectorStateResetsSemanticsAndReusesClea
   EXPECT_FALSE(state->ordered_count);
   EXPECT_EQ(state->address_range_violation_lanes, 0u);
   EXPECT_TRUE(state->element_lane_masks.empty());
+  const auto &cold = std::as_const(*state);
+  EXPECT_TRUE(std::ranges::all_of(cold.ds2_per_lane_addr, [](uint64_t a) { return a == 0; }));
+  EXPECT_TRUE(std::ranges::all_of(cold.per_lane_lds_addr, [](uint32_t a) { return a == 0; }));
+  EXPECT_TRUE(std::ranges::all_of(cold.per_lane_lds_src_bytes, [](uint8_t b) { return b == 0; }));
+  EXPECT_EQ(cold.ds2_per_lane_addr.data(), ds2_storage) << "written lane storage is kept";
   EXPECT_EQ(state->translated.request_index, 0u);
   EXPECT_EQ(state->translated.completed_bytes, 0u);
   EXPECT_EQ(state->translated.atomic_lane, 0u);

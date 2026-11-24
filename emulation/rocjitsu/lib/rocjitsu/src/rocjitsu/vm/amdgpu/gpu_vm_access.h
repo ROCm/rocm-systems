@@ -137,34 +137,56 @@ public:
 /// @brief Move-only lease that releases one memory-ingress count on every exit path.
 class MemoryIngressPermit {
 public:
+  /// @brief Release hook that needs no captured state beyond one pointer.
+  using RawRelease = void (*)(void *) noexcept;
+
   MemoryIngressPermit() = default;
   explicit MemoryIngressPermit(std::function<void()> release, MemoryPtEpoch pt_epoch = {})
       : release_(std::move(release)), pt_epoch_(std::move(pt_epoch)) {}
+  /// @brief A permit released by @p release(@p context); the per-instruction
+  /// local admission uses it to avoid building and moving a std::function.
+  MemoryIngressPermit(RawRelease release, void *context) noexcept
+      : raw_release_(release), raw_context_(context) {}
   MemoryIngressPermit(const MemoryIngressPermit &) = delete;
   MemoryIngressPermit &operator=(const MemoryIngressPermit &) = delete;
   MemoryIngressPermit(MemoryIngressPermit &&other) noexcept
-      : release_(std::exchange(other.release_, {})), pt_epoch_(std::exchange(other.pt_epoch_, {})) {
+      : raw_release_(std::exchange(other.raw_release_, nullptr)),
+        raw_context_(std::exchange(other.raw_context_, nullptr)) {
+    if (other.release_)
+      release_ = std::exchange(other.release_, {});
+    if (other.pt_epoch_.session_identity || other.pt_epoch_.generation)
+      pt_epoch_ = std::exchange(other.pt_epoch_, {});
   }
   MemoryIngressPermit &operator=(MemoryIngressPermit &&other) noexcept {
     if (this != &other) {
       reset();
-      release_ = std::exchange(other.release_, {});
-      pt_epoch_ = std::exchange(other.pt_epoch_, {});
+      raw_release_ = std::exchange(other.raw_release_, nullptr);
+      raw_context_ = std::exchange(other.raw_context_, nullptr);
+      if (other.release_)
+        release_ = std::exchange(other.release_, {});
+      if (other.pt_epoch_.session_identity || other.pt_epoch_.generation)
+        pt_epoch_ = std::exchange(other.pt_epoch_, {});
     }
     return *this;
   }
   ~MemoryIngressPermit() { reset(); }
 
   void reset() {
-    if (auto release = std::exchange(release_, {}))
-      release();
-    pt_epoch_ = {};
+    if (auto *release = std::exchange(raw_release_, nullptr))
+      release(std::exchange(raw_context_, nullptr));
+    if (release_)
+      if (auto release = std::exchange(release_, {}))
+        release();
+    if (pt_epoch_.session_identity || pt_epoch_.generation)
+      pt_epoch_ = {};
   }
-  explicit operator bool() const { return static_cast<bool>(release_); }
+  explicit operator bool() const { return raw_release_ || static_cast<bool>(release_); }
   /// @brief Return the bound PT session, or an empty epoch when none was admitted.
   [[nodiscard]] MemoryPtEpoch pt_epoch() const { return pt_epoch_; }
 
 private:
+  RawRelease raw_release_ = nullptr;
+  void *raw_context_ = nullptr;
   std::function<void()> release_;
   MemoryPtEpoch pt_epoch_{};
 };

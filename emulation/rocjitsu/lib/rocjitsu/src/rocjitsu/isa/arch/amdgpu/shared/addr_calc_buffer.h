@@ -28,8 +28,10 @@
 #include <bit>
 #include <cassert>
 #include <cstdint>
+#include <cstdlib>
 #include <optional>
 #include <span>
+#include <string_view>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -394,6 +396,48 @@ inline BufferAddressRegisters read_buffer_address_registers(RegisterAccess &regs
   return result;
 }
 
+/// @brief Whether linear CDNA buffer lanes take the one-pass in-range path.
+/// @details RJ_VMEM_LINEAR_BUFFER=0 keeps every lane on the per-lane check so
+/// the two can be compared inside one binary.
+inline bool linear_buffer_lanes_enabled() {
+  static const bool enabled = [] {
+    const char *value = std::getenv("RJ_VMEM_LINEAR_BUFFER");
+    return !value || std::string_view(value) != "0";
+  }();
+  return enabled;
+}
+
+/// @brief Address a linear GFX9/CDNA raw buffer access when every active lane is in range.
+/// @details Linear means no IDXEN, swizzle or ADD_TID, and not MI100's raw
+/// check (which excludes SOFFSET). Each lane's byte offset is the 32-bit
+/// VOFFSET + inst_offset plus SOFFSET; an access is in range when all of its
+/// @p bytes fit below NUM_RECORDS, which is exactly when the per-element
+/// check keeps every element. Returns false, writing nothing, if any active
+/// lane would be clamped; the caller then runs the per-lane check.
+/// @param offsets VOFFSET per lane, or empty when OFFEN is clear.
+inline bool gfx9_linear_buffer_lanes(std::span<const uint32_t> offsets, uint64_t exec,
+                                     uint32_t wf_size, uint32_t inst_offset, uint32_t soffset,
+                                     uint64_t base, uint32_t num_records, uint64_t bytes,
+                                     std::array<uint64_t, 64> &addresses) {
+  if (bytes == 0 || bytes > num_records)
+    return false;
+  const uint64_t limit = num_records - bytes;
+  std::array<uint64_t, 64> computed;
+  bool in_range = true;
+  for (uint32_t lane = 0; lane < wf_size; ++lane) {
+    const uint32_t voffset = offsets.empty() ? 0 : offsets[lane];
+    const uint64_t offset = uint64_t{voffset + inst_offset} + soffset;
+    const bool active = (exec >> lane) & 1;
+    in_range &= !active || offset <= limit;
+    computed[lane] = buffer_virtual_address(base + offset);
+  }
+  if (!in_range)
+    return false;
+  for (uint32_t lane = 0; lane < wf_size; ++lane)
+    addresses[lane] = ((exec >> lane) & 1) ? computed[lane] : addresses[lane];
+  return true;
+}
+
 /// @brief Compute per-lane addresses for MUBUF encoding.
 ///
 /// @details Populates d.per_lane_addr, d.lane_mask, d.exec_mask and, on GFX9/CDNA,
@@ -495,7 +539,16 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   uint32_t vgpr_base = wf.vgpr_alloc().base + inst.vaddr;
   const auto address_regs =
       read_buffer_address_registers(regs, vgpr_base, inst.idxen, inst.offen, exec);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+  // Linear raw CDNA buffers whose lanes are all in range need no per-lane
+  // bounds bookkeeping; any clamped lane takes the exact loop below.
+  const bool linear =
+      gfx9 && linear_buffer_lanes_enabled() && !inst.idxen && !gfx9_srd.swizzle_enable &&
+      !gfx9_srd.add_tid_enable && arch != rocjitsu::IsaFamily::Cdna1 &&
+      gfx9_linear_buffer_lanes(inst.offen ? address_regs.offsets : std::span<const uint32_t>{},
+                               exec, wf.wf_size(), static_cast<uint32_t>(inst.offset), soffset_val,
+                               base_addr, num_records, uint64_t{d.elem_size} * d.num_elems,
+                               d.per_lane_addr);
+  for (uint32_t lane = 0; !linear && lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     const uint32_t index = inst.idxen ? address_regs.indices[lane] : 0;

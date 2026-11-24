@@ -1050,6 +1050,28 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
         }
     } else {
       auto &cu = wf.raw_cu();
+      // An admitted local load of a functional, unobserved CU reads backing
+      // directly, as vector loads do; any extent, MTYPE or admission doubt
+      // declines before an effect and the K$ path below runs unchanged.
+      if (direct_backing_ && ingress.outcome == VmAccessOutcome::Complete && d.translated.access &&
+          has_ingress_handler() && !d.request_force_l1_bypass && !cu.debug_active() &&
+          cu.plugin_group().empty() && cu.l2())
+        if (const VmDirectBacking *backing = d.translated.access->direct_backing()) {
+          const DirectVectorRequest request{
+              .addrs = &d.addr,
+              .lanes = 1,
+              .wf_size = 1,
+              .elem_size = sizeof(uint32_t),
+              .num_elems = d.num_dwords,
+              .instruction_mtype = d.mtype,
+              .transactions = {},
+              .data = reinterpret_cast<uint8_t *>(d.response_data),
+              .is_load = true,
+          };
+          if (try_direct_vector_access(request, *backing, cu.l1_vector(), *cu.l2()) ==
+              VmAccessOutcome::Complete)
+            return VmAccessOutcome::Complete;
+        }
       const bool allow_private_batch =
           GpuVmAccessBatchGuard::active() && !cu.debug_active() && cu.plugin_group().empty();
       const VmAccessOutcome outcome =
