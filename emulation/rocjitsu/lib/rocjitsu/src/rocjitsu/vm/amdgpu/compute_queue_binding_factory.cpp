@@ -18,33 +18,39 @@ public:
         ring_base_(ring_base), ring_size_(ring_size) {}
 
   ~ComputeQueueBinding() override {
-    if (registration_id_)
+    if (registration_id_) {
       (void)command_processor_.unregister_queue_registration(registration_id_);
+    }
   }
 
   QueuePrepareCloseStatus prepare_close() noexcept override {
-    if (registration_id_ == 0)
+    if (registration_id_ == 0) {
       return QueuePrepareCloseStatus::Ready;
+    }
     const QueuePrepareCloseStatus status =
         command_processor_.prepare_unregister_queue_registration(registration_id_);
-    if (status == QueuePrepareCloseStatus::Ready)
+    if (status == QueuePrepareCloseStatus::Ready) {
       registration_id_ = 0;
+    }
     return status;
   }
 
   QueuePrepareCloseStatus prepare_preempt_close() noexcept override {
-    if (registration_id_ == 0)
+    if (registration_id_ == 0) {
       return QueuePrepareCloseStatus::Ready;
+    }
     const QueuePrepareCloseStatus status =
         command_processor_.prepare_preempt_queue_registration(registration_id_);
-    if (status == QueuePrepareCloseStatus::Ready)
+    if (status == QueuePrepareCloseStatus::Ready) {
       registration_id_ = 0;
+    }
     return status;
   }
 
   QueueReconfigureStatus reconfigure(const QueueReconfigureRequest &request) override {
-    if (format_ == QueuePacketFormat::Pm4)
+    if (format_ == QueuePacketFormat::Pm4) {
       return command_processor_.update_pm4_queue_registration(registration_id_, request);
+    }
     QueueReconfigureRequest effective = request;
     if (!request.scheduling_percentage) {
       effective.ring_base_address = ring_base_;
@@ -60,10 +66,12 @@ public:
   }
 
   QueueSubmissionStatus submit_producer(uint64_t producer_cursor) override {
-    if (!registration_id_)
+    if (!registration_id_) {
       return QueueSubmissionStatus::Faulted;
-    if (format_ == QueuePacketFormat::Pm4)
+    }
+    if (format_ == QueuePacketFormat::Pm4) {
       return command_processor_.notify_pm4_queue_doorbell(registration_id_, producer_cursor);
+    }
     command_processor_.notify_queue_doorbell(registration_id_, producer_cursor);
     return QueueSubmissionStatus::Accepted;
   }
@@ -84,8 +92,9 @@ public:
 
   QueueBindingCreateResult create_binding(const QueueRegistrationRequest &request) override {
     if (request.type != QueueType::Compute || (request.packet_format != QueuePacketFormat::Aql &&
-                                               request.packet_format != QueuePacketFormat::Pm4))
+                                               request.packet_format != QueuePacketFormat::Pm4)) {
       return {};
+    }
     const uint64_t registration_id = command_processor_.register_queue({
         .address_space = request.identity.address_space,
         .interrupt_sink = request.identity.interrupt_sink,
@@ -112,8 +121,9 @@ public:
         .packet_callbacks = callbacks_,
         .scheduling_percentage = request.scheduling_percentage,
     });
-    if (registration_id == 0)
+    if (registration_id == 0) {
       return {};
+    }
     // The processor attachment is live. A failed ownership allocation must not
     // reach a recovering frontend without a binding that owns that attachment.
     return [&]() noexcept -> QueueBindingCreateResult {

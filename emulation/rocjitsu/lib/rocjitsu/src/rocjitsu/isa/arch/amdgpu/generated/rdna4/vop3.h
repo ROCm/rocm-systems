@@ -1281,8 +1281,9 @@ public:
   }
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vop3::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp || modifiers.dpp8)
+    if (modifiers.dpp || modifiers.dpp8) {
       modifiers.src0 = &src1;
+    }
   }
   Operand vdst;
   Operand src0;
@@ -5113,8 +5114,9 @@ public:
   }
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vop3SdstEnc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp || modifiers.dpp8)
+    if (modifiers.dpp || modifiers.dpp8) {
       modifiers.src0 = &src1;
+    }
     modifiers.src2_is_wave_mask = true;
   }
   Operand vdst;
@@ -5207,8 +5209,9 @@ public:
   }
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vop3SdstEnc::amdgpu_register_modifiers(modifiers);
-    if (modifiers.dpp || modifiers.dpp8)
+    if (modifiers.dpp || modifiers.dpp8) {
       modifiers.src0 = &src1;
+    }
   }
   Operand vdst;
   Operand sdst;

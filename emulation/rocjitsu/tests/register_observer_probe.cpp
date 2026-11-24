@@ -9,11 +9,13 @@ extern "C" RJ_API_EXPORT void rj_probe_register_observer(rocjitsu::ThreadContext
                                                          uint32_t sgpr, uint32_t vgpr) {
   // The module must also be able to emit Wavefront RTTI for this downcast.
   auto *wf = dynamic_cast<rocjitsu::amdgpu::Wavefront *>(context);
-  if (!wf)
+  if (!wf) {
     return;
+  }
   const rocjitsu::amdgpu::RegisterAccess registers(*wf);
-  if (registers.write_sgpr(sgpr, registers.read_sgpr(sgpr)).failed())
+  if (registers.write_sgpr(sgpr, registers.read_sgpr(sgpr)).failed()) {
     return;
+  }
   const auto value = registers.read_vgpr_region(vgpr, 1, 1).lane(0, 0);
   registers.write_vgpr_region(vgpr, 1, 1).set_lane(0, 0, value);
 }

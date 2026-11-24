@@ -28,8 +28,9 @@ namespace detail {
 DecodeResult decodeSMovkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_movk_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SMovkI32Sopk>(opcode);
 }
 } // namespace detail
@@ -55,8 +56,9 @@ namespace detail {
 DecodeResult decodeSCmovkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmovk_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmovkI32Sopk>(opcode);
 }
 } // namespace detail
@@ -80,8 +82,9 @@ namespace detail {
 DecodeResult decodeSCmpkEqI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_eq_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkEqI32Sopk>(opcode);
 }
 } // namespace detail
@@ -105,8 +108,9 @@ namespace detail {
 DecodeResult decodeSCmpkLgI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_lg_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkLgI32Sopk>(opcode);
 }
 } // namespace detail
@@ -130,8 +134,9 @@ namespace detail {
 DecodeResult decodeSCmpkGtI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_gt_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkGtI32Sopk>(opcode);
 }
 } // namespace detail
@@ -155,8 +160,9 @@ namespace detail {
 DecodeResult decodeSCmpkGeI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_ge_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkGeI32Sopk>(opcode);
 }
 } // namespace detail
@@ -180,8 +186,9 @@ namespace detail {
 DecodeResult decodeSCmpkLtI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_lt_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkLtI32Sopk>(opcode);
 }
 } // namespace detail
@@ -205,8 +212,9 @@ namespace detail {
 DecodeResult decodeSCmpkLeI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_le_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkLeI32Sopk>(opcode);
 }
 } // namespace detail
@@ -230,8 +238,9 @@ namespace detail {
 DecodeResult decodeSCmpkEqU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_eq_u32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkEqU32Sopk>(opcode);
 }
 } // namespace detail
@@ -255,8 +264,9 @@ namespace detail {
 DecodeResult decodeSCmpkLgU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_lg_u32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkLgU32Sopk>(opcode);
 }
 } // namespace detail
@@ -280,8 +290,9 @@ namespace detail {
 DecodeResult decodeSCmpkGtU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_gt_u32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkGtU32Sopk>(opcode);
 }
 } // namespace detail
@@ -305,8 +316,9 @@ namespace detail {
 DecodeResult decodeSCmpkGeU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_ge_u32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkGeU32Sopk>(opcode);
 }
 } // namespace detail
@@ -330,8 +342,9 @@ namespace detail {
 DecodeResult decodeSCmpkLtU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_lt_u32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkLtU32Sopk>(opcode);
 }
 } // namespace detail
@@ -355,8 +368,9 @@ namespace detail {
 DecodeResult decodeSCmpkLeU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_le_u32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkLeU32Sopk>(opcode);
 }
 } // namespace detail
@@ -381,8 +395,9 @@ namespace detail {
 DecodeResult decodeSAddkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_addk_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SAddkI32Sopk>(opcode);
 }
 } // namespace detail
@@ -404,8 +419,9 @@ namespace detail {
 DecodeResult decodeSMulkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_mulk_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SMulkI32Sopk>(opcode);
 }
 } // namespace detail
@@ -432,8 +448,9 @@ DecodeResult decodeSCbranchIForkSopk(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cbranch_i_fork", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCbranchIForkSopk>(opcode);
 }
 } // namespace detail
@@ -464,8 +481,9 @@ namespace detail {
 DecodeResult decodeSGetregB32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_getreg_b32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SGetregB32Sopk>(opcode);
 }
 } // namespace detail
@@ -486,16 +504,18 @@ namespace detail {
 DecodeResult decodeSSetregB32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_setreg_b32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSetregB32Sopk>(opcode);
 }
 } // namespace detail
 
 void SSetregB32Sopk::implicit_uses(RegisterSet &uses) const {
   Sopk::implicit_uses(uses);
-  if (auto r = simm16.to_register_ref())
+  if (auto r = simm16.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
@@ -516,16 +536,18 @@ DecodeResult decodeSSetregImm32B32Sopk(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_setreg_imm32_b32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSetregImm32B32Sopk>(opcode);
 }
 } // namespace detail
 
 void SSetregImm32B32Sopk::implicit_uses(RegisterSet &uses) const {
   Sopk::implicit_uses(uses);
-  if (auto r = simm16.to_register_ref())
+  if (auto r = simm16.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
@@ -551,8 +573,9 @@ namespace detail {
 DecodeResult decodeSCallB64Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_call_b64", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCallB64Sopk>(opcode);
 }
 } // namespace detail
