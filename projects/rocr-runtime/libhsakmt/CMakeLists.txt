@@ -201,6 +201,8 @@ else()
                      "src/extsem.c")
     if (CMAKE_SYSTEM_NAME MATCHES "Linux")
       list(APPEND HSAKMT_SRC "src/perfctr.c" "src/pmc_table.c")
+      ## Per-OS KFD topology reader; see src/topology_dinfo.h.
+      list(APPEND HSAKMT_SRC "src/linux/topology_dinfo.c")
     endif()
   endif()
 
