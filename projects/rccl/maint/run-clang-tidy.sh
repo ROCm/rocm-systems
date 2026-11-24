@@ -230,8 +230,8 @@ if [[ ${#FILTERS[@]} -gt 0 ]]; then
     echo "WARNING: not in ${BUILD_DIR}/compile_commands.json, so not analysed:" >&2
     printf '         %s\n' "${NOT_ANALYSED[@]}" >&2
   fi
+  # No findings file: an empty one would read as "analysed, nothing found".
   if [[ ${#ANALYSED[@]} -eq 0 ]]; then
-    : > "${BUILD_DIR}/clang-tidy-findings.txt"
     exit 0
   fi
   FILTER_REGEX="$(printf '%s\n' "${ANALYSED[@]}" | to_regex | paste --serial --delimiters='|')"

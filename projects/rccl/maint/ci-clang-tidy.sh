@@ -83,6 +83,10 @@ summarise() {
   # C/C++ file under src/; that is not a failure.
   if [[ ! -f "$FINDINGS" ]] && grep -q 'no files to check' "$LOG" 2>/dev/null; then
     echo "No C/C++ files under src/ changed, so there was nothing to analyse."
+  # A successful run that leaves no findings file analysed nothing: every
+  # changed file is missing from the compile database (listed below).
+  elif [[ ! -f "$FINDINGS" && -s "$NOT_ANALYSED" && "${STATUS:-1}" -eq 0 ]]; then
+    echo "Nothing was analysed: none of the changed files is in the compile database."
   elif [[ ! -f "$FINDINGS" ]]; then
     echo ":warning: clang-tidy did not complete, so nothing was analysed."
     echo "See the \`Run clang-tidy\` step log for the error."
