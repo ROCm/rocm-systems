@@ -1,0 +1,1 @@
+* Fixed missing, duplicate or out-of-bounds collective latency reporting when local rank counts differ from eight or HIP device IDs differ from local ranks. The exchange buffer uses the actual local rank count, and periodic reports and the final flush come from local rank 0 on each node.
