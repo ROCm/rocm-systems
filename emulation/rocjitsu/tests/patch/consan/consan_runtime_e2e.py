@@ -16,6 +16,8 @@ import sys
 import tempfile
 import time
 
+from group_flat_width_oracle import FLAT_WIDTH_CASES, assert_flat_width_observations
+
 # Row publication flags from the shared ConSan wire contract.
 ROW_ENTERED = 1
 ROW_EXITED = 2
@@ -85,6 +87,7 @@ CASES = (
         f'flat_store_{scenario}'
         for scenario in ('overlap', 'adjacent', 'ordered', 'tail')
     ),
+    *FLAT_WIDTH_CASES,
     'wide_u8',
     'wide_i8_alias_high',
     'wide_d16_u8',
@@ -372,7 +375,11 @@ class Driver:
         if fixture_name.startswith('atomic_'):
             mode = fixture_name if fixture_name.endswith('_count') else 'defined'
         if fixture_name.startswith('flat_'):
-            mode = 'defined'
+            mode = (
+                fixture_name
+                if fixture_name in FLAT_WIDTH_CASES and fixture_name.endswith('_values')
+                else 'defined'
+            )
         if wide:
             mode = (
                 'wide_b128'
@@ -827,6 +834,11 @@ class Driver:
             )
 
     def assert_observations(self, decoded, fixture):
+        if fixture in FLAT_WIDTH_CASES:
+            assert_flat_width_observations(
+                decoded, fixture, self.args.wave_size, ROW_ENTERED | ROW_EXITED
+            )
+            return
         if fixture.startswith('flat_'):
             self.assert_flat_observations(decoded, fixture)
             return

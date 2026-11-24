@@ -940,6 +940,8 @@ TEST_F(ConSanContract, GroupFlatOriginSurvivesRoundTripOnlyInItsProvenProfile) {
   site.origin = static_cast<AccessOrigin>(2);
   EXPECT_TRUE(validate_manifest(manifest).failed());
   site.origin = AccessOrigin::GroupFlat;
+  site.width = 2;
+  EXPECT_TRUE(validate_manifest(manifest).succeeded());
   site.width = 8;
   EXPECT_TRUE(validate_manifest(manifest).failed());
   site.width = 4;

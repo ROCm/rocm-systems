@@ -219,6 +219,13 @@ foreach(
             flat-load-unknownstrict
             flat-load-nongroupstrict
         )
+        foreach(_scenario IN ITEMS values overlap adjacent)
+            set(_name flat-half-${_scenario})
+            string(TOUPPER "${_scenario}" _scenario_define)
+            list(APPEND _flat_specs "${_name}:16:0:0:0:0")
+            set(_flat_options_${_name} -DFLAT_${_scenario_define}=1)
+            list(APPEND _flat_cases_${_gpu}_${_wave_size} ${_name})
+        endforeach()
         set(_atomic_specs)
         set(_atomic_forms u32 u64 f32 cas)
         if(_legacy OR _gpu STREQUAL "gfx1250")
@@ -398,6 +405,9 @@ foreach(
             if(_name MATCHES "^flat-")
                 set(_fixture_source fixtures/group_flat.s)
                 set(_fixture_deps)
+                if(_width EQUAL 16)
+                    set(_fixture_source fixtures/group_flat_half.s)
+                endif()
             else()
                 set(_fixture_source fixtures/native_widths.s)
                 set(_fixture_deps

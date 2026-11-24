@@ -218,18 +218,31 @@ std::optional<RegisterRef> allocated_vgpr_tuple(const Operand *operand, uint32_t
   return reg;
 }
 
-bool is_flat_b32(const Instruction &instruction) {
+uint32_t group_flat_width(const Instruction &instruction) {
   if (instruction.amdgpu_memory_addressing() != amdgpu::MemoryAddressing::Flat)
-    return false;
+    return 0;
   using Op = amdgpu::Operation;
   switch (instruction.amdgpu_operation()) {
+  case Op::FLAT_LOAD_USHORT:
+  case Op::FLAT_LOAD_U16:
+  case Op::FLAT_LOAD_SSHORT:
+  case Op::FLAT_LOAD_I16:
+  case Op::FLAT_LOAD_SHORT_D16:
+  case Op::FLAT_LOAD_D16_B16:
+  case Op::FLAT_LOAD_SHORT_D16_HI:
+  case Op::FLAT_LOAD_D16_HI_B16:
+  case Op::FLAT_STORE_SHORT:
+  case Op::FLAT_STORE_B16:
+  case Op::FLAT_STORE_SHORT_D16_HI:
+  case Op::FLAT_STORE_D16_HI_B16:
+    return 2;
   case Op::FLAT_LOAD_B32:
   case Op::FLAT_LOAD_DWORD:
   case Op::FLAT_STORE_B32:
   case Op::FLAT_STORE_DWORD:
-    return true;
+    return 4;
   default:
-    return false;
+    return 0;
   }
 }
 
@@ -324,7 +337,7 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
       (!uses_split_workgroup_barrier(arch) && operation == amdgpu::Operation::S_BARRIER)) {
     return Result::success(); // The complete original group/CFG is qualified below.
   }
-  if (is_flat_b32(instruction)) {
+  if (const uint32_t flat_width = group_flat_width(instruction)) {
     const bool rdna = arch == IsaFamily::Rdna3;
     const bool wide = arch == IsaFamily::Rdna4 || arch == IsaFamily::Cdna5;
     const bool read = instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Load;
@@ -383,7 +396,7 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
                         .address_vgpr = address->index,
                         .immediate_bytes = immediate,
                         .guest_size = static_cast<uint32_t>(instruction.size()),
-                        .width = 4,
+                        .width = flat_width,
                         .origin = AccessOrigin::GroupFlat,
                         .assumption = assumption});
     return Result::success();
@@ -666,7 +679,7 @@ Result validate_lds_race_accesses(const InputProgram &program, const Manifest &m
           operation == amdgpu::Operation::S_BARRIER_WAIT) {
         barrier_offsets.insert(instruction.src_loc());
       }
-      if (native_lds_form(instruction).width != 0 || is_flat_b32(instruction)) {
+      if (native_lds_form(instruction).width != 0 || group_flat_width(instruction) != 0) {
         access_offsets.insert(instruction.src_loc());
       }
     }
