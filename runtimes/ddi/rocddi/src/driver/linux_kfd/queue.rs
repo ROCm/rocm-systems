@@ -2190,16 +2190,16 @@ impl KfdQueue {
         let id = self
             .id
             .ok_or_else(|| error(ErrorKind::Unsupported, "queue has no native identifier"))?;
-        self.vm
-            .kfd()
-            .update_queue(&mut uapi::UpdateQueue {
-                ring_address: 0,
-                queue_id: id,
-                ring_size: 0,
-                percentage: 0,
-                priority: self.priority,
-            })
-            .map_err(|source| native_error("AMDKFD_IOC_UPDATE_QUEUE", source))?;
+        if let Err(source) = self.vm.kfd().update_queue(&mut uapi::UpdateQueue {
+            ring_address: 0,
+            queue_id: id,
+            ring_size: 0,
+            percentage: 0,
+            priority: self.priority,
+        }) {
+            self.vm.diagnose_queue_update_failure(id, &source);
+            return Err(native_error("AMDKFD_IOC_UPDATE_QUEUE", source));
+        }
         self.active = false;
         Ok(())
     }

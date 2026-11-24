@@ -408,6 +408,8 @@ struct State {
     svm_context: Option<(u64, u64)>,
     updates: Vec<uapi::UpdateQueue>,
     update_errno: VecDeque<Option<i32>>,
+    /// Optional native operation order for the cleanup-order test.
+    native_calls: Option<Vec<(&'static str, u64)>>,
     cu_masks: Vec<(uapi::SetCuMask, Vec<u32>)>,
 }
 
@@ -439,6 +441,16 @@ impl Fixture {
             endpoint,
             Arc::new(move |call| {
                 let mut state = observed.lock().unwrap();
+                if let Some(calls) = state.native_calls.as_mut() {
+                    calls.push(match &*call {
+                        connection::Call::Wait(_, event) => ("wait", u64::from(event.event_id)),
+                        connection::Call::UpdateQueue(_) => ("update", 0),
+                        connection::Call::DestroyQueue(_) => ("destroy", 0),
+                        connection::Call::Unmap(_, _) => ("unmap", 0),
+                        connection::Call::Free(_) => ("free", 0),
+                        _ => ("other", 0),
+                    });
+                }
                 match call {
                     connection::Call::Wait(args, event) if event.event_id == 19 => {
                         if state.lost {
@@ -1489,6 +1501,148 @@ fn queue_control_updates_forward_the_native_records() {
         assert_eq!(state.cu_masks[0].1, mask);
     }
 
+    queue.destroy().unwrap();
+    fixture.assert_released();
+}
+
+fn inactivation_diagnostic_flag_cases() {
+    for value in [None, Some("0"), Some("true"), Some("1")] {
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+                .arg("--exact")
+                .arg("driver::linux_kfd::queue::tests::inactivation_diagnostics_preserve_native_error_state_and_cleanup_order")
+                .arg("--nocapture")
+                .env("ROCDDI_TEST_INACTIVATION_DIAGNOSTIC_CHILD", "1")
+                .env_remove("ROCDDI_CODE_CACHE_DIAGNOSTICS");
+        if let Some(value) = value {
+            command.env("ROCDDI_CODE_CACHE_DIAGNOSTICS", value);
+        }
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let text = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(
+            text.matches("boundary=UPDATE_QUEUE-error").count(),
+            usize::from(value == Some("1"))
+        );
+    }
+}
+
+#[test]
+fn inactivation_diagnostics_preserve_native_error_state_and_cleanup_order() {
+    if std::env::var_os("ROCDDI_TEST_INACTIVATION_DIAGNOSTIC_CHILD").is_none() {
+        inactivation_diagnostic_flag_cases();
+        return;
+    }
+
+    let fixture = Fixture::new(true);
+    let mut queue = fixture.create(descriptor(QueueParameters::Sdma)).unwrap();
+    {
+        let mut state = fixture.state.lock().unwrap();
+        state.native_calls = Some(Vec::new());
+        state.update_errno.push_back(Some(13));
+    }
+    let failure = queue.inactivate().unwrap_err();
+    match failure {
+        Error::NativeOperation {
+            kind,
+            operation,
+            source,
+        } => {
+            assert_eq!(kind, ErrorKind::PermissionDenied);
+            assert_eq!(operation, "AMDKFD_IOC_UPDATE_QUEUE");
+            assert_eq!(source.raw_os_error(), Some(13));
+            assert_eq!(source.kind(), io::ErrorKind::PermissionDenied);
+        }
+        other => panic!("UPDATE failure changed identity: {other:?}"),
+    }
+    assert!(queue.active);
+    assert!(!queue.destroying);
+    assert!(!queue.uncertain);
+    assert_eq!(queue.id, Some(0));
+    {
+        let mut state = fixture.state.lock().unwrap();
+        let expected = if std::env::var_os("ROCDDI_CODE_CACHE_DIAGNOSTICS")
+            .is_some_and(|value| value == "1")
+        {
+            vec![("update", 0), ("wait", 20), ("wait", 19)]
+        } else {
+            vec![("update", 0)]
+        };
+        assert_eq!(state.native_calls, Some(expected));
+        assert_eq!(state.destroys, 0);
+        assert_eq!(state.frees, 0);
+        state.native_calls.as_mut().unwrap().clear();
+    }
+    fixture
+        .state
+        .lock()
+        .unwrap()
+        .native_calls
+        .as_mut()
+        .unwrap()
+        .clear();
+    queue
+        .destroy_with_retained_transport(&mut || {
+            let mut state = fixture.state.lock().unwrap();
+            assert_eq!(state.destroys, 1);
+            assert_eq!(state.frees, 0);
+            state.native_calls.as_mut().unwrap().push(("retired", 0));
+        })
+        .unwrap();
+    {
+        let state = fixture.state.lock().unwrap();
+        let calls = state.native_calls.as_ref().unwrap();
+        assert_eq!(
+            &calls[..4],
+            &[("wait", 19), ("wait", 20), ("destroy", 0), ("retired", 0)]
+        );
+        assert_eq!(
+            calls.iter().filter(|(name, _)| *name == "destroy").count(),
+            1
+        );
+        assert!(
+            calls[4..]
+                .iter()
+                .all(|(name, _)| matches!(*name, "unmap" | "free"))
+        );
+    }
+    fixture.assert_released();
+
+    // Success never samples diagnostic state and repeated inactivation is inert.
+    let fixture = Fixture::new(true);
+    let mut queue = fixture.create(descriptor(QueueParameters::Sdma)).unwrap();
+    fixture.state.lock().unwrap().native_calls = Some(Vec::new());
+    queue.inactivate().unwrap();
+    queue.inactivate().unwrap();
+    assert!(!queue.active);
+    assert_eq!(
+        fixture.state.lock().unwrap().native_calls,
+        Some(vec![("update", 0)])
+    );
+    queue.destroy().unwrap();
+    fixture.assert_released();
+}
+
+#[test]
+fn inactivation_checks_process_before_native_update() {
+    let fixture = Fixture::new(true);
+    let mut queue = fixture.create(descriptor(QueueParameters::Sdma)).unwrap();
+    let original_vm = queue.vm.clone();
+    let foreign = shared(connection::Kfd::new(
+        File::open("/dev/null").unwrap(),
+        crate::os::ProcessIdentity::with_pid_for_test(std::process::id().wrapping_add(1)),
+    ));
+    queue.vm = memory::queue_fixture(foreign, backing_file(), native_node());
+    assert!(matches!(
+        queue.inactivate(),
+        Err(Error::NativeOperation {
+            operation: "KFD queue inactivation",
+            ..
+        })
+    ));
+    assert!(fixture.state.lock().unwrap().updates.is_empty());
+    assert!(queue.active);
+    queue.vm = original_vm;
     queue.destroy().unwrap();
     fixture.assert_released();
 }

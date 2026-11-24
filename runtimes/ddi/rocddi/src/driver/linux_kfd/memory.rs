@@ -24,6 +24,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
+mod diagnostics;
 mod host_alias;
 mod scratch;
 pub(super) use host_alias::KfdHostAlias;

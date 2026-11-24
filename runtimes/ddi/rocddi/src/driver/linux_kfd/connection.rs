@@ -981,6 +981,13 @@ impl Kfd {
         }
     }
 
+    /// Copies a persistent manual-reset event's native words without decoding
+    /// or resetting it. The event owner serializes this read with observation.
+    pub(super) fn exception_payload(&self, event_id: u32) -> io::Result<Option<[u64; 4]>> {
+        self.poll_exception(event_id)
+            .map(|event| event.map(|event| event.payload))
+    }
+
     pub(super) fn hardware_exception(
         &self,
         event_id: u32,
