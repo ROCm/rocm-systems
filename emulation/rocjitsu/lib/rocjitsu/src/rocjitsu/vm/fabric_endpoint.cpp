@@ -50,7 +50,7 @@ public:
   bool write = false;
   bool local = false;
   TraceOrigin trace_origin{};
-  FabricBacking backing;
+  amdgpu::GpuBackingRange backing;
   std::shared_ptr<amdgpu::VmTransferEffectGate> effect_gate;
   EffectAdmission admit_effect;
   PreEffectAdmission admit_pre_effect;
@@ -462,7 +462,7 @@ void FabricEndpoint::shutdown() {
 }
 
 FabricEndpoint::PreparedTransfer FabricEndpoint::prepare_read(
-    uint32_t requester_gpu_id, uint32_t owner_gpu_id, FabricBacking backing,
+    uint32_t requester_gpu_id, uint32_t owner_gpu_id, amdgpu::GpuBackingRange backing,
     std::shared_ptr<amdgpu::VmTransferEffectGate> effect_gate, EffectAdmission admit_effect,
     PreEffectAdmission admit_pre_effect, TraceOrigin trace_origin) {
   return prepare(requester_gpu_id, owner_gpu_id, std::move(backing), {}, false, false,
@@ -471,7 +471,7 @@ FabricEndpoint::PreparedTransfer FabricEndpoint::prepare_read(
 }
 
 FabricEndpoint::PreparedTransfer FabricEndpoint::prepare_write(
-    uint32_t requester_gpu_id, uint32_t owner_gpu_id, FabricBacking backing,
+    uint32_t requester_gpu_id, uint32_t owner_gpu_id, amdgpu::GpuBackingRange backing,
     std::span<const std::byte> bytes, std::shared_ptr<amdgpu::VmTransferEffectGate> effect_gate,
     EffectAdmission admit_effect, PreEffectAdmission admit_pre_effect, TraceOrigin trace_origin) {
   return prepare(requester_gpu_id, owner_gpu_id, std::move(backing), bytes, true, false,
@@ -480,7 +480,7 @@ FabricEndpoint::PreparedTransfer FabricEndpoint::prepare_write(
 }
 
 FabricEndpoint::PreparedTransfer FabricEndpoint::prepare_local_write(
-    uint32_t owner_gpu_id, FabricBacking backing, std::span<const std::byte> bytes,
+    uint32_t owner_gpu_id, amdgpu::GpuBackingRange backing, std::span<const std::byte> bytes,
     std::shared_ptr<amdgpu::VmTransferEffectGate> effect_gate, EffectAdmission admit_effect) {
   return prepare(owner_gpu_id, owner_gpu_id, std::move(backing), bytes, true, true,
                  std::move(effect_gate), std::move(admit_effect), {}, {});
@@ -505,19 +505,19 @@ bool FabricEndpoint::can_route(uint32_t requester_gpu_id, uint32_t owner_gpu_id)
   return found;
 }
 
-FabricEndpoint::PreparedTransfer
-FabricEndpoint::prepare(uint32_t requester_gpu_id, uint32_t owner_gpu_id, FabricBacking backing,
-                        std::span<const std::byte> bytes, bool write, bool local,
-                        std::shared_ptr<amdgpu::VmTransferEffectGate> effect_gate,
-                        EffectAdmission admit_effect, PreEffectAdmission admit_pre_effect,
-                        TraceOrigin trace_origin) {
-  if (!backing || !effect_gate || (local && (owner_gpu_id == 0 || !admit_effect)) ||
-      backing.owner_gpu_id() != owner_gpu_id ||
+FabricEndpoint::PreparedTransfer FabricEndpoint::prepare(
+    uint32_t requester_gpu_id, uint32_t owner_gpu_id, amdgpu::GpuBackingRange backing,
+    std::span<const std::byte> bytes, bool write, bool local,
+    std::shared_ptr<amdgpu::VmTransferEffectGate> effect_gate, EffectAdmission admit_effect,
+    PreEffectAdmission admit_pre_effect, TraceOrigin trace_origin) {
+  if (!backing.storage || !effect_gate || (local && (owner_gpu_id == 0 || !admit_effect)) ||
+      backing.owner_gpu_id != owner_gpu_id ||
       (local ? (requester_gpu_id != owner_gpu_id || !write) : requester_gpu_id == owner_gpu_id)) {
     return {};
   }
-  if (backing.extent() == 0 || backing.extent() > std::numeric_limits<uint32_t>::max() ||
-      (write && bytes.size() != backing.extent())) {
+  if (backing.storage.extent() == 0 ||
+      backing.storage.extent() > std::numeric_limits<uint32_t>::max() ||
+      (write && bytes.size() != backing.storage.extent())) {
     return {.outcome = VmAccessOutcome::Malformed, .operation = {}};
   }
 
@@ -562,7 +562,7 @@ FabricEndpoint::prepare(uint32_t requester_gpu_id, uint32_t owner_gpu_id, Fabric
   if (write) {
     request->payload.assign(bytes.begin(), bytes.end());
   } else {
-    request->effect_response.resize(request->backing.extent());
+    request->effect_response.resize(request->backing.storage.extent());
   }
   {
     std::lock_guard lock(state_->mutex);
@@ -906,7 +906,7 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
       amdgpu::DeviceCacheDomain owner_domain;
       std::span<const amdgpu::DeviceCacheDomain> effect_domains = prepared_domains_;
       if (prepared_domains_.size() == 1 && prepared_domains_[0].gpu_id == 0) {
-        owner_domain = {prepared_domains_[0].coherence, request->backing.owner_gpu_id()};
+        owner_domain = {prepared_domains_[0].coherence, request->backing.owner_gpu_id};
         effect_domains = {&owner_domain, 1};
       }
       if (!effect_authority.cache_aliases.empty()) {
@@ -979,16 +979,17 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
                                                     std::memory_order_acq_rel)) {
           return;
         }
-        const bool complete = request->write ? request->backing.write(request->payload)
-                                             : request->backing.read(request->effect_response);
+        const bool complete = request->write
+                                  ? request->backing.storage.write(request->payload)
+                                  : request->backing.storage.read(request->effect_response);
         if (complete) {
           if (request->write) {
-            writer.advance(request->backing.backing_id(), request->backing.offset(),
-                           request->backing.extent());
+            writer.advance(request->backing.storage.backing_id(), request->backing.storage.offset(),
+                           request->backing.storage.extent());
           } else {
             request->read_stamp = line_freshness_.capture_read_under_writer(
-                writer, request->backing.backing_id(), request->backing.offset(),
-                request->backing.extent());
+                writer, request->backing.storage.backing_id(), request->backing.storage.offset(),
+                request->backing.storage.extent());
           }
         }
         writer = {};
@@ -1005,14 +1006,14 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
                 state_->diagnostics.directed_effects[request->route_index * 2 + direction];
             ++(request->write ? directed.writes : directed.reads);
             (request->write ? directed.write_bytes : directed.read_bytes) +=
-                request->backing.extent();
+                request->backing.storage.extent();
             if (state_->effect_trace_capacity != 0) {
               auto &trace = state_->diagnostics.committed_effects;
               if (trace.size() < state_->effect_trace_capacity) {
                 trace.push_back({.request_id = request->id,
-                                 .backing_id = request->backing.backing_id(),
-                                 .backing_offset = request->backing.offset(),
-                                 .bytes = request->backing.extent(),
+                                 .backing_id = request->backing.storage.backing_id(),
+                                 .backing_offset = request->backing.storage.offset(),
+                                 .bytes = request->backing.storage.extent(),
                                  .requester_gpu_id = directed.requester_gpu_id,
                                  .owner_gpu_id = directed.owner_gpu_id,
                                  .write = request->write,

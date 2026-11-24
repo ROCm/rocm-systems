@@ -989,7 +989,7 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
   struct WriteOp {
     const uint8_t *source;
     std::byte *direct_destination;
-    FabricBacking fallible_destination;
+    simdojo::RetainedBackingRange fallible_destination;
     uint32_t size;
     L2Cache *l2;
     uint64_t address;
@@ -1307,7 +1307,7 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
                                             uint32_t begin, uint32_t size) -> util::Result {
       const uint64_t address = line.snapshot->address + begin;
       std::byte *destination = nullptr;
-      FabricBacking fallible;
+      simdojo::RetainedBackingRange fallible;
       if (!backing.direct_bytes.empty()) {
         destination = backing.direct_bytes.data() + begin;
       } else {

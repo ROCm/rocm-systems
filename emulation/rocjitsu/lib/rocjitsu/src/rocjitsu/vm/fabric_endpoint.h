@@ -8,9 +8,9 @@
 
 #include "rocjitsu/config/system_graph.h"
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
+#include "rocjitsu/vm/amdgpu/gpu_backing_range.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/canonical_line_freshness.h"
-#include "rocjitsu/vm/fabric_backing.h"
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
@@ -63,7 +63,7 @@ public:
   /// The request reservation survives a temporarily unavailable admission and
   /// is released after the terminal target handler has finished its effect.
   using EffectAdmission = std::function<EffectAuthority(
-      const FabricBacking &, bool, amdgpu::MemoryIngressPermit &request_reservation)>;
+      const amdgpu::GpuBackingRange &, bool, amdgpu::MemoryIngressPermit &request_reservation)>;
 
   /// @brief Admit one target-handler attempt before it enters the owner effect.
   /// @details A successful permit spans validation, backing access, and handler
@@ -156,12 +156,12 @@ public:
   /// VmTransferToken by a later translator. A missing/forbidden route returns
   /// Faulted, never an empty optional that permits direct backing fallback.
   [[nodiscard]] PreparedTransfer
-  prepare_read(uint32_t requester_gpu_id, uint32_t owner_gpu_id, FabricBacking backing,
+  prepare_read(uint32_t requester_gpu_id, uint32_t owner_gpu_id, amdgpu::GpuBackingRange backing,
                std::shared_ptr<amdgpu::VmTransferEffectGate> effect_gate,
                EffectAdmission admit_effect = {}, PreEffectAdmission admit_pre_effect = {},
                TraceOrigin trace_origin = {});
   [[nodiscard]] PreparedTransfer
-  prepare_write(uint32_t requester_gpu_id, uint32_t owner_gpu_id, FabricBacking backing,
+  prepare_write(uint32_t requester_gpu_id, uint32_t owner_gpu_id, amdgpu::GpuBackingRange backing,
                 std::span<const std::byte> bytes,
                 std::shared_ptr<amdgpu::VmTransferEffectGate> effect_gate,
                 EffectAdmission admit_effect = {}, PreEffectAdmission admit_pre_effect = {},
@@ -171,7 +171,7 @@ public:
   /// callback is required. No route or link is needed; the owner inbox invokes
   /// the target handler directly.
   [[nodiscard]] PreparedTransfer prepare_local_write(
-      uint32_t owner_gpu_id, FabricBacking backing, std::span<const std::byte> bytes,
+      uint32_t owner_gpu_id, amdgpu::GpuBackingRange backing, std::span<const std::byte> bytes,
       std::shared_ptr<amdgpu::VmTransferEffectGate> effect_gate, EffectAdmission admit_effect);
 
   /// @brief True only for one validated local route between these GPUs.
@@ -211,7 +211,7 @@ private:
   class Operation;
 
   [[nodiscard]] PreparedTransfer
-  prepare(uint32_t requester_gpu_id, uint32_t owner_gpu_id, FabricBacking backing,
+  prepare(uint32_t requester_gpu_id, uint32_t owner_gpu_id, amdgpu::GpuBackingRange backing,
           std::span<const std::byte> bytes, bool write, bool local,
           std::shared_ptr<amdgpu::VmTransferEffectGate> effect_gate, EffectAdmission admit_effect,
           PreEffectAdmission admit_pre_effect, TraceOrigin trace_origin);

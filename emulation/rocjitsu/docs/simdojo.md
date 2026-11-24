@@ -27,6 +27,7 @@ event loop via the `Functional<Base>` CRTP mixin.
 | `components/memory_interface.h` | MemoryInterface - abstract byte-addressed memory controller |
 | `components/cache.h` | `Cache<NumSets, Assoc, LineSizeBits>` - set-associative cache template |
 | `components/sparse_memory.h` | SparseMemory - page-allocated flat address space |
+| `components/retained_backing_range.h` | RetainedBackingRange - a bounded view that keeps existing storage alive |
 | `components/register_file.h` | RegisterFile - typed register storage with read/write interface |
 | `components/vector_reg.h` | `VectorReg<N, T>` - SIMD-width vector register type |
 | *(uses `util/debug_print.h`)* | Conditional debug output (`util::debug` namespace) |
@@ -201,9 +202,18 @@ controllers, scratchpad memories) implement this interface. Backing stores
 number of sets, associativity, and line size. Provides `lookup()`, `fill()`,
 and `flush()`. Used as a backing store inside cache controllers.
 
-**SparseMemory** (`sparse_memory.h`) is a page-allocated flat address space
-that allocates pages on first access. Used as backing storage for memory
-controllers.
+**SparseMemory** (`sparse_memory.h`) owns the pages of a simulated address
+space. An unwritten address reads as zero. Writes and explicit reservations
+allocate 4 KiB pages. AMDGPU `GpuMemory` and RISC-V `Memory` use it for their
+modeled physical memory.
+
+**RetainedBackingRange** (`retained_backing_range.h`) is a view that a request can
+carry after address translation. It holds a shared owner, a byte offset in
+that owner's storage, and a length. Subranges keep the owner alive and must
+fit inside the original request. Mapped ranges read and write the original
+bytes directly. The optional `BackingRangeAccess` interface lets an owner supply
+byte-access methods. For example, the peer-fabric coherence tests use it to
+read and write a bounded region of an existing `GpuMemory`.
 
 **RegisterFile** (`register_file.h`) provides typed register storage with
 indexed read/write access. **VectorReg** (`vector_reg.h`) models a

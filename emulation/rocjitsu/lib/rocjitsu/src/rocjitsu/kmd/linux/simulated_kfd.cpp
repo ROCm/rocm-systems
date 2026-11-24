@@ -24,9 +24,8 @@
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
 #include "rocjitsu/vm/amdgpu/sdma_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "rocjitsu/vm/canonical_backing_id.h"
-#include "rocjitsu/vm/fabric_backing_kfd.h"
 #include "rocjitsu/vm/fabric_endpoint.h"
+#include "simdojo/components/backing_store_id.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -1310,7 +1309,7 @@ KfdProcess::KfdProcess(uint32_t process_id, uint32_t num_gpus)
 
 KfdProcess::GpuBacking::GpuBacking(size_t size, uint32_t gpu_id, bool controlled_peer_for_testing)
     : size_(size), gpu_id_(gpu_id), controlled_peer_for_testing_(controlled_peer_for_testing),
-      backing_id_(allocate_canonical_backing_id()) {}
+      backing_id_(simdojo::allocate_backing_store_id()) {}
 
 KfdProcess::GpuBacking::~GpuBacking() {
   if (mapping_) {
@@ -1673,7 +1672,7 @@ SimulatedKfd::scoped_canonical_alias(const KfdProcess &proc,
 }
 
 std::optional<SimulatedKfd::LivePeerAliasSelection> SimulatedKfd::try_select_live_peer_aliases(
-    const KfdProcess::GpuAliasRecord &requester, const FabricBacking &backing,
+    const KfdProcess::GpuAliasRecord &requester, const simdojo::RetainedBackingRange &backing,
     amdgpu::MemoryIngressPermit driver_pin, bool allow_cacheable_aliases, bool &busy) {
   busy = false;
   constexpr uint64_t kLineBytes = amdgpu::L2Cache::LINE_SIZE;
@@ -2720,7 +2719,7 @@ amdgpu::PreparedCanonicalWriteback SimulatedKfd::prepare_gpu_alias_writeback(
         granted.backing.size() != binding.span.size) {
       return PreparedCanonicalWriteback(VmAccessOutcome::Unavailable);
     }
-    FabricBacking backing = make_fabric_backing(granted.backing);
+    auto backing = granted.backing.retain_backing_range().storage;
     if (!backing || backing.backing_id() != binding.alias.backing_id ||
         backing.offset() != backing_offset || backing.extent() != binding.span.size) {
       return PreparedCanonicalWriteback(VmAccessOutcome::Unavailable);
@@ -3971,25 +3970,26 @@ bool SimulatedKfd::register_process_address_spaces(const std::shared_ptr<KfdProc
              return {};
            }
            FabricEndpoint *const selected_endpoint = endpoint->endpoint;
-           FabricBacking backing = make_fabric_backing(std::move(granted.backing));
+           auto backing = granted.backing.retain_backing_range();
            const bool cacheable_peer = admission.cacheable;
            FabricEndpoint::EffectAdmission admit_effect =
                [proc, gpu_id, address, size, alias, endpoint_access, selected_endpoint,
                 effect_access, peer_alias_ingress, peer_line_gate,
                 address_space = std::move(address_space), execution = executing_access,
                 cacheable_peer, local_write,
-                gate](const FabricBacking &effect_backing, bool effect_write,
+                gate](const amdgpu::GpuBackingRange &effect_backing, bool effect_write,
                       amdgpu::MemoryIngressPermit &request_reservation)
                -> FabricEndpoint::EffectAuthority {
              FabricEndpoint::EffectAuthority result;
              result.outcome = amdgpu::VmAccessOutcome::Revoked;
              if (execution.revoked() || execution.cache_identity() == 0 ||
-                 execution.retain_effect_gate() != gate || !effect_backing ||
-                 effect_backing.backing_id() != alias.backing_id ||
-                 (local_write ? effect_backing.owner_gpu_id() != gpu_id
-                              : effect_backing.owner_gpu_id() == gpu_id) ||
-                 effect_backing.offset() != alias.backing_offset + (address - alias.gpu_va) ||
-                 effect_backing.extent() != size || (local_write && !effect_write)) {
+                 execution.retain_effect_gate() != gate || !effect_backing.storage ||
+                 effect_backing.storage.backing_id() != alias.backing_id ||
+                 (local_write ? effect_backing.owner_gpu_id != gpu_id
+                              : effect_backing.owner_gpu_id == gpu_id) ||
+                 effect_backing.storage.offset() !=
+                     alias.backing_offset + (address - alias.gpu_va) ||
+                 effect_backing.storage.extent() != size || (local_write && !effect_write)) {
                return result;
              }
              const auto requester_current = [&] {
@@ -4008,10 +4008,10 @@ bool SimulatedKfd::register_process_address_spaces(const std::shared_ptr<KfdProc
                                  : grant.first_peer_candidate) ||
                    (!local_write && grant.mixed_peer_owners) ||
                    grant.domain != KfdProcess::GpuGrantDomain::Vram ||
-                   grant.owner_gpu_id != effect_backing.owner_gpu_id() ||
+                   grant.owner_gpu_id != effect_backing.owner_gpu_id ||
                    grant.first_extent_bytes < size || grant.cacheable != cacheable_peer ||
                    !current.backing || current.backing.backing_id() != alias.backing_id ||
-                   current.backing.file_offset() != effect_backing.offset() ||
+                   current.backing.file_offset() != effect_backing.storage.offset() ||
                    current.backing.size() != size ||
                    (local_write && (!current.backing.controlled_peer_for_testing() ||
                                     size > amdgpu::L2Cache::LINE_SIZE -
@@ -4030,7 +4030,7 @@ bool SimulatedKfd::register_process_address_spaces(const std::shared_ptr<KfdProc
                std::lock_guard route_lock(live_endpoint->mutex);
                return live_endpoint->endpoint == selected_endpoint &&
                       (local_write ||
-                       selected_endpoint->can_route(gpu_id, effect_backing.owner_gpu_id()));
+                       selected_endpoint->can_route(gpu_id, effect_backing.owner_gpu_id));
              };
 
              const std::shared_ptr<CuIngressAccess> live_access = effect_access.lock();
@@ -4059,7 +4059,8 @@ bool SimulatedKfd::register_process_address_spaces(const std::shared_ptr<KfdProc
                  return result;
                }
                std::optional<amdgpu::MemoryIngressPermit> reservation = peer_line_gate->try_acquire(
-                   effect_backing.backing_id(), effect_backing.offset(), effect_backing.extent());
+                   effect_backing.storage.backing_id(), effect_backing.storage.offset(),
+                   effect_backing.storage.extent());
                if (!reservation) {
                  result.outcome = amdgpu::VmAccessOutcome::Unavailable;
                  return result;
@@ -4069,8 +4070,8 @@ bool SimulatedKfd::register_process_address_spaces(const std::shared_ptr<KfdProc
 
              bool selection_busy = false;
              std::optional<LivePeerAliasSelection> selected = driver->try_select_live_peer_aliases(
-                 alias, effect_backing, std::move(driver_pin), cacheable_peer || effect_write,
-                 selection_busy);
+                 alias, effect_backing.storage, std::move(driver_pin),
+                 cacheable_peer || effect_write, selection_busy);
              if (selected) {
                const bool requester_scope_current = std::ranges::any_of(
                    selected->scopes, [&](const amdgpu::DeviceCacheAliasScope &scope) {

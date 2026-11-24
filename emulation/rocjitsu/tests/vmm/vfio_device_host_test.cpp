@@ -19,7 +19,6 @@
 #include "rocjitsu/vm/amdgpu/pci/register_symbols.h"
 #include "rocjitsu/vm/amdgpu/pci/scratch_pci_device.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
-#include "rocjitsu/vm/canonical_backing_id.h"
 #include "rocjitsu/vm/fabric_endpoint.h"
 #include "rocjitsu/vm/soc.h"
 #include "rocjitsu/vm/topology_assembly.h"
@@ -27,6 +26,7 @@
 #include "rocjitsu/vmm/vfu/vfio_device_host.h"
 #include "rocjitsu/vmm/vfu/vfio_server.h"
 #include "rocjitsu/vmm/vfu/vfio_target_grants.h"
+#include "simdojo/components/backing_store_id.h"
 #include "util/diagnostic.h"
 #include "vfio_user_client.h"
 
@@ -294,7 +294,7 @@ public:
         ::fcntl(backing_.get(), F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) != 0) {
       return false;
     }
-    backing_id_ = rocjitsu::allocate_canonical_backing_id();
+    backing_id_ = simdojo::allocate_backing_store_id();
     return true;
   }
 
@@ -1135,6 +1135,37 @@ TEST(VfioTargetGrants, ClassifiesOnePeerStepAndRetainsSameIovaTombstone) {
   EXPECT_EQ(replacement.snapshot.backing_offset, read.snapshot.backing_offset);
   EXPECT_EQ(pair.grants().admit_peer(read.snapshot).outcome,
             rocjitsu::amdgpu::VmAccessOutcome::Revoked);
+}
+
+TEST(VfioTargetGrants, RetainedBarSubviewAccessesOnlyItsBytes) {
+  MappedGrantPair pair(/*seal_owner=*/true);
+  ASSERT_TRUE(pair.built());
+  rocjitsu::test::VfioUserClient requester, owner;
+  ASSERT_TRUE(pair.attach(requester, owner));
+  constexpr uint64_t iova = 0x3000'0100;
+  ASSERT_TRUE(requester.dma_map(iova, 16, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
+  const auto session = pair.requester_host().target_session_snapshot();
+  ASSERT_TRUE(session);
+  const auto prepared = pair.grants().prepare_peer(0, session->generation(), iova, 8, true);
+  ASSERT_EQ(prepared.kind, rocjitsu::VfioTargetGrants::PeerKind::Ready);
+  auto admission = pair.grants().admit_peer(prepared.snapshot);
+  ASSERT_EQ(admission.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  const auto range = prepared.snapshot.retain_backing_range().storage;
+  const auto child = range.subview(range.offset() + 2, 4);
+  ASSERT_TRUE(child);
+  std::array<std::byte, 8> expected{};
+  ASSERT_TRUE(range.read(expected));
+  const std::array update{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+  ASSERT_TRUE(child.write(update));
+  std::array<std::byte, 4> readback{};
+  ASSERT_TRUE(child.read(readback));
+  EXPECT_EQ(readback, update);
+  std::copy(update.begin(), update.end(), expected.begin() + 2);
+  std::array<std::byte, 8> actual{};
+  ASSERT_TRUE(range.read(actual));
+  EXPECT_EQ(actual, expected);
+  EXPECT_FALSE(child.subview(range.offset(), 1));
 }
 
 TEST(VfioTargetGrants, RejectsPeerSnapshotWithChangedCanonicalBacking) {

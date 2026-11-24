@@ -38,7 +38,6 @@
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
-#include "rocjitsu/vm/fabric_backing_kfd.h"
 #include "rocjitsu/vm/fabric_endpoint.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/rj_vm.h"
@@ -3610,10 +3609,10 @@ TEST_F(KfdPeerBindingTest, ProductionProviderPublishesTwoDirtyPeerRunsBeforeFabr
                                                            process_id_, kSecondDirtyOffset));
   const uint64_t epoch = machine_->soc(0)->cache_coherence()->current_epoch();
 
-  auto effect_backing = rocjitsu::make_fabric_backing(
+  auto effect_backing =
       process->gpu_peer_backing_grant(kRequester, allocation.va_addr + kFirstDirtyOffset, 1)
-          .backing);
-  ASSERT_TRUE(effect_backing);
+          .backing.retain_backing_range();
+  ASSERT_TRUE(effect_backing.storage);
   auto read = machine_->fabric_endpoint()->prepare_read(
       kRequester, kOwner, std::move(effect_backing), access->retain_effect_gate());
   ASSERT_TRUE(read);
@@ -7870,12 +7869,12 @@ TEST_F(KfdTwoRequesterBindingTest, CanonicalAliasSnapshotFollowsGpuGrantsAndBack
   ASSERT_TRUE(second_import);
   EXPECT_EQ(second_import->backing_id, owner_alias->backing_id);
   EXPECT_NE(second_import->admission_generation, imported_alias->admission_generation);
-  const auto first_view = rocjitsu::make_fabric_backing(
-      process->gpu_peer_backing_grant(kOwner, first.va_addr, 1).backing);
-  const auto imported_view = rocjitsu::make_fabric_backing(
-      importer->gpu_peer_backing_grant(kOwner, imported.va_addr, 1).backing);
-  EXPECT_EQ(first_view.backing_id(), owner_alias->backing_id);
-  EXPECT_EQ(imported_view.backing_id(), owner_alias->backing_id);
+  const auto first_view =
+      process->gpu_peer_backing_grant(kOwner, first.va_addr, 1).backing.retain_backing_range();
+  const auto imported_view =
+      importer->gpu_peer_backing_grant(kOwner, imported.va_addr, 1).backing.retain_backing_range();
+  EXPECT_EQ(first_view.storage.backing_id(), owner_alias->backing_id);
+  EXPECT_EQ(imported_view.storage.backing_id(), owner_alias->backing_id);
 
   ASSERT_EQ(map_gpu(process_id_, first.handle, kFirstRequester), 0);
   ASSERT_EQ(map_gpu(process_id_, first.handle, kSecondRequester), 0);

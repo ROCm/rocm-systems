@@ -3,18 +3,19 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/prepared_canonical_writeback.h"
-#include "rocjitsu/vm/fabric_backing_kfd.h"
 #include "rocjitsu/vm/fabric_endpoint.h"
 #include "rocjitsu/vm/topology_assembly.h"
 #include "rocjitsu/vm/virtual_machine.h"
 #include "util/diagnostic.h"
 
+#include "simdojo/components/retained_backing_range.h"
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
 
@@ -54,7 +55,7 @@ std::vector<config::SystemPeerRoute> fanout_routes() {
 }
 
 FabricEndpoint::EffectAdmission admit_local_test_effect() {
-  return [](const FabricBacking &, bool write, amdgpu::MemoryIngressPermit &) {
+  return [](const amdgpu::GpuBackingRange &, bool write, amdgpu::MemoryIngressPermit &) {
     EXPECT_TRUE(write);
     FabricEndpoint::EffectAuthority authority;
     authority.permit = amdgpu::MemoryIngressPermit([] {});
@@ -199,7 +200,12 @@ private:
   std::shared_ptr<const KfdProcess::GpuBacking> backing_;
 };
 
-class VectorBackingOwner final : public FabricBacking::Owner {
+amdgpu::GpuBackingRange bind_gpu_backing(std::shared_ptr<simdojo::BackingRangeAccess> store,
+                                         uint32_t gpu_id, uint64_t offset, size_t length) {
+  return {gpu_id, {std::move(store), offset, length}};
+}
+
+class VectorBackingOwner final : public simdojo::BackingRangeAccess {
 public:
   static constexpr uint64_t kBase = 0x400;
 
@@ -251,7 +257,7 @@ private:
   bool reject_writes_ = false;
 };
 
-class CacheableBackingOwner final : public FabricBacking::Owner {
+class CacheableBackingOwner final : public simdojo::BackingRangeAccess {
 public:
   static constexpr uint64_t kBase = 0x400;
   static constexpr size_t kExtent = 0x200;
@@ -381,8 +387,8 @@ protected:
   KfdProcess::GpuBackingLease lease(size_t offset, size_t size) const {
     return backing_.lease(offset, size);
   }
-  FabricBacking fabric_lease(size_t offset, size_t size) const {
-    return make_fabric_backing(lease(offset, size));
+  amdgpu::GpuBackingRange fabric_lease(size_t offset, size_t size) const {
+    return lease(offset, size).retain_backing_range();
   }
 
   BackingFixture backing_;
@@ -421,8 +427,8 @@ protected:
   KfdProcess::GpuBackingLease lease(size_t offset, size_t size) const {
     return backing_.lease(offset, size);
   }
-  FabricBacking fabric_lease(size_t offset, size_t size) const {
-    return make_fabric_backing(lease(offset, size));
+  amdgpu::GpuBackingRange fabric_lease(size_t offset, size_t size) const {
+    return lease(offset, size).retain_backing_range();
   }
 
   BackingFixture backing_;
@@ -488,8 +494,8 @@ protected:
     engine_.shutdown();
   }
 
-  FabricBacking backing(uint64_t offset, size_t size) const {
-    return FabricBacking(owner_, kOwner, offset, size);
+  amdgpu::GpuBackingRange backing(uint64_t offset, size_t size) const {
+    return bind_gpu_backing(owner_, kOwner, offset, size);
   }
 
   void step_to_target() {
@@ -531,7 +537,7 @@ public:
       return std::nullopt;
     }
     auto prepared = endpoint_.prepare_read(
-        kRequester, kOwner, make_fabric_backing(backing_.lease(address - kVa, size)), gate);
+        kRequester, kOwner, backing_.lease(address - kVa, size).retain_backing_range(), gate);
     if (!prepared) {
       return std::nullopt;
     }
@@ -546,8 +552,8 @@ public:
       return std::nullopt;
     }
     auto prepared = endpoint_.prepare_write(
-        kRequester, kOwner, make_fabric_backing(backing_.lease(address - kVa, bytes.size())), bytes,
-        gate);
+        kRequester, kOwner, backing_.lease(address - kVa, bytes.size()).retain_backing_range(),
+        bytes, gate);
     if (!prepared) {
       return std::nullopt;
     }
@@ -576,9 +582,9 @@ TEST_F(FabricEndpointLocalTest, OwnerInboxWritesWithoutRouteOrWireMessages) {
                                          std::byte{0x45}};
   EXPECT_FALSE(endpoint_->can_route(kRequester, kOwner));
   EXPECT_TRUE(engine_.topology().links().empty());
-  auto write =
-      endpoint_->prepare_local_write(kOwner, FabricBacking(owner, kOwner, kOffset, payload.size()),
-                                     payload, gate, admit_local_test_effect());
+  auto write = endpoint_->prepare_local_write(
+      kOwner, bind_gpu_backing(owner, kOwner, kOffset, payload.size()), payload, gate,
+      admit_local_test_effect());
   ASSERT_TRUE(write);
   write.operation->submit();
   EXPECT_EQ(write.operation->poll({}), amdgpu::VmAccessOutcome::Unavailable);
@@ -605,22 +611,23 @@ TEST_F(FabricEndpointLocalTest, OwnerWriteRequiresMatchingBackingAndExtent) {
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
   const std::array<std::byte, 4> payload{};
   EXPECT_FALSE(endpoint_->prepare_local_write(
-      kOwner, FabricBacking(owner, kOwner, VectorBackingOwner::kBase, payload.size()), payload,
+      kOwner, bind_gpu_backing(owner, kOwner, VectorBackingOwner::kBase, payload.size()), payload,
       gate, {}));
   EXPECT_FALSE(endpoint_->prepare_local_write(
-      0, FabricBacking(owner, 0, VectorBackingOwner::kBase, payload.size()), payload, gate,
+      0, bind_gpu_backing(owner, 0, VectorBackingOwner::kBase, payload.size()), payload, gate,
       admit_local_test_effect()));
   EXPECT_FALSE(endpoint_->prepare_local_write(
-      kOwner, FabricBacking(owner, kRequester, VectorBackingOwner::kBase, payload.size()), payload,
-      gate, admit_local_test_effect()));
+      kOwner, bind_gpu_backing(owner, kRequester, VectorBackingOwner::kBase, payload.size()),
+      payload, gate, admit_local_test_effect()));
   EXPECT_EQ(endpoint_
                 ->prepare_local_write(
-                    kOwner, FabricBacking(owner, kOwner, VectorBackingOwner::kBase, payload.size()),
+                    kOwner,
+                    bind_gpu_backing(owner, kOwner, VectorBackingOwner::kBase, payload.size()),
                     std::span<const std::byte>(payload).first(3), gate, admit_local_test_effect())
                 .outcome,
             amdgpu::VmAccessOutcome::Malformed);
   EXPECT_FALSE(endpoint_->prepare_write(
-      kOwner, kOwner, FabricBacking(owner, kOwner, VectorBackingOwner::kBase, payload.size()),
+      kOwner, kOwner, bind_gpu_backing(owner, kOwner, VectorBackingOwner::kBase, payload.size()),
       payload, gate));
   EXPECT_EQ(owner->writes(), 0u);
 }
@@ -632,7 +639,8 @@ TEST_F(FabricEndpointLocalTest, RetryKeepsReservationUntilOwnerEffectFinishes) {
                                          std::byte{0x89}};
   int admissions = 0;
   int releases = 0;
-  auto admit = [&](const FabricBacking &, bool write, amdgpu::MemoryIngressPermit &reservation) {
+  auto admit = [&](const amdgpu::GpuBackingRange &, bool write,
+                   amdgpu::MemoryIngressPermit &reservation) {
     EXPECT_TRUE(write);
     FabricEndpoint::EffectAuthority authority;
     if (++admissions == 1) {
@@ -648,7 +656,7 @@ TEST_F(FabricEndpointLocalTest, RetryKeepsReservationUntilOwnerEffectFinishes) {
     return authority;
   };
   auto write = endpoint_->prepare_local_write(
-      kOwner, FabricBacking(owner, kOwner, VectorBackingOwner::kBase, payload.size()), payload,
+      kOwner, bind_gpu_backing(owner, kOwner, VectorBackingOwner::kBase, payload.size()), payload,
       gate, admit);
   ASSERT_TRUE(write);
   write.operation->submit();
@@ -673,7 +681,7 @@ TEST_F(FabricEndpointLocalTest, QueuedCancellationAndShutdownNeverWriteBacking) 
   const std::array<std::byte, 4> payload{std::byte{0x92}, std::byte{0x92}, std::byte{0x92},
                                          std::byte{0x92}};
   auto cancelled = endpoint_->prepare_local_write(
-      kOwner, FabricBacking(owner, kOwner, VectorBackingOwner::kBase, payload.size()), payload,
+      kOwner, bind_gpu_backing(owner, kOwner, VectorBackingOwner::kBase, payload.size()), payload,
       gate, admit_local_test_effect());
   ASSERT_TRUE(cancelled);
   cancelled.operation->submit();
@@ -683,8 +691,8 @@ TEST_F(FabricEndpointLocalTest, QueuedCancellationAndShutdownNeverWriteBacking) 
   EXPECT_EQ(owner->writes(), 0u);
 
   auto shutdown = endpoint_->prepare_local_write(
-      kOwner, FabricBacking(owner, kOwner, VectorBackingOwner::kBase + 4, payload.size()), payload,
-      gate, admit_local_test_effect());
+      kOwner, bind_gpu_backing(owner, kOwner, VectorBackingOwner::kBase + 4, payload.size()),
+      payload, gate, admit_local_test_effect());
   ASSERT_TRUE(shutdown);
   shutdown.operation->submit();
   endpoint_->shutdown();
@@ -704,7 +712,8 @@ TEST_F(FabricEndpointLocalTest, ShutdownWaitsForEnteredAdmissionAndReservation) 
   auto entered_future = entered.get_future();
   std::promise<void> continue_admission;
   auto continue_future = continue_admission.get_future().share();
-  auto admit = [&](const FabricBacking &, bool, amdgpu::MemoryIngressPermit &reservation) {
+  auto admit = [&](const amdgpu::GpuBackingRange &, bool,
+                   amdgpu::MemoryIngressPermit &reservation) {
     reservation = amdgpu::MemoryIngressPermit([&] { releases.fetch_add(1); });
     entered.set_value();
     continue_future.wait();
@@ -713,7 +722,7 @@ TEST_F(FabricEndpointLocalTest, ShutdownWaitsForEnteredAdmissionAndReservation) 
     return authority;
   };
   auto write = endpoint_->prepare_local_write(
-      kOwner, FabricBacking(owner, kOwner, VectorBackingOwner::kBase, payload.size()), payload,
+      kOwner, bind_gpu_backing(owner, kOwner, VectorBackingOwner::kBase, payload.size()), payload,
       gate, admit);
   ASSERT_TRUE(write);
   write.operation->submit();
@@ -731,7 +740,7 @@ TEST_F(FabricEndpointLocalTest, ShutdownWaitsForEnteredAdmissionAndReservation) 
   bool closed = false;
   while (std::chrono::steady_clock::now() < deadline) {
     auto probe = endpoint_->prepare_local_write(
-        kOwner, FabricBacking(owner, kOwner, VectorBackingOwner::kBase + 4, payload.size()),
+        kOwner, bind_gpu_backing(owner, kOwner, VectorBackingOwner::kBase + 4, payload.size()),
         payload, gate, admit_local_test_effect());
     if (probe.outcome == amdgpu::VmAccessOutcome::Revoked) {
       closed = true;
@@ -837,10 +846,11 @@ TEST_F(FabricEndpointTest, OwnerEventSendsOneRequestAndResponseFromItsOwnThread)
   const std::array<std::byte, 8> reverse_payload{std::byte{0x51}, std::byte{0x52}, std::byte{0x53},
                                                  std::byte{0x54}, std::byte{0x55}, std::byte{0x56},
                                                  std::byte{0x57}, std::byte{0x58}};
-  auto reverse = endpoint_->prepare_write(
-      kOwner, kRequester,
-      FabricBacking(reverse_owner, kRequester, VectorBackingOwner::kBase, reverse_payload.size()),
-      reverse_payload, gate);
+  auto reverse =
+      endpoint_->prepare_write(kOwner, kRequester,
+                               bind_gpu_backing(reverse_owner, kRequester,
+                                                VectorBackingOwner::kBase, reverse_payload.size()),
+                               reverse_payload, gate);
   ASSERT_TRUE(reverse);
   reverse.operation->submit();
   ASSERT_TRUE(engine_.step());
@@ -887,22 +897,41 @@ TEST_F(FabricEndpointTest, OwnerEventSendsOneRequestAndResponseFromItsOwnThread)
   EXPECT_EQ(stats.effect_trace_dropped, 1u);
 }
 
+TEST_F(FabricEndpointTest, KfdLeaseSubviewsShareStorageAndEnforceTheRequestBounds) {
+  const auto parent = fabric_lease(3, 8);
+  ASSERT_TRUE(parent.storage);
+  const std::array<std::byte, 8> initial{};
+  ASSERT_TRUE(parent.storage.write(initial));
+  const auto interior = parent.storage.subview(5, 4);
+  ASSERT_TRUE(interior);
+  EXPECT_EQ(interior.backing_id(), parent.storage.backing_id());
+  const std::array data{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+  ASSERT_TRUE(interior.write(data));
+  std::array<std::byte, 8> result{};
+  ASSERT_TRUE(parent.storage.read(result));
+  EXPECT_EQ(result, (std::array<std::byte, 8>{std::byte{}, std::byte{}, data[0], data[1], data[2],
+                                              data[3], std::byte{}, std::byte{}}));
+  EXPECT_TRUE(parent.storage.subview(11, 0));
+  EXPECT_FALSE(interior.subview(4, 1));
+  EXPECT_FALSE(parent.storage.subview(UINT64_MAX, 2));
+}
+
 TEST_F(FabricEndpointTest, NonKfdBackingRetainsOwnerAndBoundsReadWrite) {
   auto owner = std::make_shared<VectorBackingOwner>();
   std::weak_ptr<VectorBackingOwner> lifetime = owner;
   constexpr uint64_t kOffset = VectorBackingOwner::kBase + 5;
-  FabricBacking backing(owner, kOwner, kOffset, 4);
-  ASSERT_TRUE(backing);
-  EXPECT_EQ(backing.owner_gpu_id(), kOwner);
-  EXPECT_EQ(backing.offset(), kOffset);
-  EXPECT_EQ(backing.extent(), 4u);
-  EXPECT_FALSE(FabricBacking(owner, kOwner, VectorBackingOwner::kBase - 1, 4));
-  EXPECT_FALSE(FabricBacking(owner, kOwner, VectorBackingOwner::kBase + 14, 4));
+  auto backing = bind_gpu_backing(owner, kOwner, kOffset, 4);
+  ASSERT_TRUE(backing.storage);
+  EXPECT_EQ(backing.owner_gpu_id, kOwner);
+  EXPECT_EQ(backing.storage.offset(), kOffset);
+  EXPECT_EQ(backing.storage.extent(), 4u);
+  EXPECT_FALSE(bind_gpu_backing(owner, kOwner, VectorBackingOwner::kBase - 1, 4).storage);
+  EXPECT_FALSE(bind_gpu_backing(owner, kOwner, VectorBackingOwner::kBase + 14, 4).storage);
 
   const std::array<std::byte, 3> too_short{};
-  EXPECT_FALSE(backing.write(too_short));
+  EXPECT_FALSE(backing.storage.write(too_short));
   std::array<std::byte, 5> too_long{};
-  EXPECT_FALSE(backing.read(too_long));
+  EXPECT_FALSE(backing.storage.read(too_long));
   EXPECT_EQ(owner->reads(), 0u);
   EXPECT_EQ(owner->writes(), 0u);
 
@@ -932,7 +961,7 @@ TEST_F(FabricEndpointTest, NonKfdBackingRetainsOwnerAndBoundsReadWrite) {
   EXPECT_EQ(written[9], std::byte{0x7b});
 
   auto read = endpoint_->prepare_read(
-      kRequester, kOwner, FabricBacking(retained, kOwner, kOffset, payload.size()), gate);
+      kRequester, kOwner, bind_gpu_backing(retained, kOwner, kOffset, payload.size()), gate);
   ASSERT_TRUE(read);
   retained.reset();
   write.operation.reset();
@@ -968,9 +997,9 @@ TEST_F(FabricEndpointTest, ManualEndpointLeavesCacheableBackingUnmanaged) {
             amdgpu::VmAccessOutcome::Complete);
   const uint64_t epoch = domain->current_epoch();
 
-  auto read = endpoint_->prepare_read(kRequester, kOwner,
-                                      FabricBacking(owner, kOwner, CacheableBackingOwner::kBase, 1),
-                                      std::make_shared<amdgpu::VmTransferEffectGate>());
+  auto read = endpoint_->prepare_read(
+      kRequester, kOwner, bind_gpu_backing(owner, kOwner, CacheableBackingOwner::kBase, 1),
+      std::make_shared<amdgpu::VmTransferEffectGate>());
   ASSERT_TRUE(read);
   read.operation->submit();
   ASSERT_TRUE(engine_.step());
@@ -1214,8 +1243,8 @@ TEST_F(FabricEndpointTest, RejectedNonKfdWriteReportsFaultWithoutBackingEffect) 
                                          std::byte{0x44}};
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
   auto write = endpoint_->prepare_write(
-      kRequester, kOwner, FabricBacking(owner, kOwner, VectorBackingOwner::kBase + 5, 4), payload,
-      gate);
+      kRequester, kOwner, bind_gpu_backing(owner, kOwner, VectorBackingOwner::kBase + 5, 4),
+      payload, gate);
   ASSERT_TRUE(write);
   write.operation->submit();
   ASSERT_TRUE(engine_.step());
@@ -1447,7 +1476,8 @@ TEST_F(FabricEndpointClockedTest, RequestReservationSurvivesAdmissionRetryUntilE
                                          std::byte{0x37}};
   int admissions = 0;
   int releases = 0;
-  auto admit = [&](const FabricBacking &, bool write, amdgpu::MemoryIngressPermit &reservation) {
+  auto admit = [&](const amdgpu::GpuBackingRange &, bool write,
+                   amdgpu::MemoryIngressPermit &reservation) {
     EXPECT_TRUE(write);
     ++admissions;
     FabricEndpoint::EffectAuthority authority;
@@ -1509,7 +1539,8 @@ TEST_F(FabricEndpointClockedTest, PreEffectRefusalRetriesBeforeEffectAdmissionOr
     }
     return admission;
   };
-  auto admit_effect = [&](const FabricBacking &, bool write, amdgpu::MemoryIngressPermit &) {
+  auto admit_effect = [&](const amdgpu::GpuBackingRange &, bool write,
+                          amdgpu::MemoryIngressPermit &) {
     EXPECT_TRUE(write);
     ++effect_admissions;
     FabricEndpoint::EffectAuthority authority;
@@ -1517,7 +1548,7 @@ TEST_F(FabricEndpointClockedTest, PreEffectRefusalRetriesBeforeEffectAdmissionOr
     return authority;
   };
   auto write = endpoint_->prepare_write(kRequester, kOwner,
-                                        FabricBacking(owner, kOwner, kOffset, payload.size()),
+                                        bind_gpu_backing(owner, kOwner, kOffset, payload.size()),
                                         payload, gate, admit_effect, admit_pre_effect);
   ASSERT_TRUE(write);
   write.operation->submit();
@@ -1566,7 +1597,8 @@ TEST_F(FabricEndpointClockedTest, PreEffectPermitOutlivesCancelledTokenThroughTa
     admission.permit = amdgpu::MemoryIngressPermit([&] { releases.fetch_add(1); });
     return admission;
   };
-  auto admit_effect = [&](const FabricBacking &, bool write, amdgpu::MemoryIngressPermit &) {
+  auto admit_effect = [&](const amdgpu::GpuBackingRange &, bool write,
+                          amdgpu::MemoryIngressPermit &) {
     EXPECT_FALSE(write);
     entered_validation.set_value();
     validation_continued.wait();
@@ -1579,8 +1611,9 @@ TEST_F(FabricEndpointClockedTest, PreEffectPermitOutlivesCancelledTokenThroughTa
     effect_continued.wait();
   });
   constexpr uint64_t kOffset = VectorBackingOwner::kBase + 8;
-  auto read = endpoint_->prepare_read(kRequester, kOwner, FabricBacking(owner, kOwner, kOffset, 4),
-                                      gate, admit_effect, admit_pre_effect);
+  auto read =
+      endpoint_->prepare_read(kRequester, kOwner, bind_gpu_backing(owner, kOwner, kOffset, 4), gate,
+                              admit_effect, admit_pre_effect);
   ASSERT_TRUE(read);
   read.operation->submit();
   amdgpu::VmTransferToken token(std::move(read.operation), 4);
@@ -1634,7 +1667,8 @@ TEST_F(FabricEndpointClockedTest, CommittedReservedWriteReconcilesOnceBeforeRepl
                                          std::byte{0x5c}};
   int admissions = 0;
   int releases = 0;
-  auto admit = [&](const FabricBacking &, bool write, amdgpu::MemoryIngressPermit &reservation) {
+  auto admit = [&](const amdgpu::GpuBackingRange &, bool write,
+                   amdgpu::MemoryIngressPermit &reservation) {
     EXPECT_TRUE(write);
     EXPECT_FALSE(reservation);
     ++admissions;
@@ -1644,7 +1678,7 @@ TEST_F(FabricEndpointClockedTest, CommittedReservedWriteReconcilesOnceBeforeRepl
     return authority;
   };
   auto write = endpoint_->prepare_write(kRequester, kOwner,
-                                        FabricBacking(owner, kOwner, kOffset, payload.size()),
+                                        bind_gpu_backing(owner, kOwner, kOffset, payload.size()),
                                         payload, gate, admit);
   ASSERT_TRUE(write);
   write.operation->submit();
@@ -1682,7 +1716,8 @@ TEST_F(FabricEndpointClockedTest, CancellationAndShutdownWaitForActiveReservatio
   auto entered_future = entered.get_future();
   std::promise<void> continue_admission;
   auto continue_future = continue_admission.get_future().share();
-  auto admit = [&](const FabricBacking &, bool, amdgpu::MemoryIngressPermit &reservation) {
+  auto admit = [&](const amdgpu::GpuBackingRange &, bool,
+                   amdgpu::MemoryIngressPermit &reservation) {
     reservation = amdgpu::MemoryIngressPermit([&] { releases.fetch_add(1); });
     entered.set_value();
     continue_future.wait();
@@ -1984,8 +2019,8 @@ TEST_F(FabricEndpointAssemblyCoherenceTest,
   const uint64_t requester_epoch = requester_soc->cache_coherence()->current_epoch();
   const uint64_t owner_epoch = owner_soc->cache_coherence()->current_epoch();
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
-  auto read =
-      endpoint_->prepare_read(kRequester, kOwner, FabricBacking(owner_, kOwner, kAddress, 1), gate);
+  auto read = endpoint_->prepare_read(kRequester, kOwner,
+                                      bind_gpu_backing(owner_, kOwner, kAddress, 1), gate);
   ASSERT_TRUE(read);
   read.operation->submit();
   step_to_target();
@@ -2005,8 +2040,9 @@ TEST_F(FabricEndpointAssemblyCoherenceTest,
   const uint64_t requester_epoch_before_write = requester_soc->cache_coherence()->current_epoch();
   const uint64_t owner_epoch_before_write = owner_soc->cache_coherence()->current_epoch();
   const std::array<std::byte, 1> payload{std::byte{0x33}};
-  auto write = endpoint_->prepare_write(
-      kRequester, kOwner, FabricBacking(owner_, kOwner, kAddress, payload.size()), payload, gate);
+  auto write = endpoint_->prepare_write(kRequester, kOwner,
+                                        bind_gpu_backing(owner_, kOwner, kAddress, payload.size()),
+                                        payload, gate);
   ASSERT_TRUE(write);
   write.operation->submit();
   step_to_target();
@@ -2094,7 +2130,7 @@ TEST(FabricEndpointAssemblyTest, RouteFreeLegacyOwnerResolvesLateGpuIdentityForS
   const std::array<std::byte, 4> payload{std::byte{0xb2}, std::byte{0xb2}, std::byte{0xb2},
                                          std::byte{0xb2}};
   bool resolved_dirty_line = false;
-  auto admit = [domain, &resolved_dirty_line](const FabricBacking &, bool write,
+  auto admit = [domain, &resolved_dirty_line](const amdgpu::GpuBackingRange &, bool write,
                                               amdgpu::MemoryIngressPermit &) {
     EXPECT_TRUE(write);
     FabricEndpoint::EffectAuthority authority;
@@ -2114,7 +2150,7 @@ TEST(FabricEndpointAssemblyTest, RouteFreeLegacyOwnerResolvesLateGpuIdentityForS
     return authority;
   };
   auto write = endpoint->prepare_local_write(
-      kRequester, FabricBacking(owner, kRequester, VectorBackingOwner::kBase, payload.size()),
+      kRequester, bind_gpu_backing(owner, kRequester, VectorBackingOwner::kBase, payload.size()),
       payload, gate, admit);
   ASSERT_TRUE(write);
   write.operation->submit();
@@ -2162,12 +2198,13 @@ TEST(FabricEndpointAssemblyTest, RetryablePreparedMaintenanceReleasesPermitAndCo
   engine.register_as_primary();
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
   const std::array<std::byte, 1> payload{std::byte{0x5a}};
-  const FabricBacking backing(owner, kRequester, kAddress, payload.size());
+  const auto backing = bind_gpu_backing(owner, kRequester, kAddress, payload.size());
   int admissions = 0;
   int authority_releases = 0;
   int reservation_releases = 0;
   int witness_calls = 0;
-  auto admit = [&](const FabricBacking &, bool write, amdgpu::MemoryIngressPermit &reservation) {
+  auto admit = [&](const amdgpu::GpuBackingRange &, bool write,
+                   amdgpu::MemoryIngressPermit &reservation) {
     EXPECT_TRUE(write);
     ++admissions;
     if (!reservation) {
@@ -2181,7 +2218,7 @@ TEST(FabricEndpointAssemblyTest, RetryablePreparedMaintenanceReleasesPermitAndCo
                                        .size = amdgpu::L2Cache::LINE_SIZE,
                                        .admission_generation = 1,
                                        .cache_identity = 1,
-                                       .backing_id = backing.backing_id(),
+                                       .backing_id = backing.storage.backing_id(),
                                        .backing_offset = kAddress});
     authority.resolve_writeback = [](uint32_t, uint32_t, uint64_t,
                                      size_t) -> amdgpu::PreparedCanonicalWriteback {

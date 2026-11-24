@@ -25,9 +25,10 @@ namespace simdojo {
 
 /// @brief Sparse page-table memory model as a simulation Component.
 ///
-/// Little-endian, 4KB pages allocated on first access. Provides byte, word,
-/// and doubleword access plus bulk image loading and page iteration for
-/// serialization.
+/// Owns 4 KiB pages indexed by simulated address. Reading a missing page
+/// returns zeros. Writes and explicit reservations allocate pages on demand.
+/// Provides little-endian scalar access, bulk image loading and page
+/// iteration for serialization.
 ///
 class SparseMemory : public Component {
 public:

@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "rocjitsu/vm/amdgpu/gpu_backing_range.h"
+
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
 #include "simdojo/components/pci_bar_address_decoder.h"
@@ -98,6 +100,11 @@ public:
     std::size_t length = 0;
     std::shared_ptr<std::byte> mapped_bytes;
     std::shared_ptr<amdgpu::VmTransferEffectGate> effect_gate;
+
+    [[nodiscard]] amdgpu::GpuBackingRange retain_backing_range() const noexcept {
+      return {owner_gpu_id, simdojo::RetainedBackingRange::mapped(mapped_bytes, backing_id,
+                                                                  backing_offset, length)};
+    }
   };
 
   enum class PeerKind : uint8_t {

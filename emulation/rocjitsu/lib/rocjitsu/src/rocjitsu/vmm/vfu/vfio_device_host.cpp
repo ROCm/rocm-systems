@@ -103,37 +103,6 @@ bool unsupported_cacheable_peer_pte(const amdgpu::GpuVmAccess &access,
   return access.info().vmid != 0 && translation.mtype != amdgpu::Mtype::UC;
 }
 
-class PeerBarBacking final : public FabricBacking::Owner {
-public:
-  explicit PeerBarBacking(VfioTargetGrants::PeerSnapshot snapshot)
-      : offset_(snapshot.backing_offset), backing_id_(snapshot.backing_id),
-        length_(snapshot.length), bytes_(std::move(snapshot.mapped_bytes)) {}
-
-  [[nodiscard]] uint64_t base_offset() const noexcept override { return offset_; }
-  [[nodiscard]] std::size_t extent() const noexcept override { return length_; }
-  [[nodiscard]] uint64_t backing_id() const noexcept override { return backing_id_; }
-  [[nodiscard]] bool read(uint64_t offset, std::span<std::byte> result) noexcept override {
-    if (offset != offset_ || result.size() != length_ || bytes_ == nullptr) {
-      return false;
-    }
-    std::memmove(result.data(), bytes_.get(), length_);
-    return true;
-  }
-  [[nodiscard]] bool write(uint64_t offset, std::span<const std::byte> source) noexcept override {
-    if (offset != offset_ || source.size() != length_ || bytes_ == nullptr) {
-      return false;
-    }
-    std::memmove(bytes_.get(), source.data(), length_);
-    return true;
-  }
-
-private:
-  uint64_t offset_;
-  uint64_t backing_id_;
-  std::size_t length_;
-  std::shared_ptr<std::byte> bytes_;
-};
-
 /// Hold every mmap-backed SG entry until a mixed target/ordinary transfer has
 /// validated its complete span. Releasing the entries marks writes dirty.
 struct PreparedMappedSpan {
@@ -465,14 +434,13 @@ VfioDeviceHost::prepare_peer_read(uint64_t requester_generation, uint64_t iova, 
   const FabricEndpoint::TraceOrigin trace_origin{
       .map_id = snapshot.map_id, .gpu_va = gpu_va, .iova = iova};
   const uint32_t owner_gpu_id = snapshot.owner_gpu_id;
-  FabricBacking backing(std::make_shared<PeerBarBacking>(snapshot), owner_gpu_id,
-                        snapshot.backing_offset, snapshot.length);
+  auto backing = snapshot.retain_backing_range();
   auto captured_admission = target_grants_->capture_admission(snapshot);
   const amdgpu::GpuVmAccess captured_access = *executing_access;
   const amdgpu::VmTranslation selected = *selected_translation;
   auto admission = [captured_admission = std::move(captured_admission), captured_access, selected,
-                    gpu_va, iova,
-                    length](const FabricBacking &, bool write, amdgpu::MemoryIngressPermit &) {
+                    gpu_va, iova, length](const amdgpu::GpuBackingRange &, bool write,
+                                          amdgpu::MemoryIngressPermit &) {
     if (write) {
       return FabricEndpoint::EffectAuthority(
           {.outcome = amdgpu::VmAccessOutcome::Revoked, .permit = {}});
@@ -528,14 +496,13 @@ VfioDeviceHost::prepare_peer_write(uint64_t requester_generation, uint64_t iova,
   const FabricEndpoint::TraceOrigin trace_origin{
       .map_id = snapshot.map_id, .gpu_va = gpu_va, .iova = iova};
   const uint32_t owner_gpu_id = snapshot.owner_gpu_id;
-  FabricBacking backing(std::make_shared<PeerBarBacking>(snapshot), owner_gpu_id,
-                        snapshot.backing_offset, snapshot.length);
+  auto backing = snapshot.retain_backing_range();
   auto captured_admission = target_grants_->capture_admission(snapshot);
   const amdgpu::GpuVmAccess captured_access = *executing_access;
   const amdgpu::VmTranslation selected = *selected_translation;
   auto admission = [captured_admission = std::move(captured_admission), captured_access, selected,
-                    gpu_va, iova, length = bytes.size()](const FabricBacking &, bool write,
-                                                         amdgpu::MemoryIngressPermit &) {
+                    gpu_va, iova, length = bytes.size()](
+                       const amdgpu::GpuBackingRange &, bool write, amdgpu::MemoryIngressPermit &) {
     if (!write) {
       return FabricEndpoint::EffectAuthority(
           {.outcome = amdgpu::VmAccessOutcome::Revoked, .permit = {}});
