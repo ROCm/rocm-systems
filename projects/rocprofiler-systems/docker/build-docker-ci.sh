@@ -176,9 +176,10 @@ do
 
     # Extract ROCm major, minor, and patch versions
     ROCM_MAJOR="${ROCM_VERSION%%.*}"
-    ROCM_MINOR="${ROCM_VERSION#*.}"
-    ROCM_PATCH="${ROCM_MINOR#*.}"
-    if [ "${ROCM_PATCH}" = "${ROCM_MINOR}" ]; then
+    ROCM_REST="${ROCM_VERSION#*.}"
+    ROCM_MINOR="${ROCM_REST%%.*}"
+    ROCM_PATCH="${ROCM_REST#*.}"
+    if [ "${ROCM_PATCH}" = "${ROCM_REST}" ]; then
         ROCM_PATCH=0
     fi
 
