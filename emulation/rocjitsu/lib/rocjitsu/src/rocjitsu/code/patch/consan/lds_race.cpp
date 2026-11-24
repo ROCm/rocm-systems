@@ -108,12 +108,19 @@ struct NativeLdsForm {
 };
 
 NativeLdsForm native_lds_form(const Instruction &instruction) {
-  switch (instruction.amdgpu_operation()) {
-  case amdgpu::Operation::DS_ADD_U32:
-    if (instruction.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Lds &&
-        instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic)
+  if (instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic) {
+    if (instruction.amdgpu_memory_addressing() != amdgpu::MemoryAddressing::Lds)
+      return {};
+    switch (instruction.amdgpu_operation()) {
+    case amdgpu::Operation::DS_ADD_U32:
       return {.width = 4};
-    return {};
+    case amdgpu::Operation::DS_ADD_U64:
+      return {.width = 8};
+    default:
+      return {};
+    }
+  }
+  switch (instruction.amdgpu_operation()) {
   case amdgpu::Operation::DS_LOAD_B32:
   case amdgpu::Operation::DS_STORE_B32:
   case amdgpu::Operation::DS_READ_B32:

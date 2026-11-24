@@ -72,8 +72,6 @@ class AnalysisDriver(Driver):
                 if case
                 in (
                     'race',
-                    'atomic_u32_read',
-                    'atomic_u32_write',
                     'high_lane',
                     'wide_b8_overlap',
                     'wide_b96_overlap',
@@ -89,6 +87,8 @@ class AnalysisDriver(Driver):
             if case == 'wide_collision'
             else (1 if case == 'collision' else 0)
         )
+        if case.startswith('atomic_') and case.endswith(('_read', '_write')):
+            pairs = 1
         transpose = case.startswith('transpose_')
         transpose_overlap = transpose and case.endswith('_overlap')
         rejected = int(
@@ -227,14 +227,18 @@ class AnalysisDriver(Driver):
                     endpoints = sorted(
                         (finding['first'], finding['second']), key=lambda e: e['wave']
                     )
-                    peer = case.rsplit('_', 1)[1]
+                    _, form, peer = case.split('_')
+                    width = 8 if form == 'u64' else 4
                     for wave, (endpoint, role) in enumerate(
                         zip(endpoints, ('atomic', peer))
                     ):
                         assert endpoint['site'] == endpoint['wave'] == wave
                         assert endpoint['access'] == role
                         assert endpoint['mask'] == 1 << (self.args.wave_size - 1)
-                        assert endpoint['offset'] == 1016 and endpoint['width'] == 4
+                        assert (
+                            endpoint['offset'] == 1024 - 2 * width + (width - 4) * wave
+                        )
+                        assert endpoint['width'] == (4 if wave else width)
             if case == 'wide_d16_overlap':
                 endpoints = set()
                 for finding in analyzed['cross_wave_examples']:

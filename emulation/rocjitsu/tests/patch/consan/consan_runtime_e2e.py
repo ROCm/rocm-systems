@@ -58,7 +58,8 @@ CASES = (
         for scenario in ('full', 'empty', 'partial', 'overlap', 'adjacent', 'short')
     ),
     *(
-        f'atomic_u32_{peer}'
+        f'atomic_{form}_{peer}'
+        for form in ('u32', 'u64')
         for peer in ('count', 'read', 'write', 'atomic', 'adjacent')
     ),
     'wide_u8',
@@ -339,7 +340,7 @@ class Driver:
         if fixture_name.startswith('transpose_'):
             mode = fixture_name
         if fixture_name.startswith('atomic_'):
-            mode = 'atomic_u32_count' if fixture_name.endswith('_count') else 'defined'
+            mode = fixture_name if fixture_name.endswith('_count') else 'defined'
         if wide:
             mode = (
                 'wide_b128'
@@ -690,7 +691,8 @@ class Driver:
                     assert record['flags'] == 4 and record['anchor_exec'] == anchor
 
     def assert_atomic_observations(self, decoded, fixture):
-        scenario = fixture.split('_')[-1]
+        _, form, scenario = fixture.split('_')
+        width = 8 if form == 'u64' else 4
         high = 1 << (self.args.wave_size - 1)
         if scenario == 'count':
             kinds = [2, 3, 1]
@@ -700,17 +702,22 @@ class Driver:
                     (1, address, high | (high >> 1)),
                     (2, address, high),
                 ]
-                for address in (1012, 1020)
+                for address in (1024 - 3 * width, 1024 - width)
             ]
         else:
             kinds = [3, {'read': 1, 'write': 2, 'atomic': 3, 'adjacent': 2}[scenario]]
+            start = 1024 - 2 * width
+            peer = start if scenario == 'atomic' else start + width - 4
             expected_rows = [
-                [(0, 1016, high)],
-                [(1, 1020 if scenario == 'adjacent' else 1016, high)],
+                [(0, start, high)],
+                [(1, peer + 4 if scenario == 'adjacent' else peer, high)],
             ]
-        assert [(site['access'], site['width']) for site in decoded['sites']] == [
-            (kind, 4) for kind in kinds
-        ]
+        widths = [width] * len(kinds)
+        if scenario not in ('count', 'atomic'):
+            widths[1] = 4
+        assert [(site['access'], site['width']) for site in decoded['sites']] == list(
+            zip(kinds, widths)
+        )
         (execution,) = decoded['executions']
         assert len(execution['rows']) == len(expected_rows)
         for wave, (row, expected) in enumerate(zip(execution['rows'], expected_rows)):
@@ -724,7 +731,7 @@ class Driver:
                 assert record['site'] == site and record['sequence'] == sequence
                 assert record['commit'] == 0x43534143 and record['flags'] == 1
                 assert (record['width'], record['offset'], record['mask']) == (
-                    4,
+                    widths[site],
                     address,
                     mask,
                 )

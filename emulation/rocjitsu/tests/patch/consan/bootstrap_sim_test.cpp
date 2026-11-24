@@ -585,7 +585,12 @@ TEST_F(ConSanBootstrapSim,
 }
 
 class ConSanTargetSim : public ConSanBootstrapSim,
-                        public ::testing::WithParamInterface<test::TargetMode> {};
+                        public ::testing::WithParamInterface<test::TargetMode> {
+protected:
+  void check_atomic_add(const std::string &form, uint32_t width,
+                        const std::vector<uint32_t> &expected_words);
+  void check_atomic_peers(const std::string &form, uint32_t width);
+};
 
 TEST_P(ConSanTargetSim, PublicationBarrierBlocksAnEarlyConsumer) {
   const test::TargetMode target = GetParam();
@@ -1185,21 +1190,25 @@ void expect_atomic_analysis(const RunResult &run, uint32_t threads, size_t obser
 }
 #endif
 
-TEST_P(ConSanTargetSim, AtomicU32ExecutesTheOriginalUpdateOnce) {
+void ConSanTargetSim::check_atomic_add(const std::string &form, uint32_t width,
+                                       const std::vector<uint32_t> &expected_words) {
+  SCOPED_TRACE(form);
+  const std::string fixture = "width-atomic-" + form + "-count";
+  const std::string mnemonic = "ds_add_" + form;
   const test::TargetMode target = GetParam();
   const uint32_t threads = 2 * target.wave_size;
   const uint64_t high = uint64_t{1} << (target.wave_size - 1);
   const uint64_t atomic_mask = high | (high >> 1);
   RunResult before, after;
   AtomicIssueTrace::Masks before_masks, after_masks;
-  ASSERT_NO_FATAL_FAILURE(run("width-atomic-u32-count", Bootstrap::None, before, target, threads,
-                              true, 1, false, 1,
-                              std::make_unique<AtomicIssueTrace>("ds_add_u32", before_masks)));
-  ASSERT_NO_FATAL_FAILURE(run("width-atomic-u32-count", Bootstrap::Instrumented, after, target,
-                              threads, true, 1, false, 1,
-                              std::make_unique<AtomicIssueTrace>("ds_add_u32", after_masks)));
+  ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true, width / 4,
+                              false, 1,
+                              std::make_unique<AtomicIssueTrace>(mnemonic, before_masks)));
+  ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true,
+                              width / 4, false, 1,
+                              std::make_unique<AtomicIssueTrace>(mnemonic, after_masks)));
   expect_guest_state(before, after);
-  EXPECT_EQ(before.full_output, (std::vector<uint32_t>{9, 10}));
+  EXPECT_EQ(before.full_output, expected_words);
   EXPECT_EQ(after_masks, before_masks);
   EXPECT_EQ(after.manifest.scope, ScopeKind::NativeLdsNoSynchronization);
   ASSERT_EQ(after.manifest.sites.size(), 3u);
@@ -1210,11 +1219,11 @@ TEST_P(ConSanTargetSim, AtomicU32ExecutesTheOriginalUpdateOnce) {
     EXPECT_EQ(before_masks[wave], (std::vector<uint64_t>{atomic_mask}));
     for (uint32_t site = 0; site < roles.size(); ++site) {
       EXPECT_EQ(after.manifest.sites[site].access, roles[site]);
-      EXPECT_EQ(after.manifest.sites[site].width, 4u);
+      EXPECT_EQ(after.manifest.sites[site].width, width);
       const auto &record = records[3 * wave + site];
       EXPECT_EQ(record.wave, wave);
       EXPECT_EQ(record.site, site);
-      EXPECT_EQ(record.offset, 1012 + 8 * wave);
+      EXPECT_EQ(record.offset, 1024 - 3 * width + 2 * width * wave);
       EXPECT_EQ(record.mask, site == 1 ? atomic_mask : high);
     }
   }
@@ -1223,17 +1232,20 @@ TEST_P(ConSanTargetSim, AtomicU32ExecutesTheOriginalUpdateOnce) {
 #endif
 }
 
-TEST_P(ConSanTargetSim, AtomicU32ConflictsWithOverlappingOrdinaryPeers) {
+void ConSanTargetSim::check_atomic_peers(const std::string &form, uint32_t width) {
+  SCOPED_TRACE(form);
   const test::TargetMode target = GetParam();
   const uint32_t threads = 2 * target.wave_size;
   const uint64_t high = uint64_t{1} << (target.wave_size - 1);
+  const uint32_t atomic_offset = 1024 - 2 * width;
+  const uint32_t overlap_offset = atomic_offset + width - 4;
   for (const auto &[peer, role, offset, pairs] :
-       {std::tuple{"read", AccessKind::Read, 1016u, 1u},
-        std::tuple{"write", AccessKind::Write, 1016u, 1u},
-        std::tuple{"atomic", AccessKind::Atomic, 1016u, 0u},
-        std::tuple{"adjacent", AccessKind::Write, 1020u, 0u}}) {
+       {std::tuple{"read", AccessKind::Read, overlap_offset, 1u},
+        std::tuple{"write", AccessKind::Write, overlap_offset, 1u},
+        std::tuple{"atomic", AccessKind::Atomic, atomic_offset, 0u},
+        std::tuple{"adjacent", AccessKind::Write, atomic_offset + width, 0u}}) {
     SCOPED_TRACE(peer);
-    const std::string fixture = std::string("width-atomic-u32-") + peer;
+    const std::string fixture = "width-atomic-" + form + "-" + peer;
     RunResult before, after;
     ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true));
     ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true));
@@ -1246,16 +1258,27 @@ TEST_P(ConSanTargetSim, AtomicU32ConflictsWithOverlappingOrdinaryPeers) {
     const auto records = published_accesses(after);
     ASSERT_EQ(records.size(), 2u);
     for (uint32_t wave = 0; wave < 2; ++wave) {
-      EXPECT_EQ(after.manifest.sites[wave].width, 4u);
+      EXPECT_EQ(after.manifest.sites[wave].width,
+                wave == 0 || role == AccessKind::Atomic ? width : 4u);
       EXPECT_EQ(records[wave].wave, wave);
       EXPECT_EQ(records[wave].site, wave);
       EXPECT_EQ(records[wave].mask, high);
-      EXPECT_EQ(records[wave].offset, wave == 0 ? 1016u : offset);
+      EXPECT_EQ(records[wave].offset, wave == 0 ? atomic_offset : offset);
     }
 #ifdef CONSAN_ANALYZER_ENABLED
     expect_atomic_analysis(after, threads, records.size(), pairs);
 #endif
   }
+}
+
+TEST_P(ConSanTargetSim, AtomicU32AddsOnceAndConflictsWithOverlappingOrdinaryPeers) {
+  ASSERT_NO_FATAL_FAILURE(check_atomic_add("u32", 4, {9, 10}));
+  ASSERT_NO_FATAL_FAILURE(check_atomic_peers("u32", 4));
+}
+
+TEST_P(ConSanTargetSim, AtomicU64PropagatesCarryAndConflictsWithTheUpperDword) {
+  ASSERT_NO_FATAL_FAILURE(check_atomic_add("u64", 8, {0, 4, 0, 4}));
+  ASSERT_NO_FATAL_FAILURE(check_atomic_peers("u64", 8));
 }
 
 class NativeWidthIssueCounter final : public ExecutionPlugin {

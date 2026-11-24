@@ -612,6 +612,27 @@ TEST_F(ConSanAnalysis, AtomicPeersAndSameWaveOrdinaryAccessDoNotFormCandidates) 
   EXPECT_EQ(result.value().collision_groups, 0u);
 }
 
+TEST_F(ConSanAnalysis, QwordAtomicRequiresEightValidBytesAndOverlapsTheHighDword) {
+  Manifest &manifest = test::manifest(capture_.header);
+  manifest.sites.front().access = AccessKind::Atomic;
+  manifest.sites.front().width = 8;
+  // [120,128) is the last aligned qword inside this 128-byte LDS extent.
+  for (const uint32_t offset : {120u, 116u, 128u}) {
+    workgroups(1, 950, 64);
+    access(0, 0, 1, offset, 3);
+    access(1, 1, 1, 124);
+    const auto result = analyze();
+    ASSERT_TRUE(result.succeeded()) << error_.message();
+    const auto &execution = result.value().executions.front();
+    const bool valid = offset == 120;
+    EXPECT_EQ(execution.coverage_complete, valid);
+    EXPECT_EQ(execution.valid_observations, valid ? 2u : 1u);
+    EXPECT_EQ(execution.rejected_records, valid ? 0u : 1u);
+    EXPECT_EQ(execution.cross_wave_pairs, valid ? 1u : 0u);
+    EXPECT_EQ(execution.collision_groups, 0u);
+  }
+}
+
 TEST_F(ConSanAnalysis, OrdinaryLdsProfileReplaysByteAccessesAndRejectsAtomicFacts) {
   Manifest &manifest = test::manifest(capture_.header);
   manifest.options = {

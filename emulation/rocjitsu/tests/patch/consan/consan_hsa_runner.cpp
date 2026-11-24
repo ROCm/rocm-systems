@@ -100,16 +100,16 @@ hsa_amd_memory_pool_t fine_pool(hsa_agent_t cpu) {
 
 int run(int argc, char **argv) {
   if (argc < 5) {
-    std::cerr
-        << "Usage: consan_hsa_runner ORIGINAL ENTRY LAUNCHES MODE "
-           "[--baseline] "
-           "[--bad-geometry] [--profiling] [--reuse-signal] [--target GPU] [--wave-size N] "
-           "[--threads N] [--test-statistics] [--batch-barrier-and|--batch-barrier-or] "
-           "[--separate-barrier] [--high-lane] [--workgroups N] [--amd-signals]\n"
-           "MODE: grouped, grouped_sync, defined, synchronized, mixed, wide_u8, wide_i8, "
-           "wide_b8_peer, wide_d16_u8, wide_d16_i8, wide_d16_u16, wide_d16_peer, wide_u16, "
-           "wide_i16, "
-           "wide_b64, wide_b96, wide_b128, atomic_u32_count, transpose_BITS_SCENARIO, observe\n";
+    std::cerr << "Usage: consan_hsa_runner ORIGINAL ENTRY LAUNCHES MODE "
+                 "[--baseline] "
+                 "[--bad-geometry] [--profiling] [--reuse-signal] [--target GPU] [--wave-size N] "
+                 "[--threads N] [--test-statistics] [--batch-barrier-and|--batch-barrier-or] "
+                 "[--separate-barrier] [--high-lane] [--workgroups N] [--amd-signals]\n"
+                 "MODE: grouped, grouped_sync, defined, synchronized, mixed, wide_u8, wide_i8, "
+                 "wide_b8_peer, wide_d16_u8, wide_d16_i8, wide_d16_u16, wide_d16_peer, wide_u16, "
+                 "wide_i16, "
+                 "wide_b64, wide_b96, wide_b128, atomic_u32_count, atomic_u64_count, "
+                 "transpose_BITS_SCENARIO, observe\n";
     return 3;
   }
   uint32_t launches = 0;
@@ -137,8 +137,8 @@ int run(int argc, char **argv) {
       return 3;
     }
   }
-  const bool atomic_count = mode == "atomic_u32_count";
-  const bool defined = mode == "defined" || atomic_count;
+  const bool atomic_wide = mode == "atomic_u64_count";
+  const bool defined = mode == "defined" || mode == "atomic_u32_count";
   const bool grouped = mode == "grouped" || mode == "grouped_sync";
   const bool group_barrier = mode == "grouped_sync";
   const bool mixed = mode == "mixed";
@@ -151,8 +151,8 @@ int run(int argc, char **argv) {
                               : mode == "wide_b96"                                             ? 12
                               : mode == "wide_b128"                                            ? 16
                                                                                                : 0;
-  if (!defined && !synchronized && !grouped && wide_width == 0 && !d16 && !transpose_bits &&
-      mode != "observe") {
+  if (!atomic_wide && !defined && !synchronized && !grouped && wide_width == 0 && !d16 &&
+      !transpose_bits && mode != "observe") {
     return 3;
   }
   std::string_view target = "gfx1100";
@@ -205,8 +205,10 @@ int run(int argc, char **argv) {
   }
   const uint32_t wave_count = (threads + wave_size - 1) / wave_size;
   const uint32_t output_words =
-      transpose_bits ? 4u * threads * workgroups
-                     : std::max(((wide_width || d16) ? 4u : 1u) * wave_count * workgroups, 2u);
+      transpose_bits
+          ? 4u * threads * workgroups
+          : std::max(((wide_width || d16) ? 4u : (atomic_wide ? 2u : 1u)) * wave_count * workgroups,
+                     2u);
   const size_t output_bytes = output_words * sizeof(uint32_t);
   if (baseline && (bad_geometry || profiling || reuse_signal || test_statistics || barrier_type)) {
     return 3;
@@ -458,7 +460,14 @@ int run(int argc, char **argv) {
               << last_output[1] << '\n';
     if (defined) {
       for (uint32_t wave = 0; wave < wave_count; ++wave) {
-        if (last_output[wave] != input + wave + (atomic_count ? 2u : 0u)) {
+        if (last_output[wave] != input + wave + (mode == "atomic_u32_count" ? 2u : 0u)) {
+          result = 23;
+        }
+      }
+    }
+    if (atomic_wide) {
+      for (uint32_t wave = 0; wave < wave_count; ++wave) {
+        if (last_output[2 * wave] != 0 || last_output[2 * wave + 1] != 4) {
           result = 23;
         }
       }

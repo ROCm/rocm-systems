@@ -52,6 +52,7 @@ TEST(ConSanInput, AtomicAddRequiresQualifiedLdsFormAndAllocatedOperands) {
         InputErrorCode::UnsupportedSynchronization);
   check(cdna4::kDsAddU32Ds, {.acc = 1, .addr = 3, .data0 = 7}, InputErrorCode::UnsupportedAccess);
   check(cdna4::kDsAddU32Ds, {.addr = 3, .data0 = 8}, InputErrorCode::UnsupportedAccess);
+  check(cdna4::kDsAddU64Ds, {.addr = 3, .data0 = 7}, InputErrorCode::UnsupportedAccess);
 }
 
 TEST(ConSanInput, Gfx1100UsesConcreteModelOnlyDecoder) {

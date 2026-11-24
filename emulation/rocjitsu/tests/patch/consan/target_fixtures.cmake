@@ -177,19 +177,23 @@ foreach(
             list(APPEND _target_fixtures ${_image})
         endforeach()
         set(_atomic_specs)
-        foreach(
-            _scenario
-            IN
-            ITEMS count read write atomic adjacent
-        )
-            set(_name atomic-u32-${_scenario})
-            string(TOUPPER "${_scenario}" _scenario_define)
-            list(APPEND _atomic_specs "${_name}:32:0:0:0:0")
-            list(APPEND _atomic_cases_${_gpu}_${_wave_size} ${_name})
-            set(_atomic_options_${_name}
-                -DCONSAN_ATOMIC=1
-                -DATOMIC_${_scenario_define}=1
+        foreach(_form IN ITEMS u32 u64)
+            string(TOUPPER "${_form}" _form_define)
+            foreach(
+                _scenario
+                IN
+                ITEMS count read write atomic adjacent
             )
+                set(_name atomic-${_form}-${_scenario})
+                string(TOUPPER "${_scenario}" _scenario_define)
+                list(APPEND _atomic_specs "${_name}:32:0:0:0:0")
+                list(APPEND _atomic_cases_${_gpu}_${_wave_size} ${_name})
+                set(_atomic_options_${_name}
+                    -DCONSAN_ATOMIC=1
+                    -DATOMIC_${_form_define}=1
+                    -DATOMIC_${_scenario_define}=1
+                )
+            endforeach()
         endforeach()
         set(_dual_specs)
         foreach(_bits IN ITEMS 32 64)
