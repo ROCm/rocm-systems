@@ -8,7 +8,9 @@
 #include "rocjitsu/vmm/vfu/bus_plan.h"
 #include "rocjitsu/vmm/vfu/vfio_target_grants.h"
 
+#include "util/bit.h"
 #include "util/log.h"
+#include "util/store_once.h"
 
 // libvfio-user's headers pull in <stdint.h>, <sys/uio.h> and others before
 // opening their own linkage block, so those are included first here, outside the
@@ -47,6 +49,7 @@ extern "C" {
 #include <memory>
 #include <new>
 #include <optional>
+#include <shared_mutex>
 #include <utility>
 #include <vector>
 
@@ -284,6 +287,29 @@ constexpr std::array<vfu_region_access_cb_t *, 6> kBarTrampolines = {
 /// fetched over the protocol otherwise remain indistinguishable here.
 bool is_mmap_backed(const vfu_dma_info_t &info) { return info.vaddr != nullptr; }
 
+/// @brief Where this process can address every byte of a shared window, or
+///        nullptr when the library's mapping does not cover all of it.
+///
+/// @details The library maps a window's length rounded up to a whole page,
+/// starting from its file offset rounded down to one, and reports the window at
+/// the offset's remainder inside that mapping. A window whose file offset is
+/// not page aligned can therefore have a tail the mapping does not reach, so
+/// the window is checked against the mapping the library reports rather than
+/// trusted to be addressable for its whole length.
+std::byte *whole_window_address(const vfu_dma_info_t &info) {
+  if (info.vaddr == nullptr) {
+    return nullptr;
+  }
+  const auto mapping_base = reinterpret_cast<std::uintptr_t>(info.mapping.iov_base);
+  const auto window_base = reinterpret_cast<std::uintptr_t>(info.vaddr);
+  if (window_base < mapping_base ||
+      !util::is_range_in_bounds(window_base - mapping_base, info.iova.iov_len,
+                                info.mapping.iov_len)) {
+    return nullptr;
+  }
+  return static_cast<std::byte *>(info.vaddr);
+}
+
 simdojo::DmaRegion to_dma_region(const vfu_dma_info_t &info) {
   return {
       .guest_phys = reinterpret_cast<uint64_t>(info.iova.iov_base),
@@ -308,7 +334,7 @@ void dma_register_trampoline(vfu_ctx_t *ctx, vfu_dma_info_t *info) {
   }
   // A client may re-register a window it already holds; the library reports that
   // as a fresh mapping, so the device is told only about genuinely new ones.
-  if (host_of(ctx).record_guest_region(region)) {
+  if (host_of(ctx).record_guest_region(region, whole_window_address(*info))) {
     device_of(ctx).dma_map(region);
   }
 }
@@ -398,7 +424,7 @@ void VfioDeviceHost::detach() {
     pending_reset_.reset();
     closing = device_.revoke_transport_session(&transport_);
     client_session_.reset();
-    guest_regions_.clear();
+    clear_guest_regions_locked();
   }
   if (closing != nullptr && target_grants_ != nullptr) {
     target_grants_->revoke_session(target_ordinal_, closing->generation());
@@ -908,6 +934,12 @@ bool VfioDeviceHost::build() {
     util::Logger::warn(std::format("vfu: cannot realize device: {}", std::strerror(errno)));
     return false;
   }
+
+  // A copy that bypasses the library also bypasses its dirty-page log. That is
+  // sound only because this host registers no migration callbacks, and the
+  // library offers DMA logging only to a context that has them. Registering
+  // them must turn this off, or route writes through the library again.
+  mapped_fast_path_.store(target_grants_ == nullptr, std::memory_order_release);
   return true;
 }
 
@@ -1069,7 +1101,7 @@ VfioDeviceHost::ServeResult VfioDeviceHost::run(std::stop_token stop_token) {
         client_session_.reset();
       }
       if (disconnected) {
-        guest_regions_.clear();
+        clear_guest_regions_locked();
         declined_regions = declined_regions_;
         declined_bytes = declined_bytes_;
         stop_after_disconnect = single_client_;
@@ -1144,14 +1176,51 @@ void VfioDeviceHost::note_unreachable_region(const simdojo::DmaRegion &region) {
                   region.guest_phys, region.length));
 }
 
-bool VfioDeviceHost::record_guest_region(const simdojo::DmaRegion &region) {
+bool VfioDeviceHost::record_guest_region(const simdojo::DmaRegion &region,
+                                         std::byte *host_address) {
   const std::lock_guard lock(state_mutex_);
-  return guest_regions_.insert(region);
+  // Copies that bypass the library read this record holding only the gate, so
+  // every change to it is made with the gate held exclusively.
+  const std::lock_guard gate(mapped_gate_);
+  // An address recorded with no client attached would outlive the check that a
+  // copy finding it relies on, so such a window stays on the library path.
+  return guest_regions_.insert(region, attached_ ? host_address : nullptr);
 }
 
 void VfioDeviceHost::forget_guest_region(const simdojo::DmaRegion &region) {
   const std::lock_guard lock(state_mutex_);
+  // Taking the gate exclusively waits out every copy still inside the window.
+  // This is what stands in for vfu_mutex_ on the mapped path: the library
+  // unmaps the window as soon as the unregister callback that called this
+  // returns.
+  const std::lock_guard gate(mapped_gate_);
   guest_regions_.erase(region);
+}
+
+void VfioDeviceHost::clear_guest_regions_locked() {
+  const std::lock_guard gate(mapped_gate_);
+  guest_regions_.clear();
+}
+
+bool VfioDeviceHost::copy_mapped_window(uint64_t guest_phys, void *data, std::size_t length,
+                                        bool to_guest) const {
+  const std::shared_lock gate(mapped_gate_);
+  // A span that leaves its window, or an access the window does not grant, is
+  // not refused here: the library path decides it.
+  std::byte *const host = guest_regions_.host_span(
+      guest_phys, length, to_guest ? simdojo::DmaAccess::Write : simdojo::DmaAccess::Read);
+  if (host == nullptr) {
+    return false;
+  }
+  if (to_guest) {
+    // Another thread, or the guest itself, may complete a compare/exchange on
+    // these bytes while they are written, and a store repeated by memcpy would
+    // undo it.
+    util::store_once(host, static_cast<const std::byte *>(data), length);
+  } else {
+    std::memcpy(data, host, length);
+  }
+  return true;
 }
 
 bool VfioDeviceHost::trigger(uint32_t vector) {
@@ -1372,6 +1441,14 @@ simdojo::DmaAccessOutcome VfioDeviceHost::copy_guest_memory(uint64_t guest_phys,
   }
   if (length > std::numeric_limits<uint64_t>::max() - guest_phys) {
     return simdojo::DmaAccessOutcome::Malformed;
+  }
+
+  // A host address is recorded only while a client is attached, so a hit
+  // needs no attachment check; quiesce exists only with target grants, where
+  // this is off. A miss decides nothing and falls through to the checks below.
+  if (mapped_fast_path_.load(std::memory_order_acquire) &&
+      copy_mapped_window(guest_phys, data, length, to_guest)) {
+    return simdojo::DmaAccessOutcome::Complete;
   }
 
   const std::lock_guard lock(vfu_mutex_);
