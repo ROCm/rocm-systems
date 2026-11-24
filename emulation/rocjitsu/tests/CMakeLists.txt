@@ -238,13 +238,31 @@ target_link_libraries(
         GTest::gtest_main
 )
 rj_configure_target(rj_concurrent_dispatch_fuzz_test PRIVATE_INCLUDES WARNINGS)
-add_dependencies(rj_concurrent_dispatch_fuzz_test rj_concurrent_dispatch_fuzz)
+# Link the CLI against a deterministic failing harness to test error handling
+# without adding fault injection to the production executable.
+add_executable(
+    rj_concurrent_dispatch_fuzz_oracle_fixture
+    ../fuzz/concurrent_dispatch/concurrent_dispatch_fuzz_main.cpp
+    fuzz/concurrent_dispatch/concurrent_dispatch_fuzz_oracle_fixture.cpp
+)
+target_include_directories(
+    rj_concurrent_dispatch_fuzz_oracle_fixture
+    PRIVATE ../fuzz/concurrent_dispatch
+)
+target_link_libraries(rj_concurrent_dispatch_fuzz_oracle_fixture PRIVATE util)
+rj_configure_target(rj_concurrent_dispatch_fuzz_oracle_fixture WARNINGS)
+add_dependencies(
+    rj_concurrent_dispatch_fuzz_test
+    rj_concurrent_dispatch_fuzz
+    rj_concurrent_dispatch_fuzz_oracle_fixture
+)
 rj_add_gtest_tests(rj_concurrent_dispatch_fuzz_test)
 add_test(
     NAME ConcurrentDispatchFuzzCliTest
     COMMAND
         ${CMAKE_COMMAND}
         -DFUZZ_EXECUTABLE=$<TARGET_FILE:rj_concurrent_dispatch_fuzz>
+        -DORACLE_FAILURE_EXECUTABLE=$<TARGET_FILE:rj_concurrent_dispatch_fuzz_oracle_fixture>
         -DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/concurrent-dispatch-fuzz-cli
         -P
         ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/concurrent_dispatch/test_concurrent_dispatch_fuzz_cli.cmake
