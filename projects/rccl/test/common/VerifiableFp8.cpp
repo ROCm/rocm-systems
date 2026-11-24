@@ -192,7 +192,7 @@ namespace RcclUnitTesting
         (void)hipGetLastError();
         return true;
       }
-      for (char const* ocpArch : {"gfx950", "gfx1200", "gfx1201", "gfx1250"})
+      for (char const* ocpArch : {"gfx950", "gfx1170", "gfx1171", "gfx1200", "gfx1201", "gfx1250"})
       {
         if (strncmp(prop.gcnArchName, ocpArch, strlen(ocpArch)) == 0) return false;
       }

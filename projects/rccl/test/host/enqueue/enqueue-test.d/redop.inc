@@ -242,6 +242,8 @@ TEST_F(EnqueueMicrotest, HostToDevRedOp_AvgFloat8_PacksFloatReciprocalNotFp8Bits
 TEST_F(EnqueueMicrotest, Fp8DeviceIsFnuz_MirrorsTheTypedefSelection) {
   // Mirrors rccl_float8.h: only these take the OCP typedef in device code.
   EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx950"));
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx1170"));
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx1171"));
   EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx1200"));
   EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx1201"));
   EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx1250"));

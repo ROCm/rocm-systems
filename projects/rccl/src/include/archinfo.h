@@ -73,8 +73,8 @@ inline int rcclLL128ShmemElemsPerThreadFromArch(char const* arch) {
  * which is FNUZ as well. Below HIP 6.3 every arch takes that fallback, whose
  * rcclFp8ToFloat ignores this answer. */
 inline bool rcclFp8DeviceIsFnuz(char const* arch) {
-  return !(IsArchMatch(arch, "gfx950") || IsArchMatch(arch, "gfx1200") || IsArchMatch(arch, "gfx1201") ||
-           IsArchMatch(arch, "gfx1250"));
+  return !(IsArchMatch(arch, "gfx950") || IsArchMatch(arch, "gfx117") || IsArchMatch(arch, "gfx1200") ||
+           IsArchMatch(arch, "gfx1201") || IsArchMatch(arch, "gfx1250"));
 }
 
 #endif // ARCHINFO_H
