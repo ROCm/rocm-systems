@@ -34,6 +34,7 @@
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/nccl_stubs.h"
+#include "fakes/profiler_fakes.h"
 #include "fakes/rccl_wrap_fakes.h"
 #include "fakes/recorder_fakes.h"
 #include "fakes/strongstream_stubs.h"

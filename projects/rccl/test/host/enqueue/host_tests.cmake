@@ -118,6 +118,7 @@ rccl_add_enqueue_micro_binary(rccl-UnitTestsMicroEnqueueMgmtTaskEnq mgmt-task-en
   SOURCES
     fakes/group_fakes.cc
     fakes/nccl_fakes.cc
+    fakes/profiler_fakes.cc
     fakes/utils_fakes.cc)
 
 # TaskPrepScene.h resets every fake it drives, so each task_prep/ and task_sched/ binary links them all.
@@ -137,6 +138,7 @@ rccl_add_enqueue_micro_binary(rccl-UnitTestsMicroEnqueueTaskPrep task_prep/task-
     fakes/nccl_fakes.cc
     fakes/nccl_stubs.cc
     fakes/os_fakes.cc
+    fakes/profiler_fakes.cc
     fakes/proxy_fakes.cc
     fakes/rccl_wrap_fakes.cc
     fakes/recorder_fakes.cc
@@ -170,6 +172,7 @@ rccl_add_enqueue_micro_binary(rccl-UnitTestsMicroEnqueueTaskPrepTaskClassify tas
     fakes/nccl_fakes.cc
     fakes/nccl_stubs.cc
     fakes/os_fakes.cc
+    fakes/profiler_fakes.cc
     fakes/proxy_fakes.cc
     fakes/rccl_wrap_fakes.cc
     fakes/recorder_fakes.cc
@@ -197,6 +200,7 @@ rccl_add_enqueue_micro_binary(rccl-UnitTestsMicroEnqueueTaskPrepTaskPretuning ta
     fakes/nccl_fakes.cc
     fakes/nccl_stubs.cc
     fakes/os_fakes.cc
+    fakes/profiler_fakes.cc
     fakes/proxy_fakes.cc
     fakes/rccl_wrap_fakes.cc
     fakes/recorder_fakes.cc
@@ -224,6 +228,7 @@ rccl_add_enqueue_micro_binary(rccl-UnitTestsMicroEnqueueTaskPrepTaskPosttuning t
     fakes/nccl_fakes.cc
     fakes/nccl_stubs.cc
     fakes/os_fakes.cc
+    fakes/profiler_fakes.cc
     fakes/proxy_fakes.cc
     fakes/rccl_wrap_fakes.cc
     fakes/recorder_fakes.cc
@@ -254,6 +259,7 @@ rccl_add_enqueue_micro_binary(rccl-UnitTestsMicroEnqueueTaskSched task_sched/tas
     fakes/nccl_fakes.cc
     fakes/nccl_stubs.cc
     fakes/os_fakes.cc
+    fakes/profiler_fakes.cc
     fakes/proxy_fakes.cc
     fakes/rccl_wrap_fakes.cc
     fakes/recorder_fakes.cc

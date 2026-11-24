@@ -38,27 +38,6 @@ extern int g_envCtaPolicy;  // UNDRIVEN
 extern std::function<ncclResult_t(const ncclComm_t, int*)> g_commCount;
 extern std::function<ncclResult_t(const ncclComm_t, int*)> g_commUserRank;
 
-// ncclProfilerStart/StopCeCollEvent. Default succeed without a profiler.
-struct ncclCeCollArgs;
-extern std::function<ncclResult_t(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t)>
-    g_profilerStartCeCollEvent;
-extern std::function<ncclResult_t(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t)>
-    g_profilerStopCeCollEvent;
-
-// ncclProfilerStart/Stop{Group,Coll}ApiEvent. Default succeed without a profiler.
-struct ncclInfo;
-extern std::function<ncclResult_t(struct ncclInfo*, bool)> g_profilerStartGroupApiEvent;
-extern std::function<ncclResult_t()> g_profilerStopGroupApiEvent;
-extern std::function<ncclResult_t(struct ncclInfo*, bool)> g_profilerStartCollApiEvent;
-extern std::function<ncclResult_t()> g_profilerStopCollApiEvent;
-
-// ncclProfilerStart/StopAddonEvent. Default succeed without a profiler.
-struct ncclProfilerEventRef;
-extern std::function<ncclResult_t(struct ncclInfo*, bool, struct ncclProfilerEventRef*, struct ncclProfilerEventRef*)>
-    g_profilerStartAddonEvent;
-extern std::function<ncclResult_t(struct ncclProfilerEventRef*, struct ncclProfilerEventRef*)>
-    g_profilerStopAddonEvent;
-
 // Restore every comm_fakes seam to its default. Call from a fixture TearDown.
 void ResetCommFakes();
 
