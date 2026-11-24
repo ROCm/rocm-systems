@@ -160,4 +160,19 @@ inline void execute_float_compare(Wavefront &wave, FloatCompare32Function wave32
   wave.raise_alu_causes(causes);
 }
 
+// Execute a Wave64-only predicate. Unsupported test-CU wave sizes fail before
+// source observation or mask/status commits; ordinary Wave32 bridges are unaffected.
+template <unsigned Bits, typename Commit>
+inline void execute_float_compare_wave64(Wavefront &wave, FloatCompare64Function function,
+                                         uint64_t flags, uint64_t modifiers,
+                                         const Operand &source_a, const Operand &source_b,
+                                         bool constant, Commit commit, uint64_t exec_mask) {
+  if (wave.wf_size() != 64) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  execute_float_compare<Bits>(wave, nullptr, function, flags, modifiers, source_a, source_b,
+                              constant, commit, exec_mask);
+}
+
 } // namespace rocjitsu::amdgpu::arith
