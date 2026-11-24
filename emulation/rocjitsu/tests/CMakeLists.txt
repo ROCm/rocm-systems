@@ -522,6 +522,7 @@ add_executable(
     older_scalar_integer_test.cpp
     older_fp_class_compare_test.cpp
     older_integer_compare_test.cpp
+    older_integer64_compare_test.cpp
     rj_arith_policy_test.cpp
     rj_arith_config_test.cpp
     rj_arith_bridge_test.cpp
@@ -672,6 +673,7 @@ add_executable(
     simd_correctness/mfma_register_paths_test.cpp
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
+    gfx908_compare_test.cpp
     vop3_conversion_modifiers_test.cpp
     cube_instruction_test.cpp
     division_test.cpp

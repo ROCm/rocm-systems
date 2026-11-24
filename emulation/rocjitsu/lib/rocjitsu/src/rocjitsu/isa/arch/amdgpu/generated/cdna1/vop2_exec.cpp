@@ -5,7 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/base/rj_compiler.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna1/valu.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna1/alu_status.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/vop2.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
