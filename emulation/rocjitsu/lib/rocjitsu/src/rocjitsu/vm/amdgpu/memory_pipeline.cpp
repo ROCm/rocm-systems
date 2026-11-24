@@ -2753,6 +2753,34 @@ LocalMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
   return completion;
 }
 
+std::optional<VmAccessOutcome>
+GlobalMemPipeline::try_direct_spans(uint32_t process_id, const GpuVmAccess &access,
+                                    std::span<const DirectSpan> spans, bool is_load) {
+  if (!direct_backing_ || !local_range_handler_ || !l2_ || spans.empty() ||
+      !access.info().legacy_cache_compatible)
+    return std::nullopt;
+  const VmDirectBacking *backing = access.direct_backing();
+  if (!backing)
+    return std::nullopt;
+  uint64_t begin = UINT64_MAX, end = 0;
+  for (const DirectSpan &span : spans) {
+    if (span.size > UINT64_MAX - span.address)
+      return std::nullopt;
+    begin = std::min(begin, span.address);
+    end = std::max(end, span.address + span.size);
+  }
+  // The same speculation bound as a vector request's bounding box.
+  constexpr uint64_t page = IdentityAddressSpaceTranslator::kPageSize;
+  if (begin >= end || end - begin > (uint64_t{1} << 16) * page)
+    return std::nullopt;
+  // The admission is held until the transfer below returns.
+  const auto local = local_range_handler_(
+      process_id, access, {begin, end - begin, is_load ? VmAccessKind::Read : VmAccessKind::Write});
+  if (!local || local->outcome != VmAccessOutcome::Complete)
+    return std::nullopt;
+  return amdgpu::try_direct_spans(spans, is_load, Mtype::RW, *backing, *l1_, *l2_);
+}
+
 VmAccessOutcome TensorDmaPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   return resume_tensor_dma(inst, wf);
 }

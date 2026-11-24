@@ -12,6 +12,7 @@
 #include <bit>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 namespace rocjitsu::amdgpu {
 
@@ -27,6 +28,14 @@ bool vmem_scalar_direct_enabled() {
   static const bool enabled = [] {
     const char *value = std::getenv("RJ_VMEM_SCALAR_DIRECT");
     return vmem_direct_enabled() && (!value || std::strcmp(value, "0") != 0);
+  }();
+  return enabled;
+}
+
+bool vmem_tdm_direct_enabled() {
+  static const bool enabled = [] {
+    const char *value = std::getenv("RJ_VMEM_TDM_DIRECT");
+    return vmem_direct_enabled() && !(value && value[0] == '0');
   }();
   return enabled;
 }
@@ -508,6 +517,76 @@ std::optional<VmAccessOutcome> try_direct_swizzled_access(const VectorMemState &
     for (const StridedRun &run : transfer.runs)
       if (l2.bypass_raced_fill(run.address, run.bytes()))
         l2.drop_bypassed_copies(run.address, run.bytes());
+  return VmAccessOutcome::Complete;
+}
+
+std::optional<VmAccessOutcome> try_direct_spans(std::span<const DirectSpan> spans, bool is_load,
+                                                Mtype instruction_mtype,
+                                                const VmDirectBacking &backing,
+                                                const L1VectorCache &l1, L2Cache &l2) {
+  if (spans.empty())
+    return VmAccessOutcome::Complete;
+  // Resolve every span before any effect; resolution may take page-table
+  // locks, so it must finish before the admission is held.
+  const uint64_t generation = backing.generation();
+  std::vector<VmDirectBacking::Copy> copies;
+  copies.reserve(spans.size());
+  std::optional<LegacyLocalExtent> extent;
+  uint64_t lo = UINT64_MAX, hi = 0;
+  bool guarded = false;
+  for (const DirectSpan &span : spans) {
+    if (span.size == 0)
+      continue;
+    if (!extent || !extent->contains(span.address, span.size)) {
+      extent = backing.extent(span.address, generation);
+      if (!extent || !extent->contains(span.address, span.size))
+        return std::nullopt;
+      const Mtype mtype = effective_mtype(instruction_mtype, extent->mtype);
+      if (mtype == Mtype::UC || mtype == Mtype::CC)
+        return std::nullopt;
+    }
+    if (!is_load &&
+        (l1.may_hold(span.address, span.size) || !l2.may_bypass(span.address, span.size)))
+      return std::nullopt;
+    guarded |= extent->owner != LegacyHostExtentOwner::DriverSealedRam;
+    copies.push_back({span.address, extent->host(span.address), span.data, span.size});
+    lo = std::min(lo, span.address);
+    hi = std::max(hi, span.address + span.size);
+  }
+  if (copies.empty())
+    return VmAccessOutcome::Complete;
+  if (l2.has_unpublished_lines())
+    return std::nullopt;
+
+  std::optional<VmRawBackingWriteGate::Permit> permit;
+  if (!is_load) {
+    permit = backing.begin_write(lo, hi - lo);
+    if (!permit)
+      return std::nullopt;
+  }
+  struct SpanTransfer {
+    std::span<const VmDirectBacking::Copy> copies;
+    const VmDirectBacking &backing;
+    bool into_memory = false;
+    bool guarded = true;
+    bool completed = false;
+  } transfer{copies, backing, !is_load, guarded};
+  if (!backing.run_admitted(
+          generation,
+          [](void *context) {
+            auto &t = *static_cast<SpanTransfer *>(context);
+            t.completed = t.backing.copy(t.copies, t.into_memory, t.guarded);
+          },
+          &transfer))
+    return std::nullopt;
+  // Plain transfers are idempotent: after a host fault, the caller's ordinary
+  // path repeats the request from its start and reports the fault itself.
+  if (!transfer.completed)
+    return std::nullopt;
+  if (!is_load)
+    for (const VmDirectBacking::Copy &copy : copies)
+      if (l2.bypass_raced_fill(copy.address, copy.size))
+        l2.drop_bypassed_copies(copy.address, copy.size);
   return VmAccessOutcome::Complete;
 }
 

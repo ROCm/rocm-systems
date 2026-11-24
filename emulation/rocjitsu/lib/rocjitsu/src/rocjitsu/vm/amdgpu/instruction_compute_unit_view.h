@@ -15,6 +15,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -38,6 +39,9 @@ class RegisterAccess;
 struct LdsBarrierArrivalObservation;
 struct TensorDmaIssueObservation;
 struct TensorDmaMemoryAccessObservation;
+struct DirectSpan;
+class GpuVmAccess;
+enum class VmAccessOutcome : uint8_t;
 class Wavefront;
 
 /// @brief Completion contract for a deferred runtime queue exception.
@@ -132,6 +136,11 @@ public:
   void report_tensor_dma_memory_access(const TensorDmaMemoryAccessObservation &access);
   bool observes_tensor_dma_issue() const;
   void report_tensor_dma_issue(const TensorDmaIssueObservation &issue);
+  /// Complete dense tensor DMA rows directly against local host backing, or
+  /// decline before any effect; see GlobalMemPipeline::try_direct_spans().
+  std::optional<VmAccessOutcome> try_direct_global_spans(const GpuVmAccess &access,
+                                                         std::span<const DirectSpan> spans,
+                                                         bool is_load);
   bool observes_lds_barrier_arrival() const;
   void report_lds_barrier_arrival(const LdsBarrierArrivalObservation &arrival);
 

@@ -2239,6 +2239,14 @@ inline void InstructionComputeUnitView::report_tensor_dma_memory_access(
     const TensorDmaMemoryAccessObservation &access) {
   raw_cu().plugin_group().onAmdgpuTensorDmaMemoryAccess(access, raw_wavefront());
 }
+inline std::optional<VmAccessOutcome> InstructionComputeUnitView::try_direct_global_spans(
+    const GpuVmAccess &access, std::span<const DirectSpan> spans, bool is_load) {
+  ComputeUnitCore &cu = raw_cu();
+  if (cu.debug_active() || !cu.plugin_group().empty())
+    return std::nullopt;
+  return cu.global_mem_pipeline_.try_direct_spans(raw_wavefront().process_id(), access, spans,
+                                                  is_load);
+}
 inline bool InstructionComputeUnitView::observes_tensor_dma_issue() const {
   return raw_cu().plugin_group().observes_tensor_dma_issue(raw_wavefront());
 }

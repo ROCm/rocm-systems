@@ -637,6 +637,121 @@ inline void for_each_tensor_element(const TensorDmaDescriptor &desc, const Tenso
     for_each_dense_tensor_element(desc, layout, visit);
 }
 
+/// @brief Complete an unobserved dense tile whose every row is in bounds as
+/// whole rows against local host backing, or decline with no effect.
+/// @details Each row moves as one global span. Loads stage the tile in payload
+/// and publish LDS, split only where padding falls, after every row arrived,
+/// as the element path does; a host fault therefore leaves LDS untouched.
+/// Stores read the dense LDS stream first. Gather, partly out-of-bounds tiles,
+/// clipped LDS and observed instructions keep the element path, which also
+/// repeats any declined transfer from its start.
+/// @pre prepare_tensor's descriptor and address-range validation passed.
+inline bool try_direct_dense_tensor(TensorDmaState &state, Wavefront &wf,
+                                    const TensorDmaLayout &layout, uint64_t element_count,
+                                    uint64_t lds_allocation_end) {
+  const TensorDmaDescriptor &desc = state.desc;
+  if (!vmem_tdm_direct_enabled() || desc.gather || layout.empty() || element_count == 0 ||
+      !wf.address_space() || wf.cu().observes_tensor_dma_issue() ||
+      wf.cu().observes_tensor_dma_memory_access())
+    return false;
+  const std::span<const uint32_t> dimensions = layout.dimensions();
+  const uint32_t width = desc.tile_dims[0];
+  if (dimensions.empty() || width == 0 || width > desc.tensor_dims[0])
+    return false;
+  const uint32_t iterations = desc.iterate ? desc.iteration_count : 1;
+  const uint64_t rows_per_iteration = element_count / iterations / width;
+  const uint32_t size = desc.elem_size;
+  const uint64_t row_bytes = uint64_t{width} * size;
+  const bool padded = desc.pad && !state.store_from_lds;
+  const TensorDmaLdsPadding padding = tensor_dma_lds_padding(desc);
+  const uint64_t lds_origin = uint64_t{wf.lds_base()} + uint64_t{desc.lds_base};
+
+  // One global span per row, merged with the previous one when both its
+  // memory and payload continue it.
+  state.payload.resize(static_cast<size_t>(element_count) * size);
+  std::vector<DirectSpan> spans;
+  spans.reserve(static_cast<size_t>(rows_per_iteration) * iterations);
+  uint64_t payload_offset = 0;
+  for (uint32_t iter = 0; iter < iterations; ++iter) {
+    for (uint64_t row = 0; row < rows_per_iteration; ++row) {
+      uint64_t remaining = row;
+      uint64_t row_base = uint64_t{iter} * desc.global_increment;
+      for (uint32_t dim : dimensions.subspan(1)) {
+        const uint32_t coord = static_cast<uint32_t>(remaining % desc.tile_dims[dim]);
+        remaining /= desc.tile_dims[dim];
+        if (coord >= desc.tensor_dims[dim])
+          return false;
+        row_base += uint64_t{coord} * desc.global_strides[dim - 1];
+      }
+      const uint64_t address = desc.global_base + row_base * size;
+      if (!spans.empty() && spans.back().address + spans.back().size == address &&
+          spans.back().data + spans.back().size == state.payload.data() + payload_offset &&
+          spans.back().size + row_bytes <= UINT32_MAX)
+        spans.back().size += static_cast<uint32_t>(row_bytes);
+      else
+        spans.push_back(
+            {address, static_cast<uint32_t>(row_bytes), state.payload.data() + payload_offset});
+      payload_offset += row_bytes;
+    }
+  }
+
+  // Visit each row's LDS pieces in tile order; padding splits a row only
+  // where an element starts a new interval.
+  const auto for_each_lds_piece = [&](auto &&visit) {
+    uint64_t offset = 0;
+    for (uint32_t iter = 0; iter < iterations; ++iter) {
+      const uint64_t iteration_byte = uint64_t{iter} * desc.lds_increment * size;
+      for (uint64_t row = 0; row < rows_per_iteration; ++row) {
+        const uint64_t tile_base = row * row_bytes;
+        for (uint32_t x = 0; x < width;) {
+          const uint64_t tile_byte = tile_base + uint64_t{x} * size;
+          uint32_t end = width;
+          uint64_t lds_byte = iteration_byte + tile_byte;
+          if (padded) {
+            const uint64_t interval = tile_byte / padding.interval_bytes;
+            const uint64_t next = (interval + 1) * padding.interval_bytes;
+            end = static_cast<uint32_t>(
+                std::min<uint64_t>(width, (next - tile_base + size - 1) / size));
+            lds_byte += interval * padding.amount_bytes;
+          }
+          if (!visit(lds_origin + lds_byte, offset, uint64_t{end - x} * size))
+            return false;
+          offset += uint64_t{end - x} * size;
+          x = end;
+        }
+      }
+    }
+    return true;
+  };
+  // Every LDS byte must lie in the allocation: clipped elements keep the
+  // element path's byte-prefix model.
+  if (!for_each_lds_piece([&](uint64_t lds, uint64_t, uint64_t bytes) {
+        return lds + bytes <= lds_allocation_end;
+      }))
+    return false;
+
+  auto access = wf.snapshot_vm_access();
+  if (!access)
+    return false;
+  if (state.store_from_lds)
+    for_each_lds_piece([&](uint64_t lds, uint64_t offset, uint64_t bytes) {
+      std::as_const(wf.lds()).read(static_cast<uint32_t>(lds), state.payload.data() + offset,
+                                   static_cast<uint32_t>(bytes));
+      return true;
+    });
+  if (wf.cu().try_direct_global_spans(*access, spans, !state.store_from_lds) !=
+      VmAccessOutcome::Complete)
+    return false;
+  if (!state.store_from_lds)
+    for_each_lds_piece([&](uint64_t lds, uint64_t offset, uint64_t bytes) {
+      wf.lds().write(static_cast<uint32_t>(lds), state.payload.data() + offset,
+                     static_cast<uint32_t>(bytes));
+      return true;
+    });
+  state.access = std::move(access);
+  return true;
+}
+
 inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
   const TensorDmaDescriptor &desc = state.desc;
   const TensorDmaLayout layout(desc);
@@ -662,6 +777,8 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
   if (!validate_materialization_address_ranges(desc, layout, wf, state.store_from_lds,
                                                lds_allocation_end)) [[unlikely]]
     return util::Result::failure();
+  if (try_direct_dense_tensor(state, wf, layout, *element_count, lds_allocation_end))
+    return util::Result::success();
   state.elements.reserve(static_cast<size_t>(*element_count));
   auto append_element = [&](uint64_t global_element, uint64_t iteration_lds_element,
                             uint64_t tile_element, bool in_bounds) {
