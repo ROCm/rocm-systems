@@ -33,6 +33,9 @@
 #ifndef MK_A_KERNARG_ALIGNMENT
 #define MK_A_KERNARG_ALIGNMENT 8
 #endif
+#ifndef MK_TRACE_EXIT_STRESS
+#define MK_TRACE_EXIT_STRESS 0
+#endif
 .amdgcn_target "amdgcn-amd-amdhsa--gfx1250"
 
 .macro wait_all
@@ -81,6 +84,17 @@ mk_a:
 #endif
   wait_all
   s_wait_storecnt 0
+#if MK_TRACE_EXIT_STRESS
+  // Exit probes must use entry wave identity and publish despite guest EXEC.
+  v_readfirstlane_b32 s9, v0
+  v_mov_b32 v0, 0
+  s_cmp_eq_u32 s9, 0
+  s_cbranch_scc0 .Ltrace_empty_exit_a
+  s_mov_b32 exec_lo, -2
+  s_endpgm
+.Ltrace_empty_exit_a:
+  s_mov_b32 exec_lo, 0
+#endif
   s_endpgm
 .Lend_a:
 .size mk_a, .Lend_a-mk_a

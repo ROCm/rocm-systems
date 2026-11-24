@@ -886,7 +886,7 @@ if(TARGET consan_multi_entry_runner AND TARGET rj_consan_analyze)
                 $<TARGET_FILE:rj_consan_analyze> --plugin
                 $<TARGET_FILE:hsa_consan_testable> --launcher
                 $<TARGET_FILE:rocjitsu_bin> --fixture
-                ${_fixture_dir}/multi-entry.hsaco --config
+                ${_fixture_dir}/multi-entry-trace-exits.hsaco --config
                 ${PROJECT_SOURCE_DIR}/configs/gfx1250_mi455x.json --root
                 ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --source ${PROJECT_SOURCE_DIR}
                 --workgroups ${_groups}

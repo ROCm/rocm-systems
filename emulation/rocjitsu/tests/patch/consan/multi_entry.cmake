@@ -35,6 +35,7 @@ foreach(
         unreachable-pc
         native-wide-vgprs
         alignment
+        trace-exits
 )
     set(_variant_object ${_fixture_dir}/multi-entry-${_variant}.o)
     set(_variant_image ${_fixture_dir}/multi-entry-${_variant}.hsaco)
@@ -51,6 +52,8 @@ foreach(
         set(_variant_defines -DMK_NATIVE_VGPRS=384)
     elseif(_variant STREQUAL "alignment")
         set(_variant_defines -DMK_EXTENDED_ABI=1 -DMK_A_KERNARG_ALIGNMENT=32)
+    elseif(_variant STREQUAL "trace-exits")
+        set(_variant_defines -DMK_TRACE_EXIT_STRESS=1)
     endif()
     add_custom_command(
         OUTPUT ${_variant_object}
