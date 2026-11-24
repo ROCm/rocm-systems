@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <format>
 #include <iterator>
@@ -30,6 +31,7 @@
 #include <mutex>
 #include <new>
 #include <optional>
+#include <pthread.h>
 #include <stop_token>
 #include <string>
 #include <sys/mman.h>
@@ -37,7 +39,6 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/un.h>
-#include <system_error>
 #include <thread>
 #include <unistd.h>
 #include <utility>
@@ -54,8 +55,10 @@ struct rj_daemon_t {
   ino_t socket_inode = 0;
   std::mutex clients_mutex;
   std::vector<int> client_fds;
-  std::jthread engine_thread;
-  std::jthread accept_thread;
+  pthread_t engine_thread{};
+  pthread_t accept_thread{};
+  bool engine_thread_started = false;
+  bool accept_thread_started = false;
 };
 
 namespace {
@@ -757,7 +760,7 @@ void handle_client(int client_fd, rj_daemon_t *daemon, std::stop_token stop) {
   session.run(stop);
 }
 
-void accept_clients(rj_daemon_t *daemon, std::stop_token stop) {
+void accept_clients(rj_daemon_t *daemon) {
   // The accept thread starts before rj_daemon_start publishes its handle.
   // Do not admit a client until startup has committed that publication.
   while (daemon->status.load(std::memory_order_acquire) == RJ_DAEMON_STATUS_STARTING)
@@ -771,7 +774,7 @@ void accept_clients(rj_daemon_t *daemon, std::stop_token stop) {
   };
   std::vector<ClientThread> client_threads;
   try {
-    while (!stop.stop_requested() && !daemon->stop_requested.load(std::memory_order_acquire)) {
+    while (!daemon->stop_requested.load(std::memory_order_acquire)) {
       std::erase_if(client_threads, [](const ClientThread &client) {
         return client.complete->load(std::memory_order_acquire);
       });
@@ -840,9 +843,13 @@ rj_status_t teardown(rj_daemon_t *daemon) {
   // Wake clients blocked inside an infinite-timeout device operation before
   // joining their threads. Transport shutdown alone only interrupts socket I/O.
   rj_vm_close_all_devices(daemon->vm);
-  daemon->accept_thread.request_stop();
-  if (daemon->accept_thread.joinable())
-    daemon->accept_thread.join();
+  if (daemon->accept_thread_started) {
+    if (pthread_join(daemon->accept_thread, nullptr) != 0) {
+      daemon->status.store(RJ_DAEMON_STATUS_ERROR, std::memory_order_release);
+      return ROCJITSU_STATUS_ERROR;
+    }
+    daemon->accept_thread_started = false;
+  }
 
   if (daemon->listen_fd >= 0) {
     ::close(daemon->listen_fd);
@@ -851,9 +858,13 @@ rj_status_t teardown(rj_daemon_t *daemon) {
   remove_owned_socket(daemon);
 
   rj_vm_request_exit(daemon->vm, "daemon shutdown");
-  daemon->engine_thread.request_stop();
-  if (daemon->engine_thread.joinable())
-    daemon->engine_thread.join();
+  if (daemon->engine_thread_started) {
+    if (pthread_join(daemon->engine_thread, nullptr) != 0) {
+      daemon->status.store(RJ_DAEMON_STATUS_ERROR, std::memory_order_release);
+      return ROCJITSU_STATUS_ERROR;
+    }
+    daemon->engine_thread_started = false;
+  }
   if (daemon->trace_fabric_effects) {
     auto *fabric = daemon->vm->vm ? daemon->vm->vm->fabric_endpoint() : nullptr;
     if (!fabric) {
@@ -890,6 +901,15 @@ rj_status_t teardown(rj_daemon_t *daemon) {
   daemon->vm = nullptr;
   daemon->status.store(RJ_DAEMON_STATUS_STOPPED, std::memory_order_release);
   return ROCJITSU_STATUS_SUCCESS;
+}
+
+rj_status_t rollback_startup(rj_daemon_t *daemon, rj_status_t status) {
+  teardown(daemon);
+  // The unpublished handle cannot be retained by a caller for a join retry.
+  // Preserve jthread's destruction invariant before releasing its thread state.
+  if (daemon->accept_thread_started || daemon->engine_thread_started)
+    std::terminate();
+  return status;
 }
 
 bool remove_stale_socket(const rj_daemon_t *daemon, const sockaddr_un &address,
@@ -1029,29 +1049,38 @@ rj_status_t rj_daemon_start_with_options(const char *json, const char *socket_pa
     return status;
   }
 
-  try {
-    created->engine_thread = std::jthread([state = created.get()] {
-      const rj_status_t run_status = rj_vm_run(state->vm, nullptr);
-      if (run_status != ROCJITSU_STATUS_SUCCESS ||
-          !state->stop_requested.load(std::memory_order_acquire)) {
-        mark_error(state);
-      }
-    });
-    created->accept_thread = std::jthread(
-        [state = created.get()](std::stop_token stop) { accept_clients(state, stop); });
-  } catch (const std::system_error &) {
-    teardown(created.get());
-    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
-  } catch (const std::bad_alloc &) {
-    teardown(created.get());
-    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
+  const int engine_error = pthread_create(
+      &created->engine_thread, nullptr,
+      [](void *context) -> void * {
+        auto *state = static_cast<rj_daemon_t *>(context);
+        const rj_status_t run_status = rj_vm_run(state->vm, nullptr);
+        if (run_status != ROCJITSU_STATUS_SUCCESS ||
+            !state->stop_requested.load(std::memory_order_acquire)) {
+          mark_error(state);
+        }
+        return nullptr;
+      },
+      created.get());
+  if (engine_error != 0) {
+    return rollback_startup(created.get(), ROCJITSU_STATUS_OUT_OF_RESOURCES);
   }
+  created->engine_thread_started = true;
+  const int accept_error = pthread_create(
+      &created->accept_thread, nullptr,
+      [](void *context) -> void * {
+        accept_clients(static_cast<rj_daemon_t *>(context));
+        return nullptr;
+      },
+      created.get());
+  if (accept_error != 0) {
+    return rollback_startup(created.get(), ROCJITSU_STATUS_OUT_OF_RESOURCES);
+  }
+  created->accept_thread_started = true;
 
   rj_daemon_status_t expected = RJ_DAEMON_STATUS_STARTING;
   if (!created->status.compare_exchange_strong(expected, RJ_DAEMON_STATUS_RUNNING,
                                                std::memory_order_acq_rel)) {
-    teardown(created.get());
-    return ROCJITSU_STATUS_ERROR;
+    return rollback_startup(created.get(), ROCJITSU_STATUS_ERROR);
   }
   created->status.notify_all();
 
