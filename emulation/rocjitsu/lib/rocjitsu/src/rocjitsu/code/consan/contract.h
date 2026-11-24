@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/result.h"
+#include "util/diagnostic.h"
 
 #include <array>
 #include <cstdint>
@@ -129,21 +130,6 @@ inline constexpr uint32_t kRecordReservedBegin = 48;
 inline constexpr uint32_t kAccessCommitted = 0x43534143;
 inline constexpr uint32_t kExactGuestMask = 1;
 } // namespace wire
-
-enum class ContractErrorCode {
-  None,
-  InvalidEncoding,
-  IncompatibleContract,
-  IdentityMismatch,
-  InvalidFacts,
-  UnsupportedLaunch,
-  ResourceLimit,
-};
-
-struct ContractError {
-  ContractErrorCode code = ContractErrorCode::None;
-  std::string message;
-};
 
 /// @brief Initial software budgets, checked before allocating untrusted extents.
 /// @details These conservative experimental caps are not measured production
@@ -289,28 +275,30 @@ struct TransportImage {
 [[nodiscard]] FailureOr<TransportImage>
 initialize_transport(const Manifest &manifest, const LaunchDimensions &dimensions,
                      uint32_t group_bytes, uint32_t private_bytes, uint64_t serial,
-                     uint64_t report_address, ContractError *error = nullptr);
+                     uint64_t report_address, util::DiagnosticEmitter diagnostic = {});
 
 [[nodiscard]] Digest digest(std::span<const uint8_t> bytes);
 [[nodiscard]] Digest mvp_options_digest();
 
-[[nodiscard]] Result validate_manifest(const Manifest &manifest, ContractError *error = nullptr,
+[[nodiscard]] Result validate_manifest(const Manifest &manifest,
+                                       util::DiagnosticEmitter diagnostic = {},
                                        const ContractLimits &limits = {});
 
 /// @brief Check exact image bytes separately from static-facts-only decoding.
 /// @details Offline captures own facts, but need not retain either code image.
 [[nodiscard]] Result match_images(const Manifest &manifest, std::span<const uint8_t> original,
-                                  std::span<const uint8_t> prepared, ContractError *error = nullptr,
+                                  std::span<const uint8_t> prepared,
+                                  util::DiagnosticEmitter diagnostic = {},
                                   const ContractLimits &limits = {});
 
 /// @brief Encode canonical, checksummed, explicitly little-endian static facts.
-[[nodiscard]] FailureOr<std::vector<uint8_t>> encode_manifest(const Manifest &manifest,
-                                                              ContractError *error = nullptr,
-                                                              const ContractLimits &limits = {});
+[[nodiscard]] FailureOr<std::vector<uint8_t>>
+encode_manifest(const Manifest &manifest, util::DiagnosticEmitter diagnostic = {},
+                const ContractLimits &limits = {});
 
 /// @brief Decode bounded, owning facts; reject trailing bytes and absent mappings.
 [[nodiscard]] FailureOr<Manifest> decode_manifest(std::span<const uint8_t> bytes,
-                                                  ContractError *error = nullptr,
+                                                  util::DiagnosticEmitter diagnostic = {},
                                                   const ContractLimits &limits = {});
 
 /// @brief Check actual launch shape and derive the single canonical storage layout.
@@ -320,6 +308,6 @@ initialize_transport(const Manifest &manifest, const LaunchDimensions &dimension
 [[nodiscard]] FailureOr<LaunchLayout>
 plan_launch(const Manifest &manifest, const LaunchDimensions &dimensions,
             uint32_t packet_group_bytes, uint32_t packet_private_bytes,
-            ContractError *error = nullptr, const ContractLimits &limits = {});
+            util::DiagnosticEmitter diagnostic = {}, const ContractLimits &limits = {});
 
 } // namespace rocjitsu::consan

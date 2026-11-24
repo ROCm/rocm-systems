@@ -12,6 +12,7 @@
 #include "rocjitsu/code/patch/consan/prepare.h"
 #include "rocjitsu/code/patch/fault_injection/drop_barrier.h"
 #include "rocjitsu/isa/register_set.h"
+#include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
 
@@ -57,11 +58,11 @@ TEST_F(ConSanPrepare, AllAdmittedCompanionsHaveOwningValidatedReplayableArtifact
     ASSERT_TRUE(artifact.succeeded()) << name << ": " << error_.message;
     EXPECT_TRUE(validate_prepared(original, artifact.value(), error_).succeeded())
         << error_.message;
-    ContractError image_error;
+    util::StringDiagnostic image_error;
     EXPECT_TRUE(verify_artifact_images(artifact.value().manifest, original, artifact.value().image,
-                                       &image_error)
+                                       image_error.emitter())
                     .succeeded())
-        << name << ": " << image_error.message;
+        << name << ": " << image_error.message();
     const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(artifact.value().manifest);
     ASSERT_TRUE(encoded.succeeded());
     const FailureOr<Manifest> decoded = decode_manifest(encoded.value());
@@ -129,10 +130,11 @@ TEST_F(ConSanPrepare, DropBarrierMutantReceivesFreshPreparation) {
   EXPECT_EQ(manifest.sites[1].original_offset, 0x40u);
   EXPECT_EQ(manifest.sites[1].access, AccessKind::Read);
   EXPECT_EQ(manifest.sites[1].original_size, 8u);
-  ContractError image_error;
+  util::StringDiagnostic image_error;
   EXPECT_TRUE(
-      verify_artifact_images(manifest, mutant, artifact.value().image, &image_error).succeeded())
-      << image_error.message;
+      verify_artifact_images(manifest, mutant, artifact.value().image, image_error.emitter())
+          .succeeded())
+      << image_error.message();
   EXPECT_EQ(source_image, pristine);
 }
 
@@ -298,10 +300,11 @@ TEST_F(ConSanPrepare, RegisterPressureReturnsAResourceErrorInsteadOfAnInternalAs
       EXPECT_LE(manifest.entry.prepared_sgprs, REGISTER_SET_ALLOCATABLE_SGPRS);
       EXPECT_GE(manifest.entry.prepared_vgprs, metadata.value().vgprs);
       EXPECT_LE(manifest.entry.prepared_vgprs, 256u);
-      ContractError image_error;
+      util::StringDiagnostic image_error;
       EXPECT_TRUE(
-          verify_artifact_images(manifest, image, artifact.value().image, &image_error).succeeded())
-          << image_error.message;
+          verify_artifact_images(manifest, image, artifact.value().image, image_error.emitter())
+              .succeeded())
+          << image_error.message();
     } else {
       EXPECT_TRUE(artifact.failed());
       EXPECT_EQ(error_.code, InputErrorCode::ResourceLimit);

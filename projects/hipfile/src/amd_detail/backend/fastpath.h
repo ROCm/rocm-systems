@@ -33,11 +33,6 @@ struct Fastpath : public BackendWithFallback {
     int score(const std::shared_ptr<IFile> &file, const std::shared_ptr<IBuffer> &buffer, size_t size,
               hoff_t file_offset, hoff_t buffer_offset) const override;
 
-    void enqueueAsyncIo(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer,
-                        size_t *size_p, hoff_t *file_offset_p, hoff_t *buffer_offset_p,
-                        ssize_t *bytes_transferred_p, std::shared_ptr<IStream> stream,
-                        std::shared_ptr<AsyncFailoverState> failover) override;
-
 protected:
     ssize_t _io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
                      hoff_t file_offset, hoff_t buffer_offset) override;
@@ -45,8 +40,4 @@ protected:
     void    on_fallback() const override;
 };
 
-}
-
-extern "C" {
-void async_fastpath_copy(void *userArgs);
 }

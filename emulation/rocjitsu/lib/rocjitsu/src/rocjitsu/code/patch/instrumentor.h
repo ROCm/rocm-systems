@@ -223,6 +223,11 @@ struct InstrumentedSite {
   uint32_t instrumentation_size = 0;
 };
 
+/// @brief Runtime obligation for the entry-prologue wrapper declared in the ELF.
+enum class DbiKernargBinding { None, CallerSuppliedWrapper };
+/// @brief Whether growth preserves live values or every originally declared GPR.
+enum class GuestStatePreservation { LiveRegisters, DeclaredRegisters };
+
 /// @brief Original SGPR/VGPR metadata counts needed to request register growth.
 struct OriginalRegisterCounts {
   uint32_t sgprs = 0;
@@ -235,6 +240,16 @@ struct InstrumentationResources {
   uint32_t kernarg_bytes = 0;
 };
 
+/// @brief Source-bound attribution and resources for one explicitly selected entry.
+struct InstrumentedEntry {
+  uint64_t original_descriptor_offset = 0;
+  uint64_t prepared_descriptor_offset = 0;
+  uint64_t original_entry_offset = 0;
+  uint64_t prepared_entry_offset = 0;
+  InstrumentationResources resources;
+  std::vector<InstrumentedSite> sites = {};
+};
+
 /// @brief All-or-nothing result: failures publish neither ELF bytes nor sites.
 struct InstrumentedCodeObject {
   std::vector<uint8_t> elf_bytes;
@@ -244,13 +259,20 @@ struct InstrumentedCodeObject {
   std::optional<TextEditError> edit_error;
   std::vector<std::string> warnings;
   std::vector<InstrumentedSite> sites;
+  /// Legacy-path resources; zero for explicit entry requests, even one selection.
   InstrumentationResources resources;
+  /// Explicit-entry results sorted by original_descriptor_offset. Find the
+  /// requested descriptor here and read its resources for the kernarg wrapper size.
+  std::vector<InstrumentedEntry> entries;
 };
 
-/// @brief Runtime obligation for the entry-prologue wrapper declared in the ELF.
-enum class DbiKernargBinding { None, CallerSuppliedWrapper };
-/// @brief Whether growth preserves live values or every originally declared GPR.
-enum class GuestStatePreservation { LiveRegisters, DeclaredRegisters };
+/// @brief Per-entry options keyed to a descriptor in the immutable input image.
+struct EntryInstrumentationOptions {
+  uint64_t descriptor_file_offset = 0;
+  DbiKernargBinding kernarg_binding = DbiKernargBinding::None;
+  GuestStatePreservation preservation = GuestStatePreservation::LiveRegisters;
+  std::optional<OriginalRegisterCounts> register_growth;
+};
 
 struct InstrumentationOptions {
   DbiKernargBinding kernarg_binding = DbiKernargBinding::None;
@@ -259,6 +281,10 @@ struct InstrumentationOptions {
   /// register-to-register preservation and bounded allocation growth; absent
   /// means the existing allocation/scratch policy.
   std::optional<OriginalRegisterCounts> register_growth;
+  /// Explicit disjoint-entry observations; cannot be combined with legacy options.
+  /// ReplaceWithInst is unsupported: ownership is proved on the original CFG.
+  /// Every queued point must belong to exactly one requested entry scope.
+  std::vector<EntryInstrumentationOptions> entries = {};
 };
 
 /// @brief Result of Instrumentor::patch_with_debug_summaries().
@@ -587,6 +613,13 @@ private:
   InstrumentationOptions options_;
   std::vector<InstrumentationPoint> points_;
   bool patched_ = false;
+
+  struct EntryPatchPlan;
+  EntryPatchPlan *entry_plan_ = nullptr;
+  ValidationResult *entry_validation_ = nullptr;
+  std::optional<uint64_t> planning_descriptor_offset_;
+  std::optional<uint64_t> planning_cave_offset_;
+  [[nodiscard]] InstrumentedCodeObjectDebug patch_entries();
 
   // Tests can bypass runtime-binding gates to inspect a plan or supply their own
   // dispatch support. Planner validation still runs; production callers cannot

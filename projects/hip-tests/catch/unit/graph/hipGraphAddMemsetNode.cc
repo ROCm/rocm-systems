@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <algorithm>
 #include <functional>
 #include <vector>
 
@@ -60,6 +61,66 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipGraphAddMemsetNode_Positive_Basic, uint8_t, uint1
   };
 
   GraphMemsetNodeCommonPositive<TestType, hipMemsetParams>(f);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Fill rows of a few to a hundred elements of each valid element size (1, 2, 4) with a 2D
+ * memset node, in an allocation with a pitch larger than the row, and verify every byte: the rows
+ * hold the value and the padding between them is untouched.
+ * Test source
+ * ------------------------
+ *    - unit/graph/hipGraphAddMemsetNode.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 7.1
+ */
+HIP_TEMPLATE_TEST_CASE(Unit_hipGraphAddMemsetNode_Positive_2DPadding, uint8_t, uint16_t,
+                       uint32_t) {
+  constexpr uint32_t memsetVal = 0xD1E2F304u;
+  constexpr uint8_t paddingVal = 0x3C;
+  constexpr size_t numRows = 4;
+  const size_t numElements = GENERATE(1, 3, 5, 16, 20, 100);
+  const size_t width = numElements * sizeof(TestType);
+  const size_t pitch = width + 32;
+  const size_t allocSize = pitch * numRows + 64;
+
+  LinearAllocGuard<uint8_t> dst_d(LinearAllocs::hipMalloc, allocSize);
+  HIP_CHECK(hipMemset(dst_d.ptr(), paddingVal, allocSize));
+
+  hipMemsetParams params{};
+  params.dst = dst_d.ptr();
+  params.elementSize = sizeof(TestType);
+  params.width = numElements;
+  params.height = numRows;
+  params.pitch = pitch;
+  params.value = memsetVal;
+
+  hipGraph_t graph = nullptr;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  hipGraphNode_t node = nullptr;
+  HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &params));
+  hipGraphExec_t graph_exec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread));
+  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+
+  std::vector<uint8_t> dst_h(allocSize);
+  HIP_CHECK(hipMemcpy(dst_h.data(), dst_d.ptr(), allocSize, hipMemcpyDeviceToHost));
+  std::vector<uint8_t> expected(allocSize, paddingVal);
+  for (size_t row = 0; row < numRows; row++) {
+    for (size_t column = 0; column < width; column++) {
+      expected[row * pitch + column] =
+          static_cast<uint8_t>(memsetVal >> (8 * (column % sizeof(TestType))));
+    }
+  }
+  const auto mismatch = std::mismatch(dst_h.begin(), dst_h.end(), expected.begin());
+  INFO("element size " << sizeof(TestType) << " width " << width << ": first mismatch at byte "
+                       << (mismatch.first - dst_h.begin()));
+  REQUIRE(mismatch.first == dst_h.end());
 }
 
 /**

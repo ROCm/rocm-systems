@@ -29,6 +29,11 @@ namespace {
 // want to exercise here.
 constexpr size_t kFragmentBlockSize = 2 * 1024 * 1024;
 
+// A system request above one block is not sub-allocated: it gets a dedicated
+// allocation of the requested size. The zero-init and coherence tests also run
+// at this size so that the hand-off between the two paths is covered.
+constexpr size_t kAboveBlockSize = kFragmentBlockSize + 4096;
+
 // Deterministic, per-buffer/per-offset fingerprint. Distinct (id, offset)
 // pairs produce distinct bytes, so if two live fragments ever overlap, the
 // later writer clobbers the earlier one and read-back verification fails.
@@ -325,38 +330,49 @@ void MemoryFragment::FragmentZeroInitTest(void) {
     return;
   }
 
-  // Repeatedly allocate -> assert zeroed -> dirty -> free with a fixed size,
-  // which makes the sub-allocator very likely to hand back the same recycled
-  // fragment. A recycled fragment that still carries the previous (0xAB) data
-  // would fail the zero check, catching missing zero-initialization.
-  const size_t kSize = 4096;
-  const int kIters = 128;
-  for (int it = 0; it < kIters; ++it) {
-    uint8_t* p = nullptr;
-    hsa_status_t err = hsa_amd_memory_pool_allocate(
-        pool, kSize, 0, reinterpret_cast<void**>(&p));
-    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-    ASSERT_NE(p, nullptr);
+  // Repeatedly allocate -> assert zeroed -> dirty -> free with a fixed size.
+  // A buffer that still carries the previous (0xAB) data fails the zero check,
+  // catching missing zero-initialization. Each size reaches its memory by a
+  // different path:
+  //   - one page: the sub-allocator hands back the same recycled fragment;
+  //   - exactly one block: the freed block comes back from the block cache;
+  //   - above one block: a dedicated allocation whose pages come from the OS.
+  const struct {
+    size_t size;
+    int iters;
+  } kCases[] = {{4096, 128}, {kFragmentBlockSize, 16}, {kAboveBlockSize, 16}};
 
-    for (size_t i = 0; i < kSize; ++i) {
-      ASSERT_EQ(p[i], 0u) << "Fragment not zero-initialized at iteration " << it
-                          << ", offset " << i;
+  for (const auto& c : kCases) {
+    for (int it = 0; it < c.iters; ++it) {
+      uint8_t* p = nullptr;
+      hsa_status_t err = hsa_amd_memory_pool_allocate(
+          pool, c.size, 0, reinterpret_cast<void**>(&p));
+      ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+      ASSERT_NE(p, nullptr);
+
+      // One assertion per buffer: a per-byte ASSERT is slow at these sizes.
+      size_t first_nonzero = 0;
+      while (first_nonzero < c.size && p[first_nonzero] == 0) ++first_nonzero;
+      ASSERT_EQ(first_nonzero, c.size)
+          << "Buffer of " << c.size << " bytes not zero-initialized at iteration "
+          << it << ", offset " << first_nonzero;
+
+      memset(p, 0xAB, c.size);
+
+      err = hsa_amd_memory_pool_free(p);
+      ASSERT_EQ(err, HSA_STATUS_SUCCESS);
     }
-
-    memset(p, 0xAB, kSize);
-
-    err = hsa_amd_memory_pool_free(p);
-    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
   }
 }
 
 void MemoryFragment::FragmentCoherenceOnPool(
     const char* label, hsa_agent_t cpuAgent, hsa_agent_t gpuAgent,
-    hsa_amd_memory_pool_t under_test_pool, bool grant_cpu) {
+    hsa_amd_memory_pool_t under_test_pool, bool grant_cpu, int num_elements) {
   hsa_status_t err;
 
   if (verbosity() > 0) {
-    std::cout << "  Fragment coherence on " << label << " memory" << std::endl;
+    std::cout << "  Fragment coherence on " << label << " memory, "
+              << num_elements * sizeof(int) << " bytes" << std::endl;
   }
 
   // A standard (coarse-grain) system pool for scratch buffers the kernel also
@@ -380,14 +396,14 @@ void MemoryFragment::FragmentCoherenceOnPool(
                          0, 0, &queue);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  const int kNumElements = 256;
+  const int kNumElements = num_elements;
   const size_t kBufBytes = kNumElements * sizeof(int);
-  ASSERT_LE(kBufBytes, kFragmentBlockSize);
 
-  // sysMemory is the buffer under test: a sub-allocated fragment from the
-  // pool under test (fine-grain system or device/VRAM). The GPU atomically
-  // adds kValue to each element; the CPU must observe the result after the
-  // packet's system-scope release.
+  // sysMemory is the buffer under test, from the pool under test (fine-grain
+  // system or device/VRAM): a sub-allocated fragment, or a dedicated
+  // allocation when kBufBytes is above one block. The GPU atomically adds
+  // kValue to each element; the CPU must observe the result after the packet's
+  // system-scope release.
   int* sysMemory = NULL;
   err = hsa_amd_memory_pool_allocate(under_test_pool, kBufBytes, 0,
                                      reinterpret_cast<void**>(&sysMemory));
@@ -508,11 +524,23 @@ void MemoryFragment::FragmentCoherenceOnPool(
 
 void MemoryFragment::FragmentCoherenceTest(hsa_agent_t cpuAgent,
                                            hsa_agent_t gpuAgent) {
+  // One workgroup of elements: every buffer is a fragment.
+  const int kFragmentElements = 256;
+
   // System memory (fine-grain): host-accessible, no CPU-access grant needed.
   hsa_amd_memory_pool_t sys_pool;
   if (GetFineGrainSystemPool(&sys_pool)) {
     FragmentCoherenceOnPool("fine-grain system", cpuAgent, gpuAgent, sys_pool,
-                            /*grant_cpu=*/false);
+                            /*grant_cpu=*/false, kFragmentElements);
+
+    // Above one block the system buffers are dedicated allocations that the
+    // GPU reaches only through hsa_amd_agents_allow_access. Skipped on
+    // emulators, where a grid this large is slow.
+    if (!rocrtst::isEmuModeEnabled()) {
+      FragmentCoherenceOnPool("fine-grain system (above one block)", cpuAgent,
+                              gpuAgent, sys_pool, /*grant_cpu=*/false,
+                              static_cast<int>(kAboveBlockSize / sizeof(int)));
+    }
   } else if (verbosity() > 0) {
     std::cout << "  No fine-grain system pool; skipping system case."
               << std::endl;
@@ -523,7 +551,7 @@ void MemoryFragment::FragmentCoherenceTest(hsa_agent_t cpuAgent,
   if (GetDevicePool(gpuAgent, &dev_pool)) {
     if (PoolAccessibleByAgent(cpuAgent, dev_pool)) {
       FragmentCoherenceOnPool("device/VRAM", cpuAgent, gpuAgent, dev_pool,
-                              /*grant_cpu=*/true);
+                              /*grant_cpu=*/true, kFragmentElements);
     } else if (verbosity() > 0) {
       std::cout << "  Device pool not host-accessible (non-large-BAR); "
                    "skipping device case." << std::endl;

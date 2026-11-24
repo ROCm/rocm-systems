@@ -811,8 +811,10 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
     l1_->prefetch_resident(d.addr, wf.process_id());
     return VmAccessOutcome::Complete;
   }
-  if (d.memviol)
+  if (d.memviol) {
+    wf.raise_memory_violation("negative scalar buffer offset");
     return VmAccessOutcome::Faulted;
+  }
   // A scalar atomic accesses one 4- or 8-byte element and returns it as dwords.
   if (d.atomic_op != AtomicOp::NONE &&
       ((d.elem_size != sizeof(uint32_t) && d.elem_size != sizeof(uint64_t)) ||
@@ -1917,11 +1919,12 @@ bool rejects_atomic_operation(const VectorMemState &d, Wavefront &wf, bool local
   return true;
 }
 
-bool rejects_flat_dds(const Instruction &inst, const Wavefront &wf, uint64_t request_lanes) {
+bool rejects_flat_dds(const Instruction &inst, Wavefront &wf, uint64_t request_lanes) {
   if (!(inst.data_as<VectorMemState>()->flat_dds_lane_mask & request_lanes))
     return false;
   util::Logger::warn("unsupported FLAT DDS execution: ", inst.mnemonic(),
                      " pc=", std::format("{:#x}", wf.pc), ": CDNA5 DDS backing is not implemented");
+  wf.set_unreported_memory_failure("CDNA5 FLAT DDS backing is not implemented");
   return true;
 }
 
@@ -1976,7 +1979,11 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
   // instruction before global or LDS side effects rather than narrowing a
   // DDS address into another workgroup's LDS allocation.
   const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
-  if (d.ds_memviol || rejects_flat_dds(inst, wf, request_lanes))
+  if (d.ds_memviol) {
+    wf.raise_memory_violation("misaligned LDS atomic");
+    return VmAccessOutcome::Faulted;
+  }
+  if (rejects_flat_dds(inst, wf, request_lanes))
     return VmAccessOutcome::Faulted;
   if (d.rejects_private_atomic(request_lanes)) {
     const auto arch = wf.cu().arch();
@@ -2106,8 +2113,11 @@ VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wav
 
 VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wavefront &wf,
                                                          uint64_t request_lanes) {
-  if (d.requires_scratch_backing && (d.scratch_lane_mask & request_lanes) && wf.scratch_base() == 0)
+  if (d.requires_scratch_backing && (d.scratch_lane_mask & request_lanes) &&
+      wf.scratch_base() == 0) {
+    wf.set_unreported_memory_failure("private access without scratch backing");
     return VmAccessOutcome::Faulted;
+  }
 
   if (d.image_metadata || wf.address_space() || (has_ingress_handler() && wf.process_id() != 0)) {
     const bool has_progress = d.translated.request_index != 0 ||
@@ -2491,8 +2501,10 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
       std::memcpy(d.response_data.data() + lane * sizeof(uint32_t), &*previous, sizeof(uint32_t));
     return VmAccessOutcome::Complete;
   }
-  if (d.ds_memviol)
+  if (d.ds_memviol) {
+    wf.raise_memory_violation("misaligned LDS atomic");
     return VmAccessOutcome::Faulted;
+  }
   if (d.lds_stack_inputs) {
     execute_lds_stack(wf, d);
     return VmAccessOutcome::Complete;
@@ -2506,8 +2518,10 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
   if (d.gds)
     return wf.raw_cu().gws_device().execute_gds(d, wf);
   const auto arch = wf.cu().arch();
-  if (native_ds_atomic_misaligned(d, arch, request_lanes))
+  if (native_ds_atomic_misaligned(d, arch, request_lanes)) {
+    wf.raise_memory_violation("misaligned LDS atomic");
     return VmAccessOutcome::Faulted;
+  }
   auto access = [&](Lds &backing) {
     execute_lds_access(d, wf, backing, d.per_lane_addr, request_lanes & ~d.ds_oob_lane_mask,
                        d.store_data, d.response_data);
