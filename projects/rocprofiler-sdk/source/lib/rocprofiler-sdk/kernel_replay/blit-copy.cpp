@@ -75,6 +75,14 @@ using kernel_abi::tiles_for;
 using kernel_abi::unlisted_counter;
 using kernel_abi::workgroup_size;
 
+// HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG is absent from HSA headers older than interface 1.7
+#if HSA_AMD_INTERFACE_VERSION_MAJOR > 1 ||                                                         \
+    (HSA_AMD_INTERFACE_VERSION_MAJOR == 1 && HSA_AMD_INTERFACE_VERSION_MINOR >= 7)
+constexpr uint32_t memory_pool_executable_flag = HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
+#else
+constexpr uint32_t memory_pool_executable_flag = (1U << 2);
+#endif
+
 // A copy runs as four dispatches, in this order: three build the tile list on the GPU from the
 // region descriptors, and the last copies it, digesting the tiles when it is a capture that keeps
 // them. The restore kernels then work from that capture's tile list, one dispatch each.
@@ -383,7 +391,7 @@ allocate_mapped(const hsa::AgentCache& agent, size_t size)
     auto* ext = hsa::get_amd_ext_table();
     void* ptr = nullptr;
     if(ext->hsa_amd_memory_pool_allocate_fn(
-           agent.gpu_pool(), size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, &ptr) != HSA_STATUS_SUCCESS)
+           agent.gpu_pool(), size, memory_pool_executable_flag, &ptr) != HSA_STATUS_SUCCESS)
         return nullptr;
     if(host_writable(ptr)) return ptr;
     ext->hsa_amd_memory_pool_free_fn(ptr);
