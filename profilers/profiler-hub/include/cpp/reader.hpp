@@ -379,8 +379,11 @@ struct reader_t
         const reader_types::time_window_t& window = {}) const;
 
     /** @brief Fills @p rows with the next page of table events whose id is in
-     *         (@p after_id, @p last_id]. Returns the number written. A short
-     *         page means there are no further rows. */
+     *         (@p after_id, @p last_id], except that an @p after_id of 0 starts
+     *         at the first row and includes a row whose id is 0. Returns the
+     *         number written. A short page means there are no further rows.
+     *         Use a capacity of at least 2 when paging, since a page that ends
+     *         on id 0 cannot be continued. */
     [[nodiscard]] uint32_t read_table_events(const resolved_event_query& query,
                                              uint32_t                    event_type,
                                              uint64_t                    after_id,

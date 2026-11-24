@@ -142,11 +142,6 @@ protected:
         host.process_id = 100;
         host.thread_id  = 200;
 
-        // The first event written by this writer is stored with event id 0, and
-        // the table query's inner join does not find that row. A discarded
-        // region takes that id so the rows below are readable.
-        test::insert_region(*writer, "region-z", 100, 200);
-
         writer_types::event_data_t categorized;
         categorized.event_category = "HIP_API";
         writer_types::region_data_t region_a;
@@ -233,13 +228,7 @@ protected:
         add_alloc("FREE", 8200, 0x3000, gpu);
         add_alloc("ALLOC", 9000, 0x4000, other);
 
-        writer_types::pmc_event_data_t unused;
-        unused.event.emplace();
-        unused.value            = 9;
-        unused.sample.timestamp = 10;
-        unused.sample.track     = counter_track;
-        writer->insert_pmc_event_data(unused, pmc.unique_id);
-
+        // The first sample (1.5) is stored with id 0 and must still be returned.
         for(const double value : { 1.5, 2.5 })
         {
             writer_types::pmc_event_data_t sample;
@@ -345,13 +334,12 @@ TEST_F(rocpd_v3_table_events_test, duration_tables_report_fields_spans_and_summa
     ASSERT_EQ(samples.size(), 1U);
     EXPECT_EQ(samples[0].start, 1500U);
 
-    const auto  kernels = read(resolved_event_query{}, PH_EVENT_TYPE_KERNEL_DISPATCH);
-    std::string kernel_starts;
-    for(const auto& row : kernels)
-    {
-        kernel_starts += std::to_string(row.start) + " ";
-    }
-    ASSERT_EQ(kernels.size(), 3U) << kernel_starts;
+    // The first kernel written is stored with id 0 and must be returned.
+    const auto kernels = read(resolved_event_query{}, PH_EVENT_TYPE_KERNEL_DISPATCH);
+    ASSERT_EQ(kernels.size(), 4U);
+    const auto* first_kernel = find_row(kernels, 50);
+    ASSERT_NE(first_kernel, nullptr);
+    EXPECT_EQ(first_kernel->id, 0U);
     const auto* kernel = find_row(kernels, 3000);
     ASSERT_NE(kernel, nullptr);
     EXPECT_EQ(kernel->grid_size_x, 8U);
@@ -367,6 +355,24 @@ TEST_F(rocpd_v3_table_events_test, duration_tables_report_fields_spans_and_summa
         resolved_event_query{}, PH_EVENT_TYPE_KERNEL_DISPATCH, kernel->id, UINT64_MAX, 1);
     ASSERT_EQ(page.size(), 1U);
     EXPECT_GT(page[0].id, kernel->id);
+
+    // Paging from the start with two rows per page walks past id 0 without
+    // skipping or repeating a row.
+    std::vector<uint64_t> paged_ids;
+    uint64_t              after = 0;
+    for(;;)
+    {
+        const auto chunk = read(
+            resolved_event_query{}, PH_EVENT_TYPE_KERNEL_DISPATCH, after, UINT64_MAX, 2);
+        for(const auto& row : chunk)
+        {
+            paged_ids.push_back(row.id);
+        }
+        if(chunk.size() < 2U) break;
+        after = chunk.back().id;
+    }
+    ASSERT_EQ(paged_ids.size(), kernels.size());
+    EXPECT_EQ(paged_ids.front(), 0U);
 
     const auto  copies = read(resolved_event_query{}, PH_EVENT_TYPE_MEMORY_COPY);
     const auto* copy   = find_row(copies, 7000);
@@ -481,8 +487,10 @@ TEST_F(rocpd_v3_table_events_test, filters_narrow_duration_rows)
     kernel_name.has_string_filter = true;
     kernel_name.kernel_symbol_ids = { kernels[0].kernel_id };
     const auto named              = read(kernel_name, PH_EVENT_TYPE_KERNEL_DISPATCH);
-    ASSERT_EQ(named.size(), 1U);
+    // Two of the four kernels (starts 50 and 3000) share symbol 20.
+    ASSERT_EQ(named.size(), 2U);
     EXPECT_EQ(named[0].kernel_id, kernels[0].kernel_id);
+    EXPECT_EQ(named[1].kernel_id, kernels[0].kernel_id);
 
     resolved_event_query copy_name;
     copy_name.has_string_filter = true;
@@ -583,6 +591,7 @@ TEST_F(rocpd_v3_table_events_test, samples_counters_memory_activity_and_hip_even
     ASSERT_EQ(kernel_counters.size(), 1U);
     EXPECT_EQ(kernel_counters[0].start, 3000U);
     EXPECT_DOUBLE_EQ(kernel_counters[0].value, 1.5);
+    EXPECT_EQ(kernel_counters[0].id, 0U);
 
     resolved_event_query counter_window;
     counter_window.time = time_window{ 3000, 3500 };
@@ -604,9 +613,12 @@ TEST_F(rocpd_v3_table_events_test, samples_counters_memory_activity_and_hip_even
     resolved_event_query memory;
     memory.tracks       = memory_tracks;
     const auto activity = read(memory, PH_EVENT_TYPE_MEMORY_ACTIVITY);
-    ASSERT_EQ(activity.size(), 3U);
+    // The allocation at 30 is the first one written, so its row id is 0.
+    ASSERT_EQ(activity.size(), 4U);
+    EXPECT_EQ(activity[0].id, 0U);
     EXPECT_LT(activity[0].id, activity[1].id);
     EXPECT_LT(activity[1].id, activity[2].id);
+    EXPECT_LT(activity[2].id, activity[3].id);
 
     memory.time = time_window{ 8000, 8300 };
     EXPECT_EQ(read(memory, PH_EVENT_TYPE_MEMORY_ACTIVITY).size(), 2U);

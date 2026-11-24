@@ -621,8 +621,20 @@ sample_table_sql(data_storage::sqlite_backend& backend,
     const char* end_column = kind == sample_table_kind::counter ? "K.end" : "S.timestamp";
     return "SELECT " + std::string(id_column) + ", " + start_column + ", " + end_column +
            ", " + value_column + " FROM " + from + " WHERE " +
-           (where.empty() ? std::string() : where + " AND ") + id_column + " > ? AND " +
+           (where.empty() ? std::string() : where + " AND ") + id_column + " >= ? AND " +
            id_column + " <= ? ORDER BY " + id_column + " LIMIT ?";
+}
+
+/**
+ * First row id a page may hold. The profiler-hub writer numbers rows from 0, so
+ * @p after_id 0 starts the table and includes a row with id 0. Any other value
+ * continues after that id. Callers return early when a non-zero @p after_id is not
+ * below the upper bound, so the addition cannot wrap.
+ */
+uint64_t
+first_id_of_page(uint64_t after_id)
+{
+    return after_id == 0 ? 0 : after_id + 1;
 }
 
 bool
@@ -645,6 +657,9 @@ read_memory_activity_events(const reader_catalog_t&     catalog,
         const std::vector<memory_activity_point_t>* points{};
         size_t                                      index{};
     };
+    if(after_id != 0 && after_id >= last_id) return 0;
+    const uint64_t first_id = first_id_of_page(after_id);
+
     std::vector<cursor_t> cursors;
     for(const uint32_t track_id : query.tracks)
     {
@@ -666,9 +681,9 @@ read_memory_activity_events(const reader_catalog_t&     catalog,
         if(points == nullptr) continue;
         const auto begin = std::lower_bound(points->begin(),
                                             points->end(),
-                                            after_id,
+                                            first_id,
                                             [](const memory_activity_point_t& point,
-                                               uint64_t id) { return point.id <= id; });
+                                               uint64_t id) { return point.id < id; });
         cursors.push_back(
             cursor_t{ points, static_cast<size_t>(begin - points->begin()) });
     }
@@ -734,7 +749,7 @@ read_sample_events(data_storage::sqlite_backend& backend,
 
     const uint64_t upper_id =
         std::min<uint64_t>(last_id, static_cast<uint64_t>(INT64_MAX));
-    if(after_id >= upper_id) return 0;
+    if(after_id != 0 && after_id >= upper_id) return 0;
 
     auto statement =
         backend.create_read_statement_executor<sample_table_row,
@@ -745,7 +760,7 @@ read_sample_events(data_storage::sqlite_backend& backend,
             &sample_table_row::end_timestamp,
             &sample_table_row::value);
 
-    uint64_t cursor = after_id;
+    uint64_t cursor = first_id_of_page(after_id);
     uint32_t filled = 0;
     while(filled < capacity)
     {
@@ -769,7 +784,7 @@ read_sample_events(data_storage::sqlite_backend& backend,
                 if(filled == capacity) stop = true;
             });
         if(got == 0 || got < capacity) break;
-        cursor = scanned;
+        cursor = scanned + 1;
     }
     return filled;
 }
@@ -919,13 +934,13 @@ rocpd_v3_reader::read_table_events(const resolved_event_query& query,
         " E ON E.id = " + source->alias + ".event_id LEFT JOIN " + sample_table +
         " S ON S.event_id = " + source->alias + ".event_id WHERE " +
         (where.empty() ? std::string() : where + " AND ") + source->alias +
-        ".id > ? AND " + source->alias + ".id <= ? ORDER BY " + source->alias +
+        ".id >= ? AND " + source->alias + ".id <= ? ORDER BY " + source->alias +
         ".id LIMIT ?";
 
     // SQLite binds signed 64-bit integers, so an unbounded range stops at INT64_MAX.
     const uint64_t upper_id =
         std::min<uint64_t>(last_id, static_cast<uint64_t>(INT64_MAX));
-    if(after_id >= upper_id) return 0;
+    if(after_id != 0 && after_id >= upper_id) return 0;
 
     auto statement =
         m_backend->create_read_statement_executor<table_event_row,
@@ -959,7 +974,7 @@ rocpd_v3_reader::read_table_events(const resolved_event_query& query,
             &table_event_row::level,
             &table_event_row::sample_track_id);
 
-    uint64_t cursor = after_id;
+    uint64_t cursor = first_id_of_page(after_id);
     uint32_t filled = 0;
     while(filled < capacity)
     {
@@ -981,7 +996,7 @@ rocpd_v3_reader::read_table_events(const resolved_event_query& query,
                 }
             });
         if(got == 0 || got < capacity) break;
-        cursor = scanned;
+        cursor = scanned + 1;
     }
     return filled;
 }

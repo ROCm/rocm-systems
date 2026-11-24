@@ -630,8 +630,11 @@ extern "C"
      * @param query Query from ph_event_query_create().
      * @param event_type ph_event_type_t value. A type the query does not list
      *        yields a successful empty page.
-     * @param after_id Return rows whose id is greater than this. Pass 0 to
-     *        start. Pass the last returned id to continue.
+     * @param after_id Pass 0 to start at the first row, including a row whose
+     *        id is 0 (the profiler-hub writer numbers rows from 0). Any other
+     *        value returns rows whose id is greater than it, so pass the last
+     *        returned id to continue. A page that ends on id 0 cannot be
+     *        continued with after_id 0, so use a capacity of at least 2.
      * @param last_id Return rows whose id is not greater than this. Pass
      *        UINT64_MAX for no upper bound. Ranges from
      *        ph_event_query_id_span() let several threads read one table.
