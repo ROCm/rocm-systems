@@ -12,7 +12,9 @@ SHELL [ "/bin/bash", "-c" ]
 
 # ROCm Systems Profiler needs GCC >= 11 for C++20; RHEL 8 base is GCC 8 — use gcc-toolset on el8 only (install step below).
 ARG GCC_TOOLSET_VERSION=11
-ENV PATH=/opt/rh/gcc-toolset-${GCC_TOOLSET_VERSION}/root/usr/bin:/usr/lib64/openmpi/bin:/usr/local/bin:${PATH}
+ENV ROCM_PATH="/opt/rocm"
+ENV PATH=/opt/rh/gcc-toolset-${GCC_TOOLSET_VERSION}/root/usr/bin:/usr/lib64/openmpi/bin:/usr/local/bin:${ROCM_PATH}/bin:${PATH}
+ENV LD_LIBRARY_PATH="/usr/local/lib:/usr/local/lib64:${ROCM_PATH}/lib"
 
 ARG EXTRA_PACKAGES=""
 ARG ELFUTILS_DOWNLOAD_VERSION="0.188"
@@ -77,20 +79,39 @@ RUN if [ -n "${GPU_TYPE}" ]; then \
     fi
 
 ARG ROCM_VERSION=""
-RUN if [ -n "${ROCM_VERSION}" ]; then \
-        OS_VERSION_MAJOR=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"' | cut -d. -f1) && \
-        printf '%s\n' '[rocm]' \
-            "name=ROCm ${ROCM_VERSION} repository" \
-            "baseurl=https://repo.radeon.com/rocm/el${OS_VERSION_MAJOR}/${ROCM_VERSION}/main" \
-            'enabled=1' 'priority=50' 'gpgcheck=1' \
-            'gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key' > /etc/yum.repos.d/rocm.repo && \
-        if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi && \
-        dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir && \
-        dnf install -y rocm-dev && \
-        if [ "${OS_VERSION_MAJOR}" -gt 8 ]; then \
-            dnf install -y libavcodec-free-devel libavformat-free-devel; \
-        fi && \
-        dnf clean all; \
+RUN if [ -n "${ROCM_VERSION}" ] && [ "${ROCM_VERSION}" != "0.0" ]; then \
+        ROCM_MAJOR=$(echo ${ROCM_VERSION} | cut -d. -f1) && \
+        ROCM_MINOR=$(echo ${ROCM_VERSION} | cut -d. -f2) && \
+        ROCM_PATCH=$(echo ${ROCM_VERSION} | cut -d. -f3) && \
+        if [ -z "${ROCM_PATCH}" ]; then ROCM_PATCH=0; fi && \
+        if [ "${ROCM_MAJOR}" -ge 10 ]; then \
+            TARBALL="therock-dist-linux-multiarch-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_PATCH}.tar.gz" && \
+            curl -fSL "https://stable.repo.amd.com/rocm/core/tarball/${TARBALL}" -o "/tmp/${TARBALL}" && \
+            mkdir -p /tmp/rocm-extract && \
+            tar -xzf "/tmp/${TARBALL}" -C /tmp/rocm-extract && \
+            rm -f "/tmp/${TARBALL}" && \
+            if [ -d /tmp/rocm-extract/bin ] && [ -d /tmp/rocm-extract/lib ]; then \
+                mv /tmp/rocm-extract /opt/rocm; \
+            else \
+                rm -rf /tmp/rocm-extract; \
+            fi && \
+            test -d /opt/rocm/bin && \
+            test -d /opt/rocm/lib && \
+        else \
+            OS_VERSION_MAJOR=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"' | cut -d. -f1) && \
+            printf '%s\n' '[rocm]' \
+                "name=ROCm ${ROCM_VERSION} repository" \
+                "baseurl=https://repo.radeon.com/rocm/el${OS_VERSION_MAJOR}/${ROCM_VERSION}/main" \
+                'enabled=1' 'priority=50' 'gpgcheck=1' \
+                'gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key' > /etc/yum.repos.d/rocm.repo && \
+            if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi && \
+            dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir && \
+            dnf install -y rocm-dev && \
+            if [ "${OS_VERSION_MAJOR}" -gt 8 ]; then \
+                dnf install -y libavcodec-free-devel libavformat-free-devel; \
+            fi && \
+            dnf clean all; \
+        fi; \
     fi
 
 WORKDIR /home
