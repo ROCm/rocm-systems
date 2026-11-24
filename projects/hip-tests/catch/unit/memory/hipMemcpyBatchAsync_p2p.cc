@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <algorithm>
 #include <array>
 #include <limits>
 #include <utility>
@@ -278,14 +279,31 @@ static std::vector<int> GetMutuallyPeeredDevices() {
   return devices;
 }
 
+// The number of allgather batches over `num_devices` GPUs: kBackToBackIterations up to 8 GPUs, then
+// fewer, so the peer copies stay at what 8 GPUs move and a run over every partition of a large
+// machine (64 GPUs: 8064 copies per batch) ends within its child deadline. A batch that large still
+// wraps the signal ring many times. At least `num_patterns` batches keep the alternating sources
+// that show the last batch landed last.
+static size_t AllgatherIterations(size_t num_devices, size_t destinations_per_peer,
+                                  size_t num_patterns) {
+  constexpr size_t kReferenceDevices = 8;
+  const auto peer_copies = [destinations_per_peer](size_t devices) {
+    return devices * (devices - 1) * destinations_per_peer;
+  };
+  return std::clamp<size_t>(
+      kBackToBackIterations * peer_copies(kReferenceDevices) / peer_copies(num_devices),
+      num_patterns, kBackToBackIterations);
+}
+
 // Allgather-style batches issued back to back on one stream with no synchronization in between,
 // over the first `max_devices` mutually peered GPUs: every GPU's buffer is copied to two
 // destinations on every other GPU, so each source feeds several destinations and one batch becomes
 // several SDMA operations that all wait on the stream's prior work. With `with_intra_device_copy`
 // each batch also carries an intra-device copy, which runs as a shader copy waiting on the same
 // prior work. The sources alternate between two patterns from batch to batch, so the final
-// contents show that the last batch landed after all the others. The data moved grows with the
-// square of the number of GPUs.
+// contents show that the last batch landed after all the others. A batch grows with the square of
+// the number of GPUs, so the number of batches shrinks to keep the peer copies at what
+// kBackToBackIterations batches move across 8 GPUs (see AllgatherIterations).
 static void RunAllgatherBackToBack(size_t max_devices, bool with_intra_device_copy) {
   if (HipTest::getDeviceCount() < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
@@ -298,12 +316,12 @@ static void RunAllgatherBackToBack(size_t max_devices, bool with_intra_device_co
   if (devices.size() > max_devices) {
     devices.resize(max_devices);
   }
-  CAPTURE(devices.size(), with_intra_device_copy);
-
   constexpr size_t kNumPatterns = 2;
   constexpr size_t kDestinationsPerPeer = 2;
   const int stream_device = devices.front();
   const size_t num_devices = devices.size();
+  const size_t iterations = AllgatherIterations(num_devices, kDestinationsPerPeer, kNumPatterns);
+  CAPTURE(num_devices, with_intra_device_copy, iterations);
   const auto pattern = [](size_t device_idx, size_t pattern_idx) {
     return std::vector<unsigned char>(
         kBackToBackCopySize,
@@ -373,7 +391,7 @@ static void RunAllgatherBackToBack(size_t max_devices, bool with_intra_device_co
   size_t attrs_idxs[1] = {0};
   HIP_CHECK(hipDeviceSynchronize());
 
-  for (size_t iteration = 0; iteration < kBackToBackIterations; ++iteration) {
+  for (size_t iteration = 0; iteration < iterations; ++iteration) {
     std::vector<void*>& iteration_srcs = batch_srcs[iteration % kNumPatterns];
     HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), iteration_srcs.data(), sizes.data(),
                                   sizes.size(), &attr, attrs_idxs, 1, nullptr,
@@ -381,7 +399,7 @@ static void RunAllgatherBackToBack(size_t max_devices, bool with_intra_device_co
   }
   HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
 
-  const size_t last_pattern_idx = (kBackToBackIterations - 1) % kNumPatterns;
+  const size_t last_pattern_idx = (iterations - 1) % kNumPatterns;
   for (size_t i = 0; i < dsts.size(); ++i) {
     INFO("Destination " << i << " on device " << dsts[i].device);
     HIP_CHECK(hipSetDevice(dsts[i].device));
