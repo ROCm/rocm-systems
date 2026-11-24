@@ -37,11 +37,13 @@ public:
 
   /// @brief Allocate one block.  O(1) from free-list; falls back to heap.
   void *allocate(size_t size) {
-    if (size > BlockSize)
+    if (size > BlockSize) {
       return ::operator new(size);
+    }
 
-    if (void *ptr = try_allocate(size))
+    if (void *ptr = try_allocate(size)) {
       return ptr;
+    }
     // Pool exhausted — fall back to heap.
     return ::operator new(size);
   }
@@ -52,10 +54,12 @@ public:
   /// error code instead of allowing `operator new` to throw.
   /// @returns Pointer to a block, or nullptr when the free-list is exhausted.
   void *try_allocate(size_t size) {
-    if (size > BlockSize)
+    if (size > BlockSize) {
       return nullptr;
-    if (free_head_ == nullptr)
+    }
+    if (free_head_ == nullptr) {
       return nullptr;
+    }
     void *ptr = free_head_;
     free_head_ = free_head_->next;
     return ptr;

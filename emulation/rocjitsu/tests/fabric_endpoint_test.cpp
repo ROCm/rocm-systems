@@ -119,8 +119,9 @@ config::LoadedConfig load_assembly_config(std::string json, std::string_view nod
   util::StringDiagnostic diagnostic;
   auto loaded = config::load_config_from_string_for_node(json, kEmbeddedSchema, node_id,
                                                          diagnostic.emitter());
-  if (loaded.failed())
+  if (loaded.failed()) {
     throw std::runtime_error(diagnostic.message());
+  }
   return std::move(loaded.value());
 }
 
@@ -129,8 +130,9 @@ VirtualMachine *assemble_topology_or_throw(config::LoadedConfig &loaded,
   util::StringDiagnostic diagnostic;
   auto assembled =
       assemble_virtual_machine_topology(loaded, topology, daemon_mode, diagnostic.emitter());
-  if (assembled.failed())
+  if (assembled.failed()) {
     throw std::runtime_error(diagnostic.message());
+  }
   return assembled.value();
 }
 
@@ -163,11 +165,13 @@ public:
     libc_passthrough().resolve();
     fd_ = libc_passthrough().memfd_create("fabric-endpoint-test", MFD_CLOEXEC | MFD_ALLOW_SEALING);
     if (fd_ < 0 || ::ftruncate(fd_, 4096) != 0 ||
-        libc_passthrough().fcntl(fd_, F_ADD_SEALS, F_SEAL_SHRINK) != 0)
+        libc_passthrough().fcntl(fd_, F_ADD_SEALS, F_SEAL_SHRINK) != 0) {
       return;
+    }
     backing_ = KfdProcess::GpuBacking::create_memfd_alias(fd_, 4096, kOwner);
-    if (!backing_)
+    if (!backing_) {
       return;
+    }
     KfdProcess::GpuAllocation allocation;
     allocation.gpu_va = kVa;
     allocation.size = 4096;
@@ -179,8 +183,9 @@ public:
   }
 
   ~BackingFixture() {
-    if (fd_ >= 0)
+    if (fd_ >= 0) {
       libc_passthrough().close(fd_);
+    }
   }
 
   bool valid() const { return backing_ != nullptr; }
@@ -204,8 +209,9 @@ public:
   size_t extent() const noexcept override { return bytes_.size(); }
 
   bool read(uint64_t offset, std::span<std::byte> result) noexcept override {
-    if (!contains(offset, result.size()))
+    if (!contains(offset, result.size())) {
       return false;
+    }
     std::copy_n(bytes_.begin() + static_cast<size_t>(offset - kBase), result.size(),
                 result.begin());
     ++reads_;
@@ -214,8 +220,9 @@ public:
   }
 
   bool write(uint64_t offset, std::span<const std::byte> bytes) noexcept override {
-    if (reject_writes_ || !contains(offset, bytes.size()))
+    if (reject_writes_ || !contains(offset, bytes.size())) {
       return false;
+    }
     std::copy(bytes.begin(), bytes.end(), bytes_.begin() + static_cast<size_t>(offset - kBase));
     ++writes_;
     last_offset_ = offset;
@@ -230,8 +237,9 @@ public:
 
 private:
   bool contains(uint64_t offset, size_t size) const noexcept {
-    if (offset < kBase)
+    if (offset < kBase) {
       return false;
+    }
     const uint64_t relative = offset - kBase;
     return relative <= bytes_.size() && size <= bytes_.size() - relative;
   }
@@ -260,16 +268,18 @@ public:
   }
 
   bool read(uint64_t offset, std::span<std::byte> result) noexcept override {
-    if (!contains(offset, result.size()))
+    if (!contains(offset, result.size())) {
       return false;
+    }
     memory_->read_block(offset, {reinterpret_cast<uint8_t *>(result.data()), result.size()});
     ++reads_;
     return true;
   }
 
   bool write(uint64_t offset, std::span<const std::byte> bytes) noexcept override {
-    if (!contains(offset, bytes.size()))
+    if (!contains(offset, bytes.size())) {
       return false;
+    }
     memory_->write_block(offset, {reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()});
     ++writes_;
     return true;
@@ -280,8 +290,9 @@ public:
 
 private:
   bool contains(uint64_t offset, size_t size) const noexcept {
-    if (offset < kBase)
+    if (offset < kBase) {
       return false;
+    }
     const uint64_t relative = offset - kBase;
     return relative <= kExtent && size <= kExtent - relative;
   }
@@ -299,8 +310,9 @@ public:
 
   amdgpu::VmTranslationResult translate(uint64_t address, size_t size,
                                         amdgpu::VmAccessKind) const override {
-    if (!contains(address, size))
+    if (!contains(address, size)) {
       return {};
+    }
     return {.outcome = amdgpu::VmAccessOutcome::Complete,
             .translation = {.domain = amdgpu::VmMemoryDomain::System,
                             .address = address,
@@ -311,16 +323,18 @@ public:
 
   amdgpu::VmAccessOutcome read(amdgpu::VmMemoryDomain domain, uint64_t address,
                                std::span<std::byte> bytes) override {
-    if (domain != amdgpu::VmMemoryDomain::System || !contains(address, bytes.size()))
+    if (domain != amdgpu::VmMemoryDomain::System || !contains(address, bytes.size())) {
       return amdgpu::VmAccessOutcome::Faulted;
+    }
     std::ranges::copy_n(bytes_.begin() + (address - kBase), bytes.size(), bytes.begin());
     return amdgpu::VmAccessOutcome::Complete;
   }
 
   amdgpu::VmAccessOutcome write(amdgpu::VmMemoryDomain domain, uint64_t address,
                                 std::span<const std::byte> bytes) override {
-    if (domain != amdgpu::VmMemoryDomain::System || !contains(address, bytes.size()))
+    if (domain != amdgpu::VmMemoryDomain::System || !contains(address, bytes.size())) {
       return amdgpu::VmAccessOutcome::Faulted;
+    }
     std::ranges::copy(bytes, bytes_.begin() + (address - kBase));
     return amdgpu::VmAccessOutcome::Complete;
   }
@@ -396,8 +410,9 @@ protected:
   void TearDown() override { stop(); }
 
   void stop() {
-    if (stopped_)
+    if (stopped_) {
       return;
+    }
     engine_.primary_release();
     engine_.shutdown();
     stopped_ = true;
@@ -512,12 +527,14 @@ public:
   prepare_deferred_read(amdgpu::PhysicalMemoryAccess &, uint64_t address, size_t size,
                         amdgpu::VmAccessKind access,
                         const std::shared_ptr<amdgpu::VmTransferEffectGate> &gate) const override {
-    if (access != amdgpu::VmAccessKind::Read || address < kVa)
+    if (access != amdgpu::VmAccessKind::Read || address < kVa) {
       return std::nullopt;
+    }
     auto prepared = endpoint_.prepare_read(
         kRequester, kOwner, make_fabric_backing(backing_.lease(address - kVa, size)), gate);
-    if (!prepared)
+    if (!prepared) {
       return std::nullopt;
+    }
     return amdgpu::VmTransferToken(std::move(prepared.operation), size);
   }
 
@@ -525,13 +542,15 @@ public:
   prepare_deferred_write(amdgpu::PhysicalMemoryAccess &, uint64_t address,
                          std::span<const std::byte> bytes,
                          const std::shared_ptr<amdgpu::VmTransferEffectGate> &gate) const override {
-    if (address < kVa)
+    if (address < kVa) {
       return std::nullopt;
+    }
     auto prepared = endpoint_.prepare_write(
         kRequester, kOwner, make_fabric_backing(backing_.lease(address - kVa, bytes.size())), bytes,
         gate);
-    if (!prepared)
+    if (!prepared) {
       return std::nullopt;
+    }
     return amdgpu::VmTransferToken(std::move(prepared.operation), bytes.size());
   }
 
@@ -1238,8 +1257,9 @@ TEST_F(FabricEndpointTest, MissingAndAmbiguousRoutesFaultBeforeSubmission) {
 
 TEST_F(FabricEndpointTest, OverlongManualRouteFailsClosedBeforeWiring) {
   config::SystemPeerRoute route{"g0", "g1", kRequester, kOwner, {"e0"}};
-  for (size_t i = 0; i < config::kMaxPeerRouteEndpoints - 1; ++i)
+  for (size_t i = 0; i < config::kMaxPeerRouteEndpoints - 1; ++i) {
     route.endpoints.push_back("sw" + std::to_string(i));
+  }
   route.endpoints.push_back("e1");
   ASSERT_EQ(route.endpoints.size(), config::kMaxPeerRouteEndpoints + 1);
 
@@ -1455,16 +1475,18 @@ TEST_F(FabricEndpointClockedTest, RequestReservationSurvivesAdmissionRetryUntilE
   EXPECT_EQ(releases, 0);
   EXPECT_EQ(endpoint_->diagnostics().effects, 0u);
 
-  for (int step = 0; step < 8 && admissions < 2; ++step)
+  for (int step = 0; step < 8 && admissions < 2; ++step) {
     ASSERT_TRUE(engine_.step());
+  }
   ASSERT_EQ(admissions, 2);
   EXPECT_EQ(releases, 1);
   EXPECT_EQ(endpoint_->diagnostics().effects, 1u);
   EXPECT_EQ(endpoint_->diagnostics().directed_effects[0].write_bytes, payload.size());
   EXPECT_EQ(write.operation->poll({}), amdgpu::VmAccessOutcome::Unavailable);
   for (int step = 0; step < 8 && write.operation->poll({}) == amdgpu::VmAccessOutcome::Unavailable;
-       ++step)
+       ++step) {
     ASSERT_TRUE(engine_.step());
+  }
   EXPECT_EQ(write.operation->poll({}), amdgpu::VmAccessOutcome::Complete);
   EXPECT_EQ(releases, 1);
   EXPECT_TRUE(std::equal(payload.begin(), payload.end(), lease(132, 4).bytes().begin()));
@@ -1482,8 +1504,9 @@ TEST_F(FabricEndpointClockedTest, PreEffectRefusalRetriesBeforeEffectAdmissionOr
   auto admit_pre_effect = [&] {
     ++pre_admissions;
     amdgpu::MemoryIngressAdmission admission;
-    if (!open)
+    if (!open) {
       admission.outcome = amdgpu::VmAccessOutcome::Unavailable;
+    }
     return admission;
   };
   auto admit_effect = [&](const FabricBacking &, bool write, amdgpu::MemoryIngressPermit &) {
@@ -1508,15 +1531,17 @@ TEST_F(FabricEndpointClockedTest, PreEffectRefusalRetriesBeforeEffectAdmissionOr
   EXPECT_EQ(write.operation->poll({}), amdgpu::VmAccessOutcome::Unavailable);
 
   open = true;
-  for (int step = 0; step < 12 && owner->writes() == 0; ++step)
+  for (int step = 0; step < 12 && owner->writes() == 0; ++step) {
     ASSERT_TRUE(engine_.step());
+  }
   ASSERT_EQ(pre_admissions, 2);
   EXPECT_EQ(effect_admissions, 1);
   ASSERT_EQ(owner->writes(), 1u);
   EXPECT_EQ(endpoint_->diagnostics().effects, 1u);
   for (int step = 0; step < 8 && write.operation->poll({}) == amdgpu::VmAccessOutcome::Unavailable;
-       ++step)
+       ++step) {
     ASSERT_TRUE(engine_.step());
+  }
   EXPECT_EQ(write.operation->poll({}), amdgpu::VmAccessOutcome::Complete);
   EXPECT_TRUE(std::equal(payload.begin(), payload.end(), owner->bytes_for_testing().begin() + 4));
 }
@@ -1636,8 +1661,9 @@ TEST_F(FabricEndpointClockedTest, CommittedReservedWriteReconcilesOnceBeforeRepl
   EXPECT_EQ(write.operation->reconcile_revocation({}), amdgpu::VmAccessOutcome::Complete);
   write.operation->cancel();
   EXPECT_EQ(write.operation->poll({}), amdgpu::VmAccessOutcome::Complete);
-  for (int step = 0; step < 2; ++step)
+  for (int step = 0; step < 2; ++step) {
     ASSERT_TRUE(engine_.step());
+  }
   EXPECT_EQ(admissions, 1);
   EXPECT_EQ(releases, 1);
   EXPECT_EQ(owner->writes(), 1u);
@@ -1811,8 +1837,9 @@ TEST_F(FabricEndpointClockedTest, EnteredEffectRemainsPendingUntilPublished) {
   }
   auto invalidation = std::async(std::launch::async, [&] { return vm.invalidate(handle); });
   const auto deadline = std::chrono::steady_clock::now() + 5s;
-  while (access->is_current() && std::chrono::steady_clock::now() < deadline)
+  while (access->is_current() && std::chrono::steady_clock::now() < deadline) {
     std::this_thread::yield();
+  }
   EXPECT_FALSE(access->is_current());
   EXPECT_EQ(invalidation.wait_for(0ms), std::future_status::timeout);
 
@@ -1826,8 +1853,9 @@ TEST_F(FabricEndpointClockedTest, EnteredEffectRemainsPendingUntilPublished) {
   release.set_value();
   EXPECT_TRUE(owner.get());
   EXPECT_TRUE(invalidation.get());
-  if (before_release != std::future_status::ready)
+  if (before_release != std::future_status::ready) {
     (void)reconcile.get();
+  }
   EXPECT_EQ(access->write(kVa + 120, source, progress, token), amdgpu::VmAccessOutcome::Complete);
   EXPECT_EQ(progress, source.size());
   EXPECT_EQ(endpoint_->diagnostics().effects, 1u);
@@ -2142,8 +2170,9 @@ TEST(FabricEndpointAssemblyTest, RetryablePreparedMaintenanceReleasesPermitAndCo
   auto admit = [&](const FabricBacking &, bool write, amdgpu::MemoryIngressPermit &reservation) {
     EXPECT_TRUE(write);
     ++admissions;
-    if (!reservation)
+    if (!reservation) {
       reservation = amdgpu::MemoryIngressPermit([&] { ++reservation_releases; });
+    }
     FabricEndpoint::EffectAuthority authority;
     authority.permit = amdgpu::MemoryIngressPermit([&] { ++authority_releases; });
     authority.cache_aliases.push_back({.domain = {domain, kRequester},

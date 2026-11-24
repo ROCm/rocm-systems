@@ -154,8 +154,9 @@ public:
   ~MemoryIngressPermit() { reset(); }
 
   void reset() {
-    if (auto release = std::exchange(release_, {}))
+    if (auto release = std::exchange(release_, {})) {
       release();
+    }
     pt_epoch_ = {};
   }
   explicit operator bool() const { return static_cast<bool>(release_); }
@@ -356,8 +357,9 @@ public:
 
   template <typename Effect> [[nodiscard]] bool commit(Effect &&effect) {
     std::optional<Permit> permit = try_acquire();
-    if (!permit)
+    if (!permit) {
       return false;
+    }
     std::invoke(std::forward<Effect>(effect));
     return true;
   }
@@ -436,8 +438,9 @@ public:
                   VmDeferredWriteMaintenance write_maintenance = VmDeferredWriteMaintenance::Caller,
                   bool peer_origin = false);
   ~VmTransferToken() {
-    if (operation_)
+    if (operation_) {
       operation_->cancel();
+    }
   }
   VmTransferToken(const VmTransferToken &) = delete;
   VmTransferToken &operator=(const VmTransferToken &) = delete;
@@ -671,13 +674,15 @@ public:
                                                             uint64_t lane_mask, uint32_t width,
                                                             const AtomicLaneMutation &mutation,
                                                             uint32_t &next_lane) {
-    if (addresses.size() > 64)
+    if (addresses.size() > 64) {
       return VmAccessOutcome::Malformed;
+    }
     uint32_t lane = 0;
     const AtomicMutation lane_mutation = [&](std::span<std::byte> bytes) { mutation(lane, bytes); };
     for (lane = next_lane; lane < addresses.size(); ++lane) {
-      if (!(lane_mask & (1ULL << lane)))
+      if (!(lane_mask & (1ULL << lane))) {
         continue;
+      }
       if (!mutation) {
         next_lane = lane;
         return VmAccessOutcome::Malformed;
@@ -857,8 +862,9 @@ public:
   [[nodiscard]] std::optional<uint64_t> local_grant_generation(uint64_t address, size_t size) const;
   [[nodiscard]] std::optional<VmAccessAdmission> local_admission(uint64_t address,
                                                                  size_t size) const {
-    if (const auto generation = local_grant_generation(address, size))
+    if (const auto generation = local_grant_generation(address, size)) {
       return VmAccessAdmission{.generation = *generation};
+    }
     return std::nullopt;
   }
   [[nodiscard]] VmLocalGrantView local_grant_view(uint64_t address, size_t size) const;

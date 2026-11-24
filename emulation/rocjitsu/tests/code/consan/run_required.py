@@ -88,7 +88,7 @@ def required_names():
         'ConSanConfigure.EnvironmentOnlySdk',
         'ConSanRuntimeIntegration.Guards',
         'ConSanRuntime.SymbolBoundary',
-        'ConSanHsaPlugin.RuntimeConfigurationRequiresBothPrefixedPaths',
+        'ConSanHsaPlugin.RuntimeConfigurationRequiresPathsAndIndependentProfile',
         'ConSanHsaPlugin.AmdSignalsCompleteAdmittedDispatches',
         'ConSanHsaPlugin.AmdSignalCreationPreservesArgumentsAndFailedOutputsRemainUntracked',
         'ConSanHsaPlugin.RejectedAmdDispatchNotifiesItsCompletion',

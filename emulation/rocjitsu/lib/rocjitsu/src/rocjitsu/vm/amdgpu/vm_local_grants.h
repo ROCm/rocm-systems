@@ -17,17 +17,20 @@ public:
   const std::atomic<uint64_t> *publication() const { return publication_.get(); }
 
   std::optional<uint64_t> generation(uint64_t address, size_t size) const {
-    if (const auto *grant = find(address, size))
+    if (const auto *grant = find(address, size)) {
       return grant->generation;
+    }
     return std::nullopt;
   }
 
   const VmLocalGrant *find(uint64_t address, size_t size) const {
-    if (!publication_ || !size)
+    if (!publication_ || !size) {
       return nullptr;
+    }
     const uint64_t epoch = publication_->load(std::memory_order_acquire);
-    if (epoch == UINT64_MAX)
+    if (epoch == UINT64_MAX) {
       return nullptr;
+    }
     struct Entry {
       uint64_t identity = 0, epoch = 0;
       VmLocalGrant grant;
@@ -38,8 +41,9 @@ public:
              address < entry.grant.end && size <= entry.grant.end - address;
     };
     // Adjacent cache levels usually check subspans of the same allocation.
-    if (covers(last))
+    if (covers(last)) {
       return &last.grant;
+    }
     static thread_local std::array<Entry, 8> entries{};
     for (const auto &entry : entries) {
       if (covers(entry)) {
@@ -47,11 +51,13 @@ public:
         return &last.grant;
       }
     }
-    if (!lookup_)
+    if (!lookup_) {
       return nullptr;
+    }
     const auto grant = lookup_(address, size);
-    if (!grant.end || address < grant.begin || address >= grant.end || size > grant.end - address)
+    if (!grant.end || address < grant.begin || address >= grant.end || size > grant.end - address) {
       return nullptr;
+    }
     static thread_local unsigned next = 0;
     last = entries[next++ % entries.size()] = {identity_, epoch, grant};
     return &last.grant;

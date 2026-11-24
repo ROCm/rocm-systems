@@ -52,8 +52,9 @@ inline bool lds_barrier_cell_arrive_completes_phase(uint64_t state, uint32_t upd
 inline uint64_t lds_barrier_cell_update_arrive(uint64_t state, uint32_t update = 1) {
   const uint32_t next = static_cast<uint32_t>(state) - update;
   uint64_t result = (state & ~kLdsBarrierCellBarStateMask) | next;
-  if (lds_barrier_cell_arrive_completes_phase(state, update))
+  if (lds_barrier_cell_arrive_completes_phase(state, update)) {
     result = (result & ~kLdsBarrierCellPendingMask) | lds_barrier_cell_init_count(state);
+  }
   return result;
 }
 

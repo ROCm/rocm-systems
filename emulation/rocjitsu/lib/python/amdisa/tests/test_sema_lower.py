@@ -1222,7 +1222,7 @@ class TestLowerControlFlow:
         )
         block = SemaBlock('TEST', ExecModel.SCALAR, body)
         result = lower_sema_block(block)
-        assert 'if (wf.read_scc())' in result
+        assert result == '  if (wf.read_scc()) {\n    uint32_t tmp = 1;\n  }'
 
     def test_if_else(self):
         body = SemaNode(
