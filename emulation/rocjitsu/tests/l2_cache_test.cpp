@@ -125,6 +125,13 @@ public:
     EXPECT_EQ(tag->dirty, original.dirty);
   }
 
+  static void remove_dirty_mask(L2Cache &cache, uint64_t line_address, uint32_t vmid) {
+    auto maintenance_lock = cache.acquire_cache_access();
+    std::lock_guard set_lock(cache.set_mutex(line_address));
+    std::lock_guard mask_lock(cache.dirty_bytes_mutex_);
+    cache.dirty_bytes_.erase({vmid, line_address});
+  }
+
   static bool dirty_byte(L2Cache &cache, uint64_t line_address, uint32_t vmid, uint32_t offset) {
     auto maintenance_lock = cache.acquire_cache_access();
     std::lock_guard set_lock(cache.set_mutex(line_address));
@@ -1883,6 +1890,39 @@ TEST(DeviceCacheCoherenceTest, GroupMaintenanceDistinguishesSeparateBackingMemor
   EXPECT_EQ(second_memory.read8(kAddress), 0x66u);
 }
 
+TEST(DeviceCacheCoherenceTest, CheckedLegacyGroupReportsMissingBackingAfterReleasingLocks) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  auto domain = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", domain);
+  const std::array domains{domain};
+  const uint64_t data_epoch = domain->current_epoch();
+  const uint64_t instruction_epoch = domain->current_instruction_epoch();
+  bool reported = false;
+  auto report = [&](std::string_view message) {
+    reported = true;
+    EXPECT_EQ(message, "cache hierarchy lacks legacy maintenance backing");
+    EXPECT_TRUE(L2CacheTestAccess::cache_access_available(l2));
+    EXPECT_EQ(domain->current_epoch(), data_epoch);
+    EXPECT_EQ(domain->current_instruction_epoch(), instruction_epoch);
+    // Reenter the domain from the diagnostic sink: the failed acquisition
+    // must release its coordinator locks before reporting the configuration.
+    auto nested = DeviceCacheCoherenceTestAccess::acquire_legacy_cache_maintenance_group(
+        domains, DeviceCacheOperation::Invalidate, {});
+    EXPECT_TRUE(nested.succeeded());
+  };
+  EXPECT_TRUE(
+      DeviceCacheCoherenceTestAccess::acquire_legacy_cache_maintenance_group(
+          domains, DeviceCacheOperation::WritebackInvalidate, util::DiagnosticEmitter(report))
+          .failed());
+  EXPECT_TRUE(reported);
+  // The nested invalidate lease advances epochs, but failed writeback itself
+  // must not publish an additional epoch.
+  EXPECT_EQ(domain->current_epoch(), data_epoch + 1);
+  EXPECT_EQ(domain->current_instruction_epoch(), instruction_epoch + 1);
+}
+
 TEST(DeviceCacheCoherenceTest, GroupPreflightRetriesDirtyNonzeroVmidBeforeAnyWrite) {
   using rocjitsu::amdgpu::L2CacheTestAccess;
   using rocjitsu::amdgpu::MemorySideCacheTestAccess;
@@ -2033,6 +2073,57 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedCompleteGrantWithWrongIdentityIsTerm
   EXPECT_EQ(owner->write_attempts, 0u);
   EXPECT_EQ(owner->bytes_[8], std::byte{0});
   EXPECT_EQ(coherence->current_epoch(), epoch);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
+}
+
+TEST(DeviceCacheCoherenceTest, CheckedPreparedGroupReportsMissingResolver) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  auto domain = std::make_shared<DeviceCacheCoherence>();
+  const std::array domains{DeviceCacheDomain{domain, 11}};
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(DeviceCacheCoherence::acquire_cache_maintenance_group(
+                  domains, DeviceCacheOperation::WritebackInvalidate, {}, diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(), "prepared cache writeback resolver is required");
+}
+
+TEST(DeviceCacheCoherenceTest, CheckedPreparedSnapshotFailureReleasesLocksWithoutPublishing) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", coherence);
+  std::array<uint8_t, L2Cache::LINE_SIZE> bytes{};
+  bytes.fill(0x5a);
+  const std::array ranges{std::pair<uint32_t, uint32_t>{8, 4}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, bytes, kVmid, 101, 23, ranges);
+  L2CacheTestAccess::remove_dirty_mask(l2, kAddress, kVmid);
+  const uint64_t data_epoch = coherence->current_epoch();
+  const uint64_t instruction_epoch = coherence->current_instruction_epoch();
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  const auto resolver = [](uint32_t, uint32_t, uint64_t, size_t) {
+    ADD_FAILURE() << "malformed dirty state reached the resolver";
+    return rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess::make(0, 0, 0, 0, 0, {});
+  };
+  util::StringDiagnostic diagnostic;
+  auto report = [&](std::string_view message) {
+    EXPECT_TRUE(L2CacheTestAccess::cache_access_available(l2));
+    diagnostic(message);
+  };
+  EXPECT_TRUE(DeviceCacheCoherence::acquire_cache_maintenance_group(
+                  domains, DeviceCacheOperation::WritebackInvalidate, resolver,
+                  util::DiagnosticEmitter(report))
+                  .failed());
+  EXPECT_EQ(diagnostic.message(), "dirty L2 line has no byte mask");
+  EXPECT_TRUE(L2CacheTestAccess::resident(l2, kAddress, kVmid));
+  EXPECT_EQ(coherence->current_epoch(), data_epoch);
+  EXPECT_EQ(coherence->current_instruction_epoch(), instruction_epoch);
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, bytes, kVmid, 101, 23, ranges);
   EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
 }
 

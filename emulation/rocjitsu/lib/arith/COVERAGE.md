@@ -236,3 +236,11 @@ IEEE-dependent NaNs and FP status. The 30 gfx1150-specific arithmetic, selection
 rounding and conversion entry points do not advertise new empirical qualification;
 comparisons share the existing raw-bit predicates. Scalar operations have one
 SGPR value per operand, so there is no lane-vector SIMD backend to select.
+### gfx908 floating comparisons
+
+All FP16/FP32/FP64 relational CMP/CMPX forms, including F/TRU, use shared
+scalar, AVX2 and AVX-512 numeric predicates. Wave64-only gfx908 APIs preserve
+Compatibility's CLAMP-only INVALID classification, including quiet NaNs and
+constant predicates. Loose and numeric-only modes leave status untouched;
+mode 3 remains unsupported. This carries the existing emulator model without
+claiming new empirical qualification. Other older profiles migrate separately.

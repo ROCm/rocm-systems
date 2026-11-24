@@ -1323,6 +1323,9 @@ std::vector<ArithmeticCase> fma_mix_f32_cases() {
       cases.back().arith_dispatch = true;
     }
   }
+  for (auto &test : cases) {
+    test.arith_dispatch = true;
+  }
   return cases;
 }
 
@@ -1765,6 +1768,9 @@ std::vector<ArithmeticCase> fma_mix_half_cases() {
         }
       }
     }
+  }
+  for (auto &test : cases) {
+    test.arith_dispatch = true;
   }
   for (auto &test : cases) {
     test.arith_dispatch = true;

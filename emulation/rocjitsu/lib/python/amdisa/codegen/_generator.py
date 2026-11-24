@@ -16949,23 +16949,6 @@ class CodeGenerator:
                                 '    wf.set_vcc_mask(raw_result);\n'
                                 '  };\n'
                             )
-                        if (
-                            self.generated_dir_name == 'cdna3'
-                            and enc.enc_name == 'ENC_VOP3'
-                        ):
-                            cmp = re.fullmatch(
-                                r'V_(CMPX?)_(\w+)_(F16|F32|F64)', inst.name
-                            )
-                            if cmp is not None and cmp[2] != 'CLASS':
-                                rel = 'T' if cmp[2] == 'TRU' else cmp[2].title()
-                                cmpx = str(cmp[1] == 'CMPX').lower()
-                                guard = (
-                                    f'  if (inst_.clamp) {{\n'
-                                    f'    cdna3::signaling_compare<amdgpu::fp_format::{cmp[3]}, '
-                                    f'amdgpu::comparison::{rel}>(wf, src0, src1, inst_.op_sel, '
-                                    f'inst_.abs, inst_.neg, vdst, {cmpx});\n    return;\n  }}\n'
-                                )
-                                _result_commit_setup = guard + _result_commit_setup
                         # SDWA postamble: apply dst_sel merge and float clamp after ALU.
                         _sdwa_postamble = ''
                         _dpp_cleanup = ''
@@ -17202,10 +17185,6 @@ class CodeGenerator:
                             _result_commit_setup += capture
                         if self.isa_spec.arch_name == 'cdna1':
                             status = ''
-                            # The CDNA1 XML calls the always-true predicate TRU.
-                            float_compare = FLOAT_COMPARISONS.get(
-                                inst.name.replace('_TRU_', '_T_')
-                            )
                             if inst.name == 'V_ADD_F32':
                                 rhs = (
                                     'vsrc1'
@@ -17216,10 +17195,6 @@ class CodeGenerator:
                                     '  ::rocjitsu::cdna1::record_exceptions(wf, '
                                     f'::rocjitsu::cdna1::classify_binary_f32<false>(*this, wf, {rhs}));\n'
                                 )
-                            elif enc.enc_name.upper() == 'ENC_VOP3' and float_compare:
-                                bits, _ = float_compare
-                                # CLAMP signals on NaNs even when the predicate is constant.
-                                status = f'  if (inst_.clamp) ::rocjitsu::cdna1::record_signaling_compare<amdgpu::fp_format::F{bits}>(*this, wf);\n'
                             _ordinary_result_commit_setup += status
                             _result_commit_setup += status
                         if _rj_arith_arithmetic:
@@ -17961,7 +17936,7 @@ class CodeGenerator:
                 if self.isa_spec.arch_name == 'cdna1':
                     if enc.enc_name in ('ENC_VOP2', 'ENC_VOP3'):
                         cpp_includes.append(
-                            ('rocjitsu/isa/arch/amdgpu/cdna1/valu.h', False)
+                            ('rocjitsu/isa/arch/amdgpu/cdna1/alu_status.h', False)
                         )
                     if any(i.name == 'V_CLREXCP' for i in all_insts):
                         cpp_includes.append(
@@ -18114,6 +18089,7 @@ class CodeGenerator:
                         'rdna3',
                         'rdna3_5',
                         'rdna4',
+                        'cdna1',
                         'cdna3',
                         'cdna4',
                         'cdna5',
@@ -18142,10 +18118,11 @@ class CodeGenerator:
                             False,
                         )
                     )
-                from amdisa.codegen.execute.rj_arith_division import DIVISION_NAMES
+                from amdisa.codegen.execute.rj_arith_division import supports_division
 
-                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
-                    i.name in DIVISION_NAMES for i in all_insts
+                if any(
+                    supports_division(self.isa_spec.arch_name, i.name)
+                    for i in all_insts
                 ):
                     cpp_includes.append(
                         (
@@ -18237,6 +18214,11 @@ class CodeGenerator:
                     MIXED_BF16_NAMES,
                     DOT2_F32_NAMES,
                     HALF_DOT_NAMES,
+                    CDNA_LEGACY_MATH_F32,
+                    GFX1250_BF16_MATH,
+                    CDNA_MATH_F16,
+                    CDNA_MATH_F32,
+                    CDNA_MATH_F64,
                 )
                 from amdisa.codegen.execute.rj_arith_packed_bf16 import (
                     PACKED_BF16_NAMES,
@@ -18272,6 +18254,12 @@ class CodeGenerator:
                             if self.isa_spec.arch_name == 'cdna5'
                             else {'V_MUL_LEGACY_F32'}
                         )
+                        | CDNA_LEGACY_MATH_F32
+                        | GFX1250_BF16_MATH
+                        | CDNA_MATH_F16
+                        | CDNA_MATH_F32
+                        | CDNA_MATH_F64
+                        | {'V_TRIG_PREOP_F64', 'V_TANH_F32'}
                     )
                     if self.isa_spec.arch_name == 'cdna5':
                         float_names |= (
