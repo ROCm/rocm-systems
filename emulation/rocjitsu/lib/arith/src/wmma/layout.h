@@ -9,6 +9,31 @@
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
+// Location of a contiguous sixteen-lane section within a WMMA operand.
+struct WmmaRegisterSection {
+  int reg;
+  int lane;
+};
+
+// Each packed A/B word supplies a K pair. gfx11 replicates the same inputs
+// across all sixteen-lane groups, so one copy supplies the whole tile.
+template <int Lanes, bool Rdna3> constexpr WmmaRegisterSection wmma_half_input(int k) {
+  constexpr int Registers = 256 / Lanes;
+  return Rdna3 ? WmmaRegisterSection{k / 2, 0}
+               : WmmaRegisterSection{(k % Registers) / 2, 16 * (k / Registers)};
+}
+
+// Location of an unpacked output row. gfx12 packed C/D combine neighboring
+// register rows into low and high halfwords at the same lane offset.
+template <int Lanes, bool Rdna3> constexpr WmmaRegisterSection wmma_half_output(int row) {
+  constexpr int Groups = Lanes / 16;
+  if constexpr (Rdna3) {
+    return {row / Groups, 16 * (row % Groups)};
+  } else {
+    return {row % (256 / Lanes), 16 * (row / 8) + (Lanes == 64 ? 32 * ((row / 4) % 2) : 0)};
+  }
+}
+
 // Map an accumulation step in [0,16) to gfx12 Wave32's physical K coordinate.
 // DOT4 blocks visit K=0,8,4,12; packed output narrows at each block boundary.
 constexpr int wmma_gfx12_w32_k(int step) {

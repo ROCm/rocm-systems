@@ -17,7 +17,7 @@ uint32_t integer_compare_x86_64_v3(uint32_t mode, const uint32_t *const *a,
 // Compare signed/unsigned integers.
 // Requires the named CPU features and validated instruction controls.
 template <int Bits, bool Signed, unsigned Predicate>
-uint32_t integer_compare_x86_64_v4(uint32_t mode, const uint32_t *const *a,
+uint64_t integer_compare_x86_64_v4(int lanes, uint32_t mode, const uint32_t *const *a,
                                    const uint32_t *const *b);
 
 } // namespace rocjitsu::arith

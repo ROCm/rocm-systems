@@ -350,11 +350,70 @@ TEST(FpLdexpGfx11, CapturedSignalingNans) {
   check_captured_gfx11<64, 64>(rj_arith_v_ldexp_f64_w64, ldexp_f64_lanes);
 }
 
-// Compatibility reproduces captured gfx1100 FREXP_MANT lanes.
+// Compatibility and strict exact reproduce captured gfx1100 FREXP_MANT lanes.
 TEST(FpFrexpMantF64Gfx11, CapturedSignalingNans) {
-  using rocjitsu::arith::test::check_captured_gfx11;
-  check_captured_gfx11<32, 64>(rj_arith_v_frexp_mant_f64_w32, frexp_mant_f64_lanes);
-  check_captured_gfx11<64, 64>(rj_arith_v_frexp_mant_f64_w64, frexp_mant_f64_lanes);
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 64>(rj_arith_v_frexp_mant_f64_w32, frexp_mant_f64_lanes);
+  check_captured_gfx11_exact<64, 64>(rj_arith_v_frexp_mant_f64_w64, frexp_mant_f64_lanes);
+}
+
+namespace {
+
+// gfx1100 (W7900, mkm2) hw1100-noieee lanes (2026-09-25): denormal inputs decompose when kept
+// (0x1f0) and flush to signed zero when input denormals are flushed (0x100).
+const CapturedGfx11 frexp_mant_f64_denormal_lanes[] = {
+    {"SmallestDenormalKept", 0, 0x1f0, 0x0000000000000001, 0, 0, 0x3fe0000000000000},
+    {"LargestNegativeDenormalKept", 0, 0x1f0, 0x800fffffffffffff, 0, 0, 0xbfeffffffffffffe},
+    {"SmallestDenormalFlushed", 0, 0x100, 0x0000000000000001, 0, 0, 0},
+    {"LargestNegativeDenormalFlushed", 0, 0x100, 0x800fffffffffffff, 0, 0, 0x8000000000000000},
+};
+
+// FREXP_EXP_I32_F64 integer exponents from the same corpus and from the gfx1201 (RX 9070 XT)
+// rj-valu-audit-local capture (2026-09-28); both cards agree. Denormals kept: 2^-1074 has
+// exponent -1073 and the largest denormal -1022; flushed denormals, infinities and NaNs give 0.
+struct FrexpExpF64Case {
+  uint64_t guest_flags;
+  uint64_t input;
+  uint32_t expected;
+};
+const FrexpExpF64Case frexp_exp_f64_cases[] = {
+    {0, 0x0000000000000001, 0xfffffbcfU},
+    {0, 0x800fffffffffffff, 0xfffffc02U},
+    {0, 0x7ff0000000000000, 0},
+    {RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, 0x0000000000000001, 0},
+};
+
+} // namespace
+
+// Compatibility and strict exact reproduce captured gfx1100 FREXP_MANT denormal handling.
+TEST(FpFrexpMantF64Gfx11, CapturedDenormals) {
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 64>(rj_arith_v_frexp_mant_f64_w32, frexp_mant_f64_denormal_lanes);
+  check_captured_gfx11_exact<64, 64>(rj_arith_v_frexp_mant_f64_w64, frexp_mant_f64_denormal_lanes);
+}
+
+// Both architectures' FREXP_EXP_I32_F64 entries reproduce the captured exponents in
+// Compatibility and strict exact mode.
+TEST(FpFrexpExpF64, CapturedExponentsBothArchitectures) {
+  using namespace rocjitsu::arith::test;
+  using Entry =
+      int (*)(uint64_t, uint32_t, uint64_t, uint32_t *const *, const uint32_t *const *, uint32_t *);
+  for (Entry entry :
+       {Entry(rj_arith_v_frexp_exp_i32_f64_w32), Entry(rj_arith_v_frexp_exp_i32_f64_w32_gfx12)}) {
+    for (uint64_t cpu : supported_cpu_levels()) {
+      for (uint64_t semantics : hardware_semantics()) {
+        for (const FrexpExpF64Case &test : frexp_exp_f64_cases) {
+          SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << test.input);
+          Registers<4, 32> r;
+          write_fp(r.v, 0, 64, test.input);
+          r.v[2][0] = 0xa5a5a5a5U;
+          ASSERT_EQ(entry(cpu | semantics | test.guest_flags, 1, 0, r.v + 2, r.v, nullptr),
+                    RJ_ARITH_SUCCESS);
+          EXPECT_EQ(r.v[2][0], test.expected);
+        }
+      }
+    }
+  }
 }
 
 // SIMD must retain the inherited scalar model across guest modes and exceptional inputs.

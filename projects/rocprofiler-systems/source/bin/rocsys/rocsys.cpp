@@ -6,8 +6,16 @@
 #include "common/defines.h"
 #include "common/path.hpp"
 #include "common/tool_runner.hpp"
+#include "rocsys/options.hpp"
+
+#include "backends/rocprofiler_sdk/backend.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
+#include "core/sdk/tracing-config-deps.hpp"
+#include "core/sdk/tracing-config.hpp"
 
 #include <timemory/utility/argparse.hpp>
+
+#include <stdlib.h>  // POSIX ::setenv
 
 #include <array>
 #include <cerrno>
@@ -15,10 +23,12 @@
 #include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <unistd.h>
+#include <vector>
 
 namespace
 {
@@ -98,6 +108,112 @@ dispatch_exec(int argc, char** argv, const rocprofsys::cli::dispatch_result& par
               << "': " << std::strerror(exec_error) << '\n';
     return k_exec_failure_status;
 }
+
+/// The ROCPROFSYS_ROCM_DOMAINS values the installed rocprofiler-sdk takes, the list the
+/// tool checks the variable against.
+[[nodiscard]] std::vector<std::string>
+supported_rocm_domains()
+{
+    using tracing_config_t = rocprofsys::rocprofiler_sdk::tracing_config<
+        rocprofsys::backends::rocprofiler_sdk::backend<
+            rocprofsys::rocprofiler_sdk::wrapper>,
+        rocprofsys::rocprofiler_sdk::default_externals>;
+    return tracing_config_t::get_domain_choices();
+}
+
+/// Start the tool of @p parsed with @p argv.
+[[nodiscard]] int
+start_tool(int argc, char** argv, const rocprofsys::cli::dispatch_result& parsed,
+           std::string_view program)
+{
+    return parsed.spec->mode.has_value() ? dispatch_in_process(argc, argv, parsed)
+                                         : dispatch_exec(argc, argv, parsed, program);
+}
+
+/// Read the rocsys options, set the variables they write, and start the tool with the
+/// command line that is left. A subcommand that takes no rocsys options gets the whole
+/// command line.
+[[nodiscard]] int
+run_subcommand(int argc, char** argv, const rocprofsys::cli::dispatch_result& parsed,
+               std::string_view program)
+{
+    if(!parsed.spec->takes_rocsys_options)
+    {
+        return start_tool(argc, argv, parsed, program);
+    }
+    const int  first   = parsed.strip_subcommand ? 2 : 1;
+    const auto options = rocprofsys::rocsys::parse_options(
+        std::vector<std::string>(argv + first, argv + argc), supported_rocm_domains());
+    if(!options.errors.empty())
+    {
+        for(const auto& message : options.errors)
+        {
+            std::cerr << "error: " << message << '\n';
+        }
+        std::cerr << "hint: run '" << program << " --help' for the rocsys options.\n";
+        return EXIT_FAILURE;
+    }
+    for(const auto& [name, value] : options.environment)
+    {
+        if(::setenv(name.c_str(), value.c_str(), 1) != 0)
+        {
+            std::cerr << program << ": failed to set " << name << '\n';
+            return EXIT_FAILURE;
+        }
+    }
+
+    // The tool sees the command line without the rocsys options.
+    auto tool_argv = std::vector<std::string>(argv, argv + first);
+    tool_argv.insert(tool_argv.end(), options.tool_args.begin(), options.tool_args.end());
+    if(!options.command.empty())
+    {
+        tool_argv.emplace_back("--");
+        tool_argv.insert(tool_argv.end(), options.command.begin(), options.command.end());
+    }
+    auto pointers = rocprofsys::common_utils::to_c_argv(tool_argv);
+    return start_tool(static_cast<int>(tool_argv.size()), pointers.data(), parsed,
+                      program);
+}
+
+/// Print @p text, or @p error when the catalog has no such help.
+[[nodiscard]] int
+print_help_text(const std::optional<std::string>& text, std::string_view error)
+{
+    if(!text)
+    {
+        std::cerr << error << '\n';
+        return EXIT_FAILURE;
+    }
+    std::cout << *text;
+    return EXIT_SUCCESS;
+}
+
+/// The rocsys help, or the help topic after "--help=": a category, or "all".
+[[nodiscard]] int
+print_rocsys_help(std::string_view program, std::string_view topic)
+{
+    if(topic.empty())
+    {
+        rocprofsys::cli::print_help(std::cout, program,
+                                    rocprofsys::rocsys::options_summary());
+        return EXIT_SUCCESS;
+    }
+    const auto error = "error: unknown help topic '" + std::string{ topic } +
+                       "'\nhint: run '" + std::string{ program } +
+                       " --help' for the categories.";
+    return print_help_text(
+        rocprofsys::rocsys::options_help(topic, supported_rocm_domains()), error);
+}
+
+/// One rocsys option in full, as "rocsys traces --help" asks for "--traces".
+[[nodiscard]] int
+print_option_help(const rocprofsys::cli::dispatch_result& parsed)
+{
+    return print_help_text(
+        rocprofsys::rocsys::options_help("--" + std::string{ parsed.topic },
+                                         supported_rocm_domains()),
+        parsed.error_message);
+}
 }  // namespace
 
 int
@@ -109,17 +225,20 @@ main(int argc, char** argv)
     switch(parsed.kind)
     {
         case rocprofsys::cli::dispatch_kind::show_help:
-            rocprofsys::cli::print_help(std::cout, program);
+            return print_rocsys_help(program, parsed.topic);
+        case rocprofsys::cli::dispatch_kind::show_subcommand_help:
+            rocprofsys::cli::print_subcommand_help(std::cout, program, *parsed.spec,
+                                                   rocprofsys::rocsys::options_summary());
             return EXIT_SUCCESS;
+        case rocprofsys::cli::dispatch_kind::show_option_help:
+            return print_option_help(parsed);
         case rocprofsys::cli::dispatch_kind::show_version:
             return exit_with_version(program);
         case rocprofsys::cli::dispatch_kind::error:
             std::cerr << parsed.error_message << '\n';
             return EXIT_FAILURE;
-        case rocprofsys::cli::dispatch_kind::in_process:
-            return dispatch_in_process(argc, argv, parsed);
-        case rocprofsys::cli::dispatch_kind::exec_tool:
-            return dispatch_exec(argc, argv, parsed, program);
+        case rocprofsys::cli::dispatch_kind::run_subcommand:
+            return run_subcommand(argc, argv, parsed, program);
         default: return EXIT_FAILURE;
     }
 }

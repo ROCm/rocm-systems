@@ -211,15 +211,28 @@ TEST_F(NetIbCastCommonMicrotest, CommBaseQpHelpers_IndexStripeAndLookUpQps) {
   EXPECT_EQ(qp, nullptr);
 }
 
-TEST_F(NetIbCastCommonMicrotest, NqpsPerRequest_IsAllQpsOnlyWhenSplittingOrWeighting) {
+TEST_F(NetIbCastCommonMicrotest, DefaultNqpsPerRequest_IsDataQpsUnlessSplittingOnQps) {
   ZeroedPtr<ncclIbSendComm> send;
   send->base.nqps = 4;
-  EXPECT_EQ(IbCastCommBaseGetNqpsPerRequest(&send->base), 1);
+  send->base.nDataQps = 2;
+  EXPECT_EQ(IbCastCommBaseGetDefaultNqpsPerRequest(&send->base), 2);
+  send->base.splitDataOnQps = 1;
+  EXPECT_EQ(IbCastCommBaseGetDefaultNqpsPerRequest(&send->base), 4);
+  // The scheduler parameters play no part.
+  send->base.splitDataOnQps = 0;
   send->base.schedParms.splitData = true;
-  EXPECT_EQ(IbCastCommBaseGetNqpsPerRequest(&send->base), 4);
-  send->base.schedParms.splitData = false;
   send->base.schedParms.doWrr = true;
-  EXPECT_EQ(IbCastCommBaseGetNqpsPerRequest(&send->base), 4);
+  EXPECT_EQ(IbCastCommBaseGetDefaultNqpsPerRequest(&send->base), 2);
+}
+
+TEST_F(NetIbCastCommonMicrotest, DefaultNqpsPerRequest_NeverExceedsTheCommsQps) {
+  // RMA connections force nqps to 1 while nDataQps still counts both sides' devices.
+  ZeroedPtr<ncclIbSendComm> send;
+  send->base.nqps = 1;
+  send->base.nDataQps = 2;
+  EXPECT_EQ(IbCastCommBaseGetDefaultNqpsPerRequest(&send->base), 1);
+  send->base.splitDataOnQps = 1;
+  EXPECT_EQ(IbCastCommBaseGetDefaultNqpsPerRequest(&send->base), 1);
 }
 
 TEST_F(NetIbCastCommonMicrotest, PostRecvWorkRequest_GoesThroughTheQpsContext) {

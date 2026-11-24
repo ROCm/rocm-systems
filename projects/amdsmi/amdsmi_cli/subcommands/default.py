@@ -40,9 +40,7 @@ class DefaultCommands:
 
         processors = amdsmi_interface.amdsmi_get_processor_handles()
         try:
-            version_info["amdgpu version"] = amdsmi_interface.amdsmi_get_gpu_driver_info(
-                processors[0]
-            )
+            version_info["amdgpu version"] = self.helpers.get_gpu_driver_info(processors[0])
         except amdsmi_exception.AmdSmiLibraryException as e:
             version_info["amdgpu version"] = "N/A"
             logging.debug("Failed to get driver info for gpu: %s", e.get_error_info())

@@ -1930,7 +1930,7 @@ struct CostTable {
 };
 
 // A general row's mask bit, for the per-call algSelection cases below.
-constexpr uint64_t GeneralBit(int a, int p) { return 1ull << (a * NCCL_NUM_PROTOCOLS + p); }
+constexpr rcclTuningMask GeneralBit(int a, int p) { return rcclTuningMask::bit(a * NCCL_NUM_PROTOCOLS + p); }
 
 ncclTaskColl CostTask(ncclFunc_t f, ncclDataType_t dt = ncclFloat32,
                       ncclDevRedOp_t devOp = ncclDevSum) {
@@ -2236,11 +2236,11 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionAcceptsAFamilyOfRows) {
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_NoAlgSelection_LeavesEveryEligibleCell) {
-  // algMask == 0 is "automatic": the filter must not narrow the default path.
+  // An empty algMask is "automatic": the filter must not narrow the default path.
   CostComm cc;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce);
-  task.algMask = 0;
+  task.algMask = rcclTuningMask();
   ScriptAllTimes(1.0f);
 
   ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 1, 1, 1, 0, tbl.ptr()));
@@ -2256,7 +2256,7 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_SymmetricOnlySelection_LeavesGenera
   CostComm cc;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce);
-  task.algMask = 1ull << NCCL_TUNING_SYM_KERNEL_ID_OFFSET;
+  task.algMask = rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET);
   task.forceAlgSelection = 1;
   ScriptAllTimes(1.0f);
 
@@ -2291,8 +2291,8 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_MixedGeneralAndSymmetricSelection_N
   CostTable tbl;
   auto task = CostTask(ncclFuncAllGather);
   task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_LL) |
-                 (1ull << (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_LL)) |
-                 (1ull << (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_LLMC));
+                 rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_LL) |
+                 rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_LLMC);
   ScriptAllTimes(1.0f);
 
   ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 1, 1, 1, 0, tbl.ptr()));
@@ -2341,7 +2341,7 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_PatSizeWindowExcludesPatWhenNothing
   CostComm cc(/*nRanks=*/8, /*nNodes=*/8);
   CostTable tbl;
   auto task = CostTask(ncclFuncAllGather);
-  task.algMask = 0;
+  task.algMask = rcclTuningMask();
   ScriptAllTimes(1.0f);
 
   ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 64u << 20, 1, 1, 1,
@@ -2689,6 +2689,48 @@ TEST_F(EnqueueMicrotest, RedOpCreate_NullComm_RejectedByCommCheck) {
   EXPECT_EQ(ncclInvalidArgument,
             ncclRedOpCreatePreMulSum_impl(&op, &s, ncclFloat32,
                                           ncclScalarHostImmediate, nullptr));
+}
+
+// ===========================================================================
+// ncclEnqueueCommCheck -- the comm gate every collective entry point calls first.
+// ===========================================================================
+
+TEST_F(EnqueueMicrotest, EnqueueCommCheck_ReadyComm_Succeeds) {
+  RedOpComm rc;
+  EXPECT_EQ(ncclSuccess, ncclEnqueueCommCheck(rc.get(), "AllReduce"));
+}
+
+TEST_F(EnqueueMicrotest, EnqueueCommCheck_RevokedComm_IsInvalidUsage) {
+  RedOpComm rc;
+  rc.get()->revokedFlag = 1;
+  ncclResult_t r = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    r = ncclEnqueueCommCheck(rc.get(), "AllReduce");
+  });
+  EXPECT_EQ(ncclInvalidUsage, r);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "communicator was revoked")) << "actual log:\n" << log;
+}
+
+TEST_F(EnqueueMicrotest, EnqueueCommCheck_InitInProgress_IsInvalidArgument) {
+  RedOpComm rc;
+  rc.get()->initState = ncclInProgress;
+  ncclResult_t r = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    r = ncclEnqueueCommCheck(rc.get(), "AllReduce");
+  });
+  EXPECT_EQ(ncclInvalidArgument, r);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "is not ready")) << "actual log:\n" << log;
+}
+
+TEST_F(EnqueueMicrotest, EnqueueCommCheck_AsyncResultInProgress_IsInvalidArgument) {
+  RedOpComm rc;
+  rc.get()->asyncResult = ncclInProgress;
+  ncclResult_t r = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    r = ncclEnqueueCommCheck(rc.get(), "AllReduce");
+  });
+  EXPECT_EQ(ncclInvalidArgument, r);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "is not ready")) << "actual log:\n" << log;
 }
 
 // ===========================================================================

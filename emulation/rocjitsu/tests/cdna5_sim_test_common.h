@@ -39,6 +39,8 @@
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "rocjitsu/vm/plugins/lds_barrier_arrival_observation.h"
 #include "rocjitsu/vm/soc.h"
 #include "util/except.h"
 #include "util/simd.h"
@@ -347,6 +349,79 @@ inline std::unique_ptr<Instruction> decode_gfx1250(const std::array<uint32_t, 3>
   EXPECT_EQ(inst->mnemonic(), expected_mnemonic);
   EXPECT_EQ(inst->size(), static_cast<int>(words.size() * sizeof(words[0])));
   return inst;
+}
+
+/// Records every arrival at an LDS barrier cell, and the order in which it
+/// and the tensor DMA hooks fire.
+class LdsBarrierArrivalRecorder final : public ExecutionPlugin {
+public:
+  explicit LdsBarrierArrivalRecorder(bool wants_hook = true)
+      : ExecutionPlugin("lds_barrier_arrival_recorder"), wants_hook_(wants_hook) {}
+
+  enum class Hook { TensorIssued, Arrived, TensorMemoryAccess };
+
+  struct Arrival {
+    amdgpu::LdsBarrierArrivalObservation observation;
+    const amdgpu::Wavefront *wave = nullptr;
+    /// The state of `wave` when the hook fired.
+    amdgpu::WfState wave_state = amdgpu::WfState::RUNNING;
+
+    bool operator==(const Arrival &) const = default;
+
+    /// Readable GoogleTest failure output.
+    friend void PrintTo(const Arrival &arrival, std::ostream *os) {
+      const auto &observation = arrival.observation;
+      *os << std::format(
+          "{{source {} cell {:#x} {:#x} -> {:#x}{} wave {} state {}}}",
+          static_cast<int>(observation.source), observation.cell_address, observation.old_state,
+          observation.new_state, observation.phase_completed ? " completed" : "",
+          static_cast<const void *>(arrival.wave), static_cast<int>(arrival.wave_state));
+    }
+  };
+
+  bool observes_lds_barrier_arrival() const override { return wants_hook_; }
+  bool observes_tensor_dma_issue() const override { return true; }
+  bool observes_tensor_dma_memory_access() const override { return true; }
+
+  void onAmdgpuLdsBarrierArrived(const amdgpu::LdsBarrierArrivalObservation &arrival,
+                                 const amdgpu::Wavefront &wf) override {
+    arrivals.push_back({.observation = arrival, .wave = &wf, .wave_state = wf.state()});
+    hooks.push_back(Hook::Arrived);
+  }
+
+  void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation &,
+                               const amdgpu::Wavefront &) override {
+    hooks.push_back(Hook::TensorIssued);
+  }
+
+  void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &) override {
+    hooks.push_back(Hook::TensorMemoryAccess);
+  }
+
+  std::vector<Arrival> arrivals;
+  std::vector<Hook> hooks;
+
+private:
+  bool wants_hook_ = true;
+};
+
+/// Add an arrival recorder to `group`, which must already be installed.
+inline LdsBarrierArrivalRecorder &add_lds_barrier_arrival_recorder(ExecutionPluginGroup &group,
+                                                                   bool wants_hook = true) {
+  auto recorder = std::make_unique<LdsBarrierArrivalRecorder>(wants_hook);
+  auto *result = recorder.get();
+  EXPECT_TRUE(group.add(std::move(recorder)));
+  return *result;
+}
+
+/// Replace the simulation's plugins with one arrival recorder.
+inline LdsBarrierArrivalRecorder &install_lds_barrier_arrival_recorder(Gfx1250Sim &sim,
+                                                                       bool wants_hook = true) {
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto &recorder = add_lds_barrier_arrival_recorder(*group, wants_hook);
+  sim.plugin_group = std::move(group);
+  sim.soc->set_plugin_group(sim.plugin_group);
+  return recorder;
 }
 
 } // namespace rocjitsu::test::cdna5
