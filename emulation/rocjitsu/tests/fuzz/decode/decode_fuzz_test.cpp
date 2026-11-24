@@ -20,9 +20,10 @@ template <size_t N>
 std::array<uint8_t, kWindowSize> make_window(const std::array<uint32_t, N> &words) {
   std::array<uint8_t, kWindowSize> result{};
   for (size_t word = 0; word < words.size(); ++word) {
-    for (size_t byte = 0; byte < sizeof(uint32_t); ++byte)
+    for (size_t byte = 0; byte < sizeof(uint32_t); ++byte) {
       result[word * sizeof(uint32_t) + byte] =
           static_cast<uint8_t>((words[word] >> (byte * 8)) & 0xffu);
+    }
   }
   return result;
 }

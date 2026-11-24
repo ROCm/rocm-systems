@@ -104,7 +104,7 @@ Examples:
             '--coverage-report',
             action='store_true',
             help="Generate code coverage report; includes device coverage on "
-                 "ROCm 7.15+ and falls back to host-only on older releases"
+                 "ROCm 10.3+ and falls back to host-only on older releases"
         )
         self.parser.add_argument(
             '--build-dir',

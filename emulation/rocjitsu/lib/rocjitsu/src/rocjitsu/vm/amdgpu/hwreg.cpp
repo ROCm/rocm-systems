@@ -104,8 +104,9 @@ struct DecodedHwreg {
 };
 
 uint32_t mask_to_bits(uint32_t value, uint32_t bits) {
-  if (bits >= 32)
+  if (bits >= 32) {
     return value;
+  }
   return value & ((1u << bits) - 1u);
 }
 
@@ -114,8 +115,9 @@ uint32_t field_value(uint32_t value, uint32_t shift, uint32_t bits) {
 }
 
 uint32_t blocks_minus_one(uint32_t count, uint32_t block_size) {
-  if (count == 0)
+  if (count == 0) {
     return 0;
+  }
   return ((count + block_size - 1u) / block_size) - 1u;
 }
 
@@ -458,8 +460,9 @@ HwregTable table_for_arch(rocjitsu::IsaFamily arch) {
 const HwregDescriptor *find_descriptor(rocjitsu::IsaFamily arch, uint32_t id) {
   HwregTable table = table_for_arch(arch);
   for (size_t i = 0; i < table.size; ++i) {
-    if (table.entries[i].id == id)
+    if (table.entries[i].id == id) {
       return &table.entries[i];
+    }
   }
   return nullptr;
 }
@@ -469,8 +472,9 @@ DecodedHwreg decode_hwreg(uint16_t hwreg) {
   decoded.id = hwreg_id(hwreg);
   decoded.offset = (hwreg >> 6) & 0x1Fu;
   decoded.size = ((hwreg >> 11) & 0x1Fu) + 1u;
-  if (decoded.offset + decoded.size > 32u)
+  if (decoded.offset + decoded.size > 32u) {
     decoded.size = 32u - decoded.offset;
+  }
   decoded.mask = (decoded.size == 32u) ? 0xFFFFFFFFu : ((1u << decoded.size) - 1u);
   return decoded;
 }
@@ -482,8 +486,9 @@ bool field_intersects(const DecodedHwreg &decoded, uint32_t offset, uint32_t siz
 // Observe only the requested field, never the other bits read to preserve a
 // partial HWREG write. GFX12 moved SCC from STATUS[0] to STATE_PRIV[9].
 bool field_aliases_scc(const Wavefront &wf, HwregState state, const DecodedHwreg &decoded) {
-  if (state == HwregState::StatePrivGfx12)
+  if (state == HwregState::StatePrivGfx12) {
     return field_intersects(decoded, 9, 1);
+  }
   const auto arch = wf.cu().arch();
   return (state == HwregState::Status || state == HwregState::StatusGfx10 ||
           state == HwregState::Gfx11Status) &&
@@ -512,10 +517,12 @@ uint32_t rdna3_4_hw_id1_raw(const Wavefront &wf) {
 bool rdna3_4_hw_id1_location_fits(const Wavefront &wf, const DecodedHwreg &decoded) {
   const auto &cu = wf.cu();
   const uint32_t width = cu.cus_per_shader_array();
-  if (field_intersects(decoded, 8, 9) && (!width || width % 2 || width > 32))
+  if (field_intersects(decoded, 8, 9) && (!width || width % 2 || width > 32)) {
     return false;
-  if (field_intersects(decoded, 16, 1) && cu.shader_array_id() > 1)
+  }
+  if (field_intersects(decoded, 16, 1) && cu.shader_array_id() > 1) {
     return false;
+  }
   return !field_intersects(decoded, 18, 3) || cu.shader_engine_id() < 8;
 }
 
@@ -525,12 +532,13 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     raw_value = wf.mode_raw();
     return HwregAccessResult::Success;
   case HwregState::Gfx11Status:
+    // IDLE[28] tells a host reader that a wave has nothing in flight. The wave
+    // executing this S_GETREG never is, so it reads 0 (gfx1100 and gfx1201).
     raw_value = (wf.status_raw() & ~((7u << 9) | (1u << 12) | (1u << 16) | (1u << 28))) |
                 field_value(wf.exec() == 0, 9, 1) | field_value(wf.vcc_mask() == 0, 10, 1) |
                 field_value(wf.cu().in_multiwave_workgroup(), 11, 1) |
                 field_value(wf.state() == WfState::BARRIER, 12, 1) |
-                field_value(!wf.is_halted(), 16, 1) |
-                field_value(wf.wait_counters().empty(), 28, 1);
+                field_value(!wf.is_halted(), 16, 1);
     return HwregAccessResult::Success;
   case HwregState::GprAllocGfx11: {
     // The GFX11 CWSR handler interprets VGPR_SIZE+1 in units of four
@@ -585,15 +593,15 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
          wf.cu().arch() == rocjitsu::IsaFamily::Cdna5)) {
       // SCC, user priority and HALT are in STATE_PRIV on GFX12. Derive the
       // live STATUS fields instead of exposing their legacy backing bits.
+      // IDLE[28] stays 0 for the reading wave, as for GFX11 above.
       constexpr uint32_t external_bits =
           (1u << 8) | (1u << 14) | (1u << 18) | (1u << 23) | (0xfu << 24) | (1u << 30);
-      raw_value =
-          (raw_value & external_bits) | field_value(wf.in_trap_handler(), 5, 1) |
-          field_value(wf.cu().trap_message_address(0x85) != 0, 6, 1) |
-          field_value(wf.exec() == 0, 9, 1) | field_value(wf.vcc_mask() == 0, 10, 1) |
-          field_value(wf.cu().in_multiwave_workgroup(), 11, 1) |
-          field_value(wf.trap_barrier_complete(), 15, 1) | field_value(!wf.is_halted(), 16, 1) |
-          field_value(wf.wait_counters().empty(), 28, 1) | field_value(wf.wf_size() == 64, 29, 1);
+      raw_value = (raw_value & external_bits) | field_value(wf.in_trap_handler(), 5, 1) |
+                  field_value(wf.cu().trap_message_address(0x85) != 0, 6, 1) |
+                  field_value(wf.exec() == 0, 9, 1) | field_value(wf.vcc_mask() == 0, 10, 1) |
+                  field_value(wf.cu().in_multiwave_workgroup(), 11, 1) |
+                  field_value(wf.trap_barrier_complete(), 15, 1) |
+                  field_value(!wf.is_halted(), 16, 1) | field_value(wf.wf_size() == 64, 29, 1);
     } else {
       constexpr uint32_t dynamic_bits = (1u << 6) | (7u << 9) | (1u << 12) | (1u << 16);
       raw_value = (raw_value & ~dynamic_bits) | ((wf.cu().trap_addresses().first != 0) << 6) |
@@ -689,8 +697,9 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     return HwregAccessResult::Success;
   case HwregState::XccIdCdna3_4: {
     const std::optional<uint32_t> xcc = wf.cu().xcc_id();
-    if (!xcc || *xcc > 15)
+    if (!xcc || *xcc > 15) {
       return HwregAccessResult::Unsupported;
+    }
     raw_value = *xcc;
     return HwregAccessResult::Success;
   }
@@ -733,8 +742,9 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     raw_value = gfx1250_ib_sts2_raw(wf);
     return HwregAccessResult::Success;
   case HwregState::WgpIdGfx1250:
-    if (!wf.cu().cus_per_shader_array() || wf.cu().cus_per_shader_array() > 16)
+    if (!wf.cu().cus_per_shader_array() || wf.cu().cus_per_shader_array() > 16) {
       return HwregAccessResult::Unsupported;
+    }
     // Each gfx1250 ComputeUnit models one WGP, including its shared LDS.
     raw_value = field_value(wf.cu().shader_array_cu_id(), 10, 4);
     return HwregAccessResult::Success;
@@ -768,8 +778,9 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
     wf.set_trapsts(raw_value & ~kGfx10TrapstsDpRateMask);
     return HwregAccessResult::Success;
   case HwregState::FlushIb:
-    if (raw_value & 1u)
+    if (raw_value & 1u) {
       wf.cu().instruction_cache().invalidate_all();
+    }
     return HwregAccessResult::Success;
   case HwregState::GprAllocGfx11:
   case HwregState::LdsAllocGfx11:
@@ -1040,8 +1051,9 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
   }
 
   if (desc->state == HwregState::Gfx11Status && field_intersects(decoded, 6, 1) &&
-      wf.cu().trap_addresses().first != 0)
+      wf.cu().trap_addresses().first != 0) {
     raw_value |= 1u << 6;
+  }
   value = (raw_value >> decoded.offset) & decoded.mask;
   return HwregAccessResult::Success;
 }
@@ -1049,8 +1061,9 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
 bool hwreg_accesses_scc(const Wavefront &wf, uint16_t hwreg, bool write) {
   const auto decoded = decode_hwreg(hwreg);
   const auto *desc = find_descriptor(wf.cu().arch(), decoded.id);
-  if (!desc || !field_aliases_scc(wf, desc->state, decoded))
+  if (!desc || !field_aliases_scc(wf, desc->state, decoded)) {
     return false;
+  }
   return !write || (desc->write_policy != HwregWritePolicy::ReadOnly &&
                     (desc->write_policy != HwregWritePolicy::Privileged || wf.in_trap_handler()));
 }
@@ -1059,8 +1072,9 @@ HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src,
                                     HwregWriteKind kind) {
   DecodedHwreg decoded = decode_hwreg(hwreg);
   const HwregDescriptor *desc = find_descriptor(wf.cu().arch(), decoded.id);
-  if (!desc)
+  if (!desc) {
     return HwregAccessResult::Unsupported;
+  }
 
   switch (desc->write_policy) {
   case HwregWritePolicy::ReadOnly:
@@ -1069,8 +1083,9 @@ HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src,
     // A wave running the trap handler is in privileged mode (hardware sets
     // STATUS.PRIV on trap entry), which is exactly the context these registers
     // are writable from. Everything else is user mode and is refused.
-    if (!wf.in_trap_handler())
+    if (!wf.in_trap_handler()) {
       return HwregAccessResult::Privileged;
+    }
     break;
   case HwregWritePolicy::UserWritable:
     break;
@@ -1088,8 +1103,9 @@ HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src,
     const bool high =
         desc->state == HwregState::ShaderTbaHiGfx10 || desc->state == HwregState::ShaderTmaHiGfx10;
     const uint32_t shift = 8 + decoded.offset + (high ? 32 : 0);
-    if (shift >= 48)
+    if (shift >= 48) {
       return HwregAccessResult::Success;
+    }
     const uint64_t mask = (uint64_t{decoded.mask} << shift) & 0x0000ffffffffffffull;
     return wf.cu().update_trap_address(tma, mask, uint64_t{src} << shift)
                ? HwregAccessResult::Success
@@ -1099,12 +1115,14 @@ HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src,
     break;
   }
 
-  if (desc->state == HwregState::FlushIb)
+  if (desc->state == HwregState::FlushIb) {
     return write_raw_hwreg(wf, desc->state, insert_hwreg_field(0, src, decoded));
+  }
   uint32_t raw_value = 0;
   HwregAccessResult result = read_raw_hwreg(wf, desc->state, raw_value);
-  if (result != HwregAccessResult::Success)
+  if (result != HwregAccessResult::Success) {
     return result;
+  }
 
   uint32_t updated = insert_hwreg_field(raw_value, src, decoded);
   if (desc->state == HwregState::Mode && kind != HwregWriteKind::Generic &&
@@ -1114,8 +1132,9 @@ HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src,
     // the requested HWREG slice. gfx1251 lacks this target capability and uses
     // the ordinary field insertion above.
     updated = (updated & ~VGPR_MSB_MODE_MASK) | (src & VGPR_MSB_MODE_MASK);
-    if (kind == HwregWriteKind::SetregImm32)
+    if (kind == HwregWriteKind::SetregImm32) {
       wf.arm_setreg_vgpr_msb_hazard();
+    }
   }
 
   return write_raw_hwreg(wf, desc->state, updated);

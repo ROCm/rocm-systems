@@ -92,8 +92,9 @@ TEST(RelocationFunctionTableHip, TranslatesEightWayDeviceDispatch) {
   // prove that the compiler retained all eight address-taken functions.
   std::vector<uint64_t> source_targets;
   source_targets.reserve(source_tables[0].entries.size());
-  for (const auto &entry : source_tables[0].entries)
+  for (const auto &entry : source_tables[0].entries) {
     source_targets.push_back(entry.target_text_offset);
+  }
   std::ranges::sort(source_targets);
   EXPECT_EQ(std::ranges::adjacent_find(source_targets), source_targets.end());
 
@@ -126,8 +127,9 @@ TEST(RelocationFunctionTableHip, TranslatesEightWayDeviceDispatch) {
   EXPECT_EQ(translated_tables[0].table_size, 8u * sizeof(uint64_t));
 
   const uint64_t translated_text_size = translated.text_sections()[0]->size();
-  for (const auto &entry : translated_tables[0].entries)
+  for (const auto &entry : translated_tables[0].entries) {
     EXPECT_LT(entry.target_text_offset, translated_text_size);
+  }
 }
 
 TEST(RelocationFunctionTableHip, TranslationIgnoresExplicitNonAllocatedRelocation) {

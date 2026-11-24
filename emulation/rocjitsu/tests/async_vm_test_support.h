@@ -89,15 +89,17 @@ private:
     std::shared_ptr<AsyncVmRequest> request;
     {
       std::lock_guard lock(mutex_);
-      if (queued_.empty())
+      if (queued_.empty()) {
         return;
+      }
       request = std::move(queued_.front());
       queued_.pop_front();
     }
     AsyncVmRequest::Phase expected = AsyncVmRequest::Phase::Queued;
     if (!request->phase.compare_exchange_strong(expected, AsyncVmRequest::Phase::Entered,
-                                                std::memory_order_acq_rel))
+                                                std::memory_order_acq_rel)) {
       return;
+    }
     if (!request->effect_gate || !request->effect_gate->commit([&] {
           std::lock_guard backing_lock(request->backing->mutex);
           const std::size_t size =
@@ -115,14 +117,16 @@ private:
           } else {
             std::ranges::copy_n(at, size, request->response.begin());
             ++request->backing->read_effects;
-            if (request->backing->read_freshness)
+            if (request->backing->read_freshness) {
               request->read_stamp = request->backing->read_freshness->try_capture_read(
                   request->backing->read_backing_id, request->address, size);
+            }
           }
           request->outcome = VmAccessOutcome::Complete;
           request->phase.store(AsyncVmRequest::Phase::Done, std::memory_order_release);
-        }))
+        })) {
       request->phase.store(AsyncVmRequest::Phase::Revoked, std::memory_order_release);
+    }
   }
 
   simdojo::Event event_{this, simdojo::EventType::TIMER_CALLBACK};
@@ -137,19 +141,23 @@ public:
 
   void submit() override {
     ++request_->backing->posts;
-    if (request_->backing->submit_probe)
+    if (request_->backing->submit_probe) {
       request_->backing->submit_probe();
+    }
     owner_.enqueue(request_);
   }
 
   VmAccessOutcome poll(std::span<std::byte> result) override {
     const AsyncVmRequest::Phase phase = request_->phase.load(std::memory_order_acquire);
-    if (phase == AsyncVmRequest::Phase::Queued || phase == AsyncVmRequest::Phase::Entered)
+    if (phase == AsyncVmRequest::Phase::Queued || phase == AsyncVmRequest::Phase::Entered) {
       return VmAccessOutcome::Unavailable;
-    if (phase == AsyncVmRequest::Phase::Revoked)
+    }
+    if (phase == AsyncVmRequest::Phase::Revoked) {
       return VmAccessOutcome::Revoked;
-    if (request_->outcome == VmAccessOutcome::Complete && !request_->write)
+    }
+    if (request_->outcome == VmAccessOutcome::Complete && !request_->write) {
       std::ranges::copy(request_->response, result.begin());
+    }
     return request_->outcome;
   }
 
@@ -158,16 +166,20 @@ public:
     if (phase == AsyncVmRequest::Phase::Queued) {
       AsyncVmRequest::Phase expected = AsyncVmRequest::Phase::Queued;
       if (request_->phase.compare_exchange_strong(expected, AsyncVmRequest::Phase::Revoked,
-                                                  std::memory_order_acq_rel))
+                                                  std::memory_order_acq_rel)) {
         return VmAccessOutcome::Revoked;
+      }
       phase = expected;
     }
-    if (phase == AsyncVmRequest::Phase::Entered)
+    if (phase == AsyncVmRequest::Phase::Entered) {
       return VmAccessOutcome::Unavailable;
-    if (phase == AsyncVmRequest::Phase::Revoked)
+    }
+    if (phase == AsyncVmRequest::Phase::Revoked) {
       return VmAccessOutcome::Revoked;
-    if (request_->outcome == VmAccessOutcome::Complete && !request_->write)
+    }
+    if (request_->outcome == VmAccessOutcome::Complete && !request_->write) {
       std::ranges::copy(request_->response, result.begin());
+    }
     return request_->outcome;
   }
 
@@ -201,20 +213,23 @@ public:
 
   VmDataRoute classify_data_route(uint64_t address, std::size_t size,
                                   VmAccessKind access) const override {
-    if (!overlaps_deferred(address, size))
+    if (!overlaps_deferred(address, size)) {
       return VmDataRoute::Local;
+    }
     return access == VmAccessKind::Read || access == VmAccessKind::Write ? VmDataRoute::Deferred
                                                                          : VmDataRoute::Faulted;
   }
 
   VmTranslationResult translate(uint64_t address, std::size_t size, VmAccessKind) const override {
-    if (size == 0 || address >= backing->bytes.size())
+    if (size == 0 || address >= backing->bytes.size()) {
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+    }
     std::size_t contiguous = std::min<std::size_t>(size, backing->bytes.size() - address);
-    if (address < deferred_begin_)
+    if (address < deferred_begin_) {
       contiguous = std::min<std::size_t>(contiguous, deferred_begin_ - address);
-    else if (is_deferred(address))
+    } else if (is_deferred(address)) {
       contiguous = std::min<std::size_t>(contiguous, deferred_end_ - address);
+    }
     return {
         .outcome = VmAccessOutcome::Complete,
         .translation = {.domain = VmMemoryDomain::System,
@@ -227,8 +242,9 @@ public:
   prepare_deferred_read(PhysicalMemoryAccess &, uint64_t address, std::size_t size,
                         VmAccessKind access,
                         const std::shared_ptr<VmTransferEffectGate> &effect_gate) const override {
-    if (access != VmAccessKind::Read || !is_deferred(address))
+    if (access != VmAccessKind::Read || !is_deferred(address)) {
       return std::nullopt;
+    }
     const std::size_t chunk = std::min<std::size_t>({size, 4, deferred_end_ - address});
     auto request = std::make_shared<AsyncVmRequest>();
     request->backing = backing;
@@ -241,8 +257,9 @@ public:
   std::optional<VmTransferToken>
   prepare_deferred_write(PhysicalMemoryAccess &, uint64_t address, std::span<const std::byte> bytes,
                          const std::shared_ptr<VmTransferEffectGate> &effect_gate) const override {
-    if (!is_deferred(address))
+    if (!is_deferred(address)) {
       return std::nullopt;
+    }
     const std::size_t chunk = std::min<std::size_t>({bytes.size(), 4, deferred_end_ - address});
     auto request = std::make_shared<AsyncVmRequest>();
     request->backing = backing;
@@ -255,15 +272,17 @@ public:
 
   VmTransferStep read_step(PhysicalMemoryAccess &memory, uint64_t address,
                            std::span<std::byte> bytes, VmAccessKind access) const override {
-    if (access == VmAccessKind::Execute && is_deferred(address))
+    if (access == VmAccessKind::Execute && is_deferred(address)) {
       return {.outcome = VmAccessOutcome::Malformed};
+    }
     return AddressSpaceTranslator::read_step(memory, address, bytes, access);
   }
 
   VmAccessOutcome read(VmMemoryDomain, uint64_t address, std::span<std::byte> bytes) override {
     if (overlaps_deferred(address, bytes.size()) || address > backing->bytes.size() ||
-        bytes.size() > backing->bytes.size() - address)
+        bytes.size() > backing->bytes.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::lock_guard lock(backing->mutex);
     std::ranges::copy_n(backing->bytes.begin() + address, bytes.size(), bytes.begin());
     return VmAccessOutcome::Complete;
@@ -272,8 +291,9 @@ public:
   VmAccessOutcome write(VmMemoryDomain, uint64_t address,
                         std::span<const std::byte> bytes) override {
     if (overlaps_deferred(address, bytes.size()) || address > backing->bytes.size() ||
-        bytes.size() > backing->bytes.size() - address)
+        bytes.size() > backing->bytes.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::lock_guard lock(backing->mutex);
     std::ranges::copy(bytes, backing->bytes.begin() + address);
     return VmAccessOutcome::Complete;
@@ -281,8 +301,9 @@ public:
 
   AtomicLoadResult atomic_load(VmMemoryDomain, uint64_t address, uint32_t width) override {
     if ((width != 4 && width != 8) || overlaps_deferred(address, width) ||
-        address > backing->bytes.size() || width > backing->bytes.size() - address)
+        address > backing->bytes.size() || width > backing->bytes.size() - address) {
       return {.outcome = VmAccessOutcome::Malformed};
+    }
     uint64_t value = 0;
     std::lock_guard lock(backing->mutex);
     std::memcpy(&value, backing->bytes.data() + address, width);
@@ -292,8 +313,9 @@ public:
   VmAccessOutcome atomic_store(VmMemoryDomain, uint64_t address, uint32_t width,
                                uint64_t value) override {
     if ((width != 4 && width != 8) || overlaps_deferred(address, width) ||
-        address > backing->bytes.size() || width > backing->bytes.size() - address)
+        address > backing->bytes.size() || width > backing->bytes.size() - address) {
       return VmAccessOutcome::Malformed;
+    }
     std::lock_guard lock(backing->mutex);
     std::memcpy(backing->bytes.data() + address, &value, width);
     return VmAccessOutcome::Complete;
@@ -330,8 +352,9 @@ public:
     auto root = std::make_unique<simdojo::CompositeComponent>("root");
     owner = static_cast<AsyncVmOwner *>(root->add_child(std::make_unique<AsyncVmOwner>()));
     engine.topology().set_root(std::move(root));
-    if (engine.create().failed())
+    if (engine.create().failed()) {
       throw std::runtime_error("cannot create asynchronous VM test engine");
+    }
   }
 
   simdojo::SimulationEngine engine;

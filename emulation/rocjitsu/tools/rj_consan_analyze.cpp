@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/consan/analysis/analyze.h"
+#include "util/diagnostic.h"
 
 #include <charconv>
 #include <fstream>
@@ -35,10 +36,12 @@ int main(int argc, char **argv) {
       const std::from_chars_result parsed =
           std::from_chars(number.data(), number.data() + number.size(), options.examples);
       if (parsed.ec != std::errc{} || parsed.ptr != number.data() + number.size() ||
-          options.examples > kMaxFindingExamples)
+          options.examples > kMaxFindingExamples) {
         return kExitInputError;
-    } else
+      }
+    } else {
       return kExitInputError;
+    }
   }
   std::ifstream file(argv[1], std::ios::binary | std::ios::ate);
   if (!file || file.tellg() < 0 ||
@@ -53,21 +56,22 @@ int main(int argc, char **argv) {
     std::cerr << "capture input error: incomplete or changing input\n";
     return kExitInputError;
   }
-  ContractError error;
-  rocjitsu::FailureOr<Capture> capture = decode_capture(bytes, &error);
+  util::StringDiagnostic diagnostic;
+  rocjitsu::FailureOr<Capture> capture = decode_capture(bytes, diagnostic.emitter());
   if (capture.failed()) {
-    std::cerr << "capture input error: " << error.message << '\n';
+    std::cerr << "capture input error: " << diagnostic.message() << '\n';
     return kExitInputError;
   }
   const rocjitsu::FailureOr<LdsRaceResult> result =
-      analyze_capture(capture.value(), options, &error);
+      analyze_capture(capture.value(), options, diagnostic.emitter());
   if (result.failed()) {
-    std::cerr << "analysis input error: " << error.message << '\n';
+    std::cerr << "analysis input error: " << diagnostic.message() << '\n';
     return kExitInputError;
   }
   std::cout << render_analysis(result.value());
   std::cout.flush();
-  if (!std::cout)
+  if (!std::cout) {
     return kExitOutputFailure;
+  }
   return has_findings(result.value()) ? kExitFindings : kExitNoObservedFindings;
 }

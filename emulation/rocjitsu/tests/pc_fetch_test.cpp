@@ -75,8 +75,9 @@ protected:
   }
 
   void TearDown() override {
-    if (wave && !wave->is_halted())
+    if (wave && !wave->is_halted()) {
       wave->halt();
+    }
   }
 
   void map_page(uint64_t virtual_address, uint64_t physical_address) {

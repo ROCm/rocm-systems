@@ -46,11 +46,13 @@ void *operator new(size_t size) {
     throw std::bad_alloc();
   }
   for (;;) {
-    if (void *memory = std::malloc(size ? size : 1))
+    if (void *memory = std::malloc(size ? size : 1)) {
       return memory;
+    }
     const auto handler = std::get_new_handler();
-    if (!handler)
+    if (!handler) {
       throw std::bad_alloc();
+    }
     handler();
   }
 }

@@ -63,16 +63,19 @@ protected:
   }
 
   void TearDown() override {
-    if (wf && !wf->is_halted())
+    if (wf && !wf->is_halted()) {
       wf->halt();
+    }
   }
 
   void program(std::span<const uint32_t> words) {
-    for (size_t i = 0; i < words.size(); ++i)
+    for (size_t i = 0; i < words.size(); ++i) {
       memory.write32(kProgram + i * 4, words[i]);
+    }
     // Supply the complete instruction fetch window at the end of the program.
-    for (size_t i = 0; i < 4; ++i)
+    for (size_t i = 0; i < 4; ++i) {
       memory.write32(kProgram + (words.size() + i) * 4, 0xBF800000u);
+    }
   }
 
   void step(unsigned bytes = 4) {
@@ -178,8 +181,9 @@ TEST_P(VskipTest, VectorEncodingFamiliesSkipWithoutIssueOrWaitCounterEffects) {
       std::string_view name = entry.mnemonic;
       if (!(name.starts_with("v_") || name.starts_with("buffer_") || name.starts_with("tbuffer_") ||
             name.starts_with("image_") || name.starts_with("ds_") || name.starts_with("flat_") ||
-            name.starts_with("global_") || name.starts_with("scratch_") || name == "exp"))
+            name.starts_with("global_") || name.starts_with("scratch_") || name == "exp")) {
         continue;
+      }
       // The generated sample table has at most two words; wider MFMA extension
       // encodings have separate coverage in the async test below.
       const std::array<uint32_t, 4> padded{entry.words[0], entry.words[1], 0, 0};
@@ -187,8 +191,9 @@ TEST_P(VskipTest, VectorEncodingFamiliesSkipWithoutIssueOrWaitCounterEffects) {
       // Generated samples can violate operand constraints (for example, the
       // v_readfirstlane sample selects an SGPR source). Dedicated cases use
       // valid encodings and require successful decoding.
-      if (inst.failed() || inst.value()->size() > 8)
+      if (inst.failed() || inst.value()->size() > 8) {
         continue;
+      }
       ASSERT_TRUE(inst.value()->is_vskip_affected()) << name;
       words.insert(words.end(), padded.begin(), padded.begin() + inst.value()->size() / 4);
       ++skipped;
@@ -203,8 +208,9 @@ TEST_P(VskipTest, VectorEncodingFamiliesSkipWithoutIssueOrWaitCounterEffects) {
     wf->wait_counters().vmcnt = 3;
     wf->wait_counters().lgkmcnt = 2;
     wf->wait_counters().expcnt = 1;
-    for (unsigned i = 0; i < skipped + 2; ++i)
+    for (unsigned i = 0; i < skipped + 2; ++i) {
       (void)cu->step();
+    }
     EXPECT_FALSE(wf->is_halted());
     EXPECT_EQ(wf->pc, kProgram + words.size() * 4);
     EXPECT_EQ(record->issued, (std::vector<std::string>{"s_setvskip", "s_setvskip"}));
@@ -256,8 +262,9 @@ TEST_P(VskipTest, Vop3SubencodingsSkipWithoutIssue) {
   auto *record = recorder.get();
   ASSERT_TRUE(plugins->add(std::move(recorder)));
   cu->set_plugin_group(plugins);
-  for (unsigned bytes : {4, 8, 8, 4, 4})
+  for (unsigned bytes : {4, 8, 8, 4, 4}) {
     step(bytes);
+  }
   EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + 6, 0), 0x12345678u);
   EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 8), 0xA5A5A5A5u);
   EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base, 0), 1u);
@@ -286,12 +293,14 @@ TEST(VskipAsyncTest, ExtendedMfmaSkipsBeforeAsyncSubmission) {
   wf->set_exec(~uint64_t{0});
   const auto matrix = mma_test::make_cdna4_mfma_scale_words(45, 1, 448, 449);
   memory.write32(kProgram, kEnable);
-  for (size_t i = 0; i < matrix.size(); ++i)
+  for (size_t i = 0; i < matrix.size(); ++i) {
     memory.write32(kProgram + 4 + i * 4, matrix[i]);
+  }
   memory.write32(kProgram + 20, kDisable);
   memory.write32(kProgram + 24, kMoveVector);
-  for (unsigned i = 28; i < 48; i += 4)
+  for (unsigned i = 28; i < 48; i += 4) {
     memory.write32(kProgram + i, 0xBF800000u);
+  }
   cu->write_vgpr(wf->vgpr_alloc().base + 64, 0, 0x3F800000);
   (void)cu->step();
   (void)cu->step();
@@ -325,8 +334,9 @@ TEST(VskipTargetTest, ModeBitDoesNotSuppressRdnaOrCdna5) {
     wf->set_exec(~uint64_t{0});
     wf->set_mode_raw(Wavefront::VSKIP_BIT);
     memory.write32(kProgram, kMoveVector);
-    for (unsigned i = 4; i < 16; i += 4)
+    for (unsigned i = 4; i < 16; i += 4) {
       memory.write32(kProgram + i, 0xBF800000u);
+    }
     (void)cu->step();
     EXPECT_EQ(wf->pc, kProgram + 4);
     EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base, 0), 1u);

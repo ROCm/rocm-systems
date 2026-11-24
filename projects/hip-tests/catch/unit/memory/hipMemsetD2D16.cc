@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <algorithm>
+#include <vector>
+
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
@@ -132,6 +135,51 @@ HIP_TEST_CASE(Unit_hipMemsetD2D16_NegTsts) {
     HIP_CHECK_ERROR(hipMemsetD2D16(A_d, devPitch, memsetval, -10, numH), hipErrorInvalidValue);
   }
   HIP_CHECK(hipFree(reinterpret_cast<void*>(A_d)));
+}
+/**
+ * Test Description
+ * ------------------------
+ * - Fills rows a few elements wide, at origins that aren't 16-byte aligned, with a pitch larger
+ * than the row, and checks every byte of the allocation: the rows hold the value and the bytes
+ * around them are untouched.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemsetD2D16.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemsetD2D16_ShortRowPadding) {
+  constexpr uint16_t memsetVal = 0xB1C2;
+  constexpr uint8_t paddingVal = 0x3C;
+  constexpr size_t numRows = 5;
+  const size_t numElements = GENERATE(1, 3, 7, 9, 31);
+  const size_t originElements = GENERATE(0, 1, 3);
+  const size_t width = numElements * sizeof(uint16_t);
+  const size_t pitch = width + 6 * sizeof(uint16_t);
+  const size_t origin = originElements * sizeof(uint16_t);
+  const size_t allocSize = origin + pitch * numRows + 64;
+
+  uint8_t* A_d = nullptr;
+  HIP_CHECK(hipMalloc(&A_d, allocSize));
+  HIP_CHECK(hipMemset(A_d, paddingVal, allocSize));
+  HIP_CHECK(hipMemsetD2D16(reinterpret_cast<hipDeviceptr_t>(A_d + origin), pitch, memsetVal, width,
+                           numRows));
+  std::vector<uint8_t> A_h(allocSize);
+  HIP_CHECK(hipMemcpy(A_h.data(), A_d, allocSize, hipMemcpyDeviceToHost));
+
+  std::vector<uint8_t> expected(allocSize, paddingVal);
+  for (size_t row = 0; row < numRows; row++) {
+    for (size_t column = 0; column < width; column++) {
+      expected[origin + row * pitch + column] =
+          static_cast<uint8_t>(memsetVal >> (8 * (column % sizeof(uint16_t))));
+    }
+  }
+  const auto mismatch = std::mismatch(A_h.begin(), A_h.end(), expected.begin());
+  INFO("width " << width << " pitch " << pitch << " origin " << origin << ": first mismatch at byte "
+                << (mismatch.first - A_h.begin()));
+  REQUIRE(mismatch.first == A_h.end());
+  HIP_CHECK(hipFree(A_d));
 }
 /**
  * End doxygen group MemoryTest.

@@ -226,26 +226,30 @@ engine caller and can share the SoC's D-1 persistent workers. Callers progress
 concurrently and join only their own submission. Runtime, doorbell and daemon
 threads are outside this execution budget.
 
-The single-GPU tables retain these synchronous engine/dispatch pairs (H=0):
+The multi-XCD single-GPU presets use these synchronous engine/dispatch pairs (H=0).
 
-| Budget | gfx950 E/D | gfx1250 E/D | gfx1100/gfx1151/gfx1201 E/D |
+| Budget | gfx942 E/D | gfx950 E/D | gfx1250 E/D |
 |---:|---:|---:|---:|
 | 1 | 1/1 | 1/1 | 1/1 |
 | 2 | 1/2 | 1/2 | 1/2 |
-| 4 | 2/3 | 1/4 | 1/4 |
-| 8 | 2/7 | 2/7 | 1/8 |
-| 16 | 8/9 | 8/9 | 1/16 |
-| 24 | 8/17 | 8/17 | 1/24 |
-| 32 | 8/25 | 8/25 | 1/24 |
-| 40 | 8/25 | 8/33 | 1/24 |
-| 48 and above | 8/25 | 8/41 | 1/24 |
+| 4 | 2/3 | 2/3 | 1/4 |
+| 8 | 2/7 | 2/7 | 2/7 |
+| 16 | 8/9 | 8/9 | 8/9 |
+| 24 | 8/17 | 8/17 | 8/17 |
+| 32 | 8/25 | 8/25 | 8/25 |
+| 40 | 8/25 | 8/25 | 8/33 |
+| 48 | 8/41 | 8/41 | 8/41 |
+| 56 | 8/41 | 8/41 | 8/49 |
+| 64 and above | 8/41 | 8/41 | 8/57 |
 
-At their highest budget, both single-GPU server presets use eight engines.
-gfx950 adds 24 shared CU dispatch workers at budget 32 and gfx1250 adds 40
-at budget 48. All matrix handlers execute on the issuing thread.
-See the [async MMA thread policy](async-instructions.md#thread-policy).
-Desktop and MI210 tables stop at 1/24/0. CDNA3 stops at 8/17/0.
-A budget of 12 selects the eight-thread row.
+The highest entries use eight engines. gfx942 and gfx950 add 40 shared CU
+dispatch workers, and gfx1250 adds 56. All matrix handlers execute on the
+issuing thread. See the
+[async MMA thread policy](async-instructions.md#thread-policy).
+
+Desktop and MI210 presets use one engine, so their dispatch width equals the
+retained thread count. Their granules are 1, 2, 4, 8, 16 and 24 threads.
+MI210 adds a 32-thread granule. A budget of 12 selects the eight-thread row.
 
 Print allocations for any target without constructing a simulated GPU:
 
@@ -296,8 +300,8 @@ selects them by the agent's GPU target and GPU count. The hardware agent format 
 host scheduling policy. Unknown targets use the serial fallback. For multiple
 GPUs, it uses the matching native preset when available. Other GPU counts
 convert each single-GPU granule's budget B to E=1, D=1+floor((B-1)/GPUs) and H=0,
-then leave selection to rocjitsu. Derived gfx950 tables use up to 32 threads
-and gfx1250 uses 48, while desktop and CDNA3 tables use 24.
+then leave selection to rocjitsu. The starting budgets come from the
+single-GPU tables above.
 Its multi-GPU configurations default to E=1/D=1/H=0 for the same reasons. A positive
 engine override can change that pin;
 `num_threads: 0` retains it. Profile options may override `cpu_thread_budget`,
@@ -434,12 +438,12 @@ rocjitsu responsibilities.
 
 Matrix adapters forward FP16_OVFL where applicable. Floating-point WMMA ignores
 guest rounding and denormal controls; integer WMMA does not accept those controls.
-rj-arith never explicitly changes host FP controls. It assumes the default host FP
-environment: round-to-nearest, FTZ/DAZ disabled, and exceptions masked. In local mode,
-the executable must satisfy this precondition too: linking with `-ffast-math` can
-enable FTZ/DAZ before emulation starts. Arithmetic may set host sticky exception flags. Compatibility deliberately
-does not retain legacy host-environment isolation; nondefault host controls are
-outside the contract in every semantics mode. `RJ_FORCE_SCALAR`
+rocjitsu, including rj-arith, assumes the default host FP environment: round-to-nearest,
+FTZ/DAZ disabled, and exceptions masked. rj-arith never explicitly changes host FP
+controls. In local mode, the executable must satisfy this precondition too: linking with
+`-ffast-math` can enable FTZ/DAZ before emulation starts. Arithmetic may set host sticky
+exception flags. Nondefault host controls are outside the contract in every semantics
+mode. `RJ_FORCE_SCALAR`
 selects rj-arith's baseline CPU path; the test override also applies to existing CUs.
 It does not change semantics.
 

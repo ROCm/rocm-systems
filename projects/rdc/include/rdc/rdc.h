@@ -481,7 +481,7 @@ typedef enum {
   RDC_HEALTH_RETIRED_PAGE_NUM,       //!< Retired page number
   RDC_HEALTH_PENDING_PAGE_NUM,       //!< Pending page number
   RDC_HEALTH_RETIRED_PAGE_LIMIT,     //!< the threshold of retired page number
-  RDC_HEALTH_EEPROM_CONFIG_VALID,    //!< Reads the EEPROM and verifies the checksums
+  RDC_HEALTH_EEPROM_CONFIG_VALID,    //!< Verifies the EEPROM checksums: 1 if valid, 0 if corrupted
   RDC_HEALTH_POWER_THROTTLE_TIME,    //!< Power throttle status counter
   RDC_HEALTH_THERMAL_THROTTLE_TIME,  //!< Total time in thermal throttle status (microseconds)
   RDC_HEALTH_VIOLATION_COUNTER,      //!< Accumulated violation counter
@@ -1534,7 +1534,11 @@ rdc_status_t rdc_field_unwatch(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_
 /**
  *  @brief Run the diagnostic test cases
  *
- *  @details Run the diagnostic test cases at different levels.
+ *  @details Run the diagnostic test cases at different levels. On a handle
+ *  from rdc_connect(), rdcd runs at most two diagnostics at a time,
+ *  rdc_diagnostic_run() and rdc_test_case_run() together, for all of its
+ *  clients. A run keeps its place until it ends, also after its client has
+ *  gone away.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
@@ -1544,7 +1548,8 @@ rdc_status_t rdc_field_unwatch(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_
  *  The RDC_DIAG_LVL_SHORT only take a few seconds, and the
  *  the RDC_DIAG_LVL_LONG may take up to 15 minutes.
  *
- *  @param[in] config  Implementation specific configuration.
+ *  @param[in] config  Implementation specific configuration. On a handle from
+ *  rdc_connect(), NULL is the same as an empty configuration.
  *
  *  @param[in] config_size  Length of the configuration.
  *
@@ -1553,6 +1558,14 @@ rdc_status_t rdc_field_unwatch(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_
  *  @param[inout] callback  Callback for realtime communication
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_GROUP_NOT_FOUND The GPU group does not exist.
+ *  @retval ::RDC_ST_MAX_LIMIT On a handle from rdc_connect(): rdcd already
+ *  runs two diagnostics.
+ *  @retval ::RDC_ST_CLIENT_ERROR On a handle from rdc_connect(): rdcd cannot
+ *  be reached, or the connection failed during the run.
+ *  @retval ::RDC_ST_BAD_PARAMETER response is NULL, or, on a handle from
+ *  rdc_connect(), the run reported more test cases or GPU results than
+ *  rdc_diag_response_t holds.
  */
 rdc_status_t rdc_diagnostic_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                                 rdc_diag_level_t level, const char* config, size_t config_size,
@@ -1561,7 +1574,9 @@ rdc_status_t rdc_diagnostic_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group
 /**
  *  @brief Run one diagnostic test case
  *
- *  @details Run a specific diagnostic test case.
+ *  @details Run a specific diagnostic test case. On a handle from
+ *  rdc_connect(), it counts as one of the two diagnostics that rdcd runs at a
+ *  time (see rdc_diagnostic_run()).
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
@@ -1569,7 +1584,8 @@ rdc_status_t rdc_diagnostic_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group
  *
  *  @param[in] test_case  The test case to run.
  *
- *  @param[in] config  Implementation specific configuration.
+ *  @param[in] config  Implementation specific configuration. On a handle from
+ *  rdc_connect(), NULL is the same as an empty configuration.
  *
  *  @param[in] config_size  Length of the configuration.
  *
@@ -1578,6 +1594,14 @@ rdc_status_t rdc_diagnostic_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group
  *  @param[inout] callback  Callback for realtime communication
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_GROUP_NOT_FOUND The GPU group does not exist.
+ *  @retval ::RDC_ST_MAX_LIMIT On a handle from rdc_connect(): rdcd already
+ *  runs two diagnostics.
+ *  @retval ::RDC_ST_CLIENT_ERROR On a handle from rdc_connect(): rdcd cannot
+ *  be reached, or the connection failed during the run.
+ *  @retval ::RDC_ST_BAD_PARAMETER result is NULL, or, on a handle from
+ *  rdc_connect(), the run reported more GPU results than rdc_diag_test_result_t
+ *  holds.
  */
 rdc_status_t rdc_test_case_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                                rdc_diag_test_cases_t test_case, const char* config,

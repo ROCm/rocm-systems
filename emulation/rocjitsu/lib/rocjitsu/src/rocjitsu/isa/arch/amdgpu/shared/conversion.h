@@ -93,8 +93,9 @@ template <typename V> using Lane = typename LaneOf<V>::type;
 template <typename Fmt, typename V, typename Mask>
 constexpr Mask rounds_up(Rounding rounding, const Mask &negative, V kept, V rest, V half) {
   const V zero(Lane<V>{0});
-  if (rounding == Rounding::NEAREST_UP)
+  if (rounding == Rounding::NEAREST_UP) {
     return rest > half || (rest == half && rest != zero && !negative);
+  }
   return rest != zero && round_increment::rounds_up<Fmt>(static_cast<uint32_t>(rounding), negative,
                                                          kept, rest, half);
 }
@@ -191,9 +192,10 @@ private:
     using F16 = fp_format::F16;
     bits = source_modifier::apply<F16>(bits & V(F16::kBits), index, abs, neg);
     bits = input_denormal::flush_input<F16>(bits, input);
-    if (quiet_nan)
+    if (quiet_nan) {
       bits = detail::choose((bits & V(F16::kMagnitude)) > V(F16::kInfinity), bits | V(F16::kQuiet),
                             bits);
+    }
     return bits;
   }
 };
@@ -497,8 +499,9 @@ private:
       } else {
         assert(rounding.prescale == 0 && "widening is exact and applies no prescale");
         const V widened = widen<Source, Destination>(bits);
-        if (quiet_nan)
+        if (quiet_nan) {
           return widened;
+        }
         // A signaling NaN keeps its quiet bit clear; its payload survives widening.
         const auto signaling = (bits & V(Source::kMagnitude)) > V(Source::kInfinity) &&
                                (bits & V(Source::kQuiet)) == V(Lane{0});

@@ -59,14 +59,16 @@ TEST(ConversionTest, Fp8DecodeIsExactAndCanonicalizesNan) {
   for (uint32_t byte = 0; byte < 0x100u; ++byte) {
     const uint32_t fp8 = conversion::decode_fp8<conversion::Fp8>(byte);
     const uint32_t bf8 = conversion::decode_fp8<conversion::Bf8>(byte);
-    if ((byte & 0x7fu) == 0x7fu)
+    if ((byte & 0x7fu) == 0x7fu) {
       EXPECT_EQ(fp8, 0xffc00000u) << byte;
-    else
+    } else {
       EXPECT_EQ(conversion::encode_fp8<conversion::Fp8>(fp8, false), byte) << byte;
-    if ((byte & 0x7fu) > 0x7cu)
+    }
+    if ((byte & 0x7fu) > 0x7cu) {
       EXPECT_EQ(bf8, 0xffc00000u) << byte;
-    else
+    } else {
       EXPECT_EQ(conversion::encode_fp8<conversion::Bf8>(bf8, false), byte) << byte;
+    }
   }
   EXPECT_EQ(conversion::decode_fp8<conversion::Fp8>(0x7eu), 0x43e00000u); // 448
   EXPECT_EQ(conversion::decode_fp8<conversion::Fp8>(0x01u), 0x3b000000u); // 2^-9
@@ -207,7 +209,8 @@ int host_round_mode(Rounding direction) {
   }
 }
 
-/// Run host IEEE conversions in one rounding mode, restoring nearest-even afterwards.
+/// Run a host IEEE reference conversion in one rounding mode, restoring nearest-even
+/// afterwards, so the conversions under test run in the default host environment.
 class HostRounding {
 public:
   explicit HostRounding(Rounding direction) { std::fesetround(host_round_mode(direction)); }
@@ -216,9 +219,19 @@ public:
   HostRounding &operator=(const HostRounding &) = delete;
 };
 
-uint32_t host_f64_to_f32(uint64_t bits) {
+// Volatile results keep each conversion inside its rounding scope.
+uint32_t host_f64_to_f32(uint64_t bits, Rounding direction) {
+  HostRounding host(direction);
   volatile double value = std::bit_cast<double>(bits);
-  return std::bit_cast<uint32_t>(static_cast<float>(value));
+  volatile float result = static_cast<float>(value);
+  return std::bit_cast<uint32_t>(float(result));
+}
+
+template <typename Integer> uint32_t host_integer_to_f32(Integer integer, Rounding direction) {
+  HostRounding host(direction);
+  volatile Integer value = integer;
+  volatile float result = static_cast<float>(value);
+  return std::bit_cast<uint32_t>(float(result));
 }
 
 // Without flushing or saturation the rules are those of IEEE 754 conversion.
@@ -226,13 +239,13 @@ TEST(FloatRoundingTest, NarrowF64ToF32MatchesIeeeInEveryMode) {
   std::mt19937_64 random(1);
   for (const Rounding direction : kDirections) {
     const FloatRounding policy{direction, false, false};
-    HostRounding host(direction);
     for (int i = 0; i < 200000; ++i) {
       uint64_t bits = random();
       // Most samples land near the F32 range, including its subnormals.
-      if (i % 4 != 0)
+      if (i % 4 != 0) {
         bits = (bits & 0x800fffffffffffffull) | (uint64_t{random() % 320 + 1023 - 170} << 52);
-      ASSERT_EQ(f64_to_f32(bits, policy), uint64_t{host_f64_to_f32(bits)})
+      }
+      ASSERT_EQ(f64_to_f32(bits, policy), uint64_t{host_f64_to_f32(bits, direction)})
           << std::hex << bits << " direction " << static_cast<int>(direction);
     }
   }
@@ -288,17 +301,14 @@ TEST(FloatRoundingTest, IntegerToF32MatchesIeeeInEveryMode) {
   std::mt19937_64 random(2);
   for (const Rounding direction : kDirections) {
     const FloatRounding policy{direction, false, false};
-    HostRounding host(direction);
     for (int i = 0; i < 200000; ++i) {
       const auto value = static_cast<uint32_t>(random() >> (random() % 40));
-      volatile uint32_t unsigned_value = value;
-      volatile int32_t signed_value = static_cast<int32_t>(value);
+      const auto signed_value = static_cast<int32_t>(value);
       const uint32_t magnitude = signed_value < 0 ? 0u - value : value;
       ASSERT_EQ(integer_to_f32(magnitude, signed_value < 0, policy),
-                std::bit_cast<uint32_t>(static_cast<float>(signed_value)))
-          << static_cast<int32_t>(value);
-      ASSERT_EQ(integer_to_f32(value, false, policy),
-                std::bit_cast<uint32_t>(static_cast<float>(unsigned_value)))
+                host_integer_to_f32(signed_value, direction))
+          << signed_value;
+      ASSERT_EQ(integer_to_f32(value, false, policy), host_integer_to_f32(value, direction))
           << value;
     }
   }
@@ -308,8 +318,9 @@ TEST(FloatRoundingTest, WidenF32ToF64IsExact) {
   std::mt19937_64 random(3);
   for (int i = 0; i < 200000; ++i) {
     auto bits = static_cast<uint32_t>(random());
-    if (i % 2 == 0)
+    if (i % 2 == 0) {
       bits &= 0x807fffffu; // zero or subnormal
+    }
     volatile float value = std::bit_cast<float>(bits);
     ASSERT_EQ(f32_to_f64(uint64_t{bits}), std::bit_cast<uint64_t>(static_cast<double>(value)))
         << std::hex << bits;
