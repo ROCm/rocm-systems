@@ -28,26 +28,29 @@ GpuAliasIngressGate::SlotLocks GpuAliasIngressGate::lock_local_slots() const {
   return locks;
 }
 
+class GpuAliasIngressGate::LocalCache::Owner {
+public:
+  explicit Owner(std::shared_ptr<GpuAliasIngressGate> gate) : gate(std::move(gate)) {}
+  // Keeps the slot storage alive until the last admitted permit is released.
+  std::shared_ptr<GpuAliasIngressGate> gate;
+};
+
 std::optional<amdgpu::MemoryIngressPermit>
-GpuAliasIngressGate::try_acquire_local(Key key) noexcept {
+GpuAliasIngressGate::try_acquire_local(Key key, LocalCache &cache) noexcept {
   static std::atomic<size_t> next_slot{0};
   static thread_local const size_t index =
       next_slot.fetch_add(1, std::memory_order_relaxed) % kLocalSlots;
   if (!maintenance_active_.load(std::memory_order_acquire)) {
-    // The worker keeps one gate reference between requests. A permit still
-    // outlives its issuing worker: it owns this anchor until release, even
+    // The cache keeps one gate reference between requests. A permit still
+    // outlives its issuing scope: it owns this anchor until release, even
     // if destruction is on another worker after exit or a driver change.
-    struct WorkerOwner {
-      std::shared_ptr<GpuAliasIngressGate> gate;
-      explicit WorkerOwner(std::shared_ptr<GpuAliasIngressGate> gate) : gate(std::move(gate)) {}
-    };
-    static thread_local std::shared_ptr<WorkerOwner> worker;
+    auto &worker = cache.owner_;
     auto &slot = local_slots_[index];
     std::lock_guard lock(slot.mutex);
     if (!slot.key && !maintenance_active_.load(std::memory_order_acquire)) {
       try {
         if (!worker || worker->gate.get() != this)
-          worker = std::make_shared<WorkerOwner>(shared_from_this());
+          worker = std::make_shared<LocalCache::Owner>(shared_from_this());
         std::function<void()> done = [&slot] { release_local(slot); };
         slot.owner = {worker, this};
         slot.key = key;

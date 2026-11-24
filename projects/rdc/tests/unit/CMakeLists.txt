@@ -49,11 +49,8 @@ include(GoogleTest)
 # rdc_codec_tests: pure-logic tests (entity codec, AFID field registration,
 # library loader; the loader tests dlopen only libm and libc). Links only
 # librdc_bootstrap (which holds the codec, the field descriptor table and the
-# loader) and NOT librdc, so it pulls in no amdsmi. librdc runs amdsmi_init in a
-# load-time static initializer that throws when no GPU/driver is present, which
-# would abort the process before main(); keeping these tests out of that library
-# lets them run on GPU-less CI and satisfy the unit-test gate anywhere. Uses
-# gtest_main since it needs no custom setup.
+# loader) and NOT librdc, so it pulls in no amdsmi and runs on GPU-less CI.
+# Uses gtest_main since it needs no custom setup.
 add_executable(
     ${RDC_CODEC_TESTS}
     ${SRC_DIR}/test_entity_codec.cc
@@ -123,12 +120,59 @@ if(TARGET rdc_client)
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
         COMPONENT ${TESTS_COMPONENT}
     )
+
+    # rdc_client_replies_tests: the client against a server whose replies state more
+    # entries than they carry. It links librdc_client for the generated gRPC service and
+    # messages, so that the process has one copy of them.
+    add_executable(rdc_client_replies_tests ${SRC_DIR}/test_client_replies.cc)
+    target_include_directories(
+        rdc_client_replies_tests
+        PRIVATE ${PROJECT_SOURCE_DIR}/include ${PROTOB_OUT_DIR}
+    )
+    target_link_libraries(
+        rdc_client_replies_tests
+        PRIVATE rdc_bootstrap rdc_client gRPC::grpc++ GTest::gtest_main pthread
+    )
+    set_target_properties(
+        rdc_client_replies_tests
+        PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib:\$ORIGIN/../../../lib/rdc/grpc/lib"
+    )
+    add_test(NAME rdc_client_replies_tests COMMAND rdc_client_replies_tests)
+    install(
+        TARGETS rdc_client_replies_tests
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+        COMPONENT ${TESTS_COMPONENT}
+    )
+
+    # rdc_policy_client_tests: policy registration through the client against a
+    # fake rdcd that admits, rejects or never answers a stream. Links like
+    # rdc_client_replies_tests.
+    add_executable(rdc_policy_client_tests ${SRC_DIR}/test_policy_client.cc)
+    target_include_directories(
+        rdc_policy_client_tests
+        PRIVATE ${PROJECT_SOURCE_DIR}/include ${PROTOB_OUT_DIR}
+    )
+    target_link_libraries(
+        rdc_policy_client_tests
+        PRIVATE rdc_bootstrap rdc_client gRPC::grpc++ GTest::gtest_main pthread
+    )
+    set_target_properties(
+        rdc_policy_client_tests
+        PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib:\$ORIGIN/../../../lib/rdc/grpc/lib"
+    )
+    add_test(NAME rdc_policy_client_tests COMMAND rdc_policy_client_tests)
+    install(
+        TARGETS rdc_policy_client_tests
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+        COMPONENT ${TESTS_COMPONENT}
+    )
 endif()
 
 # rdc_link_status_tests: rdc_link_status_get() against fake amdsmi link-status
-# replies. Compiles RdcTopologyLinkImpl.cc into the test, which defines the
-# amdsmi calls that file makes, so it links neither librdc nor amd_smi and runs
-# on GPU-less CI. librdc_bootstrap provides the logger.
+# replies, and both it and rdc_device_topology_get() with an unavailable GPU.
+# Compiles RdcTopologyLinkImpl.cc into the test, which defines the amdsmi calls
+# that file makes, so it links neither librdc nor amd_smi and runs on GPU-less
+# CI. librdc_bootstrap provides the logger.
 add_executable(
     rdc_link_status_tests
     ${SRC_DIR}/test_link_status.cc
@@ -180,6 +224,23 @@ install(
     COMPONENT ${TESTS_COMPONENT}
 )
 
+# rdc_telemetry_tests: how RdcTelemetryModule hands watched fields to the telemetry
+# libraries, checked with a stub library. Builds the module from source instead of
+# linking librdc, whose load-time amd-smi initialization needs a GPU, so it runs on
+# GPU-less CI.
+add_executable(
+    rdc_telemetry_tests
+    ${SRC_DIR}/test_telemetry_module.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcTelemetryModule.cc
+)
+target_include_directories(
+    rdc_telemetry_tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+)
+target_link_libraries(rdc_telemetry_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
+set_target_properties(rdc_telemetry_tests PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib")
+add_test(NAME rdc_telemetry_tests COMMAND rdc_telemetry_tests)
+
 # rdc_unit_tests: hardware-aware SmiUtils tests. Links librdc (flat table,
 # partition helpers) and amd_smi. Provides its own main() to init amdsmi once.
 # Hardware-dependent tests self-skip when no AMD GPU is present.
@@ -201,27 +262,82 @@ set_target_properties(
 add_test(NAME ${RDC_UNIT_TESTS} COMMAND ${RDC_UNIT_TESTS})
 
 install(
-    TARGETS ${RDC_CODEC_TESTS} ${RDC_UNIT_TESTS} rdc_diag_kernel_tests rdc_topology_tests
+    TARGETS
+        ${RDC_CODEC_TESTS}
+        ${RDC_UNIT_TESTS}
+        rdc_diag_kernel_tests
+        rdc_topology_tests
+        rdc_telemetry_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)
+
+# rdc_gpu_table_tests: the flat GPU table, RDC's AMD SMI session and the groups of
+# its GPUs against fake AMD SMI calls. Compiles SmiUtils.cc, RdcGroupSettingsImpl.cc
+# and RdcPartitionImpl.cc, so it needs neither librdc nor a GPU, and links no
+# amd_smi: test_gpu_table.cc defines the amdsmi calls those files make.
+add_executable(
+    rdc_gpu_table_tests
+    ${SRC_DIR}/test_gpu_table.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/SmiUtils.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcGroupSettingsImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcPartitionImpl.cc
+)
+target_include_directories(
+    rdc_gpu_table_tests
+    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+)
+target_link_libraries(rdc_gpu_table_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
+set_target_properties(rdc_gpu_table_tests PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib")
+add_test(NAME rdc_gpu_table_tests COMMAND rdc_gpu_table_tests)
+install(
+    TARGETS rdc_gpu_table_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)
+
+# rdc_updater_tests: RdcMetricsUpdaterImpl's stop() and start() against a test
+# watch table. Compiles RdcMetricsUpdaterImpl.cc, so it needs neither librdc nor
+# a GPU.
+add_executable(
+    rdc_updater_tests
+    ${SRC_DIR}/test_metrics_updater.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcMetricsUpdaterImpl.cc
+)
+target_include_directories(
+    rdc_updater_tests
+    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+)
+target_link_libraries(rdc_updater_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
+set_target_properties(rdc_updater_tests PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib")
+add_test(NAME rdc_updater_tests COMMAND rdc_updater_tests)
+install(
+    TARGETS rdc_updater_tests
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT}
 )
 
 # rdc_status_tests: the statuses the health calls return for a GPU group that does
-# not exist, and rdc_status_string(). It compiles RdcWatchTableImpl.cc and
-# RdcGroupSettingsImpl.cc instead of linking librdc, so it needs no GPU;
-# librdc_bootstrap provides the logger and rdc_status_string().
+# not exist, and rdc_status_string(). It compiles RdcWatchTableImpl.cc,
+# RdcGroupSettingsImpl.cc and SmiUtils.cc instead of linking librdc, so it needs no
+# GPU; librdc_bootstrap provides the logger and rdc_status_string(), amd_smi the
+# calls SmiUtils.cc makes (the tests make none).
 add_executable(
     rdc_status_tests
     ${SRC_DIR}/test_status_codes.cc
     ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcWatchTableImpl.cc
     ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcGroupSettingsImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/SmiUtils.cc
 )
 target_include_directories(
     rdc_status_tests
     PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
 )
-target_link_libraries(rdc_status_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
-set_target_properties(rdc_status_tests PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib")
+target_link_libraries(rdc_status_tests PRIVATE rdc_bootstrap amd_smi GTest::gtest_main pthread)
+set_target_properties(
+    rdc_status_tests
+    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib:${AMD_SMI_LIB_DIR}"
+)
 add_test(NAME rdc_status_tests COMMAND rdc_status_tests)
 install(
     TARGETS rdc_status_tests
@@ -260,9 +376,10 @@ install(
 )
 
 # rdc_metric_fetcher_tests: builds and destroys metric fetchers from several
-# threads at once. Compiles the metric fetcher into the test, so it runs on
-# GPU-less CI. amd_smi provides the calls the fetcher's other functions make,
-# librdc_bootstrap the logger.
+# threads at once, and checks RDC_FI_GPU_MEMORY_CUR_BANDWIDTH against fake
+# gpu_metrics replies. Compiles the metric fetcher into the test, which defines
+# the amdsmi calls the tests reach, so it runs on GPU-less CI. amd_smi provides
+# the calls the tests never make, librdc_bootstrap the logger.
 add_executable(
     rdc_metric_fetcher_tests
     ${SRC_DIR}/test_metric_fetcher.cc
@@ -286,6 +403,27 @@ add_test(NAME rdc_metric_fetcher_tests COMMAND rdc_metric_fetcher_tests)
 set_tests_properties(rdc_metric_fetcher_tests PROPERTIES TIMEOUT 120)
 install(
     TARGETS rdc_metric_fetcher_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)
+
+# rdc_cache_bounds_tests: the retention limits of cached samples. It compiles
+# RdcCacheManagerImpl.cc instead of linking librdc, so it needs no GPU;
+# librdc_bootstrap provides the logger.
+add_executable(
+    rdc_cache_bounds_tests
+    ${SRC_DIR}/test_cache_bounds.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcCacheManagerImpl.cc
+)
+target_include_directories(rdc_cache_bounds_tests PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(rdc_cache_bounds_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
+set_target_properties(
+    rdc_cache_bounds_tests
+    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib"
+)
+add_test(NAME rdc_cache_bounds_tests COMMAND rdc_cache_bounds_tests)
+install(
+    TARGETS rdc_cache_bounds_tests
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT}
 )

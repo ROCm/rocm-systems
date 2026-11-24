@@ -50,6 +50,7 @@
 #pragma once
 
 #include "global_memory_builders.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "scalar_builders.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -131,11 +132,11 @@ inline util::Result append(std::vector<uint32_t> &words, const util::FailureOr<W
 // guaranteed visible to a reader until s_wait_alu clears sa_sdst. LLVM assumes
 // every SGPR may have been read on entry to a called function, which a probe is.
 // 0xfffe is the value LLVM's amdgpu-wait-sgpr-hazards pass emits for it.
-inline void append_salu_sgpr_write_wait(std::vector<uint32_t> &words, rj_code_arch_t arch) {
+inline void append_salu_sgpr_write_wait(std::vector<uint32_t> &words, rocjitsu::IsaFamily arch) {
   constexpr util::FailureOr<uint32_t> wait =
-      build_sopp_encoding(ROCJITSU_CODE_ARCH_RDNA4, rdna4::kSWaitAluSopp, 0xfffe);
+      build_sopp_encoding(rocjitsu::IsaFamily::Rdna4, rdna4::kSWaitAluSopp, 0xfffe);
   static_assert(wait.succeeded());
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch == rocjitsu::IsaFamily::Rdna4)
     words.push_back(wait.value());
 }
 
@@ -148,7 +149,7 @@ inline void append_salu_sgpr_write_wait(std::vector<uint32_t> &words, rj_code_ar
 /// @return Failure for an invalid slot count or an unsupported encoding.
 /// @param emit_error Destination for failure diagnostics; omitted emitters discard them.
 /// @details Invalid slot counts leave words unchanged; encoding failures may leave a partial body.
-inline util::Result build_log_record_probe_body(rj_code_arch_t arch, uint32_t record_type,
+inline util::Result build_log_record_probe_body(rocjitsu::IsaFamily arch, uint32_t record_type,
                                                 uint32_t slot_count, std::vector<uint32_t> &words,
                                                 util::DiagnosticEmitter emit_error = {}) {
   if (slot_count == 0 || (slot_count & (slot_count - 1)) != 0 || slot_count > 64)

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/control_flow.h"
@@ -61,8 +62,9 @@ bool s_setpc_from_sreg(const Instruction &inst, uint32_t word, uint16_t ssrc0) {
   // gfx1250 renamed the scalar PC transfer without changing its role in the
   // call/return CFG. Accept both spellings; the raw source operand remains in
   // the low byte for the canonical one-word form.
-  const std::string_view mnemonic = inst.mnemonic();
-  if (inst.size() != sizeof(uint32_t) || (mnemonic != "s_setpc_b64" && mnemonic != "s_set_pc_i64"))
+  const amdgpu::Operation operation = inst.amdgpu_operation();
+  if (inst.size() != sizeof(uint32_t) ||
+      (operation != amdgpu::Operation::S_SETPC_B64 && operation != amdgpu::Operation::S_SET_PC_I64))
     return false;
   return static_cast<uint16_t>(word & 0xffu) == ssrc0;
 }
@@ -163,7 +165,7 @@ void BasicBlock::add_static_pc_address_builder(PcAddressBuilder builder) {
 }
 
 FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
-BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+BasicBlock::build(const CodeObject &co, Decoder &decoder, rocjitsu::IsaFamily arch,
                   DecodeErrorEmitter emit_error, std::span<const uint64_t> extra_leaders,
                   ExternalEntryPolicy entry_policy, std::span<const uint64_t> extra_split_points,
                   rj_code_target_id_t target) {
@@ -177,7 +179,7 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
 }
 
 FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
-BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rocjitsu::IsaFamily arch,
                        DecodeErrorEmitter emit_error, std::span<const uint64_t> extra_leaders,
                        ExternalEntryPolicy entry_policy,
                        std::span<const uint64_t> extra_split_points, DecodedSection *prepared,
@@ -357,7 +359,7 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
         // depend on whether the linker happened to align the section, so an unterminated tail
         // would be translated verbatim in one build and given a terminator in the next.
         const bool reaches_section_end =
-            arch == ROCJITSU_CODE_ARCH_CDNA5 && i >= decoded.size() && next_offset >= section_end;
+            arch == rocjitsu::IsaFamily::Cdna5 && i >= decoded.size() && next_offset >= section_end;
         if (can_fall_through && (reaches_gfx1250_zero || reaches_section_end)) {
           current->has_terminator_ = true;
           current->has_implicit_terminator_ = true;
@@ -733,7 +735,7 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
 }
 
 FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_reachable(
-    const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+    const CodeObject &co, Decoder &decoder, rocjitsu::IsaFamily arch,
     std::span<const uint64_t> entry_offsets, DecodeErrorEmitter emit_error,
     std::span<const CodeRange> permitted_ranges, std::span<const uint64_t> decode_seeds,
     std::span<const uint64_t> extra_split_points, rj_code_target_id_t target) {
@@ -747,7 +749,7 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_reachable(
 }
 
 FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
-BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rocjitsu::IsaFamily arch,
                       const BuildOptions &options, DecodeErrorEmitter emit_error) {
   const rj_code_target_id_t target_id = concrete_target(co, options.target);
   if (options.decode_policy == DecodePolicy::FullSection) {

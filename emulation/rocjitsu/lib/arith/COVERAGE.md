@@ -57,6 +57,11 @@ not the ability to raise a flag on half of all DOT mnemonics.
 
 ## CDNA and gfx1250
 
+gfx1250 FP32 ADD/SUB/SUBREV use their `_gfx1250` entry points with no
+Compatibility FP causes. MUL retains inherited input-denormal/range reporting
+without adding gfx12 INVALID causes; OMOD retains its legacy cause suppression.
+Both explicit strict modes remain unqualified for these operations.
+
 ### Matrix instructions
 
 CDNA matrix support covers twenty gfx942 MFMA forms (FP16/BF16, XF32 and FP8/BF8),
@@ -107,6 +112,12 @@ VCC/EXEC writes and trap delivery. Ordinary Compatibility comparisons remain
 numeric-only; explicit reporting qualification is unchanged. Gfx10 signaling
 policy remains in the partially migrated RDNA2 adapter until that migration.
 
+Gfx1150 floating relational predicates use scalar/AVX2/AVX-512 numeric and
+classification kernels on both waves. Compatibility preserves the inherited
+DX10_CLAMP-gated INVALID policy (CLAMP: any NaN; otherwise signaling NaNs).
+Explicit numeric modes leave FP status unused; strict status mode is unsupported.
+No new empirical hardware qualification is claimed for this inherited model.
+
 ## Scalar floating point
 
 gfx12 scalar arithmetic, comparisons, rounding and conversions use rj-arith in
@@ -147,3 +158,51 @@ Loose uses FP32-intermediate MAD. Guest rounding, forced intermediate flushing,
 IEEE NaN quieting, FP16_OVFL and final output modifiers are retained. This is
 software-model reuse, not new empirical qualification; strict modes reject and
 FP status is unchanged. The native half FMA migration is independent.
+
+## Older-profile integer dot products
+
+Rocjitsu routes the integer DOT2/DOT4/DOT8 forms present on gfx908, gfx90a,
+gfx1030 and gfx1150 through the existing scalar, AVX2 and AVX-512-v4 backends.
+This includes the old-destination DOTC forms where present, half selectors,
+signedness and saturation. Gfx1010 has no such integer-dot instructions.
+Floating-point DOT2 forms migrate as described below.
+
+## Older host-model floating dots
+
+gfx908, gfx90a and gfx1030 FP16-input FP32-output DOT2/DOT2C use the same
+pair-sum-then-accumulate model as gfx942, including packed source selectors,
+modifiers, destination overlap and partial EXEC. Compatibility and Loose use
+the existing scalar, AVX2 and AVX-512-v4 implementations; strict bit-exact modes
+remain unsupported. This transfers the inherited software model without new
+empirical qualification. gfx1150 uses the distinct model described below.
+The superseded HostF32 packed-dot and accumulating emitters have no remaining
+production users and are removed.
+
+## gfx1150 floating dots
+
+FP16/BF16 DOT2 with FP32 or true16 output and the FP16 DOT2ACC use the
+existing gfx11 arithmetic in both waves. Compatibility retains rocjitsu's
+integer-grid accumulation, NaN and packed narrowing policies; Loose uses
+the existing scalar, AVX2 and AVX-512 arithmetic. Packed-output Compatibility
+retains the inherited scalar grid model. Guest rounding/denormal controls
+remain ignored; FP16 overflow, inline replication, modifiers, selected
+C/D halves and DPP continue through the shared adapters. This inherits the
+existing software model, not a new gfx1150 hardware qualification. Explicit
+strict decoded modes 2 and 3 reject active VOP2, VOP3 and VOP3P requests
+without changing D; Compatibility/Loose/allow-Loose support the inherited model.
+This qualification boundary does not cover VOPD: its FP16/BF16 dual DOT2ACC
+forms retain their existing execution policy and can write both destinations
+in modes 2 and 3.
+
+The old true16-dot emitter loses its last production users and is deleted.
+Its semantic classes now route directly to the shared library binding, along
+with the migrated HostF32 packed and accumulating forms on CDNA1/2 and RDNA2.
+
+## gfx1251 packed U64
+
+The three packed U64 forms (ADD_NC, SUB_NC, LSHL_ADD) use scalar, AVX2 and
+AVX-512 paths for all semantics. ADD/SUB include independent half-element
+negation and mathematical U64 saturation. LSHL_ADD retains the inherited
+active count range0..4, checked before writes by Rocjitsu; no expanded hardware
+claim is made for other counts. Scalar carriers replicate the appropriate
+U64 data or U32 count. Existing decoder and simulator coverage is retained.

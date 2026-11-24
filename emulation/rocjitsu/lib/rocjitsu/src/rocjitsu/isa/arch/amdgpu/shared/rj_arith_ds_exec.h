@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_register.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/operand.h"

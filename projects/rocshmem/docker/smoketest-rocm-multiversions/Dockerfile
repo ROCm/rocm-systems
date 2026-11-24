@@ -65,7 +65,7 @@ RUN mkdir -p /etc/apt/keyrings \
       > /etc/apt/preferences.d/rocm-pin-600 \
  && apt-get update \
  && for ver in ${ROCM_LEGACY_VERSIONS}; do \
-      apt-get install -y rocm${ver}; \
+      apt-get install -y --no-install-recommends rocm${ver}; \
     done \
  && apt-get clean && rm -rf /var/lib/apt/lists/* \
  && { update-alternatives --query rocm >/dev/null 2>&1 && update-alternatives --remove-all rocm; }
@@ -86,7 +86,7 @@ RUN wget -qO- https://repo.amd.com/rocm/packages/gpg/rocm.gpg \
           apt-cache show "${pkg}" >/dev/null 2>&1 && pkgs="${pkgs} ${pkg}"; \
         done; \
       done; \
-      apt-get install -y ${pkgs}; \
+      apt-get install -y --no-install-recommends ${pkgs}; \
     done \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -235,3 +235,7 @@ RUN if [ -n "${USE_SRC}" ]; then \
     fi
 
 ENTRYPOINT ["/app/build_and_test.sh"]
+
+# Build/development image that runs as root by design.
+# trivy:ignore:DS-0002
+USER root

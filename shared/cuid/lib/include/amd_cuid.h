@@ -40,7 +40,13 @@ extern "C" {
 #define AMDCUID_LIB_VERSION_MINOR 1
 
 //! Patch version should be updated for each bug fix or non-API change
-#define AMDCUID_LIB_VERSION_PATCH 0
+//!
+//! 2.1.1: every caller and container gets the same components: one unreadable
+//! file leaves out only its component, a host VF is told by its physfn link,
+//! and a KFD topology the caller cannot read in full gives a partition no
+//! UnitID unless the compute partition mode fixes the count. A missing
+//! machine-id is logged at INFO, not WARN.
+#define AMDCUID_LIB_VERSION_PATCH 1
 
 /**
  * @brief Retrieve the version of the CUID library.
@@ -343,7 +349,7 @@ typedef enum {
                                       ///< or the component moves.
   AMDCUID_QUERY_SOURCE = 17,          ///< Query which stage answered the last derivation
                                       ///< (::amdcuid_source_t). Supported by all device types.
-  AMDCUID_QUERY_LAST
+  AMDCUID_QUERY_LAST = 18
 } amdcuid_query_t;
 
 /**

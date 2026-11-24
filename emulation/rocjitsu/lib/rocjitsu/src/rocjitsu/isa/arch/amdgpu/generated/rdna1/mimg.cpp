@@ -65,6 +65,8 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 void ImageLoadMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -151,6 +153,8 @@ ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_MIP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 void ImageLoadMipMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -237,6 +241,8 @@ ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 void ImageLoadPckMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -319,6 +325,8 @@ ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_PCK_SGN);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 void ImageLoadPckSgnMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -406,6 +414,8 @@ ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_MIP_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 void ImageLoadMipPckMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -497,6 +507,8 @@ ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_MIP_PCK_SGN);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 void ImageLoadMipPckSgnMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -581,6 +593,8 @@ ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 void ImageStoreMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -648,6 +662,8 @@ ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_MIP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 void ImageStoreMipMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -713,6 +729,8 @@ ImageStorePckMimg::ImageStorePckMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 void ImageStorePckMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -781,6 +799,8 @@ ImageStoreMipPckMimg::ImageStoreMipPckMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_MIP_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 void ImageStoreMipPckMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -842,6 +862,8 @@ ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   vaddr.set_register_byte_mask(amdgpu::image_coordinate_component_bytes(0, inst_.a16));
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GET_RESINFO);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Other);
 }
 
 void ImageGetResinfoMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -920,6 +942,8 @@ ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
       ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
                         : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_SWAP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 void ImageAtomicSwapMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -998,6 +1022,8 @@ ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
       ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
                         : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_CMPSWAP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 void ImageAtomicCmpswapMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -1076,6 +1102,8 @@ ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
       ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
                         : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_ADD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 void ImageAtomicAddMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -1154,6 +1182,8 @@ ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
       ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
                         : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_SUB);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 void ImageAtomicSubMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -1232,6 +1262,8 @@ ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
       ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
                         : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_SMIN);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 void ImageAtomicSminMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -1310,6 +1342,8 @@ ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
       ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
                         : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_UMIN);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 void ImageAtomicUminMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -1388,6 +1422,8 @@ ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
       ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
                         : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_SMAX);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 void ImageAtomicSmaxMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -1466,6 +1502,8 @@ ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
       ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
                         : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_UMAX);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 void ImageAtomicUmaxMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -1544,6 +1582,8 @@ ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
       ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
                         : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_AND);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 void ImageAtomicAndMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -1622,6 +1662,8 @@ ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
       ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
                         : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_OR);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 void ImageAtomicOrMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -1700,6 +1742,8 @@ ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
       ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
                         : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_XOR);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 void ImageAtomicXorMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -1778,6 +1822,8 @@ ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
       ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
                         : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_INC);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 void ImageAtomicIncMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -1856,6 +1902,8 @@ ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
       ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
                         : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_DEC);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 void ImageAtomicDecMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -1934,6 +1982,8 @@ ImageAtomicFcmpswapMimg::ImageAtomicFcmpswapMimg(const MachineInst *inst)
       ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
                         : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_FCMPSWAP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 void ImageAtomicFcmpswapMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -2012,6 +2062,8 @@ ImageAtomicFminMimg::ImageAtomicFminMimg(const MachineInst *inst)
       ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
                         : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_FMIN);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 void ImageAtomicFminMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -2090,6 +2142,8 @@ ImageAtomicFmaxMimg::ImageAtomicFmaxMimg(const MachineInst *inst)
       ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
                         : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_FMAX);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 void ImageAtomicFmaxMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -2158,6 +2212,8 @@ ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -2243,6 +2299,8 @@ ImageSampleClMimg::ImageSampleClMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleClMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -2338,6 +2396,8 @@ ImageSampleDMimg::ImageSampleDMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleDMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -2429,6 +2489,8 @@ ImageSampleDClMimg::ImageSampleDClMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleDClMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -2522,6 +2584,8 @@ ImageSampleLMimg::ImageSampleLMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_L);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleLMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -2611,6 +2675,8 @@ ImageSampleBMimg::ImageSampleBMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_B);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleBMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -2699,6 +2765,8 @@ ImageSampleBClMimg::ImageSampleBClMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_B_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleBClMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -2787,6 +2855,8 @@ ImageSampleLzMimg::ImageSampleLzMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_LZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleLzMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -2872,6 +2942,8 @@ ImageSampleCMimg::ImageSampleCMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -2960,6 +3032,8 @@ ImageSampleCClMimg::ImageSampleCClMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCClMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -3048,6 +3122,8 @@ ImageSampleCDMimg::ImageSampleCDMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCDMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -3136,6 +3212,8 @@ ImageSampleCDClMimg::ImageSampleCDClMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCDClMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -3224,6 +3302,8 @@ ImageSampleCLMimg::ImageSampleCLMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_L);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCLMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -3312,6 +3392,8 @@ ImageSampleCBMimg::ImageSampleCBMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_B);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCBMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -3400,6 +3482,8 @@ ImageSampleCBClMimg::ImageSampleCBClMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_B_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCBClMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -3488,6 +3572,8 @@ ImageSampleCLzMimg::ImageSampleCLzMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_LZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCLzMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -3576,6 +3662,8 @@ ImageSampleOMimg::ImageSampleOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -3664,6 +3752,8 @@ ImageSampleClOMimg::ImageSampleClOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleClOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -3752,6 +3842,8 @@ ImageSampleDOMimg::ImageSampleDOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleDOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -3840,6 +3932,8 @@ ImageSampleDClOMimg::ImageSampleDClOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleDClOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -3928,6 +4022,8 @@ ImageSampleLOMimg::ImageSampleLOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_L_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleLOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -4016,6 +4112,8 @@ ImageSampleBOMimg::ImageSampleBOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_B_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleBOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -4104,6 +4202,8 @@ ImageSampleBClOMimg::ImageSampleBClOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_B_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleBClOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -4192,6 +4292,8 @@ ImageSampleLzOMimg::ImageSampleLzOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_LZ_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleLzOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -4280,6 +4382,8 @@ ImageSampleCOMimg::ImageSampleCOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -4368,6 +4472,8 @@ ImageSampleCClOMimg::ImageSampleCClOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCClOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -4456,6 +4562,8 @@ ImageSampleCDOMimg::ImageSampleCDOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCDOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -4544,6 +4652,8 @@ ImageSampleCDClOMimg::ImageSampleCDClOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCDClOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -4632,6 +4742,8 @@ ImageSampleCLOMimg::ImageSampleCLOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_L_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCLOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -4720,6 +4832,8 @@ ImageSampleCBOMimg::ImageSampleCBOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_B_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCBOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -4808,6 +4922,8 @@ ImageSampleCBClOMimg::ImageSampleCBClOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_B_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCBClOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -4896,6 +5012,8 @@ ImageSampleCLzOMimg::ImageSampleCLzOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_LZ_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCLzOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -4984,6 +5102,8 @@ ImageGather4Mimg::ImageGather4Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -5052,6 +5172,8 @@ ImageGather4ClMimg::ImageGather4ClMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4ClMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -5120,6 +5242,8 @@ ImageLoadBy2Mimg::ImageLoadBy2Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_BY2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 void ImageLoadBy2Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -5203,6 +5327,8 @@ ImageLoadBy4Mimg::ImageLoadBy4Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_BY4);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 void ImageLoadBy4Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -5293,6 +5419,8 @@ ImageGather4LMimg::ImageGather4LMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_L);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4LMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -5363,6 +5491,8 @@ ImageGather4BMimg::ImageGather4BMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_B);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4BMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -5433,6 +5563,8 @@ ImageGather4BClMimg::ImageGather4BClMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_B_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4BClMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -5503,6 +5635,8 @@ ImageGather4LzMimg::ImageGather4LzMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_LZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4LzMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -5571,6 +5705,8 @@ ImageGather4CMimg::ImageGather4CMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4CMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -5641,6 +5777,8 @@ ImageGather4CClMimg::ImageGather4CClMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4CClMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -5713,6 +5851,8 @@ ImageLoadMipBy2Mimg::ImageLoadMipBy2Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_MIP_BY2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 void ImageLoadMipBy2Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -5804,6 +5944,8 @@ ImageLoadMipBy4Mimg::ImageLoadMipBy4Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_MIP_BY4);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 void ImageLoadMipBy4Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -5893,6 +6035,8 @@ ImageGather4CLMimg::ImageGather4CLMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_L);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4CLMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -5963,6 +6107,8 @@ ImageGather4CBMimg::ImageGather4CBMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_B);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4CBMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -6033,6 +6179,8 @@ ImageGather4CBClMimg::ImageGather4CBClMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_B_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4CBClMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -6103,6 +6251,8 @@ ImageGather4CLzMimg::ImageGather4CLzMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_LZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4CLzMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -6173,6 +6323,8 @@ ImageGather4OMimg::ImageGather4OMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4OMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -6243,6 +6395,8 @@ ImageGather4ClOMimg::ImageGather4ClOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4ClOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -6308,6 +6462,8 @@ ImageStoreBy2Mimg::ImageStoreBy2Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_BY2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 void ImageStoreBy2Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -6371,6 +6527,8 @@ ImageStoreBy4Mimg::ImageStoreBy4Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_BY4);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 void ImageStoreBy4Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -6439,6 +6597,8 @@ ImageGather4LOMimg::ImageGather4LOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_L_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4LOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -6509,6 +6669,8 @@ ImageGather4BOMimg::ImageGather4BOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_B_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4BOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -6579,6 +6741,8 @@ ImageGather4BClOMimg::ImageGather4BClOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_B_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4BClOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -6649,6 +6813,8 @@ ImageGather4LzOMimg::ImageGather4LzOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_LZ_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4LzOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -6719,6 +6885,8 @@ ImageGather4COMimg::ImageGather4COMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4COMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -6789,6 +6957,8 @@ ImageGather4CClOMimg::ImageGather4CClOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4CClOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -6859,6 +7029,8 @@ ImageStoreMipBy2Mimg::ImageStoreMipBy2Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_MIP_BY2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 void ImageStoreMipBy2Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -6929,6 +7101,8 @@ ImageStoreMipBy4Mimg::ImageStoreMipBy4Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_MIP_BY4);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 void ImageStoreMipBy4Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -6999,6 +7173,8 @@ ImageGather4CLOMimg::ImageGather4CLOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_L_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4CLOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -7069,6 +7245,8 @@ ImageGather4CBOMimg::ImageGather4CBOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_B_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4CBOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -7139,6 +7317,8 @@ ImageGather4CBClOMimg::ImageGather4CBClOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_B_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4CBClOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -7209,6 +7389,8 @@ ImageGather4CLzOMimg::ImageGather4CLzOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_LZ_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4CLzOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -7277,6 +7459,8 @@ ImageGetLodMimg::ImageGetLodMimg(const MachineInst *inst)
   if (mimg_has_status(&inst_, true))
     flags_ |= INCLUDES_UNWRITTEN_LAST_VGPR;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GET_LOD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Other);
 }
 
 void ImageGetLodMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -7346,6 +7530,8 @@ ImageGather4hMimg::ImageGather4hMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4H);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4hMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -7414,6 +7600,8 @@ ImageGather4hPckMimg::ImageGather4hPckMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4H_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4hPckMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -7482,6 +7670,8 @@ ImageGather8hPckMimg::ImageGather8hPckMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER8H_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather8hPckMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -7557,6 +7747,8 @@ ImageSampleCdMimg::ImageSampleCdMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCdMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -7648,6 +7840,8 @@ ImageSampleCdClMimg::ImageSampleCdClMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CD_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCdClMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -7736,6 +7930,8 @@ ImageSampleCCdMimg::ImageSampleCCdMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCCdMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -7824,6 +8020,8 @@ ImageSampleCCdClMimg::ImageSampleCCdClMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CD_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCCdClMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -7912,6 +8110,8 @@ ImageSampleCdOMimg::ImageSampleCdOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CD_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCdOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -8000,6 +8200,8 @@ ImageSampleCdClOMimg::ImageSampleCdClOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CD_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCdClOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -8088,6 +8290,8 @@ ImageSampleCCdOMimg::ImageSampleCCdOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CD_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCCdOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -8176,6 +8380,8 @@ ImageSampleCCdClOMimg::ImageSampleCCdClOMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CD_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCCdClOMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -8261,6 +8467,8 @@ ImageLoadPck2Mimg::ImageLoadPck2Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_PCK2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 void ImageLoadPck2Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -8343,6 +8551,8 @@ ImageLoadPck4Mimg::ImageLoadPck4Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_PCK4);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 void ImageLoadPck4Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -8430,6 +8640,8 @@ ImageLoadMipPck2Mimg::ImageLoadMipPck2Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_MIP_PCK2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 void ImageLoadMipPck2Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -8521,6 +8733,8 @@ ImageLoadMipPck4Mimg::ImageLoadMipPck4Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_MIP_PCK4);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 void ImageLoadMipPck4Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -8605,6 +8819,8 @@ ImageStorePck2Mimg::ImageStorePck2Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_PCK2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 void ImageStorePck2Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -8668,6 +8884,8 @@ ImageStorePck4Mimg::ImageStorePck4Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_PCK4);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 void ImageStorePck4Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -8736,6 +8954,8 @@ ImageStoreMipPck2Mimg::ImageStoreMipPck2Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_MIP_PCK2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 void ImageStoreMipPck2Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -8806,6 +9026,8 @@ ImageStoreMipPck4Mimg::ImageStoreMipPck4Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_MIP_PCK4);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 void ImageStoreMipPck4Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -8866,6 +9088,8 @@ ImageMsaaLoadMimg::ImageMsaaLoadMimg(const MachineInst *inst)
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_MSAA_LOAD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -8904,6 +9128,8 @@ ImageSampleDG16Mimg::ImageSampleDG16Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleDG16Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -8992,6 +9218,8 @@ ImageSampleDClG16Mimg::ImageSampleDClG16Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_CL_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleDClG16Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -9080,6 +9308,8 @@ ImageSampleCDG16Mimg::ImageSampleCDG16Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCDG16Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -9168,6 +9398,8 @@ ImageSampleCDClG16Mimg::ImageSampleCDClG16Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_CL_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCDClG16Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -9256,6 +9488,8 @@ ImageSampleDOG16Mimg::ImageSampleDOG16Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_O_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleDOG16Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -9344,6 +9578,8 @@ ImageSampleDClOG16Mimg::ImageSampleDClOG16Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_CL_O_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleDClOG16Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -9432,6 +9668,8 @@ ImageSampleCDOG16Mimg::ImageSampleCDOG16Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_O_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCDOG16Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -9520,6 +9758,8 @@ ImageSampleCDClOG16Mimg::ImageSampleCDClOG16Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_CL_O_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCDClOG16Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -9608,6 +9848,8 @@ ImageSampleCdG16Mimg::ImageSampleCdG16Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CD_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCdG16Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -9696,6 +9938,8 @@ ImageSampleCdClG16Mimg::ImageSampleCdClG16Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CD_CL_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCdClG16Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -9784,6 +10028,8 @@ ImageSampleCCdG16Mimg::ImageSampleCCdG16Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CD_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCCdG16Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -9872,6 +10118,8 @@ ImageSampleCCdClG16Mimg::ImageSampleCCdClG16Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CD_CL_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCCdClG16Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -9960,6 +10208,8 @@ ImageSampleCdOG16Mimg::ImageSampleCdOG16Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CD_O_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCdOG16Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -10048,6 +10298,8 @@ ImageSampleCdClOG16Mimg::ImageSampleCdClOG16Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CD_CL_O_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCdClOG16Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -10136,6 +10388,8 @@ ImageSampleCCdOG16Mimg::ImageSampleCCdOG16Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CD_O_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCCdOG16Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {
@@ -10224,6 +10478,8 @@ ImageSampleCCdClOG16Mimg::ImageSampleCCdClOG16Mimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CD_CL_O_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleCCdClOG16Mimg::append_src_operand(std::string &out, uint8_t operand_index) const {

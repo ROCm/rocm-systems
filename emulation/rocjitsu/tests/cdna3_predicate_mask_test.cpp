@@ -6,6 +6,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -42,7 +43,7 @@ struct Fixture {
   explicit Fixture(unsigned sgprs = SGPRS_PER_WF, unsigned wave_slots = 1)
       : gpu_mem("cdna3_predicate_mask_mem"), l2("cdna3_predicate_mask_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA3;
+    cfg.arch = rocjitsu::IsaFamily::Cdna3;
     cfg.num_wf_slots = wave_slots;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
@@ -50,7 +51,7 @@ struct Fixture {
     rocjitsu::test::initialize_compute_unit(cu, "cu_cdna3_predicate_mask", cfg, &gpu_mem, &l2);
     if (!cu)
       return;
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+    decoder = Decoder::create(rocjitsu::IsaFamily::Cdna3);
     wf = cu->dispatch_wf(0, 0, sgprs, VGPRS_PER_WF);
   }
 

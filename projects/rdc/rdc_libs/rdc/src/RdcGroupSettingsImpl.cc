@@ -90,6 +90,20 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_add(rdc_gpu_group_t groupId, ui
   // Pass the full entity index so the partition helper resolves the correct socket for
   // CPX partition instances (entity_info.device_index alone is only the socket index).
   rdc_status_t status = partition_->rdc_get_num_partition_impl(gpu_index, &num_partitions);
+  // A GPU AMD SMI cannot identify keeps its index in groups, and so does each of its partition
+  // instances; their fields read as not found. Such a GPU has no partition count to check an
+  // instance against, so the instance needs a slot (a placeholder) in the GPU table.
+  bool unavailable_instance = false;
+  if (status == RDC_ST_NOT_FOUND) {
+    amdsmi_processor_handle unused = nullptr;
+    if (entity_info.entity_role == RDC_DEVICE_ROLE_PHYSICAL && entity_info.instance_index == 0) {
+      num_partitions = 1;
+      status = RDC_ST_OK;
+    } else if (get_processor_handle_from_id(gpu_index, &unused) == AMDSMI_STATUS_NOT_FOUND) {
+      unavailable_instance = true;
+      status = RDC_ST_OK;
+    }
+  }
   if (status != RDC_ST_OK) {
     RDC_LOG(RDC_ERROR, "rdc_group_gpu_add: get_num_partition failed for gpu_index="
                            << gpu_index << " device_index=" << entity_info.device_index
@@ -112,7 +126,7 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_add(rdc_gpu_group_t groupId, ui
         return RDC_ST_BAD_PARAMETER;
       }
     }
-  } else {
+  } else if (!unavailable_instance) {
     if ((entity_info.entity_role != RDC_DEVICE_ROLE_PHYSICAL) &&
         (entity_info.device_type == RDC_DEVICE_TYPE_GPU)) {
       RDC_LOG(RDC_INFO, "GPU " << entity_info.device_index << "." << entity_info.device_type

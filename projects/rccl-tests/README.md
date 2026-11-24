@@ -80,8 +80,14 @@ e.g. build RCCL-Tests using CMake for `gfx90a`, `gfx942` and `gfx1200`. e.g.,
     ```shell
     $ cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="/path/to/mpi;/path/to/rocm" -DUSE_MPI=ON -DBUILD_LOCAL_GPU_TARGET_ONLY=ON ..
     ```
+* `LOCAL_GPU_ONLY=1` is the Makefile equivalent, and `install.sh` exposes it as `-l|--local_gpu_only`. e.g.,
+    ```shell
+    $ make LOCAL_GPU_ONLY=1 MPI=1 MPI_HOME=/path/to/mpi NCCL_HOME=/opt/rocm
+    $ ./install.sh -l -m --mpi_home /path/to/mpi
+    ```
+    An explicitly specified `GPU_TARGETS` takes precedence over `LOCAL_GPU_ONLY=1`.
 
-`-DBUILD_LOCAL_GPU_TARGET_ONLY` will not work with `docker build`-based setups, as the docker build engine is unable to query the local GPU architecture. Please use `-DGPU_TARGETS` for CMake-based builds or `GPU_TARGETS` for Makefile-based builds when building RCCL-Tests using a Dockerfile and `docker build`.
+`-DBUILD_LOCAL_GPU_TARGET_ONLY` and `LOCAL_GPU_ONLY=1` will not work with `docker build`-based setups, as the docker build engine is unable to query the local GPU architecture. Please use `-DGPU_TARGETS` for CMake-based builds or `GPU_TARGETS` for Makefile-based builds when building RCCL-Tests using a Dockerfile and `docker build`.
 
 ## Usage
 

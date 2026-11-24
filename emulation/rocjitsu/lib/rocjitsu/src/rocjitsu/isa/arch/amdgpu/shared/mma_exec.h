@@ -28,6 +28,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/result.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -1558,7 +1559,7 @@ bool try_exec_mfma_snapshot(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32
       return false;
     const uint32_t stride = ((N + W - 1) / W) * W;
     const uint32_t d_regs = mfma_dense_reg_count(uint64_t{M} * N * B, sizeof(T) * 8, 64);
-    const uint32_t a_block_lanes = cu.arch() == ROCJITSU_CODE_ARCH_CDNA2 ? M : 0u;
+    const uint32_t a_block_lanes = cu.arch() == rocjitsu::IsaFamily::Cdna2 ? M : 0u;
     // cbsz/abid and blgp can broadcast part of each register.
     const uint64_t a_lanes =
         cbsz == 0 ? mfma_full_lane_mask(64) : mfma_permuted_lane_mask([&](uint32_t lane) {
@@ -1739,7 +1740,7 @@ RJ_NOINLINE void exec_f32_mixed_generic(auto &cu, uint32_t a_bits, uint32_t b_bi
                                         ExtractB eb, uint32_t const_acc, uint32_t cbsz,
                                         uint32_t abid, uint32_t blgp, MfmaF32Denorm denorm) {
   static_assert(M > 0 && N > 0 && K > 0);
-  const uint32_t a_block_lanes = cu.arch() == ROCJITSU_CODE_ARCH_CDNA2 ? M : 0u;
+  const uint32_t a_block_lanes = cu.arch() == rocjitsu::IsaFamily::Cdna2 ? M : 0u;
   const uint32_t wf = cu.wf_size();
   struct Result {
     uint32_t reg;
@@ -2094,7 +2095,7 @@ RJ_NOINLINE inline void exec_i32_i8_generic(auto &cu, uint32_t M, uint32_t N, ui
                                             uint32_t B, uint32_t dst, uint32_t s0, uint32_t s1,
                                             uint32_t s2, uint32_t const_acc, uint32_t cbsz,
                                             uint32_t abid, uint32_t blgp) {
-  const uint32_t a_block_lanes = cu.arch() == ROCJITSU_CODE_ARCH_CDNA2 ? M : 0u;
+  const uint32_t a_block_lanes = cu.arch() == rocjitsu::IsaFamily::Cdna2 ? M : 0u;
   const uint32_t wf = cu.wf_size();
   struct Result {
     uint32_t reg;

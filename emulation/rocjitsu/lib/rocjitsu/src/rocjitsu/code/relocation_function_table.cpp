@@ -118,11 +118,12 @@ void transfer_instruction(PairState &state, const Instruction &inst,
                           std::span<const RelocationFunctionTable> tables, uint64_t text_vaddr,
                           uint8_t wave_size, std::vector<RelocationTableDispatch> *dispatches,
                           std::vector<PcRelativeAddressBuilder> *address_builders) {
-  const std::string_view mnemonic = inst.mnemonic();
+  const amdgpu::Operation operation = inst.amdgpu_operation();
   // Only getpc can create a tracked fact from an empty state. Large linked
   // objects contain millions of unrelated instructions, so avoid decoding
   // operand register classes or constructing a full def/use set for them.
-  if (state.empty() && mnemonic != "s_get_pc_i64" && mnemonic != "s_getpc_b64")
+  if (state.empty() && operation != amdgpu::Operation::S_GET_PC_I64 &&
+      operation != amdgpu::Operation::S_GETPC_B64)
     return;
   // Report the completed address before the table check below can reclassify the pair, so a
   // builder is described the same way whether or not its target happens to be a known table.
@@ -136,7 +137,8 @@ void transfer_instruction(PairState &state, const Instruction &inst,
   const auto dst_pair = sgpr_pair(inst.dst_operand(0));
   const auto src0_pair = sgpr_pair(inst.src_operand(0));
 
-  if (mnemonic == "s_swap_pc_i64" || mnemonic == "s_swappc_b64") {
+  if (operation == amdgpu::Operation::S_SWAP_PC_I64 ||
+      operation == amdgpu::Operation::S_SWAPPC_B64) {
     if (dispatches != nullptr && dst_pair && src0_pair) {
       const auto value = state.find(*src0_pair);
       if (value != state.end() && value->second.kind == PairValueKind::TableEntry) {
@@ -154,7 +156,9 @@ void transfer_instruction(PairState &state, const Instruction &inst,
   }
 
   std::optional<PairValue> result;
-  if ((mnemonic == "s_get_pc_i64" || mnemonic == "s_getpc_b64") && dst_pair) {
+  if ((operation == amdgpu::Operation::S_GET_PC_I64 ||
+       operation == amdgpu::Operation::S_GETPC_B64) &&
+      dst_pair) {
     if (inst.src_loc() <= std::numeric_limits<uint64_t>::max() - text_vaddr &&
         static_cast<uint64_t>(inst.size()) <=
             std::numeric_limits<uint64_t>::max() - text_vaddr - inst.src_loc()) {
@@ -162,7 +166,7 @@ void transfer_instruction(PairState &state, const Instruction &inst,
                          .value = text_vaddr + inst.src_loc() + static_cast<uint64_t>(inst.size()),
                          .source_getpc_offset = inst.src_loc()};
     }
-  } else if (mnemonic == "s_add_nc_u64" && dst_pair) {
+  } else if (operation == amdgpu::Operation::S_ADD_NC_U64 && dst_pair) {
     const auto src1_pair = sgpr_pair(inst.src_operand(1));
     std::optional<uint16_t> address_pair;
     std::optional<uint64_t> addend;
@@ -203,7 +207,7 @@ void transfer_instruction(PairState &state, const Instruction &inst,
         }
       }
     }
-  } else if (mnemonic == "s_load_b64" && dst_pair && src0_pair) {
+  } else if (operation == amdgpu::Operation::S_LOAD_B64 && dst_pair && src0_pair) {
     const auto base = state.find(*src0_pair);
     if (base != state.end()) {
       if (base->second.kind == PairValueKind::Address && inst.num_src_operands() >= 2 &&

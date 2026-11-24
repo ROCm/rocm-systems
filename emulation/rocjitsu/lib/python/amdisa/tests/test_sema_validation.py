@@ -1,10 +1,7 @@
 # Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Check operand access, execution loops and side effects in semantic lowering.
-
-Scalar cases also compare the corresponding scalar emitters.
-"""
+"""Check operand access, execution loops and side effects in semantic lowering."""
 
 import re
 
@@ -17,12 +14,6 @@ from amdisa.codegen.execute.sema_lower import (
     LoweringContext,
     OperandMap,
     lower_sema_block,
-)
-from amdisa.codegen.execute.scalar import (
-    gen_scalar_binop,
-    gen_scalar_cmp,
-    gen_scalar_saveexec,
-    gen_scalar_unary,
 )
 
 
@@ -83,18 +74,13 @@ class TestScalarBinopValidation:
             ('shl', 'b32', 'nonzero'),
         ],
     )
-    def test_scalar_binop_properties_match(self, op, dtype, scc):
+    def test_scalar_binop_writes_scc_without_exec_loop(self, op, dtype, scc):
         sem = _FakeSem(
             f'S_{op.upper()}_{dtype.upper()}', 'scalar_binop', op, dtype, scc
         )
-        old = gen_scalar_binop(['sdst'], ['ssrc0', 'ssrc1'], op, dtype, scc)
         new = _new_output(sem, ['ssrc0', 'ssrc1'], ['sdst'], dtype)
-        old_props = _extract_properties(old)
         new_props = _extract_properties(new)
-        assert (
-            old_props['writes_scc'] == new_props['writes_scc']
-        ), f"SCC mismatch for {op}/{dtype}: old={old_props['writes_scc']}, new={new_props['writes_scc']}"
-        assert not old_props['has_exec_loop'], "scalar should not have EXEC loop"
+        assert new_props['writes_scc']
         assert not new_props['has_exec_loop'], "scalar should not have EXEC loop"
         assert 'ssrc0' in new_props['operand_names']
         assert 'sdst' in new_props['operand_names']
@@ -104,9 +90,7 @@ class TestScalarCmpValidation:
     @pytest.mark.parametrize('op', ['eq', 'ne', 'lt', 'gt', 'le', 'ge'])
     def test_scalar_cmp_writes_scc(self, op):
         sem = _FakeSem(f'S_CMP_{op.upper()}_U32', 'scalar_cmp', op, 'u32', 'compare')
-        old = gen_scalar_cmp(['ssrc0', 'ssrc1'], op, 'u32')
         new = _new_output(sem, ['ssrc0', 'ssrc1'], [], 'u32')
-        assert 'write_scc' in old
         assert 'write_scc' in new
 
 
@@ -114,9 +98,7 @@ class TestScalarUnaryValidation:
     @pytest.mark.parametrize('op', ['not', 'floor', 'trunc'])
     def test_scalar_unary_no_exec_loop(self, op):
         sem = _FakeSem(f'S_{op.upper()}_B32', 'scalar_unary', op, 'b32', 'nonzero')
-        old = gen_scalar_unary(['sdst'], ['ssrc0'], op, 'b32', 'nonzero')
         new = _new_output(sem, ['ssrc0'], ['sdst'], 'b32')
-        assert 'for (uint32_t lane' not in old
         assert 'for (uint32_t lane' not in new
         assert 'write_scc' in new
 
@@ -189,9 +171,7 @@ class TestVop3ModifierValidation:
 class TestSaveexecValidation:
     def test_saveexec_writes_exec(self):
         sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and', 'b64', 'nonzero')
-        old = gen_scalar_saveexec(['sdst'], ['ssrc0'], 'and')
         new = _new_output(sem, ['ssrc0'], ['sdst'])
-        assert 'wf.set_exec(' in old
         assert 'wf.write_exec(' in new
         assert 'write_scc' in new
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/shader_engine.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "util/diagnostic.h"
 #include "util/except.h"
@@ -12,7 +13,7 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-ShaderEngine::ShaderEngine(std::string name, const Config &config, rj_code_arch_t arch,
+ShaderEngine::ShaderEngine(std::string name, const Config &config, rocjitsu::IsaFamily arch,
                            GpuMemory *memory, L2Cache *l2, simdojo::ExecMode exec_mode)
     : simdojo::CompositeComponent(std::move(name)) {
   set_weight(0); // Structural container, not a work-producing component.

@@ -1242,7 +1242,6 @@ struct externals
         }
 
         [[nodiscard]] std::size_t get_gpu_agents_count() const { return 0; }
-        [[nodiscard]] std::size_t get_cpu_agents_count() const { return 0; }
     };
 
     static constexpr int k_agent_type_gpu = 1;

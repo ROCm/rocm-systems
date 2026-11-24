@@ -202,7 +202,7 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
   // [RCCL] Pre-compute ncclSymkMask() once per pass; ncclTuningComputeAllTunings uses
   // the cached result to skip sym kernel entries not applicable for this collective.
   input->symkMaskCache = ncclSymkMask(input->comm, input->func, input->devRedOp, input->datatype,
-                                      input->countMax, input->symAligned16B);
+                                      input->countMax, input->symAligned16B, input->ginWindowsUnregistered);
   // Set tuning to Ring/Simple for single rank case
   if (input->comm->nRanks <= 1) {
     bestTuning.algo = NCCL_ALGO_RING;

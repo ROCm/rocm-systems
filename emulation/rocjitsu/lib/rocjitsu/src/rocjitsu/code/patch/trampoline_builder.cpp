@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/trampoline_builder.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/analysis/free_registers.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -26,9 +27,10 @@ namespace {
 // A pair read by VALU remains subject to RDNA4's SGPR rule after later SALU
 // writes. Save destinations may have been read by earlier guest/probe code.
 // Guard the completed save batch before argument or EXEC-restore consumers.
-bool needs_rdna4_save_guard(rj_code_arch_t arch, std::span<const SpecialStateSlot> special_saves,
+bool needs_rdna4_save_guard(rocjitsu::IsaFamily arch,
+                            std::span<const SpecialStateSlot> special_saves,
                             std::span<const RegisterSave> register_saves) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA4 &&
+  return arch == rocjitsu::IsaFamily::Rdna4 &&
          (!special_saves.empty() ||
           std::ranges::any_of(register_saves,
                               [](const RegisterSave &save) { return save.cls == RegClass::SGPR; }));
@@ -110,14 +112,21 @@ bool plan_argument_moves(std::span<const ProbeArgValue> args, const ProbeAbi &ab
 }
 
 [[nodiscard]] bool check_size_and_words(const TrampolinePlan &plan, std::string *err) {
-  if (plan.arch == ROCJITSU_CODE_ARCH_INVALID) {
+  if (plan.arch == rocjitsu::IsaFamily::Invalid) {
     report(err, "trampoline plan: arch was not set");
     return false;
   }
-  if (plan.original_size == 0 || plan.original_size % 4 != 0 ||
-      ((plan.emit_original || plan.patch_anchor) && plan.original_size != 4 &&
-       plan.original_size != 8)) {
-    report(err, "trampoline plan: original_size must be 4 or 8 when patching or relocating");
+  if (plan.original_size == 0 || plan.original_size % 4 != 0) {
+    report(err, "trampoline plan: original_size must be nonzero and dword aligned");
+    return false;
+  }
+  if (plan.emit_original && plan.original_size != 4 && plan.original_size != 8) {
+    report(err, "trampoline plan: original_size must be 4 or 8 when relocating the original");
+    return false;
+  }
+  if (plan.patch_anchor && plan.original_size != 4 && plan.original_size != 8 &&
+      plan.original_size != 12) {
+    report(err, "trampoline plan: original_size must be 4, 8 or 12 when patching the anchor");
     return false;
   }
   const size_t expected_words = plan.original_size / sizeof(uint32_t);
@@ -142,7 +151,7 @@ void append_word(std::vector<uint8_t> &dst, uint32_t w) {
 // vector-memory read or lane select of it, nor a SALU write of M0 against a later
 // M0 reader; software spaces them with wait states (s_nop N supplies N+1, any other
 // instruction 1).
-[[nodiscard]] constexpr bool needs_restore_wait_states(rj_code_arch_t arch) {
+[[nodiscard]] constexpr bool needs_restore_wait_states(rocjitsu::IsaFamily arch) {
   return arch_is_cdna_4_or_lower(arch);
 }
 
@@ -171,7 +180,7 @@ struct SpillBracket {
 util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &vgpr_spills,
                                                   const std::vector<SpillSlot> &sgpr_spills,
                                                   const std::vector<SpillSlot> &acc_spills,
-                                                  uint16_t bridge_vgpr, rj_code_arch_t arch,
+                                                  uint16_t bridge_vgpr, rocjitsu::IsaFamily arch,
                                                   const util::DiagnosticEmitter *error) {
   constexpr uint16_t kUniformLane = 0; // An SGPR is uniform; one lane suffices.
   SpillBracket bracket;
@@ -343,7 +352,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
     if (forward.failed())
       return std::nullopt;
     append_word(out.patched_anchor_bytes, forward.value());
-    if (plan.original_size == 8) {
+    while (out.patched_anchor_bytes.size() < plan.original_size) {
       util::FailureOr<uint32_t> nop = build_s_nop(0, plan.arch, &error);
       if (nop.failed())
         return std::nullopt;
@@ -663,7 +672,7 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
     envelope_words += 1;
   }
 
-  if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4) {
+  if (plan.arch == rocjitsu::IsaFamily::Rdna4) {
     envelope_words += 2; // getpc -> add, and add/addc -> swappc.
     if (needs_rdna4_save_guard(plan.arch, special_saves, plan.register_saves))
       envelope_words += 1;
@@ -734,10 +743,10 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // gfx11.0 TRANS results need a VA_VDST wait before a VALU consumer. Neither
   // s_waitcnt nor scalar envelope instructions discharge that dependency.
   // Drain before guest saves/arguments and before restoring state on return.
-  if (plan.arch == ROCJITSU_CODE_ARCH_RDNA3)
+  if (plan.arch == rocjitsu::IsaFamily::Rdna3)
     boundary_drain.push_back(
         build_sopp_encoding(plan.arch, rdna3::kSWaitcntDepctrSopp, 0x0fff).value());
-  if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (plan.arch == rocjitsu::IsaFamily::Rdna4)
     boundary_drain.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xf1fc).value());
 
   util::FailureOr<uint16_t> maybe_exec_operand = scalar_operand_exec_lo(plan.arch, &error);
@@ -1033,7 +1042,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     return std::nullopt;
   // The probe may have VALU-read this pair. Its new getpc value must be ready
   // before either scalar add reads it, independently of boundary waits.
-  if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (plan.arch == rocjitsu::IsaFamily::Rdna4)
     env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe).value());
   // getpc_index is relative to the envelope. Include the original's prefix only
   // when it is emitted; dispatch-only plans can retain a snapshot without it.
@@ -1051,7 +1060,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   env.push_back(static_cast<uint32_t>(delta >> 32));
   // Both halves are now written; complete them before the indirect call reads
   // the address. Neither add reads the other half's newly written value.
-  if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (plan.arch == rocjitsu::IsaFamily::Rdna4)
     env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe).value());
 
   // The call: writes the return PC into the cc-derived link pair, jumps to the
@@ -1124,7 +1133,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   if (owed_wait_states > 0 &&
       !append_scalar(build_s_nop(static_cast<uint16_t>(owed_wait_states - 1), plan.arch, &error)))
     return std::nullopt;
-  const size_t restore_drain_words = plan.arch == ROCJITSU_CODE_ARCH_RDNA4 ? 1 : 0;
+  const size_t restore_drain_words = plan.arch == rocjitsu::IsaFamily::Rdna4 ? 1 : 0;
   if (restore_drain_words)
     env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xf1fc).value());
 
@@ -1146,7 +1155,10 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // SOPP range checks are shared with the inline path.
   TrampolinePlan emit_plan = plan;
   emit_plan.before_items.clear();
-  emit_plan.after_items.clear();
+  // Replay plans retain the generated placement shape. Omitted-original plans
+  // keep their explicit replacement body after the restored envelope.
+  if (plan.emit_original)
+    emit_plan.after_items.clear();
   std::vector<InlineAsmItem> &items =
       after_original ? emit_plan.after_items : emit_plan.before_items;
   items.push_back(InlineAsmItem{.words = std::move(env)});

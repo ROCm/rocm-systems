@@ -24,7 +24,8 @@ namespace rocjitsu::amdgpu {
 /// writes cannot reuse stale decodes.
 /// Instructions that borrow the fetch buffer cannot be retained. Entries use
 /// heap storage because a CU can run on different workers. Re-execution follows
-/// the stateless Instruction::execute contract. The decoder consumes bytes, not
+/// the Instruction::execute contract; completed memory state is retired before
+/// return and reset before its next preparation. The decoder consumes bytes, not
 /// their PC: identical fetched windows can share a decode at different addresses.
 /// PC-relative execution still reads the issuing wave's current PC.
 /// Up to kNumEntries consecutive four-byte instructions occupy distinct primary
@@ -47,7 +48,7 @@ public:
   /// @brief Decode from freshly fetched words, or take the matching cached object.
   ///
   /// @details The CU uses heap storage for every miss, including uncached
-  /// memory operations and debugger execution. The allocation guard also
+  /// asynchronous operations and debugger execution. The allocation guard also
   /// bypasses an unrelated decoder pool installed by the caller.
   /// @param enabled False bypasses reuse and table allocation while debugging.
   [[gnu::always_inline]] DecodeResult decode(Decoder &decoder, uint64_t pc, uint32_t vmid,
@@ -70,12 +71,13 @@ public:
     return decode_miss(decoder, words, emit_error, enabled);
   }
 
-  /// @brief Return only completed, stateless instructions.
+  /// @brief Return completed instructions with no active dynamic state.
   ///
   /// @details Construct immediately after decode() with the same key and policy.
-  /// Memory pipelines and async execution take ownership by releasing/moving
-  /// the caller's unique_ptr, so their in-flight instructions cannot become
-  /// cache entries.
+  /// Memory pipelines return ownership only after synchronous completion;
+  /// retry and async execution release/move the caller's unique_ptr, so their
+  /// in-flight instructions cannot become cache entries. Tensor DMA keeps its
+  /// continuation lifetime and does not participate in decoded reuse.
   class ScopedReturn {
   public:
     ScopedReturn(DecodedInstructionCache &cache, std::unique_ptr<Instruction> &instruction,
@@ -85,8 +87,10 @@ public:
           from_pc_slot_(cache.from_pc_slot_) {}
 
     [[gnu::always_inline]] ~ScopedReturn() {
-      if (enabled_ && instruction_ && !instruction_->is_memory_op() && !instruction_->data() &&
-          !borrows_fetch_buffer(*instruction_, words_) && std::uncaught_exceptions() == exceptions_)
+      if (enabled_ && instruction_ &&
+          instruction_->amdgpu_memory_addressing() != MemoryAddressing::Tensor &&
+          !instruction_->data() && !borrows_fetch_buffer(*instruction_, words_) &&
+          std::uncaught_exceptions() == exceptions_)
         cache_.put(pc_, vmid_, words_, instruction_, from_pc_slot_);
     }
 

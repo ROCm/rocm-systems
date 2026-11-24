@@ -14,7 +14,7 @@ The reported 2026-10-15 and 2026-10-19 **final** VFIO pod runs used:
 | Input | Version or source | Purpose |
 | --- | --- | --- |
 | QEMU | 10.1.0, commit `f8b2f64e2336a28bf0d50b6ef8a7d8c013e9bcf3` | Two `vfio-user-pci` functions and one NIC per guest |
-| libvfio-user | commit `37491ed9af828fc161238dacd82e83ea35a09f87` | Standard VFIO-user DMA mapping; CMake fetches this revision |
+| libvfio-user | commit `37491ed9af828fc161238dacd82e83ea35a09f87` with the downstream BAR-mask fix | Historical input for the October runs; standard VFIO-user DMA mapping |
 | AMDGPU DKMS | `amdgpu-dkms_7.1.3.31500000-2390945.24.04_all.deb` | Guest `amdgpu.ko` and companion modules |
 | Linux image and headers | `6.17.0-23-generic` | Guest `vmlinuz` and matching module build tree |
 | ROCm guest user stack | HIP `7.14.60850-0000000`, ROCr `1.21`, RCCL `2.30.4-HEAD:2b22ab0` | Rank binary and runtime libraries |
@@ -37,11 +37,8 @@ ninja qemu-system-x86_64
 ```
 
 Use the produced binary's `-device help` output to confirm `vfio-user-pci`.
-The rocJITsu VFIO CMake build fetches libvfio-user at the revision above and
-applies `patches/libvfio-user/0001-preserve-small-64-bit-bar-upper-address.patch`
-automatically. That general BAR mask fix preserves the upper half of a
-sub-4-GiB 64-bit peer BAR. Neither the QEMU nor libvfio-user patch adds a
-rocJITsu-specific peer-map command.
+The VFIO CMake build fetches libvfio-user at the revision pinned in
+`cmake/rj_libvfio_user.cmake`.
 
 For the **zero-patch** final gate, extract the pinned DKMS package and build
 against headers for the *guest* kernel. Its `Makefile` handles configuration

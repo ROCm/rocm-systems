@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/test_encodings.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -41,7 +42,7 @@ public:
   std::vector<std::string> issued;
 };
 
-class VskipTest : public ::testing::TestWithParam<rj_code_arch_t> {
+class VskipTest : public ::testing::TestWithParam<rocjitsu::IsaFamily> {
 protected:
   void SetUp() override {
     ComputeUnitCore::Config config{};
@@ -213,16 +214,16 @@ TEST_P(VskipTest, VectorEncodingFamiliesSkipWithoutIssueOrWaitCounterEffects) {
     wf->wait_counters() = {};
   };
   switch (GetParam()) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     check(cdna1::test_data::ENCODINGS);
     break;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     check(cdna2::test_data::ENCODINGS);
     break;
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     check(cdna3::test_data::ENCODINGS);
     break;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     check(cdna4::test_data::ENCODINGS);
     break;
   default:
@@ -233,7 +234,7 @@ TEST_P(VskipTest, VectorEncodingFamiliesSkipWithoutIssueOrWaitCounterEffects) {
 TEST_P(VskipTest, Vop3SubencodingsSkipWithoutIssue) {
   // These XML encoding names omit ENC_: VOP3_SDST_ENC and VOP3P_MFMA.
   // Neither form is sampled by the generated mnemonic-only encoding table.
-  const uint32_t matrix = GetParam() == ROCJITSU_CODE_ARCH_CDNA1 ? 0xD3C50000u : 0xD3C58000u;
+  const uint32_t matrix = GetParam() == rocjitsu::IsaFamily::Cdna1 ? 0xD3C50000u : 0xD3C58000u;
   const std::array<std::array<uint32_t, 4>, 2> encodings{{
       {0xD1E00806u, 0x040A0300u, 0, 0}, // v_div_scale_f32 v6, s[8:9], v0, v1, v2
       {matrix, 0x04020300u, 0, 0},      // v_mfma_f32_16x16x4_f32 a[0:3], v0, v1, a[0:3]
@@ -265,14 +266,14 @@ TEST_P(VskipTest, Vop3SubencodingsSkipWithoutIssue) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Cdna, VskipTest,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                           ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4));
+                         ::testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                           rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4));
 
 TEST(VskipAsyncTest, ExtendedMfmaSkipsBeforeAsyncSubmission) {
   GpuMemory memory{"vskip_async_memory"};
   L2Cache l2{"vskip_async_l2"};
   ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  config.arch = rocjitsu::IsaFamily::Cdna4;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 104;
   config.vgprs_per_wf = 512;
@@ -305,8 +306,9 @@ TEST(VskipAsyncTest, ExtendedMfmaSkipsBeforeAsyncSubmission) {
 }
 
 TEST(VskipTargetTest, ModeBitDoesNotSuppressRdnaOrCdna5) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
-                    ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch :
+       {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3,
+        rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     SCOPED_TRACE(arch);
     GpuMemory memory{"vskip_other_memory"};
     L2Cache l2{"vskip_other_l2"};

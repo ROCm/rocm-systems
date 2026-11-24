@@ -9,11 +9,11 @@ hbmBandwidth:
 hbm_read_bandwidth:
   formula: SUM($hbm_read_bytes) / SUM(End_Timestamp - Start_Timestamp)
 hbm_read_bytes:
-  formula: TCC_BUBBLE_sum * 128 + TCC_EA0_RDREQ_32B_sum * 32 + (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) * 64
+  formula: TCC_BUBBLE_sum * 128 + TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA_RDREQ_32B_sum) * 64
 hbm_write_bandwidth:
   formula: SUM($hbm_write_bytes) / SUM(End_Timestamp - Start_Timestamp)
 hbm_write_bytes:
-  formula: (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32 + TCC_EA0_WRREQ_64B_sum * 64
+  formula: (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32 + TCC_EA_WRREQ_64B_sum * 64
 ipc_branch_sendmsg_vskipped_lds:
   formula: SUM(SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SUM(SQ_ACTIVE_INST_ANY)
 ipc_branch_sendmsg_vskipped_lds_per_dispatch:

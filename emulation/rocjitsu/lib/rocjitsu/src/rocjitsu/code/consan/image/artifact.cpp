@@ -6,6 +6,7 @@
 #include "rocjitsu/code/consan/image/metadata.h"
 #include "rocjitsu/code/consan/target.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/bit.h"
 
 #include <cstring>
@@ -153,7 +154,7 @@ Result inspect_image(const Manifest &manifest, std::span<const uint8_t> image, b
     return reject(error, ContractErrorCode::IdentityMismatch,
                   "prepared metadata resources differ from facts");
   if (prepared &&
-      (target->arch == ROCJITSU_CODE_ARCH_CDNA3 || target->arch == ROCJITSU_CODE_ARCH_CDNA4)) {
+      (target->arch == rocjitsu::IsaFamily::Cdna3 || target->arch == rocjitsu::IsaFamily::Cdna4)) {
     const uint32_t allocated_sgprs =
         (RJ_AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc1,
                             amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT) +

@@ -13,6 +13,7 @@
 #include "utils/debug.hpp"
 #include "utils/nontemporal.hpp"
 #include <algorithm>
+#include <limits>
 #include <map>
 
 namespace amd::roc {
@@ -24,13 +25,13 @@ DmaBlitManager::DmaBlitManager(VirtualGPU& gpu, Setup setup)
       completeOperation_(false),
       context_(nullptr) {}
 
-inline void DmaBlitManager::synchronize() const {
+void DmaBlitManager::synchronize() const {
   if (syncOperation_) {
     gpu().releaseGpuMemoryFence();
   }
 }
 
-inline Memory& DmaBlitManager::gpuMem(device::Memory& mem) const {
+Memory& DmaBlitManager::gpuMem(device::Memory& mem) const {
   return static_cast<Memory&>(mem);
 }
 
@@ -364,7 +365,7 @@ bool DmaBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOp
 
   // Memory objects are already validated in HIP API layer
   // All operations here are inter-device; use the unified batch copy path
-  if (!hsaCopyBatch(copyOps)) {
+  if (!submitCopyBatch(copyOps)) {
     LogPrintfError("DmaBlitManager::copyBufferBatch - Batch copy failed");
     return false;
   }
@@ -585,9 +586,9 @@ bool DmaBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dstMem
 }
 
 // ================================================================================================
-inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, const_address src,
-                                           hsa_agent_t& srcAgent, size_t size,
-                                           amd::CopyMetadata& copyMetadata) const {
+bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, const_address src,
+                                    hsa_agent_t& srcAgent, size_t size,
+                                    amd::CopyMetadata& copyMetadata) const {
   hsa_status_t status = HSA_STATUS_SUCCESS;
   uint32_t copyMask = 0;
   bool kUseRegularCopyApi = false;
@@ -745,9 +746,9 @@ bool DmaBlitManager::hsaCopy(const Memory& srcMemory, const Memory& dstMemory,
 }
 
 // ================================================================================================
-bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
-                                  const std::vector<hsa_signal_t>* externalWaitEvents,
-                                  std::vector<ProfilingSignal*>* outBatchSignals) const {
+bool DmaBlitManager::submitCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
+                                     const std::vector<hsa_signal_t>* externalWaitEvents,
+                                     std::vector<ProfilingSignal*>* outBatchSignals) const {
   if (copyOps.empty()) {
     return true;
   }
@@ -2893,7 +2894,8 @@ bool KernelBlitManager::fillBuffer3D(device::Memory& memory, const void* pattern
 bool KernelBlitManager::shaderCopyBuffer(address dst, address src, const amd::Coord3D& dstOrigin,
                                          const amd::Coord3D& srcOrigin, const amd::Coord3D& sizeIn,
                                          bool entire, const uint32_t blitWg,
-                                         amd::CopyMetadata copyMetadata, bool attachSignal) const {
+                                         amd::CopyMetadata copyMetadata, bool attachSignal,
+                                         bool localCopy) const {
   constexpr uint32_t kBlitType = BlitCopyBuffer;
   constexpr uint32_t kMaxAlignment = 2 * sizeof(uint64_t);
   amd::Coord3D size(sizeIn[0]);
@@ -2910,6 +2912,22 @@ bool KernelBlitManager::shaderCopyBuffer(address dst, address src, const amd::Co
   // Program the dispatch dimensions
   const size_t localWorkSize = (aligned) ? 512 : 1024;
   size_t globalWorkSize = std::min(blitWg * localWorkSize, size[0]);
+  uint32_t copy_mode = aligned_size;
+  const size_t mallSize = dev().info().l3CacheSize_;
+  if (localCopy && aligned && mallSize != 0 && sizeIn[0] > mallSize / 2) {
+    // Above half of the MALL, source and destination no longer both stay resident and the copy
+    // is DRAM bound. One element per work-item dispatches workgroups in address order, which
+    // keeps the in-flight window contiguous, and nontemporal stores keep the destination from
+    // evicting the source. Once the source alone exceeds the MALL, it is streamed too.
+    // Copies beyond the 32-bit grid fall back to the grid-stride loop. An explicit
+    // DEBUG_CLR_LIMIT_BLIT_WG keeps its workgroup cap.
+    if (flagIsDefault(DEBUG_CLR_LIMIT_BLIT_WG)) {
+      const size_t maxGridSize =
+          amd::alignDown(size_t{std::numeric_limits<uint32_t>::max()}, localWorkSize);
+      globalWorkSize = std::min(size[0], maxGridSize);
+    }
+    copy_mode = (sizeIn[0] > mallSize) ? CopyStreamLoadStore : CopyStreamStore;
+  }
   globalWorkSize = amd::alignUp(globalWorkSize, localWorkSize);
 
   // Program kernels arguments for the blit operation
@@ -2925,7 +2943,7 @@ bool KernelBlitManager::shaderCopyBuffer(address dst, address src, const amd::Co
   setArgument(kernels_[kBlitType], 2, sizeof(copySize), &copySize);
 
   setArgument(kernels_[kBlitType], 3, sizeof(remainder), &remainder);
-  setArgument(kernels_[kBlitType], 4, sizeof(aligned_size), &aligned_size);
+  setArgument(kernels_[kBlitType], 4, sizeof(copy_mode), &copy_mode);
 
   // End pointer is the aligned copy size and destination offset
   uint64_t end_ptr = reinterpret_cast<uint64_t>(dst) + dstOrigin[0] + sizeIn[0] - remainder;
@@ -3194,7 +3212,7 @@ bool KernelBlitManager::WriteBufferBatch(
   if (!pinned_copy_ops.empty()) {
     constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
-    if (!hsaCopyBatch(pinned_copy_ops)) {
+    if (!submitCopyBatch(pinned_copy_ops)) {
       LogWarning(
           "KernelBlitManager::WriteBufferBatch: SDMA batch copy failed, falling back to shader "
           "copy");
@@ -3318,7 +3336,7 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
   if (!pinned_copy_ops.empty()) {
     constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
-    if (!hsaCopyBatch(pinned_copy_ops)) {
+    if (!submitCopyBatch(pinned_copy_ops)) {
       LogWarning(
           "KernelBlitManager::ReadBufferBatch: SDMA batch copy failed, falling back to shader "
           "copy");
@@ -3376,6 +3394,10 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   std::vector<hsa_signal_t> priorWaitEvents =
       gpu().Barriers().WaitingSignal(HwQueueEngine::Unknown);
   ProfilingSignal* priorSignal = gpu().Barriers().GetLastSignal();
+  // Held until the command's final barrier so the batch's own signals can't rearm it.
+  if (priorSignal != nullptr) {
+    gpu().Barriers().HoldSignal(priorSignal);
+  }
 
   // Partition into intra-device (kernel blit) and inter-device (DMA batch) groups.
   std::vector<amd::BatchCopyOp> d2dCopyOps;
@@ -3399,11 +3421,12 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
     bool useShaderCopyPath =
         isLinearCopyOp && useShaderCopyBufferPath(srcMem, dstMem, op.size, op.metadata);
 
-    if (useShaderCopyPath) {
-      d2dCopyOps.push_back(op);
-    } else {
-      p2pCopyOps.push_back(op);
+    // Size each vector once on first use, so the one a batch doesn't use is never allocated.
+    auto& dst_ops = useShaderCopyPath ? d2dCopyOps : p2pCopyOps;
+    if (dst_ops.capacity() == 0) {
+      dst_ops.reserve(copyOps.size());
     }
+    dst_ops.push_back(op);
   }
 
   // Dispatch inter-device/pagelocked read/write batch first so SDMA engines start early.
@@ -3412,7 +3435,7 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   ProfilingSignal* lastBatchSignal = nullptr;
   if (!p2pCopyOps.empty()) {
     // Always pass prior wait events to maintain stream ordering for the batch.
-    if (!hsaCopyBatch(p2pCopyOps, &priorWaitEvents, &batchSignals)) {
+    if (!submitCopyBatch(p2pCopyOps, &priorWaitEvents, &batchSignals)) {
       // Shader copy is linear only; fail the batch if it has swap/indirect ops.
       bool hasNonLinear = false;
       for (const auto& op : p2pCopyOps) {
@@ -3447,6 +3470,16 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
 
     std::map<size_t, std::vector<amd::BatchCopyOp>, std::greater<size_t>>
         d2d_copy_ops_by_size;
+    {
+      // Count per size first so each group is allocated once instead of regrown.
+      std::map<size_t, size_t, std::greater<size_t>> size_counts;
+      for (const auto &op : d2dCopyOps) {
+        ++size_counts[op.size];
+      }
+      for (const auto &[size, n] : size_counts) {
+        d2d_copy_ops_by_size[size].reserve(n);
+      }
+    }
     for (const auto &op : d2dCopyOps) {
       d2d_copy_ops_by_size[op.size].push_back(op);
     }
@@ -3543,10 +3576,15 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
         // scope issued by synchronization packet.
         gpu().addSystemScope();
       }
-      result =
-          shaderCopyBuffer(reinterpret_cast<address>(dstMemory.virtualAddress()),
-                           reinterpret_cast<address>(srcMemory.virtualAddress()), dstOrigin,
-                           srcOrigin, sizeIn, entire, blitWg, copyMetadata, !copyMetadata.isAsync_);
+      const uint64_t localAgent = dev().getBackendDevice().handle;
+      const bool localCopy = !srcMemory.isHostMemDirectAccess() &&
+                             !dstMemory.isHostMemDirectAccess() &&
+                             srcRocMemory.getOwningAgent().handle == localAgent &&
+                             dstRocMemory.getOwningAgent().handle == localAgent;
+      result = shaderCopyBuffer(reinterpret_cast<address>(dstMemory.virtualAddress()),
+                                reinterpret_cast<address>(srcMemory.virtualAddress()), dstOrigin,
+                                srcOrigin, sizeIn, entire, blitWg, copyMetadata,
+                                !copyMetadata.isAsync_, localCopy);
     }
   }
 

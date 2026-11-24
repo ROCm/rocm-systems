@@ -11,6 +11,7 @@
 #include "rocjitsu/code/kernel_scope.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <gtest/gtest.h>
 
@@ -23,7 +24,7 @@
 namespace rocjitsu {
 namespace {
 
-constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
 
 // s_cbranch_scc0 is SOPP opcode 5 on CDNA; simm16 is the dword delta from the
 // next instruction.
@@ -219,9 +220,9 @@ TEST(BasicBlockWindow, CfgRejectsTruncatedInstructionWithSourceOffset) {
 
 TEST(BasicBlockWindow, CfgPreservesFourWordInstructionAtSectionEnd) {
   TestCodeObject object({0xcc3a0200, 0x42020d04, 0xcc336008, 0x04223110});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
+  auto blocks = build_valid_blocks(object, *decoder, rocjitsu::IsaFamily::Cdna5);
   ASSERT_EQ(blocks.size(), 1u);
   const Instruction &instruction = *blocks.front()->instructions().begin();
   EXPECT_EQ(instruction.size(), 16);

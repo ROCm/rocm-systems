@@ -187,9 +187,7 @@ class Driver:
         fixture_name = {
             'repeat': 'disjoint',
             'repeat_race': 'race',
-            'grouped_repeat': (
-                'grouped_barrier' if args.target == 'gfx1250' else 'grouped_disjoint'
-            ),
+            'grouped_repeat': 'grouped_barrier',
             'grouped_oversized': 'grouped_disjoint',
             'grouped_edge': 'grouped_disjoint',
             'single_missing_id': 'disjoint',

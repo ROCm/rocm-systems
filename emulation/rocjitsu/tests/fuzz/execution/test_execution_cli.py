@@ -217,7 +217,7 @@ class ExecutionFuzzCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             input_path = Path(temporary) / "input.bin"
             input_path.write_bytes(b"\x00")
-            for target in ("gfx1100", "gfx1151", "gfx1251"):
+            for target in ("gfx1100", "gfx1150", "gfx1251"):
                 result = self.run_execution_fuzz(
                     "--input", input_path, "--target", target
                 )

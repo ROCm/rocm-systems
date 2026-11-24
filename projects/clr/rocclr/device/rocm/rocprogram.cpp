@@ -205,6 +205,16 @@ bool Program::createKernels(void* binary, size_t binSize, bool useUniformWorkGro
     return false;
   }
 
+  if (codeObjectVer() <= 4 && rocDevice().settings().ext_dispatch_packet_) {
+    LogPrintfError("Code object version %u is not supported on %s. "
+                   "Use -mcode-object-version=5 or later.",
+                   codeObjectVer(), device().isa().targetId());
+    buildLog_ += "Error: Code object version " + std::to_string(codeObjectVer()) +
+                 " is not supported on " + device().isa().targetId() +
+                 ". Use -mcode-object-version=5 or later.\n";
+    return false;
+  }
+
   for (const auto& kernelMeta : kernelMetadataMap_) {
     const std::string kernelName = kernelMeta.first;
     Kernel* aKernel = new roc::Kernel(kernelName, this);

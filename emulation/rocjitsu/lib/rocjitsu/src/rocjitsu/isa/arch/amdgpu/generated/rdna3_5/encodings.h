@@ -943,7 +943,7 @@ public:
   std::string full_image_resource_name() const;
   bool should_print_dst_operand(uint8_t operand_index) const override {
     // Image atomics have one encoded VDATA tuple, printed as a source.
-    return !mnemonic_.starts_with("image_atomic_") &&
+    return amdgpu_memory_kind() != amdgpu::MemoryKind::Atomic &&
            Instruction::should_print_dst_operand(operand_index);
   }
   void capture_nsa_words(const MachineInst *inst, const Operand *vaddr);

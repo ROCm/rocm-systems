@@ -24,6 +24,7 @@
 #include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/config/effective_config.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "util/diagnostic.h"
@@ -100,6 +101,9 @@ int run_daemon_server(const char *config_path, const std::string &socket_path = 
           trace_fabric_effects ? static_cast<uint32_t>(RJ_DAEMON_OPTION_TRACE_FABRIC_EFFECTS) : 0u,
       .fabric_trace_capacity = 0,
   };
+  // Daemon clients live in other processes. Their host views inside this
+  // dedicated server are installed and removed by the simulator.
+  host_mapping_lock().set_mapping_changes_observed(true);
   if (rj_daemon_start_with_options(json.c_str(), resolved_socket_path.c_str(), &options, &daemon) !=
       ROCJITSU_STATUS_SUCCESS) {
     std::cerr << std::format("rocjitsu: failed to start daemon from {} at {}\n", config_path,
@@ -708,6 +712,13 @@ int main(int argc, char *argv[]) {
     print_usage(command);
     return 1;
   }
+
+#if defined(RJ_DISABLE_INTERPOSER)
+  std::cerr << "rocjitsu: application launches require the interposer; reconfigure with "
+               "-DROCJITSU_ENABLE_INTERPOSER=ON\n";
+  cleanup_runtime_files(my_pid);
+  return 1;
+#endif
 
   std::vector<char *> application_arguments;
   for (auto &argument : parsed.value().positional)

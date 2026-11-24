@@ -8,6 +8,7 @@
 #include "fixtures/float_dot/rdna_matrix_sample.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -104,8 +105,8 @@ inline Registers float_input(uint32_t width, uint32_t bits, bool bfloat, bool gf
 
 // Execute one instruction, check selected destination words, and verify that
 // registers outside the destination range are unchanged.
-inline void check(rj_code_arch_t arch, uint32_t width, std::array<uint32_t, 2> words, uint32_t mode,
-                  const Registers &input, std::span<const Sample> expected,
+inline void check(rocjitsu::IsaFamily arch, uint32_t width, std::array<uint32_t, 2> words,
+                  uint32_t mode, const Registers &input, std::span<const Sample> expected,
                   uint32_t output_words = 256) {
   SCOPED_TRACE(testing::Message() << "arch=" << arch << " width=" << width << " word0=" << std::hex
                                   << words[0] << " word1=" << words[1] << " mode=" << mode);
@@ -150,8 +151,8 @@ inline void check(rj_code_arch_t arch, uint32_t width, std::array<uint32_t, 2> w
   wave->halt();
 }
 // Allow short expectations to stay inline at their call sites.
-inline void check(rj_code_arch_t arch, uint32_t width, std::array<uint32_t, 2> words, uint32_t mode,
-                  const Registers &input, std::initializer_list<Sample> expected,
+inline void check(rocjitsu::IsaFamily arch, uint32_t width, std::array<uint32_t, 2> words,
+                  uint32_t mode, const Registers &input, std::initializer_list<Sample> expected,
                   uint32_t output_words = 256) {
   check(arch, width, words, mode, input, std::span<const Sample>(expected.begin(), expected.size()),
         output_words);

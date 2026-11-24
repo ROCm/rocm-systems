@@ -17,7 +17,11 @@ from typing import Any, Dict, NoReturn, Optional, Tuple
 import config
 from membw_analysis.models import BOTTLENECK_LEVELS
 from utils.logger import console_warning
-from utils.utils_common import canonical_config_arch, load_panel_configs
+from utils.utils_common import (
+    MEMORY_CHART_PANEL_ID,
+    canonical_config_arch,
+    load_panel_configs,
+)
 
 LAYOUTS_DIR = config.rocprof_compute_home / "memory_chart" / "layouts"
 
@@ -175,21 +179,8 @@ class PanelConfigs:
         """The memory chart panel config of *arch*, or None if it has none."""
         if arch not in cls._by_arch:
             panels = load_panel_configs([str(config.analysis_configs_dir / arch)])
-            cls._by_arch[arch] = next(
-                (panel for panel in panels.values() if is_memory_chart_panel(panel)),
-                None,
-            )
+            cls._by_arch[arch] = panels.get(MEMORY_CHART_PANEL_ID)
         return cls._by_arch[arch]
-
-
-def is_memory_chart_panel(panel: dict[str, Any]) -> bool:
-    """True when every table of a panel config is drawn as the memory chart."""
-    sources = panel.get("data source") or []
-    return bool(sources) and all(
-        table.get("cli_style") == "mem_chart"
-        for source in sources
-        for table in source.values()
-    )
 
 
 def layout_files() -> list[Path]:

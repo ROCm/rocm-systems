@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -36,7 +37,7 @@ enum class FuzzTarget : uint8_t {
   Gfx1010,
   Gfx1030,
   Gfx1100,
-  Gfx1151,
+  Gfx1150,
   Gfx1200,
   Gfx1201,
   Gfx1250,
@@ -73,7 +74,7 @@ std::optional<FuzzTarget> parse_target(std::string_view name);
 std::string_view target_name(FuzzTarget target);
 
 /// @brief Return the ISA architecture for an execution fuzz target.
-rj_code_arch_t target_arch(FuzzTarget target);
+rocjitsu::IsaFamily target_arch(FuzzTarget target);
 
 /// @brief Return the canonical registry ID for an execution fuzz target.
 rj_code_target_id_t target_id(FuzzTarget target);

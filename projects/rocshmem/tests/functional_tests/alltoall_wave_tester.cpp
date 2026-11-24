@@ -38,12 +38,18 @@ __device__ void alltoall_wave([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unuse
 
 ALLTOALLWAVEGEN(float, float)
 ALLTOALLWAVEGEN(double, double)
-
+ALLTOALLWAVEGEN(char, char)
+// ALLTOALLWAVEGEN(long double, longdouble)
+ALLTOALLWAVEGEN(signed char, schar)
 ALLTOALLWAVEGEN(short, short)
 ALLTOALLWAVEGEN(int, int)
 ALLTOALLWAVEGEN(long, long)
 ALLTOALLWAVEGEN(long long, longlong)
-ALLTOALLWAVEGEN(char, char)
+ALLTOALLWAVEGEN(unsigned char, uchar)
+ALLTOALLWAVEGEN(unsigned short, ushort)
+ALLTOALLWAVEGEN(unsigned int, uint)
+ALLTOALLWAVEGEN(unsigned long, ulong)
+ALLTOALLWAVEGEN(unsigned long long, ulonglong)
 ALLTOALLWAVEGEN(__half, half)
 ALLTOALLWAVEGEN(__hip_bfloat16, bfloat16)
 
@@ -197,7 +203,7 @@ void AlltoallWaveTester<T1>::resetBuffers(size_t size) {
         int idx = (wave_id * n_pes + pe) * num_elems + i;
         if constexpr (std::is_same<T1, __half>::value ||
                       std::is_same<T1, __hip_bfloat16>::value) {
-          source_buf[idx] = static_cast<T1>(3.14f + my_pe + pe + wave_id);
+          source_buf[idx] = static_cast<T1>(3.5f + my_pe + pe + wave_id);
         } else if constexpr (std::is_floating_point<T1>::value) {
           source_buf[idx] = static_cast<T1>(3.14 + my_pe + pe + wave_id);
         } else {
@@ -225,7 +231,7 @@ void AlltoallWaveTester<T1>::verifyResults(size_t size) {
         T1 expected;
         if constexpr (std::is_same<T1, __half>::value ||
                       std::is_same<T1, __hip_bfloat16>::value) {
-          expected = static_cast<T1>(3.14f + pe + my_pe + wave_id);
+          expected = static_cast<T1>(3.5f + pe + my_pe + wave_id);
         } else if constexpr (std::is_floating_point<T1>::value) {
           expected = static_cast<T1>(3.14 + pe + my_pe + wave_id);
         } else {

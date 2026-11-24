@@ -521,7 +521,7 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
             vp_frames_.pop_back();
         }
     }
-    output_frame_cnt_ = 0;     // reset frame_count
+    output_frame_cnt_ = 0, output_frame_cnt_ret_ = 0;     // reset frame counts
     if (is_decode_res_changed) {
         coded_width_ = p_video_format->coded_width;
         coded_height_ = p_video_format->coded_height;
@@ -552,12 +552,13 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
 
     num_decode_surfaces_ = p_video_format->min_num_decode_surfaces;
 
-    if (p_video_format->reconfig_options == ROCDEC_RECONFIG_NEW_SURFACES) {
-        if (out_mem_type_ == OUT_SURFACE_MEM_DEV_INTERNAL || out_mem_type_ == OUT_SURFACE_MEM_NOT_MAPPED) {
+    if (out_mem_type_ == OUT_SURFACE_MEM_DEV_INTERNAL || out_mem_type_ == OUT_SURFACE_MEM_NOT_MAPPED) {
+        if (p_video_format->reconfig_options == ROCDEC_RECONFIG_NEW_SURFACES) {
             GetSurfaceStrideInternal(video_surface_format_, coded_width_, coded_height_, &surface_stride_, &surface_vstride_);
-        } else {
-            surface_stride_ = target_width_ * byte_per_pixel_;
         }
+    } else {
+        // copied frames are packed at the target width, so the pitch changes even when the decode surfaces are kept
+        surface_stride_ = target_width_ * byte_per_pixel_;
     }
     chroma_height_ = static_cast<int>(ceil(target_height_ * GetChromaHeightFactor(video_surface_format_)));
     num_chroma_planes_ = GetChromaPlaneCount(video_surface_format_);
@@ -763,47 +764,29 @@ int RocVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
             }
             // Copy luma data
             int dst_pitch = disp_width_ * byte_per_pixel_;
-            uint8_t *p_src_ptr_y = static_cast<uint8_t *>(src_dev_ptr[0]) + (disp_rect_.top + crop_rect_.top) * src_pitch[0] + (disp_rect_.left + crop_rect_.left) * byte_per_pixel_;
-            if (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) {
-                if (src_pitch[0] == dst_pitch) {
-                    int luma_size = src_pitch[0] * coded_height_;
-                    HIP_API_CALL(hipMemcpyDtoDAsync(p_dec_frame_ptr, p_src_ptr_y, luma_size, hip_stream_));
+            hipMemcpyKind copy_kind = (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) ? hipMemcpyDeviceToDevice : hipMemcpyDeviceToHost;
+            // when the src and dst pitches match, the plane is contiguous and a 1D copy can be used; otherwise use 2D copy to copy an ROI
+            auto copy_plane = [&](uint8_t *p_dst, const uint8_t *p_src, uint32_t plane_src_pitch, int height) {
+                if (plane_src_pitch == static_cast<uint32_t>(dst_pitch)) {
+                    HIP_API_CALL(hipMemcpyAsync(p_dst, p_src, static_cast<size_t>(dst_pitch) * height, copy_kind, hip_stream_));
                 } else {
-                    // use 2d copy to copy an ROI
-                    HIP_API_CALL(hipMemcpy2DAsync(p_dec_frame_ptr, dst_pitch, p_src_ptr_y, src_pitch[0], dst_pitch, disp_height_, hipMemcpyDeviceToDevice, hip_stream_));
+                    HIP_API_CALL(hipMemcpy2DAsync(p_dst, dst_pitch, p_src, plane_src_pitch, dst_pitch, height, copy_kind, hip_stream_));
                 }
-            } else
-                HIP_API_CALL(hipMemcpy2DAsync(p_dec_frame_ptr, dst_pitch, p_src_ptr_y, src_pitch[0], dst_pitch, disp_height_, hipMemcpyDeviceToHost, hip_stream_));
+            };
+            uint8_t *p_src_ptr_y = static_cast<uint8_t *>(src_dev_ptr[0]) + (disp_rect_.top + crop_rect_.top) * src_pitch[0] + (disp_rect_.left + crop_rect_.left) * byte_per_pixel_;
+            copy_plane(p_dec_frame_ptr, p_src_ptr_y, src_pitch[0], disp_height_);
 
             // Copy chroma plane ( )
             // rocDec output gives pointer to luma and chroma pointers separated for the decoded frame
             uint8_t *p_frame_uv = p_dec_frame_ptr + dst_pitch * disp_height_;
             uint8_t *p_src_ptr_uv = (num_chroma_planes_ == 1) ? static_cast<uint8_t *>(src_dev_ptr[1]) + ((disp_rect_.top + crop_rect_.top) >> 1) * src_pitch[1] + (disp_rect_.left + crop_rect_.left) * byte_per_pixel_ :
             static_cast<uint8_t *>(src_dev_ptr[1]) + (disp_rect_.top + crop_rect_.top) * src_pitch[1] + (disp_rect_.left + crop_rect_.left) * byte_per_pixel_;
-            if (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) {
-                if (src_pitch[1] == dst_pitch) {
-                    int chroma_size = chroma_height_ * dst_pitch;
-                    HIP_API_CALL(hipMemcpyDtoDAsync(p_frame_uv, p_src_ptr_uv, chroma_size, hip_stream_));
-                } else {
-                    // use 2d copy to copy an ROI
-                    HIP_API_CALL(hipMemcpy2DAsync(p_frame_uv, dst_pitch, p_src_ptr_uv, src_pitch[1], dst_pitch, chroma_height_, hipMemcpyDeviceToDevice, hip_stream_));
-                }
-            } else
-                HIP_API_CALL(hipMemcpy2DAsync(p_frame_uv, dst_pitch, p_src_ptr_uv, src_pitch[1], dst_pitch, chroma_height_, hipMemcpyDeviceToHost, hip_stream_));
+            copy_plane(p_frame_uv, p_src_ptr_uv, src_pitch[1], chroma_height_);
 
             if (num_chroma_planes_ == 2) {
                 uint8_t *p_frame_v = p_dec_frame_ptr + dst_pitch * (disp_height_ + chroma_height_);
                 uint8_t *p_src_ptr_v = static_cast<uint8_t *>(src_dev_ptr[2]) + (disp_rect_.top + crop_rect_.top) * src_pitch[2] + (disp_rect_.left + crop_rect_.left) * byte_per_pixel_;
-                if (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) {
-                    if (src_pitch[2] == dst_pitch) {
-                        int chroma_size = chroma_height_ * dst_pitch;
-                        HIP_API_CALL(hipMemcpyDtoDAsync(p_frame_v, p_src_ptr_v, chroma_size, hip_stream_));
-                    } else {
-                        // use 2d copy to copy an ROI
-                        HIP_API_CALL(hipMemcpy2DAsync(p_frame_v, dst_pitch, p_src_ptr_v, src_pitch[2], dst_pitch, chroma_height_, hipMemcpyDeviceToDevice, hip_stream_));
-                    }
-                } else
-                    HIP_API_CALL(hipMemcpy2DAsync(p_frame_v, dst_pitch, p_src_ptr_v, src_pitch[2], dst_pitch, chroma_height_, hipMemcpyDeviceToHost, hip_stream_));
+                copy_plane(p_frame_v, p_src_ptr_v, src_pitch[2], chroma_height_);
             }
 
             HIP_API_CALL(hipStreamSynchronize(hip_stream_));
@@ -879,9 +862,12 @@ uint8_t* RocVideoDecoder::GetFrame(int64_t *pts) {
             DecFrameBuffer *fb = &vp_frames_q_.front();
             if (pts) *pts = fb->pts;
             return fb->frame_ptr;
-        } else if (vp_frames_.size() > 0){
-            if (pts) *pts = vp_frames_[output_frame_cnt_ret_].pts;
-            return vp_frames_[output_frame_cnt_ret_++].frame_ptr;
+        } else if (output_frame_cnt_ret_ < static_cast<int>(vp_frames_.size())) {
+            DecFrameBuffer *fb = &vp_frames_[output_frame_cnt_ret_++];
+            // once every pending frame has been returned (e.g. by a reconfigure flush), the next display callback refills vp_frames_ from index 0
+            if (output_frame_cnt_ == 0) output_frame_cnt_ret_ = 0;
+            if (pts) *pts = fb->pts;
+            return fb->frame_ptr;
         }
     }
     return nullptr;
@@ -900,18 +886,9 @@ uint8_t* RocVideoDecoder::GetFrame(int64_t *pts) {
 bool RocVideoDecoder::ReleaseFrame(int64_t pTimestamp, bool b_flushing) {
     if (out_mem_type_ == OUT_SURFACE_MEM_NOT_MAPPED)
         return true;    // nothing to do
-    if (out_mem_type_ != OUT_SURFACE_MEM_DEV_INTERNAL) {
-        if (!b_flushing)  // if not flushing the buffers are reused, so keep them
-            return true;            // nothing to do
-        else {
-            DecFrameBuffer *fb = &vp_frames_[0];
-            if (pTimestamp != fb->pts) {
-                RocVideoDecCriticalLog("Decoded frame released out of order");
-                return false;
-            }
-            vp_frames_.erase(vp_frames_.begin());     // get rid of the frames from the framestore
-        }
-    }
+    // the copied-frame buffers in vp_frames_ are reused, also when flushing; ReconfigureDecoder frees them when the output size changes
+    if (out_mem_type_ != OUT_SURFACE_MEM_DEV_INTERNAL)
+        return true;
     // only needed when using internal mapped buffer
     if (!vp_frames_q_.empty()) {
         std::lock_guard<std::mutex> lock(mtx_vp_frame_);

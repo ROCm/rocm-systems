@@ -14,7 +14,6 @@ import pytest
 from amdisa.codegen.execute import float_fract, float_ldexp
 from amdisa.codegen.execute.sema_lower import _INLINE_UNARY_OPS, lower_sema_block
 from amdisa.codegen.execute.simd_codegen import (
-    SIMD_VOP1_UNARY,
     local_coverage_probe,
     simd_probe_line,
 )
@@ -47,14 +46,10 @@ from amdisa.semantics import derive_semantics
 
 def test_cls_i32_codegen():
     semantic = _INLINE_UNARY_OPS['cls_i32']
-    simd = SIMD_VOP1_UNARY['v_cls_i32_vop1'][2]
-
-    for emitted in (semantic, simd):
-        assert '0xFFFFFFFFu' in emitted or 'static_cast<uint32_t>(-1)' in emitted
-        assert 'countl_zero' in emitted or 'clz_u32_simd' in emitted
-        assert 'countl_zero(abs_val)) - 1' not in emitted
-        assert 'countl_zero(a)) - 1' not in emitted
-        assert 'clz_u32_simd(u) - 1' not in emitted
+    assert '0xFFFFFFFFu' in semantic or 'static_cast<uint32_t>(-1)' in semantic
+    assert 'countl_zero' in semantic
+    assert 'countl_zero(abs_val)) - 1' not in semantic
+    assert 'countl_zero(a)) - 1' not in semantic
 
 
 def test_permlane_uses_opsel_fi_and_bound_ctrl_bits():
@@ -809,33 +804,6 @@ def test_packed_integer_vop3_modifiers_precede_conversion(op, has_abs):
         )
         assert modifiers in cpp
         assert cpp.index(modifiers) < cpp.index(f'amdgpu::cvt_{op}(f0)')
-
-
-@pytest.mark.parametrize('name', ['v_cvt_i32_f64', 'v_cvt_u32_f64'])
-def test_f64_to_integer_simd_defers_source_modifiers_to_scalar(name):
-    vop3 = simd_probe_line(f'{name}_vop3')
-    # The glue carries no modifiers, so a modified encoding runs the scalar body.
-    assert vop3.startswith('  if (!inst.inst_.abs && !inst.inst_.neg) {\n')
-    assert '  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(' in vop3
-    assert 'apply_vop3_src_mod_f64' not in vop3
-    assert 'inst_.abs' not in simd_probe_line(f'{name}_vop1')
-
-
-@pytest.mark.parametrize(
-    ('name', 'operation'),
-    [
-        ('v_cvt_floor_i32_f32', 'FloorI32'),
-        ('v_cvt_flr_i32_f32', 'FloorI32'),
-        ('v_cvt_nearest_i32_f32', 'NearestI32'),
-        ('v_cvt_rpi_i32_f32', 'NearestI32'),
-    ],
-)
-def test_floor_nearest_simd_uses_shared_raw_bit_conversion(name, operation):
-    # Both forms pass the scalar body's FloorI32/NearestI32 stage object; for
-    # VOP3 it holds ABS/NEG, so a modified encoding stays on the SIMD path.
-    probe = '  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);'
-    assert simd_probe_line(f'{name}_vop1') == probe
-    assert simd_probe_line(f'{name}_vop3') == probe
 
 
 @pytest.mark.parametrize('dtype', ['f32', 'f16'])

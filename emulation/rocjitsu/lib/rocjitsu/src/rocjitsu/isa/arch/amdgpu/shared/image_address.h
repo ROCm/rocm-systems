@@ -3,11 +3,12 @@
 
 /// @file image_address.h
 /// @brief Dependency-light image address encoding helpers.
-/// @details Generated decoder-model sources include this header to describe
-/// register operands, so it must remain free of VM dependencies. Keep only
-/// encoding-level value types here; execution helpers belong in image_access.h.
+/// @details Generated image decoder-model sources use these helpers to describe
+/// register operands. Keep this header free of VM dependencies.
 
 #pragma once
+
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address_types.h"
 
 #include <array>
 #include <bit>
@@ -16,27 +17,6 @@
 #include <optional>
 
 namespace rocjitsu::amdgpu {
-
-/// @brief LOD input mode of a qualified sampling instruction.
-enum class ImageSampleMode { Implicit, Zero, Explicit, Bias, Derivatives, Derivatives16 };
-
-/// Encoded controls selecting active and derivative coordinates for RDNA sampler operations.
-struct ImageSampleSources {
-  uint16_t sampler;
-  uint8_t dim;
-  ImageSampleMode mode;
-  bool query;
-  bool linear_candidate;
-  bool unorm;
-  bool offset;
-  bool compare;
-  bool clamp;
-  bool gather;
-  bool lod_warning = false;
-  bool filtered_feedback_candidate =
-      false;                // Full resource with a data result and a supported form.
-  bool texel_fault = false; ///< Encoded TFE bit.
-};
 
 /// The top and left edges provide implicit texture gradients for a 2x2 pixel quad.
 class ImageDerivativeQuad {
@@ -78,14 +58,6 @@ constexpr bool graphics_image_needs_gradients(bool query, unsigned maximum_mip, 
   const unsigned min = (sampler_filter >> 22) & mask;
   return !gather && (min != mag || (min & 2) || (mag & 2));
 }
-
-/// @brief Candidate wave-relative VGPR selectors for image coordinates.
-/// @details Printing and dependency metadata consume the prefix selected by
-/// the instruction's DIM and A16 fields. Linear execution may consume a
-/// shorter prefix selected by the resource type after checking that DIM
-/// supplies enough coordinates. Entries outside a caller's prefix need not
-/// name valid registers.
-using ImageAddressRegisters = std::array<uint32_t, 13>;
 
 /// SQ_RSRC_IMG_* resource types.
 inline constexpr uint32_t kImage1d = 8;

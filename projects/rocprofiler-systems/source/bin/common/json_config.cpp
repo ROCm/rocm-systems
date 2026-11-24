@@ -12,8 +12,6 @@
 #include <array>
 #include <charconv>
 #include <concepts>
-#include <fstream>
-#include <iostream>
 #include <set>
 #include <sstream>
 #include <utility>
@@ -505,27 +503,6 @@ resolve_config(const nlohmann::json& config)
     return resolve_schema_config(config);
 }
 
-std::optional<std::map<std::string, std::string>>
-load_and_resolve(const std::string& filepath)
-{
-    std::ifstream ifs{ filepath };
-    if(!ifs.is_open())
-    {
-        return std::nullopt;
-    }
-
-    try
-    {
-        auto const config = nlohmann::json::parse(ifs);
-        return resolve_config(config);
-    } catch(const nlohmann::json::exception& e)
-    {
-        std::cerr << "[rocprof-sys] WARNING: Failed to parse config '" << filepath
-                  << "': " << e.what() << '\n';
-        return std::nullopt;
-    }
-}
-
 std::optional<config_metadata>
 get_config_metadata(const nlohmann::json& config)
 {
@@ -557,25 +534,6 @@ get_config_metadata(const nlohmann::json& config)
         result.cli_flag = meta["cli_flag"].get<std::string>();
     }
     return result;
-}
-
-std::optional<config_metadata>
-load_config_metadata(const std::string& filepath)
-{
-    std::ifstream ifs{ filepath };
-    if(!ifs.is_open())
-    {
-        return std::nullopt;
-    }
-
-    try
-    {
-        auto const config = nlohmann::json::parse(ifs);
-        return get_config_metadata(config);
-    } catch(const nlohmann::json::exception&)
-    {
-        return std::nullopt;
-    }
 }
 
 std::string

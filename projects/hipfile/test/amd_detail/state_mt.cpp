@@ -50,6 +50,22 @@ static atomic<unsigned long> n_free_files{0};
 
 static atomic<bool> run_flag{true};
 
+// Reports a failure in a worker thread and aborts the process.
+//
+// Don't call exit() from a worker thread: it destroys static objects, such
+// as the DriverState singleton, while the other threads are still using
+// them. abort() stops the process where it is, and when the test runs under
+// gdb, gdb prints every thread's backtrace.
+[[noreturn]] static void
+fail(const string &msg)
+{
+    {
+        lock_guard<mutex> guard{io_mutex};
+        cerr << msg << endl;
+    }
+    abort();
+}
+
 static int
 make_temp_file()
 {
@@ -57,20 +73,12 @@ make_temp_file()
     char pathname[]{"state_mt_tmp.XXXXXX"};
     int  fd{mkstemp(pathname)};
     if (-1 == fd) {
-        {
-            lock_guard<mutex> guard{io_mutex};
-            cerr << "mkstemp() failed! " << strerror(errno) << endl;
-        }
-        exit(EXIT_FAILURE);
+        fail("mkstemp() failed! "s + strerror(errno));
     }
 
     // Ensure the file is deleted when fd is closed
     if (-1 == unlink(pathname)) {
-        {
-            lock_guard<mutex> guard{io_mutex};
-            cerr << "unlink() failed! " << strerror(errno) << endl;
-        }
-        exit(EXIT_FAILURE);
+        fail("unlink() failed! "s + strerror(errno));
     }
 
     return fd;
@@ -104,11 +112,7 @@ thread_function(int id)
         void      *buf = nullptr;
         hipError_t err = hipMalloc(&buf, ALLOC_SIZE);
         if (err != hipSuccess) {
-            {
-                lock_guard<mutex> guard{io_mutex};
-                cerr << "hipMalloc() failed!" << endl;
-            }
-            exit(EXIT_FAILURE);
+            fail("hipMalloc() failed!");
         }
 
         buffers.push_back(buf);
@@ -117,11 +121,7 @@ thread_function(int id)
         hipStream_t hip_stream;
         err = hipStreamCreateWithFlags(&hip_stream, hipStreamNonBlocking);
         if (err != hipSuccess) {
-            {
-                lock_guard<mutex> guard{io_mutex};
-                cerr << "hipStreamCreateWithFlags() failed!" << endl;
-            }
-            exit(EXIT_FAILURE);
+            fail("hipStreamCreateWithFlags() failed!");
         }
 
         hip_streams.push_back(hip_stream);
@@ -164,11 +164,7 @@ thread_function(int id)
                     auto [fd, handle] = files[idx];
                     ds->deregisterFile(handle);
                     if (-1 == close(fd)) {
-                        {
-                            lock_guard<mutex> guard{io_mutex};
-                            cerr << "close() failed! " << strerror(errno) << endl;
-                        }
-                        exit(EXIT_FAILURE);
+                        fail("close() failed! "s + strerror(errno));
                     }
                     n_free_files++;
 
@@ -181,11 +177,7 @@ thread_function(int id)
                     void      *buf = nullptr;
                     hipError_t err = hipMalloc(&buf, ALLOC_SIZE);
                     if (err != hipSuccess) {
-                        {
-                            lock_guard<mutex> guard{io_mutex};
-                            cerr << "hipMalloc() failed!" << endl;
-                        }
-                        exit(EXIT_FAILURE);
+                        fail("hipMalloc() failed!");
                     }
 
                     buffers.push_back(buf);
@@ -203,11 +195,7 @@ thread_function(int id)
                     ds->deregisterBuffer(buffers[idx]);
                     hipError_t err = hipFree(buffers[idx]);
                     if (err != hipSuccess) {
-                        {
-                            lock_guard<mutex> guard{io_mutex};
-                            cerr << "hipFree() failed!" << endl;
-                        }
-                        exit(EXIT_FAILURE);
+                        fail("hipFree() failed!");
                     }
 
                     swap(buffers[idx], buffers.back());
@@ -219,11 +207,7 @@ thread_function(int id)
                     hipStream_t hip_stream;
                     hipError_t  err = hipStreamCreateWithFlags(&hip_stream, hipStreamNonBlocking);
                     if (err != hipSuccess) {
-                        {
-                            lock_guard<mutex> guard{io_mutex};
-                            cerr << "hipStreamCreateWithFlags() failed!" << endl;
-                        }
-                        exit(EXIT_FAILURE);
+                        fail("hipStreamCreateWithFlags() failed!");
                     }
 
                     hip_streams.push_back(hip_stream);
@@ -241,11 +225,7 @@ thread_function(int id)
                     ds->deregisterStream(hip_streams[idx]);
                     hipError_t err = hipStreamDestroy(hip_streams[idx]);
                     if (err != hipSuccess) {
-                        {
-                            lock_guard<mutex> guard{io_mutex};
-                            cerr << "hipStreamDestroy() failed!" << endl;
-                        }
-                        exit(EXIT_FAILURE);
+                        fail("hipStreamDestroy() failed!");
                     }
 
                     swap(hip_streams[idx], hip_streams.back());
@@ -352,11 +332,8 @@ thread_function(int id)
                     auto [file, buffer, stream] = ds->getFileBufferAndStream(fh, buf, hip_stream);
                 } break;
 
-                default: {
-                    lock_guard<mutex> guard{io_mutex};
-                    cout << "ERROR: Tried to pick a non-existent case" << endl;
-                }
-                    exit(EXIT_FAILURE);
+                default:
+                    fail("ERROR: Tried to pick a non-existent case");
             }
         }
     }
@@ -368,8 +345,7 @@ thread_function(int id)
     for (auto [fd, fh] : files) {
         ds->deregisterFile(fh);
         if (-1 == close(fd)) {
-            lock_guard<mutex> guard{io_mutex};
-            cerr << "close() failed! " << strerror(errno) << endl;
+            fail("close() failed! "s + strerror(errno));
         }
     }
 
@@ -377,11 +353,7 @@ thread_function(int id)
         ds->deregisterBuffer(b);
         hipError_t err = hipFree(b);
         if (err != hipSuccess) {
-            {
-                lock_guard<mutex> guard{io_mutex};
-                cerr << "hipFree() failed!" << endl;
-            }
-            exit(EXIT_FAILURE);
+            fail("hipFree() failed!");
         }
     }
 
@@ -389,11 +361,7 @@ thread_function(int id)
         ds->deregisterStream(s);
         hipError_t err = hipStreamDestroy(s);
         if (err != hipSuccess) {
-            {
-                lock_guard<mutex> guard{io_mutex};
-                cerr << "hipStreamDestroy() failed!" << endl;
-            }
-            exit(EXIT_FAILURE);
+            fail("hipStreamDestroy() failed!");
         }
     }
 
@@ -422,7 +390,7 @@ main()
     struct rlimit nofile;
     if (-1 == getrlimit(RLIMIT_NOFILE, &nofile)) {
         cerr << "getrlimit() failed! " << strerror(errno) << endl;
-        exit(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 
     // The process will already have a few open files. Reduce the maximum
@@ -437,7 +405,7 @@ main()
     unsigned n_fds_per_registered_file = 2;
     if (nofile.rlim_cur <= n_file_reserved + (N_THREADS * n_files_per_thread * n_fds_per_registered_file)) {
         cerr << "RLIMIT_NOFILE (ulimit -n) is to low" << endl;
-        exit(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
     n_free_files = (nofile.rlim_cur - n_file_reserved) / n_fds_per_registered_file - 2 * N_THREADS;
 

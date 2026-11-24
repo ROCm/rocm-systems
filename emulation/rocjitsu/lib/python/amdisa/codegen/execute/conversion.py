@@ -49,19 +49,15 @@ def stages_expr(dtype: str, fields: tuple[str, ...] = ()) -> str:
 def declaration(dtype: str, fields: tuple[str, ...] | None = None) -> str:
     """Declare the scalar stage object once, before the lane loop.
 
-    ``fields`` are the VOP3 (ABS, NEG, OMOD, CLAMP) expressions; an
-    F32-to-integer conversion uses only ABS and NEG. Without them an F16
+    ``fields`` are the VOP3 (ABS, NEG, OMOD, CLAMP) expressions. Without them an F16
     result takes the SDWA OMOD, which scales before rounding and is zero for
     encodings without SDWA.
     """
     if dtype in F32_TO_INTEGER_CONVERSIONS:
-        operation = f'amdgpu::conversion::{F32_TO_INTEGER_CONVERSIONS[dtype]}'
-        modifiers = list((fields or ())[:2])
-        while modifiers and modifiers[-1] == '0u':
-            modifiers.pop()
-        args = ', '.join(['wf', *modifiers])
-        stages = f'amdgpu::conversion_f32_to_integer<{operation}>({args})'
-    elif fields is None and destination(dtype) == 'F16':
+        raise ValueError(
+            'F32 floor/nearest integer conversions require rj-arith lowering'
+        )
+    if fields is None and destination(dtype) == 'F16':
         source = _format(TO_FLOAT_CONVERSIONS[dtype][0])
         stages = f'amdgpu::sdwa_conversion_to_f16<{source}>(*this, wf)'
     else:
@@ -121,10 +117,9 @@ def simd_probe(
             f'  if (amdgpu::try_execute_words_simd<{args}>(inst, wf, {STAGES})) return;'
         )
     source, result = TO_FLOAT_CONVERSIONS[dtype]
-    if source == 'F64':
-        return f'  ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64({STAGES});'
-    if result == 'F64':
-        return f'  ROCJITSU_TRY_SIMD_CONVERSION_TO_F64({STAGES});'
+    if source == 'F64' or result == 'F64':
+        # All current profiles route these operations through rj-arith.
+        return None
     return f'  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, {STAGES});'
 
 

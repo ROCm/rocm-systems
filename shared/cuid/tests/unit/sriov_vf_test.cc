@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // On a host a VF's physfn link gives its index, so it is named as a sub-unit
-// of the card. In a guest there is no physfn link, and any reachable DSN is the
-// physical card's, so an unnamed VF has no serial of its own and takes the
-// auxiliary path (the kernel publishes no CUID attributes on a VF).
+// of the card. A VF whose index cannot be found has no serial of its own: any
+// reachable DSN is the physical card's.
 //
 // The unnamed-VF flag is set on a device whose serial is readable, so the test
 // fails if the refusal is removed; it skips when no such device exists.
@@ -14,8 +13,10 @@
 
 #include <dirent.h>
 #include <gtest/gtest.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -71,4 +72,48 @@ TEST(cuidtst, AVfWeCannotNameHasNoSerialOfItsOwn) {
   EXPECT_EQ(vf.get_hardware_fingerprint(fingerprint), AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND)
       << "a guest's view of a VF answered with " << node << "'s serial, which is the card's";
   EXPECT_EQ(fingerprint, 0u);
+}
+
+// A host VF is told by its physfn link, from the PCI function directory itself
+// or through a link to it, so a VF bound to vfio, with no DRM node, has the
+// same UnitID as when amdgpu drives it.
+TEST(cuidtst, HostVfIndexComesFromSysfsWhateverNamesIt) {
+  char base[] = "/tmp/cuid_vf_XXXXXX";
+  ASSERT_NE(mkdtemp(base), nullptr);
+  const std::string root(base);
+  const std::string pf = root + "/0000:03:00.0";
+  const std::string vf = root + "/0000:03:00.2";
+  ASSERT_EQ(mkdir(pf.c_str(), 0755), 0);
+  ASSERT_EQ(mkdir(vf.c_str(), 0755), 0);
+  ASSERT_EQ(symlink("../0000:03:00.1", (pf + "/virtfn0").c_str()), 0);
+  ASSERT_EQ(symlink("../0000:03:00.2", (pf + "/virtfn1").c_str()), 0);
+  ASSERT_EQ(symlink("../0000:03:00.0", (vf + "/physfn").c_str()), 0);
+  ASSERT_EQ(symlink(vf.c_str(), (root + "/device").c_str()), 0);
+
+  for (const std::string& path : {vf, root + "/device"}) {
+    SCOPED_TRACE(path);
+    const auto id = CuidUtilities::get_gpu_vf_identity(path);
+    EXPECT_TRUE(id.is_vf);
+    EXPECT_TRUE(id.index_known);
+    EXPECT_EQ(id.unit_id, 2);
+  }
+  EXPECT_FALSE(CuidUtilities::get_gpu_vf_identity(pf).is_vf);
+
+  // A physfn link to a PF this namespace does not show is still a VF, of
+  // unknown index.
+  const std::string hidden = root + "/0000:03:00.3";
+  ASSERT_EQ(mkdir(hidden.c_str(), 0755), 0);
+  ASSERT_EQ(symlink("../0000:04:00.0", (hidden + "/physfn").c_str()), 0);
+  const auto id = CuidUtilities::get_gpu_vf_identity(hidden);
+  EXPECT_TRUE(id.is_vf);
+  EXPECT_FALSE(id.index_known);
+  unlink((hidden + "/physfn").c_str());
+  rmdir(hidden.c_str());
+
+  for (const char* link :
+       {"/device", "/0000:03:00.0/virtfn0", "/0000:03:00.0/virtfn1", "/0000:03:00.2/physfn"})
+    unlink((root + link).c_str());
+  rmdir(vf.c_str());
+  rmdir(pf.c_str());
+  rmdir(root.c_str());
 }

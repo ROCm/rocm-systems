@@ -8,12 +8,11 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop2.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_fma64_variants_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -67,7 +66,10 @@ void VAddF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_add_f64_vop2(*this, wf);
+  const uint64_t modifiers = 0;
+  amdgpu::arith::execute_float_binary64(wf, rj_arith_v_add_f64_w32_gfx1250,
+                                        rj_arith_v_add_f64_w64_gfx1250, wf.cu().arithmetic_flags(),
+                                        modifiers, vdst, src0, vsrc1, false);
 }
 
 RJ_NOINLINE void VAddF64Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -90,7 +92,10 @@ RJ_NOINLINE void VAddF64Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_add_f64_vop2(*this, wf);
+  const uint64_t modifiers = 0;
+  amdgpu::arith::execute_float_binary64(wf, rj_arith_v_add_f64_w32_gfx1250,
+                                        rj_arith_v_add_f64_w64_gfx1250, wf.cu().arithmetic_flags(),
+                                        modifiers, vdst, src0, vsrc1, false);
   dpp_write_mask_scope_.restore();
 }
 
@@ -99,7 +104,20 @@ void VAddF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_add_f32_vop2(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_add_f32_w32_gfx1250,
+                                        rj_arith_v_add_f32_w64_gfx1250, wf.cu().arithmetic_flags(),
+                                        0, vdst, src0, vsrc1,
+                                        /*rdna3=*/false, /*compatibility_mul=*/false);
 }
 
 RJ_NOINLINE void VAddF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -122,7 +140,20 @@ RJ_NOINLINE void VAddF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_add_f32_vop2(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_add_f32_w32_gfx1250,
+                                        rj_arith_v_add_f32_w64_gfx1250, wf.cu().arithmetic_flags(),
+                                        0, vdst, src0, vsrc1,
+                                        /*rdna3=*/false, /*compatibility_mul=*/false);
   dpp_write_mask_scope_.restore();
 }
 
@@ -131,7 +162,20 @@ void VSubF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_sub_f32_vop2(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_sub_f32_w32_gfx1250,
+                                        rj_arith_v_sub_f32_w64_gfx1250, wf.cu().arithmetic_flags(),
+                                        0, vdst, src0, vsrc1,
+                                        /*rdna3=*/false, /*compatibility_mul=*/false);
 }
 
 RJ_NOINLINE void VSubF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -154,7 +198,20 @@ RJ_NOINLINE void VSubF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_sub_f32_vop2(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_sub_f32_w32_gfx1250,
+                                        rj_arith_v_sub_f32_w64_gfx1250, wf.cu().arithmetic_flags(),
+                                        0, vdst, src0, vsrc1,
+                                        /*rdna3=*/false, /*compatibility_mul=*/false);
   dpp_write_mask_scope_.restore();
 }
 
@@ -163,7 +220,20 @@ void VSubrevF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_subrev_f32_vop2(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_subrev_f32_w32_gfx1250,
+                                        rj_arith_v_subrev_f32_w64_gfx1250,
+                                        wf.cu().arithmetic_flags(), 0, vdst, src0, vsrc1,
+                                        /*rdna3=*/false, /*compatibility_mul=*/false);
 }
 
 RJ_NOINLINE void VSubrevF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -186,7 +256,20 @@ RJ_NOINLINE void VSubrevF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_subrev_f32_vop2(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_subrev_f32_w32_gfx1250,
+                                        rj_arith_v_subrev_f32_w64_gfx1250,
+                                        wf.cu().arithmetic_flags(), 0, vdst, src0, vsrc1,
+                                        /*rdna3=*/false, /*compatibility_mul=*/false);
   dpp_write_mask_scope_.restore();
 }
 
@@ -195,7 +278,10 @@ void VMulF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_mul_f64_vop2(*this, wf);
+  const uint64_t modifiers = 0;
+  amdgpu::arith::execute_float_binary64(wf, rj_arith_v_mul_f64_w32_gfx1250,
+                                        rj_arith_v_mul_f64_w64_gfx1250, wf.cu().arithmetic_flags(),
+                                        modifiers, vdst, src0, vsrc1, false);
 }
 
 RJ_NOINLINE void VMulF64Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -218,7 +304,10 @@ RJ_NOINLINE void VMulF64Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_mul_f64_vop2(*this, wf);
+  const uint64_t modifiers = 0;
+  amdgpu::arith::execute_float_binary64(wf, rj_arith_v_mul_f64_w32_gfx1250,
+                                        rj_arith_v_mul_f64_w64_gfx1250, wf.cu().arithmetic_flags(),
+                                        modifiers, vdst, src0, vsrc1, false);
   dpp_write_mask_scope_.restore();
 }
 
@@ -227,7 +316,10 @@ void VMulDx9ZeroF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_mul_dx9_zero_f32_vop2(*this, wf);
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_mul_dx9_zero_f32_w32_gfx1250,
+                                        rj_arith_v_mul_dx9_zero_f32_w64_gfx1250,
+                                        wf.cu().arithmetic_flags(), 0, vdst, src0, vsrc1,
+                                        /*rdna3=*/false, /*compatibility_mul=*/false);
 }
 
 RJ_NOINLINE void VMulDx9ZeroF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -250,7 +342,10 @@ RJ_NOINLINE void VMulDx9ZeroF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_mul_dx9_zero_f32_vop2(*this, wf);
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_mul_dx9_zero_f32_w32_gfx1250,
+                                        rj_arith_v_mul_dx9_zero_f32_w64_gfx1250,
+                                        wf.cu().arithmetic_flags(), 0, vdst, src0, vsrc1,
+                                        /*rdna3=*/false, /*compatibility_mul=*/false);
   dpp_write_mask_scope_.restore();
 }
 
@@ -259,7 +354,20 @@ void VMulF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_mul_f32_vop2(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_mul_f32_w32_gfx1250,
+                                        rj_arith_v_mul_f32_w64_gfx1250, wf.cu().arithmetic_flags(),
+                                        0, vdst, src0, vsrc1,
+                                        /*rdna3=*/false, /*compatibility_mul=*/true);
 }
 
 RJ_NOINLINE void VMulF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -282,7 +390,20 @@ RJ_NOINLINE void VMulF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_mul_f32_vop2(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_mul_f32_w32_gfx1250,
+                                        rj_arith_v_mul_f32_w64_gfx1250, wf.cu().arithmetic_flags(),
+                                        0, vdst, src0, vsrc1,
+                                        /*rdna3=*/false, /*compatibility_mul=*/true);
   dpp_write_mask_scope_.restore();
 }
 
@@ -683,7 +804,7 @@ void VFmacF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_fmac_f64_vop2(*this, wf);
+  amdgpu::arith::execute_fmac64<false>(wf, 0, vdst, src0, vsrc1);
 }
 
 RJ_NOINLINE void VFmacF64Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -706,7 +827,7 @@ RJ_NOINLINE void VFmacF64Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_fmac_f64_vop2(*this, wf);
+  amdgpu::arith::execute_fmac64<false>(wf, 0, vdst, src0, vsrc1);
   dpp_write_mask_scope_.restore();
 }
 
@@ -1072,33 +1193,11 @@ RJ_NOINLINE void VSubrevCoCiU32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf
 }
 
 void VFmamkF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t k = amdgpu::RegisterAccess(wf).read_lane64(literal64, lane);
-    uint64_t s2 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    amdgpu::sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, vdst, lane,
-        amdgpu::fp_mode::fma_f64(s0, k, s2, wf.fp_round_mode_f16_f64(),
-                                 wf.fp_denorm_mode_f16_f64()));
-  }
+  amdgpu::arith::execute_literal_fma64<true>(wf, vdst, src0, vsrc1, literal64);
 }
 
 void VFmaakF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    uint64_t k = amdgpu::RegisterAccess(wf).read_lane64(literal64, lane);
-    amdgpu::sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, vdst, lane,
-        amdgpu::fp_mode::fma_f64(s0, s1, k, wf.fp_round_mode_f16_f64(),
-                                 wf.fp_denorm_mode_f16_f64()));
-  }
+  amdgpu::arith::execute_literal_fma64<false>(wf, vdst, src0, vsrc1, literal64);
 }
 
 void VAddNcU32Vop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -1257,7 +1356,19 @@ void VFmacF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_fmac_f32_vop2(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  amdgpu::arith::execute_float_fma32<false>(
+      wf, rj_arith_v_fma_f32_w32_gfx12, rj_arith_v_fma_f32_w64_gfx12, wf.cu().arithmetic_flags(), 0,
+      vdst, src0, vsrc1, vdst, false);
 }
 
 RJ_NOINLINE void VFmacF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -1280,40 +1391,52 @@ RJ_NOINLINE void VFmacF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_fmac_f32_vop2(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  amdgpu::arith::execute_float_fma32<false>(
+      wf, rj_arith_v_fma_f32_w32_gfx12, rj_arith_v_fma_f32_w64_gfx12, wf.cu().arithmetic_flags(), 0,
+      vdst, src0, vsrc1, vdst, false);
   dpp_write_mask_scope_.restore();
 }
 
 void VFmamkF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float k = std::bit_cast<float>(literal.encoding_value_);
-    float s2 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        *this, wf, vdst, lane,
-        std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
-            s0, k, s2, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(),
-            wf.ieee_mode())));
+  if (!wf.exec()) {
+    return;
   }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  amdgpu::arith::execute_float_fma32<false>(
+      wf, rj_arith_v_fma_f32_w32_gfx12, rj_arith_v_fma_f32_w64_gfx12, wf.cu().arithmetic_flags(), 0,
+      vdst, src0, literal, vsrc1, false);
 }
 
 void VFmaakF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    float k = std::bit_cast<float>(literal.encoding_value_);
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        *this, wf, vdst, lane,
-        std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
-            s0, s1, k, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(),
-            wf.ieee_mode())));
+  if (!wf.exec()) {
+    return;
   }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  amdgpu::arith::execute_float_fma32<false>(
+      wf, rj_arith_v_fma_f32_w32_gfx12, rj_arith_v_fma_f32_w64_gfx12, wf.cu().arithmetic_flags(), 0,
+      vdst, src0, vsrc1, literal, false);
 }
 
 void VCvtPkRtzF16F32Vop2::execute_impl(amdgpu::Wavefront &wf) {

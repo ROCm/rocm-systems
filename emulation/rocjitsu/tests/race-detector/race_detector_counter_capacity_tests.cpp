@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "race_test_builder.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <gtest/gtest.h>
 
@@ -21,7 +22,7 @@ constexpr int kDwordBytes = 4;
 // For CDNA1-CDNA4 combined counters, the all-ones no-wait encoding is also the
 // maximum number of outstanding tokens. Issuing another token forces older
 // work to complete before the new operation can issue.
-constexpr auto kCdnaCounterCapacities = counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4);
+constexpr auto kCdnaCounterCapacities = counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna4);
 constexpr int kLgkmcntCapacity = kCdnaCounterCapacities.lgkmcnt;
 constexpr int kVmcntCapacity = kCdnaCounterCapacities.vmcnt;
 constexpr int kLgkmcntOverflow = 5;
@@ -412,13 +413,13 @@ namespace {
 constexpr int kGfx1250ScalarRegisters = 64;
 
 int gfx1250Capacity(amdgpu::WaitCounterType counter) {
-  return counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5).split(counter);
+  return counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna5).split(counter);
 }
 
 RaceTestBuilder makeGfx1250Test(int numWaves = 1) {
   return RaceTestBuilder(numWaves, /*vgprs=*/8, /*sgprs=*/kGfx1250ScalarRegisters,
                          /*waveSize=*/32, Dim3d(0),
-                         counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5));
+                         counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna5));
 }
 
 void issueCounterOps(RaceTestBuilder &builder, int count, amdgpu::WaitCounterType counter,
@@ -496,7 +497,8 @@ TEST(RaceDetector, Gfx1250CounterCapacity_CombinedCounterFailsLoudly) {
     SCOPED_TRACE(static_cast<int>(counter));
     RaceDetector detector(/*nWaves=*/
                           1, /*vgprCount=*/8, /*sgprCount=*/kGfx1250ScalarRegisters, Dim3d(0),
-                          [](RaceViolation) {}, counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5),
+                          [](RaceViolation) {},
+                          counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna5),
                           /*ldsSizeBytes=*/64 * 1024);
     EXPECT_TRUE(detector.getWaveRaceState(0).prepareForCounterIncrement(counter).failed());
     EXPECT_TRUE(detector.getWaveRaceState(0).getWaveMemoryEvents().empty());
@@ -506,7 +508,7 @@ TEST(RaceDetector, Gfx1250CounterCapacity_CombinedCounterFailsLoudly) {
 TEST(RaceDetector, Gfx1250CounterCapacity_ArchCapacitiesConfigureSplitCountersOnly) {
   // 6-bit LOADcnt, STOREcnt, DScnt, ASYNCcnt and TENSORcnt, and 5-bit KMcnt
   // (CDNA5 ISA 5.7.1), each holding 2^n - 1 tokens.
-  constexpr auto capacities = counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5);
+  constexpr auto capacities = counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna5);
   EXPECT_EQ(capacities.loadcnt, 63);
   EXPECT_EQ(capacities.storecnt, 63);
   EXPECT_EQ(capacities.dscnt, 63);
@@ -544,8 +546,8 @@ TEST(RaceDetector, CounterCapacity_SplitReturnsEachCountersOwnCapacity) {
 // alias the combined counters, so they have no split capacities.
 TEST(RaceDetector, CounterCapacity_LegacyArchCapacitiesHaveNoSplitCounters) {
   for (const auto arch :
-       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-        ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+       {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+        rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
     SCOPED_TRACE(static_cast<int>(arch));
     const auto capacities = counterCapacitiesForArch(arch);
     const auto properties = rocjitsu::isa_properties(arch);
@@ -561,7 +563,7 @@ TEST(RaceDetector, CounterCapacity_LegacyArchCapacitiesHaveNoSplitCounters) {
 
 TEST(RaceDetector, CounterCapacity_Rdna4ModelsItsSplitCounters) {
   using amdgpu::WaitCounterType;
-  constexpr auto capacities = counterCapacitiesForArch(ROCJITSU_CODE_ARCH_RDNA4);
+  constexpr auto capacities = counterCapacitiesForArch(rocjitsu::IsaFamily::Rdna4);
   EXPECT_EQ(capacities.vmcnt, 0);
   EXPECT_EQ(capacities.lgkmcnt, 0);
   for (const auto counter : {WaitCounterType::LOADCNT, WaitCounterType::STORECNT,

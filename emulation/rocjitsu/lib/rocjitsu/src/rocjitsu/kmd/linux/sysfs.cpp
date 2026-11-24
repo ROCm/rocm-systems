@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/kmd/linux/sysfs.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
@@ -37,17 +38,17 @@ namespace rocjitsu {
 uint32_t Sysfs::GpuInfo::clock_frequency_mhz() const {
   switch (gfx_target_version) {
   case 90008:
-    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA1);
+    return amdgpu::gpu_clock_mhz(rocjitsu::IsaFamily::Cdna1);
   case 90010:
-    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA2);
+    return amdgpu::gpu_clock_mhz(rocjitsu::IsaFamily::Cdna2);
   case 90400:
   case 90401:
   case 90402:
-    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA3);
+    return amdgpu::gpu_clock_mhz(rocjitsu::IsaFamily::Cdna3);
   case 90500:
-    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA4);
+    return amdgpu::gpu_clock_mhz(rocjitsu::IsaFamily::Cdna4);
   default:
-    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_INVALID);
+    return amdgpu::gpu_clock_mhz(rocjitsu::IsaFamily::Invalid);
   }
 }
 

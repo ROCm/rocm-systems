@@ -12,6 +12,7 @@
 /// (SIMD) and non-fused (scalar) accumulation cannot legitimately differ.
 
 #include "mma_exact_test_support.h"
+#include "rocjitsu/isa/isa_family.h"
 
 namespace {
 
@@ -29,7 +30,7 @@ using MfmaFloatSpecFn = void (*)(amdgpu::ComputeUnitCore &, uint32_t, uint32_t, 
 using MfmaIntSpecFn = void (*)(amdgpu::ComputeUnitCore &, uint32_t, uint32_t, uint32_t, uint32_t,
                                uint32_t);
 struct MfmaFixture : ExactFixture {
-  MfmaFixture() : ExactFixture(ROCJITSU_CODE_ARCH_CDNA4, WF) {}
+  MfmaFixture() : ExactFixture(rocjitsu::IsaFamily::Cdna4, WF) {}
 };
 
 // Drive one (kernel, fmt) case across all trial modes and both accumulator

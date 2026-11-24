@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_VM_AMDGPU_SHADER_ENGINE_H_
 #define ROCJITSU_VM_AMDGPU_SHADER_ENGINE_H_
 
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
 
@@ -43,7 +44,7 @@ public:
   /// @param l2 Shared L2 cache (owned by the XCD).
   /// @param exec_mode Execution mode for CU creation.
   /// @throws util::ConfigError if CU configuration or execution mode is rejected.
-  ShaderEngine(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory *memory,
+  ShaderEngine(std::string name, const Config &config, rocjitsu::IsaFamily arch, GpuMemory *memory,
                L2Cache *l2, simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL);
 
   /// @brief Construct an empty shader engine (children added externally by the config loader).

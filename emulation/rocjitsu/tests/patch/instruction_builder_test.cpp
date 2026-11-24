@@ -6,6 +6,7 @@
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <gtest/gtest.h>
 
@@ -24,90 +25,90 @@ namespace {
 TEST(InstructionBuilder, ScalarFrontendsRejectUnsupportedArchitecturesWithoutThrowing) {
   struct EncodingCase {
     std::string_view name;
-    util::FailureOr<uint32_t> (*encode)(rj_code_arch_t, const util::DiagnosticEmitter *);
+    util::FailureOr<uint32_t> (*encode)(rocjitsu::IsaFamily, const util::DiagnosticEmitter *);
   };
   const EncodingCase cases[] = {
       {"s_branch",
-       [](rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+       [](rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error) {
          return build_s_branch(0, arch, error);
        }},
       {"s_endpgm",
-       [](rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+       [](rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error) {
          return build_s_endpgm(arch, error);
        }},
-      {"s_trap", [](rj_code_arch_t arch,
+      {"s_trap", [](rocjitsu::IsaFamily arch,
                     const util::DiagnosticEmitter *error) { return build_s_trap(arch, 0, error); }},
-      {"s_nop", [](rj_code_arch_t arch,
+      {"s_nop", [](rocjitsu::IsaFamily arch,
                    const util::DiagnosticEmitter *error) { return build_s_nop(0, arch, error); }},
       {"s_getpc",
-       [](rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+       [](rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error) {
          return build_s_getpc_b64(0, arch, error);
        }},
       {"s_setpc",
-       [](rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+       [](rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error) {
          return build_s_setpc_b64(0, arch, error);
        }},
       {"s_swappc",
-       [](rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+       [](rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error) {
          return build_s_swappc_b64(0, 0, arch, error);
        }},
       {"s_call_b64",
-       [](rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+       [](rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error) {
          return build_s_call_b64(0, 0, arch, error);
        }},
       {"s_mov_b32",
-       [](rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+       [](rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error) {
          return build_s_mov_b32(0, 0, arch, error);
        }},
       {"s_mov_b64",
-       [](rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+       [](rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error) {
          return build_s_mov_b64(0, 0, arch, error);
        }},
       {"s_lshl_b32",
-       [](rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+       [](rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error) {
          return build_s_lshl_b32(0, 0, 0, arch, error);
        }},
       {"s_lshr_b32",
-       [](rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+       [](rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error) {
          return build_s_lshr_b32(0, 0, 0, arch, error);
        }},
       {"s_cselect_b32",
-       [](rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+       [](rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error) {
          return build_s_cselect_b32(0, 0, 0, arch, error);
        }},
       {"s_cmp_lg_u32",
-       [](rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+       [](rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error) {
          return build_s_cmp_lg_u32(0, 0, arch, error);
        }},
       {"s_add_u32",
-       [](rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+       [](rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error) {
          return build_s_add_u32(0, 0, 0, arch, error);
        }},
       {"s_addc_u32",
-       [](rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+       [](rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error) {
          return build_s_addc_u32(0, 0, 0, arch, error);
        }},
       {"SOP1",
-       [](rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+       [](rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error) {
          return build_sop1_encoding(arch, 0, 0, 0, error);
        }},
       {"SOP2",
-       [](rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+       [](rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error) {
          return build_sop2_encoding(arch, 0, 0, 0, 0, error);
        }},
       {"SOPK",
-       [](rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+       [](rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error) {
          return build_sopk_encoding(arch, 0, 0, 0, error);
        }},
-      {"SOPC",
-       [](rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
-         return build_sopc_encoding(arch, 0, 0, 0, error);
-       }},
+      {"SOPC", [](rocjitsu::IsaFamily arch,
+                  const util::DiagnosticEmitter
+                      *error) { return build_sopc_encoding(arch, 0, 0, 0, error); }},
   };
   for (const EncodingCase &entry : cases) {
     SCOPED_TRACE(entry.name);
-    for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_INVALID, ROCJITSU_CODE_ARCH_RV32I,
-                                ROCJITSU_CODE_ARCH_RV64I, static_cast<rj_code_arch_t>(15)}) {
+    for (rocjitsu::IsaFamily arch :
+         {rocjitsu::IsaFamily::Invalid, rocjitsu::IsaFamily::Rv32i, rocjitsu::IsaFamily::Rv64i,
+          static_cast<rocjitsu::IsaFamily>(15)}) {
       SCOPED_TRACE(static_cast<int>(arch));
       unsigned messages = 0;
       std::string message;
@@ -131,7 +132,7 @@ TEST(InstructionBuilder, ScalarFrontendsRejectUnsupportedArchitecturesWithoutThr
 TEST(InstructionBuilder, ScalarOperandLookupsRejectUnsupportedArchitecturesWithoutThrowing) {
   struct OperandCase {
     std::string_view name;
-    util::FailureOr<uint16_t> (*lookup)(rj_code_arch_t, const util::DiagnosticEmitter *);
+    util::FailureOr<uint16_t> (*lookup)(rocjitsu::IsaFamily, const util::DiagnosticEmitter *);
   };
   const OperandCase cases[] = {
       {"M0", scalar_operand_m0},
@@ -141,8 +142,9 @@ TEST(InstructionBuilder, ScalarOperandLookupsRejectUnsupportedArchitecturesWitho
   };
   for (const OperandCase &entry : cases) {
     SCOPED_TRACE(entry.name);
-    for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_INVALID, ROCJITSU_CODE_ARCH_RV32I,
-                                ROCJITSU_CODE_ARCH_RV64I, static_cast<rj_code_arch_t>(15)}) {
+    for (rocjitsu::IsaFamily arch :
+         {rocjitsu::IsaFamily::Invalid, rocjitsu::IsaFamily::Rv32i, rocjitsu::IsaFamily::Rv64i,
+          static_cast<rocjitsu::IsaFamily>(15)}) {
       unsigned messages = 0;
       std::string message;
       auto record = [&](std::string_view text) {
@@ -160,11 +162,11 @@ TEST(InstructionBuilder, ScalarOperandLookupsRejectUnsupportedArchitecturesWitho
 }
 
 TEST(InstructionBuilder, ScalarLayoutsRejectEveryOversizedFieldBeforeNarrowing) {
-  for (rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-        ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
-        ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-        ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (rocjitsu::IsaFamily arch :
+       {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+        rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Rdna1,
+        rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+        rocjitsu::IsaFamily::Rdna4}) {
     SCOPED_TRACE(static_cast<int>(arch));
     std::string message;
     auto record = [&](std::string_view text) { message = text; };
@@ -211,12 +213,12 @@ TEST(InstructionBuilder, ScalarLayoutsRejectEveryOversizedFieldBeforeNarrowing) 
 
 TEST(InstructionBuilder, PcDeltaBuilderForwardsFieldFailuresWithoutAppendingWords) {
   const std::vector<uint32_t> original{0x12345678};
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna5}) {
     for (int64_t delta : {int64_t{1}, int64_t{-1}, int64_t{1} << 33, -(int64_t{1} << 33)}) {
       SCOPED_TRACE(static_cast<int>(arch));
       SCOPED_TRACE(delta);
       // The legacy path's high-half destination fails after its low half succeeds.
-      const uint16_t pc_sreg = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 128 : 127;
+      const uint16_t pc_sreg = arch == rocjitsu::IsaFamily::Cdna5 ? 128 : 127;
       std::vector<uint32_t> words = original;
       std::string message;
       auto record = [&](std::string_view text) { message = text; };
@@ -232,8 +234,8 @@ TEST(InstructionBuilder, PcDeltaBuilderForwardsFieldFailuresWithoutAppendingWord
 }
 
 TEST(InstructionBuilder, PcDeltaBuilderStopsAfterItsFirstDiagnostic) {
-  for (rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_INVALID, ROCJITSU_CODE_ARCH_RV64I, ROCJITSU_CODE_ARCH_CDNA3}) {
+  for (rocjitsu::IsaFamily arch :
+       {rocjitsu::IsaFamily::Invalid, rocjitsu::IsaFamily::Rv64i, rocjitsu::IsaFamily::Cdna3}) {
     for (int64_t delta : {int64_t{1}, int64_t{-1}}) {
       std::vector<uint32_t> words;
       unsigned messages = 0;
@@ -245,7 +247,7 @@ TEST(InstructionBuilder, PcDeltaBuilderStopsAfterItsFirstDiagnostic) {
       const util::DiagnosticEmitter error(record);
       EXPECT_FALSE(append_pc_delta_builder(words, arch, 128, delta, false, &error));
       EXPECT_EQ(messages, 1u);
-      if (arch == ROCJITSU_CODE_ARCH_CDNA3)
+      if (arch == rocjitsu::IsaFamily::Cdna3)
         EXPECT_EQ(message, "SOP2 encoding field out of range");
       else
         EXPECT_EQ(message,
@@ -271,7 +273,7 @@ TEST(InstructionBuilder, RecoveredPcDeltaFieldFailureRetainsRelocationContext) {
                                              .target_recovery_begin_offset = 4,
                                              .target_recovery_end_offset = 16});
   const TextRelocationResult result =
-      patch_recovered_builder_fixups(text, layout, ROCJITSU_CODE_ARCH_CDNA5);
+      patch_recovered_builder_fixups(text, layout, rocjitsu::IsaFamily::Cdna5);
   EXPECT_FALSE(result.ok);
   EXPECT_EQ(result.failure, TextLayoutFailureCategory::ResourceLimit);
   EXPECT_EQ(result.source_offset, 24u);
@@ -300,7 +302,7 @@ TEST(InstructionBuilder, RecoveredIndirectSequenceRetainsBuilderDiagnostic) {
                                                 .is_call = true,
                                                 .preserve_marked_long_transfer = long_transfer});
     const TextRelocationResult result =
-        patch_recovered_indirect_fixups(text, layout, ROCJITSU_CODE_ARCH_CDNA3);
+        patch_recovered_indirect_fixups(text, layout, rocjitsu::IsaFamily::Cdna3);
     EXPECT_FALSE(result.ok);
     EXPECT_EQ(result.source_offset, 24u);
     EXPECT_EQ(result.message, long_transfer ? "canonical recovered indirect branch sequence: "
@@ -314,11 +316,11 @@ TEST(InstructionBuilder, RecoveredIndirectSequenceRetainsBuilderDiagnostic) {
 TEST(InstructionBuilder, DirectLongBranchRetainsBuilderDiagnostic) {
   constexpr uint64_t kWord = sizeof(uint32_t);
   constexpr uint64_t kTargetOffset = 140000;
-  util::FailureOr<uint32_t> maybe_branch = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3);
+  util::FailureOr<uint32_t> maybe_branch = build_s_branch(0, rocjitsu::IsaFamily::Cdna3);
   ASSERT_TRUE(maybe_branch.succeeded());
   const uint32_t branch_word = maybe_branch.value();
   std::unique_ptr<Instruction> branch =
-      test_support::decode_one(branch_word, ROCJITSU_CODE_ARCH_CDNA3);
+      test_support::decode_one(branch_word, rocjitsu::IsaFamily::Cdna3);
   ASSERT_NE(branch, nullptr);
 
   std::vector<uint8_t> text(kTargetOffset + kWord, 0);
@@ -339,7 +341,7 @@ TEST(InstructionBuilder, DirectLongBranchRetainsBuilderDiagnostic) {
                                   .target_window_bytes = 32,
                                   .translated_words = {branch_word}});
   const TextRelocationResult result =
-      patch_direct_branch_fixups(text, layout, ROCJITSU_CODE_ARCH_CDNA3);
+      patch_direct_branch_fixups(text, layout, rocjitsu::IsaFamily::Cdna3);
   EXPECT_FALSE(result.ok);
   EXPECT_EQ(result.source_offset, 0u);
   EXPECT_EQ(result.message, "direct branch long sequence: s_getpc_b64 encoding field out of range");
@@ -354,24 +356,24 @@ TEST(InstructionBuilder, ScalarFrontendFieldFailureEmitsOneInstructionSpecificDi
     message = text;
   };
   const util::DiagnosticEmitter error(record);
-  EXPECT_TRUE(build_s_mov_b32(128, 0, ROCJITSU_CODE_ARCH_CDNA4, &error).failed());
+  EXPECT_TRUE(build_s_mov_b32(128, 0, rocjitsu::IsaFamily::Cdna4, &error).failed());
   EXPECT_EQ(messages, 1u);
   EXPECT_EQ(message, "s_mov_b32 encoding field out of range");
   messages = 0;
   message.clear();
-  EXPECT_TRUE(build_s_cmp_lg_u32(0, 256, ROCJITSU_CODE_ARCH_RDNA4, &error).failed());
+  EXPECT_TRUE(build_s_cmp_lg_u32(0, 256, rocjitsu::IsaFamily::Rdna4, &error).failed());
   EXPECT_EQ(messages, 1u);
   EXPECT_EQ(message, "s_cmp_lg_u32 encoding field out of range");
   messages = 0;
   message.clear();
-  EXPECT_TRUE(build_s_mov_b32(1, 2, ROCJITSU_CODE_ARCH_CDNA4, &error).succeeded());
+  EXPECT_TRUE(build_s_mov_b32(1, 2, rocjitsu::IsaFamily::Cdna4, &error).succeeded());
   EXPECT_EQ(messages, 0u);
   EXPECT_TRUE(message.empty());
 }
 
 TEST(InstructionBuilder, UnsupportedPaddingAndIslandPoolLeaveOutputsUnchanged) {
   const std::vector<uint8_t> original{1, 2, 3, 4};
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_INVALID}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rv32i, rocjitsu::IsaFamily::Invalid}) {
     std::vector<uint8_t> text = original;
     std::string message;
     auto record = [&](std::string_view text) { message = text; };
@@ -393,28 +395,29 @@ TEST(InstructionBuilder, UnsupportedPaddingAndIslandPoolLeaveOutputsUnchanged) {
 }
 
 TEST(InstructionBuilder, Sop2SetsEncodingPrefix) {
-  util::FailureOr<uint32_t> maybe_s_lshl_b32 = build_s_lshl_b32(1, 2, 3, ROCJITSU_CODE_ARCH_RDNA4);
+  util::FailureOr<uint32_t> maybe_s_lshl_b32 =
+      build_s_lshl_b32(1, 2, 3, rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_s_lshl_b32.succeeded());
   const uint32_t word = maybe_s_lshl_b32.value();
   EXPECT_EQ((word >> 30) & 0x3u, 0x2u);
 }
 
 TEST(InstructionBuilder, SoppEncodingReturnsEncodingOrFailure) {
-  constexpr auto invalid = build_sopp_encoding(ROCJITSU_CODE_ARCH_INVALID, 0, 0);
+  constexpr auto invalid = build_sopp_encoding(rocjitsu::IsaFamily::Invalid, 0, 0);
   static_assert(invalid.failed());
 
-  for (int value = 0; value < ROCJITSU_CODE_ARCH_NUM_ARCHS; ++value) {
-    const auto arch = static_cast<rj_code_arch_t>(value);
+  for (int value = 0; value < static_cast<int>(rocjitsu::IsaFamily::Count); ++value) {
+    const auto arch = static_cast<rocjitsu::IsaFamily>(value);
     SCOPED_TRACE(value);
-    if (arch == ROCJITSU_CODE_ARCH_RV32I || arch == ROCJITSU_CODE_ARCH_RV64I)
+    if (arch == rocjitsu::IsaFamily::Rv32i || arch == rocjitsu::IsaFamily::Rv64i)
       continue;
     util::FailureOr<uint32_t> maybe_sopp_op_nop = sopp_op_nop(arch);
     ASSERT_TRUE(maybe_sopp_op_nop.succeeded());
     EXPECT_TRUE(build_sopp_encoding(arch, maybe_sopp_op_nop.value(), 0).succeeded());
   }
 
-  for (auto arch : {ROCJITSU_CODE_ARCH_INVALID, ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_RV64I,
-                    static_cast<rj_code_arch_t>(15)}) {
+  for (auto arch : {rocjitsu::IsaFamily::Invalid, rocjitsu::IsaFamily::Rv32i,
+                    rocjitsu::IsaFamily::Rv64i, static_cast<rocjitsu::IsaFamily>(15)}) {
     SCOPED_TRACE(static_cast<int>(arch));
     EXPECT_TRUE(build_sopp_encoding(arch, 0, 0).failed());
   }
@@ -428,29 +431,30 @@ TEST(InstructionBuilder, SoppEncodingEmitsOnlyRequestedFailureDiagnostic) {
     message = text;
   };
   const util::DiagnosticEmitter error(callback);
-  EXPECT_TRUE(build_sopp_encoding(ROCJITSU_CODE_ARCH_CDNA5, 0, 0, &error).succeeded());
+  EXPECT_TRUE(build_sopp_encoding(rocjitsu::IsaFamily::Cdna5, 0, 0, &error).succeeded());
   EXPECT_EQ(messages, 0u);
-  EXPECT_TRUE(build_sopp_encoding(ROCJITSU_CODE_ARCH_INVALID, 0, 0, &error).failed());
+  EXPECT_TRUE(build_sopp_encoding(rocjitsu::IsaFamily::Invalid, 0, 0, &error).failed());
   EXPECT_EQ(messages, 1u);
   EXPECT_EQ(message, "unsupported target architecture for SOPP encoding");
 }
 
 TEST(InstructionBuilder, DelayAluReturnsEncodingOrFailure) {
-  constexpr auto rdna4 = build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4);
+  constexpr auto rdna4 = build_s_delay_alu(kDelayAluSaluDep1, rocjitsu::IsaFamily::Rdna4);
   static_assert(rdna4.succeeded());
   static_assert(rdna4.value() == 0xBF870009u);
-  constexpr auto cdna4 = build_s_delay_alu(0, ROCJITSU_CODE_ARCH_CDNA4);
+  constexpr auto cdna4 = build_s_delay_alu(0, rocjitsu::IsaFamily::Cdna4);
   static_assert(cdna4.failed());
 
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
-                    ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                    rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     const auto word = build_s_delay_alu(0xFFFF, arch);
     ASSERT_TRUE(word.succeeded());
     EXPECT_EQ(word.value(), 0xBF87FFFFu);
   }
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-                    ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                    ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_RV64I, ROCJITSU_CODE_ARCH_INVALID})
+  for (auto arch :
+       {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+        rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+        rocjitsu::IsaFamily::Rv32i, rocjitsu::IsaFamily::Rv64i, rocjitsu::IsaFamily::Invalid})
     EXPECT_TRUE(build_s_delay_alu(0, arch).failed());
 }
 
@@ -462,9 +466,9 @@ TEST(InstructionBuilder, DelayAluEmitsOnlyRequestedFailureDiagnostic) {
     message = text;
   };
   const util::DiagnosticEmitter error(callback);
-  EXPECT_TRUE(build_s_delay_alu(0, ROCJITSU_CODE_ARCH_RDNA4, &error).succeeded());
+  EXPECT_TRUE(build_s_delay_alu(0, rocjitsu::IsaFamily::Rdna4, &error).succeeded());
   EXPECT_EQ(messages, 0u);
-  EXPECT_TRUE(build_s_delay_alu(0, ROCJITSU_CODE_ARCH_CDNA4, &error).failed());
+  EXPECT_TRUE(build_s_delay_alu(0, rocjitsu::IsaFamily::Cdna4, &error).failed());
   EXPECT_EQ(messages, 1u);
   EXPECT_EQ(message, "s_delay_alu for target architecture");
 }
@@ -572,12 +576,12 @@ TEST(ComputeSoppBranchSimm16, TargetNearUint64MaxFails) {
 TEST(InstructionBuilder, BuildSEndpgm) {
   // calculate with SOPP prefix (0x17F) << 23 | opcode 0x1 << 16
   constexpr uint32_t SOPP_S_ENDPGM_CDNA4 = 0xBF810000u;
-  util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_s_endpgm.succeeded());
   EXPECT_EQ(maybe_s_endpgm.value(), SOPP_S_ENDPGM_CDNA4);
   // calculate with SOPP prefix (0x17F) << 23 | opcode 0x30 << 16
   constexpr uint32_t SOPP_S_ENDPGM_RDNA4 = 0xBFB00000u;
-  util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_s_endpgm_2.succeeded());
   EXPECT_EQ(maybe_s_endpgm_2.value(), SOPP_S_ENDPGM_RDNA4);
 }
@@ -586,11 +590,12 @@ TEST(InstructionBuilder, BuildSMovB32UsesRdna1AndRdna2Opcodes) {
   constexpr uint16_t kDst = 4;
   constexpr uint16_t kSrc = 8;
 
-  util::FailureOr<uint32_t> maybe_s_mov_b32 = build_s_mov_b32(kDst, kSrc, ROCJITSU_CODE_ARCH_RDNA1);
+  util::FailureOr<uint32_t> maybe_s_mov_b32 =
+      build_s_mov_b32(kDst, kSrc, rocjitsu::IsaFamily::Rdna1);
   ASSERT_TRUE(maybe_s_mov_b32.succeeded());
   const uint32_t rdna1_word = maybe_s_mov_b32.value();
   util::FailureOr<uint32_t> maybe_s_mov_b32_2 =
-      build_s_mov_b32(kDst, kSrc, ROCJITSU_CODE_ARCH_RDNA2);
+      build_s_mov_b32(kDst, kSrc, rocjitsu::IsaFamily::Rdna2);
   ASSERT_TRUE(maybe_s_mov_b32_2.succeeded());
   const uint32_t rdna2_word = maybe_s_mov_b32_2.value();
 
@@ -627,20 +632,20 @@ TEST(GeneratedInstructionBuilder, Gfx1250ScalarPathsUseGeneratedLayouts) {
 
   constexpr auto sopp = cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = kSimm16});
   constexpr auto encoded_sopp =
-      build_sopp_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSBranchSopp, kSimm16);
+      build_sopp_encoding(rocjitsu::IsaFamily::Cdna5, cdna5::kSBranchSopp, kSimm16);
   static_assert(encoded_sopp.succeeded());
   EXPECT_EQ(encoded_sopp.value(), sopp[0]);
 
   constexpr auto sop1 = cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = kSsrc0, .sdst = kSdst});
   util::FailureOr<uint32_t> maybe_sop1_encoding =
-      build_sop1_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSMovB32Sop1, kSdst, kSsrc0);
+      build_sop1_encoding(rocjitsu::IsaFamily::Cdna5, cdna5::kSMovB32Sop1, kSdst, kSsrc0);
   ASSERT_TRUE(maybe_sop1_encoding.succeeded());
   EXPECT_EQ(maybe_sop1_encoding.value(), sop1[0]);
 
   constexpr auto sop2 =
       cdna5::build_sop2(cdna5::kSLshlB32Sop2, {.ssrc0 = kSsrc0, .ssrc1 = kSsrc1, .sdst = kSdst});
   util::FailureOr<uint32_t> maybe_sop2_encoding =
-      build_sop2_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSLshlB32Sop2, kSdst, kSsrc0, kSsrc1);
+      build_sop2_encoding(rocjitsu::IsaFamily::Cdna5, cdna5::kSLshlB32Sop2, kSdst, kSsrc0, kSsrc1);
   ASSERT_TRUE(maybe_sop2_encoding.succeeded());
   EXPECT_EQ(maybe_sop2_encoding.value(), sop2[0]);
 }
@@ -648,20 +653,20 @@ TEST(GeneratedInstructionBuilder, Gfx1250ScalarPathsUseGeneratedLayouts) {
 TEST(InstructionBuilder, BuildSGetpcB64) {
   // SOP1; opcode is arch-specific: 0x1C (GFX9), 0x1F (GFX10), 0x47 (GFX11+).
   util::FailureOr<uint32_t> maybe_s_getpc_b64 =
-      build_s_getpc_b64(/*sdst_pair_base=*/0, ROCJITSU_CODE_ARCH_CDNA2);
+      build_s_getpc_b64(/*sdst_pair_base=*/0, rocjitsu::IsaFamily::Cdna2);
   ASSERT_TRUE(maybe_s_getpc_b64.succeeded());
   EXPECT_EQ(maybe_s_getpc_b64.value(), 0xBE801C00u);
-  util::FailureOr<uint32_t> maybe_s_getpc_b64_2 = build_s_getpc_b64(0, ROCJITSU_CODE_ARCH_RDNA2);
+  util::FailureOr<uint32_t> maybe_s_getpc_b64_2 = build_s_getpc_b64(0, rocjitsu::IsaFamily::Rdna2);
   ASSERT_TRUE(maybe_s_getpc_b64_2.succeeded());
   EXPECT_EQ(maybe_s_getpc_b64_2.value(), 0xBE801F00u);
-  util::FailureOr<uint32_t> maybe_s_getpc_b64_3 = build_s_getpc_b64(0, ROCJITSU_CODE_ARCH_RDNA3);
+  util::FailureOr<uint32_t> maybe_s_getpc_b64_3 = build_s_getpc_b64(0, rocjitsu::IsaFamily::Rdna3);
   ASSERT_TRUE(maybe_s_getpc_b64_3.succeeded());
   EXPECT_EQ(maybe_s_getpc_b64_3.value(), 0xBE804700u);
-  util::FailureOr<uint32_t> maybe_s_getpc_b64_4 = build_s_getpc_b64(0, ROCJITSU_CODE_ARCH_RDNA4);
+  util::FailureOr<uint32_t> maybe_s_getpc_b64_4 = build_s_getpc_b64(0, rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_s_getpc_b64_4.succeeded());
   EXPECT_EQ(maybe_s_getpc_b64_4.value(), 0xBE804700u);
   // gfx1250 renames the family (s_get_pc_i64) but keeps opcode 0x47.
-  util::FailureOr<uint32_t> maybe_s_getpc_b64_5 = build_s_getpc_b64(0, ROCJITSU_CODE_ARCH_CDNA5);
+  util::FailureOr<uint32_t> maybe_s_getpc_b64_5 = build_s_getpc_b64(0, rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(maybe_s_getpc_b64_5.succeeded());
   EXPECT_EQ(maybe_s_getpc_b64_5.value(), 0xBE804700u);
 }
@@ -669,7 +674,7 @@ TEST(InstructionBuilder, BuildSGetpcB64) {
 TEST(InstructionBuilder, BuildSAddU32) {
   // SOP2 opcode 0 (all gens); ssrc1 = inline literal 16.
   util::FailureOr<uint32_t> maybe_s_add_u32 = build_s_add_u32(
-      /*sdst=*/0, /*ssrc0=*/0, scalar_positive_inline_u32(16), ROCJITSU_CODE_ARCH_CDNA2);
+      /*sdst=*/0, /*ssrc0=*/0, scalar_positive_inline_u32(16), rocjitsu::IsaFamily::Cdna2);
   ASSERT_TRUE(maybe_s_add_u32.succeeded());
   EXPECT_EQ(maybe_s_add_u32.value(), 0x80009000u);
 }
@@ -677,7 +682,7 @@ TEST(InstructionBuilder, BuildSAddU32) {
 TEST(InstructionBuilder, BuildSAddcU32) {
   // SOP2 opcode 4 (all gens); ssrc1 = inline literal 0.
   util::FailureOr<uint32_t> maybe_s_addc_u32 = build_s_addc_u32(
-      /*sdst=*/1, /*ssrc0=*/1, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA2);
+      /*sdst=*/1, /*ssrc0=*/1, scalar_positive_inline_u32(0), rocjitsu::IsaFamily::Cdna2);
   ASSERT_TRUE(maybe_s_addc_u32.succeeded());
   EXPECT_EQ(maybe_s_addc_u32.value(), 0x82018001u);
 }
@@ -685,25 +690,25 @@ TEST(InstructionBuilder, BuildSAddcU32) {
 TEST(InstructionBuilder, BuildSSwappcB64) {
   // SOP1; opcode is arch-specific: 0x1E (GFX9), 0x21 (GFX10), 0x49 (GFX11+).
   // link pair s[30:31], target pair s[0:1].
-  util::FailureOr<uint32_t> maybe_s_swappc_b64 =
-      build_s_swappc_b64(/*sdst_link_base=*/30, /*ssrc0_target_base=*/0, ROCJITSU_CODE_ARCH_CDNA2);
+  util::FailureOr<uint32_t> maybe_s_swappc_b64 = build_s_swappc_b64(
+      /*sdst_link_base=*/30, /*ssrc0_target_base=*/0, rocjitsu::IsaFamily::Cdna2);
   ASSERT_TRUE(maybe_s_swappc_b64.succeeded());
   EXPECT_EQ(maybe_s_swappc_b64.value(), 0xBE9E1E00u);
   util::FailureOr<uint32_t> maybe_s_swappc_b64_2 =
-      build_s_swappc_b64(30, 0, ROCJITSU_CODE_ARCH_RDNA2);
+      build_s_swappc_b64(30, 0, rocjitsu::IsaFamily::Rdna2);
   ASSERT_TRUE(maybe_s_swappc_b64_2.succeeded());
   EXPECT_EQ(maybe_s_swappc_b64_2.value(), 0xBE9E2100u);
   util::FailureOr<uint32_t> maybe_s_swappc_b64_3 =
-      build_s_swappc_b64(30, 0, ROCJITSU_CODE_ARCH_RDNA3);
+      build_s_swappc_b64(30, 0, rocjitsu::IsaFamily::Rdna3);
   ASSERT_TRUE(maybe_s_swappc_b64_3.succeeded());
   EXPECT_EQ(maybe_s_swappc_b64_3.value(), 0xBE9E4900u);
   util::FailureOr<uint32_t> maybe_s_swappc_b64_4 =
-      build_s_swappc_b64(30, 0, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_swappc_b64(30, 0, rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_s_swappc_b64_4.succeeded());
   EXPECT_EQ(maybe_s_swappc_b64_4.value(), 0xBE9E4900u);
   // gfx1250: s_swap_pc_i64, opcode 0x49
   util::FailureOr<uint32_t> maybe_s_swappc_b64_5 =
-      build_s_swappc_b64(30, 0, ROCJITSU_CODE_ARCH_CDNA5);
+      build_s_swappc_b64(30, 0, rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(maybe_s_swappc_b64_5.succeeded());
   EXPECT_EQ(maybe_s_swappc_b64_5.value(), 0xBE9E4900u);
 }
@@ -716,7 +721,7 @@ TEST(InstructionBuilder, BuildSCallB64UsesGfx1250SCallI64Opcode) {
                                                .sdst = static_cast<uint8_t>(kReturnSreg)});
 
   util::FailureOr<uint32_t> maybe_s_call_b64 =
-      build_s_call_b64(kReturnSreg, kOffsetDwords, ROCJITSU_CODE_ARCH_CDNA5);
+      build_s_call_b64(kReturnSreg, kOffsetDwords, rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(maybe_s_call_b64.succeeded());
   EXPECT_EQ(maybe_s_call_b64.value(), expected[0]);
   EXPECT_EQ(expected[0], 0xBA1EFFFEu);
@@ -726,20 +731,20 @@ TEST(InstructionBuilder, BuildSCselectB32) {
   // SOP2; opcode 0x0A on GFX9/GFX10, 0x30 on GFX11+. ssrc0 = inline 1, ssrc1 = inline 0.
   util::FailureOr<uint32_t> maybe_s_cselect_b32 =
       build_s_cselect_b32(/*sdst=*/2, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0),
-                          ROCJITSU_CODE_ARCH_CDNA2);
+                          rocjitsu::IsaFamily::Cdna2);
   ASSERT_TRUE(maybe_s_cselect_b32.succeeded());
   EXPECT_EQ(maybe_s_cselect_b32.value(), 0x85028081u);
   util::FailureOr<uint32_t> maybe_s_cselect_b32_2 = build_s_cselect_b32(
-      2, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA3);
+      2, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), rocjitsu::IsaFamily::Rdna3);
   ASSERT_TRUE(maybe_s_cselect_b32_2.succeeded());
   EXPECT_EQ(maybe_s_cselect_b32_2.value(), 0x98028081u);
   util::FailureOr<uint32_t> maybe_s_cselect_b32_3 = build_s_cselect_b32(
-      2, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+      2, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_s_cselect_b32_3.succeeded());
   EXPECT_EQ(maybe_s_cselect_b32_3.value(), 0x98028081u);
   // gfx1250 uses the GFX11+ opcode 0x30.
   util::FailureOr<uint32_t> maybe_s_cselect_b32_4 = build_s_cselect_b32(
-      2, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA5);
+      2, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(maybe_s_cselect_b32_4.succeeded());
   EXPECT_EQ(maybe_s_cselect_b32_4.value(), 0x98028081u);
 }
@@ -747,16 +752,16 @@ TEST(InstructionBuilder, BuildSCselectB32) {
 TEST(InstructionBuilder, BuildSCmpLgU32) {
   // SOPC prefix (0x17E) << 23 | opcode 7 << 16; ssrc1 = inline literal 0.
   util::FailureOr<uint32_t> maybe_s_cmp_lg_u32 =
-      build_s_cmp_lg_u32(/*ssrc0=*/2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA2);
+      build_s_cmp_lg_u32(/*ssrc0=*/2, scalar_positive_inline_u32(0), rocjitsu::IsaFamily::Cdna2);
   ASSERT_TRUE(maybe_s_cmp_lg_u32.succeeded());
   EXPECT_EQ(maybe_s_cmp_lg_u32.value(), 0xBF078002u);
   // Opcode 7 is invariant across gens, including gfx1250.
   util::FailureOr<uint32_t> maybe_s_cmp_lg_u32_2 =
-      build_s_cmp_lg_u32(2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_cmp_lg_u32(2, scalar_positive_inline_u32(0), rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_s_cmp_lg_u32_2.succeeded());
   EXPECT_EQ(maybe_s_cmp_lg_u32_2.value(), 0xBF078002u);
   util::FailureOr<uint32_t> maybe_s_cmp_lg_u32_3 =
-      build_s_cmp_lg_u32(2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA5);
+      build_s_cmp_lg_u32(2, scalar_positive_inline_u32(0), rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(maybe_s_cmp_lg_u32_3.succeeded());
   EXPECT_EQ(maybe_s_cmp_lg_u32_3.value(), 0xBF078002u);
 }
@@ -772,7 +777,7 @@ TEST(InstructionBuilder, SpillBuildersReportFailuresWithoutThrowing) {
     EXPECT_EQ(diagnostic.message(), expected);
     EXPECT_NO_THROW(EXPECT_TRUE(build(nullptr).failed()));
   };
-  constexpr auto invalid = ROCJITSU_CODE_ARCH_INVALID;
+  constexpr auto invalid = rocjitsu::IsaFamily::Invalid;
   check_failure([&](auto error) { return build_v_writelane_b32(0, 0, 0, invalid, error); },
                 "Unimplemented instruction: v_writelane_b32 for target architecture");
   check_failure([&](auto error) { return build_v_readlane_b32(0, 0, 0, invalid, error); },
@@ -783,12 +788,12 @@ TEST(InstructionBuilder, SpillBuildersReportFailuresWithoutThrowing) {
                 "Unimplemented instruction: scratch_load for target architecture");
   check_failure(
       [](auto error) {
-        return build_scratch_store_dword(0, 0, ROCJITSU_CODE_ARCH_RDNA4, error, /*acc=*/true);
+        return build_scratch_store_dword(0, 0, rocjitsu::IsaFamily::Rdna4, error, /*acc=*/true);
       },
       "Unimplemented instruction: scratch_store of an AccVGPR on an arch without them");
   check_failure(
       [](auto error) {
-        return build_scratch_load_dword(0, 0, ROCJITSU_CODE_ARCH_RDNA4, error, /*acc=*/true);
+        return build_scratch_load_dword(0, 0, rocjitsu::IsaFamily::Rdna4, error, /*acc=*/true);
       },
       "Unimplemented instruction: scratch_load of an AccVGPR on an arch without them");
   check_failure([&](auto error) { return build_wait_stores_complete(invalid, error); },
@@ -804,17 +809,17 @@ TEST(InstructionBuilder, BuildVWritelaneB32) {
   // in word0 bits[7:0]; word1 = src0 | src1<<9 with lane 0 as inline const 128.
   // CDNA3 and CDNA4 share the GFX9 VOP3 encoding.
   const util::FailureOr<std::array<uint32_t, 2>> maybe_v_writelane_b32_cdna3 =
-      build_v_writelane_b32(/*vgpr_dst=*/2, /*sgpr_src=*/5, /*lane=*/0, ROCJITSU_CODE_ARCH_CDNA3);
+      build_v_writelane_b32(/*vgpr_dst=*/2, /*sgpr_src=*/5, /*lane=*/0, rocjitsu::IsaFamily::Cdna3);
   ASSERT_TRUE(maybe_v_writelane_b32_cdna3.succeeded());
   EXPECT_EQ(maybe_v_writelane_b32_cdna3.value(),
             (std::array<uint32_t, 2>{0xD28A0002u, 0x00010005u}));
   const util::FailureOr<std::array<uint32_t, 2>> maybe_v_writelane_b32_cdna4 =
-      build_v_writelane_b32(2, 5, 0, ROCJITSU_CODE_ARCH_CDNA4);
+      build_v_writelane_b32(2, 5, 0, rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_v_writelane_b32_cdna4.succeeded());
   EXPECT_EQ(maybe_v_writelane_b32_cdna4.value(),
             (std::array<uint32_t, 2>{0xD28A0002u, 0x00010005u}));
   const util::FailureOr<std::array<uint32_t, 2>> maybe_v_writelane_b32_rdna4 =
-      build_v_writelane_b32(2, 5, 0, ROCJITSU_CODE_ARCH_RDNA4);
+      build_v_writelane_b32(2, 5, 0, rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_v_writelane_b32_rdna4.succeeded());
   EXPECT_EQ(maybe_v_writelane_b32_rdna4.value(),
             (std::array<uint32_t, 2>{0xD7610002u, 0x00010005u}));
@@ -825,17 +830,17 @@ TEST(InstructionBuilder, BuildVReadlaneB32) {
   // word0 bits[7:0]; src0 is a VGPR (256 + index), so v3 -> 0x103.
   // CDNA3 and CDNA4 share the GFX9 VOP3 encoding.
   const util::FailureOr<std::array<uint32_t, 2>> maybe_v_readlane_b32_cdna3 =
-      build_v_readlane_b32(/*sgpr_dst=*/6, /*vgpr_src=*/3, /*lane=*/0, ROCJITSU_CODE_ARCH_CDNA3);
+      build_v_readlane_b32(/*sgpr_dst=*/6, /*vgpr_src=*/3, /*lane=*/0, rocjitsu::IsaFamily::Cdna3);
   ASSERT_TRUE(maybe_v_readlane_b32_cdna3.succeeded());
   EXPECT_EQ(maybe_v_readlane_b32_cdna3.value(),
             (std::array<uint32_t, 2>{0xD2890006u, 0x00010103u}));
   const util::FailureOr<std::array<uint32_t, 2>> maybe_v_readlane_b32_cdna4 =
-      build_v_readlane_b32(6, 3, 0, ROCJITSU_CODE_ARCH_CDNA4);
+      build_v_readlane_b32(6, 3, 0, rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_v_readlane_b32_cdna4.succeeded());
   EXPECT_EQ(maybe_v_readlane_b32_cdna4.value(),
             (std::array<uint32_t, 2>{0xD2890006u, 0x00010103u}));
   const util::FailureOr<std::array<uint32_t, 2>> maybe_v_readlane_b32_rdna4 =
-      build_v_readlane_b32(6, 3, 0, ROCJITSU_CODE_ARCH_RDNA4);
+      build_v_readlane_b32(6, 3, 0, rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_v_readlane_b32_rdna4.succeeded());
   EXPECT_EQ(maybe_v_readlane_b32_rdna4.value(),
             (std::array<uint32_t, 2>{0xD7600006u, 0x00010103u}));
@@ -845,7 +850,7 @@ TEST(InstructionBuilder, BuildScratchStoreDword) {
   // CDNA3 and CDNA4 (GFX9): FLAT flat_store_dword base 0xDC700000 | seg=1<<14;
   // word1 = data<<8 | saddr(0x7F)<<16. 2 words.
   const util::FailureOr<std::vector<uint32_t>> maybe_cdna3 =
-      build_scratch_store_dword(/*vdata=*/3, /*byte_offset=*/64, ROCJITSU_CODE_ARCH_CDNA3);
+      build_scratch_store_dword(/*vdata=*/3, /*byte_offset=*/64, rocjitsu::IsaFamily::Cdna3);
   ASSERT_TRUE(maybe_cdna3.succeeded());
   const auto &cdna3 = maybe_cdna3.value();
   ASSERT_EQ(cdna3.size(), 2u);
@@ -853,7 +858,7 @@ TEST(InstructionBuilder, BuildScratchStoreDword) {
   EXPECT_EQ(cdna3[1], 0x007F0300u);
 
   const util::FailureOr<std::vector<uint32_t>> maybe_cdna4 =
-      build_scratch_store_dword(3, 64, ROCJITSU_CODE_ARCH_CDNA4);
+      build_scratch_store_dword(3, 64, rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_cdna4.succeeded());
   const auto &cdna4 = maybe_cdna4.value();
   ASSERT_EQ(cdna4.size(), 2u);
@@ -863,7 +868,7 @@ TEST(InstructionBuilder, BuildScratchStoreDword) {
   // RDNA4: VSCRATCH scratch_store_b32 base 0xED068000 | saddr(0x7C); word1 =
   // vsrc<<23; word2 = ioffset<<8. 3 words.
   const util::FailureOr<std::vector<uint32_t>> maybe_rdna4 =
-      build_scratch_store_dword(3, 64, ROCJITSU_CODE_ARCH_RDNA4);
+      build_scratch_store_dword(3, 64, rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_rdna4.succeeded());
   const auto &rdna4 = maybe_rdna4.value();
   ASSERT_EQ(rdna4.size(), 3u);
@@ -876,7 +881,7 @@ TEST(InstructionBuilder, BuildScratchLoadDword) {
   // CDNA3 and CDNA4 (GFX9): FLAT flat_load_dword base 0xDC500000 | seg=1<<14;
   // word1 = saddr<<16 | vdst<<24. 2 words.
   const util::FailureOr<std::vector<uint32_t>> maybe_cdna3 =
-      build_scratch_load_dword(/*vdst=*/5, /*byte_offset=*/64, ROCJITSU_CODE_ARCH_CDNA3);
+      build_scratch_load_dword(/*vdst=*/5, /*byte_offset=*/64, rocjitsu::IsaFamily::Cdna3);
   ASSERT_TRUE(maybe_cdna3.succeeded());
   const auto &cdna3 = maybe_cdna3.value();
   ASSERT_EQ(cdna3.size(), 2u);
@@ -884,7 +889,7 @@ TEST(InstructionBuilder, BuildScratchLoadDword) {
   EXPECT_EQ(cdna3[1], 0x057F0000u);
 
   const util::FailureOr<std::vector<uint32_t>> maybe_cdna4 =
-      build_scratch_load_dword(5, 64, ROCJITSU_CODE_ARCH_CDNA4);
+      build_scratch_load_dword(5, 64, rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_cdna4.succeeded());
   const auto &cdna4 = maybe_cdna4.value();
   ASSERT_EQ(cdna4.size(), 2u);
@@ -894,7 +899,7 @@ TEST(InstructionBuilder, BuildScratchLoadDword) {
   // RDNA4: VSCRATCH scratch_load_b32 base 0xED050000 | saddr(0x7C); word1 = vdst;
   // word2 = ioffset<<8. 3 words.
   const util::FailureOr<std::vector<uint32_t>> maybe_rdna4 =
-      build_scratch_load_dword(5, 64, ROCJITSU_CODE_ARCH_RDNA4);
+      build_scratch_load_dword(5, 64, rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_rdna4.succeeded());
   const auto &rdna4 = maybe_rdna4.value();
   ASSERT_EQ(rdna4.size(), 3u);
@@ -909,11 +914,11 @@ TEST(InstructionBuilder, ScratchDiagnosticPointerKeepsVgprRegisterFile) {
   util::StringDiagnostic diagnostic;
   const auto error = diagnostic.emitter();
   const util::FailureOr<std::vector<uint32_t>> store =
-      build_scratch_store_dword(2, 64, ROCJITSU_CODE_ARCH_CDNA3, &error);
+      build_scratch_store_dword(2, 64, rocjitsu::IsaFamily::Cdna3, &error);
   ASSERT_TRUE(store.succeeded());
   EXPECT_EQ(store.value()[1], 0x007F0200u);
   const util::FailureOr<std::vector<uint32_t>> load =
-      build_scratch_load_dword(2, 64, ROCJITSU_CODE_ARCH_CDNA3, &error);
+      build_scratch_load_dword(2, 64, rocjitsu::IsaFamily::Cdna3, &error);
   ASSERT_TRUE(load.succeeded());
   EXPECT_EQ(load.value()[1], 0x027F0000u);
   EXPECT_TRUE(diagnostic.message().empty());
@@ -923,7 +928,7 @@ TEST(InstructionBuilder, BuildScratchStoreDwordAccVgpr) {
   // acc=1 sets the CDNA FLAT acc bit (word1 bit 23 = 0x00800000), addressing the
   // AccVGPR file for the data operand. Same as BuildScratchStoreDword otherwise.
   const util::FailureOr<std::vector<uint32_t>> maybe_cdna3 = build_scratch_store_dword(
-      /*vdata=*/3, /*byte_offset=*/64, ROCJITSU_CODE_ARCH_CDNA3, nullptr, /*acc=*/true);
+      /*vdata=*/3, /*byte_offset=*/64, rocjitsu::IsaFamily::Cdna3, nullptr, /*acc=*/true);
   ASSERT_TRUE(maybe_cdna3.succeeded());
   const auto &cdna3 = maybe_cdna3.value();
   ASSERT_EQ(cdna3.size(), 2u);
@@ -931,7 +936,7 @@ TEST(InstructionBuilder, BuildScratchStoreDwordAccVgpr) {
   EXPECT_EQ(cdna3[1], 0x00FF0300u);
 
   const util::FailureOr<std::vector<uint32_t>> maybe_cdna4 =
-      build_scratch_store_dword(3, 64, ROCJITSU_CODE_ARCH_CDNA4, nullptr, /*acc=*/true);
+      build_scratch_store_dword(3, 64, rocjitsu::IsaFamily::Cdna4, nullptr, /*acc=*/true);
   ASSERT_TRUE(maybe_cdna4.succeeded());
   const auto &cdna4 = maybe_cdna4.value();
   ASSERT_EQ(cdna4.size(), 2u);
@@ -943,7 +948,7 @@ TEST(InstructionBuilder, BuildScratchLoadDwordAccVgpr) {
   // acc=1 sets the CDNA FLAT acc bit (word1 bit 23 = 0x00800000), writing the load
   // result into the AccVGPR file. Same as BuildScratchLoadDword otherwise.
   const util::FailureOr<std::vector<uint32_t>> maybe_cdna3 = build_scratch_load_dword(
-      /*vdst=*/5, /*byte_offset=*/64, ROCJITSU_CODE_ARCH_CDNA3, nullptr, /*acc=*/true);
+      /*vdst=*/5, /*byte_offset=*/64, rocjitsu::IsaFamily::Cdna3, nullptr, /*acc=*/true);
   ASSERT_TRUE(maybe_cdna3.succeeded());
   const auto &cdna3 = maybe_cdna3.value();
   ASSERT_EQ(cdna3.size(), 2u);
@@ -951,7 +956,7 @@ TEST(InstructionBuilder, BuildScratchLoadDwordAccVgpr) {
   EXPECT_EQ(cdna3[1], 0x05FF0000u);
 
   const util::FailureOr<std::vector<uint32_t>> maybe_cdna4 =
-      build_scratch_load_dword(5, 64, ROCJITSU_CODE_ARCH_CDNA4, nullptr, /*acc=*/true);
+      build_scratch_load_dword(5, 64, rocjitsu::IsaFamily::Cdna4, nullptr, /*acc=*/true);
   ASSERT_TRUE(maybe_cdna4.succeeded());
   const auto &cdna4 = maybe_cdna4.value();
   ASSERT_EQ(cdna4.size(), 2u);
@@ -962,16 +967,16 @@ TEST(InstructionBuilder, BuildScratchLoadDwordAccVgpr) {
 TEST(InstructionBuilder, BuildWaitLoadsComplete) {
   // CDNA3 and CDNA4: s_waitcnt 0 (all counters).
   const util::FailureOr<uint32_t> maybe_wait_loads_complete_cdna3 =
-      build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA3);
+      build_wait_loads_complete(rocjitsu::IsaFamily::Cdna3);
   ASSERT_TRUE(maybe_wait_loads_complete_cdna3.succeeded());
   EXPECT_EQ(maybe_wait_loads_complete_cdna3.value(), 0xBF8C0000u);
   const util::FailureOr<uint32_t> maybe_wait_loads_complete_cdna4 =
-      build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA4);
+      build_wait_loads_complete(rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_wait_loads_complete_cdna4.succeeded());
   EXPECT_EQ(maybe_wait_loads_complete_cdna4.value(), 0xBF8C0000u);
   // RDNA4: s_wait_loadcnt 0 (split counter).
   const util::FailureOr<uint32_t> maybe_wait_loads_complete_rdna4 =
-      build_wait_loads_complete(ROCJITSU_CODE_ARCH_RDNA4);
+      build_wait_loads_complete(rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_wait_loads_complete_rdna4.succeeded());
   EXPECT_EQ(maybe_wait_loads_complete_rdna4.value(), 0xBFC00000u);
 }
@@ -979,16 +984,16 @@ TEST(InstructionBuilder, BuildWaitLoadsComplete) {
 TEST(InstructionBuilder, BuildWaitStoresComplete) {
   // CDNA3 and CDNA4: s_waitcnt 0 (unified vmcnt covers stores).
   const util::FailureOr<uint32_t> maybe_wait_stores_complete_cdna3 =
-      build_wait_stores_complete(ROCJITSU_CODE_ARCH_CDNA3);
+      build_wait_stores_complete(rocjitsu::IsaFamily::Cdna3);
   ASSERT_TRUE(maybe_wait_stores_complete_cdna3.succeeded());
   EXPECT_EQ(maybe_wait_stores_complete_cdna3.value(), 0xBF8C0000u);
   const util::FailureOr<uint32_t> maybe_wait_stores_complete_cdna4 =
-      build_wait_stores_complete(ROCJITSU_CODE_ARCH_CDNA4);
+      build_wait_stores_complete(rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_wait_stores_complete_cdna4.succeeded());
   EXPECT_EQ(maybe_wait_stores_complete_cdna4.value(), 0xBF8C0000u);
   // RDNA4: s_wait_storecnt 0 (split counter, distinct from s_wait_loadcnt).
   const util::FailureOr<uint32_t> maybe_wait_stores_complete_rdna4 =
-      build_wait_stores_complete(ROCJITSU_CODE_ARCH_RDNA4);
+      build_wait_stores_complete(rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_wait_stores_complete_rdna4.succeeded());
   EXPECT_EQ(maybe_wait_stores_complete_rdna4.value(), 0xBFC10000u);
 }
@@ -996,11 +1001,11 @@ TEST(InstructionBuilder, BuildWaitStoresComplete) {
 TEST(InstructionBuilder, BuildWaitAllLoadsComplete) {
   // CDNA3 and CDNA4: one s_waitcnt 0 drains vmcnt+lgkmcnt (VMEM, LDS, scalar).
   const util::FailureOr<std::vector<uint32_t>> maybe_wait_all_loads_complete_cdna3 =
-      build_wait_all_loads_complete(ROCJITSU_CODE_ARCH_CDNA3);
+      build_wait_all_loads_complete(rocjitsu::IsaFamily::Cdna3);
   ASSERT_TRUE(maybe_wait_all_loads_complete_cdna3.succeeded());
   EXPECT_EQ(maybe_wait_all_loads_complete_cdna3.value(), (std::vector<uint32_t>{0xBF8C0000u}));
   const util::FailureOr<std::vector<uint32_t>> maybe_wait_all_loads_complete_cdna4 =
-      build_wait_all_loads_complete(ROCJITSU_CODE_ARCH_CDNA4);
+      build_wait_all_loads_complete(rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_wait_all_loads_complete_cdna4.succeeded());
   EXPECT_EQ(maybe_wait_all_loads_complete_cdna4.value(), (std::vector<uint32_t>{0xBF8C0000u}));
   // RDNA4 splits the counters and every VGPR-targeting load counter must drain:
@@ -1008,7 +1013,7 @@ TEST(InstructionBuilder, BuildWaitAllLoadsComplete) {
   // sample/gather -> VGPRs), s_wait_bvhcnt 0 (BVH -> VGPRs), then s_wait_kmcnt 0
   // (scalar -> SGPRs).
   const util::FailureOr<std::vector<uint32_t>> maybe_wait_all_loads_complete_rdna4 =
-      build_wait_all_loads_complete(ROCJITSU_CODE_ARCH_RDNA4);
+      build_wait_all_loads_complete(rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_wait_all_loads_complete_rdna4.succeeded());
   EXPECT_EQ(maybe_wait_all_loads_complete_rdna4.value(),
             (std::vector<uint32_t>{0xBFC80000u, 0xBFC20000u, 0xBFC30000u, 0xBFC70000u}));
@@ -1019,79 +1024,79 @@ TEST(InstructionBuilder, BuildWaitAllLoadsComplete) {
 // table still agrees (and that the well-known 106/126 values have not moved).
 TEST(InstructionBuilder, ScalarOperandCodesMatchGeneratedTables) {
   util::FailureOr<uint16_t> maybe_scalar_operand_vcc_lo =
-      scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_CDNA4);
+      scalar_operand_vcc_lo(rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_scalar_operand_vcc_lo.succeeded());
   EXPECT_EQ(maybe_scalar_operand_vcc_lo.value(), 106);
   util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo =
-      scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_CDNA4);
+      scalar_operand_exec_lo(rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_scalar_operand_exec_lo.succeeded());
   EXPECT_EQ(maybe_scalar_operand_exec_lo.value(), 126);
 
   util::FailureOr<uint16_t> maybe_scalar_operand_vcc_lo_2 =
-      scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_CDNA1);
+      scalar_operand_vcc_lo(rocjitsu::IsaFamily::Cdna1);
   ASSERT_TRUE(maybe_scalar_operand_vcc_lo_2.succeeded());
   EXPECT_EQ(maybe_scalar_operand_vcc_lo_2.value(), cdna1::OPR_SDST_VCC_LO);
   util::FailureOr<uint16_t> maybe_scalar_operand_vcc_lo_3 =
-      scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_CDNA4);
+      scalar_operand_vcc_lo(rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_scalar_operand_vcc_lo_3.succeeded());
   EXPECT_EQ(maybe_scalar_operand_vcc_lo_3.value(), cdna4::OPR_SDST_VCC_LO);
   util::FailureOr<uint16_t> maybe_scalar_operand_vcc_lo_4 =
-      scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_RDNA2);
+      scalar_operand_vcc_lo(rocjitsu::IsaFamily::Rdna2);
   ASSERT_TRUE(maybe_scalar_operand_vcc_lo_4.succeeded());
   EXPECT_EQ(maybe_scalar_operand_vcc_lo_4.value(), rdna2::OPR_SDST_VCC_LO);
   util::FailureOr<uint16_t> maybe_scalar_operand_vcc_lo_5 =
-      scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_RDNA4);
+      scalar_operand_vcc_lo(rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_scalar_operand_vcc_lo_5.succeeded());
   EXPECT_EQ(maybe_scalar_operand_vcc_lo_5.value(), rdna4::OPR_SDST_VCC_LO);
   util::FailureOr<uint16_t> maybe_scalar_operand_vcc_lo_6 =
-      scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_CDNA5);
+      scalar_operand_vcc_lo(rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(maybe_scalar_operand_vcc_lo_6.succeeded());
   EXPECT_EQ(maybe_scalar_operand_vcc_lo_6.value(), cdna5::OPR_SDST_VCC_LO);
 
   util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_2 =
-      scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_CDNA1);
+      scalar_operand_exec_lo(rocjitsu::IsaFamily::Cdna1);
   ASSERT_TRUE(maybe_scalar_operand_exec_lo_2.succeeded());
   EXPECT_EQ(maybe_scalar_operand_exec_lo_2.value(), cdna1::OPR_SDST_EXEC_LO);
   util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_3 =
-      scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_CDNA4);
+      scalar_operand_exec_lo(rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_scalar_operand_exec_lo_3.succeeded());
   EXPECT_EQ(maybe_scalar_operand_exec_lo_3.value(), cdna4::OPR_SDST_EXEC_LO);
   util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_4 =
-      scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_RDNA2);
+      scalar_operand_exec_lo(rocjitsu::IsaFamily::Rdna2);
   ASSERT_TRUE(maybe_scalar_operand_exec_lo_4.succeeded());
   EXPECT_EQ(maybe_scalar_operand_exec_lo_4.value(), rdna2::OPR_SDST_EXEC_LO);
   util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_5 =
-      scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_RDNA4);
+      scalar_operand_exec_lo(rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_scalar_operand_exec_lo_5.succeeded());
   EXPECT_EQ(maybe_scalar_operand_exec_lo_5.value(), rdna4::OPR_SDST_EXEC_LO);
   util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_6 =
-      scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_CDNA5);
+      scalar_operand_exec_lo(rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(maybe_scalar_operand_exec_lo_6.succeeded());
   EXPECT_EQ(maybe_scalar_operand_exec_lo_6.value(), cdna5::OPR_SDST_EXEC_LO);
 
   // Inline-constant source for -1 (193), also generation-stable.
   util::FailureOr<uint16_t> maybe_scalar_inline_neg_one =
-      scalar_inline_neg_one(ROCJITSU_CODE_ARCH_CDNA4);
+      scalar_inline_neg_one(rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_scalar_inline_neg_one.succeeded());
   EXPECT_EQ(maybe_scalar_inline_neg_one.value(), 193);
   util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_2 =
-      scalar_inline_neg_one(ROCJITSU_CODE_ARCH_CDNA1);
+      scalar_inline_neg_one(rocjitsu::IsaFamily::Cdna1);
   ASSERT_TRUE(maybe_scalar_inline_neg_one_2.succeeded());
   EXPECT_EQ(maybe_scalar_inline_neg_one_2.value(), cdna1::OPR_SRC_NEG_INT_MIN);
   util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_3 =
-      scalar_inline_neg_one(ROCJITSU_CODE_ARCH_CDNA4);
+      scalar_inline_neg_one(rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_scalar_inline_neg_one_3.succeeded());
   EXPECT_EQ(maybe_scalar_inline_neg_one_3.value(), cdna4::OPR_SRC_NEG_INT_MIN);
   util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_4 =
-      scalar_inline_neg_one(ROCJITSU_CODE_ARCH_RDNA2);
+      scalar_inline_neg_one(rocjitsu::IsaFamily::Rdna2);
   ASSERT_TRUE(maybe_scalar_inline_neg_one_4.succeeded());
   EXPECT_EQ(maybe_scalar_inline_neg_one_4.value(), rdna2::OPR_SRC_NEG_INT_MIN);
   util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_5 =
-      scalar_inline_neg_one(ROCJITSU_CODE_ARCH_RDNA4);
+      scalar_inline_neg_one(rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_scalar_inline_neg_one_5.succeeded());
   EXPECT_EQ(maybe_scalar_inline_neg_one_5.value(), rdna4::OPR_SRC_NEG_INT_MIN);
   util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_6 =
-      scalar_inline_neg_one(ROCJITSU_CODE_ARCH_CDNA5);
+      scalar_inline_neg_one(rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(maybe_scalar_inline_neg_one_6.succeeded());
   EXPECT_EQ(maybe_scalar_inline_neg_one_6.value(), cdna5::OPR_SRC_NEG_INT_MIN);
 
@@ -1107,54 +1112,61 @@ TEST(InstructionBuilder, ScalarOperandCodesMatchGeneratedTables) {
 // M0 moved from 124 (gfx9/gfx10.x) to 125 (gfx11+); each arch resolves to its
 // own generated OPR_SDST_M0.
 TEST(InstructionBuilder, ScalarOperandM0IsPerArch) {
-  util::FailureOr<uint16_t> maybe_scalar_operand_m0 = scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA1);
+  util::FailureOr<uint16_t> maybe_scalar_operand_m0 = scalar_operand_m0(rocjitsu::IsaFamily::Cdna1);
   ASSERT_TRUE(maybe_scalar_operand_m0.succeeded());
   EXPECT_EQ(maybe_scalar_operand_m0.value(), cdna1::OPR_SDST_M0);
-  util::FailureOr<uint16_t> maybe_scalar_operand_m0_2 = scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA2);
+  util::FailureOr<uint16_t> maybe_scalar_operand_m0_2 =
+      scalar_operand_m0(rocjitsu::IsaFamily::Cdna2);
   ASSERT_TRUE(maybe_scalar_operand_m0_2.succeeded());
   EXPECT_EQ(maybe_scalar_operand_m0_2.value(), cdna2::OPR_SDST_M0);
-  util::FailureOr<uint16_t> maybe_scalar_operand_m0_3 = scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA3);
+  util::FailureOr<uint16_t> maybe_scalar_operand_m0_3 =
+      scalar_operand_m0(rocjitsu::IsaFamily::Cdna3);
   ASSERT_TRUE(maybe_scalar_operand_m0_3.succeeded());
   EXPECT_EQ(maybe_scalar_operand_m0_3.value(), cdna3::OPR_SDST_M0);
-  util::FailureOr<uint16_t> maybe_scalar_operand_m0_4 = scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA4);
+  util::FailureOr<uint16_t> maybe_scalar_operand_m0_4 =
+      scalar_operand_m0(rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_scalar_operand_m0_4.succeeded());
   EXPECT_EQ(maybe_scalar_operand_m0_4.value(), cdna4::OPR_SDST_M0);
-  util::FailureOr<uint16_t> maybe_scalar_operand_m0_5 = scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA1);
+  util::FailureOr<uint16_t> maybe_scalar_operand_m0_5 =
+      scalar_operand_m0(rocjitsu::IsaFamily::Rdna1);
   ASSERT_TRUE(maybe_scalar_operand_m0_5.succeeded());
   EXPECT_EQ(maybe_scalar_operand_m0_5.value(), rdna1::OPR_SDST_M0);
-  util::FailureOr<uint16_t> maybe_scalar_operand_m0_6 = scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA2);
+  util::FailureOr<uint16_t> maybe_scalar_operand_m0_6 =
+      scalar_operand_m0(rocjitsu::IsaFamily::Rdna2);
   ASSERT_TRUE(maybe_scalar_operand_m0_6.succeeded());
   EXPECT_EQ(maybe_scalar_operand_m0_6.value(), rdna2::OPR_SDST_M0);
-  util::FailureOr<uint16_t> maybe_scalar_operand_m0_7 = scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA3);
+  util::FailureOr<uint16_t> maybe_scalar_operand_m0_7 =
+      scalar_operand_m0(rocjitsu::IsaFamily::Rdna3);
   ASSERT_TRUE(maybe_scalar_operand_m0_7.succeeded());
   EXPECT_EQ(maybe_scalar_operand_m0_7.value(), rdna3::OPR_SDST_M0);
   util::FailureOr<uint16_t> maybe_scalar_operand_m0_8 =
-      scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA3_5);
+      scalar_operand_m0(rocjitsu::IsaFamily::Rdna3_5);
   ASSERT_TRUE(maybe_scalar_operand_m0_8.succeeded());
   EXPECT_EQ(maybe_scalar_operand_m0_8.value(), rdna3_5::OPR_SDST_M0);
-  util::FailureOr<uint16_t> maybe_scalar_operand_m0_9 = scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA4);
+  util::FailureOr<uint16_t> maybe_scalar_operand_m0_9 =
+      scalar_operand_m0(rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_scalar_operand_m0_9.succeeded());
   EXPECT_EQ(maybe_scalar_operand_m0_9.value(), rdna4::OPR_SDST_M0);
   util::FailureOr<uint16_t> maybe_scalar_operand_m0_10 =
-      scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA5);
+      scalar_operand_m0(rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(maybe_scalar_operand_m0_10.succeeded());
   EXPECT_EQ(maybe_scalar_operand_m0_10.value(), cdna5::OPR_SDST_M0);
 
   // gfx9 / gfx10.x = 124; gfx11+ = 125.
   util::FailureOr<uint16_t> maybe_scalar_operand_m0_11 =
-      scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA4);
+      scalar_operand_m0(rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_scalar_operand_m0_11.succeeded());
   EXPECT_EQ(maybe_scalar_operand_m0_11.value(), 124);
   util::FailureOr<uint16_t> maybe_scalar_operand_m0_12 =
-      scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA2);
+      scalar_operand_m0(rocjitsu::IsaFamily::Rdna2);
   ASSERT_TRUE(maybe_scalar_operand_m0_12.succeeded());
   EXPECT_EQ(maybe_scalar_operand_m0_12.value(), 124);
   util::FailureOr<uint16_t> maybe_scalar_operand_m0_13 =
-      scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA4);
+      scalar_operand_m0(rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_scalar_operand_m0_13.succeeded());
   EXPECT_EQ(maybe_scalar_operand_m0_13.value(), 125);
   util::FailureOr<uint16_t> maybe_scalar_operand_m0_14 =
-      scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA5);
+      scalar_operand_m0(rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(maybe_scalar_operand_m0_14.succeeded());
   EXPECT_EQ(maybe_scalar_operand_m0_14.value(), 125);
 }

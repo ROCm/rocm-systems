@@ -17,7 +17,6 @@ Panel Config:
         ICache Hit Rate:
           value: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_REQ_sum)
           unit: Percent
-      cli_style: mem_chart
   - metric_table:
       id: 302
       title: Scalar Data Cache
@@ -35,7 +34,6 @@ Panel Config:
         DCache Load Bandwidth:
           value: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
-      cli_style: mem_chart
   - metric_table:
       id: 303
       title: GL0 Cache (Vector L0)
@@ -47,7 +45,6 @@ Panel Config:
         GL0 Hit Rate:
           value: 100 * SUM(TCP_REQ_sum - TCP_REQ_MISS_sum) / SUM(TCP_REQ_sum)
           unit: Percent
-      cli_style: mem_chart
   - metric_table:
       id: 304
       title: LDS (Local Data Share)
@@ -69,7 +66,6 @@ Panel Config:
           value: 4 * SUM(SQC_LDS_LOAD_DWORDS_sum + SQC_LDS_STORE_DWORDS_sum + SQC_LDS_ATOMIC_DWORDS_sum)
             / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
-      cli_style: mem_chart
   - metric_table:
       id: 308
       title: GL2 Cache (L2)
@@ -81,7 +77,6 @@ Panel Config:
         GL2 Hit Rate:
           value: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
           unit: Percent
-      cli_style: mem_chart
   - metric_table:
       id: 309
       title: L2 to Memory
@@ -102,7 +97,6 @@ Panel Config:
         Memory Write Bandwidth:
           value: 32 * SUM(GL2C_EA_WRREQ_DRAM_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
-      cli_style: mem_chart
   - metric_table:
       id: 310
       title: Workgroup Processors (WGPs)
@@ -129,7 +123,6 @@ Panel Config:
         Workgroups:
           value: AVG(Grid_Size / Workgroup_Size) / ($cu_per_gpu / 2)
           unit: Workgroups per WGP
-      cli_style: mem_chart
   metrics_description:
     ICache Requests: >-
       Instruction cache requests from the SQ, normalized by the chosen unit.

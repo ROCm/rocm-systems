@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 
@@ -49,7 +50,6 @@
 #include <limits>
 #include <memory>
 #include <span>
-#include <stdexcept>
 #include <string_view>
 
 namespace rocjitsu {
@@ -117,9 +117,9 @@ void InstructionComputeUnitView::update_shader_perf_level(uint32_t id, int chang
 void InstructionComputeUnitView::emit_shader_trace_data(uint32_t data) {
   const auto &notify = raw_cu().shader_trace_handler_;
   const bool has_enable =
-      arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2 ||
-      arch() == ROCJITSU_CODE_ARCH_CDNA1 || arch() == ROCJITSU_CODE_ARCH_CDNA2 ||
-      arch() == ROCJITSU_CODE_ARCH_CDNA3 || arch() == ROCJITSU_CODE_ARCH_CDNA4;
+      arch() == rocjitsu::IsaFamily::Rdna1 || arch() == rocjitsu::IsaFamily::Rdna2 ||
+      arch() == rocjitsu::IsaFamily::Cdna1 || arch() == rocjitsu::IsaFamily::Cdna2 ||
+      arch() == rocjitsu::IsaFamily::Cdna3 || arch() == rocjitsu::IsaFamily::Cdna4;
   if (notify && (!has_enable || (raw_wavefront().status_raw() & Wavefront::kStatusTraceEnableMask)))
     notify(raw_wavefront(), data);
 }
@@ -261,11 +261,11 @@ constexpr uint32_t kPrivilegedStatusBit = 1u << 5;
 
 bool has_setreg_vgpr_msb_fixup(const ComputeUnitCore::Config &config) {
   const IsaTargetRegistry &registry = default_isa_target_registry();
-  const IsaGpuTargetDescription *target = nullptr;
+  const IsaTargetBinding *target = nullptr;
   if (config.target != ROCJITSU_CODE_TARGET_INVALID) {
-    target = registry.find_gpu_target(config.target);
+    target = registry.find_target(config.target);
   } else if (const IsaTargetDescriptor *descriptor = registry.find(config.arch)) {
-    target = registry.find_default_gpu_target(*descriptor);
+    target = registry.find_default_target(*descriptor);
   }
   return target != nullptr && target->capabilities.setreg_vgpr_msb_fixup;
 }
@@ -293,6 +293,8 @@ std::string_view instruction_execution_error_name(InstructionExecutionError erro
     return "illegal instruction";
   case InstructionExecutionError::PluginFailure:
     return "plugin failure";
+  case InstructionExecutionError::GwsFailure:
+    return "GWS failure";
   }
   return "unknown instruction execution error";
 }
@@ -350,7 +352,7 @@ ComputeUnitCore::disassemble_instruction(std::span<const uint32_t> encoding, uin
 bool InstructionComputeUnitView::deliver_sendmsg(Wavefront &wf, uint32_t message) {
   if (raw_cu().handle_sendmsg(wf, message))
     return true;
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2)
     return true;
   // GFX10 SENDMSG IDs from the SOPP message table. An installed handler may
   // implement these operations for either a graphics queue or a compute trap.
@@ -502,29 +504,29 @@ static std::unique_ptr<ComputeUnitCore> create_functional_cu(std::string name,
 
 namespace {
 template <typename F>
-util::Result with_compute_unit_isa(rj_code_arch_t arch, F &&fn,
+util::Result with_compute_unit_isa(rocjitsu::IsaFamily arch, F &&fn,
                                    util::DiagnosticEmitter emit_error) {
   switch (arch) {
     // \NPI new ISA family: add its architecture-to-ISA mapping here.
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return fn.template operator()<cdna1::Isa>();
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return fn.template operator()<cdna2::Isa>();
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return fn.template operator()<cdna3::Isa>();
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return fn.template operator()<cdna4::Isa>();
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return fn.template operator()<rdna1::Isa>();
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return fn.template operator()<rdna2::Isa>();
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return fn.template operator()<rdna3::Isa>();
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return fn.template operator()<rdna3_5::Isa>();
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return fn.template operator()<rdna4::Isa>();
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return fn.template operator()<cdna5::Isa>();
   default:
     return emit_error.emit() << "Unsupported architecture for ComputeUnit";
@@ -536,10 +538,10 @@ util::Result ComputeUnitCore::validate(const Config &config, util::DiagnosticEmi
   if (config.target != ROCJITSU_CODE_TARGET_INVALID) {
     const IsaTargetRegistry &registry = default_isa_target_registry();
     const IsaTargetDescriptor *target_descriptor = registry.find(config.target);
-    const IsaGpuTargetDescription *target_binding = registry.find_gpu_target(config.target);
+    const IsaTargetBinding *target_binding = registry.find_target(config.target);
     if (target_descriptor == nullptr || target_binding == nullptr)
       return emit_error.emit() << "unsupported concrete GPU target";
-    if (target_descriptor->architecture_id != config.arch)
+    if (target_descriptor->family != config.arch)
       return emit_error.emit()
              << "concrete GPU target does not belong to the configured architecture";
     if (!target_descriptor->supports_execution ||
@@ -661,7 +663,7 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   wf->vgpr_write_mask_ = wf->lane_mask();
   wf->vcc_ = {};
   wf->scratch_base_ = {};
-  if (arch() == ROCJITSU_CODE_ARCH_CDNA3) {
+  if (arch() == rocjitsu::IsaFamily::Cdna3) {
     const uint32_t end = cdna3::sgpr_alias_end(num_sgprs);
     auto bind_pair = [&](Wavefront::SgprPair &pair, uint32_t first) {
       if (first < config_.sgprs_per_wf) {
@@ -678,7 +680,7 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   wf->set_scratch_scoreboard_id(scratch_scoreboard_base_ + wf_id);
   // Standalone dispatch supplies export storage and pre-populated GFX11 pixel
   // parameters. A graphics frontend may withhold either grant after dispatch.
-  const bool gfx11 = arch() == ROCJITSU_CODE_ARCH_RDNA3 || arch() == ROCJITSU_CODE_ARCH_RDNA3_5;
+  const bool gfx11 = arch() == rocjitsu::IsaFamily::Rdna3 || arch() == rocjitsu::IsaFamily::Rdna3_5;
   wf->set_status_raw((has_typed_export_waits(arch()) ? Wavefront::kStatusExportReadyMask : 0u) |
                      (gfx11 ? Wavefront::kStatusParamReadyMask : 0u));
   wf->flat_pointer32_ = flat_pointer32_;
@@ -841,7 +843,7 @@ void ComputeUnitCore::deliver_memory_trap(Wavefront &wave) {
 
 void ComputeUnitCore::enter_trap_handler(Wavefront &wave, const TrapHandlerConfig &config,
                                          uint32_t trap_id, uint64_t saved_pc) {
-  if (arch() == ROCJITSU_CODE_ARCH_CDNA2 && config_.memory_wait_checks_enabled()) {
+  if (arch() == rocjitsu::IsaFamily::Cdna2 && config_.memory_wait_checks_enabled()) {
     if (auto *scoreboard = wave.memory_wait_scoreboard())
       scoreboard->clear();
   }
@@ -960,10 +962,11 @@ void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome ou
   abort_dispatch(wf.dispatch_id());
 }
 
-void ComputeUnitCore::fail_gws_wait(Wavefront &wf, std::string_view reason) {
+void ComputeUnitCore::fail_gws_wait(Wavefront &wf, const char *reason) {
+  const uint64_t failure_pc = wf.state() == WfState::GWS_WAIT ? wf.gws_wait_pc_ : wf.pc;
   util::Logger::warn(reason, ": process=", wf.process_id(), " queue=", wf.queue_id(),
                      " dispatch=", wf.dispatch_id(), " cu=", name(), " wave=", wf.wf_id(),
-                     " resource=", wf.gws_wait_rid_, " pc=", std::format("{:#x}", wf.pc),
+                     " resource=", wf.gws_wait_rid_, " pc=", std::format("{:#x}", failure_pc),
                      " gws_wait_limit=", config_.gws_wait_limit);
   const uint32_t dispatch_id = wf.dispatch_id();
   const bool pm4_failed = wf.fail_pm4_submission();
@@ -975,13 +978,18 @@ void ComputeUnitCore::fail_gws_wait(Wavefront &wf, std::string_view reason) {
   }
   if (cp_ && engine())
     pending_execution_failures_.push_back({wf.queue_id(), wf.process_id(), std::string(reason)});
+  const InstructionExecutionError prior_error = wf.instruction_execution_error();
+  const char *prior_detail = wf.instruction_execution_error_detail();
   abort_dispatch(dispatch_id);
-  if (!cp_ || !engine()) {
-    if (engine())
-      engine()->request_exit(std::string(reason), 1);
-    else if (!pm4_failed)
-      throw std::runtime_error(std::string(reason));
-  }
+  // Cancellation resets the slot. Retain the failure on the original wave so
+  // standalone callers can inspect it until the slot is dispatched again.
+  wf.pc = failure_pc;
+  wf.report_instruction_execution_error(
+      prior_error == InstructionExecutionError::None ? InstructionExecutionError::GwsFailure
+                                                     : prior_error,
+      prior_error == InstructionExecutionError::None ? reason : prior_detail);
+  if (!cp_ && engine())
+    engine()->request_exit(std::string(reason), 1);
 }
 
 uint64_t InstructionComputeUnitView::trap_message_address(uint32_t message) const {
@@ -1007,7 +1015,7 @@ void ComputeUnitCore::wake_sleeping_workgroup(const Wavefront &issuer,
     return;
   // gfx1201 delivers a wake credit to its issuer as well as its peers. CDNA5
   // defines the other waves in the selected workgroup as recipients.
-  const bool wake_issuer = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool wake_issuer = arch() == rocjitsu::IsaFamily::Rdna4;
   const auto is_group_peer = [&](const auto &peer) {
     return peer && (peer.get() != &issuer || wake_issuer) && !peer->is_halted() &&
            peer->process_id() == issuer.process_id() && peer->queue_id() == issuer.queue_id() &&
@@ -1101,7 +1109,9 @@ void ComputeUnitCore::named_barrier_init(Wavefront &wf, int32_t barrier_id, uint
   auto &barrier = group->second.named[static_cast<uint32_t>(barrier_id)];
   if (member_count != 0)
     barrier.member_count = member_count & 0x7fu;
+  // Discarding the counted signals starts a new round.
   barrier.signal_count = 0;
+  ++barrier.generation;
 }
 
 void ComputeUnitCore::named_barrier_join(Wavefront &wf, int32_t barrier_id) {
@@ -1155,44 +1165,18 @@ bool ComputeUnitCore::barrier_signal(Wavefront &wf, int32_t barrier_id, uint32_t
     return false;
   const bool is_first = barrier->signal_count == 0;
   barrier->signal_count = std::min(barrier->signal_count + 1, 0x7fu);
+  plugin_group_->onAmdgpuBarrierSignaled(
+      wf, barrier_round(completion_bit, named_id, barrier->generation));
   if (barrier->signal_count < barrier->member_count)
     return is_first;
 
-  barrier->signal_count = 0;
-  auto members = complete_barrier(wf.dispatch_id(), wf.wg_id(), completion_bit, named_id);
-  notify_barrier_complete(members, completion_bit);
+  finish_barrier_round(*barrier, wf.dispatch_id(), wf.wg_id(), completion_bit, named_id);
   return is_first;
 }
 
-std::vector<Wavefront *> ComputeUnitCore::complete_barrier(uint32_t dispatch_id, uint32_t wg_id,
-                                                           uint8_t completion_bit,
-                                                           uint32_t named_barrier_id) {
-  std::vector<Wavefront *> members;
-  for (const auto &candidate : wfs_) {
-    if (!candidate || candidate->is_halted() || candidate->dispatch_id() != dispatch_id ||
-        candidate->wg_id() != wg_id)
-      continue;
-    if (completion_bit == kNamedBarrierBit && candidate->named_barrier_id_ != named_barrier_id)
-      continue;
-    candidate->barrier_complete_[completion_bit] = true;
-    members.push_back(candidate.get());
-  }
-  for (auto *member : members) {
-    if (member->state() == WfState::BARRIER && member->waiting_barrier_bit_ == completion_bit) {
-      member->barrier_complete_[completion_bit] = false;
-      member->waiting_barrier_bit_ = Wavefront::kNoBarrierWait;
-      member->set_state(WfState::RUNNING);
-      member->set_ready_cycle(cycle_counter_);
-    }
-  }
-  return members;
-}
-
-void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members,
-                                              uint8_t completion_bit) {
-  if (members.empty())
-    return;
-  BarrierKind kind;
+BarrierRound ComputeUnitCore::barrier_round(uint8_t completion_bit, uint32_t named_barrier_id,
+                                            uint64_t generation) {
+  BarrierKind kind = BarrierKind::Workgroup;
   switch (completion_bit) {
   case kNamedBarrierBit:
     kind = BarrierKind::Named;
@@ -1207,9 +1191,64 @@ void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members,
     break;
   default:
     assert(false && "unknown barrier completion bit");
-    return;
+    break;
   }
-  plugin_group_->onAmdgpuBarrierResolved(members, kind);
+  return {.kind = kind,
+          .completion_bit = completion_bit,
+          .named_id = kind == BarrierKind::Named ? named_barrier_id : 0,
+          .generation = generation};
+}
+
+ComputeUnitCore::BarrierCompletion
+ComputeUnitCore::complete_barrier(uint32_t dispatch_id, uint32_t wg_id, uint8_t completion_bit,
+                                  uint64_t generation, uint32_t named_barrier_id) {
+  BarrierCompletion completion;
+  for (const auto &candidate : wfs_) {
+    if (!candidate || candidate->is_halted() || candidate->dispatch_id() != dispatch_id ||
+        candidate->wg_id() != wg_id)
+      continue;
+    if (completion_bit == kNamedBarrierBit && candidate->named_barrier_id_ != named_barrier_id)
+      continue;
+    // The bit is a flag: a wave that has not yet waited on an earlier round
+    // keeps that round (CDNA5 ISA 5.6.1).
+    if (!candidate->barrier_complete_[completion_bit]) {
+      candidate->barrier_complete_generation_[completion_bit] = generation;
+      completion.armed.push_back(candidate.get());
+    }
+    candidate->barrier_complete_[completion_bit] = true;
+    completion.members.push_back(candidate.get());
+  }
+  for (auto *member : completion.members) {
+    if (member->state() == WfState::BARRIER && member->waiting_barrier_bit_ == completion_bit) {
+      member->barrier_complete_[completion_bit] = false;
+      member->waiting_barrier_bit_ = Wavefront::kNoBarrierWait;
+      member->set_state(WfState::RUNNING);
+      member->set_ready_cycle(cycle_counter_);
+      completion.woken.push_back(member);
+    }
+  }
+  return completion;
+}
+
+void ComputeUnitCore::notify_barrier_complete(ExecutionPluginGroup &plugins,
+                                              BarrierCompletion &completion,
+                                              const BarrierRound &round) {
+  if (completion.members.empty())
+    return;
+  plugins.onAmdgpuBarrierRoundResolved(completion.members, completion.armed, round);
+  for (auto *member : completion.woken)
+    plugins.onAmdgpuBarrierWaitPassed(*member, round);
+}
+
+void ComputeUnitCore::finish_barrier_round(BarrierCounter &barrier, uint32_t dispatch_id,
+                                           uint32_t wg_id, uint8_t completion_bit,
+                                           uint32_t named_barrier_id) {
+  barrier.signal_count = 0;
+  const BarrierRound round = barrier_round(completion_bit, named_barrier_id, barrier.generation);
+  ++barrier.generation;
+  BarrierCompletion completion =
+      complete_barrier(dispatch_id, wg_id, completion_bit, round.generation, named_barrier_id);
+  notify_barrier_complete(*plugin_group_, completion, round);
 }
 
 uint32_t ComputeUnitCore::barrier_state(const Wavefront &wf, int32_t barrier_id) const {
@@ -1263,6 +1302,11 @@ void ComputeUnitCore::barrier_wait(Wavefront &wf, int32_t barrier_id) {
 
   if (wf.barrier_complete_[completion_bit]) {
     wf.barrier_complete_[completion_bit] = false;
+    // The joined named barrier is the one that set the named bit: joining or
+    // leaving clears it.
+    plugin_group_->onAmdgpuBarrierWaitPassed(
+        wf, barrier_round(completion_bit, wf.named_barrier_id_,
+                          wf.barrier_complete_generation_[completion_bit]));
     return;
   }
   wf.waiting_barrier_bit_ = completion_bit;
@@ -1286,11 +1330,8 @@ bool ComputeUnitCore::named_barrier_leave(Wavefront &wf) {
   auto &barrier = group->second.named[id];
   if (barrier.member_count != 0)
     --barrier.member_count;
-  if (barrier.signal_count >= barrier.member_count) {
-    barrier.signal_count = 0;
-    auto members = complete_barrier(wf.dispatch_id(), wf.wg_id(), kNamedBarrierBit, id);
-    notify_barrier_complete(members, kNamedBarrierBit);
-  }
+  if (barrier.signal_count >= barrier.member_count)
+    finish_barrier_round(barrier, wf.dispatch_id(), wf.wg_id(), kNamedBarrierBit, id);
   return barrier.member_count == 0;
 }
 
@@ -1339,9 +1380,7 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
       --barrier.member_count;
       if (barrier.member_count == 0 || barrier.signal_count < barrier.member_count)
         return;
-      barrier.signal_count = 0;
-      auto members = complete_barrier(dispatch_id, wg_id, completion_bit, joined_id);
-      notify_barrier_complete(members, completion_bit);
+      finish_barrier_round(barrier, dispatch_id, wg_id, completion_bit, joined_id);
     };
 
     retire_member(group->second.workgroup[0], kWorkgroupBarrierBit);
@@ -1602,7 +1641,7 @@ bool ComputeUnitCore::nullify_unallocated_memory_result(Instruction &inst, const
   uint32_t words = d.destination_vgpr_count() + d.buffer_tfe;
   // On GFX12 the VBUFFER status register still participates in allocation
   // when the data fits exactly. LDS and FLAT have no such encoded status.
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 &&
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna4 &&
       d.dst_reg_base + words == allocation.base + allocation.count) {
     RegisterModifiers modifiers;
     inst.amdgpu_register_modifiers(modifiers);
@@ -1636,35 +1675,35 @@ void ComputeUnitCore::qualify_cdna4_memory_destination(Instruction &inst, const 
   }
 }
 
-VmAccessOutcome ComputeUnitCore::route_memory_inst(std::unique_ptr<Instruction> &&inst,
+VmAccessOutcome ComputeUnitCore::route_memory_inst(std::unique_ptr<Instruction> &inst,
                                                    Wavefront &wf, uint64_t deferred_gds_sources) {
-  if (arch() == ROCJITSU_CODE_ARCH_CDNA4)
+  if (arch() == rocjitsu::IsaFamily::Cdna4)
     qualify_cdna4_memory_destination(*inst, wf);
-  if (arch() == ROCJITSU_CODE_ARCH_RDNA3 || arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch() == rocjitsu::IsaFamily::Rdna3 || arch() == rocjitsu::IsaFamily::Rdna3_5)
     qualify_gfx11_memory(*inst, wf);
-  if (arch() == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() == rocjitsu::IsaFamily::Rdna4)
     nullify_unallocated_memory_result(*inst, wf);
-  return route_prepared_memory_inst(std::move(inst), wf, deferred_gds_sources);
+  return route_prepared_memory_inst(inst, wf, deferred_gds_sources);
 }
 
 // Only gfx1250 partitions the shared aperture into local and distributed LDS.
-static bool flat_offset_is_dds(rj_code_arch_t arch, uint64_t offset) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA5 && (offset & (uint64_t{1} << 31));
+static bool flat_offset_is_dds(rocjitsu::IsaFamily arch, uint64_t offset) {
+  return arch == rocjitsu::IsaFamily::Cdna5 && (offset & (uint64_t{1} << 31));
 }
 
 // FLAT-to-LDS atomic alignment faults the whole wave before global translation.
 // GFX1250's distributed shared segment has a distinct atomic path.
-static bool flat_shared_atomic_misaligned(rj_code_arch_t arch, const VectorMemState &state,
+static bool flat_shared_atomic_misaligned(rocjitsu::IsaFamily arch, const VectorMemState &state,
                                           uint64_t shared_offset) {
   const bool checks_alignment =
-      arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-      arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-      (arch == ROCJITSU_CODE_ARCH_CDNA5 && !flat_offset_is_dds(arch, shared_offset));
+      arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+      arch == rocjitsu::IsaFamily::Rdna4 ||
+      (arch == rocjitsu::IsaFamily::Cdna5 && !flat_offset_is_dds(arch, shared_offset));
   return checks_alignment && state.atomic_op != AtomicOp::NONE && state.elem_size &&
          shared_offset % state.elem_size != 0;
 }
 
-VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Instruction> &&inst,
+VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Instruction> &inst,
                                                             Wavefront &wf,
                                                             uint64_t deferred_gds_sources) {
   if (observes_memory_instruction_routing_)
@@ -1683,8 +1722,8 @@ VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Inst
       wf.use_wave_apertures() ? wf.shared_aperture_base() : shared_aperture_base_;
   const uint64_t shared_limit =
       wf.use_wave_apertures() ? wf.shared_aperture_limit() : shared_aperture_limit_;
-  if (inst->data()->tag() == GLOBAL_MEM && inst->mnemonic().starts_with("flat_") &&
-      shared_base != 0) {
+  if (inst->data()->tag() == GLOBAL_MEM &&
+      inst->amdgpu_memory_addressing() == MemoryAddressing::Flat && shared_base != 0) {
     auto &d = *inst->data_as<VectorMemState>();
     // The wavefront is the authority on its own width. VectorMemState::wf_size
     // is set by whoever built the state, and the DS paths leave it at its
@@ -1727,19 +1766,19 @@ VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Inst
           uint64_t offset = d.per_lane_addr[lane] - shared_base;
           // RDNA4 FLAT uses unsigned 17-bit LDS address math. Keep the
           // workgroup LDS base outside that wrapping calculation.
-          if (arch() == ROCJITSU_CODE_ARCH_RDNA4)
+          if (arch() == rocjitsu::IsaFamily::Rdna4)
             offset &= 0x1FFFFu;
           if (d.flat_local_allocation_end &&
               (offset >= wf.lds_size() || d.elem_size > wf.lds_size() - offset))
             d.flat_local_oob_lane_mask |= (uint64_t{1} << lane) & request_lanes;
-          if (arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2) {
+          if (arch() == rocjitsu::IsaFamily::Rdna1 || arch() == rocjitsu::IsaFamily::Rdna2) {
             const uint64_t bytes = uint64_t{d.elem_size} * d.num_elems;
             if (!util::is_range_in_bounds(offset, bytes, wf.lds_size()))
               d.flat_local_oob_lane_mask |= (uint64_t{1} << lane) & request_lanes;
           }
           d.per_lane_addr[lane] = offset + wf.lds_base();
           const bool gfx11 =
-              arch() == ROCJITSU_CODE_ARCH_RDNA3 || arch() == ROCJITSU_CODE_ARCH_RDNA3_5;
+              arch() == rocjitsu::IsaFamily::Rdna3 || arch() == rocjitsu::IsaFamily::Rdna3_5;
           if ((d.flat_local_lane_mask & (uint64_t{1} << lane)) &&
               flat_shared_atomic_misaligned(arch(), d, offset))
             d.ds_memviol = true;
@@ -1753,7 +1792,7 @@ VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Inst
                 d.lds_allocation->retained_bytes(d.per_lane_addr[lane], bytes, d.elem_size);
             if (retained == 0)
               d.flat_local_oob_lane_mask |= uint64_t{1} << lane;
-            if (arch() == ROCJITSU_CODE_ARCH_CDNA2 && retained < bytes)
+            if (arch() == rocjitsu::IsaFamily::Cdna2 && retained < bytes)
               d.flat_memory_violation = true;
           }
         }
@@ -1775,7 +1814,8 @@ VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Inst
     }
   }
 
-  if (decoded_route_tag == GLOBAL_MEM && inst->mnemonic().starts_with("flat_")) {
+  if (decoded_route_tag == GLOBAL_MEM &&
+      inst->amdgpu_memory_addressing() == MemoryAddressing::Flat) {
     auto &d = *inst->data_as<VectorMemState>();
     if (const auto *issue = inst->amdgpu_memory_issue_info()) {
       const uint64_t requests = transpose_request_lane_mask(d, wf.wf_size());
@@ -1785,14 +1825,14 @@ VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Inst
       else {
         // A clipped CDNA2 private lane still returns zero on the VMEM completion bus.
         const bool vmem =
-            (requests & ~shared) || (arch() == ROCJITSU_CODE_ARCH_CDNA2 && d.scratch_lane_mask);
+            (requests & ~shared) || (arch() == rocjitsu::IsaFamily::Cdna2 && d.scratch_lane_mask);
         d.routed_issue_info = issue->for_flat_memory_domains(vmem, shared != 0);
       }
     }
   }
 
   const uint8_t route_tag = inst->data()->tag();
-  if (route_tag == LOCAL_MEM && arch() == ROCJITSU_CODE_ARCH_RDNA2 &&
+  if (route_tag == LOCAL_MEM && arch() == rocjitsu::IsaFamily::Rdna2 &&
       (deferred_gds_sources || observe_routed_access) &&
       (wf.mode_raw() & Wavefront::kRdna2MemoryViolationEnable)) {
     auto &data = *inst->data_as<VectorMemState>();
@@ -1825,12 +1865,13 @@ VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Inst
 
   switch (route_tag) {
   case SCALAR_MEM:
-    return scalar_mem_pipeline_.issue_deferred(inst.release(), wf, observe_routed_access);
+    return scalar_mem_pipeline_.issue_deferred(inst, wf, observe_routed_access);
   case LOCAL_MEM:
-    return local_mem_pipeline_.issue_deferred(inst.release(), wf, observe_routed_access);
+    return local_mem_pipeline_.issue_deferred(inst, wf, observe_routed_access);
   case GLOBAL_MEM:
-    return global_mem_pipeline_.issue_deferred(inst.release(), wf, observe_routed_access);
+    return global_mem_pipeline_.issue_deferred(inst, wf, observe_routed_access);
   default:
+    inst.reset();
     return VmAccessOutcome::Malformed;
   }
 }
@@ -2001,8 +2042,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
                            ? wf.memory_exec(inst)
                            : (wf.wf_size() == 64 ? ~uint64_t{0} : uint64_t{0xffffffff});
       uint64_t issue_lanes = lanes;
-      if (!scalar &&
-          (config_.arch == ROCJITSU_CODE_ARCH_RDNA2 || (inst.flags() & CONDITIONAL_MEMORY_LANES))) {
+      if (!scalar && (config_.arch == rocjitsu::IsaFamily::Rdna2 ||
+                      (inst.flags() & CONDITIONAL_MEMORY_LANES))) {
         const auto masks = MemoryWaitScoreboard::memory_lanes(inst, wf);
         issue_lanes = masks.issue;
         lanes = masks.result;
@@ -2081,7 +2122,7 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
 
   // Source checks precede this pure FLAT domain calculation. Resolve admission,
   // overwrite ordering and result readiness before execution.
-  const bool flat = inst.mnemonic().starts_with("flat_");
+  const bool flat = inst.amdgpu_memory_addressing() == MemoryAddressing::Flat;
   const auto planned_flat =
       flat ? MemoryWaitScoreboard::flat_lanes(
                  inst, wf,
@@ -2203,8 +2244,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
   // destination on two counters; those entries are not writes racing each other.
   const bool flat_result = defs != classified.end() && defs->kind == WaitEventKind::FlatLoad;
   const bool dual_flat_result = flat_result && flat_requires_both_counters(config_.arch);
-  const bool gfx10_flat_result = flat_result && (config_.arch == ROCJITSU_CODE_ARCH_RDNA1 ||
-                                                 config_.arch == ROCJITSU_CODE_ARCH_RDNA2);
+  const bool gfx10_flat_result = flat_result && (config_.arch == rocjitsu::IsaFamily::Rdna1 ||
+                                                 config_.arch == rocjitsu::IsaFamily::Rdna2);
   const auto vmem_write_order = !gfx10_flat_result && has_ordered_vmem_writeback(config_.arch) &&
                                         defs != classified.end() &&
                                         defs->counter == WaitCounterKind::Load
@@ -2317,8 +2358,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
     if (config_.memory_wait_diagnostics == MemoryWaitDiagnostics::Off)
       continue;
     if (lock_gds_sources) {
-      if (config_.arch == ROCJITSU_CODE_ARCH_RDNA2 && deferred_gds_sources && inst.is_memory_op() &&
-          (wf.mode_raw() & Wavefront::kRdna2MemoryViolationEnable))
+      if (config_.arch == rocjitsu::IsaFamily::Rdna2 && deferred_gds_sources &&
+          inst.is_memory_op() && (wf.mode_raw() & Wavefront::kRdna2MemoryViolationEnable))
         *deferred_gds_sources = sequence;
       else
         this->lock_gds_sources(inst, wf, sequence);
@@ -2381,24 +2422,31 @@ static_assert(static_cast<uint8_t>(MemoryRoute::LOCAL) == LOCAL_MEM);
 
 namespace {
 
-DecodedMemorySpace decoded_memory_space(std::string_view mnemonic, uint8_t decoded_route_tag) {
-  // Canonical AMDGPU mnemonics carry the encoding family. Keep this decision
-  // separate from the route tag: FLAT and explicit SCRATCH both initially use
-  // the global pipeline, but a plugin must be able to tell them apart.
-  if (mnemonic.starts_with("flat_"))
+DecodedMemorySpace decoded_memory_space(const Instruction &inst, uint8_t decoded_route_tag) {
+  // The decoded addressing family stays unchanged when FLAT is routed to LDS.
+  switch (inst.amdgpu_memory_addressing()) {
+  case MemoryAddressing::Flat:
     return DecodedMemorySpace::FLAT;
-  if (mnemonic.starts_with("scratch_") || mnemonic.starts_with("s_scratch_"))
+  case MemoryAddressing::Scratch:
     return DecodedMemorySpace::SCRATCH;
-  if (mnemonic.starts_with("ds_"))
+  case MemoryAddressing::Lds:
+  case MemoryAddressing::Gds:
+  case MemoryAddressing::DirectLds:
     return DecodedMemorySpace::LOCAL;
-  if (mnemonic.starts_with("global_") || mnemonic.starts_with("buffer_") ||
-      mnemonic.starts_with("tbuffer_") || mnemonic.starts_with("image_"))
-    return DecodedMemorySpace::GLOBAL;
-  if (mnemonic.starts_with("s_"))
+  case MemoryAddressing::Global:
+  case MemoryAddressing::Buffer:
+  case MemoryAddressing::TypedBuffer:
+  case MemoryAddressing::Image:
+    return (inst.flags() & SMEM) ? DecodedMemorySpace::SCALAR : DecodedMemorySpace::GLOBAL;
+  case MemoryAddressing::Scalar:
     return DecodedMemorySpace::SCALAR;
+  case MemoryAddressing::Tensor:
+  case MemoryAddressing::Cluster:
+  case MemoryAddressing::None:
+    break;
+  }
 
-  // Synthetic instructions and future families still get the least-specific
-  // fact routing already knew before it made any changes.
+  // Synthetic instructions may supply only their established pipeline route.
   switch (decoded_route_tag) {
   case SCALAR_MEM:
     return DecodedMemorySpace::SCALAR;
@@ -2423,6 +2471,8 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
   std::array<uint64_t, 16> scalar_element_masks;
   MemoryAccessObservation access;
   access.mnemonic = inst.mnemonic();
+  access.operation = inst.amdgpu_operation();
+  access.addressing = inst.amdgpu_memory_addressing();
   access.pc = wf.pc;
   access.compute_unit_id = id();
   access.dispatch_id = wf.dispatch_id();
@@ -2430,7 +2480,7 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
   access.workgroup_id = wf.wg_id();
   access.wavefront_id = wf.wf_id();
   access.process_id = wf.process_id();
-  access.decoded_space = decoded_memory_space(inst.mnemonic(), decoded_route_tag);
+  access.decoded_space = decoded_memory_space(inst, decoded_route_tag);
   access.normalized_to_local = normalized_to_local;
   access.pre_routing_addresses = pre_routing_addresses;
 
@@ -2516,7 +2566,7 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
       if (access.flat_local_lane_mask)
         access.flat_local_allocation_end = access.lds_allocation->end;
     }
-    if (decoded_route_tag == LOCAL_MEM && arch() == ROCJITSU_CODE_ARCH_CDNA4 &&
+    if (decoded_route_tag == LOCAL_MEM && arch() == rocjitsu::IsaFamily::Cdna4 &&
         access.lds_allocation) {
       const uint32_t bytes = state.num_elems * state.elem_size;
       const auto suppressed = [&](const auto &addresses, uint64_t lanes) {
@@ -2582,7 +2632,7 @@ void ComputeUnitCore::update_wf_states() {
       continue;
     // A debugger resume can release HALT, but FATAL_HALT blocks issue even in
     // privileged mode until the host clears the architectural cause.
-    if (arch() == ROCJITSU_CODE_ARCH_RDNA3_5 && (wf->status_raw() & (1u << 23)) &&
+    if (arch() == rocjitsu::IsaFamily::Rdna3_5 && (wf->status_raw() & (1u << 23)) &&
         !wf->is_halted() && !wf->debug_halted())
       wf->set_debug_halted(true);
     if (wf->state() == WfState::EXPORT_WAIT || wf->state() == WfState::PARAM_WAIT) {
@@ -2623,16 +2673,27 @@ void ComputeUnitCore::update_wf_states() {
       }
     }
     if (all_at_barrier) {
-      std::vector<Wavefront *> barrier_wfs;
+      BarrierCompletion completion;
       for (uint32_t other = 0; other < active_slot_limit_; ++other) {
         auto &other_wf = wfs_[other];
         if (other_wf && other_wf->dispatch_id() == did && other_wf->wg_id() == wg &&
             other_wf->state() == WfState::BARRIER &&
             other_wf->waiting_barrier_bit_ == Wavefront::kNoBarrierWait)
-          barrier_wfs.push_back(other_wf.get());
+          completion.members.push_back(other_wf.get());
       }
-      notify_barrier_complete(barrier_wfs, kWorkgroupBarrierBit);
-      for (auto *bwf : barrier_wfs) {
+      // A single-instruction barrier is a split barrier whose signal and wait
+      // coincide: every member signals, the round completes, and every member
+      // passes its wait.
+      completion.armed = completion.members;
+      completion.woken = completion.members;
+      auto group = barrier_wgs_.find(wg_key(did, wg));
+      const uint64_t generation =
+          group == barrier_wgs_.end() ? 0 : group->second.workgroup[0].generation++;
+      const BarrierRound round = barrier_round(kWorkgroupBarrierBit, 0, generation);
+      for (auto *bwf : completion.members)
+        plugin_group_->onAmdgpuBarrierSignaled(*bwf, round);
+      notify_barrier_complete(*plugin_group_, completion, round);
+      for (auto *bwf : completion.members) {
         bwf->set_state(WfState::RUNNING);
         bwf->set_ready_cycle(cycle_counter_);
       }
@@ -2717,6 +2778,21 @@ void AsyncInstructionWindow::materialize() {
   materialized_ = true;
 }
 
+void AsyncInstructionWindow::check_errors() {
+  const std::optional<AsyncInstructionQueue::Failure> failure =
+      arithmetic_ ? arithmetic_->take_error() : std::nullopt;
+  if (!failure)
+    return;
+  stopped_ = true;
+  // Finish every accepted job before reporting the first failed ticket and
+  // releasing wave storage. Further failures must not replace its guest PC.
+  arithmetic_->drain();
+  (void)arithmetic_->take_error();
+  cu_.fail_wave_instruction(wf_, std::format("asynchronous {}", failure->mnemonic), failure->pc,
+                            InstructionExecutionError::MissingExecutionBackend,
+                            "MMA helper unavailable after fork");
+}
+
 void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCache *admission,
                                               uint32_t wave_size, bool has_accvgprs) {
   // CDNA4 MFMA and the default gfx1250 allowlist have cheap encoding filters.
@@ -2751,42 +2827,18 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
   AsyncInstructionWindowStorage storage;
   storage.admission = admission;
   storage.has_accvgprs = has_accvgprs;
-  try {
-    unsigned issued = 0;
-    do {
-      issue_instruction_impl<true>(active, storage.window ? &*storage.window : nullptr, &storage);
-      if (!storage.window) {
-        if (active->is_halted())
-          async_execution::stats.flush();
-        return;
-      }
-      storage.window->poll();
-    } while (++issued < async_execution::issue_limit() && storage.window->pending() &&
-             !storage.window->stopped() && active->state() == WfState::RUNNING);
-    storage.window->drain();
-  } catch (const util::UnimplementedInst &error) {
-    // Helper threads execute the same guest callbacks as the inline path. Join
-    // the remaining jobs before translating an unsupported guest combination
-    // into the wave-owned execution failure used by synchronous execution.
-    if (storage.window)
-      storage.window->abandon();
-    active->report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
-    const std::string instruction =
-        storage.window && !storage.window->failed_mnemonic().empty()
-            ? std::format("asynchronous {}", storage.window->failed_mnemonic())
-            : std::string("asynchronous instruction");
-    const uint64_t failure_pc = storage.window && !storage.window->failed_mnemonic().empty()
-                                    ? storage.window->failed_pc()
-                                    : active->pc;
-    fail_wave_instruction(*active, instruction, failure_pc, active->instruction_execution_error(),
-                          error.what());
-    async_execution::stats.flush();
-    return;
-  } catch (...) {
-    if (storage.window)
-      storage.window->abandon();
-    throw;
-  }
+  unsigned issued = 0;
+  do {
+    issue_instruction_impl<true>(active, storage.window ? &*storage.window : nullptr, &storage);
+    if (!storage.window) {
+      if (active->is_halted())
+        async_execution::stats.flush();
+      return;
+    }
+    storage.window->poll();
+  } while (++issued < async_execution::issue_limit() && storage.window->pending() &&
+           !storage.window->stopped() && active->state() == WfState::RUNNING);
+  storage.window->drain();
   if (active->is_halted())
     async_execution::stats.flush();
 }
@@ -2936,7 +2988,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   constexpr uint32_t kMimgEncodingAndNsaMask = 0xfc000006u;
   constexpr uint32_t kMimgWithThreeNsaWords = 0xf0000006u;
   if (fetch_outcome == VmAccessOutcome::Complete &&
-      (arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2) &&
+      (arch() == rocjitsu::IsaFamily::Rdna1 || arch() == rocjitsu::IsaFamily::Rdna2) &&
       (words[0] & kMimgEncodingAndNsaMask) == kMimgWithThreeNsaWords)
     fetch_outcome = fetch(fetch_pc + kFirstFetchBytes, &words.back(), sizeof(words.back()));
 
@@ -3018,11 +3070,11 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   active->begin_instruction_execution();
 
   const bool gfx10 =
-      config_.arch == ROCJITSU_CODE_ARCH_RDNA1 || config_.arch == ROCJITSU_CODE_ARCH_RDNA2;
+      config_.arch == rocjitsu::IsaFamily::Rdna1 || config_.arch == rocjitsu::IsaFamily::Rdna2;
   const bool code_end =
-      (gfx10 || config_.arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-       config_.arch == ROCJITSU_CODE_ARCH_RDNA3_5 || config_.arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-       config_.arch == ROCJITSU_CODE_ARCH_CDNA5) &&
+      (gfx10 || config_.arch == rocjitsu::IsaFamily::Rdna3 ||
+       config_.arch == rocjitsu::IsaFamily::Rdna3_5 || config_.arch == rocjitsu::IsaFamily::Rdna4 ||
+       config_.arch == rocjitsu::IsaFamily::Cdna5) &&
       inst->mnemonic() == "s_code_end";
   const bool software_trap = inst->flags() & SOFTWARE_TRAP;
   const auto trap_config =
@@ -3075,7 +3127,8 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   }
   // Pixel parameters become available when the graphics stage sets LDS_PARAM_RDY.
   // Park before recording an issue or reading M0 so the load can retry cleanly.
-  if ((config_.arch == ROCJITSU_CODE_ARCH_RDNA3 || config_.arch == ROCJITSU_CODE_ARCH_RDNA3_5) &&
+  if ((config_.arch == rocjitsu::IsaFamily::Rdna3 ||
+       config_.arch == rocjitsu::IsaFamily::Rdna3_5) &&
       !active->parameters_ready() && active->exec() != 0 &&
       (inst->mnemonic() == "lds_direct_load" || inst->mnemonic() == "lds_param_load")) {
     active->set_state(WfState::PARAM_WAIT);
@@ -3085,7 +3138,8 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   // VINTERP consumes its operands only after WAIT_EXP is satisfied. Park on
   // the instruction itself so a late LDS parameter return is visible on retry.
   if (inst->has_embedded_memory_wait() &&
-      (config_.arch == ROCJITSU_CODE_ARCH_RDNA3 || config_.arch == ROCJITSU_CODE_ARCH_RDNA3_5) &&
+      (config_.arch == rocjitsu::IsaFamily::Rdna3 ||
+       config_.arch == rocjitsu::IsaFamily::Rdna3_5) &&
       active->wait_counters().expcnt) {
     const auto threshold = waitcheck_detail::WaitcheckTarget::vinterp_wait_exp(*inst);
     if (threshold && active->wait_counters().expcnt > *threshold) {
@@ -3108,7 +3162,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     // modulo threshold is available. The read itself can have a dependency.
     if (!inst->is_waitcnt() &&
         (inst->has_embedded_memory_wait() || inst->is_memory_wait_producer() ||
-         (config_.arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+         (config_.arch == rocjitsu::IsaFamily::Cdna5 &&
           waitcheck_detail::WaitcheckTarget::is_xcnt_drain(*inst))))
       wait_state->before(*inst, config_.arch);
     wait_state->bind(active->pc, active, &ComputeUnitCore::report_memory_wait);
@@ -3129,7 +3183,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       may_submit = false;
       if (admission)
         ++admission->stats.issuer;
-    } else if (admission && matrix_coexecution::async_candidate(inst->mnemonic())) {
+    } else if (admission && matrix_coexecution::async_candidate(*inst)) {
       // Capacity can become available between this check and submit_mma().
       // Skipping lookahead must keep this instruction inline in that case.
       may_submit = false;
@@ -3141,11 +3195,13 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
         may_submit = issuer.has_value();
       }
     }
-    if (may_submit && !window && storage && matrix_coexecution::async_candidate(inst->mnemonic()) &&
+    if (may_submit && !window && storage && matrix_coexecution::async_candidate(*inst) &&
         async_pool().available())
       window = &storage->window.emplace(*this, *active, storage->has_accvgprs);
     if (window) {
       window->before(*inst);
+      if (active->is_halted())
+        return IssueOutcome::NotIssued;
       if (wait_state && !check_prepared_memory) {
         wait_state->check_instruction(*inst, *active);
         wait_checked = true;
@@ -3295,9 +3351,9 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     return IssueOutcome::Issued;
 
   if (!gfx10 && (inst->flags() & (INDIRECT_BRANCH | INDIRECT_CALL))) {
-    auto mn = std::string_view(inst->mnemonic());
-    if (mn.find("s_setpc") != std::string_view::npos ||
-        mn.find("s_swappc") != std::string_view::npos) {
+    const Operation operation = inst->amdgpu_operation();
+    if (operation == Operation::S_SETPC_B64 || operation == Operation::S_SWAPPC_B64 ||
+        operation == Operation::S_SET_PC_I64 || operation == Operation::S_SWAP_PC_I64) {
       const Operand *target_operand = inst->src_operand(0);
       assert(target_operand && "indirect PC instruction must have a target operand");
       uint64_t target = RegisterAccess(*active).read_scalar64(*target_operand);
@@ -3328,7 +3384,14 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     track_memory_wait(*inst, *active, &deferred_gds_sources);
 
   if (execution_result.failed()) [[unlikely]] {
-    fail_current_instruction();
+    // GWS rejection already cancels the dispatch and publishes its failure.
+    // Its retained error belongs to the halted slot, whose identity was reset.
+    if (active->is_halted()) {
+      execution_failure_detail_.clear();
+      return_decoded.discard();
+    } else {
+      fail_current_instruction();
+    }
     return IssueOutcome::Issued;
   }
 
@@ -3605,10 +3668,11 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       // A memory execute path can intentionally reject an invalid complete
       // register operand before constructing pipeline state. Treat that as a
       // fully suppressed instruction: no route callback, wait-counter update,
-      // or memory transaction is permitted.
+      // or memory transaction is permitted. Retain the decode for ScopedReturn,
+      // including warm LDS-direct entries whose EXEC mask is zero and whose
+      // prior dynamic state is retired.
       if (deferred_gds_sources)
         lock_gds_sources(*inst, *active, deferred_gds_sources);
-      decoded.value().reset();
     } else {
       if (inst->data()->tag() == GLOBAL_MEM) {
         auto *d = inst->data_as<VectorMemState>();
@@ -3618,7 +3682,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
         d->issue_pc = active->pc;
       }
       const VmAccessOutcome memory_outcome =
-          route_prepared_memory_inst(std::move(decoded.value()), *active, deferred_gds_sources);
+          route_prepared_memory_inst(decoded.value(), *active, deferred_gds_sources);
       if (active->instruction_execution_failed()) [[unlikely]] {
         fail_current_instruction();
         return IssueOutcome::Issued;
@@ -3638,6 +3702,8 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
         handle_memory_access_failure(*active, memory_outcome, issue_pc);
         return IssueOutcome::Issued;
       }
+      if (decoded.succeeded())
+        decoded.value()->retire_data();
       if (active->state() == WfState::MEMORY_TRAP) {
         active->pc += inst_size;
         deliver_memory_trap(*active);

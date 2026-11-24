@@ -5,6 +5,7 @@
 /// @brief Wave64 MFMA register-snapshot paths against the forced-scalar reference.
 
 #include "mma_exact_test_support.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
 
@@ -49,7 +50,7 @@ struct Shape {
 void expect_matches_scalar(
     const char *label, const Shape &shape, Overlap overlap, bool cross_chunks, uint32_t seed,
     const std::function<void(ExactFixture &, uint32_t, uint32_t, uint32_t, uint32_t)> &kernel) {
-  ExactFixture fixture(ROCJITSU_CODE_ARCH_CDNA4, WF_SIZE);
+  ExactFixture fixture(rocjitsu::IsaFamily::Cdna4, WF_SIZE);
   ASSERT_NE(fixture.wf, nullptr);
   const uint32_t offset = cross_chunks ? MfmaLazyStorage::registers_per_chunk() - 1 : 0;
   const uint32_t source_a = kSourceA + offset;
@@ -198,7 +199,7 @@ TEST(MfmaRegisterPathsTest, SparseOutputLayoutMatchesScalar) {
 TEST(MfmaRegisterPathsTest, OperandsCrossingTheAllocationEndMatchScalar) {
   SKIP_IF_NO_SIMD();
   ForceScalarGuard guard;
-  ExactFixture fx(ROCJITSU_CODE_ARCH_CDNA4, WF_SIZE);
+  ExactFixture fx(rocjitsu::IsaFamily::Cdna4, WF_SIZE);
   ASSERT_NE(fx.wf, nullptr);
   const uint32_t end = fx.cu->vgpr_allocation_block_size();
   ASSERT_GE(end, 48u);
@@ -234,7 +235,7 @@ TEST(MfmaRegisterPathsTest, I8AccumulationWrapsOnBothPaths) {
   ForceScalarGuard guard;
   for (bool force_scalar : {true, false}) {
     SCOPED_TRACE(force_scalar);
-    ExactFixture fx(ROCJITSU_CODE_ARCH_CDNA4, WF_SIZE);
+    ExactFixture fx(rocjitsu::IsaFamily::Cdna4, WF_SIZE);
     ASSERT_NE(fx.wf, nullptr);
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       fx.cu->write_vgpr(fx.vbase + kSourceA, lane, 0x01010101u);

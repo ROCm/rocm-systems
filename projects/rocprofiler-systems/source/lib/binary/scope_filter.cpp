@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "scope_filter.hpp"
-#include "core/exception.hpp"
+#include <stdexcept>
 
 #include <regex>
 
@@ -23,6 +23,6 @@ scope_filter::operator()(std::string_view _value) const
                    ? false
                    : !std::regex_search(_value.data(), std::regex{ expression });
     }
-    throw exception<std::runtime_error>{ "invalid scope filter mode" };
+    throw std::runtime_error{ "invalid scope filter mode" };
 }
 }  // namespace rocprofsys::binary

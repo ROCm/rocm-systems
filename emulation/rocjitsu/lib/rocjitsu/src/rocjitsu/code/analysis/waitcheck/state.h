@@ -51,6 +51,7 @@
 
 #include "rocjitsu/code/analysis/waitcheck/target.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <array>
 #include <bitset>
@@ -314,7 +315,8 @@ struct WaitcheckStateOps : WaitcheckTarget {
 
   static void apply_wait(PendingState &state, WaitCounterKind counter, uint32_t count);
 
-  static util::Result apply_kmcnt_wait(PendingState &state, uint32_t count, rj_code_arch_t arch);
+  static util::Result apply_kmcnt_wait(PendingState &state, uint32_t count,
+                                       rocjitsu::IsaFamily arch);
 
   static void apply_implied_vm_vsrc_wait(PendingState &state, WaitCounterKind counter,
                                          uint32_t count);
@@ -344,20 +346,21 @@ struct WaitcheckStateOps : WaitcheckTarget {
 
   [[nodiscard]] static bool flat_memory_makes_counter_out_of_order(const PendingState &state,
                                                                    WaitCounterKind counter,
-                                                                   rj_code_arch_t arch);
+                                                                   rocjitsu::IsaFamily arch);
 
-  [[nodiscard]] static util::FailureOr<bool>
-  counter_out_of_order(const PendingState &state, WaitCounterKind counter, rj_code_arch_t arch);
+  [[nodiscard]] static util::FailureOr<bool> counter_out_of_order(const PendingState &state,
+                                                                  WaitCounterKind counter,
+                                                                  rocjitsu::IsaFamily arch);
 
   static util::Result apply_counter_wait(PendingState &state, WaitCounterKind counter,
-                                         uint32_t count, rj_code_arch_t arch);
+                                         uint32_t count, rocjitsu::IsaFamily arch);
 
   [[nodiscard]] static util::FailureOr<uint32_t>
   dependency_required_count(const PendingState &state, const PendingEvent &event,
-                            rj_code_arch_t arch);
+                            rocjitsu::IsaFamily arch);
 
   static util::Result apply_memory_wait(PendingState &state, WaitCounterKind counter,
-                                        uint32_t count, rj_code_arch_t arch);
+                                        uint32_t count, rocjitsu::IsaFamily arch);
 
   static void clear_salu_sgpr_hazards(SgprHazardState &state);
 
@@ -373,13 +376,13 @@ struct WaitcheckStateOps : WaitcheckTarget {
   static void apply_sgpr_hazard_wait(SgprHazardState &state, uint32_t depctr);
 
   static util::Result apply_wait_fields(PendingState &state, const WaitFields &fields,
-                                        rj_code_arch_t arch);
+                                        rocjitsu::IsaFamily arch);
 
   static util::Result apply_embedded_waitcnt(PendingState &state, const Instruction &inst,
-                                             rj_code_arch_t arch);
+                                             rocjitsu::IsaFamily arch);
 
   static util::Result apply_waitcnt(PendingState &state, const Instruction &inst,
-                                    rj_code_arch_t arch);
+                                    rocjitsu::IsaFamily arch);
 
 private:
   // Counter facets of one static operation can track different registers and

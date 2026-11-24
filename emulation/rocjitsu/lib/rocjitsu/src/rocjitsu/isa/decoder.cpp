@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
@@ -16,11 +17,11 @@ std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry,
   const IsaTargetDescriptor *target = registry.find(target_id);
   if (target == nullptr)
     return nullptr;
-  const IsaGpuTargetDescription *binding = registry.find_gpu_target_by_code_object_id(target_id);
+  const IsaTargetBinding *binding = registry.find_target(target_id);
   if (binding != nullptr && target->variant_decoder_factory != nullptr)
     return target->variant_decoder_factory(*binding);
   if (target->variant_decoder_factory != nullptr) {
-    binding = registry.find_default_gpu_target(*target);
+    binding = registry.find_default_target(*target);
     return binding == nullptr ? nullptr : target->variant_decoder_factory(*binding);
   }
   return target->decoder_factory();
@@ -29,20 +30,21 @@ std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry,
 std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry,
                                          rj_code_target_id_t target_id) {
   const IsaTargetDescriptor *target = registry.find(target_id);
-  const IsaGpuTargetDescription *binding = registry.find_gpu_target(target_id);
+  const IsaTargetBinding *binding = registry.find_target(target_id);
   if (target == nullptr || binding == nullptr)
     return nullptr;
   return target->variant_decoder_factory == nullptr ? target->decoder_factory()
                                                     : target->variant_decoder_factory(*binding);
 }
 
-std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry, rj_code_arch_t arch) {
+std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry,
+                                         rocjitsu::IsaFamily arch) {
   const IsaTargetDescriptor *target = registry.find(arch);
   if (target == nullptr)
     return nullptr;
   if (target->variant_decoder_factory == nullptr)
     return target->decoder_factory();
-  const IsaGpuTargetDescription *binding = registry.find_default_gpu_target(*target);
+  const IsaTargetBinding *binding = registry.find_default_target(*target);
   return binding == nullptr ? nullptr : target->variant_decoder_factory(*binding);
 }
 

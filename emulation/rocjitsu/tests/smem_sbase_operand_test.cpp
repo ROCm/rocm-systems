@@ -31,6 +31,7 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/register_set.h"
 
@@ -78,7 +79,7 @@ constexpr std::array<uint32_t, 2> kRdna4SBufferLoadB128 = {
     /*lo=*/(2u & 0x3Fu) | (18u << 13) /*op*/ | (0x3Du << 26) /*encoding*/, /*hi=*/0u};
 
 struct SmemCase {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   const char *label; ///< Unique test-instance name.
   std::array<uint32_t, 2> word;
   const char *mnemonic;
@@ -124,24 +125,24 @@ INSTANTIATE_TEST_SUITE_P(
     SmemFamilies, SmemSbaseOperandTest,
     ::testing::Values(
         // 64-bit scalar loads across 10 ISAs (SBASE width 2).
-        SmemCase{ROCJITSU_CODE_ARCH_CDNA1, "cdna1", kCdnaSLoadDwordx2, "s_load_dwordx2", 2},
-        SmemCase{ROCJITSU_CODE_ARCH_CDNA2, "cdna2", kCdnaSLoadDwordx2, "s_load_dwordx2", 2},
-        SmemCase{ROCJITSU_CODE_ARCH_CDNA3, "cdna3", kCdnaSLoadDwordx2, "s_load_dwordx2", 2},
-        SmemCase{ROCJITSU_CODE_ARCH_CDNA4, "cdna4", kCdnaSLoadDwordx2, "s_load_dwordx2", 2},
-        SmemCase{ROCJITSU_CODE_ARCH_RDNA1, "rdna1", kRdnaGfx1011SLoad64, "s_load_dwordx2", 2},
-        SmemCase{ROCJITSU_CODE_ARCH_RDNA2, "rdna2", kRdnaGfx1011SLoad64, "s_load_dwordx2", 2},
-        SmemCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3", kRdnaGfx1011SLoad64, "s_load_b64", 2},
-        SmemCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", kRdnaGfx1011SLoad64, "s_load_b64", 2},
-        SmemCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4", kGfx12SLoadB64, "s_load_b64", 2},
-        SmemCase{ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", kGfx12SLoadB64, "s_load_b64", 2},
+        SmemCase{rocjitsu::IsaFamily::Cdna1, "cdna1", kCdnaSLoadDwordx2, "s_load_dwordx2", 2},
+        SmemCase{rocjitsu::IsaFamily::Cdna2, "cdna2", kCdnaSLoadDwordx2, "s_load_dwordx2", 2},
+        SmemCase{rocjitsu::IsaFamily::Cdna3, "cdna3", kCdnaSLoadDwordx2, "s_load_dwordx2", 2},
+        SmemCase{rocjitsu::IsaFamily::Cdna4, "cdna4", kCdnaSLoadDwordx2, "s_load_dwordx2", 2},
+        SmemCase{rocjitsu::IsaFamily::Rdna1, "rdna1", kRdnaGfx1011SLoad64, "s_load_dwordx2", 2},
+        SmemCase{rocjitsu::IsaFamily::Rdna2, "rdna2", kRdnaGfx1011SLoad64, "s_load_dwordx2", 2},
+        SmemCase{rocjitsu::IsaFamily::Rdna3, "rdna3", kRdnaGfx1011SLoad64, "s_load_b64", 2},
+        SmemCase{rocjitsu::IsaFamily::Rdna3_5, "rdna3_5", kRdnaGfx1011SLoad64, "s_load_b64", 2},
+        SmemCase{rocjitsu::IsaFamily::Rdna4, "rdna4", kGfx12SLoadB64, "s_load_b64", 2},
+        SmemCase{rocjitsu::IsaFamily::Cdna5, "gfx1250", kGfx12SLoadB64, "s_load_b64", 2},
         // 128-bit buffer-descriptor SBASE (width 4) -> s[4:7], both naming forms.
-        SmemCase{ROCJITSU_CODE_ARCH_CDNA4, "cdna4_buffer_load_x4", kCdnaSBufferLoadDwordx4,
+        SmemCase{rocjitsu::IsaFamily::Cdna4, "cdna4_buffer_load_x4", kCdnaSBufferLoadDwordx4,
                  "s_buffer_load_dwordx4", 4},
-        SmemCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4_buffer_load_b128", kRdna4SBufferLoadB128,
+        SmemCase{rocjitsu::IsaFamily::Rdna4, "rdna4_buffer_load_b128", kRdna4SBufferLoadB128,
                  "s_buffer_load_b128", 4},
         // Store family: SBASE is not the first source (sdata precedes it).
-        SmemCase{ROCJITSU_CODE_ARCH_CDNA4, "cdna4_store_x2", kCdnaSStoreDwordx2, "s_store_dwordx2",
-                 2}),
+        SmemCase{rocjitsu::IsaFamily::Cdna4, "cdna4_store_x2", kCdnaSStoreDwordx2,
+                 "s_store_dwordx2", 2}),
     [](const ::testing::TestParamInfo<SmemCase> &info) { return std::string(info.param.label); });
 
 } // namespace

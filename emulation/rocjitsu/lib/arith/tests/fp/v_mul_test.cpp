@@ -518,3 +518,28 @@ TEST(FpMulF32Gfx12, CompatibilityDppWave64Causes) {
     }
   }
 }
+
+// Neither strict mode borrows another target's qualification.
+TEST(FpMulF32Gfx1250, NumericAndFpStatusQualification) {
+  for (auto cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    uint32_t a[64] = {0x7f800123}, b[64] = {0x3f800000}, out[64] = {};
+    const uint32_t *x = a, *y = b;
+    uint32_t *d = out;
+    for (auto semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
+                           RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+      const uint64_t flags = cpu | semantics;
+      const int expected = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+                               ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS
+                               : RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+      for (bool wave64 : {false, true}) {
+        uint32_t status = 0x80;
+        out[0] = 0xdeadbeef;
+        const int error = wave64 ? rj_arith_v_mul_f32_w64_gfx1250(flags, 1, 0, &d, &x, &y, &status)
+                                 : rj_arith_v_mul_f32_w32_gfx1250(flags, 1, 0, &d, &x, &y, &status);
+        EXPECT_EQ(error, expected);
+        EXPECT_EQ(out[0], 0xdeadbeefU);
+        EXPECT_EQ(status, 0x80U);
+      }
+    }
+  }
+}

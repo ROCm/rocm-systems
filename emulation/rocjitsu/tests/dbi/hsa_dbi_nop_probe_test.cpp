@@ -25,6 +25,7 @@
 ///     present.
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/isa/isa_family.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include <hsa/hsa.h>
@@ -96,11 +97,11 @@ bool decodes_mnemonic_within(Decoder &decoder, std::span<const uint8_t> text, ui
   return false;
 }
 
-constexpr DbiTargetParams kCdna2Params{ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_TARGET_GFX90A,
+constexpr DbiTargetParams kCdna2Params{rocjitsu::IsaFamily::Cdna2, ROCJITSU_CODE_TARGET_GFX90A,
                                        "vector_add_probe_gfx90a", "rj_nop_probe_gfx90a", "gfx90a"};
-constexpr DbiTargetParams kCdna4Params{ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950,
+constexpr DbiTargetParams kCdna4Params{rocjitsu::IsaFamily::Cdna4, ROCJITSU_CODE_TARGET_GFX950,
                                        "vector_add_probe_gfx950", "rj_nop_probe_gfx950", "gfx950"};
-constexpr DbiTargetParams kRdna4Params{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201,
+constexpr DbiTargetParams kRdna4Params{rocjitsu::IsaFamily::Rdna4, ROCJITSU_CODE_TARGET_GFX1201,
                                        "vector_add_probe_gfx1201", "rj_nop_probe_gfx1201",
                                        "gfx1201"};
 

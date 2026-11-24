@@ -33,7 +33,19 @@ using namespace std;
 static bool
 fastpathFallbackEligibleErrno(int err)
 {
-    return err == ENODEV || err == EREMOTEIO;
+    // ENOTTY: the KFD does not implement the AIS ioctl.
+    return err == ENODEV || err == EREMOTEIO || err == ENOTTY;
+}
+
+// Stop trying the fastpath for the rest of the process if the error means it
+// can never succeed.
+static void
+maybeDisableFastpath(int err)
+{
+    // ENOTTY: the GPU driver has no AIS ioctl.
+    if (err == ENOTTY) {
+        Context<Configuration>::get()->fastpath(false);
+    }
 }
 
 /* The fastpath backend is used when:
@@ -70,6 +82,8 @@ fastpathFallbackEligibleErrno(int err)
  *      - returns
  *          - hipErrorInvalidDevice if unable to lookup current device
  *          - hipErrorUnknown if rocr runtime does not return success
+ *      - On ROCm >= 10.3 (HIP 7.18), a failure also sets the thread's last HIP
+ *        error (see hipGetLastError())
  *  - ROCR Runtime (userspace)
  *      - repository: rocm-systems
  *      - file: projects/clr/rocclr/device/rocm/rocdevice.cpp
@@ -93,7 +107,11 @@ fastpathFallbackEligibleErrno(int err)
  *      - functions: hsaKmtAisReadWriteFile(...),
  *      - If the buffer pointer, and io_size combination are invalid, return HSAKMT_STATUS_INVALID_PARAMETER
  *          - converts buffer pointer + io_size to a buffer handle (no alignment check)
- *      - size_copied and status are untouched
+ *      - size_copied and status are untouched if the call fails before the ioctl
+ *      - otherwise, size_copied and status are set from the ioctl
+ *          - if the ioctl fails before the AIS handler runs (e.g. ENOTTY when the
+ *            KFD does not implement the AIS ioctl), status is set to -errno and
+ *            size_copied to 0
  *      - returns
  *          - HSAKMT_STATUS_INVALID_PARAMETER if
  *              - the buffer pointer + size combination are invalid
@@ -221,6 +239,11 @@ Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buff
                 throw std::runtime_error("Invalid IoType");
         }
     }
+    catch (const std::system_error &e) {
+        Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size, buffer->getGpuId());
+        maybeDisableFastpath(e.code().value());
+        throw;
+    }
     catch (...) {
         Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size, buffer->getGpuId());
         throw;
@@ -279,10 +302,26 @@ Fastpath::is_fallback_eligible(std::exception_ptr e_ptr, ssize_t nbytes) const
     catch (const std::system_error &sys_err) {
         return fastpathFallbackEligibleErrno(sys_err.code().value());
     }
+    catch (const BackendDisabled &) {
+        // Configuration::fastpath() can change while an IO is in flight, e.g.
+        // another thread hit ENOTTY after score() accepted this IO. Any check
+        // of it after score() that finds it off must end in a fallback
+        // eligible exception.
+        return true;
+    }
     catch (...) {
         // Thrown exception not eligible for fallback.
         return false;
     }
+}
+
+void
+Fastpath::on_fallback() const
+{
+    // Clear the HIP error set by a failed hipAmdFile{Read,Write}
+    // If the fallback backend successfully completes IO, we don't want a set
+    // HIP Runtime Error left around.
+    (void)Context<Hip>::get()->hipGetLastError();
 }
 
 extern "C" {

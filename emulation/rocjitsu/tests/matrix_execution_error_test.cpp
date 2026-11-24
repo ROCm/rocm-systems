@@ -12,6 +12,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3p.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -31,11 +32,11 @@ using namespace rocjitsu;
 
 class MatrixExecutionErrorTest : public ::testing::Test {
 protected:
-  void initialize(rj_code_arch_t arch, uint32_t wave_size = 0) {
+  void initialize(rocjitsu::IsaFamily arch, uint32_t wave_size = 0) {
     amdgpu::ComputeUnitCore::Config config{};
     config.arch = arch;
     config.num_wf_slots = 1;
-    config.sgprs_per_wf = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 102 : 106;
+    config.sgprs_per_wf = arch == rocjitsu::IsaFamily::Cdna4 ? 102 : 106;
     config.vgprs_per_wf = 128;
     config.lds_size_kb = 64;
     cu = amdgpu::ComputeUnitCore::create("matrix_error_cu", config, &memory, &l2);
@@ -86,7 +87,7 @@ protected:
 };
 
 TEST_F(MatrixExecutionErrorTest, PackedConversionsRejectRequiredSourcesBeforeWriting) {
-  ASSERT_NO_FATAL_FAILURE(initialize(ROCJITSU_CODE_ARCH_CDNA4));
+  ASSERT_NO_FATAL_FAILURE(initialize(rocjitsu::IsaFamily::Cdna4));
   ScopedIsaExecutionBackend backend(&cdna4::execution_backend());
   const auto sr_words = cdna4::build_vop3(cdna4::kVCvtScalef32SrPkFp4F32Vop3,
                                           {.vdst = 64, .src0 = 128, .src1 = 128, .src2 = 128});
@@ -111,7 +112,7 @@ TEST_F(MatrixExecutionErrorTest, PackedConversionsRejectRequiredSourcesBeforeWri
 }
 
 TEST_F(MatrixExecutionErrorTest, SparseMatrixRejectsRequiredOperandsBeforeWriting) {
-  ASSERT_NO_FATAL_FAILURE(initialize(ROCJITSU_CODE_ARCH_CDNA5));
+  ASSERT_NO_FATAL_FAILURE(initialize(rocjitsu::IsaFamily::Cdna5));
   ScopedIsaExecutionBackend backend(&cdna5::execution_backend());
   const auto words = cdna5::build_vop3p(cdna5::kVSwmmacF3216x16x64F16Vop3p,
                                         {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 304});
@@ -131,9 +132,9 @@ TEST_F(MatrixExecutionErrorTest, SparseMatrixRejectsRequiredOperandsBeforeWritin
 }
 
 TEST_F(MatrixExecutionErrorTest, MfmaFormatsFailWithoutCommittingResults) {
-  ASSERT_NO_FATAL_FAILURE(initialize(ROCJITSU_CODE_ARCH_CDNA4));
+  ASSERT_NO_FATAL_FAILURE(initialize(rocjitsu::IsaFamily::Cdna4));
   ScopedIsaExecutionBackend backend(&cdna4::execution_backend());
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   for (const auto formats : {std::array{5u, 4u}, std::array{4u, 7u}}) {
     SCOPED_TRACE(::testing::PrintToString(formats));
     const auto dense_words =
@@ -155,9 +156,9 @@ TEST_F(MatrixExecutionErrorTest, MfmaFormatsFailWithoutCommittingResults) {
 }
 
 TEST_F(MatrixExecutionErrorTest, WmmaFormatsAndScaleFormatsFailBeforeWriting) {
-  ASSERT_NO_FATAL_FAILURE(initialize(ROCJITSU_CODE_ARCH_CDNA5));
+  ASSERT_NO_FATAL_FAILURE(initialize(rocjitsu::IsaFamily::Cdna5));
   ScopedIsaExecutionBackend backend(&cdna5::execution_backend());
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   for (const auto formats : {std::array{5u, 4u}, std::array{4u, 7u}}) {
     SCOPED_TRACE(::testing::PrintToString(formats));
     const auto words = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
@@ -202,8 +203,8 @@ TEST_F(MatrixExecutionErrorTest, WmmaFormatsAndScaleFormatsFailBeforeWriting) {
 }
 
 TEST_F(MatrixExecutionErrorTest, MixedMatricesDistinguishInlineMinusOneFromRegisterC) {
-  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
-    const bool mfma = arch == ROCJITSU_CODE_ARCH_CDNA4;
+  for (const auto arch : {rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5}) {
+    const bool mfma = arch == rocjitsu::IsaFamily::Cdna4;
     ScopedIsaExecutionBackend backend(mfma ? &cdna4::execution_backend()
                                            : &cdna5::execution_backend());
     ASSERT_NO_FATAL_FAILURE(initialize(arch));

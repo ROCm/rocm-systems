@@ -3,6 +3,7 @@
 
 #include "execution_fuzz_core.h"
 #include "generated_kernel.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
@@ -45,11 +46,12 @@ std::optional<uint64_t> find_generated_kernel_seed(FuzzTarget target, uint64_t s
 TEST(ExecutionFuzzTargetTest, NamesCoverEveryExecutionTarget) {
   constexpr std::array<std::string_view, static_cast<size_t>(FuzzTarget::Count)> expected = {
       "gfx908",  "gfx90a",  "gfx942",  "gfx950",  "gfx1010", "gfx1030",
-      "gfx1100", "gfx1151", "gfx1200", "gfx1201", "gfx1250", "gfx1251"};
+      "gfx1100", "gfx1150", "gfx1200", "gfx1201", "gfx1250", "gfx1251"};
   for (uint8_t index = 0; index < static_cast<uint8_t>(FuzzTarget::Count); ++index) {
     const FuzzTarget target = *indexed_target(index);
     EXPECT_EQ(target_name(target), expected[index]);
     EXPECT_EQ(parse_target(expected[index]), target);
+    EXPECT_NE(target_id(target), ROCJITSU_CODE_TARGET_INVALID);
   }
   EXPECT_FALSE(parse_target("unknown"));
   EXPECT_TRUE(targets_cover_amdgpu_execution_registry());
@@ -139,7 +141,7 @@ TEST(ExecutionFuzzInputTest, GeneratedKernelBranchTargetsAndMemoryWaits) {
   for (uint8_t index = 0; index < static_cast<uint8_t>(FuzzTarget::Count); ++index) {
     const FuzzTarget target = *indexed_target(index);
     SCOPED_TRACE(target_name(target));
-    const rj_code_arch_t arch = target_arch(target);
+    const rocjitsu::IsaFamily arch = target_arch(target);
     const amdgpu::WaitcntModel wait_model = amdgpu::waitcnt_model(arch).value();
     std::unique_ptr<Decoder> decoder = Decoder::create(arch);
     ASSERT_TRUE(decoder);

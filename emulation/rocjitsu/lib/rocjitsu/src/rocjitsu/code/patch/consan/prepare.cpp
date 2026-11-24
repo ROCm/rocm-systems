@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/patch/consan/prepare.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
@@ -187,9 +188,11 @@ FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error
     if (mapping == output.sites.end() || mapping->guest_size != 4)
       return reject(error, "callable DBI lowering omitted a barrier completion mapping");
     BarrierFacts facts = barrier;
-    // The signal stays in original text; the wait moves into its AfterInst
-    // trampoline. Keep both mappings instead of assuming adjacency survives.
-    facts.prepared_signal = barrier.original_signal;
+    // Split signals stay in original text. A legacy barrier both signals and
+    // waits, so its two facts refer to the same relocated guest instruction.
+    facts.prepared_signal = barrier.original_signal == barrier.original_wait
+                                ? mapping->guest_offset
+                                : barrier.original_signal;
     facts.prepared_wait = mapping->guest_offset;
     facts.completion_probe = mapping->instrumentation_offset;
     facts.probe_size = mapping->instrumentation_size;
@@ -210,7 +213,7 @@ Result validate_prepared(std::span<const uint8_t> original, const PreparedArtifa
   if (verify_artifact_images(artifact.manifest, original, artifact.image, &contract_error).failed())
     return reject(error, contract_error.message);
   const TargetProfile *target = target_profile(artifact.manifest.target);
-  const rj_code_arch_t arch = target->arch;
+  const rocjitsu::IsaFamily arch = target->arch;
   const FailureOr<InputProgram> program =
       build_input_program(original, *target, artifact.manifest.entry.name, error);
   if (program.failed())
