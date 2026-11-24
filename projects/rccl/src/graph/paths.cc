@@ -613,8 +613,9 @@ ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* system, int rank, int64_t n
   }
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   // An integrated GPU sits on the root complex and its memory is system memory, so every NIC is at least PHB away
-  // and there is no peer PCIe traffic for the PXB limit to avoid.
-  if (gpu->gpu.integrated) netGdrLevel = std::max(netGdrLevel, (int)PATH_PHB);
+  // and there is no peer PCIe traffic for the PXB limit to avoid. Limited to gfx117x; other APUs (gfx1151,
+  // MI300A) keep PXB until GDR is validated on them, and NCCL_NET_GDR_LEVEL=PHB opts them in.
+  if (gpu->gpu.integrated && IsArchMatch(gpu->gpu.gcn, "gfx117")) netGdrLevel = std::max(netGdrLevel, (int)PATH_PHB);
 #endif
   if (system->netGdrLevel != -2) netGdrLevel = system->netGdrLevel;
   NCCLCHECK(ncclGetLevel(&ncclTopoUserGdrLevel, NULL, "NCCL_NET_GDR_LEVEL"));

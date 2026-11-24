@@ -661,6 +661,23 @@ TEST_F(PathsGdrMicrotest, CheckGdr_IntegratedGpuAllowsPhb) {
   EXPECT_EQ(ncclTopoGdrModeDisable, Gdr(0, 0));
 }
 
+// Other integrated GPUs keep the PXB default until GDR is validated on them.
+TEST_F(PathsGdrMicrotest, CheckGdr_IntegratedGpuOtherThanGfx117xKeepsPxb) {
+  std::string nic = NicPci(NicBus(0), Net("a", 0));
+  for (char const* arch : {"gfx1151", "gfx942"}) {
+    SCOPED_TRACE(arch);
+    Use(BuildWithPaths(System(Cpu(0, GpuPci(GpuBus(0), 0, 0, "", "integrated=\"1\"", arch) + nic))));
+    EXPECT_EQ(1, system_->nodes[GPU].nodes[0].gpu.integrated);
+    EXPECT_EQ(PATH_PHB, system_->nodes[GPU].nodes[0].paths[NET][0].type);
+    EXPECT_EQ(ncclTopoGdrModeDisable, Gdr(0, 0));
+  }
+
+  Use(BuildWithPaths(System(Cpu(0, GpuPci(GpuBus(0), 0, 0, "", "integrated=\"1\"", "gfx1151") + nic))));
+  RcclUnitTesting::ScopedEnv gdrLevel("NCCL_NET_GDR_LEVEL", "PHB");
+  ncclTopoUserGdrLevel = -1;
+  EXPECT_EQ(ncclTopoGdrModeDefault, Gdr(0, 0));
+}
+
 TEST_F(PathsGdrMicrotest, CheckGdr_IntegratedGpuStillStopsAtSysAndFollowsTheUserLevel) {
   Use(BuildWithPaths(System(Cpu(0, GpuPci(GpuBus(0), 0, 0, "", "integrated=\"1\"", "gfx1170")) +
                             Cpu(1, NicPci(NicBus(0), Net("a", 0))))));
