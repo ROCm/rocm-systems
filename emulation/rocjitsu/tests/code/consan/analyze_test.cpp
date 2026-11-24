@@ -10,6 +10,11 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <fcntl.h>
+#include <filesystem>
+#include <fstream>
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace rocjitsu::consan {
 namespace {
@@ -1776,6 +1781,27 @@ TEST_F(ConSanAnalysis, UnmodeledScopeCannotBeTreatedAsConfirmedUnorderedAccesses
   EXPECT_EQ(error_.message(), "empty image or unsupported target, ABI, scope or options");
 }
 
+TEST_F(ConSanAnalysis, ApplicationTransportAnalyzesLdsWithoutClaimingSignalForwarding) {
+  access(0, 0, 1);
+  access(1, 1, 1);
+  const FailureOr<LdsRaceResult> controlled = analyze();
+  ASSERT_TRUE(controlled.succeeded()) << error_.message();
+  ASSERT_EQ(controlled.value().cross_wave_pairs, 1u);
+  capture_.header.execution_conditions = capture_execution_conditions(ExecutionMode::Application);
+  // A changed header cannot relabel evidence from a different transport.
+  EXPECT_TRUE(analyze_typed(capture_, {}, error_.emitter()).failed());
+  EXPECT_TRUE(encode().failed());
+  capture_.executions.front().completion = completion_evidence(ExecutionMode::Application);
+  const FailureOr<LdsRaceResult> application = analyze();
+  ASSERT_TRUE(application.succeeded()) << error_.message();
+  EXPECT_EQ(application.value().execution_conditions, kApplicationExecutionConditions);
+  EXPECT_EQ(application.value().cross_wave_pairs, controlled.value().cross_wave_pairs);
+  EXPECT_EQ(application.value().coverage_complete, controlled.value().coverage_complete);
+  capture_.header.execution_conditions = capture_execution_conditions(ExecutionMode::Controlled);
+  EXPECT_TRUE(analyze_typed(capture_, {}, error_.emitter()).failed());
+  EXPECT_TRUE(encode().failed());
+}
+
 TEST_F(ConSanAnalysis, TypedHeaderConditionsAndIdentityCannotBypassFileValidation) {
   const CaptureHeader saved = capture_.header;
   for (const uint32_t unsupported : {0u, 14u, 13u, 11u, 7u, 31u}) {
@@ -2470,6 +2496,110 @@ TEST_F(ConSanAnalysis, SecondSelectedEntryContributesDualAndTransposeMetadata) {
   ASSERT_EQ(result.value().executions.size(), 1u);
   EXPECT_EQ(result.value().executions.front().entry_key, second.entry.original_descriptor_offset);
   EXPECT_EQ(result.value().executions.front().valid_observations, 2u);
+}
+
+#if defined(CONSAN_ANALYZER_FIXTURE)
+TEST_F(ConSanAnalysis, FreshCliDistinguishesAbsentExecutionsFromZeroObservationAnalysis) {
+  std::string pattern = (std::filesystem::temp_directory_path() / "consan-lds-cli-XXXXXX").string();
+  std::vector<char> temporary(pattern.begin(), pattern.end());
+  temporary.push_back(0);
+  ASSERT_NE(::mkdtemp(temporary.data()), nullptr);
+  const std::filesystem::path directory = temporary.data();
+  const std::filesystem::path capture_path = directory / "capture.bin";
+  const std::filesystem::path output_path = directory / "analysis.json";
+  const auto execute = [&](std::string_view performed, bool covered) {
+    const FailureOr<std::vector<uint8_t>> encoded = encode();
+    ASSERT_TRUE(encoded.succeeded()) << error_.message();
+    std::ofstream file(capture_path, std::ios::binary);
+    file.write(reinterpret_cast<const char *>(encoded.value().data()), encoded.value().size());
+    file.close();
+    ASSERT_TRUE(file);
+    const pid_t child = ::fork();
+    ASSERT_GE(child, 0);
+    if (child == 0) {
+      const int output = ::open(output_path.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0600);
+      if (output < 0 || ::dup2(output, STDOUT_FILENO) < 0 || ::chdir(directory.c_str()) != 0)
+        std::_Exit(90);
+      ::close(output);
+      ::execl(CONSAN_ANALYZER_FIXTURE, CONSAN_ANALYZER_FIXTURE, "capture.bin", nullptr);
+      std::_Exit(91);
+    }
+    int status = 0;
+    ASSERT_EQ(::waitpid(child, &status, 0), child);
+    ASSERT_TRUE(WIFEXITED(status));
+    EXPECT_EQ(WEXITSTATUS(status), 0);
+    std::ifstream output(output_path);
+    const std::string rendered{std::istreambuf_iterator<char>(output),
+                               std::istreambuf_iterator<char>()};
+    EXPECT_NE(rendered.find(std::string("\"lds_analysis\":\"") + std::string(performed) + "\""),
+              std::string::npos);
+    EXPECT_NE(rendered.find(std::string("\"provided_entry_coverage_complete\":") +
+                            (covered ? "true" : "false")),
+              std::string::npos);
+    if (covered)
+      EXPECT_NE(rendered.find("\"valid_observations\":0"), std::string::npos);
+    else
+      EXPECT_NE(rendered.find("\"executions\":[]"), std::string::npos);
+  };
+  // An executed dispatch with no committed LDS observations still ran analysis.
+  execute("performed", true);
+  capture_.executions.clear();
+  execute("not_performed", false);
+  std::filesystem::remove_all(directory);
+}
+#endif
+
+TEST_F(ConSanAnalysis, NativeNoProbesProofClosesInventoryGapWithoutInventingAnExecution) {
+  ImageEntryFacts native;
+  native.key = 192;
+  native.original_sgprs = 16;
+  native.original_vgprs = 8;
+  native.binding = {.name = "no_lds_native",
+                    .original_descriptor_offset = 192,
+                    .prepared_descriptor_offset = 864,
+                    .original_entry_offset = 96,
+                    .prepared_entry_offset = 640,
+                    .original_kernarg_bytes = 16,
+                    .kernarg_alignment = 8,
+                    .prepared_sgprs = 16,
+                    .prepared_vgprs = 8};
+  native.native_code = {{.original_offset = 96, .prepared_offset = 640, .bytes = 4}};
+  capture_.header.image.entries.push_back(native);
+  const FailureOr<LdsRaceResult> uncovered = analyze();
+  ASSERT_TRUE(uncovered.succeeded()) << error_.message();
+  EXPECT_TRUE(uncovered.value().coverage_complete);
+  EXPECT_FALSE(uncovered.value().provided_entry_coverage_complete);
+
+  NoProbesNeededProof proof = {.instruction_count = 1, .code_bytes = 4};
+  proof.code_sha256[0] = 1;
+  capture_.header.image.entries.back().no_probes_needed = proof;
+  const FailureOr<LdsRaceResult> covered = analyze();
+  ASSERT_TRUE(covered.succeeded()) << error_.message();
+  EXPECT_TRUE(covered.value().coverage_complete);
+  EXPECT_TRUE(covered.value().provided_entry_coverage_complete);
+  EXPECT_EQ(covered.value().executions.size(), 1u);
+  EXPECT_EQ(covered.value().entries.back().no_probes_needed, proof);
+  const std::string rendered = render_analysis(covered.value());
+  EXPECT_NE(rendered.find("\"disposition\":\"no_probes_needed\""), std::string::npos);
+  EXPECT_NE(rendered.find("\"provided_entry_coverage_complete\":true"), std::string::npos);
+
+  capture_.executions.clear();
+  const FailureOr<LdsRaceResult> absent = analyze();
+  ASSERT_TRUE(absent.succeeded()) << error_.message();
+  EXPECT_FALSE(absent.value().coverage_complete);
+  EXPECT_FALSE(absent.value().provided_entry_coverage_complete);
+  EXPECT_TRUE(absent.value().executions.empty());
+}
+
+TEST_F(ConSanAnalysis, UnexecutedSelectedSiblingKeepsProvidedEntryCoverageIncomplete) {
+  capture_.header = test::multi_entry_header();
+  capture_.executions.clear();
+  append_execution();
+  const FailureOr<LdsRaceResult> result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  EXPECT_TRUE(result.value().coverage_complete);
+  EXPECT_FALSE(result.value().provided_entry_coverage_complete);
+  ASSERT_EQ(result.value().executions.size(), 1u);
 }
 
 TEST_F(ConSanAnalysis, SameImageEntriesUseTheirOwnFactsAndRepeatAttribution) {

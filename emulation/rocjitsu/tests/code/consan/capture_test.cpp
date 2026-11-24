@@ -15,9 +15,10 @@ namespace {
 
 TEST(ConSanTraceCapture, SavesMultiWorkgroupEvidenceWithoutClaimingSignalForwarding) {
   CaptureHeader header = test::trace_capture_header();
-  ASSERT_EQ(header.execution_conditions, kApplicationTraceExecutionConditions);
+  ASSERT_EQ(header.execution_conditions, kApplicationExecutionConditions);
   const Manifest &facts = test::manifest(header);
-  CapturedExecution execution = test::execution(facts, 1, 1, {{512, 1, 1}, {32, 1, 1}});
+  CapturedExecution execution =
+      test::execution(facts, 1, 1, {{512, 1, 1}, {32, 1, 1}}, ExecutionMode::Application);
   EXPECT_EQ(execution.completion, kCompletionVisible);
   CaptureEncoder encoder;
   const FailureOr<std::vector<uint8_t>> prefix = encoder.start(header);
@@ -33,12 +34,59 @@ TEST(ConSanTraceCapture, SavesMultiWorkgroupEvidenceWithoutClaimingSignalForward
   ASSERT_TRUE(captured.succeeded());
   EXPECT_EQ(captured.value().header, header);
   EXPECT_EQ(captured.value().executions[0].report, execution.report);
-  EXPECT_TRUE(validate_captured_execution(facts, execution).succeeded());
+  EXPECT_TRUE(
+      validate_captured_execution(facts, execution, ExecutionMode::Application).succeeded());
   execution.completion = kCompletionVisibleForwarded;
-  EXPECT_TRUE(validate_captured_execution(facts, execution).failed());
-  header.execution_conditions = kSupportedExecutionConditions;
+  EXPECT_TRUE(validate_captured_execution(facts, execution, ExecutionMode::Application).failed());
+  execution.completion = kCompletionVisible;
+  header.execution_conditions = kControlledExecutionConditions;
   CaptureEncoder wrong_conditions;
-  EXPECT_TRUE(wrong_conditions.start(header).failed());
+  ASSERT_TRUE(wrong_conditions.start(header).succeeded());
+  EXPECT_TRUE(wrong_conditions.append(execution).failed());
+}
+
+TEST(ConSanCaptureTransport, CompletionEvidenceMustMatchTheDeclaredExecutionMode) {
+  for (const ExecutionMode mode : {ExecutionMode::Controlled, ExecutionMode::Application}) {
+    SCOPED_TRACE(static_cast<int>(mode));
+    CaptureHeader header = test::capture_header();
+    header.execution_conditions = capture_execution_conditions(mode);
+    EXPECT_EQ(capture_execution_mode(header.execution_conditions), mode);
+    const Manifest &facts = test::manifest(header);
+    CapturedExecution execution = test::execution(facts, 1, 1, {{64, 1, 1}, {64, 1, 1}}, mode);
+    CaptureEncoder encoder;
+    const FailureOr<std::vector<uint8_t>> prefix = encoder.start(header);
+    ASSERT_TRUE(prefix.succeeded());
+    const FailureOr<std::vector<uint8_t>> frame = encoder.append(execution);
+    ASSERT_TRUE(frame.succeeded());
+    const FailureOr<std::vector<uint8_t>> end = encoder.finish();
+    ASSERT_TRUE(end.succeeded());
+    std::vector<uint8_t> bytes = prefix.value();
+    bytes.insert(bytes.end(), frame.value().begin(), frame.value().end());
+    bytes.insert(bytes.end(), end.value().begin(), end.value().end());
+    const FailureOr<Capture> decoded = decode_capture(bytes);
+    ASSERT_TRUE(decoded.succeeded());
+    EXPECT_EQ(decoded.value().header.execution_conditions, capture_execution_conditions(mode));
+    EXPECT_EQ(decoded.value().executions.front().completion, completion_evidence(mode));
+
+    const ExecutionMode other =
+        mode == ExecutionMode::Controlled ? ExecutionMode::Application : ExecutionMode::Controlled;
+    execution.completion = completion_evidence(other);
+    EXPECT_TRUE(validate_captured_execution(facts, execution, mode).failed());
+    const size_t payload = prefix.value().size() + 48;
+    wire::write_u32(bytes, payload + 48, execution.completion);
+    const uint64_t payload_bytes = *wire::read_u64(bytes, prefix.value().size() + 8);
+    const Digest frame_checksum = digest(std::span(bytes).subspan(payload, payload_bytes));
+    std::copy(frame_checksum.begin(), frame_checksum.end(),
+              bytes.begin() + prefix.value().size() + 16);
+    const Digest checksum = digest(std::span(bytes).first(bytes.size() - 32));
+    std::copy(checksum.begin(), checksum.end(), bytes.end() - 32);
+    EXPECT_TRUE(decode_capture(bytes).failed());
+  }
+  const ExecutionMode unknown = static_cast<ExecutionMode>(99);
+  EXPECT_EQ(capture_execution_conditions(unknown), 0u);
+  EXPECT_EQ(completion_evidence(unknown), 0u);
+  EXPECT_FALSE(capture_execution_mode(0).has_value());
+  EXPECT_FALSE(capture_execution_mode(31).has_value());
 }
 
 class ConSanCapture : public ::testing::Test {

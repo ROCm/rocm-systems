@@ -102,7 +102,7 @@ inline CaptureHeader trace_capture_header() {
                        .probe_offset = 192,
                        .probe_size = 64}};
   refresh_image(header);
-  header.execution_conditions = capture_execution_conditions(header.image);
+  header.execution_conditions = capture_execution_conditions(ExecutionMode::Application);
   return header;
 }
 
@@ -134,13 +134,14 @@ inline CaptureHeader multi_entry_header() {
 
 inline CapturedExecution execution(const Manifest &manifest, uint64_t serial,
                                    uint32_t generation = 1,
-                                   LaunchDimensions dimensions = {{64, 1, 1}, {64, 1, 1}}) {
+                                   LaunchDimensions dimensions = {{64, 1, 1}, {64, 1, 1}},
+                                   ExecutionMode mode = ExecutionMode::Controlled) {
   CapturedExecution execution;
   execution.serial = serial;
   execution.entry_key = manifest.entry.original_descriptor_offset;
   execution.dimensions = dimensions;
   execution.group_bytes = manifest.entry.prepared_group_bytes;
-  execution.completion = completion_evidence(manifest.scope);
+  execution.completion = completion_evidence(mode);
   execution.storage_slot = 1;
   execution.storage_generation = generation;
   execution.arguments.resize(manifest.entry.original_kernarg_bytes);

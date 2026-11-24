@@ -165,8 +165,9 @@ A module binds every image entry after successful freeze. The actual kernel obje
 selects an entry binding; selected dispatches use that entry's original argument
 ABI and prepared resource plan. Known unselected entries retain their original
 packet, resources and completion signal and are native/uncovered. Unknown kernel
-objects are rejected. One module, a controlled queue, nonoverlap and dedicated
-completion signals remain required, including for native siblings.
+objects are rejected. In controlled execution mode, one module, a controlled
+queue, nonoverlap and dedicated completion signals remain required, including
+for native siblings.
 Admission recognizes a native completion already visible to the application even
 if the observer has not yet processed it. The observer retains its signal lease
 until its wait returns, so callers still drain before releasing that signal.
@@ -356,6 +357,33 @@ native mixing, then replay in a fresh process after removing test artifacts.
 Their application's following completion barrier is part of the fixture; the
 ConSan interceptor adds none. These controls exercise simulator execution,
 including TTMP workgroup attribution, and do not establish physical-GPU coverage.
+
+### Execution evidence and analysis scope
+
+The capture producer declares its actual execution mode independently of the
+selected analysis scope. Controlled execution records the enforced single-queue,
+nonoverlap, profiling-disabled and system fine-grained conditions. It also records
+completion, visibility and successful forwarding to the original application
+signal. Application execution records system fine-grained transport and private
+completion visibility; its original null signal is not forwarded. Both modes
+require an independent owning snapshot before report storage can be reused.
+
+Readers accept only these two complete execution-condition combinations. Every
+execution's completion evidence must match its containing header: changing a
+header cannot relabel forwarded evidence as private visibility or the reverse.
+The LDS and execution-trace analyzers select their checks from the saved scope;
+queue restrictions and host signal forwarding do not establish guest LDS
+ordering. LDS barrier ordering still requires the GPU barrier observations.
+
+This format separation does not itself enable a new runtime path. The current
+application adapter continues to admit selected execution-trace entries only;
+selected LDS application admission is a separate runtime capability. The shared
+capture codecs and analyzers can represent and validate either transport for a
+qualified scope without falsely claiming conditions enforced by the other mode.
+
+The producer contract changed with this interpretation. Regenerate prepared
+artifacts and captures together; older producer contracts are rejected rather
+than guessed or silently upgraded.
 
 ### Offline diagnosis
 
@@ -564,9 +592,12 @@ malformed-evidence integrity issues.
 
 The analyzer keeps ordered, confirmed unordered, and unresolved pairs separate.
 Only confirmed conflicts contribute to the findings exit status; incomplete
-coverage alone does not. Always inspect `coverage_complete` alongside findings.
-Zero findings with missing evidence does not establish that unobserved accesses
-were safe.
+coverage alone does not. `coverage_complete` describes the captured selected
+executions. `provided_entry_coverage_complete` additionally requires an observed
+execution for every selected entry and a valid LDS no-probes certificate for
+every native entry in the supplied image. An unrequested or blocked native entry
+leaves this wider coverage incomplete. Zero findings with missing evidence does
+not establish that unobserved accesses were safe.
 
 ## How to use
 
@@ -721,6 +752,23 @@ that the application is race-free or that another run has the same result.
 Always inspect coverage independently of the verdict and exit code.
 
 The closed capture can be analyzed again without images or application state.
+For LDS captures, `lds_analysis` is `performed` only when at least one selected
+execution was analyzed; an empty execution list reports `not_performed` and
+incomplete coverage. An executed dispatch with no committed LDS observations
+still counts as analysis performed. Neither status changes the findings exit
+code.
+
+A native `no_probes_needed` entry carries a versioned LDS certificate in its
+owning image facts. The original image SHA256 and entry key bind its identity;
+its instruction count, reachable code extent, and canonical original-code
+SHA256 describe the compiler's absence proof. Admission with the original image
+checks that digest against the recorded native ranges. Offline replay validates
+the certificate's shape and owning image/entry metadata without requiring the
+original HSACO. As with other compiler facts, this is trusted producer evidence,
+not an independent security attestation of an arbitrary binary. It does not
+create an execution or an LDS verdict. An image containing only such entries
+remains native-only and publishes no capture.
+
 Other normal nonzero analyzer statuses indicate input/output failures. See the
 [analyzer CLI](../tools/rj_consan_analyze.cpp) and
 [analysis results](../lib/rocjitsu/src/rocjitsu/code/consan/analysis/lds_race.h)

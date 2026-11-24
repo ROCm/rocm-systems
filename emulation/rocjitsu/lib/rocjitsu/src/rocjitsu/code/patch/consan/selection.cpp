@@ -204,6 +204,31 @@ FailureOr<PreparationResult> prepare_image_best_effort(std::span<const uint8_t> 
       return Result::failure();
     result.artifact = std::move(artifact.value());
   }
+  if (result.artifact) {
+    for (const EntryPreparation &entry : result.entries) {
+      if (!entry.no_probes_needed)
+        continue;
+      const std::vector<ImageEntryFacts>::iterator native =
+          std::ranges::find(result.artifact->facts.entries, entry.key, &ImageEntryFacts::key);
+      if (native == result.artifact->facts.entries.end() ||
+          native->disposition != EntryDisposition::Native) {
+        error = {.code = InputErrorCode::InvalidImage,
+                 .text_offset = {},
+                 .message = "no-probes-needed certificate has no owning native image entry"};
+        return Result::failure();
+      }
+      native->no_probes_needed = entry.no_probes_needed;
+    }
+    util::StringDiagnostic diagnostic;
+    if (verify_artifact_images(result.artifact->facts, original, result.artifact->image,
+                               diagnostic.emitter())
+            .failed()) {
+      error = {.code = InputErrorCode::InvalidImage,
+               .text_offset = {},
+               .message = "invalid prepared no-probes-needed evidence: " + diagnostic.message()};
+      return Result::failure();
+    }
+  }
   return result;
 }
 

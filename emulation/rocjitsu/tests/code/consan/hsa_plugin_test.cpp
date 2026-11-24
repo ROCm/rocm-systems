@@ -1139,7 +1139,7 @@ TEST_F(ConSanTraceHsaPlugin, NullCompletionPreservesExtendedDependenciesAndArgum
   const FailureOr<Capture> capture = decode_capture(read_capture());
   ASSERT_TRUE(capture.succeeded());
   ASSERT_EQ(capture.value().executions.size(), 1u);
-  EXPECT_EQ(capture.value().header.execution_conditions, kApplicationTraceExecutionConditions);
+  EXPECT_EQ(capture.value().header.execution_conditions, kApplicationExecutionConditions);
   EXPECT_EQ(capture.value().executions[0].completion, kCompletionVisible);
   EXPECT_EQ(capture.value().executions[0].dimensions.grid[0], 512u);
   EXPECT_EQ(capture.value().executions[0].report, expected_report);

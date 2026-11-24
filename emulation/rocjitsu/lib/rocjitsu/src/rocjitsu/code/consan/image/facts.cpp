@@ -18,8 +18,9 @@ namespace {
 constexpr std::array<uint8_t, 8> kImageFactsMagic = {'R', 'J', 'C', 'S', 'I', 'M', 'G', 'F'};
 constexpr uint64_t kEnvelopeBytes = 64;
 constexpr uint64_t kImageFixedBytes = 144;
-constexpr uint64_t kEntryFixedBytes = 124;
+constexpr uint64_t kEntryFixedBytes = 128;
 constexpr uint64_t kNativeCodeRangeBytes = 24;
+constexpr uint64_t kNoProbesNeededProofBytes = 56;
 constexpr uint64_t kManifestFixedBytes = 64 + 248;
 constexpr uint64_t kSiteBytes = 68;
 constexpr uint64_t kBarrierBytes = 56;
@@ -170,6 +171,25 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
         !add_extent(encoded_bytes, binding.name.size(), limits.metadata_bytes)) {
       return diagnostic.emit() << "image facts exceed metadata budget";
     }
+    if (entry.no_probes_needed) {
+      const NoProbesNeededProof &proof = *entry.no_probes_needed;
+      uint64_t code_bytes = 0;
+      for (const NativeCodeRange &range : entry.native_code) {
+        if (!add_extent(code_bytes, range.bytes, image.original_text_bytes)) {
+          return diagnostic.emit() << "no-probes-needed code extent exceeds original text";
+        }
+      }
+      if (entry.disposition != EntryDisposition::Native || proof.version != 1 ||
+          proof.scope != ScopeKind::NativeLdsNoSynchronization || proof.code_bytes == 0 ||
+          proof.code_bytes % 4 != 0 || proof.code_bytes != code_bytes ||
+          proof.instruction_count == 0 || proof.instruction_count > proof.code_bytes / 4 ||
+          std::ranges::all_of(proof.code_sha256, [](uint8_t value) { return value == 0; })) {
+        return diagnostic.emit() << "invalid no-probes-needed certificate";
+      }
+      if (!add_extent(encoded_bytes, kNoProbesNeededProofBytes, limits.metadata_bytes)) {
+        return diagnostic.emit() << "no-probes-needed certificate exceeds metadata budget";
+      }
+    }
     if (entry.disposition == EntryDisposition::Native) {
       if (entry.selected || entry.native_code.empty() ||
           binding.original_group_bytes != binding.prepared_group_bytes ||
@@ -289,8 +309,15 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
   if (!scope) {
     return diagnostic.emit() << "selected entries must share one qualified scope";
   }
-  if (!selected_options || image.selection_profile !=
-                               selection_profile_digest(selected_keys, *scope, *selected_options)) {
+  if (*scope == ScopeKind::ExecutionTrace &&
+      std::ranges::any_of(image.entries, [](const ImageEntryFacts &entry) {
+        return entry.no_probes_needed.has_value();
+      })) {
+    return diagnostic.emit() << "LDS no-probes-needed certificate cannot qualify execution trace";
+  }
+  if (selected_keys.empty() || !selected_options ||
+      image.selection_profile !=
+          selection_profile_digest(selected_keys, *scope, *selected_options)) {
     return diagnostic.emit() << "image selection profile differs from entries";
   }
   return Result::success();
@@ -315,6 +342,15 @@ FailureOr<std::vector<uint8_t>> encode_image_facts(const ImageFacts &image,
   for (const ImageEntryFacts &entry : image.entries) {
     payload.u64(entry.key);
     payload.u32(static_cast<uint32_t>(entry.disposition));
+    payload.u32(entry.no_probes_needed ? 1 : 0);
+    if (entry.no_probes_needed) {
+      const NoProbesNeededProof &proof = *entry.no_probes_needed;
+      payload.u32(proof.version);
+      payload.u32(static_cast<uint32_t>(proof.scope));
+      payload.u64(proof.instruction_count);
+      payload.u64(proof.code_bytes);
+      payload.bytes(proof.code_sha256);
+    }
     payload.u32(entry.original_sgprs);
     payload.u32(entry.original_vgprs);
     wire::encode_entry(payload, entry.binding);
@@ -387,10 +423,23 @@ FailureOr<ImageFacts> decode_image_facts(std::span<const uint8_t> bytes,
   for (uint32_t index = 0; index < count; ++index) {
     ImageEntryFacts entry;
     uint32_t disposition = 0;
+    uint32_t proof_present = 0;
     uint32_t native_ranges = 0;
     uint64_t manifest_bytes = 0;
-    if (!payload.u64(entry.key) || !payload.u32(disposition) ||
-        !payload.u32(entry.original_sgprs) || !payload.u32(entry.original_vgprs) ||
+    if (!payload.u64(entry.key) || !payload.u32(disposition) || !payload.u32(proof_present) ||
+        proof_present > 1)
+      return diagnostic.emit() << "invalid or truncated image entry certificate flag";
+    if (proof_present != 0) {
+      NoProbesNeededProof proof;
+      uint32_t scope = 0;
+      if (!payload.u32(proof.version) || !payload.u32(scope) ||
+          !payload.u64(proof.instruction_count) || !payload.u64(proof.code_bytes) ||
+          !payload.bytes(proof.code_sha256))
+        return diagnostic.emit() << "truncated no-probes-needed certificate";
+      proof.scope = static_cast<ScopeKind>(scope);
+      entry.no_probes_needed = proof;
+    }
+    if (!payload.u32(entry.original_sgprs) || !payload.u32(entry.original_vgprs) ||
         !wire::decode_entry(payload, entry.binding, limits.string_bytes) ||
         !payload.u32(native_ranges)) {
       return diagnostic.emit() << "truncated image entry facts";

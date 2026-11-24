@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/isa_family.h"
 #include "util/bit.h"
+#include "util/sha256.h"
 
 #include <algorithm>
 #include <cstring>
@@ -474,6 +475,21 @@ Result verify_artifact_images(const ImageFacts &facts, std::span<const uint8_t> 
                                range.bytes))) {
         return diagnostic.emit() << "native entry body changed";
       }
+    }
+    if (entry.no_probes_needed) {
+      util::Sha256 hash;
+      hash.update("consan-no-lds-code-v1");
+      for (const NativeCodeRange &range : entry.native_code) {
+        std::array<uint8_t, 16> coordinates{};
+        wire::write_u64(coordinates, 0, range.original_offset);
+        wire::write_u64(coordinates, 8, range.bytes);
+        hash.update(coordinates.data(), coordinates.size());
+        const std::span<const uint8_t> bytes = original.subspan(
+            original_image.value().text.sh_offset + range.original_offset, range.bytes);
+        hash.update(bytes.data(), bytes.size());
+      }
+      if (hash.finish() != entry.no_probes_needed->code_sha256)
+        return diagnostic.emit() << "no-probes-needed certificate differs from original code";
     }
     const amdhsa::MetadataValue *first_metadata =
         metadata_entry(original_image.value().metadata, binding.name);

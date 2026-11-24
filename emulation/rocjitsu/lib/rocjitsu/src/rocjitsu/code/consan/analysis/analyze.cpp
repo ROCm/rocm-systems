@@ -20,7 +20,9 @@ FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisO
       return diagnostic.emit() << "entry name is not valid UTF-8 for JSON output";
     }
   }
-  if (capture.header.execution_conditions != kSupportedExecutionConditions) {
+  const std::optional<ExecutionMode> mode =
+      capture_execution_mode(capture.header.execution_conditions);
+  if (!mode) {
     return diagnostic.emit() << "unsupported capture execution conditions";
   }
   if (std::ranges::all_of(capture.header.run_identity, [](uint8_t value) { return value == 0; })) {
@@ -43,8 +45,10 @@ FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisO
         result.has_transpose |= is_transpose(site.lds_ranges.shape);
       }
     }
-    result.entries.push_back(
-        {.key = entry.key, .name = entry.binding.name, .disposition = entry.disposition});
+    result.entries.push_back({.key = entry.key,
+                              .name = entry.binding.name,
+                              .disposition = entry.disposition,
+                              .no_probes_needed = entry.no_probes_needed});
   }
   if (result.entries.size() == 1) {
     result.entry = result.entries.front().name;
@@ -59,6 +63,7 @@ FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisO
     const Manifest *manifest = selected_manifest(capture.header.image, execution.entry_key);
     if (manifest == nullptr || execution.serial != result.executions.size() + 1 ||
         execution.storage_generation <= generations[execution.storage_slot] ||
+        execution.completion != completion_evidence(*mode) ||
         (manifest != nullptr &&
          execution.arguments.size() != manifest->entry.original_kernarg_bytes)) {
       return diagnostic.emit() << "invalid capture entry or execution identity";
@@ -75,6 +80,15 @@ FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisO
     result.coverage_complete &= analyzed.coverage_complete;
     result.executions.push_back(std::move(analyzed));
   }
+  result.provided_entry_coverage_complete =
+      result.coverage_complete &&
+      std::ranges::all_of(capture.header.image.entries, [&](const ImageEntryFacts &entry) {
+        if (entry.disposition == EntryDisposition::Native)
+          return entry.no_probes_needed.has_value();
+        return std::ranges::any_of(capture.executions, [&](const CapturedExecution &execution) {
+          return execution.entry_key == entry.key;
+        });
+      });
   return result;
 }
 

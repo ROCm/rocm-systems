@@ -97,6 +97,7 @@ public:
   EntryKey key = 0;
   std::string name;
   EntryDisposition disposition = EntryDisposition::Native;
+  std::optional<NoProbesNeededProof> no_probes_needed = {};
   bool operator==(const LdsRaceImageEntry &) const = default;
 };
 
@@ -119,6 +120,8 @@ struct LdsRaceResult {
   uint64_t ordering_unresolved_pairs = 0;
   uint64_t collision_groups = 0;
   bool coverage_complete = false;
+  // Adds original entry inventory to selected-execution observation coverage.
+  bool provided_entry_coverage_complete = false;
   std::vector<LdsRaceExecutionResult> executions;
   bool operator==(const LdsRaceResult &) const = default;
 };

@@ -7,14 +7,14 @@
 namespace rocjitsu::consan {
 
 DispatchLifecycle::DispatchLifecycle(std::shared_ptr<const Manifest> facts,
-                                     CapturedExecution envelope)
-    : facts_(std::move(facts)), envelope_(std::move(envelope)) {}
+                                     CapturedExecution envelope, ExecutionMode mode)
+    : facts_(std::move(facts)), envelope_(std::move(envelope)), mode_(mode) {}
 
 RuntimeStatus DispatchLifecycle::submitted() {
   if (phase_ != Phase::Prepared) {
     return RuntimeStatus::InvalidTransition;
   }
-  if (facts_ == nullptr) {
+  if (facts_ == nullptr || capture_execution_conditions(mode_) == 0) {
     return RuntimeStatus::InvalidFacts;
   }
   const FailureOr<LaunchLayout> layout =
@@ -40,7 +40,7 @@ RuntimeStatus DispatchLifecycle::submitted() {
 
 RuntimeStatus DispatchLifecycle::observe(bool completed, bool system_visible,
                                          const std::function<bool()> &forward) {
-  if (phase_ == Phase::Forwarded || phase_ == Phase::Copied) {
+  if (phase_ == Phase::Observed || phase_ == Phase::Copied) {
     return RuntimeStatus::Success;
   }
   if (phase_ != Phase::Submitted && phase_ != Phase::Completed) {
@@ -58,16 +58,20 @@ RuntimeStatus DispatchLifecycle::observe(bool completed, bool system_visible,
   // Set a terminal state before invoking external code. An ambiguous forwarding
   // failure cannot cause a retry that decrements the application's signal twice.
   phase_ = Phase::Failed;
-  if (!forward || !forward()) {
-    return RuntimeStatus::ForwardFailed;
+  if (mode_ == ExecutionMode::Controlled) {
+    if (!forward || !forward()) {
+      return RuntimeStatus::ForwardFailed;
+    }
+  } else if (forward) {
+    return RuntimeStatus::InvalidFacts;
   }
-  phase_ = Phase::Forwarded;
+  phase_ = Phase::Observed;
   return RuntimeStatus::Success;
 }
 
 RuntimeStatus DispatchLifecycle::snapshot(const std::function<CopyResult(std::span<uint8_t>)> &copy,
                                           OwnedSnapshot &destination) {
-  if (phase_ != Phase::Forwarded) {
+  if (phase_ != Phase::Observed) {
     return RuntimeStatus::InvalidTransition;
   }
   phase_ = Phase::Failed;
@@ -83,7 +87,7 @@ RuntimeStatus DispatchLifecycle::snapshot(const std::function<CopyResult(std::sp
     return RuntimeStatus::ShortCopy;
   }
   envelope_.report = std::move(bytes);
-  envelope_.completion = completion_evidence(facts_->scope);
+  envelope_.completion = completion_evidence(mode_);
   destination = {facts_, std::move(envelope_)};
   phase_ = Phase::Copied;
   return RuntimeStatus::Success;

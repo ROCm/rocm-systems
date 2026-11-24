@@ -27,7 +27,7 @@ using Digest = std::array<uint8_t, 32>;
 // and internal API changes alone do not require a new token; no negotiation is
 // performed between producers and consumers.
 inline constexpr std::array<uint8_t, 16> kProducerContract = {
-    0x0c, 0x59, 0xb6, 0x12, 0xa5, 0x35, 0x42, 0x9e, 0x91, 0xc4, 0x97, 0xb6, 0x69, 0x02, 0x99, 0xfc};
+    0x16, 0x79, 0xe6, 0x98, 0xcf, 0x41, 0x4d, 0xf4, 0x9e, 0x6c, 0x50, 0xe4, 0x93, 0xd7, 0x63, 0xab};
 // Canonical hash input for the manifest's options identity. Changing any byte
 // changes the identity required by artifact and capture admission.
 inline constexpr std::string_view kMvpOptions =

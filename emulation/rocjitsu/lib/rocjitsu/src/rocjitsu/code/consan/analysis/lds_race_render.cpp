@@ -85,10 +85,10 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
       << (result.has_transpose ? "transpose_" : "")
       << (result.scope != ScopeKind::NativeLdsNoSynchronization ? "epoch_workgroup_barriers"
                                                                 : "no_sync_bounded_1d")
-      << "\"" << ",\"run_identity\":\"" << hex_bytes(result.run_identity)
-      << "\",\"original_sha256\":\"" << hex_bytes(result.original.sha256)
-      << "\",\"original_bytes\":" << result.original.bytes << ",\"selection_profile\":\""
-      << hex_bytes(result.selection_profile) << "\",\"entries\":[";
+      << "\",\"lds_analysis\":\"" << (result.executions.empty() ? "not_performed" : "performed")
+      << "\",\"run_identity\":\"" << hex_bytes(result.run_identity) << "\",\"original_sha256\":\""
+      << hex_bytes(result.original.sha256) << "\",\"original_bytes\":" << result.original.bytes
+      << ",\"selection_profile\":\"" << hex_bytes(result.selection_profile) << "\",\"entries\":[";
   bool first_entry = true;
   for (const LdsRaceImageEntry &entry : result.entries) {
     if (!first_entry) {
@@ -98,14 +98,25 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
     out << "{\"entry_key\":" << entry.key << ",\"entry\":";
     write_json_string(out, entry.name);
     out << ",\"disposition\":\""
-        << (entry.disposition == EntryDisposition::Selected ? "selected" : "native_uncovered")
-        << "\"}";
+        << (entry.disposition == EntryDisposition::Selected
+                ? "selected"
+                : (entry.no_probes_needed ? "no_probes_needed" : "native_uncovered"))
+        << "\"";
+    if (entry.no_probes_needed) {
+      const NoProbesNeededProof &proof = *entry.no_probes_needed;
+      out << ",\"no_probes_needed\":{\"version\":" << proof.version
+          << ",\"scope\":\"lds\",\"instruction_count\":" << proof.instruction_count
+          << ",\"code_bytes\":" << proof.code_bytes << ",\"code_sha256\":\""
+          << hex_bytes(proof.code_sha256) << "\"}";
+    }
+    out << '}';
   }
   out << "],\"entry\":";
   write_json_string(out, result.entry);
   out << ",\"target\":" << result.target << ",\"wave_size\":" << result.wave_size
       << ",\"execution_conditions\":" << result.execution_conditions
       << ",\"coverage_complete\":" << result.coverage_complete
+      << ",\"provided_entry_coverage_complete\":" << result.provided_entry_coverage_complete
       << ",\"ordering_unresolved_pairs\":" << result.ordering_unresolved_pairs
       << ",\"ordered_pairs\":" << result.ordered_pairs
       << ",\"cross_wave_pairs\":" << result.cross_wave_pairs

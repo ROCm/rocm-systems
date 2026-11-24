@@ -100,6 +100,58 @@ TEST_F(ConSanRuntimeCore, CompletionAndSystemVisibilityGateCopyReuseAndExactlyOn
   EXPECT_EQ(snapshot.facts, nullptr);
 }
 
+TEST_F(ConSanRuntimeCore, ApplicationCompletionNeedsVisibilityButNeverForwardsASignal) {
+  for (const bool trace : {false, true}) {
+    SCOPED_TRACE(trace);
+    const CaptureHeader header = trace ? test::trace_capture_header() : test::capture_header();
+    const std::shared_ptr<const Manifest> facts =
+        std::make_shared<const Manifest>(test::manifest(header));
+    const CapturedExecution captured =
+        test::execution(*facts, 1, 1, {{64, 1, 1}, {64, 1, 1}}, ExecutionMode::Application);
+    CapturedExecution prepared = captured;
+    prepared.report.clear();
+    prepared.completion = 0;
+    DispatchLifecycle lifecycle(facts, prepared, ExecutionMode::Application);
+    ASSERT_EQ(lifecycle.submitted(), RuntimeStatus::Success);
+    EXPECT_EQ(lifecycle.observe(false, true, {}), RuntimeStatus::PendingCompletion);
+    EXPECT_EQ(lifecycle.observe(true, false, {}), RuntimeStatus::PendingVisibility);
+    OwnedSnapshot snapshot;
+    EXPECT_EQ(lifecycle.snapshot({}, snapshot), RuntimeStatus::InvalidTransition);
+    ASSERT_EQ(lifecycle.observe(false, true, {}), RuntimeStatus::Success);
+    EXPECT_EQ(lifecycle.observe(true, true, {}), RuntimeStatus::Success);
+    ASSERT_EQ(lifecycle.snapshot(
+                  [&captured](std::span<uint8_t> bytes) {
+                    std::copy(captured.report.begin(), captured.report.end(), bytes.begin());
+                    return CopyResult{RuntimeStatus::Success, bytes.size()};
+                  },
+                  snapshot),
+              RuntimeStatus::Success);
+    EXPECT_EQ(snapshot.execution.completion, kCompletionVisible);
+    EXPECT_EQ(snapshot.execution.report, captured.report);
+  }
+}
+
+TEST_F(ConSanRuntimeCore, ApplicationModeRejectsForwardCallbacksWithoutInvokingThem) {
+  DispatchLifecycle lifecycle(facts_, envelope(), ExecutionMode::Application);
+  ASSERT_EQ(lifecycle.submitted(), RuntimeStatus::Success);
+  uint32_t forwards = 0;
+  EXPECT_EQ(lifecycle.observe(true, true,
+                              [&] {
+                                ++forwards;
+                                return true;
+                              }),
+            RuntimeStatus::InvalidFacts);
+  EXPECT_EQ(forwards, 0u);
+  EXPECT_EQ(lifecycle.observe(true, true, {}), RuntimeStatus::InvalidTransition);
+  OwnedSnapshot snapshot;
+  EXPECT_EQ(lifecycle.snapshot({}, snapshot), RuntimeStatus::InvalidTransition);
+}
+
+TEST_F(ConSanRuntimeCore, UnknownExecutionModeCannotArmADispatch) {
+  DispatchLifecycle lifecycle(facts_, envelope(), static_cast<ExecutionMode>(99));
+  EXPECT_EQ(lifecycle.submitted(), RuntimeStatus::InvalidFacts);
+}
+
 TEST_F(ConSanRuntimeCore, InvalidLayoutEnvelopeAndContextCannotArmAnExecution) {
   CapturedExecution invalid_layout = envelope();
   invalid_layout.dimensions.grid[0] += 1;
@@ -498,9 +550,9 @@ TEST_F(ConSanRuntimeCore, BarrierScopesKeepPerEntryMultiWorkgroupSnapshotsAndFac
     util::StringDiagnostic error;
     ASSERT_TRUE(validate_image_facts(header_.image, error.emitter()).succeeded())
         << error.message();
-    header_.execution_conditions = capture_execution_conditions(header_.image);
-    EXPECT_EQ(header_.execution_conditions, kSupportedExecutionConditions);
-    EXPECT_EQ(completion_evidence(scope), kCompletionVisibleForwarded);
+    header_.execution_conditions = capture_execution_conditions(ExecutionMode::Controlled);
+    EXPECT_EQ(header_.execution_conditions, kControlledExecutionConditions);
+    EXPECT_EQ(completion_evidence(ExecutionMode::Controlled), kCompletionVisibleForwarded);
     const LaunchDimensions dimensions = {.grid = {128, 1, 1}, .workgroup = {64, 1, 1}};
     output_.clear();
     SnapshotWriter writer;

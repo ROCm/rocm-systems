@@ -16,10 +16,18 @@ inline constexpr uint32_t kImageEntryLimit = 1024;
 
 enum class EntryDisposition : uint32_t { Selected = 1, Native = 2 };
 
-/// @brief Compiler certificate for a closed reachable body with no LDS accesses.
-/// @details The owning image identity and EntryKey bind this profile-specific
-/// certificate. The canonical code digest includes each reachable range's
-/// original offset, extent and bytes in ascending source-offset order.
+/// @brief One original reachable native block and its unchanged prepared bytes.
+struct NativeCodeRange {
+  uint64_t original_offset = 0;
+  uint64_t prepared_offset = 0;
+  uint64_t bytes = 0;
+  bool operator==(const NativeCodeRange &) const = default;
+};
+
+/// @brief Producer certificate that the complete native body has no LDS accesses.
+/// @details The owning image SHA and entry key bind the certificate. The digest
+/// covers each original native range's offset, byte count, and unchanged bytes;
+/// offline readers validate the certificate, not an external code-object path.
 struct NoProbesNeededProof {
   uint32_t version = 1;
   ScopeKind scope = ScopeKind::NativeLdsNoSynchronization;
@@ -27,14 +35,6 @@ struct NoProbesNeededProof {
   uint64_t code_bytes = 0;
   Digest code_sha256{};
   bool operator==(const NoProbesNeededProof &) const = default;
-};
-
-/// @brief One original reachable native block and its unchanged prepared bytes.
-struct NativeCodeRange {
-  uint64_t original_offset = 0;
-  uint64_t prepared_offset = 0;
-  uint64_t bytes = 0;
-  bool operator==(const NativeCodeRange &) const = default;
 };
 
 class ImageEntryFacts {
@@ -48,6 +48,7 @@ public:
   std::optional<Manifest> selected;
   // Native ownership follows reachable blocks, independently of entry order.
   std::vector<NativeCodeRange> native_code = {};
+  std::optional<NoProbesNeededProof> no_probes_needed = {};
   bool operator==(const ImageEntryFacts &) const = default;
 };
 
