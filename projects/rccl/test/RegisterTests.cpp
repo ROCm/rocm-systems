@@ -750,8 +750,8 @@ static void testWindowRegisterSingleRankNonSymTeardown() {
 }
 
 /**
- * @brief Registers an ordinary window and a GIN-only one (or a second ordinary one for the
- *        control); a GIN-only window must refuse LSA and peer pointer queries.
+ * @brief NCCL_WIN_GIN_ONLY is rejected with NCCL_WIN_COLL_SYMMETRIC; a GIN-only window (or, for the
+ *        control, a second ordinary one) next to an ordinary window must refuse LSA and peer pointer queries.
  */
 static void testWindowRegisterGinOnly(bool ginOnly) {
     SKIP_IF_NO_GPU();
@@ -885,24 +885,17 @@ TEST(Register, P2pIpcSegmentReuse)
 }
 
 /**
- * @brief NCCL_WIN_GIN_ONLY registers a window for GIN only
+ * @brief NCCL_WIN_GIN_ONLY is rejected with NCCL_WIN_COLL_SYMMETRIC and its windows refuse LSA and peer pointer
+ *        queries; the control registers without the flag
  */
 TEST(Register, WindowRegisterGinOnly)
 {
-    RUN_ISOLATED_TESTS(
-        ProcessIsolatedTestRunner::TestConfig("WindowRegisterGinOnly", []() { testWindowRegisterGinOnly(true); })
-            .setVariable("NCCL_CUMEM_ENABLE", "1"));
-}
-
-/**
- * @brief Control for WindowRegisterGinOnly: the same windows, all registered without the flag
- */
-TEST(Register, WindowRegisterAllCapabilities)
-{
-    RUN_ISOLATED_TESTS(
-        ProcessIsolatedTestRunner::TestConfig("WindowRegisterAllCapabilities",
-                                              []() { testWindowRegisterGinOnly(false); })
-            .setVariable("NCCL_CUMEM_ENABLE", "1"));
+    auto config = [](const char* name, bool ginOnly) {
+        return ProcessIsolatedTestRunner::TestConfig(name, [ginOnly]() { testWindowRegisterGinOnly(ginOnly); })
+            .setVariable("NCCL_CUMEM_ENABLE", "1");
+    };
+    RUN_ISOLATED_TESTS(config("WindowRegisterGinOnly", true),
+                       config("WindowRegisterAllCapabilities", false));
 }
 
 } // namespace RcclUnitTesting
