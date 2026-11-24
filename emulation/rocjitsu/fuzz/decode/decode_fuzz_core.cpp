@@ -63,8 +63,9 @@ std::string json_escape(std::string_view value) {
 void emit_string_array(std::ostringstream &out, const std::vector<std::string> &values) {
   out << '[';
   for (size_t i = 0; i < values.size(); ++i) {
-    if (i != 0)
+    if (i != 0) {
       out << ',';
+    }
     out << '"' << json_escape(values[i]) << '"';
   }
   out << ']';
@@ -75,20 +76,23 @@ void emit_string_array(std::ostringstream &out, const std::vector<std::string> &
 util::FailureOr<std::unique_ptr<Decoder>> create_decoder(std::string_view target,
                                                          util::DiagnosticEmitter diagnostic) {
   std::unique_ptr<Decoder> decoder = Decoder::create(default_isa_target_registry(), target);
-  if (!decoder)
+  if (!decoder) {
     return diagnostic.emit() << "unsupported decoder target: " << target;
+  }
   return decoder;
 }
 
 util::FailureOr<DecodeRecord> decode_window(Decoder &decoder, std::span<const uint8_t> bytes,
                                             util::DiagnosticEmitter diagnostic) {
-  if (bytes.size() != kWindowSize)
+  if (bytes.size() != kWindowSize) {
     return diagnostic.emit() << "decoder input must be exactly 16 bytes";
+  }
 
   std::array<uint32_t, kWindowSize / sizeof(uint32_t)> words{};
   for (size_t word = 0; word < words.size(); ++word) {
-    for (size_t byte = 0; byte < sizeof(uint32_t); ++byte)
+    for (size_t byte = 0; byte < sizeof(uint32_t); ++byte) {
       words[word] |= static_cast<uint32_t>(bytes[word * sizeof(uint32_t) + byte]) << (byte * 8);
+    }
   }
 
   util::StringDiagnostic rejection;
@@ -101,10 +105,12 @@ util::FailureOr<DecodeRecord> decode_window(Decoder &decoder, std::span<const ui
   std::unique_ptr<Instruction> inst = std::move(decoded).value();
 
   const int size = inst->size();
-  if (size != 4 && size != 8 && size != 12 && size != 16)
+  if (size != 4 && size != 8 && size != 12 && size != 16) {
     fail_invariant("instruction size is outside {4, 8, 12, 16}");
-  if (!inst->raw_encoding())
+  }
+  if (!inst->raw_encoding()) {
     fail_invariant("instruction has no raw encoding");
+  }
   // AMDGPU decoders retain the base word, but do not uniformly expose extension
   // words as contiguous storage. Keep this invariant to the common contract.
   if (inst->raw_encoding()[0] != words[0]) {
@@ -113,20 +119,24 @@ util::FailureOr<DecodeRecord> decode_window(Decoder &decoder, std::span<const ui
             << "): got 0x" << std::hex << inst->raw_encoding()[0] << ", expected 0x" << words[0];
     fail_invariant(message.str());
   }
-  if (inst->mnemonic().empty())
+  if (inst->mnemonic().empty()) {
     fail_invariant("instruction mnemonic is empty");
+  }
   for (int i = 0; i < inst->num_dst_operands(); ++i) {
-    if (!inst->dst_operand(i))
+    if (!inst->dst_operand(i)) {
       fail_invariant("destination operand is null");
+    }
   }
   for (int i = 0; i < inst->num_src_operands(); ++i) {
-    if (!inst->src_operand(i))
+    if (!inst->src_operand(i)) {
       fail_invariant("source operand is null");
+    }
   }
 
   const std::string disassembly = inst->disassemble();
-  if (disassembly.empty())
+  if (disassembly.empty()) {
     fail_invariant("instruction disassembly is empty");
+  }
   const std::string_view mnemonic = inst->mnemonic();
   const size_t dual_separator = mnemonic.find(" :: ");
   bool mnemonic_matches =
@@ -140,10 +150,11 @@ util::FailureOr<DecodeRecord> decode_window(Decoder &decoder, std::span<const ui
     const auto semantic_base =
         mnemonic.ends_with("_e32") ? mnemonic.substr(0, mnemonic.size() - 4) : mnemonic;
     auto rendered_base = rendered;
-    if (rendered_base.ends_with("_e64_dpp"))
+    if (rendered_base.ends_with("_e64_dpp")) {
       rendered_base.remove_suffix(8);
-    else if (rendered_base.ends_with("_dpp"))
+    } else if (rendered_base.ends_with("_dpp")) {
       rendered_base.remove_suffix(4);
+    }
     mnemonic_matches = rendered_base == semantic_base;
   }
   if (!mnemonic_matches) {
@@ -162,14 +173,16 @@ util::FailureOr<DecodeRecord> decode_window(Decoder &decoder, std::span<const ui
   record.disassembly = disassembly;
   for (int i = 0; i < inst->num_dst_operands(); ++i) {
     const Operand *operand = inst->dst_operand(i);
-    if (!operand)
+    if (!operand) {
       fail_invariant("destination operand is null");
+    }
     record.destinations.emplace_back(operand->name());
   }
   for (int i = 0; i < inst->num_src_operands(); ++i) {
     const Operand *operand = inst->src_operand(i);
-    if (!operand)
+    if (!operand) {
       fail_invariant("source operand is null");
+    }
     record.sources.emplace_back(operand->name());
   }
   return record;
@@ -179,11 +192,13 @@ std::string record_json(const DecodeRecord &record, std::span<const uint8_t> byt
                         std::string_view input_name) {
   std::ostringstream out;
   out << '{';
-  if (!input_name.empty())
+  if (!input_name.empty()) {
     out << "\"input\":\"" << json_escape(input_name) << "\",";
+  }
   out << "\"bytes\":\"";
-  for (const uint8_t byte : bytes)
+  for (const uint8_t byte : bytes) {
     out << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned int>(byte);
+  }
   out << std::dec << "\",\"status\":\"" << (record.valid ? "valid" : "invalid") << '"';
   if (record.valid) {
     out << ",\"size\":" << record.size << ",\"encoding_id\":" << record.encoding_id

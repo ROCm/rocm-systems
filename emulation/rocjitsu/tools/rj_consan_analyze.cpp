@@ -36,10 +36,12 @@ int main(int argc, char **argv) {
       const std::from_chars_result parsed =
           std::from_chars(number.data(), number.data() + number.size(), options.examples);
       if (parsed.ec != std::errc{} || parsed.ptr != number.data() + number.size() ||
-          options.examples > kMaxFindingExamples)
+          options.examples > kMaxFindingExamples) {
         return kExitInputError;
-    } else
+      }
+    } else {
       return kExitInputError;
+    }
   }
   std::ifstream file(argv[1], std::ios::binary | std::ios::ate);
   if (!file || file.tellg() < 0 ||
@@ -68,7 +70,8 @@ int main(int argc, char **argv) {
   }
   std::cout << render_analysis(result.value());
   std::cout.flush();
-  if (!std::cout)
+  if (!std::cout) {
     return kExitOutputFailure;
+  }
   return has_findings(result.value()) ? kExitFindings : kExitNoObservedFindings;
 }

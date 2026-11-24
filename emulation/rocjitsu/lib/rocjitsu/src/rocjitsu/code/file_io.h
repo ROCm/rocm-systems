@@ -26,8 +26,9 @@ read_file_bytes(std::string_view path, size_t max_bytes = std::numeric_limits<si
 bool fits_in_bounds(uint64_t offset, uint64_t size, size_t limit);
 
 template <typename T> bool read_value(const char *data, size_t size, size_t &offset, T &value) {
-  if (!fits_in_bounds(offset, sizeof(T), size))
+  if (!fits_in_bounds(offset, sizeof(T), size)) {
     return false;
+  }
   std::memcpy(&value, data + offset, sizeof(T));
   offset += sizeof(T);
   return true;

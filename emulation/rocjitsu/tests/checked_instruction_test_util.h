@@ -19,8 +19,9 @@ inline ::testing::AssertionResult
 append_checked_words(std::vector<uint32_t> &words,
                      std::initializer_list<util::FailureOr<uint32_t>> encodings) {
   for (const util::FailureOr<uint32_t> &encoding : encodings) {
-    if (encoding.failed())
+    if (encoding.failed()) {
       return ::testing::AssertionFailure() << "instruction builder failed at word " << words.size();
+    }
     words.push_back(encoding.value());
   }
   return ::testing::AssertionSuccess();

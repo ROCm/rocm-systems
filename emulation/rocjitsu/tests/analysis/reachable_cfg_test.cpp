@@ -45,8 +45,9 @@ public:
   explicit TestTextSection(std::span<const uint32_t> words, size_t trailing_bytes = 0)
       : Section(".text", std::make_unique<char[]>(words.size_bytes() + trailing_bytes)),
         size_(words.size_bytes() + trailing_bytes) {
-    if (!words.empty())
+    if (!words.empty()) {
       std::memcpy(data_.get(), words.data(), words.size_bytes());
+    }
   }
   size_t size() const override { return size_; }
   uint32_t sectionHeaderNameIdx() const override { return 0; }
@@ -91,15 +92,17 @@ protected:
 
   static std::vector<uint64_t> offsets(const Blocks &blocks) {
     std::vector<uint64_t> result;
-    for (const auto &block : blocks)
+    for (const auto &block : blocks) {
       result.push_back(block->start_offset());
+    }
     return result;
   }
 
   static std::vector<uint64_t> successors(const BasicBlock &block) {
     std::vector<uint64_t> result;
-    for (const auto *successor : block.successors())
+    for (const auto *successor : block.successors()) {
       result.push_back(successor->start_offset());
+    }
     std::ranges::sort(result);
     return result;
   }
@@ -152,8 +155,9 @@ std::vector<uint32_t> target_sensitive_lane_stash_words(uint8_t initial_banks, u
 
 size_t static_fixup_count(const Blocks &blocks) {
   size_t count = 0;
-  for (const auto &block : blocks)
+  for (const auto &block : blocks) {
     count += block->static_indirect_call_fixups().size();
+  }
   return count;
 }
 
@@ -307,15 +311,17 @@ TEST_F(ReachableCfg, DisjointRangesAllowBranchAcrossGap) {
 }
 
 TEST_F(ReachableCfg, RejectsInvalidEntries) {
-  for (uint64_t entry : std::array<uint64_t, 3>{1, 4, std::numeric_limits<uint64_t>::max()})
+  for (uint64_t entry : std::array<uint64_t, 3>{1, 4, std::numeric_limits<uint64_t>::max()}) {
     expect_failure({kEnd}, {entry});
+  }
   expect_failure({kEnd, kEnd}, {0}, {{4, 4}});
 }
 
 TEST_F(ReachableCfg, RejectsMalformedRanges) {
   for (Range range : {Range{1, 4}, Range{0, 3}, Range{0, 0}, Range{4, 4},
-                      Range{0, std::numeric_limits<uint64_t>::max() - 3}})
+                      Range{0, std::numeric_limits<uint64_t>::max() - 3}}) {
     expect_failure({kEnd}, {0}, {range});
+  }
 }
 
 TEST_F(ReachableCfg, ReachableMalformedInstructionsFailWithOffset) {
@@ -415,8 +421,9 @@ TEST_F(ReachableCfg, FullAndReachableConstructionAgreeOnClosedGraphs) {
         {call_result.value(), end, return_result.value()},
         {nop, end},
     };
-    if (arch == rocjitsu::IsaFamily::Cdna5)
+    if (arch == rocjitsu::IsaFamily::Cdna5) {
       programs.push_back({nop, 0}); // Existing implicit termination at zero padding.
+    }
     for (const auto &words : programs) {
       const auto reachable = build_reachable(words, {0}, {}, arch);
       ASSERT_TRUE(reachable.succeeded()) << error_.message();
@@ -517,8 +524,9 @@ TEST_F(ReachableCfg, RelativeScalarDestinationInvalidatesRecoveredPcBuilder) {
   ASSERT_TRUE(result.succeeded()) << error_.message();
   const BasicBlock *consumer = nullptr;
   for (const std::unique_ptr<BasicBlock> &block : result.value()) {
-    if (block->terminator() && block->terminator()->src_loc() == 20)
+    if (block->terminator() && block->terminator()->src_loc() == 20) {
       consumer = block.get();
+    }
   }
   ASSERT_NE(consumer, nullptr);
   EXPECT_TRUE(consumer->static_indirect_call_fixups().empty());
@@ -541,9 +549,11 @@ TEST_F(ReachableCfg, DroppedOutOfSectionTargetMakesRetainedFixupIncomplete) {
   const FailureOr<Blocks> result = build_reachable(words);
   ASSERT_TRUE(result.succeeded()) << error_.message();
   const BasicBlock *consumer = nullptr;
-  for (const std::unique_ptr<BasicBlock> &block : result.value())
-    if (block->start_offset() == 64)
+  for (const std::unique_ptr<BasicBlock> &block : result.value()) {
+    if (block->start_offset() == 64) {
       consumer = block.get();
+    }
+  }
   ASSERT_NE(consumer, nullptr);
   ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
   EXPECT_EQ(consumer->static_indirect_call_fixups().front().source_target_offset, 512u);
@@ -809,8 +819,9 @@ TEST_F(ReachableCfg, ExcludedIndirectCallTargetKeepsContinuation) {
   for (bool exclude_last : {false, true}) {
     SCOPED_TRACE(exclude_last);
     auto words = mixed_indirect_targets(true);
-    if (exclude_last)
+    if (exclude_last) {
       std::swap(words[10], words[11]);
+    }
     const std::vector<Range> ranges =
         exclude_last ? std::vector<Range>{{0, 44}} : std::vector<Range>{{0, 40}, {44, 4}};
     const auto result = build_reachable(words, {0}, ranges);
@@ -874,8 +885,9 @@ TEST_F(ReachableCfg, OptionalSeedInsideAnotherSeedsIndirectClosureIsIgnored) {
 TEST_F(ReachableCfg, IndependentSeedsDoNotExhaustTheIndirectClosureBudget) {
   const std::vector<uint32_t> words(80, kEnd);
   std::vector<uint64_t> seeds;
-  for (size_t index = 0; index < words.size(); ++index)
+  for (size_t index = 0; index < words.size(); ++index) {
     seeds.push_back(index * sizeof(uint32_t));
+  }
   const auto result = build_reachable(words, {}, {}, kArch, seeds);
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().size(), words.size());
@@ -927,8 +939,9 @@ TEST_F(ReachableCfg, FullSectionPolicyRetainsImplicitFirstEntry) {
       error_.emitter());
   ASSERT_TRUE(eager.succeeded()) << error_.message();
   size_t fixup_count = 0;
-  for (const auto &block : eager.value())
+  for (const auto &block : eager.value()) {
     fixup_count += block->static_indirect_call_fixups().size();
+  }
   EXPECT_EQ(fixup_count, 1u);
   const auto reachable = BasicBlock::build_cfg(object, *decoder, kArch, {.entries = entries});
   ASSERT_TRUE(reachable.succeeded());

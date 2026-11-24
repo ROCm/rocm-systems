@@ -166,12 +166,14 @@ const LdsProfile *find_lds_profile(rj_code_target_id_t target, std::string_view 
 
 std::optional<std::array<uint32_t, 2>>
 replace_lds_address(const LdsProfile &profile, std::span<const uint32_t> words, uint32_t reg) {
-  if (!profile.rewrite || words.size() != 2)
+  if (!profile.rewrite || words.size() != 2) {
     return std::nullopt;
+  }
   // GDS is outside the LDS profile. ACC refers to data and is preserved.
   if ((profile.arch == IsaFamily::Cdna3 || profile.arch == IsaFamily::Cdna4) &&
-      (words[0] & 0x00010000u) != 0)
+      (words[0] & 0x00010000u) != 0) {
     return std::nullopt;
+  }
   return profile.rewrite(profile.target, words, reg);
 }
 } // namespace
@@ -180,13 +182,15 @@ std::vector<LdsCapability> lds_wrong_address_capabilities() {
   const IsaTargetRegistry &registry = default_isa_target_registry();
   std::vector<LdsCapability> capabilities;
   for (const LdsProfile &profile : kLdsProfiles) {
-    if (!registry.find_target(profile.target) || !Decoder::create(registry, profile.target))
+    if (!registry.find_target(profile.target) || !Decoder::create(registry, profile.target)) {
       continue;
+    }
     capabilities.push_back({.target = profile.target,
                             .wave_size = profile.target == ROCJITSU_CODE_TARGET_GFX1250 ? 32u : 64u,
                             .form = profile.form});
-    if (profile.arch == IsaFamily::Rdna4)
+    if (profile.arch == IsaFamily::Rdna4) {
       capabilities.push_back({.target = profile.target, .wave_size = 32u, .form = profile.form});
+    }
   }
   return capabilities;
 }
@@ -202,12 +206,14 @@ FailureOr<LdsInventory> discover_lds_wrong_address(const FaultMutationContext &c
   const rj_code_target_id_t target = context.source().target_id();
   const decltype(kLdsProfiles)::const_iterator target_profile =
       std::ranges::find(kLdsProfiles, target, &LdsProfile::target);
-  if (target_profile == kLdsProfiles.end())
+  if (target_profile == kLdsProfiles.end()) {
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedTarget,
                                  "target has no LDS profile");
+  }
   FailureOr<const FaultSourceFacts *> found = context.source_facts(entry, error);
-  if (found.failed())
+  if (found.failed()) {
     return Result::failure();
+  }
   const FaultSourceFacts &facts = *found.value();
   const bool cdna5 = target == ROCJITSU_CODE_TARGET_GFX1250;
   const uint32_t wave = kernel_wavefront_size(target_profile->arch, facts.descriptor.descriptor);
@@ -215,9 +221,10 @@ FailureOr<LdsInventory> discover_lds_wrong_address(const FaultMutationContext &c
   if ((!rdna4 && wave != (cdna5 ? 32u : 64u)) ||
       (!rdna4 && !cdna5 &&
        (facts.descriptor.descriptor.kernel_code_properties &
-        amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32) != 0))
+        amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32) != 0)) {
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                  "unsupported LDS wave size");
+  }
   std::shared_ptr<LdsRecord> record = std::make_shared<LdsRecord>();
   record->source = context.source_;
   record->section = facts.section;
@@ -242,9 +249,10 @@ FailureOr<LdsInventory> discover_lds_wrong_address(const FaultMutationContext &c
         std::ranges::find_if(facts.blocks, [&](const BasicBlock *block) {
           return block->start_offset() == facts.owner.entry_offset;
         });
-    if (!binding || entry_block == facts.blocks.end())
+    if (!binding || entry_block == facts.blocks.end()) {
       return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                    "missing LDS bank analysis entry");
+    }
     const std::span<const uint8_t> text =
         context.image().subspan(facts.section.file_offset, facts.section.size);
     banks = std::make_unique<Gfx1250VgprMsbAnalysis>(
@@ -254,38 +262,46 @@ FailureOr<LdsInventory> discover_lds_wrong_address(const FaultMutationContext &c
   for (const BasicBlock *block : facts.blocks) {
     for (const Instruction &inst : block->instructions()) {
       const LdsProfile *profile = find_lds_profile(target, inst.mnemonic());
-      if (!profile || inst.size() != 8 || !inst.src_operand(0))
+      if (!profile || inst.size() != 8 || !inst.src_operand(0)) {
         continue;
+      }
       const std::optional<RegisterRef> address = inst.src_operand(0)->decoded_vgpr();
-      if (!address)
+      if (!address) {
         continue;
+      }
       uint32_t bank = 0;
       if (cdna5) {
         const amdgpu::VgprMsbRole role = inst.src_operand(0)->vgpr_msb_role();
-        if (role != amdgpu::VgprMsbRole::Src0)
+        if (role != amdgpu::VgprMsbRole::Src0) {
           continue;
+        }
         const std::optional<uint8_t> selected_bank = banks->bank_before(inst, role);
-        if (!selected_bank)
+        if (!selected_bank) {
           continue;
+        }
         bank = *selected_bank;
       }
-      if (cdna5 && bank * 256u + address->index >= record->allocated_vgprs)
+      if (cdna5 && bank * 256u + address->index >= record->allocated_vgprs) {
         continue;
+      }
       const InstructionBoundaries::Entry *boundary = facts.boundaries->find(inst.src_loc());
-      if (!boundary || boundary->size != 8 || boundary->clause || boundary->clause_member)
+      if (!boundary || boundary->size != 8 || boundary->clause || boundary->clause_member) {
         continue;
+      }
       const std::span<const uint8_t> image = context.image();
       const uint64_t offset = inst.src_loc();
       if (facts.section.file_offset > image.size() ||
           offset > image.size() - facts.section.file_offset ||
           8 > image.size() - facts.section.file_offset - offset || offset > facts.section.size ||
-          8 > facts.section.size - offset)
+          8 > facts.section.size - offset) {
         continue;
+      }
       std::array<uint32_t, 2> words = {};
       std::memcpy(words.data(), image.data() + facts.section.file_offset + offset, 8);
       if ((words[1] & 255u) != address->index ||
-          !replace_lds_address(*profile, words, address->index))
+          !replace_lds_address(*profile, words, address->index)) {
         continue;
+      }
       record->sites.push_back({.offset = inst.src_loc(),
                                .address_vgpr = address->index,
                                .address_bank = bank,
@@ -302,9 +318,10 @@ FailureOr<LdsSelection> select_lds_wrong_address(const LdsInventory &inventory,
                                                  const LdsSelector &selector,
                                                  FaultMutationError &error) {
   error = {};
-  if (!inventory.record_ || inventory.record_->source.expired())
+  if (!inventory.record_ || inventory.record_->source.expired()) {
     return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
                                  "source context expired");
+  }
   if (selector.exact) {
     const LdsSelection &exact = *selector.exact;
     if (!exact.record_ || exact.record_->source.lock() != inventory.record_->source.lock() ||
@@ -313,17 +330,20 @@ FailureOr<LdsSelection> select_lds_wrong_address(const LdsInventory &inventory,
           return site.offset == exact.site_.offset &&
                  site.address_vgpr == exact.site_.address_vgpr &&
                  site.address_bank == exact.site_.address_bank && site.form == exact.site_.form;
-        }))
+        })) {
       return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
                                    "exact LDS selection does not match source and owner");
+    }
     return exact;
   }
-  if (inventory.record_->sites.empty())
+  if (inventory.record_->sites.empty()) {
     return reject_fault_mutation(error, FaultMutationErrorCode::NoCandidates,
                                  "no supported LDS site");
-  if (selector.ordinal >= inventory.record_->sites.size())
+  }
+  if (selector.ordinal >= inventory.record_->sites.size()) {
     return reject_fault_mutation(error, FaultMutationErrorCode::OrdinalOutOfRange,
                                  "LDS ordinal out of range");
+  }
   LdsSelection selection;
   selection.record_ = inventory.record_;
   selection.site_ = inventory.record_->sites[selector.ordinal];
@@ -335,46 +355,53 @@ FailureOr<LdsResult> apply_lds_wrong_address(const FaultMutationContext &context
                                              std::optional<uint32_t> replacement_selector,
                                              FaultMutationError &error) {
   error = {};
-  if (!selection.record_ || selection.record_->source.lock() != context.source_)
+  if (!selection.record_ || selection.record_->source.lock() != context.source_) {
     return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
                                  "selection belongs to another or expired source");
+  }
   if (!replacement_selector || *replacement_selector > 255 ||
       *replacement_selector == selection.site_.address_vgpr ||
       selection.site_.address_bank * 256u + *replacement_selector >=
-          selection.record_->allocated_vgprs)
+          selection.record_->allocated_vgprs) {
     return reject_fault_mutation(
         error, FaultMutationErrorCode::InvalidParameters,
         "replacement must be distinct, encoded, and allocated as an ordinary VGPR");
+  }
   const uint64_t offset = selection.site_.offset;
   const std::span<const uint8_t> image = context.image();
   if (offset > selection.record_->section.size || 8 > selection.record_->section.size - offset ||
       selection.record_->section.file_offset > image.size() ||
       offset > image.size() - selection.record_->section.file_offset ||
-      8 > image.size() - selection.record_->section.file_offset - offset)
+      8 > image.size() - selection.record_->section.file_offset - offset) {
     return reject_fault_mutation(error, FaultMutationErrorCode::ValidationFailure,
                                  "invalid source extent", offset);
+  }
   const uint64_t file_offset = selection.record_->section.file_offset + offset;
   std::array<uint32_t, 2> original = {};
   std::memcpy(original.data(), image.data() + file_offset, 8);
   std::unique_ptr<Decoder> decoder =
       Decoder::create(default_isa_target_registry(), context.source().target_id());
-  if (!decoder)
+  if (!decoder) {
     return reject_fault_mutation(error, FaultMutationErrorCode::ValidationFailure,
                                  "missing LDS decoder", offset);
+  }
   const DecodeResult decoded = decoder->decode_window(original, offset);
   const LdsProfile *profile = find_lds_profile(context.source().target_id(), selection.site_.form);
   if (!profile || decoded.failed() || decoded.value()->mnemonic() != selection.site_.form ||
-      decoded.value()->size() != 8)
+      decoded.value()->size() != 8) {
     return reject_fault_mutation(error, FaultMutationErrorCode::ValidationFailure, "stale LDS form",
                                  offset);
+  }
   const std::optional<std::array<uint32_t, 2>> replacement =
       replace_lds_address(*profile, original, *replacement_selector);
-  if (!replacement || (original[1] & 255u) != selection.site_.address_vgpr)
+  if (!replacement || (original[1] & 255u) != selection.site_.address_vgpr) {
     return reject_fault_mutation(error, FaultMutationErrorCode::ValidationFailure,
                                  "stale LDS source", offset);
+  }
   FailureOr<std::unique_ptr<Instrumentor>> fork = context.fork_instrumentor(error);
-  if (fork.failed())
+  if (fork.failed()) {
     return Result::failure();
+  }
   InstructionReplacement edit = {.expected_bytes = std::vector<uint8_t>(8),
                                  .replacement_bytes = std::vector<uint8_t>(8)};
   std::memcpy(edit.expected_bytes.data(), original.data(), 8);
@@ -390,9 +417,10 @@ FailureOr<LdsResult> apply_lds_wrong_address(const FaultMutationContext &context
     error = translate_fault_mutation_edit_error(*applied.edit_error);
     return Result::failure();
   }
-  if (!applied.errors.empty())
+  if (!applied.errors.empty()) {
     return reject_fault_mutation(error, FaultMutationErrorCode::ValidationFailure,
                                  applied.errors.front(), offset);
+  }
   return LdsResult{.selection = selection, .image = std::move(applied.elf_bytes)};
 }
 } // namespace rocjitsu

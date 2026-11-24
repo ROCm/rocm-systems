@@ -76,10 +76,12 @@ struct InstructionTranslationReport {
   /// @returns The effective legalization action, or nullopt when the instruction
   ///          was copied verbatim or re-encoded without a rule.
   [[nodiscard]] std::optional<Action> effective_action() const {
-    if (copied_original)
+    if (copied_original) {
       return std::nullopt;
-    if (!has_legalization)
+    }
+    if (!has_legalization) {
       return semantic_lowering ? std::optional<Action>(Action::Expand) : std::nullopt;
+    }
     return action;
   }
 };

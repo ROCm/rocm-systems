@@ -64,11 +64,13 @@ TEST_P(PackedFmacConstantTest, PackedFmacDistinguishesInlineAndLiteralPairs) {
     wf->set_exec(5);
     const auto vb = wf->vgpr_alloc().base;
     for (bool vop3 : {false, true}) {
-      if (vop3 && !gfx9())
+      if (vop3 && !gfx9()) {
         continue;
+      }
       for (uint32_t selector : {244u, 255u}) {
-        if (vop3 && selector == 255)
+        if (vop3 && selector == 255) {
           continue; // GFX9 VOP3 has no appended literal encoding.
+        }
         for (uint32_t lane = 0; lane < 3; ++lane) {
           cu->write_vgpr(vb + 1, lane, pack16(0x3c00, 0x3c00));
           cu->write_vgpr(vb + 2, lane, lane == 1 ? 0xdeadbeef : 0);

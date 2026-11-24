@@ -172,8 +172,9 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
             wide ? std::bit_cast<uint64_t>(0x1p-947) : std::bit_cast<uint32_t>(0x1p-86f);
         const auto write = [&](uint32_t reg, uint64_t bits) {
           cu->write_vgpr(base + reg, 0, static_cast<uint32_t>(bits));
-          if (wide)
+          if (wide) {
             cu->write_vgpr(base + reg + 1, 0, static_cast<uint32_t>(bits >> 32));
+          }
         };
         const auto result = [&]() -> uint64_t {
           return cu->read_vgpr(base, 0) | (wide ? uint64_t{cu->read_vgpr(base + 1, 0)} << 32 : 0);
@@ -199,9 +200,10 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
             for (uint32_t operand = 1; operand <= 3; ++operand) {
               const uint64_t bits = operand == 3 ? midpoint : 0;
               fmas_cu->write_vgpr(fmas_base + operand * stride, 0, static_cast<uint32_t>(bits));
-              if (wide)
+              if (wide) {
                 fmas_cu->write_vgpr(fmas_base + operand * stride + 1, 0,
                                     static_cast<uint32_t>(bits >> 32));
+              }
             }
             fmas_wf->set_vcc_mask(1);
             fmas_cu->write_vgpr(fmas_base, 1, 0x12345678u);
@@ -347,8 +349,9 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
         for (const FixupCase &test : fixup_cases) {
           for (uint32_t rounding = 0; rounding < 4; ++rounding) {
             for (bool use_modifiers : {false, true}) {
-              if (use_modifiers && !(test.abs | test.neg))
+              if (use_modifiers && !(test.abs | test.neg)) {
                 continue;
+              }
               SCOPED_TRACE(::testing::Message()
                            << "wide=" << wide << " scalar=" << scalar << " abs=" << test.abs
                            << " neg=" << test.neg << " use_modifiers=" << use_modifiers

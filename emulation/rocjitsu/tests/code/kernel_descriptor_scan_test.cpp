@@ -204,12 +204,14 @@ TEST(KernelDescriptorScan, UnalignedSectionAndSymbolTablesAreReadAsBytes) {
   std::memcpy(sections.data(), image.data() + header.e_shoff, sections.size() * sizeof(Elf64_Shdr));
   size_t symbol_tables = 0;
   for (Elf64_Shdr &section : sections) {
-    if (section.sh_type != SHT_SYMTAB)
+    if (section.sh_type != SHT_SYMTAB) {
       continue;
+    }
     const std::vector<uint8_t> symbols(image.begin() + section.sh_offset,
                                        image.begin() + section.sh_offset + section.sh_size);
-    while (image.size() % 8 != 1)
+    while (image.size() % 8 != 1) {
       image.push_back(0);
+    }
     section.sh_offset = image.size();
     image.resize(image.size() + symbols.size());
     std::memcpy(image.data() + section.sh_offset, symbols.data(), symbols.size());
@@ -217,8 +219,9 @@ TEST(KernelDescriptorScan, UnalignedSectionAndSymbolTablesAreReadAsBytes) {
     ++symbol_tables;
   }
   ASSERT_EQ(symbol_tables, 1u);
-  while (image.size() % 8 != 1)
+  while (image.size() % 8 != 1) {
     image.push_back(0);
+  }
   header.e_shoff = image.size();
   const std::span<const std::byte> bytes = std::as_bytes(std::span(sections));
   image.resize(image.size() + bytes.size());

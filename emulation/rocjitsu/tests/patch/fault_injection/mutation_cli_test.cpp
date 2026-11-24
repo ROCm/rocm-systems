@@ -89,8 +89,9 @@ protected:
   static int open_capture(const std::filesystem::path &path, StreamFailure failure) {
     if (failure == StreamFailure::ClosedPipe) {
       int descriptors[2] = {};
-      if (pipe(descriptors) != 0)
+      if (pipe(descriptors) != 0) {
         return -1;
+      }
       close(descriptors[0]);
       return descriptors[1];
     }
@@ -101,8 +102,9 @@ protected:
   int invoke(std::vector<std::string> arguments, InvokeOptions options) {
     arguments.insert(arguments.begin(), cli_);
     std::vector<char *> pointers;
-    for (std::string &argument : arguments)
+    for (std::string &argument : arguments) {
       pointers.push_back(argument.data());
+    }
     pointers.push_back(nullptr);
     const int out = open_capture(root_ / "stdout", options.stdout_failure);
     const int err = open_capture(root_ / "stderr", options.stderr_failure);
@@ -110,29 +112,35 @@ protected:
     EXPECT_GE(err, 0);
     const pid_t child = fork();
     if (child == 0) {
-      if (chdir(root_.c_str()) != 0 || dup2(out, STDOUT_FILENO) < 0 || dup2(err, STDERR_FILENO) < 0)
+      if (chdir(root_.c_str()) != 0 || dup2(out, STDOUT_FILENO) < 0 ||
+          dup2(err, STDERR_FILENO) < 0) {
         _exit(126);
+      }
       close(out);
       close(err);
       // Exercise the executable's signal policy, independent of the test runner.
-      if (std::signal(SIGPIPE, SIG_DFL) == SIG_ERR || std::signal(SIGXFSZ, SIG_DFL) == SIG_ERR)
+      if (std::signal(SIGPIPE, SIG_DFL) == SIG_ERR || std::signal(SIGXFSZ, SIG_DFL) == SIG_ERR) {
         _exit(126);
+      }
       if (options.limit_write) {
         const rlimit core_limit = {.rlim_cur = 0, .rlim_max = 0};
         const rlimit limit = {.rlim_cur = 512, .rlim_max = 512};
-        if (setrlimit(RLIMIT_CORE, &core_limit) != 0 || setrlimit(RLIMIT_FSIZE, &limit) != 0)
+        if (setrlimit(RLIMIT_CORE, &core_limit) != 0 || setrlimit(RLIMIT_FSIZE, &limit) != 0) {
           _exit(126);
+        }
       }
       execv(pointers.front(), pointers.data());
       _exit(127);
     }
     close(out);
     close(err);
-    if (child < 0)
+    if (child < 0) {
       return -1;
+    }
     int status = 0;
-    if (waitpid(child, &status, 0) != child)
+    if (waitpid(child, &status, 0) != child) {
       return -1;
+    }
     const std::vector<uint8_t> out_bytes = options.stdout_failure == StreamFailure::None
                                                ? read(root_ / "stdout")
                                                : std::vector<uint8_t>{};
@@ -141,8 +149,9 @@ protected:
                                                : std::vector<uint8_t>{};
     stdout_.assign(out_bytes.begin(), out_bytes.end());
     stderr_.assign(err_bytes.begin(), err_bytes.end());
-    if (WIFEXITED(status))
+    if (WIFEXITED(status)) {
       return WEXITSTATUS(status);
+    }
     return WIFSIGNALED(status) ? 128 + WTERMSIG(status) : -1;
   }
   int invoke(std::vector<std::string> arguments) { return invoke(std::move(arguments), {}); }
@@ -200,8 +209,9 @@ TEST_P(FaultMutationCliFamily, ListsSelectsAndEmitsExactLibraryBytes) {
     EXPECT_EQ(barrier.members.size(), row.split ? 2u : 1u);
     std::string members;
     for (const StaticBarrierMember &member : barrier.members) {
-      if (!members.empty())
+      if (!members.empty()) {
         members += ',';
+      }
       members += std::to_string(member.offset) + ":4";
     }
     EXPECT_NE(stdout_.find("ordinal=" + std::to_string(ordinal) +
@@ -215,12 +225,14 @@ TEST_P(FaultMutationCliFamily, ListsSelectsAndEmitsExactLibraryBytes) {
     const size_t ordinal = mode == "default" ? 0 : 1;
     const StaticBarrier &barrier = inventory.value().barriers()[ordinal];
     std::vector<std::string> options{"--kind", "DropBarrier", "--target", target};
-    if (mode == "ordinal")
+    if (mode == "ordinal") {
       options.insert(options.end(), {"--ordinal", "1"});
-    if (mode == "exact")
+    }
+    if (mode == "exact") {
       options.insert(options.end(),
                      {"--exact", std::format("{:#x}", barrier.members.front().offset), "--ordinal",
                       "18446744073709551615"});
+    }
     ASSERT_EQ(invoke(args(options)), 0) << stderr_;
     const std::vector<uint8_t> mutant = read(output_);
     const std::string expected_stdout = std::format(
@@ -234,8 +246,9 @@ TEST_P(FaultMutationCliFamily, ListsSelectsAndEmitsExactLibraryBytes) {
         apply_drop_barrier(context, selection.value(), error);
     ASSERT_TRUE(library.succeeded()) << error.message;
     std::string expected_stderr;
-    for (const std::string &assumption : library.value().assumptions)
+    for (const std::string &assumption : library.value().assumptions) {
       expected_stderr += "rj_code_mutate: assumption: " + assumption + '\n';
+    }
     EXPECT_EQ(stderr_, expected_stderr);
     EXPECT_EQ(mutant, library.value().image);
     const std::optional<std::vector<uint8_t>> expected =
@@ -359,21 +372,24 @@ TEST_F(FaultMutationCli, HelpCapabilitiesAndArguments) {
                                        "form=ds_store_b32 admission=direct-single-owner\n";
   ASSERT_NE(capabilities.find(lds1200), std::string::npos);
   ASSERT_NE(capabilities.find(lds1201), std::string::npos);
-  for (const std::string target : {"gfx1200", "gfx1201"})
+  for (const std::string target : {"gfx1200", "gfx1201"}) {
     EXPECT_NE(capabilities.find("kind=LdsWrongAddress target=" + target +
                                 " wave=64 form=ds_load_b32 admission=direct-single-owner\n"),
               std::string::npos);
+  }
   for (const std::string target : {"gfx1200", "gfx1201"}) {
-    for (const std::string form : {"ds_store_b32", "ds_load_b32"})
+    for (const std::string form : {"ds_store_b32", "ds_load_b32"}) {
       EXPECT_NE(capabilities.find("kind=LdsWrongAddress target=" + target +
                                   " wave=32 form=" + form + " admission=direct-single-owner\n"),
                 std::string::npos);
+    }
   }
   for (const std::string target : {"gfx942", "gfx950"}) {
-    for (const std::string form : {"ds_write_b32", "ds_write_b128"})
+    for (const std::string form : {"ds_write_b32", "ds_write_b128"}) {
       EXPECT_NE(capabilities.find("kind=LdsWrongAddress target=" + target +
                                   " wave=64 form=" + form + " admission=direct-single-owner\n"),
                 std::string::npos);
+    }
   }
   const std::vector<LdsCapability> lds_capabilities = lds_wrong_address_capabilities();
   ASSERT_EQ(lds_capabilities.size(), 205u);
@@ -408,8 +424,9 @@ TEST_F(FaultMutationCli, HelpCapabilitiesAndArguments) {
                                              {"--ordinal", "0", "--ordinal", "1"},
                                              {"--target", "gfx1251"},
                                              {"--target", "bogus"},
-                                             {"--list"}})
+                                             {"--list"}}) {
     expect_rejected(args(options));
+  }
   expect_rejected({});
   expect_rejected({"--input", input_.string(), "--output", output_.string()});
 }
@@ -552,9 +569,10 @@ TEST_F(FaultMutationCli, SelectionAndMalformedInputsFailWithoutPublication) {
     EXPECT_EQ(stderr_.find("BadIdentity"), std::string::npos) << stderr_;
   }
   expect_rejected({"--input", input_.string(), "--kernel", "test", "--output", output_.string()});
-  for (const std::string name : {"missing.hsaco", "."})
+  for (const std::string name : {"missing.hsaco", "."}) {
     expect_rejected({"--input", (root_ / name).string(), "--kernel", "test_kernel", "--output",
                      output_.string()});
+  }
   for (size_t size : {size_t{0}, size_t{10}, image.size() - 1}) {
     write(input_, std::span(image).first(size));
     expect_rejected(args());
@@ -600,10 +618,11 @@ TEST_F(FaultMutationCli, UnknownKernelListsDescriptorEntries) {
       SCOPED_TRACE(list);
       std::vector<std::string> arguments = {"--input", input_.string(), "--kernel",
                                             "missing_kernel"};
-      if (list)
+      if (list) {
         arguments.push_back("--list");
-      else
+      } else {
         arguments.insert(arguments.end(), {"--output", output_.string()});
+      }
       expect_rejected(std::move(arguments));
       EXPECT_NE(stderr_.find("discovery failed: code=BadIdentity"), std::string::npos);
       EXPECT_NE(stderr_.find("descriptor entries:"), std::string::npos);
@@ -731,8 +750,9 @@ TEST_F(FaultMutationCli, RejectsIllegalWavesAndForms) {
 
 TEST_F(FaultMutationCli, RejectsTrapBarriersBeforeSelectingUserBarrier) {
   for (const test::DropTargetRow &row : test::kDropRows) {
-    if (!row.split)
+    if (!row.split) {
       continue;
+    }
     SCOPED_TRACE(row.name);
     for (const int32_t id : {-2, -4}) {
       SCOPED_TRACE(id);
@@ -840,8 +860,9 @@ TEST_F(FaultMutationCli, RejectsAmbiguousEntryAndUnsupportedConcreteTarget) {
   const AmdGpuCodeObject source(image.data(), image.size());
   const CodeObjectPatcher patcher(source);
   for (const Elf64_Shdr &section : patcher.section_headers()) {
-    if (section.sh_type != SHT_SYMTAB)
+    if (section.sh_type != SHT_SYMTAB) {
       continue;
+    }
     Elf64_Sym first = {}, second = {};
     std::memcpy(&first, image.data() + section.sh_offset + sizeof(Elf64_Sym), sizeof(first));
     std::memcpy(&second, image.data() + section.sh_offset + 2 * sizeof(Elf64_Sym), sizeof(second));
@@ -878,10 +899,11 @@ TEST_F(FaultMutationCli, FileFailuresPreserveInputAndExistingDestination) {
   EXPECT_EQ(read(output_), image);
   std::filesystem::remove(output_);
   for (bool hardlink : {false, true}) {
-    if (hardlink)
+    if (hardlink) {
       std::filesystem::create_hard_link(input_, output_);
-    else
+    } else {
       std::filesystem::create_symlink(input_, output_);
+    }
     EXPECT_EQ(invoke(args()), 3);
     EXPECT_EQ(read(input_), image);
     EXPECT_EQ(read(output_), image);
@@ -901,8 +923,9 @@ TEST_F(FaultMutationCli, FileFailuresPreserveInputAndExistingDestination) {
 TEST_F(FaultMutationCli, ListsTwoAddressForms) {
   for (const test::TwoAddressTarget &target : test::kTwoAddressTargets) {
     for (bool wave32 : {false, true}) {
-      if (target.cdna && wave32)
+      if (target.cdna && wave32) {
         continue;
+      }
       SCOPED_TRACE(static_cast<int>(target.target));
       SCOPED_TRACE(wave32);
       write(input_, test::make_two_address_elf(target, wave32));
@@ -920,8 +943,9 @@ TEST_F(FaultMutationCli, ListsTwoAddressForms) {
 TEST_F(FaultMutationCli, ListsSubwordAndTransposeForms) {
   for (const test::LdsFormCase &fixture : test::kSubwordCases) {
     for (bool wave32 : {false, true}) {
-      if (fixture.arch != IsaFamily::Rdna4 && wave32)
+      if (fixture.arch != IsaFamily::Rdna4 && wave32) {
         continue;
+      }
       SCOPED_TRACE(wave32);
       SCOPED_TRACE(fixture.form);
       write(input_, test::make_lds_form_elf(fixture, false, wave32));
@@ -936,8 +960,9 @@ TEST_F(FaultMutationCli, ListsSubwordAndTransposeForms) {
 TEST_F(FaultMutationCli, ListsRemainingSubwordForms) {
   for (const test::LdsFormCase &fixture : test::kRemainingSubwordCases) {
     for (bool wave32 : {false, true}) {
-      if (fixture.arch != IsaFamily::Rdna4 && wave32)
+      if (fixture.arch != IsaFamily::Rdna4 && wave32) {
         continue;
+      }
       SCOPED_TRACE(wave32);
       SCOPED_TRACE(fixture.form);
       SCOPED_TRACE(static_cast<int>(fixture.target));

@@ -54,8 +54,9 @@ TEST_P(CdnaLds, InvalidRegistersForeignAndExpiredSelections) {
   const FailureOr<LdsSelection> selected = select_lds_wrong_address(inventory.value(), {}, error);
   ASSERT_TRUE(selected.succeeded()) << error.message;
   for (std::optional<uint32_t> value :
-       std::array<std::optional<uint32_t>, 4>{std::nullopt, 2u, 16u, 256u})
+       std::array<std::optional<uint32_t>, 4>{std::nullopt, 2u, 16u, 256u}) {
     EXPECT_TRUE(apply_lds_wrong_address(source, selected.value(), value, error).failed());
+  }
   EXPECT_TRUE(apply_lds_wrong_address(foreign, selected.value(), 10, error).failed());
   EXPECT_TRUE(
       select_lds_wrong_address(inventory.value(), {.exact = LdsSelection{}, .ordinal = 0}, error)
