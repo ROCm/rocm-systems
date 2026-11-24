@@ -58,6 +58,8 @@
 #ifdef ENABLE_WSL_BACKEND
 #include "amd_smi/impl/amd_smi_wsl_device.h"
 #endif
+#include <cinttypes>
+
 #include "fwupd_carveout.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_kfd.h"
@@ -67,7 +69,6 @@
 #include "smi_nic.h"
 #include "smi_nic_hwmon.h"
 #include "smi_nic_telemetry.h"
-#include <cinttypes>
 
 // a global instance of std::mutex to protect data passed during threads
 std::mutex myMutex;
