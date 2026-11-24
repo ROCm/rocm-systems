@@ -18,50 +18,100 @@ from .cpp_file import CppFile
 _MEMORY_PREFIXES = (
     'GLOBAL_LOAD_',
     'GLOBAL_STORE_',
+    'GLOBAL_ATOMIC_',
     'BUFFER_LOAD_',
     'BUFFER_STORE_',
+    'BUFFER_ATOMIC_',
+    'SCRATCH_LOAD_',
+    'SCRATCH_STORE_',
+    'FLAT_LOAD_',
+    'FLAT_STORE_',
+    'FLAT_ATOMIC_',
+    'S_LOAD_',
+    'S_STORE_',
+    'S_BUFFER_LOAD_',
+    'S_BUFFER_STORE_',
+    'S_BUFFER_ATOMIC_',
 )
 
-_ARITHMETIC_PREFIXES = (
-    'S_MOV_',
-    'S_ADD_',
-    'S_ADDC_',
-    'S_SUB_',
-    'S_SUBB_',
-    'S_MUL_',
-    'S_MAD_',
-    'S_AND_',
-    'S_OR_',
-    'S_XOR_',
-    'S_LSHL_',
-    'S_LSHR_',
-    'S_ASHR_',
-    'S_CMP_',
-    'S_CSELECT_',
-    'V_MOV_',
-    'V_ADD_',
-    'V_ADDC_',
-    'V_SUB_',
-    'V_SUBREV_',
-    'V_MUL_',
-    'V_MAD_',
-    'V_FMA_',
-    'V_LSHL',
-    'V_LSHR',
-    'V_ASHR',
-    'V_AND_',
-    'V_OR_',
-    'V_XOR_',
-    'V_CVT_',
-    'V_CMP_',
-    'V_CNDMASK_',
-    'V_MAX_',
-    'V_MIN_',
-    'V_BFE_',
-    'V_BFI_',
-    'V_ALIGNBIT_',
-    'V_ALIGNBYTE_',
+# Scalar and vector ALU instructions qualify as arithmetic unless they carry
+# wave state the policy cannot see in their register operands: control flow,
+# waits, hardware and mode registers, EXEC, VGPR indexing or addressing modes,
+# messages, caches, matrix instructions (admitted through candidate()), and
+# interpolation (implicit LDS reads). The C++ policy still rejects explicit
+# special-register destinations, DPP and secondary operations.
+_ALU_PREFIXES = ('S_', 'V_')
+_ALU_DENIED_PREFIXES = (
+    'S_ADD_PC',
+    'S_ALLOC_VGPR',
+    'S_ATC_PROBE',
+    'S_ATOMIC_',
+    'S_BARRIER',
+    'S_BRANCH',
+    'S_BUFFER_PREFETCH',
+    'S_CALL',
+    'S_CBRANCH',
+    'S_CODE_END',
+    'S_DCACHE_',
+    'S_DENORM_MODE',
+    'S_ENDPGM',
+    'S_GET_BARRIER_STATE',
+    'S_GL1_INV',
+    'S_ICACHE_INV',
+    'S_ILLEGAL',
+    'S_INST_PREFETCH',
+    'S_MEMREALTIME',
+    'S_MEMTIME',
+    'S_MONITOR_SLEEP',
+    'S_MOVREL',
+    'S_PREFETCH_',
+    'S_RFE',
+    'S_ROUND_MODE',
+    'S_SCRATCH_',
+    'S_SENDMSG',
+    'S_SETHALT',
+    'S_SETKILL',
+    'S_SETPC',
+    'S_SETREG',
+    'S_SETVSKIP',
+    'S_SET_GPR_IDX',
+    'S_SET_INST_PREFETCH',
+    'S_SET_PC',
+    'S_SET_VALU_COEXEC_MODE',
+    'S_SET_VGPR_MSB',
+    'S_SLEEP',
+    'S_SWAPPC',
+    'S_SWAP_PC',
+    'S_TRAP',
+    'S_TTRACEDATA',
+    'S_VERSION',
+    'S_WAIT',
+    'S_WAKEUP',
+    'V_CMPX',
+    'V_ILLEGAL',
+    'V_INTERP',
+    'V_MFMA',
+    'V_MOVREL',
+    'V_SET_INACTIVE',
+    'V_SMFMAC',
+    'V_SWAPREL',
+    'V_SWMMAC',
+    'V_WMMA',
 )
+# EXEC writers whose names do not start with a denied prefix.
+_ALU_DENIED_INFIXES = ('SAVEEXEC', 'WREXEC')
+
+
+def _inline_operation_kind(name: str) -> int:
+    if name.startswith(_MEMORY_PREFIXES):
+        return 1
+    if (
+        name.startswith(_ALU_PREFIXES)
+        and not name.startswith(_ALU_DENIED_PREFIXES)
+        and not any(infix in name for infix in _ALU_DENIED_INFIXES)
+    ):
+        return 2
+    return 0
 
 
 def emit_async_inline_operations(
@@ -82,11 +132,7 @@ def emit_async_inline_operations(
 
     values = [0]
     for name in operation_names:
-        values.append(
-            1
-            if name.startswith(_MEMORY_PREFIXES)
-            else 2 if name.startswith(_ARITHMETIC_PREFIXES) else 0
-        )
+        values.append(_inline_operation_kind(name))
     rows = [
         '  ' + ', '.join(str(value) for value in values[start : start + 32]) + ','
         for start in range(0, len(values), 32)

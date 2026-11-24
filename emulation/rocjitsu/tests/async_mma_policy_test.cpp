@@ -117,14 +117,48 @@ TEST(AsyncMmaPolicyTest, Cdna4LdsReadsAndM0MovesStayInsideTheWindow) {
   };
   EXPECT_FALSE(policy::safe_inline(
       *decode(cdna4::build_ds(cdna4::kDsReadB128, {.gds = 1, .addr = 1, .vdst = 8}))));
-  EXPECT_FALSE(policy::safe_inline(
+  // LDS stores run on the issuer in order; GDS stays out.
+  EXPECT_TRUE(policy::safe_inline(
       *decode(cdna4::build_ds(cdna4::kDsWriteB128, {.addr = 1, .data0 = 4}))));
+  EXPECT_FALSE(policy::safe_inline(
+      *decode(cdna4::build_ds(cdna4::kDsWriteB128, {.gds = 1, .addr = 1, .data0 = 4}))));
   EXPECT_TRUE(policy::safe_inline(*decode(cdna4::build_sopp(cdna4::kSSetprioSopp, {.simm16 = 1}))));
   EXPECT_TRUE(policy::safe_inline(
       *decode(cdna4::build_sopk(cdna4::kSMovkI32Sopk, {.simm16 = 7, .sdst = 4}))));
-  // M0 (124) is the only special register a move may write without draining.
+  // M0 (124) is the only special register scalar arithmetic may write without draining.
   EXPECT_TRUE(policy::safe_inline(
       *decode(cdna4::build_sop1(cdna4::kSMovB32Sop1, {.ssrc0 = 3, .sdst = 124}))));
+  EXPECT_TRUE(policy::safe_inline(
+      *decode(cdna4::build_sop2(cdna4::kSAddU32Sop2, {.ssrc0 = 4, .ssrc1 = 129, .sdst = 124}))));
+  EXPECT_FALSE(policy::safe_inline(
+      *decode(cdna4::build_sop2(cdna4::kSAddU32Sop2, {.ssrc0 = 4, .ssrc1 = 129, .sdst = 126}))));
+  // Plain VALU and SALU families beyond the original allowlist are issuer work.
+  EXPECT_TRUE(policy::safe_inline(
+      *decode(cdna4::build_vop1(cdna4::kVExpF32Vop1, {.src0 = 256 + 3, .vdst = 5}))));
+  EXPECT_TRUE(policy::safe_inline(*decode(cdna4::build_vop3p(
+      cdna4::kVPkMulF32Vop3p, {.vdst = 8, .src0 = 256 + 2, .src1 = 256 + 4}))));
+  EXPECT_TRUE(policy::safe_inline(
+      *decode(cdna4::build_sopp(cdna4::kSNopSopp, {.simm16 = 0}))));
+  // Instructions that write both of their register operands must report both writes,
+  // and read-modify-write forms must report the destination as a read.
+  const auto access_of = [&](const auto &encoding) {
+    std::array<uint32_t, 4> words{};
+    std::ranges::copy(encoding, words.begin());
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    EXPECT_TRUE(policy::safe_inline(*inst)) << inst->mnemonic();
+    return *policy::footprint(*inst, 256);
+  };
+  const auto swap = access_of(cdna4::build_vop1(cdna4::kVSwapB32Vop1, {.src0 = 256 + 3, .vdst = 5}));
+  EXPECT_TRUE(swap.writes.test(3) && swap.writes.test(5)) << "v_swap writes both operands";
+  EXPECT_TRUE(swap.reads.test(3) && swap.reads.test(5));
+  const auto permlane = access_of(
+      cdna4::build_vop1(cdna4::kVPermlane32SwapB32Vop1, {.src0 = 256 + 3, .vdst = 5}));
+  EXPECT_TRUE(permlane.writes.test(3) && permlane.writes.test(5))
+      << "v_permlane32_swap writes both operands";
+  const auto fmac =
+      access_of(cdna4::build_vop2(cdna4::kVFmacF32Vop2, {.src0 = 256 + 1, .vsrc1 = 2, .vdst = 7}));
+  EXPECT_TRUE(fmac.reads.test(7)) << "v_fmac reads its accumulator";
+  EXPECT_TRUE(fmac.writes.test(7));
   EXPECT_FALSE(policy::safe_inline(
       *decode(cdna4::build_sop1(cdna4::kSMovB32Sop1, {.ssrc0 = 3, .sdst = 126}))));
   EXPECT_FALSE(policy::safe_inline(

@@ -91,6 +91,7 @@ inline bool ordinary_memory(const Instruction &inst) {
 }
 // LDS reads and the LDS-free lane permute write only their VGPR destinations,
 // which the footprint covers; they execute in program order on the issuer.
+// CDNA5 spells the same instructions DS_LOAD_*.
 inline bool lds_read(Operation operation) {
   switch (operation) {
   case Operation::DS_READ_B32:
@@ -116,11 +117,67 @@ inline bool lds_read(Operation operation) {
   case Operation::DS_READ_B64_TR_B16:
   case Operation::DS_READ_B96_TR_B6:
   case Operation::DS_BPERMUTE_B32:
+  case Operation::DS_LOAD_B32:
+  case Operation::DS_LOAD_B64:
+  case Operation::DS_LOAD_B96:
+  case Operation::DS_LOAD_B128:
+  case Operation::DS_LOAD_2ADDR_B32:
+  case Operation::DS_LOAD_2ADDR_B64:
+  case Operation::DS_LOAD_2ADDR_STRIDE64_B32:
+  case Operation::DS_LOAD_2ADDR_STRIDE64_B64:
+  case Operation::DS_LOAD_I8:
+  case Operation::DS_LOAD_U8:
+  case Operation::DS_LOAD_I16:
+  case Operation::DS_LOAD_U16:
+  case Operation::DS_LOAD_I8_D16:
+  case Operation::DS_LOAD_I8_D16_HI:
+  case Operation::DS_LOAD_U8_D16:
+  case Operation::DS_LOAD_U8_D16_HI:
+  case Operation::DS_LOAD_U16_D16:
+  case Operation::DS_LOAD_U16_D16_HI:
+  case Operation::DS_LOAD_TR4_B64:
+  case Operation::DS_LOAD_TR6_B96:
+  case Operation::DS_LOAD_TR8_B64:
+  case Operation::DS_LOAD_TR16_B128:
     return true;
   default:
     return false;
   }
 }
+// Plain LDS stores read only VGPRs (address and data), which the footprint
+// covers, and complete at issue; there is no virtual memory behind them.
+inline bool lds_write(Operation operation) {
+  switch (operation) {
+  case Operation::DS_WRITE_B8:
+  case Operation::DS_WRITE_B16:
+  case Operation::DS_WRITE_B32:
+  case Operation::DS_WRITE_B64:
+  case Operation::DS_WRITE_B96:
+  case Operation::DS_WRITE_B128:
+  case Operation::DS_WRITE_B8_D16_HI:
+  case Operation::DS_WRITE_B16_D16_HI:
+  case Operation::DS_WRITE2_B32:
+  case Operation::DS_WRITE2_B64:
+  case Operation::DS_WRITE2ST64_B32:
+  case Operation::DS_WRITE2ST64_B64:
+  case Operation::DS_STORE_B8:
+  case Operation::DS_STORE_B16:
+  case Operation::DS_STORE_B32:
+  case Operation::DS_STORE_B64:
+  case Operation::DS_STORE_B96:
+  case Operation::DS_STORE_B128:
+  case Operation::DS_STORE_B8_D16_HI:
+  case Operation::DS_STORE_B16_D16_HI:
+  case Operation::DS_STORE_2ADDR_B32:
+  case Operation::DS_STORE_2ADDR_B64:
+  case Operation::DS_STORE_2ADDR_STRIDE64_B32:
+  case Operation::DS_STORE_2ADDR_STRIDE64_B64:
+    return true;
+  default:
+    return false;
+  }
+}
+inline bool lds_access(Operation operation) { return lds_read(operation) || lds_write(operation); }
 inline bool global_data_share(const Instruction &inst) {
   const auto *issue = inst.amdgpu_memory_issue_info();
   if (!issue)
@@ -148,7 +205,7 @@ inline bool safe_inline(const Instruction &inst) {
   if (operation == Operation::S_DELAY_ALU || operation == Operation::S_NOP ||
       operation == Operation::V_NOP || operation == Operation::S_SETPRIO)
     return true;
-  if (lds_read(operation))
+  if (lds_access(operation))
     return !global_data_share(inst);
   if (candidate(inst) || ordinary_memory(inst))
     return true;
@@ -163,9 +220,10 @@ inline bool safe_inline(const Instruction &inst) {
     const auto *op = inst.dst_operand(i);
     // Ordinary SGPRs only. Fieldless SCC/VCC are permitted by the whitelist;
     // WMMA workers do not read them. Explicit special-register writes drain,
-    // except an M0 move: matrix helpers never read M0, and the LDS and
-    // buffer-to-LDS instructions that do run on the issuer in program order.
-    if (op && operation == Operation::S_MOV_B32 && op->encoding_value() == kM0Encoding)
+    // except M0: matrix helpers never read M0, and the LDS and buffer-to-LDS
+    // instructions that do run on the issuer in program order, whichever
+    // scalar instruction computed it.
+    if (op && op->encoding_value() == kM0Encoding && !op->is_vgpr())
       continue;
     if (op && !op->is_vgpr() && !op->is_fieldless() &&
         (op->encoding_value() < 0 || op->encoding_value() + (op->size_bits() + 31) / 32 > 102))
