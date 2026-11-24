@@ -175,6 +175,8 @@ TEST_F(HipFileStream, deregister_returns_removed_stream)
     auto removed = stream_map.deregisterStream(nonnull_stream);
     ASSERT_NE(removed, nullptr);
     EXPECT_EQ(removed->getHipStream(), nonnull_stream);
+    // The map must not keep a reference, so the caller holds the only one
+    EXPECT_EQ(removed.use_count(), 1);
     EXPECT_THROW(stream_map.deregisterStream(nonnull_stream), std::invalid_argument);
 }
 

@@ -215,9 +215,9 @@ StreamMap::deregisterStream(hipStream_t hip_stream)
         throw std::invalid_argument("Stream is not registered");
     }
 
-    auto stream = std::move(itr->second);
-    StreamMap::from_ptr.erase(itr);
-    return stream;
+    // extract() unlinks the node from the map without destroying it, so the stream moves out of the node
+    // directly into the return value. The node, now holding a null pointer, is destroyed afterward.
+    return std::move(StreamMap::from_ptr.extract(itr).mapped());
 }
 
 std::shared_ptr<IStream>
