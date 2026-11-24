@@ -484,6 +484,9 @@ if(TARGET consan_hsa_runner)
                 set(_width_cases
                     wide_u8
                     wide_i8_alias_high
+                    wide_d16_u8
+                    wide_d16_i8_high
+                    wide_d16_u16
                     wide_u16
                     wide_i16
                     wide_b64
@@ -509,6 +512,11 @@ if(TARGET consan_hsa_runner)
                 foreach(_width_case IN LISTS _width_cases)
                     consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
                         ${_width_case} ${_width_threads} production analysis
+                    )
+                endforeach()
+                foreach(_peer IN ITEMS overlap adjacent)
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                        wide_d16_${_peer} ${_threads} production analysis
                     )
                 endforeach()
                 foreach(_peer IN ITEMS overlap adjacent disjoint)

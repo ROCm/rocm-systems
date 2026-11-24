@@ -29,7 +29,8 @@
 #define DS_LOAD_B32 ds_read_b32
 #define DS_LOAD_U16 ds_read_u16
 #define DS_LOAD_I16 ds_read_i16
-#define DS_LOAD_PARTIAL ds_read_u16_d16_hi
+#define DS_READ_D16_OP(type) ds_read_##type
+#define DS_WRITE_D16_OP(type) ds_write_##type
 #define DS_LOAD_B96 ds_read_b96
 #define DS_LOAD_B64 ds_read_b64
 #define DS_LOAD_B128 ds_read_b128
@@ -49,7 +50,8 @@
 #define DS_LOAD_B32 ds_load_b32
 #define DS_LOAD_U16 ds_load_u16
 #define DS_LOAD_I16 ds_load_i16
-#define DS_LOAD_PARTIAL ds_load_u16_d16_hi
+#define DS_READ_D16_OP(type) ds_load_##type
+#define DS_WRITE_D16_OP(type) ds_store_##type
 #define DS_LOAD_B96 ds_load_b96
 #define DS_LOAD_B64 ds_load_b64
 #define DS_LOAD_B128 ds_load_b128
@@ -130,7 +132,9 @@ CONSAN_KERNEL:
 #else
   v_lshlrev_b32 v1, 1, v6
 #endif
-#elif CONSAN_WIDTH == 8
+#elif defined(CONSAN_D16_PEER_OFFSET)
+  v_mov_b32 v1, 0
+#elif CONSAN_WIDTH == 8 || CONSAN_WIDTH == 17
   // Three waves occupy the last three dwords of the allocation.
   v_lshlrev_b32 v1, 2, v6
   VECTOR_ADD v1, (GROUP_BYTES-12), v1
@@ -206,9 +210,9 @@ CONSAN_KERNEL:
 #endif
 #endif
 #elif CONSAN_WIDTH == 17
-  DS_STORE_B16 v1, v2
-  consan_wait_all
-  DS_LOAD_PARTIAL v8, v1
+#define DS_READ_D16(type) DS_READ_D16_OP(type)
+#define DS_WRITE_D16(type) DS_WRITE_D16_OP(type)
+#include "native_d16.inc"
 #elif CONSAN_WIDTH == 16
   DS_STORE_B16 v1, v2 offset:2
   consan_wait_all

@@ -43,6 +43,11 @@ ANALYSIS_CASES = (*RUNTIME_CASES, 'repeat_race', 'utf8_entry')
 CORE_WIDTH_CASES = (
     'wide_u8',
     'wide_i8_alias_high',
+    'wide_d16_u8',
+    'wide_d16_i8_high',
+    'wide_d16_u16',
+    'wide_d16_overlap',
+    'wide_d16_adjacent',
     'wide_b8_overlap',
     'wide_b8_adjacent',
     'wide_b8_disjoint',
@@ -197,7 +202,7 @@ def required_names():
             'UnreachableEntryOrDenseSitesFailBeforeArtifactPublication',
             'HipWorkloadsMustContainQualifiedNativeLdsSites',
             'GdsAndAccumulatorAliasingAreRejectedAtTheirActualBoundaries',
-            'QualifyOnlyWholeRegisterSingleRangeForms',
+            'QualifySingleRangeFormsWithExactDataWidths',
             'BoundedWorkgroupFixturesRetainQualifiedLdsSites',
         ):
             names.add(f'ConSanTargets/ConSanTargetStatic.{case}/{suffix}')
@@ -207,6 +212,7 @@ def required_names():
             'ThreeWavesAndPartialTailUseDistinctRows',
             'NativeWidthsPreserveEveryWordAndAllGuestState',
             'ByteAccessPreservesNeighborBytesAndExtendsOnlyActiveLanes',
+            'D16AccessesSelectSubwordsAndExecuteEachGuestFormOnce',
             'PublicationBarrierBlocksAnEarlyConsumer',
             'BarrierPreservesOutputAndGuestStateAtEmptyExecAndHighLanes',
             'RepeatedBarrierLoopsPreserveStateAndRetainIndependentSites',

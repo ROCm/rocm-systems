@@ -94,7 +94,7 @@ TEST(ConSanNativeWidthsStatic, AdmitGfx1250B64WithExactWidths) {
   EXPECT_EQ(artifact.value().manifest.sites[1].width, 4u);
 }
 
-TEST_P(ConSanTargetStatic, QualifyOnlyWholeRegisterSingleRangeForms) {
+TEST_P(ConSanTargetStatic, QualifySingleRangeFormsWithExactDataWidths) {
   const test::TargetMode mode = GetParam();
   for (const auto &[name, width] :
        std::array<std::pair<const char *, uint32_t>, 7>{{{"u16", 2},
@@ -132,13 +132,19 @@ TEST_P(ConSanTargetStatic, QualifyOnlyWholeRegisterSingleRangeForms) {
       EXPECT_EQ(sites[index].access, index < 2 ? AccessKind::Write : AccessKind::Read);
     }
   }
-  const std::vector<uint8_t> partial =
-      test::read_fixture(test::target_fixture_path(mode, "width-excluded-partial"));
-  ASSERT_FALSE(partial.empty());
+  const std::vector<uint8_t> d16 =
+      test::read_fixture(test::target_fixture_path(mode, "width-d16-overlap"));
   InputError error;
-  EXPECT_TRUE(
-      prepare(partial, *target_profile(mode.target), "lds_producer_consumer", error).failed());
-  EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess) << error.message;
+  const FailureOr<PreparedArtifact> artifact =
+      prepare(d16, *target_profile(mode.target), "lds_producer_consumer", error);
+  ASSERT_TRUE(artifact.succeeded()) << error.message;
+  const std::array<unsigned, 9> widths{1, 2, 1, 1, 1, 1, 2, 2, 4};
+  const std::vector<SiteFacts> &sites = artifact.value().manifest.sites;
+  ASSERT_EQ(sites.size(), widths.size());
+  for (size_t index = 0; index < widths.size(); ++index) {
+    EXPECT_EQ(sites[index].width, widths[index]);
+    EXPECT_EQ(sites[index].access, index < 2 || index == 8 ? AccessKind::Write : AccessKind::Read);
+  }
 }
 
 TEST_P(ConSanTargetStatic, QualifiedBarriersPreserveOriginalOperations) {

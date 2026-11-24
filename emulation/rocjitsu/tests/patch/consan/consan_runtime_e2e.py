@@ -54,6 +54,11 @@ CASES = (
     'loop_late',
     'wide_u8',
     'wide_i8_alias_high',
+    'wide_d16_u8',
+    'wide_d16_i8_high',
+    'wide_d16_u16',
+    'wide_d16_overlap',
+    'wide_d16_adjacent',
     'wide_b8_overlap',
     'wide_b8_adjacent',
     'wide_b8_disjoint',
@@ -322,6 +327,8 @@ class Driver:
                     else fixture_name.removesuffix('_high')
                 )
             )
+        if fixture_name in ('wide_d16_overlap', 'wide_d16_adjacent'):
+            mode = 'wide_d16_peer'
         if fixture_name.startswith('wide_b8_'):
             mode = 'wide_b8_peer'
         if fixture_name == 'wide_i8_alias_high':
@@ -718,6 +725,47 @@ class Driver:
                     for wave, kind, record in observations
                 ] == [(0, 2, 1 << lane, 4 * lane) for lane in range(4)]
 
+    def assert_d16_row(self, decoded, fixture, wave, records):
+        high = fixture.endswith('_high')
+        wave_size = self.args.wave_size
+        mask = (1 << (wave_size - 1)) if high else 1
+        if fixture in ('wide_d16_overlap', 'wide_d16_adjacent'):
+            expected = (
+                [
+                    (0, 2, 1, 3),
+                    (1, 2, 2, 2),
+                    (2, 1, 1, 3),
+                    (3, 1, 1, 3),
+                    (4, 1, 1, 3),
+                    (5, 1, 1, 3),
+                    (6, 1, 2, 2),
+                    (7, 1, 2, 2),
+                ]
+                if wave == 0
+                else [(8, 2, 4, 0 if fixture == 'wide_d16_overlap' else 4)]
+            )
+        else:
+            base = 1012 + 4 * wave
+            width = 2 if fixture == 'wide_d16_u16' else 1
+            address = base + 4 - width
+            expected = [
+                (0, 2, 4, base),
+                (1, 2, width, address),
+                (2, 1, width, address),
+                (3, 1, width, address),
+                (4, 1, 4, base),
+            ]
+            if high and (wave + 1) * wave_size > self.args.threads:
+                expected = []
+        assert len(records) == len(expected)
+        for seq, (record, (site_id, kind, width, address)) in enumerate(
+            zip(records, expected), 1
+        ):
+            assert record['site'] == site_id and record['sequence'] == seq
+            assert decoded['sites'][site_id]['access'] == kind
+            assert decoded['sites'][site_id]['width'] == record['width'] == width
+            assert record['offset'] == address and record['mask'] == mask
+
     def assert_width_observations(self, decoded, fixture):
         wave_size = self.args.wave_size
         waves = (self.args.threads + wave_size - 1) // wave_size
@@ -748,7 +796,10 @@ class Driver:
                 assert row['wave'] == wave and row['serial'] == index + 1
                 assert row['status'] == ROW_ENTERED | ROW_EXITED and row['loss'] == 0
                 records = row['records']
-                if byte_stride is not None:
+                if fixture.startswith('wide_d16_'):
+                    assert row['final_sequence'] == len(records)
+                    self.assert_d16_row(decoded, fixture, wave, records)
+                elif byte_stride is not None:
                     assert waves == 2
                     assert row['final_sequence'] == len(records) == 1
                     record = records[0]

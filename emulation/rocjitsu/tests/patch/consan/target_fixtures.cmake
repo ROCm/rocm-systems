@@ -200,7 +200,11 @@ foreach(
                 b96-overlap:96:0:0:0:0:4
                 b96-adjacent:96:0:0:0:0:8
                 b96-disjoint:96:0:0:0:0:12
-                excluded-partial:17:0:0:0:0
+                d16-u8:17:0:0:0:0
+                d16-i8-high:17:1:1:0:0
+                d16-u16:17:0:0:0:0
+                d16-overlap:17:0:0:0:0:0
+                d16-adjacent:17:0:0:0:0:4
         )
             string(REPLACE ":" ";" _parts ${_spec})
             list(GET _parts 0 _name)
@@ -226,9 +230,14 @@ foreach(
                 list(GET _parts 6 _peer_offset)
                 if(_width EQUAL 8)
                     set(_peer_option -DCONSAN_B8_PEER_STRIDE=${_peer_offset})
+                elseif(_width EQUAL 17)
+                    set(_peer_option -DCONSAN_D16_PEER_OFFSET=${_peer_offset})
                 else()
                     set(_peer_option -DCONSAN_B96_PEER_OFFSET=${_peer_offset})
                 endif()
+            endif()
+            if(_name STREQUAL "d16-u16")
+                set(_peer_option -DCONSAN_D16_HALF=1)
             endif()
             set(_object ${_directory}/width-${_name}.o)
             set(_image ${_directory}/width-${_name}.hsaco)
@@ -246,7 +255,10 @@ foreach(
                     ${_peer_option} -c
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native_widths.s -o
                     ${_object}
-                DEPENDS fixtures/native_widths.s ${AMDCXX}
+                DEPENDS
+                    fixtures/native_widths.s
+                    fixtures/native_d16.inc
+                    ${AMDCXX}
                 VERBATIM
             )
             add_custom_command(

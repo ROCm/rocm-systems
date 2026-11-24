@@ -4,6 +4,7 @@
 #include "aql_queue.h"
 #include "config_test_util.h"
 #include "halt_snapshot_plugin.h"
+#include "native_d16_oracle.h"
 #include "rocjitsu/isa/isa_family.h"
 #include "target_fixture.h"
 
@@ -1240,6 +1241,76 @@ TEST_P(ConSanTargetSim, ByteAccessPreservesNeighborBytesAndExtendsOnlyActiveLane
       const uint32_t byte = 0x87u + wave;
       EXPECT_EQ(after.full_output[4 * wave], count ? (high ? 0xffffff00u | byte : byte) : 0);
       EXPECT_EQ(after.full_output[4 * wave + 1], count ? (byte << 24) | 0x00234567u : 0);
+    }
+  }
+}
+
+class D16IssueTrace final : public ExecutionPlugin {
+public:
+  explicit D16IssueTrace(std::vector<std::vector<std::string>> &instructions)
+      : ExecutionPlugin("d16_issue_trace"), instructions_(instructions) {}
+  bool requires_serial_hot_hooks() const override { return true; }
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &instruction,
+                                        amdgpu::Wavefront &wave) override {
+    const std::string_view name = instruction.mnemonic();
+    if (wave.exec() && name.starts_with("ds_") && name.find("_d16") != std::string_view::npos)
+      instructions_.at(wave.wave_in_group()).emplace_back(name);
+  }
+
+private:
+  std::vector<std::vector<std::string>> &instructions_;
+};
+
+TEST_P(ConSanTargetSim, D16AccessesSelectSubwordsAndExecuteEachGuestFormOnce) {
+  const test::TargetMode target = GetParam();
+  const bool legacy = target_profile(target.target)->id < 1000;
+  const std::string read = legacy ? "ds_read_" : "ds_load_";
+  const std::string write = legacy ? "ds_write_" : "ds_store_";
+  for (const std::string_view name :
+       {"d16-u8", "d16-i8-high", "d16-u16", "d16-overlap", "d16-adjacent"}) {
+    SCOPED_TRACE(name);
+    const bool peer = name == "d16-overlap" || name == "d16-adjacent";
+    const bool signed_byte = name == "d16-i8-high";
+    const bool halfword = name == "d16-u16";
+    const uint32_t threads = 2 * target.wave_size + (peer ? 0 : 1);
+    const uint32_t waves = peer ? 2 : 3;
+    const std::string fixture = "width-" + std::string(name);
+    RunResult before, after;
+    std::vector<std::vector<std::string>> before_trace(waves), after_trace(waves);
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true, 4, false,
+                                1, std::make_unique<D16IssueTrace>(before_trace)));
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true, 4,
+                                false, 1, std::make_unique<D16IssueTrace>(after_trace)));
+    expect_guest_state(before, after);
+    const std::string load = read + (halfword ? "u16_d16" : signed_byte ? "i8_d16" : "u8_d16");
+    const std::vector<std::string> operations =
+        peer ? std::vector<std::string>{write + "b8_d16_hi", write + "b16_d16_hi",
+                                        read + "u8_d16",     read + "u8_d16_hi",
+                                        read + "i8_d16",     read + "i8_d16_hi",
+                                        read + "u16_d16",    read + "u16_d16_hi"}
+             : std::vector<std::string>{write + (halfword ? "b16_d16_hi" : "b8_d16_hi"), load,
+                                        load + "_hi"};
+    EXPECT_EQ(before_trace, after_trace);
+    ASSERT_EQ(after.full_output.size(), 4 * waves);
+    for (uint32_t wave = 0; wave < waves; ++wave) {
+      const bool empty = (peer && wave == 1) || (signed_byte && wave == 2);
+      if (empty)
+        EXPECT_TRUE(before_trace[wave].empty());
+      else
+        EXPECT_EQ(before_trace[wave], operations);
+      if (peer)
+        continue;
+      const std::array<uint32_t, 4> expected =
+          empty ? std::array<uint32_t, 4>{}
+                : test::d16_output(target.target, wave, halfword, signed_byte);
+      EXPECT_TRUE(
+          std::equal(expected.begin(), expected.end(), after.full_output.begin() + 4 * wave));
+      // Lane one starts with the same sentinels as the active lane but neither
+      // writes the alias address nor executes a D16 load.
+      if (wave < 2) {
+        EXPECT_EQ(after.waves[wave].vgpr(8, 1), 0xdeadbeefu);
+        EXPECT_EQ(after.waves[wave].vgpr(9, 1), 0x01234567u);
+      }
     }
   }
 }

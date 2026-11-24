@@ -88,6 +88,8 @@ class AnalysisDriver(Driver):
             if case == 'wide_collision'
             else (1 if case == 'collision' else 0)
         )
+        if case == 'wide_d16_overlap':
+            pairs = 8
         if case.startswith('loop_'):
             pairs = 2 * {
                 'loop_no_b0': 3,
@@ -186,6 +188,7 @@ class AnalysisDriver(Driver):
                         'barrier_missing_second',
                     )
                     else {
+                        'wide_d16_overlap': 8,
                         'loop_no_b0': 3,
                         'loop_no_b1': 2,
                         'loop_no_b0_full_journal': 4,
@@ -194,6 +197,23 @@ class AnalysisDriver(Driver):
                 )
             )
             assert analyzed['collision_groups'] == collisions
+            if case == 'wide_d16_overlap':
+                endpoints = set()
+                for finding in analyzed['cross_wave_examples']:
+                    a, b = sorted(
+                        (finding['first'], finding['second']),
+                        key=lambda endpoint: endpoint['wave'],
+                    )
+                    assert finding['ordering'] == 'unordered'
+                    assert (a['wave'], b['wave'], b['site'], b['offset']) == (
+                        0,
+                        1,
+                        8,
+                        0,
+                    )
+                    assert a['mask'] == b['mask'] == 1
+                    endpoints.add(a['site'])
+                assert endpoints == set(range(8))
             if case in ('race', 'repeat_race', 'high_lane'):
                 finding = analyzed['cross_wave_examples'][0]
                 assert finding['ordering'] == 'unordered'
