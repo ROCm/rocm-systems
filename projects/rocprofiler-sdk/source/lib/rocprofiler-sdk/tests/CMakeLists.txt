@@ -34,7 +34,7 @@ set(rocprofiler_lib_sources
     late_start.cpp
     naming.cpp
     queue_controller.cpp
-    queue_interposition.cpp
+    queue_interposition_test.cpp
     signal_pool.cpp
     timestamp.cpp
     version.cpp
