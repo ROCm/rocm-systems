@@ -125,7 +125,67 @@ class ImportData:
         )
 
 
-time_window = load_time_window_module()
+@pytest.fixture(scope="module")
+def time_window():
+    """rocpd.time_window, loaded on first use rather than when this file is imported."""
+    return load_time_window_module()
+
+
+def load_summary_module():
+    """Import rocpd.summary without the compiled libpyrocpd dependency.
+
+    summary.py imports .importer (needs libpyrocpd) and .query. Both are replaced
+    with stubs that cover only what summary.py reads at import time.
+    """
+
+    package_name = "_rocpd_summary_test"
+    package = types.ModuleType(package_name)
+    package.__path__ = []
+
+    importer = types.ModuleType(f"{package_name}.importer")
+
+    class RocpdImportData:
+        pass
+
+    def execute_statement(connection, statement, is_script=False):
+        assert isinstance(connection, sqlite3.Connection)
+        return connection.execute(statement)
+
+    importer.RocpdImportData = RocpdImportData
+    importer.execute_statement = execute_statement
+
+    query = types.ModuleType(f"{package_name}.query")
+    query.export_sqlite_query = lambda *args, **kwargs: None
+
+    sys.modules[package_name] = package
+    sys.modules[importer.__name__] = importer
+    sys.modules[query.__name__] = query
+
+    test_dir = Path(__file__).resolve().parent
+    source_path = test_dir.parents[1] / "source/lib/python/rocpd/summary.py"
+    if not source_path.is_file():
+        # Installed test tree: no source checkout, so use the installed package.
+        package_spec = importlib.util.find_spec("rocpd")
+        if package_spec is not None and package_spec.origin:
+            source_path = Path(package_spec.origin).with_name("summary.py")
+        else:
+            source_path = (
+                SOURCE_TEST_DIR.parent.parent / "source/lib/python/rocpd/summary.py"
+            )
+    assert source_path.is_file(), f"cannot locate {source_path}"
+
+    spec = importlib.util.spec_from_file_location(f"{package_name}.summary", source_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="module")
+def summary():
+    """rocpd.summary, loaded on first use so only the tests that need it import it."""
+    return load_summary_module()
 
 
 @pytest.fixture
@@ -141,7 +201,12 @@ def intervals(import_data):
     return import_data
 
 
-def test_loader_finds_installed_module_without_source(tmp_path, monkeypatch, intervals):
+def test_loader_finds_installed_module_without_source(
+    tmp_path,
+    monkeypatch,
+    intervals,
+    time_window,
+):
     prefix = tmp_path / "relocated install"
     site_packages = prefix / "lib" / "python3" / "site-packages"
     package_dir = site_packages / "rocpd"
@@ -171,7 +236,12 @@ def test_loader_finds_installed_module_without_source(tmp_path, monkeypatch, int
     assert module.percentages2timestamp(intervals, "50%", None) == (150, 200)
 
 
-def test_loader_finds_build_source_without_package(tmp_path, monkeypatch, intervals):
+def test_loader_finds_build_source_without_package(
+    tmp_path,
+    monkeypatch,
+    intervals,
+    time_window,
+):
     source_dir = tmp_path / "source tree" / "tests" / "rocpd"
     module_path = source_dir.parents[1] / "source/lib/python/rocpd/time_window.py"
     module_path.parent.mkdir(parents=True)
@@ -196,13 +266,13 @@ def test_loader_finds_build_source_without_package(tmp_path, monkeypatch, interv
 #
 # Bounds must cover every table the window actually filters
 #
-def test_bounds_include_timestamp_only_tables(intervals):
+def test_bounds_include_timestamp_only_tables(intervals, time_window):
     intervals.add_timed_view("samples", ("timestamp",), ((250,),))
 
     assert time_window.get_min_max_time(intervals) == (100, 250)
 
 
-def test_pc_sample_only_bounds_and_filtering(import_data):
+def test_pc_sample_only_bounds_and_filtering(import_data, time_window):
     import_data.supported_features = ["pc_sampling"]
     import_data.add_timed_view(
         "rocpd_gpu_pc_sample", ("timestamp",), ((100,), (200,), (300,))
@@ -218,7 +288,7 @@ def test_pc_sample_only_bounds_and_filtering(import_data):
     assert time_window.get_min_max_time(import_data) == (200, 200)
 
 
-def test_native_sqlite_uses_event_bounds_not_process_envelope():
+def test_native_sqlite_uses_event_bounds_not_process_envelope(time_window):
     connection = sqlite3.connect(":memory:")
     connection.execute("CREATE TABLE intervals (start INTEGER, end INTEGER)")
     connection.execute("CREATE TABLE samples (timestamp INTEGER)")
@@ -242,7 +312,11 @@ def test_native_sqlite_uses_event_bounds_not_process_envelope():
         connection.close()
 
 
-def test_bounds_query_aggregates_each_table_before_union(intervals, monkeypatch):
+def test_bounds_query_aggregates_each_table_before_union(
+    intervals,
+    monkeypatch,
+    time_window,
+):
     intervals.supported_features = ["pc_sampling"]
     intervals.add_timed_view("rocpd_gpu_pc_sample", ("timestamp",), ((250,),))
     statements = []
@@ -261,7 +335,7 @@ def test_bounds_query_aggregates_each_table_before_union(intervals, monkeypatch)
     assert "SELECT timestamp as min_time" not in statements[-1]
 
 
-def test_timestamp_only_events_are_not_out_of_range(intervals):
+def test_timestamp_only_events_are_not_out_of_range(intervals, time_window):
     intervals.add_timed_view("samples", ("timestamp",), ((250,),))
 
     time_window.apply_time_window(intervals, start="225", end="250")
@@ -270,7 +344,11 @@ def test_timestamp_only_events_are_not_out_of_range(intervals):
     assert intervals.execute("SELECT COUNT(*) FROM samples").fetchone()[0] == 1
 
 
-def test_no_timed_events_warning_accounts_for_timestamp_tables(intervals, capsys):
+def test_no_timed_events_warning_accounts_for_timestamp_tables(
+    intervals,
+    capsys,
+    time_window,
+):
     intervals.add_timed_view("samples", ("timestamp",), ((250,),))
 
     time_window.apply_time_window(intervals, start="225", end="250")
@@ -279,7 +357,7 @@ def test_no_timed_events_warning_accounts_for_timestamp_tables(intervals, capsys
     assert "contains no timed events" not in (captured.out + captured.err)
 
 
-def test_empty_window_reports_no_timed_events(import_data, capsys):
+def test_empty_window_reports_no_timed_events(import_data, capsys, time_window):
     import_data.add_timed_view("intervals", ("start", "end"), ((100, 110), (190, 200)))
 
     time_window.apply_time_window(import_data, start="120", end="180")
@@ -292,7 +370,7 @@ def test_empty_window_reports_no_timed_events(import_data, capsys):
     )
 
 
-def test_zero_length_trace_does_not_divide_by_zero(import_data, capsys):
+def test_zero_length_trace_does_not_divide_by_zero(import_data, capsys, time_window):
     import_data.add_timed_view("intervals", ("start", "end"), ((100, 100),))
     import_data.add_markers((("begin", 100), ("finish", 100)))
 
@@ -305,7 +383,7 @@ def test_zero_length_trace_does_not_divide_by_zero(import_data, capsys):
 # Percentage parsing
 #
 @pytest.mark.parametrize("value", ("50%", " 50% ", "5e1%"))
-def test_valid_percentage_is_converted(intervals, value):
+def test_valid_percentage_is_converted(intervals, value, time_window):
     assert time_window.percentages2timestamp(intervals, value, None) == (150, 200)
 
 
@@ -313,7 +391,7 @@ def test_valid_percentage_is_converted(intervals, value):
     ("value", "expected"),
     ((150, 150), (150.0, 150), ("150.0", 150), ("1.5e2", 150), ("150.5", 150.5)),
 )
-def test_numeric_endpoints_are_accepted(intervals, value, expected):
+def test_numeric_endpoints_are_accepted(intervals, value, expected, time_window):
     assert time_window.percentages2timestamp(intervals, value, None) == (expected, 200)
 
 
@@ -321,7 +399,12 @@ def test_numeric_endpoints_are_accepted(intervals, value, expected):
 @pytest.mark.parametrize("mode", ("timestamps", "numeric", "markers", "percentages"))
 @pytest.mark.parametrize("inclusive", (True, False))
 def test_large_timestamp_boundaries_are_preserved(
-    import_data, capsys, start_time, mode, inclusive
+    import_data,
+    capsys,
+    start_time,
+    mode,
+    inclusive,
+    time_window,
 ):
     end_time = start_time + 10
     import_data.add_timed_view("intervals", ("start", "end"), ((start_time, end_time),))
@@ -352,7 +435,12 @@ def test_large_timestamp_boundaries_are_preserved(
     ("percentage", "offset"),
     (("0%", 0), ("25%", 2), ("50%", 5), ("75%", 8), ("100%", 10)),
 )
-def test_percentage_offsets_preserve_integer_nanoseconds(import_data, percentage, offset):
+def test_percentage_offsets_preserve_integer_nanoseconds(
+    import_data,
+    percentage,
+    offset,
+    time_window,
+):
     start_time = 2**53 + 1
     end_time = start_time + 10
     import_data.add_timed_view("intervals", ("start", "end"), ((start_time, end_time),))
@@ -367,7 +455,7 @@ def test_percentage_offsets_preserve_integer_nanoseconds(import_data, percentage
 
 
 @pytest.mark.parametrize("value", ("50%%", "5%0", "%50", "%", "abc%", "5 0%"))
-def test_malformed_percentages_are_rejected(intervals, value):
+def test_malformed_percentages_are_rejected(intervals, value, time_window):
     with pytest.raises(time_window.TimeWindowError, match="Invalid --start percentage"):
         time_window.percentages2timestamp(intervals, value, None)
 
@@ -376,7 +464,14 @@ def test_malformed_percentages_are_rejected(intervals, value):
     ("start", "end", "expected"),
     (("-1%", None, (100, 200)), (None, "101%", (100, 200))),
 )
-def test_overhanging_percentages_are_clamped(intervals, capsys, start, end, expected):
+def test_overhanging_percentages_are_clamped(
+    intervals,
+    capsys,
+    start,
+    end,
+    expected,
+    time_window,
+):
     assert time_window.percentages2timestamp(intervals, start, end) == expected
     assert "### Using time window [100, 200] nsec instead" in capsys.readouterr().err
 
@@ -385,12 +480,12 @@ def test_overhanging_percentages_are_clamped(intervals, capsys, start, end, expe
 # Timestamp parsing, clamping and overlap handling
 #
 @pytest.mark.parametrize("value", ("nan", "inf", "-inf"))
-def test_non_finite_timestamps_are_rejected(intervals, value):
+def test_non_finite_timestamps_are_rejected(intervals, value, time_window):
     with pytest.raises(time_window.TimeWindowError, match="must be a finite"):
         time_window.percentages2timestamp(intervals, value, None)
 
 
-def test_invalid_timestamp_identifies_the_argument(intervals):
+def test_invalid_timestamp_identifies_the_argument(intervals, time_window):
     with pytest.raises(time_window.TimeWindowError, match="Invalid --end value"):
         time_window.percentages2timestamp(intervals, None, "later")
 
@@ -404,7 +499,14 @@ def test_invalid_timestamp_identifies_the_argument(intervals):
         ("150", "999999", (150, 200)),
     ),
 )
-def test_overhanging_bounds_are_clamped(intervals, capsys, start, end, expected):
+def test_overhanging_bounds_are_clamped(
+    intervals,
+    capsys,
+    start,
+    end,
+    expected,
+    time_window,
+):
     assert time_window.percentages2timestamp(intervals, start, end) == expected
     warning = capsys.readouterr().err
     assert warning.startswith("\n###\n### WARNING: ")
@@ -414,18 +516,18 @@ def test_overhanging_bounds_are_clamped(intervals, capsys, start, end, expected)
     )
 
 
-def test_bounds_inside_the_trace_are_not_clamped(intervals, capsys):
+def test_bounds_inside_the_trace_are_not_clamped(intervals, capsys, time_window):
     assert time_window.percentages2timestamp(intervals, "120", "180") == (120, 180)
     assert capsys.readouterr().err == ""
 
 
 @pytest.mark.parametrize(("start", "end"), (("300", "400"), ("0", "50")))
-def test_disjoint_window_is_rejected(intervals, start, end):
+def test_disjoint_window_is_rejected(intervals, start, end, time_window):
     with pytest.raises(time_window.TimeWindowError, match="does not overlap"):
         time_window.percentages2timestamp(intervals, start, end)
 
 
-def test_missing_timing_data_is_reported(import_data):
+def test_missing_timing_data_is_reported(import_data, time_window):
     with pytest.raises(time_window.TimeWindowError, match="no timing data"):
         time_window.percentages2timestamp(import_data, "50%", None)
 
@@ -433,7 +535,7 @@ def test_missing_timing_data_is_reported(import_data):
 #
 # Marker handling
 #
-def test_missing_marker_view_has_specific_error():
+def test_missing_marker_view_has_specific_error(time_window):
     connection = sqlite3.connect(":memory:")
     try:
         with pytest.raises(time_window.TimeWindowError, match="no marker data"):
@@ -442,7 +544,7 @@ def test_missing_marker_view_has_specific_error():
         connection.close()
 
 
-def test_marker_schema_errors_are_not_reclassified():
+def test_marker_schema_errors_are_not_reclassified(time_window):
     connection = sqlite3.connect(":memory:")
     connection.execute("CREATE TABLE regions_and_samples (category TEXT)")
     try:
@@ -452,7 +554,7 @@ def test_marker_schema_errors_are_not_reclassified():
         connection.close()
 
 
-def test_unrelated_database_errors_are_not_reclassified():
+def test_unrelated_database_errors_are_not_reclassified(time_window):
     class LockedConnection:
         def execute(self, *_args):
             raise sqlite3.OperationalError("database is locked")
@@ -461,14 +563,14 @@ def test_unrelated_database_errors_are_not_reclassified():
         time_window.get_marker_timestamp(LockedConnection(), "target")
 
 
-def test_unknown_marker_is_reported(intervals):
+def test_unknown_marker_is_reported(intervals, time_window):
     intervals.add_markers((("begin", 120),))
 
     with pytest.raises(time_window.TimeWindowError, match="not found"):
         time_window.get_marker_timestamp(intervals, "missing")
 
 
-def test_ambiguous_marker_is_reported(intervals):
+def test_ambiguous_marker_is_reported(intervals, time_window):
     intervals.add_markers((("begin", 120), ("begin", 130)))
 
     with pytest.raises(time_window.TimeWindowError, match="Ambiguous reference"):
@@ -476,14 +578,19 @@ def test_ambiguous_marker_is_reported(intervals):
 
 
 @pytest.mark.parametrize(("start_time", "end_time"), ((120, 180), (2**53 + 1, 2**53 + 3)))
-def test_marker_endpoints_read_their_own_column(intervals, start_time, end_time):
+def test_marker_endpoints_read_their_own_column(
+    intervals,
+    start_time,
+    end_time,
+    time_window,
+):
     intervals.add_markers((("range", start_time, end_time),))
 
     assert time_window.get_marker_timestamp(intervals, "range", "start") == start_time
     assert time_window.get_marker_timestamp(intervals, "range", "end") == end_time
 
 
-def test_end_marker_uses_the_marker_end_timestamp(import_data):
+def test_end_marker_uses_the_marker_end_timestamp(import_data, time_window):
     import_data.add_timed_view("intervals", ("start", "end"), ((130, 170),))
     import_data.add_markers((("range", 120, 180),))
 
@@ -492,14 +599,14 @@ def test_end_marker_uses_the_marker_end_timestamp(import_data):
     assert import_data.execute("SELECT COUNT(*) FROM intervals").fetchone()[0] == 1
 
 
-def test_invalid_marker_type_is_rejected(intervals):
+def test_invalid_marker_type_is_rejected(intervals, time_window):
     intervals.add_markers((("begin", 100),))
 
     with pytest.raises(ValueError, match="must be 'start' or 'end'"):
         time_window.get_marker_timestamp(intervals, "begin", "middle")
 
 
-def test_reversed_markers_report_marker_arguments(intervals):
+def test_reversed_markers_report_marker_arguments(intervals, time_window):
     intervals.add_markers((("begin", 180), ("finish", 120)))
 
     with pytest.raises(time_window.TimeWindowError) as excinfo:
@@ -511,7 +618,7 @@ def test_reversed_markers_report_marker_arguments(intervals):
     assert "--end-marker" in message and "--start-marker" in message
 
 
-def test_reversed_timestamps_report_time_arguments(intervals):
+def test_reversed_timestamps_report_time_arguments(intervals, time_window):
     with pytest.raises(time_window.TimeWindowError) as excinfo:
         time_window.apply_time_window(intervals, start="180", end="120")
 
@@ -529,7 +636,11 @@ def test_reversed_timestamps_report_time_arguments(intervals):
         {"start_marker": "begin", "end": "200"},
     ),
 )
-def test_mixed_marker_and_timestamp_endpoints_are_supported(intervals, kwargs):
+def test_mixed_marker_and_timestamp_endpoints_are_supported(
+    intervals,
+    kwargs,
+    time_window,
+):
     intervals.add_markers((("begin", 100), ("finish", 200)))
 
     time_window.apply_time_window(intervals, **kwargs)
@@ -537,7 +648,7 @@ def test_mixed_marker_and_timestamp_endpoints_are_supported(intervals, kwargs):
     assert intervals.execute("SELECT COUNT(*) FROM intervals").fetchone()[0] == 1
 
 
-def test_same_endpoint_cannot_use_time_and_marker(intervals):
+def test_same_endpoint_cannot_use_time_and_marker(intervals, time_window):
     intervals.add_markers((("begin", 100),))
 
     with pytest.raises(
@@ -548,7 +659,7 @@ def test_same_endpoint_cannot_use_time_and_marker(intervals):
         )
 
 
-def test_no_window_arguments_is_a_no_op(intervals):
+def test_no_window_arguments_is_a_no_op(intervals, time_window):
     assert time_window.apply_time_window(intervals, inclusive=True) is intervals
     assert intervals.execute("SELECT COUNT(*) FROM intervals").fetchone()[0] == 1
 
@@ -556,7 +667,7 @@ def test_no_window_arguments_is_a_no_op(intervals):
 #
 # Command-line error reporting
 #
-def test_process_args_or_exit_reports_time_window_errors():
+def test_process_args_or_exit_reports_time_window_errors(time_window):
     def fail(_input, _args):
         raise time_window.TimeWindowError("ERROR: bad window")
 
@@ -566,7 +677,7 @@ def test_process_args_or_exit_reports_time_window_errors():
     assert str(excinfo.value) == "ERROR: bad window"
 
 
-def test_process_args_or_exit_does_not_swallow_other_errors():
+def test_process_args_or_exit_does_not_swallow_other_errors(time_window):
     def fail(_input, _args):
         raise sqlite3.OperationalError("database is locked")
 
@@ -574,10 +685,134 @@ def test_process_args_or_exit_does_not_swallow_other_errors():
         time_window.process_args_or_exit(fail, None, None)
 
 
-def test_standalone_main_reports_invalid_window_without_traceback(intervals, monkeypatch):
+def test_standalone_main_reports_invalid_window_without_traceback(
+    intervals,
+    monkeypatch,
+    time_window,
+):
     monkeypatch.setattr(time_window, "RocpdImportData", lambda _input: intervals)
 
     with pytest.raises(SystemExit) as excinfo:
         time_window.main(["--input", "trace.db", "--start", "invalid"])
 
     assert str(excinfo.value).startswith("ERROR: Invalid --start value")
+
+
+def _process_table(*envs):
+    """In-memory database whose rocpd_info_process has one process per environment."""
+    import json
+
+    connection = sqlite3.connect(":memory:")
+    connection.execute(
+        "CREATE TABLE rocpd_info_process (pid INTEGER, guid TEXT, environment TEXT)"
+    )
+    for pid, env in enumerate(envs, start=1):
+        connection.execute(
+            "INSERT INTO rocpd_info_process (pid, guid, environment) VALUES (?, ?, ?)",
+            (pid, "guid", json.dumps(env)),
+        )
+    return connection
+
+
+def _rank_name_for_env(summary, env):
+    """Return the rank variable chosen from a one-process rocpd_info_process table.
+
+    Every call uses a new connection, so no cache reset is needed between cases.
+    """
+    connection = _process_table(env)
+    try:
+        return summary.get_rank_env_variable_name(connection)
+    finally:
+        connection.close()
+
+
+def test_rank_env_var_rejects_malicious_name(summary):
+    """ROCPROF_MPI_RANK_VAR must be a plain identifier that exists in the environment.
+
+    A name with a quote would otherwise be interpolated into json_extract().
+    """
+    malicious = "X') OR 1=1 --"
+
+    # Even when the malicious string is a real environment key, it is not used.
+    assert (
+        _rank_name_for_env(
+            summary,
+            {
+                "ROCPROF_MPI_RANK_VAR": malicious,
+                malicious: "0",
+                "OMPI_COMM_WORLD_RANK": "0",
+            },
+        )
+        == "OMPI_COMM_WORLD_RANK"
+    )
+
+    # With nothing else to fall back on, no rank column is produced at all.
+    assert (
+        _rank_name_for_env(summary, {"ROCPROF_MPI_RANK_VAR": malicious, malicious: "0"})
+        is None
+    )
+
+    # A well-formed name that was not actually set is ignored.
+    assert (
+        _rank_name_for_env(
+            summary,
+            {"ROCPROF_MPI_RANK_VAR": "NOT_A_REAL_VAR", "OMPI_COMM_WORLD_RANK": "1"},
+        )
+        == "OMPI_COMM_WORLD_RANK"
+    )
+
+    # A custom variable wins when it is a plain name and a real environment key.
+    chosen = _rank_name_for_env(
+        summary,
+        {
+            "ROCPROF_MPI_RANK_VAR": "MY_RANK",
+            "MY_RANK": "3",
+            "OMPI_COMM_WORLD_RANK": "0",
+        },
+    )
+    assert chosen == "MY_RANK"
+    _, sql = summary.generate_summary_query(
+        "kernels", by_rank=True, by_rank_env_var=chosen
+    )
+    assert "$.MY_RANK" in sql
+
+
+def test_rank_env_cache_is_per_connection(summary):
+    """The rank name is looked up once per connection and re-read for a new one."""
+    cache = summary._rank_env_cache
+    cache.reset()
+
+    first = _process_table({"OMPI_COMM_WORLD_RANK": "0"})
+    second = _process_table({"ROCPROF_MPI_RANK_VAR": "MY_RANK", "MY_RANK": "3"})
+    none = _process_table({})
+    try:
+        get = summary.get_rank_env_variable_name
+
+        # Same connection: the stored name is returned even if the table changes.
+        assert get(first) == "OMPI_COMM_WORLD_RANK"
+        first.execute("UPDATE rocpd_info_process SET environment = '{}'")
+        assert get(first) == "OMPI_COMM_WORLD_RANK"
+
+        # A different connection is looked up again, with no reset in between.
+        assert get(second) == "MY_RANK"
+
+        # None is cached too: the table gains a rank variable but the answer stays.
+        assert get(none) is None
+        none.execute(
+            "INSERT INTO rocpd_info_process VALUES (9, 'guid', '{\"PMI_RANK\": \"0\"}')"
+        )
+        assert get(none) is None
+
+        # Switching back to an earlier connection reads it again (now emptied).
+        assert get(first) is None
+
+        # reset() forces a new lookup even on the connection the cache last saw.
+        assert get(none) == "PMI_RANK"  # new lookup: a different connection
+        none.execute("UPDATE rocpd_info_process SET environment = '{}'")
+        assert get(none) == "PMI_RANK"  # cached
+        cache.reset()
+        assert get(none) is None
+    finally:
+        cache.reset()
+        for connection in (first, second, none):
+            connection.close()
