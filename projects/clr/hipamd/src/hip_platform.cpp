@@ -138,9 +138,19 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
 
   // Return optimal block size: min of ALU limit and requested size
   *bestBlockSize = std::min(alu_limited_threads, aligned_input_size);
-  // Calculate blocks per CU for full occupancy, capped by wavefront-slot and LDS limits
+  // Calculate blocks per CU for full occupancy, capped by wavefront-slot and LDS limits.
+  // Use waves derived from bestBlockSize (not aligned_input_size) so the cap
+  // matches the block size that numBlocksPerGrid is computed for.
   int bestBlocksPerCU = alu_limited_threads / (*bestBlockSize);
-  bestBlocksPerCU = std::min(bestBlocksPerCU, wave_slot_limit_per_cu);
+  const uint32_t best_waves =
+      (*bestBlockSize + wrkGrpInfo->wavefrontSize_ - 1) / wrkGrpInfo->wavefrontSize_;
+  if (best_waves > 0) {
+    const int best_wave_limit = static_cast<int>(
+        simdPerCU * std::min(MaxWavesPerSimd, GprWaves) / best_waves);
+    if (best_wave_limit > 0) {
+      bestBlocksPerCU = std::min(bestBlocksPerCU, best_wave_limit);
+    }
+  }
   const uint32_t maxCUs = (wrkGrpInfo->isWGPMode_ != device.settings().enableWgpMode_)
       ? (wrkGrpInfo->isWGPMode_
           ? device.info().maxComputeUnits_ / 2

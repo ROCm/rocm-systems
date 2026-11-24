@@ -431,19 +431,26 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
     if (err != hipSuccess) {
       return err;
     }
-    // Safety cap: use the kernel's wavefront size and per-CU wave slots to
-    // bound the grid.  This catches overestimates from the occupancy API
-    // (e.g. WGP-mode rounding) that would cause grid.sync() to deadlock.
+    // Safety cap: compute physical CU-level limit to prevent grid.sync()
+    // deadlock. Use per-physical-CU wavefront slots, then scale to the
+    // device's scheduling units.  This avoids the WGP rounding error where
+    // floor(2N/W) > 2*floor(N/W) lets through oversized grids.
     {
       const auto* kernel = hip::asKernel(f);
       const auto* wgi = kernel->getDeviceKernel(*device)->workGroupInfo();
       const uint32_t wf = wgi->wavefrontSize_;
       const uint32_t waves = (block_size + wf - 1) / wf;
-      if (waves > 0 && device->info().maxComputeUnits_ > 0) {
+      if (waves > 0) {
         const size_t MaxWavesPerSimd = (device->isa().versionMajor() <= 9) ? 8 : 16;
-        const uint32_t slots = device->isa().simdPerCU() * MaxWavesPerSimd;
-        const int hw_max = device->info().maxComputeUnits_ *
-            static_cast<int>(slots / waves);
+        // Always compute in physical CU units first (simdPerCU without WGP doubling)
+        const uint32_t phys_simds_per_cu = device->isa().simdPerCU();
+        const uint32_t phys_slots_per_cu = phys_simds_per_cu * MaxWavesPerSimd;
+        const uint32_t blocks_per_phys_cu = phys_slots_per_cu / waves;
+        // Physical CU count: undo WGP halving
+        uint32_t phys_cus = device->info().maxComputeUnits_;
+        if (phys_cus == 0) phys_cus = device->info().maxPhysicalComputeUnits_;
+        if (device->settings().enableWgpMode_) phys_cus *= 2;
+        const int hw_max = static_cast<int>(phys_cus * blocks_per_phys_cu);
         if (hw_max > 0) {
           max_blocks_per_grid = std::min(max_blocks_per_grid, hw_max);
         }
