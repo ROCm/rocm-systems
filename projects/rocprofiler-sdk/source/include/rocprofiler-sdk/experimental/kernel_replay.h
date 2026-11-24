@@ -75,12 +75,12 @@ typedef enum rocprofiler_kernel_replay_option_flag_t
  * @ref ROCPROFILER_CALLBACK_PHASE_ENTER.
  *
  * The snapshot bits of @c flags name the memory the SDK may keep the dispatch's snapshot in:
- *  - only @ref ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED: the snapshot is kept in
+ *  - only @ref ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED set: the snapshot is kept in
  *    pinned host memory, so it does not compete with an application that allocates device memory
  *    as it runs, apart from a work list the restore kernels keep in device memory between replays:
  *    about 0.2% of the snapshot's size, and at least 2 MiB. Pinned memory cannot be swapped out,
  *    so a large snapshot leaves the rest of the system that much less memory.
- *  - only @ref ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE: the snapshot is kept in device
+ *  - only @ref ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE set: the snapshot is kept in device
  *    memory. The SDK leaves the application 5% of the free device memory, counting memory it kept
  *    from earlier replays as free, because the replayed kernel may need scratch. This needs the
  *    SDK's copy kernels for the GPU.
@@ -116,11 +116,11 @@ typedef struct rocprofiler_kernel_replay_options_t
  * All members are present in the struct (no unions). Which members are meaningful
  * depends on the current operation:
  *
- * - @ref ROCPROFILER_KERNEL_REPLAY_CONFIG: @c dispatch_info is populated by the SDK.
+ * - @ref ROCPROFILER_KERNEL_REPLAY_CONFIG callbacks: @c dispatch_info is populated by the SDK.
  *   The tool sets @c replay_pass_count, and optionally @c replay_continue and the options
  *   @c replay_options points to, during @ref ROCPROFILER_CALLBACK_PHASE_ENTER. Pass-info fields
  *   are zero.
- * - @ref ROCPROFILER_KERNEL_REPLAY_PASS: @c dispatch_info, @c current_pass, and
+ * - @ref ROCPROFILER_KERNEL_REPLAY_PASS callbacks: @c dispatch_info, @c current_pass, and
  *   @c total_passes are populated by the SDK. @c replay_pass_count and @c replay_options read as
  *   NULL and must not be modified (both are fixed at CONFIG PHASE_ENTER). @c replay_continue is
  *   NULL during PASS PHASE_ENTER; during PASS PHASE_EXIT the SDK populates it with the callback
