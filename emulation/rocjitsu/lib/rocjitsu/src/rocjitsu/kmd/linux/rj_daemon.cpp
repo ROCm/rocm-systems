@@ -1032,6 +1032,19 @@ rj_status_t bind_socket(rj_daemon_t *daemon) {
   return ROCJITSU_STATUS_SUCCESS;
 }
 
+// Fail before unwinding startup can join an engine that has not been stopped.
+void start_daemon_threads(rj_daemon_t *state) noexcept {
+  state->engine_thread = std::jthread([state] {
+    const rj_status_t run_status = rj_vm_run(state->vm, nullptr);
+    if (run_status != ROCJITSU_STATUS_SUCCESS ||
+        !state->stop_requested.load(std::memory_order_acquire)) {
+      mark_error(state);
+    }
+  });
+  state->accept_thread =
+      std::jthread([state](std::stop_token stop) { accept_clients(state, stop); });
+}
+
 } // namespace
 
 rj_status_t rj_daemon_start_with_options(const char *json, const char *socket_path,
@@ -1100,15 +1113,7 @@ rj_status_t rj_daemon_start_with_options(const char *json, const char *socket_pa
     return status;
   }
 
-  created->engine_thread = std::jthread([state = created.get()] {
-    const rj_status_t run_status = rj_vm_run(state->vm, nullptr);
-    if (run_status != ROCJITSU_STATUS_SUCCESS ||
-        !state->stop_requested.load(std::memory_order_acquire)) {
-      mark_error(state);
-    }
-  });
-  created->accept_thread =
-      std::jthread([state = created.get()](std::stop_token stop) { accept_clients(state, stop); });
+  start_daemon_threads(created.get());
 
   rj_daemon_status_t expected = RJ_DAEMON_STATUS_STARTING;
   if (!created->status.compare_exchange_strong(expected, RJ_DAEMON_STATUS_RUNNING,

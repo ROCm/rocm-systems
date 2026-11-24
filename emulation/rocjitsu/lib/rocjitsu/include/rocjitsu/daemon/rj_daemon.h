@@ -55,7 +55,7 @@ enum { RJ_DAEMON_FABRIC_TRACE_MAX_CAPACITY = 200000u };
 /// started. The caller owns the returned handle and must eventually pass it to
 /// rj_daemon_stop. An abandoned socket is recovered, while a live socket or
 /// non-socket path is never removed. Failure to create the daemon-owned engine
-/// or accept thread does not return a status and is fatal when exceptions are disabled.
+/// or accept thread is fatal.
 ///
 /// @param[in] json VM JSON configuration string.
 /// @param[in] socket_path Filesystem path for the Unix domain socket.
