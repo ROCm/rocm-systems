@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/instrumentor.h"
+#include "rocjitsu/code/relocation_function_table.h"
 #include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -330,6 +331,30 @@ callable_state_write(const Instruction &inst, std::span<const uint8_t> text,
 
 using HelperEntryLinks = std::unordered_map<uint64_t, std::optional<uint16_t>>;
 using CalleeReturns = std::unordered_map<const BasicBlock *, std::vector<const Instruction *>>;
+
+// A call-only block is a known internal entry only when one direct instruction
+// supplies its return link and the whole straight-line body has a unique local symbol.
+const BasicBlock *sole_local_caller(const AmdGpuCodeObject &object,
+                                    const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
+  const BasicBlock *caller = nullptr;
+  for (const auto &block : blocks) {
+    const Instruction *term = block->terminator();
+    if (!term || !(term->flags() & INDIRECT_CALL))
+      continue;
+    const auto &calls = block->call_edges();
+    if (caller || calls.size() != 1 || calls.front().kind != BasicBlock::CallEdgeKind::DirectCall ||
+        !calls.front().callee || !calls.front().continuation)
+      return nullptr;
+    caller = block.get();
+  }
+  if (!caller)
+    return nullptr;
+  const BasicBlock *body = caller->call_edges().front().callee;
+  if (!body->predecessors().empty() || !body->successors().empty() ||
+      !local_text_function_name(object, body->start_offset(), body->end_offset()))
+    return nullptr;
+  return caller;
+}
 
 bool preserves_helper_link(const Instruction &inst, RegisterRef link, uint32_t ordinary_bound) {
   // A numeric SGPR in the special-register tail can also be defined through a
@@ -2063,7 +2088,7 @@ public:
   CallableStateAnalysis(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                         std::span<const KernelDescriptorInfo> kernels,
                         std::span<const uint8_t> text, rocjitsu::IsaFamily arch,
-                        uint64_t source_text_size) {
+                        uint64_t source_text_size, const BasicBlock *local_caller) {
     const uint64_t entry_text_size = std::min<uint64_t>(text.size(), source_text_size);
     std::unordered_set<uint64_t> entries;
     // A return is bounded only if every entry into its helper supplies the
@@ -2157,7 +2182,7 @@ public:
          {CallableState::GprIndexing, CallableState::Vskip, CallableState::UnavailableStorage}) {
       if (has_callable_state(arch, state)) {
         analyze_state(blocks, kernels, text, arch, state, entries, reachable, entry_links,
-                      entry_text_size);
+                      entry_text_size, local_caller);
       }
     }
   }
@@ -2197,7 +2222,8 @@ private:
                      rocjitsu::IsaFamily arch, CallableState state,
                      const std::unordered_set<uint64_t> &entries,
                      const std::unordered_set<const BasicBlock *> &reachable,
-                     const HelperEntryLinks &entry_links, uint64_t entry_text_size) {
+                     const HelperEntryLinks &entry_links, uint64_t entry_text_size,
+                     const BasicBlock *local_caller) {
     CalleeReturns preserving_returns;
     const uint32_t sgpr_count = AmdGpuCodeObject::min_kernel_sgpr_count(arch, kernels).value_or(0);
     const uint32_t ordinary_bound = ordinary_sgpr_bound(arch, sgpr_count);
@@ -2232,6 +2258,12 @@ private:
         }
       }
     }
+    // A direct call into a uniquely owned local body inherits the caller's state.
+    // Its proven return preserves that state at the ordinary continuation.
+    const BasicBlock *local_body = local_caller && reachable.contains(local_caller) &&
+                                           preserving_calls.contains(local_caller->terminator())
+                                       ? local_caller->call_edges().front().callee
+                                       : nullptr;
     // Unknown transfers can introduce incoming MODE/storage state at every
     // ordinary observation. Bounded closed text can preserve its initial state.
     const bool storage = state == CallableState::UnavailableStorage;
@@ -2286,6 +2318,9 @@ private:
       summary.incoming = entries.contains(block->start_offset())
                              ? kSafe
                              : (block->predecessors().empty() ? kUnsafe : 0);
+      if (block == local_body) {
+        summary.incoming = summaries.at(local_caller).outgoing;
+      }
       for (const BasicBlock *predecessor : block->predecessors()) {
         if (reachable.contains(predecessor)) {
           summary.incoming |= summaries.at(predecessor).outgoing;
@@ -2296,6 +2331,9 @@ private:
         continue;
       }
       summary.outgoing = outgoing;
+      if (block == local_caller && local_body && queued.insert(local_body).second) {
+        work.push_back(local_body);
+      }
       for (const BasicBlock *successor : block->successors()) {
         if (reachable.contains(successor) && queued.insert(successor).second) {
           work.push_back(successor);
@@ -3253,6 +3291,10 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       return out;
     }
   }
+  const BasicBlock *local_caller =
+      has_probe_requests && out.kernels.size() == 1
+          ? sole_local_caller(analysis_object_ ? *analysis_object_ : obj_, blocks_)
+          : nullptr;
   if (has_probe_requests && arch_ == rocjitsu::IsaFamily::Cdna5 && out.wave_size) {
     if (out.kernels.size() == 1) {
       bool has_call = false;
@@ -3261,7 +3303,15 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
           has_call |= (instruction.flags() & INDIRECT_CALL) != 0;
         }
       }
-      if (!has_call) {
+      // A validated single local return is already represented by liveness's scoped
+      // call and return edges. The callee must also preserve the bank state.
+      const bool preserves_banks =
+          local_caller &&
+          std::ranges::none_of(local_caller->call_edges().front().callee->instructions(),
+                               [&](const Instruction &inst) {
+                                 return may_change_vgpr_msb(inst, arch_, setreg_vgpr_msb_fixup);
+                               });
+      if (!has_call || preserves_banks) {
         bool bank_analysis_failed = false;
         const bool zero = std::ranges::all_of(requests, [&](const InstrumentationPoint &point) {
           if (!point.probe_obj) {
@@ -3508,7 +3558,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
         }
         if (!callable_state_analysis_) {
           callable_state_analysis_ = std::make_unique<CallableStateAnalysis>(
-              blocks_, out.kernels, analysis_text_bytes, arch_, text->size());
+              blocks_, out.kernels, analysis_text_bytes, arch_, text->size(), local_caller);
         }
         // A scalar anchor does not discharge dependencies left by earlier VALUs.
         // Until spacing is proven, exclude the entire decoded object, including

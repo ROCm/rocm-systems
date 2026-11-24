@@ -257,6 +257,57 @@ foreach(
                 endforeach()
             endforeach()
         endif()
+        foreach(_direction IN ITEMS load store)
+            string(TOUPPER "${_direction}" _direction_define)
+            foreach(_scenario IN ITEMS helper helperordered)
+                set(_name flat-${_direction}-${_scenario})
+                list(APPEND _flat_specs "${_name}:32:0:0:0:0")
+                set(_flat_options_${_name}
+                    -DFLAT_HELPER=1
+                    -DFLAT_${_direction_define}=1
+                    -DFLAT_UNKNOWN=1
+                )
+                if(_scenario STREQUAL "helperordered")
+                    list(APPEND _flat_options_${_name} -DFLAT_ORDERED=1)
+                endif()
+                list(APPEND _flat_cases_${_gpu}_${_wave_size} ${_name})
+            endforeach()
+            list(
+                APPEND _flat_cases_${_gpu}_${_wave_size}
+                flat-${_direction}-helperstrict
+            )
+        endforeach()
+        if(_gpu STREQUAL "gfx950")
+            foreach(
+                _control
+                IN
+                ITEMS
+                    lookalike
+                    other
+                    width
+                    earlier
+                    wrong
+                    private
+                    global
+                    alias
+                    badreturn
+                    clobber
+            )
+                string(TOUPPER "${_control}" _define)
+                set(_name flat-load-helper${_control})
+                list(APPEND _flat_specs "${_name}:32:0:0:0:0")
+                set(_flat_options_${_name}
+                    -DFLAT_HELPER=1
+                    -DFLAT_LOAD=1
+                    -DHELPER_${_define}=1
+                )
+                if(_control STREQUAL "global")
+                    list(APPEND _flat_options_${_name} -DFLAT_NONGROUP=1)
+                elseif(NOT _control STREQUAL "private")
+                    list(APPEND _flat_options_${_name} -DFLAT_UNKNOWN=1)
+                endif()
+            endforeach()
+        endif()
         set(_atomic_specs)
         set(_atomic_forms u32 u64 f32 cas)
         if(_legacy OR _gpu STREQUAL "gfx1250")

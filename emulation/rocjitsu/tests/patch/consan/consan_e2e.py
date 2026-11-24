@@ -80,6 +80,8 @@ class AnalysisDriver(Driver):
                     'high_lane',
                     'wide_b8_overlap',
                     'wide_b96_overlap',
+                    'flat_load_helper',
+                    'flat_store_helper',
                     'flat_load_overlap',
                     'flat_load_likely',
                     'flat_load_provenstrict',
@@ -178,6 +180,8 @@ class AnalysisDriver(Driver):
             and case
             not in (
                 'flat_load_strict',
+                'flat_load_helperstrict',
+                'flat_store_helperstrict',
                 'flat_load_unknown',
                 'flat_load_unknownstrict',
                 'exhausted',
@@ -249,9 +253,11 @@ class AnalysisDriver(Driver):
                     raw['sites'], analyzed, case, self.args.wave_size
                 )
             elif case.startswith('flat_'):
-                ordered = case.endswith('_ordered')
+                ordered = case.endswith('ordered')
                 suffix = 'epoch_workgroup_barriers' if ordered else 'no_sync_bounded_1d'
                 excludes = {
+                    'flat_load_helperstrict': 'strict_excludes_likely',
+                    'flat_store_helperstrict': 'strict_excludes_likely',
                     'flat_load_strict': 'strict_excludes_likely',
                     'flat_load_unknown': 'unresolved',
                     'flat_load_unknownstrict': 'unresolved',
@@ -261,10 +267,19 @@ class AnalysisDriver(Driver):
                 assert result['flat_policy'] == (
                     'strict' if case.endswith('strict') else 'likely'
                 )
+                method = (
+                    'lds_store_at' if case.startswith('flat_store_') else 'lds_load_at'
+                )
                 if case in excludes:
                     (omission,) = result['flat_exclusions']
                     assert (omission['site'], omission['reason']) == (1, excludes[case])
-                    if case == 'flat_load_strict':
+                    if case.endswith('helperstrict'):
+                        assert omission['confidence'] == 'conservative'
+                        assert (
+                            f'hip_moi::context::{method}<unsigned>'
+                            in omission['assumption']
+                        )
+                    elif case == 'flat_load_strict':
                         assert omission['confidence'] == 'conservative'
                         assert (
                             omission['assumption']
@@ -272,7 +287,7 @@ class AnalysisDriver(Driver):
                         )
                     assert (
                         omission['original_offset'] > raw['sites'][0]['original_offset']
-                    )
+                    ) == (not case.startswith('flat_store_'))
                     assert omission['original_size'] == (
                         12 if self.args.target in ('gfx1201', 'gfx1250') else 8
                     )
@@ -282,7 +297,13 @@ class AnalysisDriver(Driver):
                         == 'native_and_group_flat_lds_single_range_' + suffix
                     )
                     (site,) = result['flat_sites']
-                    if case in ('flat_load_likely', 'flat_load_alternate'):
+                    if '_helper' in case:
+                        assert site['confidence'] == 'conservative'
+                        assert (
+                            f'hip_moi::context::{method}<unsigned>'
+                            in site['assumption']
+                        )
+                    elif case in ('flat_load_likely', 'flat_load_alternate'):
                         assert site['confidence'] == 'conservative'
                         assert (
                             site['assumption']
@@ -317,7 +338,18 @@ class AnalysisDriver(Driver):
                         second['access'],
                     ) == (0, 'write', 1, 'read')
                     assert flat['origin'] == 'group_flat'
-                    if case in ('flat_load_likely', 'flat_load_alternate'):
+                    if '_helper' in case:
+                        assert flat['confidence'] == 'conservative'
+                        method = (
+                            'lds_store_at'
+                            if case.startswith('flat_store_')
+                            else 'lds_load_at'
+                        )
+                        assert (
+                            f'hip_moi::context::{method}<unsigned>'
+                            in flat['assumption']
+                        )
+                    elif case in ('flat_load_likely', 'flat_load_alternate'):
                         assert flat['confidence'] == 'conservative'
                         assert (
                             flat['assumption']

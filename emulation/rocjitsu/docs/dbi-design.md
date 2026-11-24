@@ -302,6 +302,11 @@ dispatches. An unresolved successor in a dynamic kernel excludes those sites
 throughout the code object. `KernelEntry` checks its own dispatch descriptor
 for static allocation because guest backedges bypass the entry stub.
 
+For one direct call into a uniquely sized local function with a single returning
+block, callable-state analysis propagates the caller's MODE and storage state to
+the callee. The return must preserve the saved PC. On gfx1250 the helper must
+also preserve VGPR banks, and liveness must establish zero banks at every probe.
+
 The callable-state analysis follows resolved branches in a leaf helper when
 every path leaves the state under analysis unchanged and returns through the
 original ordinary SGPR pair. A numeric pair in the allocated special-register

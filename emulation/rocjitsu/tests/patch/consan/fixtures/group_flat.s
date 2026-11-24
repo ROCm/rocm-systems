@@ -5,6 +5,72 @@
 
 .amdgcn_target CONSAN_TARGET
 .text
+#ifdef FLAT_HELPER
+// hip_moi::context::{lds_load_at,lds_store_at}<unsigned>, instantiated with the
+// device compiler against hip_moi/context.hpp. These local symbols exercise
+// the API contract on a bounded body containing the terminal *ptr access.
+#if defined(FLAT_STORE) || defined(HELPER_WRONG)
+#define HELPER _ZN7hip_moi7context12lds_store_atIjEEvPT_S2_jNS_7site_idE
+#elif defined(HELPER_OTHER)
+#define HELPER _ZN7hip_moi7context11lds_load_atIiEET_PKS2_jNS_7site_idE
+#elif defined(HELPER_LOOKALIKE)
+#define HELPER _ZN7hip_moi7context12lds_load_at2IjEET_PKS2_jNS_7site_idE
+#else
+#define HELPER _ZN7hip_moi7context11lds_load_atIjEET_PKS2_jNS_7site_idE
+#endif
+#if CONSAN_LEGACY
+#define HELPER_LOAD flat_load_dword
+#define HELPER_STORE flat_store_dword
+#else
+#define HELPER_LOAD flat_load_b32
+#define HELPER_STORE flat_store_b32
+#endif
+.macro consan_flat_helper_body
+  .local HELPER
+  .type HELPER,@function
+HELPER:
+#ifdef HELPER_EARLIER
+  HELPER_LOAD v10, v[2:3]
+#if CONSAN_GFX12
+  s_wait_loadcnt 0
+  s_wait_dscnt 0
+#else
+  s_waitcnt 0
+#endif
+#endif
+#if defined(HELPER_WIDTH)
+#if CONSAN_LEGACY
+  flat_load_dwordx2 v[10:11], v[2:3]
+#else
+  flat_load_b64 v[10:11], v[2:3]
+#endif
+#elif defined(FLAT_STORE)
+  HELPER_STORE v[2:3], v5
+#else
+  HELPER_LOAD v2, v[2:3]
+#endif
+#ifdef HELPER_CLOBBER
+  s_mov_b32 s12, 0
+#endif
+#ifdef HELPER_BADRETURN
+  s_setpc_b64 s[10:11]
+#else
+  s_setpc_b64 s[12:13]
+#endif
+  .size HELPER, .-HELPER
+#ifdef HELPER_ALIAS
+  .local overlapping_lds_function
+  .type overlapping_lds_function,@function
+  .set overlapping_lds_function, HELPER
+  .size overlapping_lds_function, .-HELPER
+#endif
+.endm
+#ifdef FLAT_STORE
+// Keep the store helper's original PC before its later native LDS peer.
+consan_flat_helper_body
+#endif
+#endif
+
 .globl CONSAN_KERNEL
 .type CONSAN_KERNEL,@function
 .p2align 8
@@ -17,7 +83,9 @@ CONSAN_KERNEL:
 #define FLAT_WRITE flat_store_b32
 #endif
 
-#if defined(FLAT_BACKWARD)
+#if defined(FLAT_HELPER)
+#define FLAT_IMMEDIATE 0
+#elif defined(FLAT_BACKWARD)
 #define FLAT_IMMEDIATE -4
 #elif defined(FLAT_UNDERFLOW) || (CONSAN_GFX12 && defined(FLAT_OFFSET))
 // Enter with a positive offset beyond the last dword, then return to it.
@@ -89,7 +157,11 @@ CONSAN_KERNEL:
 #else
   v_mov_b32 v4, 1020
 #endif
+#if defined(HELPER_PRIVATE)
+  s_mov_b64 s[4:5], src_private_base
+#else
   s_mov_b64 s[4:5], src_shared_base
+#endif
 #if defined(FLAT_LIKELY) || defined(FLAT_ALTERNATE)
   // s7 holds the high word of the output pointer loaded from kernargs.
   // The two controls use opposite SCC values with the same pointer select.
@@ -110,7 +182,9 @@ CONSAN_KERNEL:
   MASK_AND_SAVE MASK_PEER_SAVE, MASK_VCC
 #if defined(FLAT_STORE)
   group_flat_pointer
-#if defined(FLAT_BACKWARD)
+#ifdef FLAT_HELPER
+  s_call_b64 s[12:13], HELPER
+#elif defined(FLAT_BACKWARD)
   FLAT_WRITE v2, v5, s[4:5] offset:FLAT_IMMEDIATE scale_offset
 #elif defined(FLAT_SCALAR)
   FLAT_WRITE v2, v5, s[4:5] offset:FLAT_IMMEDIATE
@@ -156,7 +230,9 @@ CONSAN_KERNEL:
 #else
   group_flat_pointer
   // Alias the result with the low address half to exercise the BeforeInst probe.
-#if defined(FLAT_SCALAR) || defined(FLAT_BACKWARD)
+#ifdef FLAT_HELPER
+  s_call_b64 s[12:13], HELPER
+#elif defined(FLAT_SCALAR) || defined(FLAT_BACKWARD)
   FLAT_READ v2, v2, s[4:5] offset:FLAT_IMMEDIATE scale_offset
 #else
   FLAT_READ v2, v[2:3] offset:FLAT_IMMEDIATE
@@ -176,5 +252,8 @@ CONSAN_KERNEL:
   s_endpgm
 .Lkernel_end:
 .size CONSAN_KERNEL, .Lkernel_end-CONSAN_KERNEL
+#if defined(FLAT_HELPER) && !defined(FLAT_STORE)
+consan_flat_helper_body
+#endif
 
 consan_kernel_descriptor
