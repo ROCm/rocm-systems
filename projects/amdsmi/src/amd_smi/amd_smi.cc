@@ -270,10 +270,14 @@ amdsmi_status_t amdsmi_shut_down() {
   return amd::smi::AMDSmiSystem::getInstance().cleanup();
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic error "-Wswitch"
 amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char** status_string) {
   if (status_string == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
+  *status_string = nullptr;
+  // Add a case for every new amdsmi_status_t; a missing case fails the build (-Wswitch).
   switch (status) {
     case AMDSMI_STATUS_SUCCESS:
       *status_string = "AMDSMI_STATUS_SUCCESS: Call succeeded.";
@@ -298,6 +302,9 @@ amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char*
       break;
     case AMDSMI_STATUS_API_FAILED:
       *status_string = "AMDSMI_STATUS_API_FAILED: API call failed.";
+      break;
+    case AMDSMI_STATUS_TIMEOUT:
+      *status_string = "AMDSMI_STATUS_TIMEOUT: Timeout in API call.";
       break;
     case AMDSMI_STATUS_RETRY:
       *status_string = "AMDSMI_STATUS_RETRY: Retry operation.";
@@ -362,6 +369,11 @@ amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char*
       break;
     case AMDSMI_STATUS_DRIVER_NOT_LOADED:
       *status_string = "AMDSMI_STATUS_DRIVER_NOT_LOADED: Processor driver not loaded.";
+      break;
+    case AMDSMI_STATUS_MORE_DATA:
+      *status_string =
+          "AMDSMI_STATUS_MORE_DATA: There is more data than the buffer"
+          " size the user passed.";
       break;
     case AMDSMI_STATUS_NO_DATA:
       *status_string = "AMDSMI_STATUS_NO_DATA: No data was found for a given input.";
@@ -428,22 +440,15 @@ amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char*
     case AMDSMI_STATUS_UNKNOWN_ERROR:
       *status_string = "AMDSMI_STATUS_UNKNOWN_ERROR: An unknown error occurred.";
       break;
-    default:
-      // The case above didn't have a match, so look up the amdsmi status in the rsmi
-      // status map
-      // If found, get the rsmi status string.  If not, return unknown error string
-      for (auto& iter : amd::smi::rsmi_status_map) {
-        if (iter.second == status) {
-          rsmi_status_string(iter.first, status_string);
-          return AMDSMI_STATUS_SUCCESS;
-        }
-      }
-      // Not found
-      *status_string = "An unknown error occurred";
-      return AMDSMI_STATUS_UNKNOWN_ERROR;
+  }
+  // A value outside the enum matches no case.
+  if (*status_string == nullptr) {
+    *status_string = "An unknown error occurred";
+    return AMDSMI_STATUS_UNKNOWN_ERROR;
   }
   return AMDSMI_STATUS_SUCCESS;
 }
+#pragma GCC diagnostic pop
 
 amdsmi_status_t amdsmi_get_socket_handles(uint32_t* socket_count,
                                           amdsmi_socket_handle* socket_handles) {

@@ -4199,11 +4199,6 @@ class TestGpuBenchmark(unittest.TestCase):
     def test_performance_status_code_to_string(self):
         self.common.print_func_name("")
 
-        if self.TODO_SKIP_FAIL:
-            self.skipTest(
-                "Skipping test_performance_status_code_to_string as it fails (Unhashable type)."
-            )
-
         for error_num, error_name in error_map.items():
             self._log_test_start("amdsmi_status_code_to_string", "ErrorCode", error_num)
 
