@@ -125,7 +125,10 @@ NCCL_PARAM(Ll128C2c, "LL128_C2C", 1);
 static int isLL128Enabled(int minCompCap, int maxCompCap, int interType, int intraType, int nRanks, int func, int algo,
                           int minDriverVersion) {
   int ret = 1;
-  if (ncclParamLl128C2c() && minCompCap >= 90 && (!RUBIN_AND_LATER(minCompCap) || minDriverVersion >= 13030)) {
+  // [RCCL] Use ncclTuningIsRubinPlatform() rather than RUBIN_AND_LATER(): AMD compCap values (e.g. gfx1250 -> 125)
+  // match RUBIN_AND_LATER(), and minDriverVersion holds a HIP driver version on AMD, not a CUDA one.
+  if (ncclParamLl128C2c() && minCompCap >= 90 &&
+      (!ncclTuningIsRubinPlatform(minCompCap) || minDriverVersion >= 13030)) {
     // Rubin, Blackwell, and Hopper: Enable LL128 for all P2C and PXN if CUDA supports it.
     ret &= (interType <= PATH_PXN);
   } else {

@@ -507,6 +507,25 @@ TEST_F(CostModelMicrotest, InitDisablesLl128ByDefaultButHonoursAnExplicitRequest
   EXPECT_EQ(1, comm_->tuningContext.enabled[ll128][ncclFuncAllReduce]);
 }
 
+TEST_F(CostModelMicrotest, Ll128ReachOverPxnDoesNotDependOnDriverVersionOnAmd) {
+  // gfx1250 reports compCap 125, which RUBIN_AND_LATER() matches. Upstream's Rubin gate keeps LL128
+  // over PXN only from CUDA driver 13030; on AMD minDriverVersion is a HIP version, so a PXN graph
+  // must keep LL128 whatever its value, exactly as on gfx942.
+  const int ll128 = NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + NCCL_PROTO_LL128;
+  ASSERT_NE(0, modelMap[ll128].enabled[ncclFuncAllReduce]) << "Ring/LL128 AllReduce must start enabled";
+  for (int compCap : {94, 125}) {
+    for (int driverVersion : {0, 13029, 13030}) {
+      comm_ = MakeComm();
+      comm_->minCompCap = comm_->maxCompCap = compCap;
+      comm_->minDriverVersion = driverVersion;
+      SetGraphPaths(comm_.get(), PATH_PXN, PATH_NVB);
+      ASSERT_EQ(ncclSuccess, ncclTuningCostModelInit(comm_.get()));
+      EXPECT_EQ(1, comm_->tuningContext.enabled[ll128][ncclFuncAllReduce])
+          << "compCap " << compCap << " driver " << driverVersion;
+    }
+  }
+}
+
 TEST_F(CostModelMicrotest, AlgoEnvNarrowsSelectionToTheNamedAlgorithm) {
   SetMicroEnv("NCCL_ALGO", "ring");
   ASSERT_EQ(ncclSuccess, ncclTuningCostModelInit(comm_.get()));
