@@ -659,6 +659,7 @@ jobs:
           python -m pytest lib/python/amdisa/tests
 
       - name: Run corpus tests
+        id: run_corpus_tests
         # Keep the HIP corpus signal even if an independent test step fails.
         if: ${{ !cancelled() && matrix.run_simulator_corpus && steps.build_rocjitsu.outcome == 'success' && steps.install_corpus_dependencies.outcome == 'success' }}
         # A clean sanitizer sweep currently takes about 38 minutes. Each target
@@ -714,7 +715,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: rocjitsu-corpus-diagnostics-${{ matrix.name }}
-          path: ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts
+          # Passing runs need only the per-target results and durations. Keep
+          # the full build trees and logs after failures or interruptions.
+          path: ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts${{ steps.run_corpus_tests.outcome == 'success' && '/junit' || '' }}
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 7
