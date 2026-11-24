@@ -542,6 +542,7 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_MessageTooLargeDeclinesCe_Isola
 // but rcclParamForceCeAllReduce() returns 0 when set to 0 below) so ceForceStagedWindow
 // stays false. ceArMaxBytes is set via RCCL_CE_AR_2SHOT_MAX_BYTES; ZERO policy makes
 // ceZeroStagedWindow true and the call takes CE.
+// ncclProd skips ncclSymkInitOnce, which divides by zero on this mock (cftMcSize is 0).
 TEST(RcclCeAllReduceEligibility, SelectAllReduce_ZeroPolicyNoForce_TakesCe_Isolated)
 {
     if (!isCeRuntimeDriverSupported()) GTEST_SKIP() << "CE is unsupported by this runtime";
@@ -565,7 +566,7 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ZeroPolicyNoForce_TakesCe_Isola
                 rcclCollDecision decision{};
                 ncclResult_t res = rcclSelectAllReduce(
                     mock.get(), reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x2000),
-                    count, ncclFloat32, ncclSum,
+                    count, ncclFloat32, ncclProd,
                     /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision);
                 EXPECT_EQ(res, ncclSuccess);
                 EXPECT_EQ(decision.algo, RCCL_CE_REGISTERED)
@@ -589,6 +590,7 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ZeroPolicyNoForce_TakesCe_Isola
 // With RCCL_FORCE_CE_ALLREDUCE=0, rcclParamForceCeAllReduce() returns 0, suppressing
 // ceZeroStagedWindow even under ZERO policy. ceForceStagedWindow is also false.
 // No CE candidate is recorded and the call falls through to the ring fallback.
+// ncclProd skips ncclSymkInitOnce, which divides by zero on this mock (cftMcSize is 0).
 TEST(RcclCeAllReduceEligibility, SelectAllReduce_ZeroPolicyForceOff_NoCe_Isolated)
 {
     if (!isCeRuntimeDriverSupported()) GTEST_SKIP() << "CE is unsupported by this runtime";
@@ -611,7 +613,7 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ZeroPolicyForceOff_NoCe_Isolate
                 rcclCollDecision decision{};
                 ncclResult_t res = rcclSelectAllReduce(
                     mock.get(), reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x2000),
-                    count, ncclFloat32, ncclSum,
+                    count, ncclFloat32, ncclProd,
                     /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &decision);
                 EXPECT_EQ(res, ncclSuccess);
                 EXPECT_NE(decision.algo, RCCL_CE_REGISTERED)
