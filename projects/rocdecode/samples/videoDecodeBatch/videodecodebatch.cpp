@@ -311,10 +311,10 @@ int main(int argc, char **argv) {
         };
 
         // Step 1: check the decode capability of every GPU device the decoder threads use for each input file. Query
-        // rocDecGetDecoderCaps directly instead of using RocVideoDecoder::CodecSupported(), which reports a failed query
-        // the same way as an unsupported codec. A codec the GPU's VCN doesn't support (e.g. AV1 on gfx90a) or an entry
-        // that isn't a video (e.g. a subdirectory or a subtitle file) only removes that entry from the batch; a failed
-        // query is an error.
+        // rocDecGetDecoderCaps directly instead of using RocVideoDecoder::CodecSupported(), which throws on a failed
+        // query, so each failure can be reported with its status. A codec the GPU's VCN doesn't support (e.g. AV1 on
+        // gfx90a) or an entry that isn't a video (e.g. a subdirectory or a subtitle file) only removes that entry from
+        // the batch; a failed query is an error.
         std::vector<int> dec_device_ids;
         int max_threads = std::min(n_thread, static_cast<int>(input_file_paths.size()));
         for (int i = 0; i < max_threads; i++) {

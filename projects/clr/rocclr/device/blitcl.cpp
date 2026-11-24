@@ -211,6 +211,163 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
       __amd_copyBufferRectAligned(src, dst, srcRect, dstRect, size);
     }
 
+    // The rect kernels below give each work-item one 16-byte chunk of a destination row,
+    // counted from the row's first byte rounded down to 16. A chunk inside the row is one
+    // aligned 16-byte store; the partial chunks at either end of the row store less. The first
+    // grid dimension runs over the chunks of every row of a slice, the second over slices.
+    // Rects are {row pitch, slice pitch, start, 0} in bytes, and size is {row bytes, rows,
+    // slices, chunks per row}.
+    typedef uchar16 __attribute__((aligned(1))) unaligned_uchar16;
+
+    // Moves the bytes of a little-endian 16-byte value up by byte_count, 1 to 15
+    ulong2 __amd_rocclr_bytesUp(ulong2 value, uint byte_count) {
+      uint bits = 8 * byte_count;
+      if (bits >= 64) {
+        return (ulong2)(0, value.s0 << (bits - 64));
+      }
+      return (ulong2)(value.s0 << bits, (value.s1 << bits) | (value.s0 >> (64 - bits)));
+    }
+
+    // Moves the bytes of a little-endian 16-byte value down by byte_count, 1 to 15
+    ulong2 __amd_rocclr_bytesDown(ulong2 value, uint byte_count) {
+      uint bits = 8 * byte_count;
+      if (bits >= 64) {
+        return (ulong2)(value.s1 >> (bits - 64), 0);
+      }
+      return (ulong2)((value.s0 >> bits) | (value.s1 << (64 - bits)), value.s1 >> bits);
+    }
+
+    // Stores bytes position to position + store_size - 1 of a chunk-aligned 16-byte value
+    void __amd_rocclr_storeChunkPiece(ulong chunk_start, ulong2 value, uint position,
+                                      uint store_size) {
+      ulong word = ((position < 8) ? value.s0 : value.s1) >> (8 * (position & 7));
+      if (store_size == 1) {
+        *(__global uchar*)(chunk_start + position) = (uchar)word;
+      } else if (store_size == 2) {
+        *(__global ushort*)(chunk_start + position) = (ushort)word;
+      } else if (store_size == 4) {
+        *(__global uint*)(chunk_start + position) = (uint)word;
+      } else {
+        *(__global ulong*)(chunk_start + position) = word;
+      }
+    }
+
+    // Stores bytes first to last - 1 of a chunk-aligned 16-byte value at chunk_start with
+    // naturally aligned stores: growing ones up to an 8-byte boundary, then shrinking ones
+    void __amd_rocclr_storeChunkBytes(ulong chunk_start, ulong2 value, uint first, uint last) {
+      uint position = first;
+      for (uint store_size = 1; store_size <= 8; store_size *= 2) {
+        if (((position & store_size) != 0) && (position + store_size <= last)) {
+          __amd_rocclr_storeChunkPiece(chunk_start, value, position, store_size);
+          position += store_size;
+        }
+      }
+      for (uint store_size = 8; store_size > 0; store_size /= 2) {
+        if (position + store_size <= last) {
+          __amd_rocclr_storeChunkPiece(chunk_start, value, position, store_size);
+          position += store_size;
+        }
+      }
+    }
+
+    // Rows of at least 16 bytes with any alignment. Each chunk loads the 16 source bytes of the
+    // row nearest to it, unaligned (HSA enables unaligned global access), so the partial chunks
+    // at either end of the row also wait for a single load. Stores the partial chunks; returns
+    // true with the source and destination of a chunk inside the row, which the kernels copy
+    // with their own cache policy. Each policy is its own kernel: the compiler merges accesses
+    // that differ only in the nontemporal hint and drops it.
+    bool __amd_rocclr_copyRectChunk(__global uchar* src, __global uchar* dst, ulong4 srcRect,
+                                    ulong4 dstRect, ulong4 size,
+                                    __global const unaligned_uchar16** source,
+                                    __global ulong2** target) {
+      uint chunks_per_row = (uint)size.w;
+      uint slice_chunk = (uint)get_global_id(0);
+      uint row = slice_chunk / chunks_per_row;
+      ulong slice = get_global_id(1);
+      if ((row >= size.y) || (slice >= size.z)) {
+        return false;
+      }
+      uint chunk = slice_chunk - row * chunks_per_row;
+      ulong src_row = (ulong)src + srcRect.z + slice * srcRect.y + row * srcRect.x;
+      ulong dst_row = (ulong)dst + dstRect.z + slice * dstRect.y + row * dstRect.x;
+      ulong dst_end = dst_row + size.x;
+      ulong chunk_start = (dst_row & ~15UL) + (ulong)chunk * 16;
+      if (chunk_start >= dst_end) {
+        return false;
+      }
+      ulong load_offset = min(max(chunk_start, dst_row), dst_end - 16) - dst_row;
+      *source = (__global const unaligned_uchar16*)(src_row + load_offset);
+      if (chunk_start < dst_row) {
+        uint first = (uint)(dst_row - chunk_start);
+        __amd_rocclr_storeChunkBytes(chunk_start, __amd_rocclr_bytesUp(as_ulong2(**source), first),
+                                     first, 16);
+        return false;
+      }
+      if (chunk_start + 16 > dst_end) {
+        __amd_rocclr_storeChunkBytes(
+            chunk_start,
+            __amd_rocclr_bytesDown(as_ulong2(**source),
+                                   (uint)(chunk_start - dst_row - load_offset)),
+            0, (uint)(dst_end - chunk_start));
+        return false;
+      }
+      *target = (__global ulong2*)chunk_start;
+      return true;
+    }
+
+    __kernel void __amd_rocclr_copyBufferRectUnaligned(__global uchar* src, __global uchar* dst,
+                                                       ulong4 srcRect, ulong4 dstRect,
+                                                       ulong4 size) {
+      __global const unaligned_uchar16* source;
+      __global ulong2* target;
+      if (__amd_rocclr_copyRectChunk(src, dst, srcRect, dstRect, size, &source, &target)) {
+        *target = as_ulong2(*source);
+      }
+    }
+
+    // Nontemporal loads and stores, for a copy at least as large as the MALL, where neither the
+    // source nor the destination stays resident
+    __kernel void __amd_rocclr_copyBufferRectStream(__global uchar* src, __global uchar* dst,
+                                                    ulong4 srcRect, ulong4 dstRect, ulong4 size) {
+      __global const unaligned_uchar16* source;
+      __global ulong2* target;
+      if (__amd_rocclr_copyRectChunk(src, dst, srcRect, dstRect, size, &source, &target)) {
+        __builtin_nontemporal_store(as_ulong2(__builtin_nontemporal_load(source)), target);
+      }
+    }
+
+    // pattern holds the pattern repeated to 16 bytes, and dstRect.w the pattern size, a power of
+    // two up to 16. The pattern restarts at every row, so with the pattern rotated by the row's
+    // first address modulo its size, the byte at address A takes byte A % 16 of it.
+    __kernel void __amd_rocclr_fillBufferRect(__global uchar* dst, ulong2 pattern,
+                                              ulong4 dstRect, ulong4 size) {
+      uint chunks_per_row = (uint)size.w;
+      uint slice_chunk = (uint)get_global_id(0);
+      uint row = slice_chunk / chunks_per_row;
+      ulong slice = get_global_id(1);
+      if ((row >= size.y) || (slice >= size.z)) {
+        return;
+      }
+      uint chunk = slice_chunk - row * chunks_per_row;
+      ulong dst_row = (ulong)dst + dstRect.z + slice * dstRect.y + row * dstRect.x;
+      ulong dst_end = dst_row + size.x;
+      ulong chunk_start = (dst_row & ~15UL) + (ulong)chunk * 16;
+      if (chunk_start >= dst_end) {
+        return;
+      }
+      uint rotation = (uint)(dst_row & (dstRect.w - 1));
+      ulong2 row_pattern = (rotation == 0) ? pattern
+                                           : (__amd_rocclr_bytesUp(pattern, rotation) |
+                                              __amd_rocclr_bytesDown(pattern, 16 - rotation));
+      if ((chunk_start >= dst_row) && (chunk_start + 16 <= dst_end)) {
+        *(__global ulong2*)chunk_start = row_pattern;
+        return;
+      }
+      __amd_rocclr_storeChunkBytes(chunk_start, row_pattern,
+                                   (uint)(max(dst_row, chunk_start) - chunk_start),
+                                   (uint)(min(dst_end, chunk_start + 16) - chunk_start));
+    }
+
     // TODO: Once the sequential for-loop fix lands in llvm-project/amd/device-libs/opencl/src/misc/amdblit.cl
     // (replacing get_global_id(0) with a for loop), revert this back to:
     //   __amd_batchMemOp(params, count);

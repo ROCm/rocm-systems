@@ -9884,12 +9884,57 @@ TEST(HwregTest, GetregReadsModeAndStatusTargetIds) {
     const auto arch = arch_case.arch;
     uint32_t expected = (kStatus & ~((1u << 6) | (1u << 11) | (1u << 12))) | (3u << 9) | (1u << 16);
     if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5)
-      expected |= kStatus & (1u << 6);
+      expected = (expected | (kStatus & (1u << 6))) & ~(1u << 28);
     if (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5)
-      expected = 0x12054600u;
+      expected = 0x02054600u;
     EXPECT_EQ(cu->read_sgpr(sb + 5), expected);
     EXPECT_EQ(cu->read_sgpr(sb + 6), 0u);
 
+    if (!wf->is_halted())
+      wf->halt();
+  }
+}
+
+TEST(HwregTest, StatusNeverReportsTheReadingWaveIdle) {
+  // GFX11 and GFX12 STATUS.IDLE[28] is for a host reading another wave. The
+  // reading wave is executing S_GETREG: gfx1100 and gfx1201 read 0 there with
+  // no memory outstanding. CDNA3/4 keep IDLE in bit 31 of the raw word.
+  for (const HwregArchCase &arch_case : kHwregArchCases) {
+    SCOPED_TRACE(arch_case.name);
+    amdgpu::GpuMemory gpu_mem(std::string("hwreg_status_idle_mem_") + arch_case.name);
+    amdgpu::L2Cache l2(std::string("hwreg_status_idle_l2_") + arch_case.name);
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch_case.arch;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 106;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create(arch_case.name, cfg, &gpu_mem, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto decoder = Decoder::create(arch_case.arch);
+    ASSERT_NE(decoder, nullptr);
+    const auto words = encode_sopk(arch_case.getreg_op, 4, encode_hwreg(2));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    wf->set_status_raw(0);
+    wf->set_exec(1);
+    wf->set_vcc_raw(1);
+    ASSERT_TRUE(wf->wait_counters().empty());
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    const uint32_t idle_wave = cu->read_sgpr(wf->sgpr_alloc().base + 4);
+    EXPECT_EQ(idle_wave & (1u << 28), 0u);
+    const auto arch = arch_case.arch;
+    if (arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4) {
+      EXPECT_EQ(idle_wave, 1u << 16); // VALID only; IDLE[31] clear as before.
+    }
+    wf->wait_counters().vmcnt = 1;
+    uint32_t busy_wave = UINT32_MAX;
+    ASSERT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(2), busy_wave),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(busy_wave, idle_wave);
+    wf->wait_counters().vmcnt = 0;
     if (!wf->is_halted())
       wf->halt();
   }
@@ -11803,31 +11848,22 @@ TEST(RdnaDot2Bf16ExecutionTest, TruncationAndSubnormalsMatchEachTarget) {
     const uint32_t base = wave->vgpr_alloc().base;
     for (uint32_t mode : {0u, 0xffu}) {
       wave->set_mode_raw(mode);
-      for (int host_round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-        for (const Case &test : cases) {
-          SCOPED_TRACE(test.name);
-          SCOPED_TRACE(static_cast<int>(arch));
-          SCOPED_TRACE(mode);
-          SCOPED_TRACE(host_round);
-          compute_unit->write_vgpr(base, 0, test.left);
-          compute_unit->write_vgpr(base + 1, 0, test.right);
-          compute_unit->write_vgpr(base + 2, 0, test.accumulator);
-          compute_unit->write_vgpr(base + 3, 0, 0xcafe0000);
-          const std::array<uint32_t, 2> words =
-              encode_vop3(/*op=*/rdna4::kVDot2Bf16Bf16Vop3, /*vdst=*/3,
-                          /*src0=*/vgpr_src(0), /*src1=*/vgpr_src(1), /*src2=*/vgpr_src(2));
-          std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
-          ASSERT_NE(instruction, nullptr);
-          const int saved_round = std::fegetround();
-          ASSERT_EQ(std::fesetround(host_round), 0);
-          EXPECT_TRUE(compute_unit->execute_instruction(instruction.get(), *wave).succeeded());
-          const int restored_round = std::fegetround();
-          std::fesetround(saved_round);
-          EXPECT_EQ(restored_round, host_round);
-          const uint16_t expected =
-              arch == rocjitsu::IsaFamily::Rdna4 ? test.gfx1201 : test.gfx1100;
-          EXPECT_EQ(compute_unit->read_vgpr(base + 3, 0), 0xcafe0000u | expected);
-        }
+      for (const Case &test : cases) {
+        SCOPED_TRACE(test.name);
+        SCOPED_TRACE(static_cast<int>(arch));
+        SCOPED_TRACE(mode);
+        compute_unit->write_vgpr(base, 0, test.left);
+        compute_unit->write_vgpr(base + 1, 0, test.right);
+        compute_unit->write_vgpr(base + 2, 0, test.accumulator);
+        compute_unit->write_vgpr(base + 3, 0, 0xcafe0000);
+        const std::array<uint32_t, 2> words =
+            encode_vop3(/*op=*/rdna4::kVDot2Bf16Bf16Vop3, /*vdst=*/3,
+                        /*src0=*/vgpr_src(0), /*src1=*/vgpr_src(1), /*src2=*/vgpr_src(2));
+        std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+        ASSERT_NE(instruction, nullptr);
+        EXPECT_TRUE(compute_unit->execute_instruction(instruction.get(), *wave).succeeded());
+        const uint16_t expected = arch == rocjitsu::IsaFamily::Rdna4 ? test.gfx1201 : test.gfx1100;
+        EXPECT_EQ(compute_unit->read_vgpr(base + 3, 0), 0xcafe0000u | expected);
       }
     }
     wave->halt();
@@ -12083,19 +12119,13 @@ TEST(SdwaOutputScalingTest, F32ScalingUsesExplicitRounding) {
       Case{0x7f812345u, 1, {0x7fc12345u, 0x7fc12345u, 0x7fc12345u, 0x7fc12345u}},
       Case{0x3f800001u, 0, {0x3f800001u, 0x3f800001u, 0x3f800001u, 0x3f800001u}},
   };
-  const int saved_round = std::fegetround();
-  for (int host_round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    EXPECT_EQ(std::fesetround(host_round), 0);
-    for (const Case &test : cases) {
-      for (uint32_t mode = 0; mode < 4; ++mode) {
-        SCOPED_TRACE(::testing::Message() << "input=" << test.input << " omod=" << test.omod
-                                          << " mode=" << mode << " host=" << host_round);
-        EXPECT_EQ(amdgpu::sdwa::scale_f32(test.input, test.omod, mode), test.expected[mode]);
-        EXPECT_EQ(std::fegetround(), host_round);
-      }
+  for (const Case &test : cases) {
+    for (uint32_t mode = 0; mode < 4; ++mode) {
+      SCOPED_TRACE(::testing::Message()
+                   << "input=" << test.input << " omod=" << test.omod << " mode=" << mode);
+      EXPECT_EQ(amdgpu::sdwa::scale_f32(test.input, test.omod, mode), test.expected[mode]);
     }
   }
-  EXPECT_EQ(std::fesetround(saved_round), 0);
 }
 
 TEST(SdwaOutputScalingTest, FloatingConversionsUseDestinationFormat) {

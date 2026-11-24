@@ -64,6 +64,24 @@
 #define RCCL_STORE_FREE_STEP_BARRIER 0
 #endif
 
+// gfx1250 Simple's start-of-step barrier orders LDS only (stepStartBarrier()). Needs system-scope slot loads, no TDM.
+// -DENABLE_SIMPLE_STORE_FREE_STEP_START=OFF keeps the full-fence barrier.
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && !defined(RCCL_DISABLE_SIMPLE_STORE_FREE_STEP_START) && \
+  !(defined(ENABLE_TDM_SIMPLE) && ENABLE_TDM_SIMPLE) && RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#define RCCL_SIMPLE_STORE_FREE_STEP_START 1
+#else
+#define RCCL_SIMPLE_STORE_FREE_STEP_START 0
+#endif
+
+// Block barrier whose fences order LDS only: it does not wait for the waves' global or peer stores.
+inline __device__ void ldsOrderedBarrier(int nthreads, int threadsPerBlock, uint64_t& barrier_next,
+                                         uint64_t* barriers) {
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+  barrier_generic_ordered(__atomic_signal_fence(__ATOMIC_SEQ_CST), nthreads, barrier_next, barriers, __ATOMIC_RELAXED,
+                          __ATOMIC_RELAXED);
+  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+}
+
 // Runs an LL or LL128 step barrier that orders LDS between the waves but does not wait for their global or peer
 // stores to complete. Returns false where the caller must run its full-fence barrier instead: other architectures,
 // and sends with a connFifo, whose proxy acts on a tail. Only valid where the receiver validates every line by its
@@ -75,10 +93,7 @@ inline __device__ bool storeFreeStepBarrier(bool fifoSend, int nthreads, int thr
 #if RCCL_STORE_FREE_STEP_BARRIER
   if (fifoSend) return false;
   if (nthreads != WARP_SIZE) {
-    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
-    barrier_generic_ordered(__atomic_signal_fence(__ATOMIC_SEQ_CST), nthreads, barrier_next, barriers, __ATOMIC_RELAXED,
-                            __ATOMIC_RELAXED);
-    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+    ldsOrderedBarrier(nthreads, threadsPerBlock, barrier_next, barriers);
   }
   return true;
 #else
@@ -87,10 +102,23 @@ inline __device__ bool storeFreeStepBarrier(bool fifoSend, int nthreads, int thr
 #endif
 }
 
-#if RCCL_STORE_FREE_STEP_BARRIER
+// The store-free barriers are skipped on connFifo sends (LL, LL128, Simple) and receives (Simple).
+#if RCCL_STORE_FREE_STEP_BARRIER || RCCL_SIMPLE_STORE_FREE_STEP_START
 inline __device__ bool anySendConnFifo(struct ncclDevChannel* channel, int const* sendPeers, int nsend, int connIndex) {
   bool fifo = false;
-  for (int i = 0; i < nsend; i++) fifo |= channel->peers[sendPeers[i]]->send[connIndex].connFifo != nullptr;
+  for (int i = 0; i < nsend; i++) {
+    fifo |= channel->peers[sendPeers[i]]->send[connIndex].connFifo != nullptr;
+  }
+  return fifo;
+}
+#endif
+
+#if RCCL_SIMPLE_STORE_FREE_STEP_START
+inline __device__ bool anyRecvConnFifo(struct ncclDevChannel* channel, int const* recvPeers, int nrecv, int connIndex) {
+  bool fifo = false;
+  for (int i = 0; i < nrecv; i++) {
+    fifo |= channel->peers[recvPeers[i]]->recv[connIndex].connFifo != nullptr;
+  }
   return fifo;
 }
 #endif

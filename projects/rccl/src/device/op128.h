@@ -379,6 +379,43 @@ DEFINE_ld_st__size(1, uint8_t, b8, r) DEFINE_ld_st__size(2, uint16_t, b16, h) DE
 #endif
 }
 
+// gfx1250 waits s_wait_xcnt 0 before each atomic store. reduceCopy's plain data stores use buffer stores instead:
+// a replayed store rewrites the same value.
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && \
+  !defined(RCCL_DISABLE_SIMPLE_BUFFER_STORE) && __has_builtin(__builtin_amdgcn_raw_buffer_store_b128) && \
+  __has_builtin(__builtin_amdgcn_make_buffer_rsrc)
+#define RCCL_SIMPLE_BUFFER_STORE 1
+// Device-only block: uniform.h and cachePolicy.h define __device__ to empty when it is missing, which a host pass
+// must not see.
+#include "uniform.h"
+#include "tdm/cachePolicy.h"
+
+struct WaveStore16 {
+  __amdgpu_buffer_rsrc_t rsrc;
+  uint32_t voff;
+};
+
+// Base = the first active lane's address, OOB checking off. True when every active lane sits less than one warp of
+// packs above it (the lane layout of a Simple hunk); otherwise the caller keeps the global stores.
+__device__ __forceinline__ bool waveStore16Begin(uintptr_t addr, WaveStore16& w) {
+  uintptr_t base = wave::uniform(static_cast<uint64_t>(addr));
+  uintptr_t off = addr - base;
+  w.rsrc = __builtin_amdgcn_make_buffer_rsrc(reinterpret_cast<void*>(base), 0, -1LL, 0);
+  // The mask changes nothing once the check below passed; it lets the compiler fold ioff into the instruction offset.
+  w.voff = (uint32_t)off & (WARP_SIZE * 16 - 1);
+  return !__any(off >= WARP_SIZE * 16);
+}
+
+// Only after waveStore16Begin() returned true.
+__device__ __forceinline__ void waveStore16(WaveStore16 const& w, uint32_t ioff, BytePack<16> value) {
+  // cpol SCOPE_SYS, the scope the DWORDX4 store builtin gives.
+  __builtin_amdgcn_raw_buffer_store_b128(value.v4u, w.rsrc, w.voff + ioff, 0,
+                                         createCachePolicy(TemporalHint::RT, MemScope::SYS));
+}
+#else
+#define RCCL_SIMPLE_BUFFER_STORE 0
+#endif
+
 __device__ __forceinline__ BytePack<16> load16global(uintptr_t addr) {
   BytePack<16> ans;
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS

@@ -692,8 +692,8 @@ void VAddF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) | (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
   amdgpu::arith::execute_float_binary16<amdgpu::arith::HalfBinaryOperation::Add>(
-      wf, rj_arith_v_add_f16_w32, rj_arith_v_add_f16_w64, wf.cu().arithmetic_flags(), modifiers,
-      vdst, src0, src1, true);
+      wf, rj_arith_v_add_f16_w32_gfx10, rj_arith_v_add_f16_w64_gfx10, wf.cu().arithmetic_flags(),
+      modifiers, vdst, src0, src1, true);
 }
 
 void VSubF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -705,8 +705,8 @@ void VSubF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) | (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
   amdgpu::arith::execute_float_binary16<amdgpu::arith::HalfBinaryOperation::Sub>(
-      wf, rj_arith_v_sub_f16_w32, rj_arith_v_sub_f16_w64, wf.cu().arithmetic_flags(), modifiers,
-      vdst, src0, src1, true);
+      wf, rj_arith_v_sub_f16_w32_gfx10, rj_arith_v_sub_f16_w64_gfx10, wf.cu().arithmetic_flags(),
+      modifiers, vdst, src0, src1, true);
 }
 
 void VSubrevF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -718,8 +718,8 @@ void VSubrevF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) | (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
   amdgpu::arith::execute_float_binary16<amdgpu::arith::HalfBinaryOperation::Subrev>(
-      wf, rj_arith_v_subrev_f16_w32, rj_arith_v_subrev_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, vdst, src0, src1, true);
+      wf, rj_arith_v_subrev_f16_w32_gfx10, rj_arith_v_subrev_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, true);
 }
 
 void VMulF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -731,8 +731,8 @@ void VMulF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) | (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
   amdgpu::arith::execute_float_binary16<amdgpu::arith::HalfBinaryOperation::Mul>(
-      wf, rj_arith_v_mul_f16_w32, rj_arith_v_mul_f16_w64, wf.cu().arithmetic_flags(), modifiers,
-      vdst, src0, src1, true);
+      wf, rj_arith_v_mul_f16_w32_gfx10, rj_arith_v_mul_f16_w64_gfx10, wf.cu().arithmetic_flags(),
+      modifiers, vdst, src0, src1, true);
 }
 
 void VFmacF16Vop3::execute_impl(amdgpu::Wavefront &wf) {

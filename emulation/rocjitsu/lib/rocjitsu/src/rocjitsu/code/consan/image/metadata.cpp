@@ -10,6 +10,7 @@
 
 #include <cstring>
 #include <optional>
+#include <set>
 
 namespace rocjitsu::consan {
 namespace {
@@ -52,9 +53,21 @@ bool parse(std::span<const uint8_t> image, const KernelDescriptorInfo &kernel,
     return false;
   const amdhsa::MetadataValue *kernels = root.field("amdhsa.kernels");
   if (kernels == nullptr || kernels->kind != amdhsa::MetadataValue::Kind::Array ||
-      kernels->array.size() != 1)
+      kernels->array.empty() || kernels->array.size() > 1024)
     return false;
-  const amdhsa::MetadataValue &entry = kernels->array.front();
+  const amdhsa::MetadataValue *selected = nullptr;
+  std::set<std::string_view> names;
+  for (const amdhsa::MetadataValue &candidate : kernels->array) {
+    const amdhsa::MetadataValue *name = candidate.field(".name");
+    if (name == nullptr || name->kind != amdhsa::MetadataValue::Kind::String ||
+        !names.insert(name->string).second)
+      return false;
+    if (name->string == kernel.kernel_name)
+      selected = &candidate;
+  }
+  if (selected == nullptr)
+    return false;
+  const amdhsa::MetadataValue &entry = *selected;
   const std::optional<uint32_t> kernarg = entry.integer_field(".kernarg_segment_size");
   const std::optional<uint32_t> alignment = entry.integer_field(".kernarg_segment_align");
   const std::optional<uint32_t> sgprs = entry.integer_field(".sgpr_count");
