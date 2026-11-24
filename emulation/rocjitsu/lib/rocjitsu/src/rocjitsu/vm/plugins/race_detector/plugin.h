@@ -234,6 +234,7 @@ public:
 
 private:
   size_t trace_context_ = kDefaultTraceContext;
+  bool initialization_failed_ = false;
 
   struct WorkgroupKey {
     uint32_t dispatch_id;

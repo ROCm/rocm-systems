@@ -725,16 +725,19 @@ RaceDetectorPlugin::RaceDetectorPlugin() : ExecutionPlugin("race") {}
 
 util::Result RaceDetectorPlugin::initialize(const char *config_json,
                                             util::DiagnosticEmitter diagnostic) {
+  initialization_failed_ = false;
   if (!config_json || !*config_json) {
     return util::Result::success();
   }
   flexbuffers::Builder builder;
   flatbuffers::Parser parser;
   if (!parser.ParseFlexBuffer(config_json, nullptr, &builder)) {
+    initialization_failed_ = true;
     return diagnostic.emit() << "Race plugin configuration is not valid JSON";
   }
   const flexbuffers::Reference root = flexbuffers::GetRoot(builder.GetBuffer());
   if (!root.IsMap()) {
+    initialization_failed_ = true;
     return diagnostic.emit() << "Race plugin configuration must be an object";
   }
   const flexbuffers::Reference context = root.AsMap()["trace_context"];
@@ -743,6 +746,7 @@ util::Result RaceDetectorPlugin::initialize(const char *config_json,
   }
   if (!context.IsIntOrUint() || (context.IsInt() && context.AsInt64() < 2) ||
       context.AsUInt64() < 2 || context.AsUInt64() > kTraceHistorySize) {
+    initialization_failed_ = true;
     return diagnostic.emit() << "Race plugin 'trace_context' must be an integer between 2 and "
                              << kTraceHistorySize;
   }
@@ -750,7 +754,11 @@ util::Result RaceDetectorPlugin::initialize(const char *config_json,
   return util::Result::success();
 }
 
-RaceDetectorPlugin::~RaceDetectorPlugin() { sink().write(getSummary()); }
+RaceDetectorPlugin::~RaceDetectorPlugin() {
+  if (!initialization_failed_) {
+    sink().write(getSummary());
+  }
+}
 
 std::string RaceDetectorPlugin::getSummary() const {
   std::lock_guard<std::mutex> lock(report_mutex_);

@@ -242,11 +242,42 @@ TEST(RaceReportConfigTest, ValidatesTraceContextAtInitialization) {
 }
 
 TEST(RaceReportConfigTest, FactoryRejectsInvalidConfiguration) {
+  struct RejectionCase {
+    const char *config;
+    const char *reason;
+  };
+  const RejectionCase cases[] = {
+      {"{", "configuration is not valid JSON"},
+      {"[]", "configuration must be an object"},
+      {R"({"trace_context":1})", "'trace_context' must be an integer between 2 and 256"},
+      {R"({"trace_context":257})", "'trace_context' must be an integer between 2 and 256"}};
+  for (const RejectionCase &test : cases) {
+    SCOPED_TRACE(test.config);
+    testing::internal::CaptureStderr();
+    std::unique_ptr<rocjitsu::ExecutionPlugin> plugin(
+        rocjitsu::create_plugin_instance<RaceDetectorPlugin>(test.config));
+    const std::string diagnostic = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(plugin, nullptr);
+    EXPECT_NE(diagnostic.find("create failed: Race plugin"), std::string::npos) << diagnostic;
+    EXPECT_NE(diagnostic.find(test.reason), std::string::npos) << diagnostic;
+    EXPECT_EQ(diagnostic.find("ROCJITSU RACE DETECTION SUMMARY"), std::string::npos) << diagnostic;
+    EXPECT_EQ(diagnostic.find("No races detected."), std::string::npos) << diagnostic;
+  }
+  testing::internal::CaptureStderr();
   std::unique_ptr<rocjitsu::ExecutionPlugin> plugin(
-      rocjitsu::create_plugin_instance<RaceDetectorPlugin>(R"({"trace_context":1})"));
-  EXPECT_EQ(plugin, nullptr);
-  plugin.reset(rocjitsu::create_plugin_instance<RaceDetectorPlugin>(R"({"trace_context":2})"));
+      rocjitsu::create_plugin_instance<RaceDetectorPlugin>(R"({"trace_context":2})"));
   EXPECT_NE(plugin, nullptr);
+  plugin.reset();
+  const std::string summary = testing::internal::GetCapturedStderr();
+  EXPECT_NE(summary.find("ROCJITSU RACE DETECTION SUMMARY"), std::string::npos) << summary;
+  EXPECT_NE(summary.find("No races detected."), std::string::npos) << summary;
+}
+
+TEST(RaceReportConfigTest, DefaultConstructedPluginEmitsSummary) {
+  testing::internal::CaptureStderr();
+  { RaceDetectorPlugin plugin; }
+  const std::string summary = testing::internal::GetCapturedStderr();
+  EXPECT_NE(summary.find("No races detected."), std::string::npos) << summary;
 }
 
 TEST(RaceReportTraceTest, RepeatedPcWithDifferentBytesSelectsTheMatchingEncoding) {
