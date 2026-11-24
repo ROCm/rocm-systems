@@ -220,3 +220,18 @@ struct RedOpComm {
   ncclComm* get() { return storage.get(); }
 };
 }  // namespace
+
+namespace {
+struct BatchComm {
+  std::unique_ptr<ncclTopoSystem> topo{new ncclTopoSystem{}};
+  std::unique_ptr<ncclComm> comm{new ncclComm{}};
+  BatchComm(int nNodes, const char* gcn) {
+    comm->nNodes = nNodes;
+    comm->topo = topo.get();
+    SetSingleGpuArch(topo.get(), gcn);
+  }
+  ncclComm* get() { return comm.get(); }
+};
+
+void SetBatchParam(int64_t v) { SetParam("RCCL_P2P_BATCH_ENABLE", v); }
+}  // namespace

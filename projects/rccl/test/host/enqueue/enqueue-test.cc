@@ -27,6 +27,7 @@
 
 #include "../common/LogCapture.hpp"
 #include "ScopedHook.h"
+#include "fakes/comm_fakes.h"
 #include "fakes/enqueue_test_deps.h"
 #include "fakes/strongstream_stubs.h"
 

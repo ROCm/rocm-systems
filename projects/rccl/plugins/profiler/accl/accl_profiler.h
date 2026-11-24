@@ -146,7 +146,6 @@ struct acclFanoutCall {
   const char* datatype;
   size_t      count;
   int         graphCaptured;
-  uint64_t    seqNumber;
   // One reference for the open CollApi bracket and one per task not yet
   // started. A graph-captured call is never released: every replay restarts its
   // tasks against this handle. Guarded by ctx->apiMutex, as are the fields below.
@@ -163,6 +162,7 @@ struct acclFanoutCall {
 struct acclCollApiStub {
   uint64_t    type;           // ncclProfileCollApi
   void*       ctx;
+  uint64_t    ctxSerial;      // ctx->serial when opened
   int         open;
   const char* func;
   const char* datatype;
@@ -295,11 +295,13 @@ struct acclCommContext {
 
   // Fan-out calls: every one allocated (freed with the context) and the free
   // list they are recycled through. RCCL keeps no sequence number for these
-  // calls, so fanoutSeq numbers them per communicator.
+  // calls, so fanoutSeq numbers their launches per communicator, in launch order.
   pthread_mutex_t          apiMutex;
   struct acclFanoutCall*   fanoutAll;
   struct acclFanoutCall*   fanoutFree;
   uint64_t                 fanoutSeq;
+  // Unique per context for the life of the process, unlike its address.
+  uint64_t                 serial;
 };
 
 #endif

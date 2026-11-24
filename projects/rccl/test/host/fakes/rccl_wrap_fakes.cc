@@ -450,6 +450,9 @@ bool rcclCeAllReduceEnabled(const struct ncclComm*) {
   return true;  // arch default: enabled
 }
 bool rcclForceCeAllReduceEnabled(const struct ncclComm*) { return false; }
+// taskAppend reads both on its way to the per-peer Send/Recv fan-out: an unset environment.
+bool rcclForceCeScratchEnabled(const ncclComm*) { return false; }
+bool rcclNcclAlgoEnvIsSet() { return false; }
 
 // ===========================================================================
 // Fail-loud floor -- rccl_wrap.cc entry points no host-only microtest executes.
@@ -467,10 +470,8 @@ void rcclSetPxn(struct ncclComm*, int&) { FailLoudUnfaked("rccl_wrap_fakes", "rc
 void rcclSetCeAllReduceFastPath(struct ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclSetCeAllReduceFastPath");
 }
-// rcclCeAllReduceEnabled and rcclForceCeAllReduceEnabled have controllable fakes above.
-bool rcclForceCeScratchEnabled(const ncclComm*) {
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclForceCeScratchEnabled");
-}
+// rcclCeAllReduceEnabled, rcclForceCeAllReduceEnabled, rcclForceCeScratchEnabled and rcclNcclAlgoEnvIsSet have
+// fakes above.
 size_t rcclCeAr2ShotMax(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMax");
 }
@@ -478,9 +479,6 @@ size_t rcclCeAr2ShotMin(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMin");
 }
 // rcclCeArNonRegCap, which taskAppend and ncclCeInit call instead of rcclCeAr2ShotMax, is a seam above.
-bool rcclNcclAlgoEnvIsSet() {
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclNcclAlgoEnvIsSet");
-}
 bool rcclAllGatherCeRegisteredWindow(const ncclComm*, size_t, ncclSymRegType_t, bool) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclAllGatherCeRegisteredWindow");
 }

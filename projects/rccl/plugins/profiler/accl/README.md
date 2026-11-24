@@ -24,18 +24,21 @@ ncclProfileCollApi | ncclProfileP2pApi | ncclProfileP2p
 
 RCCL runs AlltoAll, Gather, Scatter and Direct AllGather (small AllGathers on
 gfx942/gfx950, below `RCCL_DIRECT_ALLGATHER_THRESHOLD`) as one Send and one Recv
-task per peer. Those tasks report `P2p` events, not a `Coll` event. RCCL brackets
-the tasks' `P2pApi` events with the call's `CollApi` event, and the plugin uses that
-nesting to tie each task back to the call. It writes one record per call per kernel
-launch, in the same format as any other collective, with these differences:
+task per peer. Those tasks report `P2p` events, not a `Coll` event. For a plugin
+that subscribes to `ncclProfileCollApi` and `ncclProfileP2pApi`, as this one
+does, RCCL brackets the tasks' `P2pApi` events with the call's `CollApi` event,
+and the plugin uses that nesting to tie each task back to the call. It writes one
+record per call per kernel launch, in the same format as any other collective,
+with these differences:
 
 - `coll_algo` is `"P2P"` and `coll_proto` is empty.
 - `coll_n_channels` is the number of distinct channels the call's tasks ran on, and
   `coll_n_channels_reported` is 0.
 - Each `kernel_events` entry spans every task on that channel, from the earliest
   start to the latest stop.
-- `coll_sn` numbers these calls per communicator. RCCL keeps no sequence number
-  for them, so it shares no numbering with other records.
+- `coll_sn` numbers these launches per communicator, in launch order, so each
+  replay of a captured graph gets a new number. RCCL keeps no sequence number
+  for these calls, so this numbering is separate from other records'.
 
 A call whose tasks do not fit in one kernel plan, which is rare and only happens
 at large rank counts, produces one record per plan. A user's own

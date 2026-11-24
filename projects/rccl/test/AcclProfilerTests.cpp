@@ -43,6 +43,7 @@ extern "C" {
   void test_acclWriteDummyRecord(void* ctx);
   int  test_acclOutputFd(void* ctx);
   unsigned long test_acclProxyOpGeneration(void* ctx, int slot);
+  void test_acclRenewSerial(void* ctx);
 }
 extern ncclResult_t acclPluginInit(void**, uint64_t, int*, const char*,
                                    int, int, int, ncclDebugLogger_t);
@@ -2727,6 +2728,16 @@ TEST(AcclProfilerLifecycle, ProxyOpSlotReuseDoesNotWriteTheSlotMutex) {
     );
 }
 
+static std::vector<std::string> ReadCollRecords(const char* dir, const char* commHashHex) {
+    std::vector<std::string> records;
+    std::istringstream lines(ReadProfilerOutput(dir, commHashHex));
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (line.find("\"coll_perf\"") != std::string::npos) records.push_back(line);
+    }
+    return records;
+}
+
 // =========================================================================
 // The nightly's failure mode: many collectives held open by late KernelCh
 // stops, each with finished proxy ops. 100 x 16 ops is more than the op pool
@@ -2742,8 +2753,8 @@ TEST(AcclProfilerSummary, FinishedOpsOfOpenCollectivesDoNotExhaustThePool) {
             int mask = 0;
             ASSERT_EQ(acclPluginInit(&ctx, 0x7004, &mask, "op_open_colls",
                                      2, 16, 0, nullptr), 0);
-            const int nColls = 100, opsPerColl = 16;
-            static_assert(100 * 16 > ACCL_PROXY_OP_POOL_SIZE,
+            constexpr int nColls = 100, opsPerColl = 16;
+            static_assert(nColls * opsPerColl > ACCL_PROXY_OP_POOL_SIZE,
                           "the scenario must overrun a pool that retains ops");
             std::vector<void*> kchs;
             for (int c = 0; c < nColls; c++) {
@@ -2777,15 +2788,9 @@ TEST(AcclProfilerSummary, FinishedOpsOfOpenCollectivesDoNotExhaustThePool) {
             }
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
-            std::istringstream lines(ReadProfilerOutput(dir.c_str(), "0x7004"));
-            std::string line;
-            int records = 0;
-            while (std::getline(lines, line)) {
-                if (line.find("\"coll_perf\"") == std::string::npos) continue;
-                records++;
-                EXPECT_EQ(JsonNumber(line, "n_proxy_ops"), opsPerColl) << line;
-            }
-            EXPECT_EQ(records, nColls);
+            std::vector<std::string> recs = ReadCollRecords(dir.c_str(), "0x7004");
+            EXPECT_EQ(recs.size(), static_cast<size_t>(nColls));
+            for (const std::string& r : recs) EXPECT_EQ(JsonNumber(r, "n_proxy_ops"), opsPerColl) << r;
             std::string s = ReadSummaryLine(dir.c_str(), "0x7004");
             ExpectSummaryCounters(s, {});
             EXPECT_EQ(JsonNumber(s, "coll_pool_high_water"), nColls) << s;
@@ -2801,16 +2806,6 @@ TEST(AcclProfilerSummary, FinishedOpsOfOpenCollectivesDoNotExhaustThePool) {
 // call's CollApi event; each task's P2p event is parented to its P2pApi handle,
 // and its KernelCh/ProxyOp events to the P2p handle.
 // =========================================================================
-
-static std::vector<std::string> ReadCollRecords(const char* dir, const char* commHashHex) {
-    std::vector<std::string> records;
-    std::istringstream lines(ReadProfilerOutput(dir, commHashHex));
-    std::string line;
-    while (std::getline(lines, line)) {
-        if (line.find("\"coll_perf\"") != std::string::npos) records.push_back(line);
-    }
-    return records;
-}
 
 // Posts one call the way taskAppend does and returns each task's P2pApi handle.
 static std::vector<void*> PostFanoutCall(void* ctx, const char* func, size_t count,
@@ -2902,8 +2897,10 @@ TEST(AcclProfilerFanout, CallWritesOneCollectiveRecord) {
             for (int t = 1; t < 4; t++) EXPECT_EQ(tasks[t], tasks[0]);
             ASSERT_NE(tasks[0], nullptr);
             void* kch[4];
-            const uint64_t start[4] = {1000, 1000, 1200, 1300};
-            const uint64_t stop[4] = {2000, 2000, 2500, 2600};
+            // Channel 1's later task starts and stops first, so the span holds only if a
+            // start takes the minimum and a stop the maximum.
+            const uint64_t start[4] = {1000, 1000, 1300, 1200};
+            const uint64_t stop[4] = {2000, 2000, 2600, 2500};
             for (int t = 0; t < 4; t++) kch[t] = StartKernelCh(ctx, tasks[t], t / 2, start[t]);
 
             ncclProfilerEventDescr_v5_t od;
@@ -2992,10 +2989,10 @@ TEST(AcclProfilerFanout, CallSplitAcrossPlansWritesOneRecordPerPlan) {
 
             std::vector<std::string> recs = ReadCollRecords(dir.c_str(), "0x8003");
             ASSERT_EQ(recs.size(), 2u);
-            for (const std::string& r : recs) {
-                EXPECT_NE(r.find("\"coll\":\"AlltoAll\""), std::string::npos) << r;
-                EXPECT_EQ(JsonNumber(r, "coll_sn"), 0) << r;
-                EXPECT_EQ(JsonNumber(r, "coll_n_channels"), 2) << r;
+            for (size_t i = 0; i < recs.size(); i++) {
+                EXPECT_NE(recs[i].find("\"coll\":\"AlltoAll\""), std::string::npos) << recs[i];
+                EXPECT_EQ(JsonNumber(recs[i], "coll_sn"), double(i)) << "numbered per launch: " << recs[i];
+                EXPECT_EQ(JsonNumber(recs[i], "coll_n_channels"), 2) << recs[i];
             }
             ExpectSummaryCounters(ReadSummaryLine(dir.c_str(), "0x8003"), {});
         },
@@ -3031,6 +3028,174 @@ TEST(AcclProfilerFanout, GraphCapturedCallIsKeptForEveryReplay) {
     );
 }
 
+// accl_report.py drops warmups by sorting each (rank, coll, size) group by coll_sn, so a replay
+// must not reuse its capture's number: with two same-size calls in a graph, numbers repeating
+// 0,1,0,1 would drop executions 0 and 2 as the warmups instead of 0 and 1.
+TEST(AcclProfilerFanout, GraphReplaysAreNumberedInLaunchOrder) {
+    ScopedProfilerDir dir("fanout_replay_sn");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerFanout.GraphReplaysAreNumberedInLaunchOrder",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x8007, &mask, "fanout_replay_sn", 2, 2, 0, nullptr), 0);
+            std::vector<void*> a = PostFanoutCall(ctx, "AlltoAll", 1024, 2, /*graphCaptured=*/true);
+            std::vector<void*> b = PostFanoutCall(ctx, "AlltoAll", 1024, 2, /*graphCaptured=*/true);
+            for (int replay = 0; replay < 2; replay++) {
+                RunFanoutLaunch(ctx, a);
+                RunFanoutLaunch(ctx, b);
+            }
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::vector<std::string> recs = ReadCollRecords(dir.c_str(), "0x8007");
+            ASSERT_EQ(recs.size(), 4u);
+            for (size_t i = 0; i < recs.size(); i++) {
+                EXPECT_EQ(JsonNumber(recs[i], "coll_sn"), double(i)) << recs[i];
+            }
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// A call split across plans keeps a pointer to its open launch. If that launch finalizes and an
+// unrelated collective takes its pool slot, the call's next task must open a launch of its own,
+// not join the collective that now holds the slot.
+TEST(AcclProfilerFanout, NextPlanDoesNotJoinACollectiveThatReusedTheLaunchSlot) {
+    ScopedProfilerDir dir("fanout_slot_reuse");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerFanout.NextPlanDoesNotJoinACollectiveThatReusedTheLaunchSlot",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x8008, &mask, "fanout_slot_reuse", 2, 2, 0, nullptr), 0);
+            std::vector<void*> p2pApis = PostFanoutCall(ctx, "AlltoAll", 1024, 4);
+            void* first = RunFanoutLaunch(ctx, {p2pApis[0], p2pApis[1]});
+            ASSERT_NE(first, nullptr);
+
+            // A ring collective takes the slot the first launch freed and stays open.
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, /*nChannels=*/1, /*seqNumber=*/50, /*count=*/256);
+            void* ring = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &ring, &cd), 0);
+            ASSERT_EQ(ring, first) << "precondition: the ring collective reuses the freed slot";
+
+            void* second = RunFanoutLaunch(ctx, {p2pApis[2], p2pApis[3]});
+            EXPECT_NE(second, ring);
+
+            void* kch = StartKernelCh(ctx, ring, /*channelId=*/0, 3000);
+            ASSERT_EQ(acclPluginStopEvent(ring), 0);
+            StopKernelCh(kch, 4000);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::vector<std::string> recs = ReadCollRecords(dir.c_str(), "0x8008");
+            ASSERT_EQ(recs.size(), 3u);
+            int p2p = 0, ringRecords = 0;
+            for (const std::string& r : recs) {
+                if (r.find("\"coll_algo\":\"P2P\"") != std::string::npos) {
+                    p2p++;
+                    EXPECT_EQ(JsonNumber(r, "coll_n_channels"), 2) << r;
+                } else {
+                    ringRecords++;
+                    EXPECT_EQ(JsonNumber(r, "coll_n_channels"), 1) << r;
+                    EXPECT_EQ(JsonNumber(r, "coll_sn"), 50) << r;
+                }
+            }
+            EXPECT_EQ(p2p, 2);
+            EXPECT_EQ(ringRecords, 1);
+            ExpectSummaryCounters(ReadSummaryLine(dir.c_str(), "0x8008"), {});
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// A call that fails between its CollApi start and stop never sends the stop. The next CollApi
+// start must not reach back into that bracket's communicator, which may be gone by then, and a
+// later Send/Recv must not attach to the stale bracket either.
+TEST(AcclProfilerFanout, AbandonedBracketIsNeverTouchedAgain) {
+    ScopedProfilerDir dir("fanout_abandoned");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerFanout.AbandonedBracketIsNeverTouchedAgain",
+        [&dir]() {
+            void* first = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&first, 0x8009, &mask, "fanout_abandoned_a", 2, 2, 0, nullptr), 0);
+            ncclProfilerEventDescr_v5_t d;
+            memset(&d, 0, sizeof(d));
+            d.type = ncclProfileCollApi;
+            d.collApi.func = "AlltoAll";
+            d.collApi.count = 1024;
+            d.collApi.datatype = "ncclFloat32";
+            void* collApi = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(first, &collApi, &d), 0);
+            memset(&d, 0, sizeof(d));
+            d.type = ncclProfileP2pApi;
+            d.p2pApi.func = "Send";
+            d.p2pApi.count = 1024;
+            d.p2pApi.datatype = "ncclFloat32";
+            void* p2pApi = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(first, &p2pApi, &d), 0);
+            ASSERT_NE(p2pApi, nullptr);
+            // No CollApi stop: the call failed. Its communicator is then destroyed.
+            ASSERT_EQ(acclPluginFinalize(first), 0);
+
+            // A new communicator, possibly at the same address. Its first Send must not attach
+            // to the abandoned bracket.
+            void* second = nullptr;
+            ASSERT_EQ(acclPluginInit(&second, 0x800A, &mask, "fanout_abandoned_b", 2, 2, 0, nullptr), 0);
+            void* stray = reinterpret_cast<void*>(0x1);
+            ASSERT_EQ(acclPluginStartEvent(second, &stray, &d), 0);
+            EXPECT_EQ(stray, nullptr);
+
+            // Its next fanned-out call works as usual.
+            std::vector<void*> p2pApis = PostFanoutCall(second, "AlltoAll", 1024, 2);
+            ASSERT_NE(p2pApis[0], nullptr);
+            RunFanoutLaunch(second, p2pApis);
+            ASSERT_EQ(acclPluginFinalize(second), 0);
+            EXPECT_EQ(ReadCollRecords(dir.c_str(), "0x800a").size(), 1u);
+            ExpectSummaryCounters(ReadSummaryLine(dir.c_str(), "0x800a"), {});
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// The allocator may well hand a new communicator's context the address of the one an abandoned
+// bracket names. Only the context serial tells them apart.
+TEST(AcclProfilerFanout, AbandonedBracketIgnoredByANewContextAtTheSameAddress) {
+    ScopedProfilerDir dir("fanout_same_address");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerFanout.AbandonedBracketIgnoredByANewContextAtTheSameAddress",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x800B, &mask, "fanout_same_address", 2, 2, 0, nullptr), 0);
+            ncclProfilerEventDescr_v5_t d;
+            memset(&d, 0, sizeof(d));
+            d.type = ncclProfileCollApi;
+            d.collApi.func = "AlltoAll";
+            d.collApi.count = 1024;
+            d.collApi.datatype = "ncclFloat32";
+            void* collApi = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &collApi, &d), 0);
+            memset(&d, 0, sizeof(d));
+            d.type = ncclProfileP2pApi;
+            d.p2pApi.func = "Send";
+            d.p2pApi.count = 1024;
+            d.p2pApi.datatype = "ncclFloat32";
+            void* p2pApi = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &p2pApi, &d), 0);
+            ASSERT_NE(p2pApi, nullptr);
+
+            // No CollApi stop; then, to the plugin, a new context at the same address.
+            test_acclRenewSerial(ctx);
+            void* stray = reinterpret_cast<void*>(0x1);
+            ASSERT_EQ(acclPluginStartEvent(ctx, &stray, &d), 0);
+            EXPECT_EQ(stray, nullptr) << "a Send on the new context attached to the abandoned bracket";
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
 TEST(AcclProfilerFanout, CallIsRecycledOnceAllItsTasksHaveStarted) {
     ScopedProfilerDir dir("fanout_recycle");
     RUN_ISOLATED_TEST_WITH_ENV(
@@ -3053,7 +3218,7 @@ TEST(AcclProfilerFanout, CallIsRecycledOnceAllItsTasksHaveStarted) {
 
             std::vector<std::string> recs = ReadCollRecords(dir.c_str(), "0x8005");
             ASSERT_EQ(recs.size(), 3u);
-            // c reuses a's object but not its sequence number.
+            // Launches are numbered in launch order, whichever call object they reuse.
             EXPECT_EQ(JsonNumber(recs[0], "coll_sn"), 0) << recs[0];
             EXPECT_EQ(JsonNumber(recs[1], "coll_sn"), 1) << recs[1];
             EXPECT_EQ(JsonNumber(recs[2], "coll_sn"), 2) << recs[2];

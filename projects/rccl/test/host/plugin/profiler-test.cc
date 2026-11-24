@@ -1197,6 +1197,84 @@ TEST_F(ProfilerMicrotest, StartCollApi_OnlyCollRelatedBitsStartIt) {
   }
 }
 
+// The CollApi event of a collective run as Send/Recv tasks has no Coll child, so only a plugin that
+// takes both CollApi and the P2pApi events nested in it gets one.
+TEST_F(ProfilerMicrotest, StartP2pCollApi_OnlyCollApiWithP2pApiStartsIt) {
+  Load(0);
+  ncclInfo info = MakeInfo(ncclFuncAlltoAll);
+  const int kNoStart[] = {0,
+                          ncclProfileCollApi,
+                          ncclProfileP2pApi,
+                          ncclProfileColl | ncclProfileP2p | ncclProfileKernelCh | ncclProfileProxyOp,
+                          ncclProfileCollApi | ncclProfileP2p,
+                          ncclProfileP2pApi | ncclProfileColl};
+  for (int mask : kNoStart) {
+    fake_.Clear();
+    ncclProfilerEventMask = mask;
+    bool started = true;
+    ASSERT_EQ(ncclSuccess, ncclProfilerStartP2pCollApiEvent(&info, false, &started));
+    EXPECT_FALSE(started) << mask;
+    EXPECT_TRUE(fake_.StartsOf(ncclProfileCollApi).empty()) << mask;
+  }
+
+  fake_.Clear();
+  ncclProfilerEventMask = ncclProfileCollApi | ncclProfileP2pApi;
+  ncclProfilerApiState.groupApiEventHandle = R(0x77);
+  bool started = false;
+  ASSERT_EQ(ncclSuccess, ncclProfilerStartP2pCollApiEvent(&info, true, &started));
+  EXPECT_TRUE(started);
+  auto starts = fake_.StartsOf(ncclProfileCollApi);
+  ASSERT_EQ(starts.size(), 1u);
+  const auto& d = starts[0].d;
+  EXPECT_EQ(d.parentObj, H(0x77));
+  EXPECT_STREQ(d.collApi.func, ncclFuncToString(ncclFuncAlltoAll));
+  EXPECT_EQ(d.collApi.count, 42u);
+  EXPECT_STREQ(d.collApi.datatype, "ncclFloat32");
+  EXPECT_EQ(d.collApi.root, 6);
+  EXPECT_TRUE(d.collApi.graphCaptured);
+  EXPECT_EQ(d.collApi.userTag, 9u);
+  EXPECT_EQ(ncclProfilerApiState.collApiEventHandle.h[0], starts[0].handle);
+  ASSERT_EQ(ncclSuccess, ncclProfilerStopCollApiEvent());
+  EXPECT_EQ(fake_.Stops(), std::vector<void*>{starts[0].handle});
+}
+
+TEST_F(ProfilerMicrotest, PluginList_P2pCollApi_ReachesOnlyThePluginTakingCollApiAndP2pApi) {
+  FakePlugin2::Reset();
+  ncclProfiler_v8_t vtable2{"FakeProfiler2", &FakePlugin2::Init, &FakePlugin2::Start, &FakePlugin2::Stop,
+                            &FakePlugin2::Record, &FakePlugin2::Finalize};
+  FakeLib lib2{{"ncclProfiler_v8", &vtable2}};
+  g_openProfilerLib = [&](const char* name) -> void* {
+    return std::string(name ? name : "") == "a" ? static_cast<void*>(&lib_) : static_cast<void*>(&lib2);
+  };
+  g_env["NCCL_PROFILER_PLUGIN"] = "a,b";
+  fake_.initMask = ncclProfileCollApi | ncclProfileP2pApi | ncclProfileColl;
+  FakePlugin2::initMask() = ncclProfileColl;  // takes CollApi events only as the parent of Coll events
+  ASSERT_EQ(ncclSuccess, ncclProfilerPluginInit(comm_.get()));
+  ASSERT_EQ(profilerPluginCount, 2);
+  fake_.Clear();
+
+  ncclInfo info = MakeInfo(ncclFuncAlltoAll);
+  ASSERT_EQ(ncclSuccess, ncclProfilerStartGroupApiEvent(&info, false));
+  bool started = false;
+  ASSERT_EQ(ncclSuccess, ncclProfilerStartP2pCollApiEvent(&info, false, &started));
+  EXPECT_TRUE(started);
+  auto starts = fake_.StartsOf(ncclProfileCollApi);
+  ASSERT_EQ(starts.size(), 1u);
+  EXPECT_EQ(ncclProfilerApiState.collApiEventHandle.h[0], starts[0].handle);
+  EXPECT_EQ(ncclProfilerApiState.collApiEventHandle.h[1], nullptr);
+  for (const auto& s : FakePlugin2::starts()) EXPECT_NE(s.d.type, uint64_t(ncclProfileCollApi));
+  ASSERT_EQ(ncclSuccess, ncclProfilerStopCollApiEvent());
+
+  // An ordinary collective's CollApi event still reaches both: their Coll children hang off it.
+  ASSERT_EQ(ncclSuccess, ncclProfilerStartCollApiEvent(&info, false));
+  EXPECT_NE(ncclProfilerApiState.collApiEventHandle.h[0], nullptr);
+  EXPECT_NE(ncclProfilerApiState.collApiEventHandle.h[1], nullptr);
+  ASSERT_EQ(ncclSuccess, ncclProfilerStopCollApiEvent());
+  ASSERT_EQ(ncclSuccess, ncclProfilerStopGroupApiEvent());
+  ASSERT_EQ(ncclSuccess, ncclProfilerPluginFinalize(comm_.get()));
+  FakePlugin2::Reset();
+}
+
 // Plan-level events
 
 class ProfilerPlanMicrotest : public ProfilerMicrotest {

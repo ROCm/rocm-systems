@@ -754,3 +754,236 @@ TEST_F(EnqueueMicrotest, PlannerSetCapturingGraph_StreamsFromDifferentGraphs_Are
   EXPECT_EQ(2, sc.cc.get()->planner.numStreams);
   EXPECT_FALSE(ncclCudaGraphValid(sc.cc.get()->planner.capturingGraph));
 }
+
+// ===========================================================================
+// taskAppend -- collectives lowered to per-peer Send/Recv tasks
+//
+// AlltoAll, Gather, Scatter and Direct AllGather post one Send and one Recv
+// task per peer. For a plugin that subscribes to CollApi and P2pApi, every
+// P2pApi event the call posts must start inside one CollApi event, which
+// stops on every exit, error returns included. An in-place pair to self is
+// skipped when P2P batching is off: scheduleP2pTasksToPlan drops that pair,
+// and a task that never reaches a plan never reports its P2p event.
+// ===========================================================================
+
+namespace {
+// Single-node comm on which every fan-out reaches p2pTaskAppend for each peer: a planner slot and
+// a schedule round per peer, a channel-0 connector per rank, and connect masks.
+struct FanoutScene {
+  static constexpr size_t kCount = 4;  // int32 elements per peer
+  CollTaskComm cc;
+  std::vector<ncclKernelPlanner::Peer> peers;
+  std::vector<std::remove_pointer_t<decltype(ncclComm::p2pSchedule)>> schedule;
+  std::vector<ncclChannelPeer> channelPeers;
+  std::vector<ncclChannelPeer*> channelPeerSlots;
+  std::vector<channelMasks> connectSend, connectRecv;
+  std::vector<int32_t> bigA, bigB, small;
+  int savedMask = ncclProfilerEventMask;
+
+  explicit FanoutScene(int nRanks) {
+    ncclComm* comm = cc.get();
+    comm->nRanks = nRanks;
+    comm->rank = 0;
+    comm->nNodes = 1;
+    comm->maxLocalRanks = nRanks;
+    peers.resize(nRanks);
+    schedule.resize(nRanks);
+    channelPeers.resize(nRanks);
+    channelPeerSlots.resize(nRanks);
+    connectSend.resize(static_cast<size_t>(nRanks) * NCCL_MAX_CONNS);
+    connectRecv.resize(static_cast<size_t>(nRanks) * NCCL_MAX_CONNS);
+    for (int r = 0; r < nRanks; ++r) {
+      schedule[r].sendRank = r;
+      schedule[r].recvRank = r;
+      channelPeerSlots[r] = &channelPeers[r];
+    }
+    comm->planner.peers = peers.data();
+    comm->p2pSchedule = schedule.data();
+    comm->p2pnChannels = 1;
+    comm->p2pnChannelsPerPeer = 1;
+    comm->channels[0].peers = channelPeerSlots.data();
+    comm->connectSend = connectSend.data();
+    comm->connectRecv = connectRecv.data();
+    for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
+      comm->groupNext[type] = reinterpret_cast<ncclComm*>(NCCL_COMM_GROUP_INVALID);
+    }
+    ClearGroupHeads();
+    bigA.assign(nRanks * kCount, 0);
+    bigB.assign(nRanks * kCount, 0);
+    small.assign(kCount, 0);
+  }
+  ~FanoutScene() {
+    ClearGroupHeads();
+    ncclProfilerEventMask = savedMask;
+  }
+  static void ClearGroupHeads() {
+    for (int type = 0; type < ncclGroupTaskTypeNum; ++type) ncclGroupCommHead[type] = nullptr;
+  }
+
+  // rank 0 is the root of Gather and Scatter.
+  ncclInfo Info(ncclFunc_t coll, bool inPlace) {
+    ncclInfo info{};
+    info.comm = cc.get();
+    info.coll = coll;
+    info.datatype = ncclInt32;
+    info.op = ncclSum;
+    info.count = kCount;
+    info.chunkSteps = 1;
+    info.sliceSteps = 1;
+    int32_t* ownBlock = bigA.data() + cc.get()->rank * kCount;
+    switch (coll) {
+    case ncclFuncAlltoAll:
+      info.sendbuff = bigA.data();
+      info.recvbuff = inPlace ? bigA.data() : bigB.data();
+      break;
+    case ncclFuncAllGather:
+    case ncclFuncGather:
+      info.useDirect = coll == ncclFuncAllGather;
+      info.recvbuff = bigA.data();
+      info.sendbuff = inPlace ? ownBlock : small.data();
+      break;
+    case ncclFuncScatter:
+      info.sendbuff = bigA.data();
+      info.recvbuff = inPlace ? ownBlock : small.data();
+      break;
+    default:
+      ADD_FAILURE() << "not a fan-out: " << coll;
+    }
+    return info;
+  }
+
+  // Tasks rank 0 posts: a Send and a Recv per peer, or for a root, nRanks receives (sends) plus its
+  // own send (receive). The in-place pair to self goes when P2P batching is off.
+  int ExpectedTasks(ncclFunc_t coll, bool inPlace, bool batching) const {
+    int n = cc.storage->nRanks;
+    int all = (coll == ncclFuncGather || coll == ncclFuncScatter) ? n + 1 : 2 * n;
+    return inPlace && !batching ? all - 2 : all;
+  }
+};
+
+// What the profiler hooks saw, in order.
+struct FanoutEvent {
+  enum Kind { kCollApiStart, kP2pApiStart, kCollApiStop } kind;
+  ncclFunc_t func;
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, P2pFanoutSkipsSelf_OnlyAnInPlacePairWithBatchingOff) {
+  BatchComm bc(/*nNodes=*/1, "gfx942");
+  int buf[2];
+  SetBatchParam(0);
+  EXPECT_TRUE(p2pFanoutSkipsSelf(bc.get(), &buf[0], &buf[0]));
+  EXPECT_FALSE(p2pFanoutSkipsSelf(bc.get(), &buf[0], &buf[1])) << "out of place";
+  SetBatchParam(1);
+  EXPECT_FALSE(p2pFanoutSkipsSelf(bc.get(), &buf[0], &buf[0])) << "batching keeps the pair";
+}
+
+TEST_F(EnqueueMicrotest, P2pFanoutReportsCollApi_EveryFanOutButDirectReduceScatter) {
+  ncclInfo info{};
+  for (ncclFunc_t f : {ncclFuncAlltoAll, ncclFuncGather, ncclFuncScatter}) {
+    info.coll = f;
+    info.useDirect = false;
+    EXPECT_TRUE(p2pFanoutReportsCollApi(&info)) << f;
+  }
+  info.coll = ncclFuncAllGather;
+  EXPECT_FALSE(p2pFanoutReportsCollApi(&info)) << "a kernel AllGather reports its own Coll event";
+  info.useDirect = true;
+  EXPECT_TRUE(p2pFanoutReportsCollApi(&info));
+  info.coll = ncclFuncReduceScatter;
+  EXPECT_FALSE(p2pFanoutReportsCollApi(&info)) << "Direct ReduceScatter's reduce phase reports the call";
+  for (ncclFunc_t f : {ncclFuncAllReduce, ncclFuncBroadcast, ncclFuncReduce, ncclFuncSend, ncclFuncRecv}) {
+    info.coll = f;
+    EXPECT_FALSE(p2pFanoutReportsCollApi(&info)) << f;
+  }
+}
+
+TEST_F(EnqueueMicrotest, TaskAppend_FanOut_BracketsEveryP2pApiEventInOneCollApiEvent) {
+  for (ncclFunc_t coll : {ncclFuncAlltoAll, ncclFuncAllGather, ncclFuncGather, ncclFuncScatter}) {
+    for (bool inPlace : {false, true}) {
+      for (bool batching : {false, true}) {
+        FanoutScene sc(/*nRanks=*/4);
+        ncclProfilerEventMask = NCCL_PROFILER_P2P_COLL_API_MASK;
+        SetBatchParam(batching ? 1 : 0);
+        std::vector<FanoutEvent> log;
+        ScopedHook start(g_profilerStartP2pCollApiEvent, [&](ncclInfo* info, bool, bool* started) {
+          log.push_back({FanoutEvent::kCollApiStart, info->coll});
+          *started = true;
+          return ncclSuccess;
+        });
+        ScopedHook p2pApi(g_profilerStartP2pApiEvent, [&](ncclInfo* info, bool) {
+          log.push_back({FanoutEvent::kP2pApiStart, info->coll});
+          return ncclSuccess;
+        });
+        ScopedHook stop(g_profilerStopCollApiEvent, [&]() {
+          log.push_back({FanoutEvent::kCollApiStop, ncclFuncSend});
+          return ncclSuccess;
+        });
+        ncclInfo info = sc.Info(coll, inPlace);
+        const std::string what = std::string(ncclFuncToString(coll)) + (inPlace ? " in place" : " out of place") +
+                                  (batching ? ", batching on" : ", batching off");
+        ASSERT_EQ(ncclSuccess, taskAppend(sc.cc.get(), &info)) << what;
+
+        const int tasks = sc.ExpectedTasks(coll, inPlace, batching);
+        EXPECT_EQ(tasks, sc.cc.get()->planner.nTasksP2p) << what;
+        ASSERT_EQ(static_cast<size_t>(tasks) + 2, log.size()) << what;
+        EXPECT_EQ(FanoutEvent::kCollApiStart, log.front().kind) << what;
+        EXPECT_EQ(coll, log.front().func) << what << ": the CollApi event names the call, not Send/Recv";
+        for (size_t i = 1; i + 1 < log.size(); ++i) {
+          EXPECT_EQ(FanoutEvent::kP2pApiStart, log[i].kind) << what << " event " << i;
+          EXPECT_TRUE(log[i].func == ncclFuncSend || log[i].func == ncclFuncRecv) << what << " event " << i;
+        }
+        EXPECT_EQ(FanoutEvent::kCollApiStop, log.back().kind) << what;
+      }
+    }
+  }
+}
+
+TEST_F(EnqueueMicrotest, TaskAppend_FanOut_NoBracketUnlessAPluginTakesCollApiAndP2pApi) {
+  for (int mask : {0, int(ncclProfileColl | ncclProfileP2p), int(ncclProfileCollApi | ncclProfileP2p),
+                   int(ncclProfileP2pApi | ncclProfileColl)}) {
+    FanoutScene sc(/*nRanks=*/4);
+    ncclProfilerEventMask = mask;
+    ScopedHook start(g_profilerStartP2pCollApiEvent, [](ncclInfo*, bool, bool* started) {
+      *started = true;
+      return ncclSuccess;
+    });
+    ScopedHook stop(g_profilerStopCollApiEvent, []() { return ncclSuccess; });
+    ncclInfo info = sc.Info(ncclFuncAlltoAll, /*inPlace=*/false);
+    ASSERT_EQ(ncclSuccess, taskAppend(sc.cc.get(), &info)) << mask;
+    EXPECT_EQ(0, start.calls) << mask;
+    EXPECT_EQ(0, stop.calls) << mask;
+    EXPECT_EQ(8, sc.cc.get()->planner.nTasksP2p) << mask << ": the tasks are posted regardless";
+  }
+}
+
+TEST_F(EnqueueMicrotest, TaskAppend_FanOutFailingMidway_StillStopsItsCollApiEvent) {
+  FanoutScene sc(/*nRanks=*/4);
+  ncclProfilerEventMask = NCCL_PROFILER_P2P_COLL_API_MASK;
+  ScopedHook start(g_profilerStartP2pCollApiEvent, [](ncclInfo*, bool, bool* started) {
+    *started = true;
+    return ncclSuccess;
+  });
+  int p2pApiCalls = 0;
+  ScopedHook p2pApi(g_profilerStartP2pApiEvent, [&](ncclInfo*, bool) {
+    return ++p2pApiCalls == 3 ? ncclInternalError : ncclSuccess;
+  });
+  ScopedHook stop(g_profilerStopCollApiEvent, []() { return ncclSuccess; });
+  ncclInfo info = sc.Info(ncclFuncAlltoAll, /*inPlace=*/false);
+  EXPECT_EQ(ncclInternalError, taskAppend(sc.cc.get(), &info));
+  EXPECT_EQ(1, start.calls);
+  EXPECT_EQ(1, stop.calls) << "left open, a plugin would take the thread's next Send/Recv as part of this call";
+}
+
+TEST_F(EnqueueMicrotest, TaskAppend_FanOutTheProfilerDidNotStart_IsNotStopped) {
+  FanoutScene sc(/*nRanks=*/4);
+  ncclProfilerEventMask = NCCL_PROFILER_P2P_COLL_API_MASK;
+  ScopedHook start(g_profilerStartP2pCollApiEvent, [](ncclInfo*, bool, bool* started) {
+    *started = false;  // e.g. the only plugin taking CollApi lacks P2pApi
+    return ncclSuccess;
+  });
+  ScopedHook stop(g_profilerStopCollApiEvent, []() { return ncclSuccess; });
+  ncclInfo info = sc.Info(ncclFuncScatter, /*inPlace=*/false);
+  ASSERT_EQ(ncclSuccess, taskAppend(sc.cc.get(), &info));
+  EXPECT_EQ(1, start.calls);
+  EXPECT_EQ(0, stop.calls) << "stopping would hit a stale handle in the thread's API state";
+}

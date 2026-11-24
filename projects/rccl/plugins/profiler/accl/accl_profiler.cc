@@ -545,6 +545,7 @@ static void acclFinalizeAndFree(struct acclCommContext* ctx,
 // ============================================================================
 
 static __thread struct acclCollApiStub tlsCollApi;
+static uint64_t gCtxSerial;  // last acclCommContext::serial handed out; 0 is never one
 
 // Under ctx->apiMutex.
 static struct acclFanoutCall* acclAllocFanoutCall(struct acclCommContext* ctx) {
@@ -598,7 +599,9 @@ static struct acclCollInfo* acclJoinFanoutLaunch(struct acclCommContext* ctx,
       coll->func = call->func;
       coll->algo = "P2P";
       coll->proto = "";
-      coll->seqNumber = call->seqNumber;
+      // Per launch, in launch order: a replayed graph restarts the same call,
+      // and accl_report.py orders samples by coll_sn to drop warmups.
+      coll->seqNumber = ctx->fanoutSeq++;
       coll->msgSizeBytes = (size_t)acclDatatypeSize(call->datatype) * call->count;
       coll->nTasksStarted = 1;
       coll->nKernelChExpected = nChannels;
@@ -646,6 +649,7 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
   }
 
   ctx->refCount = 1;
+  ctx->serial = __atomic_add_fetch(&gCtxSerial, 1, __ATOMIC_RELAXED);
   for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
     pthread_mutex_init(&ctx->collPool[i].mutex, NULL);
   }
@@ -1026,16 +1030,12 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     // Every collective call reports one. The stub records it so a P2pApi event
     // starting inside can attach to it; nothing is allocated unless one does.
     struct acclCollApiStub* stub = &tlsCollApi;
-    // A call that failed between its CollApi start and stop never sent the
-    // stop, so drop what that bracket still holds before reusing the stub.
-    if (stub->open && stub->call) {
-      struct acclCommContext* prev = (struct acclCommContext*)stub->ctx;
-      pthread_mutex_lock(&prev->apiMutex);
-      acclFanoutCallUnref(prev, stub->call);
-      pthread_mutex_unlock(&prev->apiMutex);
-    }
+    // A bracket still open here never got its stop. Abandon it without
+    // touching its call: its communicator may be gone. The call is freed with
+    // its context.
     stub->type = ncclProfileCollApi;
     stub->ctx = ctx;
+    stub->ctxSerial = ctx->serial;
     stub->open = 1;
     stub->func = eDescr->collApi.func;
     stub->datatype = eDescr->collApi.datatype;
@@ -1048,9 +1048,10 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
 
   if (eDescr->type == ncclProfileP2pApi) {
     // Only a Send/Recv posted inside an open CollApi bracket is part of a
-    // fanned-out collective; a user's own Send/Recv stays unprofiled.
+    // fanned-out collective; a user's own Send/Recv stays unprofiled. The
+    // serial tells this context from a freed one at the same address.
     struct acclCollApiStub* stub = &tlsCollApi;
-    if (!stub->open || stub->ctx != ctx ||
+    if (!stub->open || stub->ctx != ctx || stub->ctxSerial != ctx->serial ||
         (size_t)acclDatatypeSize(stub->datatype) * stub->count < ctx->minMsgSize) {
       *eHandle = NULL;
       return ncclSuccess;
@@ -1064,7 +1065,6 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
         call->datatype = stub->datatype;
         call->count = stub->count;
         call->graphCaptured = stub->graphCaptured;
-        call->seqNumber = ctx->fanoutSeq++;
         call->refCount = 1;  // the bracket's; released at CollApi stop
         stub->call = call;
       } else {
@@ -1181,11 +1181,8 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
         acclFreeProxyOp(ctx, op);
         return ncclSuccess;
       }
-      // Fold the op into its collective now and release the slot below, rather
-      // than holding it until the collective finalizes: that waits on KernelCh
-      // stops, which can arrive tens of ms late, and the op pool filled with
-      // finished ops while it did. RCCL stops every step of an op before the op
-      // (net.cc), so nothing more will be charged to these totals.
+      // Fold into the coll and free the slot now, not at finalize, which waits
+      // on late KernelCh stops; RCCL stops all of an op's steps first (net.cc).
       pthread_mutex_lock(&op->mutex);
       if (op->isSend) {
         coll->nSendOps++;

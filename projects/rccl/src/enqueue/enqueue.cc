@@ -4312,17 +4312,35 @@ static bool collConfigIsProfilerTagOnly(const ncclCollConfig_t* config, int comm
   return true;
 }
 
+// What a collective call does before its CollApi event: join the group, record the capturing graph,
+// and open the GroupApi event that the CollApi event hangs off.
+static ncclResult_t collApiPrologue(struct ncclComm* comm, struct ncclInfo* info, bool* isGraphCaptured) {
+  // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
+  ncclGroupCommJoin(comm, ncclGroupTaskTypeCollective);
+  // Set capturing graph. Called here so that profiler can emit a group API event with this information
+  NCCLCHECK(ncclPlannerSetCapturingGraph(comm, info));
+  *isGraphCaptured = ncclCudaGraphValid(comm->planner.capturingGraph);
+  NCCLCHECK(ncclProfilerStartGroupApiEvent(info, *isGraphCaptured));
+  NCCLCHECK(ncclProfilerRecordGroupApiEventState(ncclProfilerGroupStartApiStop));
+  return ncclSuccess;
+}
+
+// Stops the call's CollApi event when the scope exits, error returns included. One left open would
+// be taken, by a plugin tracking the open CollApi event, as the parent of the thread's next Send/Recv.
+struct CollApiEventScope {
+  bool active = false;
+  ~CollApiEventScope() {
+    if (active) ncclProfilerStopCollApiEvent();
+  }
+};
+
 static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info, struct ncclDevRedOpFull opDev) {
   struct ncclKernelPlanner* planner = &comm->planner;
 
-  // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
-  ncclGroupCommJoin(info->comm, ncclGroupTaskTypeCollective);
-  // Set capturing graph. Called here so that profiler can emit a group API event with this information
-  NCCLCHECK(ncclPlannerSetCapturingGraph(comm, info));
-  bool isGraphCaptured = ncclCudaGraphValid(planner->capturingGraph);
-  NCCLCHECK(ncclProfilerStartGroupApiEvent(info, isGraphCaptured));
-  NCCLCHECK(ncclProfilerRecordGroupApiEventState(ncclProfilerGroupStartApiStop));
+  bool isGraphCaptured;
+  NCCLCHECK(collApiPrologue(comm, info, &isGraphCaptured));
   NCCLCHECK(ncclProfilerStartCollApiEvent(info, isGraphCaptured));
+  CollApiEventScope collApiEvent{true};
 
   // Plain broadcasts (no user config) use the batched-broadcast (AllGatherV) optimization. A config
   // that sets only the observational profiler tag is schedule-neutral, so admit it too and carry the
@@ -4435,7 +4453,6 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
     planner->nTasksColl += 1;
     ncclTaskCollSorterInsert(&planner->collSorter, t, t->trafficBytes);
   }
-  ncclProfilerStopCollApiEvent();
   return ncclSuccess;
 }
 
@@ -4502,13 +4519,7 @@ static ncclResult_t ceCollTaskAppend(struct ncclComm* comm, struct ncclInfo* inf
     ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
   }
 
-  // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
-  ncclGroupCommJoin(info->comm, ncclGroupTaskTypeCollective);
-  // Set capturing graph. Called here so that profiler can emit a group API event with this information
-  NCCLCHECK(ncclPlannerSetCapturingGraph(comm, info));
-  isGraphCaptured = ncclCudaGraphValid(planner->capturingGraph);
-  NCCLCHECK(ncclProfilerStartGroupApiEvent(info, isGraphCaptured));
-  NCCLCHECK(ncclProfilerRecordGroupApiEventState(ncclProfilerGroupStartApiStop));
+  NCCLCHECK(collApiPrologue(comm, info, &isGraphCaptured));
   NCCLCHECK(ncclProfilerStartCollApiEvent(info, isGraphCaptured));
 
   t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
@@ -5225,15 +5236,14 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           comm->planner.p2pCollOpCount++;
         }
         // Decide before the fan-out: p2pTaskAppend overwrites info->coll with Send/Recv. The
-        // symmetric AlltoAll goes through collTaskAppend, which reports its own CollApi event.
-        const bool reportsCollApi = !useSymmetricAlltoAll && p2pFanoutReportsCollApi(info);
-        if (reportsCollApi) {
-          ncclGroupCommJoin(comm, ncclGroupTaskTypeCollective);
-          NCCLCHECK(ncclPlannerSetCapturingGraph(comm, info));
-          bool isGraphCaptured = ncclCudaGraphValid(comm->planner.capturingGraph);
-          NCCLCHECK(ncclProfilerStartGroupApiEvent(info, isGraphCaptured));
-          NCCLCHECK(ncclProfilerRecordGroupApiEventState(ncclProfilerGroupStartApiStop));
-          NCCLCHECK(ncclProfilerStartCollApiEvent(info, isGraphCaptured));
+        // symmetric AlltoAll goes through collTaskAppend, which reports its own CollApi event. The
+        // mask check skips the prologue when no plugin could take this CollApi event.
+        CollApiEventScope collApiEvent;
+        if (!useSymmetricAlltoAll && p2pFanoutReportsCollApi(info) &&
+            (ncclProfilerCurrentEventMask() & NCCL_PROFILER_P2P_COLL_API_MASK) == NCCL_PROFILER_P2P_COLL_API_MASK) {
+          bool isGraphCaptured;
+          NCCLCHECK(collApiPrologue(comm, info, &isGraphCaptured));
+          NCCLCHECK(ncclProfilerStartP2pCollApiEvent(info, isGraphCaptured, &collApiEvent.active));
         }
         if (useSymmetricAlltoAll) {
           NCCLCHECK(collTaskAppend(comm, info, opDev));
@@ -5343,7 +5353,6 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         } else {
           NCCLCHECK(collTaskAppend(comm, info, opDev));
         }
-        if (reportsCollApi) NCCLCHECK(ncclProfilerStopCollApiEvent());
       }
     }
   }

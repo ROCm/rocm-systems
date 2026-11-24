@@ -214,6 +214,7 @@ struct collApi {
   const char* datatype;
   int root;
   bool graphCaptured;
+  bool p2pTasks;                    // a P2pApi event started inside it, so no Coll child will come
   struct taskEventBase* eventHead;  // queue head for task events
   struct taskEventBase* eventTail;  // queue tail for task events
   double startTs;

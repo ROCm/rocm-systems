@@ -45,6 +45,13 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclCeCollArgs*, hipS
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t)>
     g_profilerStopCeCollEvent;
 
+// ncclProfilerStartP2pCollApiEvent / ncclProfilerStopCollApiEvent / ncclProfilerStartP2pApiEvent. Default
+// succeed without a profiler: the fan-out's CollApi event reports not started.
+struct ncclInfo;
+extern std::function<ncclResult_t(struct ncclInfo*, bool, bool*)> g_profilerStartP2pCollApiEvent;
+extern std::function<ncclResult_t()> g_profilerStopCollApiEvent;
+extern std::function<ncclResult_t(struct ncclInfo*, bool)> g_profilerStartP2pApiEvent;
+
 // Restore every comm_fakes seam to its default. Call from a fixture TearDown.
 void ResetCommFakes();
 

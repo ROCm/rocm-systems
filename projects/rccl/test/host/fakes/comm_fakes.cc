@@ -25,6 +25,9 @@ ASSERT_HOOK_MATCHES_PROD(g_commCount, ncclCommCount);
 ASSERT_HOOK_MATCHES_PROD(g_commUserRank, ncclCommUserRank);
 ASSERT_HOOK_MATCHES_PROD(g_profilerStartCeCollEvent, ncclProfilerStartCeCollEvent);
 ASSERT_HOOK_MATCHES_PROD(g_profilerStopCeCollEvent, ncclProfilerStopCeCollEvent);
+ASSERT_HOOK_MATCHES_PROD(g_profilerStartP2pCollApiEvent, ncclProfilerStartP2pCollApiEvent);
+ASSERT_HOOK_MATCHES_PROD(g_profilerStopCollApiEvent, ncclProfilerStopCollApiEvent);
+ASSERT_HOOK_MATCHES_PROD(g_profilerStartP2pApiEvent, ncclProfilerStartP2pApiEvent);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -73,6 +76,17 @@ std::function<ncclResult_t(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t
 std::function<ncclResult_t(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t)> g_profilerStopCeCollEvent =
     DefaultProfilerCeCollEvent;
 
+static ncclResult_t DefaultProfilerStartP2pCollApiEvent(struct ncclInfo*, bool, bool* started) {
+  *started = false;
+  return ncclSuccess;
+}
+static ncclResult_t DefaultProfilerStopCollApiEvent() { return ncclSuccess; }
+static ncclResult_t DefaultProfilerStartP2pApiEvent(struct ncclInfo*, bool) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclInfo*, bool, bool*)> g_profilerStartP2pCollApiEvent =
+    DefaultProfilerStartP2pCollApiEvent;
+std::function<ncclResult_t()> g_profilerStopCollApiEvent = DefaultProfilerStopCollApiEvent;
+std::function<ncclResult_t(struct ncclInfo*, bool)> g_profilerStartP2pApiEvent = DefaultProfilerStartP2pApiEvent;
+
 // alloc.h per-device allocation counters, defined in src/init.cc.
 struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 
@@ -82,6 +96,9 @@ void ResetCommFakes() {
   g_commUserRank = DefaultCommUserRank;
   g_profilerStartCeCollEvent = DefaultProfilerCeCollEvent;
   g_profilerStopCeCollEvent = DefaultProfilerCeCollEvent;
+  g_profilerStartP2pCollApiEvent = DefaultProfilerStartP2pCollApiEvent;
+  g_profilerStopCollApiEvent = DefaultProfilerStopCollApiEvent;
+  g_profilerStartP2pApiEvent = DefaultProfilerStartP2pApiEvent;
   g_commEnsureReadyResult = ncclSuccess;
   g_envCtaPolicy = NCCL_CONFIG_UNDEF_INT;
   ncclGdrCopy = nullptr;
@@ -117,9 +134,12 @@ ncclResult_t ncclProfilerStartGroupApiEvent(struct ncclInfo*, bool) { return ncc
 ncclResult_t ncclProfilerRecordGroupApiEventState(ncclProfilerEventState_t) { return ncclSuccess; }
 ncclResult_t ncclProfilerStopGroupApiEvent() { return ncclSuccess; }
 ncclResult_t ncclProfilerStartCollApiEvent(struct ncclInfo*, bool) { return ncclSuccess; }
-ncclResult_t ncclProfilerStopCollApiEvent() { return ncclSuccess; }
-ncclResult_t ncclProfilerStartP2pApiEvent(struct ncclInfo*, bool) {
-  return ncclSuccess;
+ncclResult_t ncclProfilerStopCollApiEvent() { return g_profilerStopCollApiEvent(); }
+ncclResult_t ncclProfilerStartP2pCollApiEvent(struct ncclInfo* info, bool isGraphCaptured, bool* started) {
+  return g_profilerStartP2pCollApiEvent(info, isGraphCaptured, started);
+}
+ncclResult_t ncclProfilerStartP2pApiEvent(struct ncclInfo* info, bool isGraphCaptured) {
+  return g_profilerStartP2pApiEvent(info, isGraphCaptured);
 }
 ncclResult_t ncclProfilerStopP2pApiEvent() {
   return ncclSuccess;

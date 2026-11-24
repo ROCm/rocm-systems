@@ -487,6 +487,13 @@ ProxyCtrl event
 NetPlugin event (with a NULL parent when ProxyStep is unavailable)
 ```
 
+RCCL runs AlltoAll, Gather, Scatter and Direct AllGather as point-to-point tasks: one Send and one
+Recv per peer, reported as Point-to-point API and Point-to-point events. Such a call reports a
+Collective API event only to plugins whose mask includes both `ncclProfileCollApi` and
+`ncclProfileP2pApi`. That event has no Collective event child. The Point-to-point API events of the call's tasks start and stop inside it,
+on the same thread, which is how a plugin can tell which call the tasks belong to. A plugin that
+releases a Collective API event when its last child completes must release this one at its stop.
+
 # Profiler instrumentation and logging
 
 ## Profiling of collective and p2p operations
