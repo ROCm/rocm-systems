@@ -1451,6 +1451,18 @@ Values accepted
 ^^^^^^^^^^^^^^^
 0 or 1. Default value is 0 (disabled).
 
+.. _env_NCCL_NET_GDR_MLOPART:
+
+NCCL_NET_GDR_MLOPART
+--------------------
+The ``NCCL_NET_GDR_MLOPART`` variable controls whether GPU Direct RDMA is used for MLO partitions (MLOPart, such as CPX or DPX partitions of a physical GPU). A partition reaches the NIC over the physical device's DMA path, so GPU Direct RDMA is as available to a partition as it is to the whole GPU.
+
+Setting it to 0 opts every MLO partition out of GPU Direct RDMA. Physical GPUs are not affected by this setting.
+
+Values accepted
+^^^^^^^^^^^^^^^
+0 or 1. Default value is 1 (enabled).
+
 NCCL_GDRCOPY_FIFO_ENABLE
 ------------------------
 The ``NCCL_GDRCOPY_FIFO_ENABLE`` variable controls whether the communicator work FIFO is allocated in GDRCopy-mapped CUDA memory when GDRCopy support is enabled.
