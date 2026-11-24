@@ -28,26 +28,48 @@
 
 namespace rocjitsu::amdgpu::mma_plan {
 
-// Long enough for unrolled K steps with their epilogues.
-inline constexpr unsigned kMaxSteps = 64;
-/// Helper jobs a block may hand off. Each is one submission; wait masks are 32 bits.
-inline constexpr unsigned kMaxJobs = 32;
+// Long enough for full Tensile/HipKittens straight-line K-step tiles (71-128 insns).
+inline constexpr unsigned kMaxSteps = 128;
+/// Helper jobs a block may hand off. Each is one submission; wait masks are 64 bits.
+inline constexpr unsigned kMaxJobs = 64;
+using JobMask = uint64_t;
 /// Jobs submitted this close to the block end may still run when the next
 /// block starts, so all of their factors are copied at submission: the next
 /// block's loads can then overwrite the registers without waiting.
 inline constexpr unsigned kTailSteps = 16;
 /// Plan steps reached from a word with no vector register operand: scalar ALU,
-/// scalar memory and program control (GFX9 encodings). Such an instruction can
-/// run while helper jobs are outstanding without a register check.
-inline bool scalar_only_encoding(uint32_t word) {
+/// scalar memory and program control. Such an instruction can run while helper
+/// jobs are outstanding without a register check. On RDNA4, MODE-modifying
+/// scalar instructions (s_setreg*, s_round_mode, s_denorm_mode) are excluded
+/// because WMMA reads MODE.FP16_OVFL.
+inline bool scalar_only_encoding(rocjitsu::IsaFamily arch, uint32_t word) {
   const uint32_t top9 = word >> 23;
-  if (top9 == 0x17d || top9 == 0x17e || top9 == 0x17f) // SOP1, SOPC, SOPP
+  if (top9 == 0x17d || top9 == 0x17e) // SOP1, SOPC
     return true;
-  if ((word >> 28) == 0xb) // SOPK
+  if (top9 == 0x17f) { // SOPP
+    if (arch == rocjitsu::IsaFamily::Rdna4) {
+      const uint32_t op = (word >> 16) & 0x7f;
+      if (op == 17 || op == 18) // s_round_mode, s_denorm_mode
+        return false;
+    }
     return true;
+  }
+  if ((word >> 28) == 0xb) { // SOPK
+    if (arch == rocjitsu::IsaFamily::Rdna4) {
+      const uint32_t op = (word >> 23) & 0x1f;
+      if (op == 18 || op == 19) // s_setreg_b32, s_setreg_imm32_b32
+        return false;
+    }
+    return true;
+  }
   if ((word >> 30) == 0x2) // SOP2
     return true;
-  return (word >> 26) == 0x30; // SMEM
+  if (arch == rocjitsu::IsaFamily::Rdna4)
+    return (word >> 26) == 0x3d; // RDNA4 SMEM
+  return (word >> 26) == 0x30;   // GFX9 SMEM
+}
+inline bool scalar_only_encoding(uint32_t word) {
+  return scalar_only_encoding(rocjitsu::IsaFamily::Cdna4, word);
 }
 inline constexpr unsigned kMaxChain = matrix_coexecution::Helper::kMaxChain;
 
@@ -71,7 +93,7 @@ struct Step {
   uint8_t size = 0;
   uint16_t offset = 0; ///< Bytes from the block entry.
   uint8_t job = 0;   ///< Helper job of an Offload or Chained step.
-  uint32_t wait = 0; ///< Helper jobs joined before the step.
+  JobMask wait = 0;  ///< Helper jobs joined before the step.
   uint8_t members = 0;
   Instruction *inst = nullptr;
   std::array<Instruction *, kMaxChain> chain{};
@@ -103,8 +125,12 @@ inline bool offloadable(const Instruction &inst, bool has_accvgprs) {
 /// @brief Stateless issuer work that needs no memory pipeline or wait counter.
 inline bool pure_alu(const Instruction &inst) {
   const Operation operation = inst.amdgpu_operation();
+  if (operation == Operation::S_WAIT_ALU || operation == Operation::S_CLAUSE)
+    return true;
   if (inst.is_memory_op() || inst.is_waitcnt() || inst.data())
     return false;
+  if (inst.amdgpu_secondary_operation() != Operation::Unknown)
+    return async_mma_policy::is_safe_vopd(inst);
   return operation == Operation::S_SETPRIO || operation == Operation::S_MOVK_I32 ||
          operation == Operation::S_ADDK_I32 || operation == Operation::S_NOP ||
          operation == Operation::V_NOP || operation == Operation::S_DELAY_ALU ||
@@ -184,6 +210,108 @@ inline bool inline_only() {
   }();
   return enabled;
 }
+/// Approximate matrix instruction weight in tenths of a microsecond on host SIMD.
+inline unsigned mma_weight(const Instruction &inst) {
+  switch (inst.amdgpu_operation()) {
+  case Operation::V_MFMA_SCALE_F32_16X16X128_F8F6F4:
+  case Operation::V_MFMA_SCALE_F32_32X32X64_F8F6F4:
+  case Operation::V_MFMA_F32_16X16X128_F8F6F4:
+  case Operation::V_MFMA_F32_32X32X64_F8F6F4:
+    return 37;
+  case Operation::V_MFMA_F32_16X16X32_FP8_FP8:
+  case Operation::V_MFMA_F32_16X16X32_FP8_BF8:
+  case Operation::V_MFMA_F32_16X16X32_BF8_FP8:
+  case Operation::V_MFMA_F32_16X16X32_BF8_BF8:
+  case Operation::V_MFMA_F32_32X32X16_FP8_FP8:
+  case Operation::V_MFMA_F32_32X32X16_FP8_BF8:
+  case Operation::V_MFMA_F32_32X32X16_BF8_FP8:
+  case Operation::V_MFMA_F32_32X32X16_BF8_BF8:
+    return 18;
+  case Operation::V_MFMA_F32_16X16X32_F16:
+  case Operation::V_MFMA_F32_32X32X16_F16:
+  case Operation::V_MFMA_F32_16X16X32_BF16:
+  case Operation::V_MFMA_F32_32X32X16_BF16:
+    return 9;
+  case Operation::V_MFMA_F32_16X16X16_F16:
+  case Operation::V_MFMA_F32_32X32X8_F16:
+    return 5;
+  case Operation::V_WMMA_F32_16X16X16_FP8_FP8:
+  case Operation::V_WMMA_F32_16X16X16_FP8_BF8:
+  case Operation::V_WMMA_F32_16X16X16_BF8_FP8:
+  case Operation::V_WMMA_F32_16X16X16_BF8_BF8:
+    return 2;
+  case Operation::V_WMMA_F32_16X16X16_F16:
+  case Operation::V_WMMA_F32_16X16X16_BF16:
+  case Operation::V_WMMA_F16_16X16X16_F16:
+  case Operation::V_WMMA_BF16_16X16X16_BF16:
+  case Operation::V_WMMA_I32_16X16X16_IU8:
+  case Operation::V_WMMA_I32_16X16X16_IU4:
+  case Operation::V_WMMA_I32_16X16X32_IU4:
+    return 3;
+  case Operation::V_SWMMAC_F32_16X16X32_F16:
+  case Operation::V_SWMMAC_F32_16X16X32_BF16:
+  case Operation::V_SWMMAC_F16_16X16X32_F16:
+  case Operation::V_SWMMAC_BF16_16X16X32_BF16:
+  case Operation::V_SWMMAC_I32_16X16X32_IU8:
+  case Operation::V_SWMMAC_I32_16X16X32_IU4:
+  case Operation::V_SWMMAC_I32_16X16X64_IU4:
+  case Operation::V_SWMMAC_F32_16X16X32_FP8_FP8:
+  case Operation::V_SWMMAC_F32_16X16X32_FP8_BF8:
+  case Operation::V_SWMMAC_F32_16X16X32_BF8_FP8:
+  case Operation::V_SWMMAC_F32_16X16X32_BF8_BF8:
+    return 4;
+  default:
+    return 10;
+  }
+}
+/// Maximum MMAs packed into one helper job when batching independent chains.
+/// RJ_MMA_BATCH_PACK=1 disables independent-MMA batching.
+inline bool batch_pack_explicit() {
+  static const bool explicit_set = [] {
+    const char *value = std::getenv("RJ_MMA_BATCH_PACK");
+    return value && *value;
+  }();
+  return explicit_set;
+}
+inline bool batch_min_chains_explicit() {
+  static const bool explicit_set = [] {
+    const char *value = std::getenv("RJ_MMA_BATCH_MIN_CHAINS");
+    return value && *value;
+  }();
+  return explicit_set;
+}
+inline unsigned batch_pack_limit() {
+  static const unsigned limit = [] {
+    const char *value = std::getenv("RJ_MMA_BATCH_PACK");
+    if (!value || !*value)
+      return 4u;
+    const unsigned parsed = static_cast<unsigned>(std::strtoul(value, nullptr, 0));
+    return std::clamp(parsed, 1u, kMaxChain);
+  }();
+  return limit;
+}
+/// Minimum logical chains in a block before independent-MFMA batching activates.
+/// Keeps <= 8-chain kernels (e.g. acc8) at full 1:1 helper fan-out.
+inline unsigned batch_min_chains() {
+  static const unsigned min_chains = [] {
+    const char *value = std::getenv("RJ_MMA_BATCH_MIN_CHAINS");
+    if (!value || !*value)
+      return 9u;
+    return static_cast<unsigned>(std::strtoul(value, nullptr, 0));
+  }();
+  return min_chains;
+}
+/// Minimum per-job MMA weight (in tenths of a microsecond) required to accept a
+/// block when RJ_MMA_MIN_JOB_WEIGHT is set. Zero disables the weight gate.
+inline unsigned min_job_weight() {
+  static const unsigned weight = [] {
+    const char *value = std::getenv("RJ_MMA_MIN_JOB_WEIGHT");
+    if (!value || !*value)
+      return 0u;
+    return static_cast<unsigned>(std::strtoul(value, nullptr, 0));
+  }();
+  return weight;
+}
 
 using Access = async_execution::Access;
 inline bool overlaps(const Access &a, const Access &b) { return a.conflicts(b) || b.conflicts(a); }
@@ -234,9 +362,11 @@ struct MemberOperands {
 };
 
 inline std::optional<MemberOperands> member_operands(const Instruction &inst, unsigned step,
-                                                     uint32_t num_vgprs, bool has_accvgprs) {
+                                                     uint32_t num_vgprs, bool has_accvgprs,
+                                                     uint32_t wave_size = 32) {
   MemberOperands member;
   member.step = step;
+  const bool tied_dst = async_mma_policy::is_rdna4_swmmac(inst.amdgpu_operation());
   const auto range = [&](const Operand *operand, uint16_t &base,
                          uint8_t &regs) -> std::optional<bool> {
     const auto ref = operand ? operand->to_register_ref() : std::nullopt;
@@ -245,10 +375,11 @@ inline std::optional<MemberOperands> member_operands(const Instruction &inst, un
     const bool acc = ref->cls == RegClass::ACC_VGPR;
     const uint32_t limit = acc ? (has_accvgprs ? Access::kRegistersPerBank : 0)
                                : std::min(Access::kRegistersPerBank, num_vgprs);
-    if (ref->index >= limit || ref->width > limit - ref->index)
+    const uint32_t width = async_mma_policy::matrix_operand_width(inst, ref->width, wave_size);
+    if (ref->index >= limit || width > limit - ref->index)
       return std::nullopt;
     base = uint16_t(ref->index + (acc ? Access::kRegistersPerBank : 0));
-    regs = uint8_t(ref->width);
+    regs = uint8_t(width);
     return true;
   };
   for (int i = 0; i != inst.num_src_operands(); ++i) {
@@ -281,8 +412,11 @@ inline std::optional<MemberOperands> member_operands(const Instruction &inst, un
   const auto found = range(inst.dst_operand(0), base, regs);
   if (!found || !*found)
     return std::nullopt;
-  for (unsigned r = 0; r != regs; ++r)
+  for (unsigned r = 0; r != regs; ++r) {
     member.other.writes.set(base + r);
+    if (tied_dst)
+      member.other.reads.set(base + r);
+  }
   return member;
 }
 
@@ -293,6 +427,7 @@ struct Plan {
     Words words;
   };
   bool accept = false;
+  bool local_only = false; ///< Lightweight MMAs stay inside the issuer's LLC domain.
   uint64_t epoch = 0;
   uint64_t length = 0; ///< Bytes covered by the steps.
   Words first{};
@@ -314,6 +449,7 @@ struct Plan {
   Plan &operator=(Plan &&other) {
     release();
     accept = other.accept;
+    local_only = other.local_only;
     footprint = other.footprint;
     first_access = other.first_access;
     first_write = other.first_write;
@@ -349,7 +485,10 @@ struct Plan {
 template <typename Fetch>
 void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uint32_t num_vgprs,
              bool has_accvgprs, uint64_t &decodes,
-             bool tail_snapshot = cross_block_enabled() && tail_snapshot_enabled()) {
+             bool tail_snapshot = cross_block_enabled() && tail_snapshot_enabled(),
+             unsigned pack_limit = batch_pack_limit(),
+             unsigned min_chains = batch_min_chains(),
+             unsigned min_weight = min_job_weight(), uint32_t wave_size = 32) {
   Instruction::ScopedHeapAllocation heap;
   // A logical chain: one helper job if offloaded. `joined` is the first step
   // that must wait for it; the block end if none does.
@@ -440,9 +579,6 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
 
   for (unsigned k = 0; k != kMaxSteps; ++k) {
     current = k;
-    // Stay in the fetchable code page of the block entry.
-    if ((pc % GpuMemory::PAGE_SIZE) + offset + sizeof(Plan::Words) > GpuMemory::PAGE_SIZE)
-      break;
     Plan::Words words;
     if (!fetch_words(pc + offset, words))
       break;
@@ -455,7 +591,7 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
       plan.first = words;
     if (!async_mma_policy::safe_inline(*inst))
       break;
-    const auto access = async_execution::footprint(*inst, num_vgprs, has_accvgprs);
+    const auto access = async_execution::footprint(*inst, num_vgprs, has_accvgprs, wave_size);
     if (!access)
       break;
     plan.code.push_back({offset, words});
@@ -464,7 +600,7 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
     step.offset = static_cast<uint16_t>(offset);
     std::optional<MemberOperands> operands;
     if (offloadable(*inst, has_accvgprs))
-      operands = member_operands(*inst, k, num_vgprs, has_accvgprs);
+      operands = member_operands(*inst, k, num_vgprs, has_accvgprs, wave_size);
     // Placeholders keep step-indexed tables aligned while this step is decided.
     accesses.push_back(*access);
     step_chain.push_back(-1);
@@ -538,33 +674,86 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
       alive += chain.head <= t && t < chain.joined;
     max_concurrent = std::max(max_concurrent, alive);
   }
-  // Placement: every logical chain becomes a helper job. Nothing is kept on
-  // the issuer by design: at replay a job that finds no helper runs on the
-  // issuer, and a finished helper is reused, so the split between issuer and
-  // helpers follows the pool at run time. Only past the job limit is a chain
-  // appended to a running job whose submission every member can run at.
+  // Placement: pack independent chains into helper jobs of up to `pack_limit`
+  // members once a block has enough chains to keep helpers busy, grouping
+  // chains that share A/B factor registers and identical join points so helper
+  // handoffs drop without delaying any consumer or relaxing bit-exactness.
+  // Small blocks (fewer than `min_chains` chains) keep 1:1 fan-out.
   constexpr int kIssuer = -1;
   std::vector<int> job_of(chains.size(), kIssuer);
   std::vector<unsigned> job_host;             // chain whose head submits each job
   std::vector<std::vector<int>> job_chains;   // chains of each job, host first
   std::vector<unsigned> job_size;             // members of each job
-  if (max_concurrent >= 2) {
+  std::vector<unsigned> job_joined;           // earliest join step among a job's chains
+  std::vector<decltype(Access::reads)> job_factors; // union of A/B/scale reads per job
+  unsigned total_weight = 0;
+  unsigned total_members = 0;
+  for (const auto &chain : chains) {
+    total_members += chain.count;
+    for (unsigned i = 0; i != chain.count; ++i)
+      total_weight += mma_weight(*plan.steps[chain.members[i].step].inst);
+  }
+  const bool profitable = max_concurrent >= 2 && (min_weight == 0 || total_weight >= 2 * min_weight);
+  if (profitable) {
+    // Lightweight MMAs (e.g. RDNA4 16x16x16 WMMA at 200-300 ns/op) need fuller
+    // jobs to amortize helper handoff and must never cross a CCD boundary; pack
+    // up to kMaxChain once >= 4 chains exist unless explicitly overridden.
+    const bool lightweight = total_members != 0 && total_weight <= 4u * total_members;
+    plan.local_only = lightweight;
+    const unsigned default_pack =
+        lightweight && !batch_pack_explicit() && pack_limit == batch_pack_limit() ? kMaxChain
+                                                                                  : pack_limit;
+    const unsigned default_min_chains =
+        lightweight && !batch_min_chains_explicit() && min_chains == batch_min_chains()
+            ? 4u
+            : min_chains;
+    const unsigned effective_pack = std::clamp(default_pack, 1u, kMaxChain);
+    const bool pack_independent = effective_pack > 1 && chains.size() >= default_min_chains;
+    const auto can_merge = [&](unsigned j, unsigned c) {
+      const unsigned h = job_host[j];
+      if (chains[h].joined <= chains[c].head)
+        return false;
+      std::vector<int> own = job_chains[j];
+      own.push_back(int(c));
+      for (unsigned i = 0; i != chains[c].count; ++i) {
+        const unsigned at = chains[c].members[i].step;
+        if (!hoistable(accesses[at], chains[h].head, at, own))
+          return false;
+      }
+      return true;
+    };
     for (unsigned c = 0; c != chains.size(); ++c) {
-      const unsigned head = chains[c].head;
+      decltype(Access::reads) c_factors;
+      for (unsigned i = 0; i != chains[c].count; ++i)
+        c_factors |= chains[c].members[i].factors(false);
       int chosen = -1;
-      if (job_host.size() == kMaxJobs) {
-        for (unsigned j = 0; j != job_host.size() && chosen < 0; ++j) {
-          const unsigned h = job_host[j];
-          if (chains[h].joined <= head || job_size[j] + chains[c].count > kMaxChain)
+      if (pack_independent && chains[c].count < effective_pack) {
+        size_t best_overlap = 0;
+        unsigned best_size = kMaxChain + 1;
+        for (unsigned j = 0; j != job_host.size(); ++j) {
+          if (job_joined[j] != chains[c].joined ||
+              job_size[j] + chains[c].count > effective_pack)
             continue;
-          std::vector<int> own = job_chains[j];
-          own.push_back(int(c));
-          bool ok = true;
-          for (unsigned i = 0; ok && i != chains[c].count; ++i) {
-            const unsigned at = chains[c].members[i].step;
-            ok = hoistable(accesses[at], chains[h].head, at, own);
-          }
-          if (ok)
+          const size_t overlap = (job_factors[j] & c_factors).count();
+          // Without shared factors, avoid diluting a nearly full A/B-affine job.
+          if (overlap == 0 && job_size[j] > effective_pack / 2)
+            continue;
+          const bool better =
+              chosen < 0 || overlap > best_overlap ||
+              (overlap == best_overlap &&
+               (job_size[j] < best_size || (job_size[j] == best_size && overlap == 0)));
+          if (!better || !can_merge(j, c))
+            continue;
+          chosen = int(j);
+          best_overlap = overlap;
+          best_size = job_size[j];
+        }
+      }
+      if (chosen < 0 && job_host.size() == kMaxJobs) {
+        for (unsigned j = 0; j != job_host.size() && chosen < 0; ++j) {
+          if (job_size[j] + chains[c].count > kMaxChain)
+            continue;
+          if (can_merge(j, c))
             chosen = int(j);
         }
       }
@@ -575,10 +764,14 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
         job_host.push_back(c);
         job_chains.emplace_back();
         job_size.push_back(0);
+        job_joined.push_back(chains[c].joined);
+        job_factors.emplace_back();
       }
       job_of[c] = chosen;
       job_chains[chosen].push_back(int(c));
       job_size[chosen] += chains[c].count;
+      job_joined[chosen] = std::min(job_joined[chosen], chains[c].joined);
+      job_factors[chosen] |= c_factors;
     }
   }
 
@@ -604,7 +797,7 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
     }
     for (unsigned j : joins[k])
       if (job_of[j] != kIssuer)
-        step.wait |= uint32_t{1} << job_of[j];
+        step.wait |= JobMask{1} << job_of[j];
   }
   // Jobs submitted near the block end may outlive it; optionally copy all of
   // their factors so the next block's loads never wait for them.
@@ -696,12 +889,14 @@ public:
     active_ = std::exchange(other.active_, 0);
     inherited_ = std::exchange(other.inherited_, 0);
     track_access_ = other.track_access_;
+    access_dirty_ = other.access_dirty_;
     next_seq_ = other.next_seq_;
     tickets_ = other.tickets_;
     heads_ = other.heads_;
     plans_ = other.plans_;
     entry_pc_ = other.entry_pc_;
     seq_ = other.seq_;
+    member_offset_ = other.member_offset_;
     access_ = other.access_;
     failure_ = std::move(other.failure_);
     return *this;
@@ -713,8 +908,8 @@ public:
   /// waits and factor WAR waits). Returns true only when entry waits were
   /// populated, so callers can skip reading the wait arrays in the common case.
   bool begin_block(const Plan &plan, uint64_t entry_pc, unsigned cap,
-                   std::array<uint32_t, kMaxSteps> &result_wait,
-                   std::array<uint32_t, kMaxSteps> &factor_wait, bool &filtered,
+                   std::array<JobMask, kMaxSteps> &result_wait,
+                   std::array<JobMask, kMaxSteps> &factor_wait, bool &filtered,
                    bool track_access = true) {
     plan_ = &plan;
     block_pc_ = entry_pc;
@@ -727,12 +922,14 @@ public:
       return false;
     // Fast filter: nothing in this block touches a running job's registers.
     const Access &fp = plan.footprint;
-    if (!(fp.writes & (access_.reads | access_.writes)).any() && !(fp.reads & access_.writes).any())
+    const Access &live_access = access();
+    if (!(fp.writes & (live_access.reads | live_access.writes)).any() &&
+        !(fp.reads & live_access.writes).any())
       return false;
     filtered = true;
     result_wait.fill(0);
     factor_wait.fill(0);
-    for (uint32_t m = active_; m; m &= m - 1) {
+    for (JobMask m = active_; m; m &= m - 1) {
       const unsigned slot = std::countr_zero(m);
       const Access &job = job_access(slot);
       // A result the block reads or overwrites: join at the first touch. A
@@ -740,23 +937,23 @@ public:
       // factors are not in `reads`).
       for_each_register(job.writes, [&](unsigned r) {
         if (plan.first_access[r] != Plan::kNoStep)
-          result_wait[plan.first_access[r]] |= uint32_t{1} << slot;
+          result_wait[plan.first_access[r]] |= JobMask{1} << slot;
       });
       for_each_register(job.reads & ~job.writes, [&](unsigned r) {
         if (plan.first_write[r] != Plan::kNoStep)
-          factor_wait[plan.first_write[r]] |= uint32_t{1} << slot;
+          factor_wait[plan.first_write[r]] |= JobMask{1} << slot;
       });
     }
     return true;
   }
 
   /// Physical slots the plan's job mask refers to in this block.
-  uint32_t slots_of(uint32_t plan_jobs) const {
-    uint32_t slots = 0;
-    for (uint32_t m = plan_jobs; m; m &= m - 1) {
+  JobMask slots_of(JobMask plan_jobs) const {
+    JobMask slots = 0;
+    for (JobMask m = plan_jobs; m; m &= m - 1) {
       const uint8_t slot = slot_of_job_[std::countr_zero(m)];
       if (slot != kNoSlot)
-        slots |= uint32_t{1} << slot;
+        slots |= JobMask{1} << slot;
     }
     return slots;
   }
@@ -764,11 +961,11 @@ public:
   /// Join all jobs of this wave whose helper has finished. Returns true if any
   /// slot was freed. Sets `ok` to false if a helper was unavailable after fork.
   bool join_ready(bool *ok = nullptr) {
-    uint32_t ready = 0;
-    for (uint32_t m = active_; m; m &= m - 1) {
+    JobMask ready = 0;
+    for (JobMask m = active_; m; m &= m - 1) {
       const unsigned slot = std::countr_zero(m);
       if (matrix_coexecution::SharedPool::ready(tickets_[slot]))
-        ready |= uint32_t{1} << slot;
+        ready |= JobMask{1} << slot;
     }
     if (!ready)
       return false;
@@ -784,40 +981,45 @@ public:
   /// waits on this wave's oldest job. Returns false when the job must run inline.
   template <typename Fill, typename Reap>
   bool submit(unsigned plan_job, const Step &step, void *wave, Fill &&fill, Reap &&reap,
-              bool bounded_wait = bounded_wait_enabled()) {
-    if (active_ == ~uint32_t{0} && !join_one_finished())
+              bool bounded_wait = bounded_wait_enabled(), unsigned start_member = 0) {
+    if (cap_ == 0 || start_member >= step.members)
       return false;
-    matrix_coexecution::SharedPool::Ticket ticket = pool_->claim(cap_);
+    if (active_ == ~JobMask{0} && !join_one_finished())
+      return false;
+    const bool local_only = plan_ && plan_->local_only;
+    matrix_coexecution::SharedPool::Ticket ticket = pool_->claim(cap_, local_only);
     if (!ticket && active_) {
       bool ok = true;
       if (join_ready(&ok)) {
         if (!ok)
           return false;
-        ticket = pool_->claim(cap_);
+        ticket = pool_->claim(cap_, local_only);
       }
     }
     if (!ticket && reap())
-      ticket = pool_->claim(cap_);
+      ticket = pool_->claim(cap_, local_only);
     if (!ticket && bounded_wait && active_) {
-      if (!join(uint32_t{1} << oldest_slot()))
+      if (!join(JobMask{1} << oldest_slot()))
         return false;
-      ticket = pool_->claim(cap_);
+      ticket = pool_->claim(cap_, local_only);
     }
     if (!ticket)
       return false;
     const unsigned slot = std::countr_zero(~active_);
     tickets_[slot] = ticket;
+    const unsigned count = step.members - start_member;
     const MatrixInputSnapshot *const *snapshots =
         step.snapshots ? fill(matrix_coexecution::SharedPool::snapshot_buffer(ticket)) : nullptr;
-    matrix_coexecution::SharedPool::start(ticket, step.chain.data(), step.members, wave,
+    matrix_coexecution::SharedPool::start(ticket, step.chain.data() + start_member, count, wave,
                                           snapshots);
     heads_[slot] = &step;
     plans_[slot] = plan_;
     entry_pc_[slot] = block_pc_;
     seq_[slot] = next_seq_++;
+    member_offset_[slot] = uint8_t(start_member);
     slot_of_job_[plan_job] = uint8_t(slot);
-    active_ |= uint32_t{1} << slot;
-    if (track_access_) {
+    active_ |= JobMask{1} << slot;
+    if (track_access_ && !access_dirty_) {
       const Access &job = job_access(slot);
       access_.reads |= job.reads;
       access_.writes |= job.writes;
@@ -828,7 +1030,7 @@ public:
     return submit(plan_job, step, wave, std::forward<Fill>(fill), [] { return false; });
   }
   /// Join physical slots. Returns false if a helper was unavailable (after fork).
-  bool join(uint32_t mask) {
+  bool join(JobMask mask) {
     bool ok = true;
     mask &= active_;
     if (!mask)
@@ -839,21 +1041,22 @@ public:
       unsigned member = 0;
       ok &= pool_->finish(tickets_[slot], &error, &member).succeeded();
       if (error.error && !failure_) {
-        const Instruction &inst = *heads_[slot]->chain[member];
+        const unsigned idx = member + member_offset_[slot];
+        const Instruction &inst = *heads_[slot]->chain[idx];
         const uint64_t pc =
-            entry_pc_[slot] + plans_[slot]->steps[heads_[slot]->member_step[member]].offset;
+            entry_pc_[slot] + plans_[slot]->steps[heads_[slot]->member_step[idx]].offset;
         failure_ = Failure{std::string(inst.mnemonic()), pc, error};
       }
-      active_ &= ~(uint32_t{1} << slot);
-      inherited_ &= ~(uint32_t{1} << slot);
+      active_ &= ~(JobMask{1} << slot);
+      inherited_ &= ~(JobMask{1} << slot);
       mask &= mask - 1;
     }
     if (track_access_) {
-      access_ = {};
-      for (uint32_t m = active_; m; m &= m - 1) {
-        const Access &job = job_access(std::countr_zero(m));
-        access_.reads |= job.reads;
-        access_.writes |= job.writes;
+      if (!active_) {
+        access_ = {};
+        access_dirty_ = false;
+      } else {
+        access_dirty_ = true;
       }
     }
     return ok;
@@ -870,28 +1073,39 @@ public:
   bool pending() const { return active_ != 0; }
   /// True when jobs are still running OR a reaped job left an unreported error.
   bool has_work() const { return active_ != 0 || failure_.has_value(); }
-  uint32_t active() const { return active_; }
+  JobMask active() const { return active_; }
   /// Physical slots inherited from earlier blocks that are still live.
-  uint32_t inherited() const { return inherited_; }
-  const Access &access() const { return access_; }
+  JobMask inherited() const { return inherited_; }
+  const Access &access() const {
+    if (access_dirty_) {
+      access_ = {};
+      for (JobMask m = active_; m; m &= m - 1) {
+        const Access &job = job_access(std::countr_zero(m));
+        access_.reads |= job.reads;
+        access_.writes |= job.writes;
+      }
+      access_dirty_ = false;
+    }
+    return access_;
+  }
   /// Slots whose job conflicts with an instruction about to execute on the issuer.
-  uint32_t conflicting(const Access &next) const {
-    uint32_t mask = 0;
-    for (uint32_t m = active_; m; m &= m - 1) {
+  JobMask conflicting(const Access &next) const {
+    JobMask mask = 0;
+    for (JobMask m = active_; m; m &= m - 1) {
       const unsigned slot = std::countr_zero(m);
       if (overlaps(job_access(slot), next))
-        mask |= uint32_t{1} << slot;
+        mask |= JobMask{1} << slot;
     }
     return mask;
   }
   /// Join any job whose helper has finished; otherwise join the oldest job.
   bool join_one_finished() {
-    for (uint32_t m = active_; m; m &= m - 1) {
+    for (JobMask m = active_; m; m &= m - 1) {
       const unsigned slot = std::countr_zero(m);
       if (matrix_coexecution::SharedPool::ready(tickets_[slot]))
-        return join(uint32_t{1} << slot);
+        return join(JobMask{1} << slot);
     }
-    return join(uint32_t{1} << oldest_slot());
+    return join(JobMask{1} << oldest_slot());
   }
 
 private:
@@ -899,7 +1113,7 @@ private:
     return plans_[slot]->job_accesses[heads_[slot]->job];
   }
   unsigned oldest_slot() const {
-    uint32_t m = active_;
+    JobMask m = active_;
     unsigned oldest = std::countr_zero(m);
     for (m &= m - 1; m; m &= m - 1) {
       const unsigned slot = std::countr_zero(m);
@@ -914,6 +1128,7 @@ private:
   uint64_t block_pc_ = 0;
   unsigned cap_ = ~0u;
   bool track_access_ = false;
+  mutable bool access_dirty_ = false;
   uint64_t next_seq_ = 0;
   std::array<uint8_t, kMaxJobs> slot_of_job_{};
   std::array<matrix_coexecution::SharedPool::Ticket, kMaxJobs> tickets_{};
@@ -921,10 +1136,11 @@ private:
   std::array<const Plan *, kMaxJobs> plans_{};
   std::array<uint64_t, kMaxJobs> entry_pc_{};
   std::array<uint64_t, kMaxJobs> seq_{};
-  Access access_;
+  std::array<uint8_t, kMaxJobs> member_offset_{};
+  mutable Access access_;
   std::optional<Failure> failure_;
-  uint32_t active_ = 0;
-  uint32_t inherited_ = 0;
+  JobMask active_ = 0;
+  JobMask inherited_ = 0;
 };
 
 /// @brief Per-CU plans keyed like MmaAdmissionCache, retaining decoded instructions.
@@ -958,6 +1174,7 @@ public:
     uint32_t vmid, vgprs;
     bool acc;
     VmCacheNamespace cache_namespace;
+    uint32_t wave_size = 32;
     bool operator==(const Key &) const = default;
   };
 
@@ -991,8 +1208,13 @@ public:
       Plan &plan = it->second;
       plan = Plan{};
       plan.epoch = icache.epoch();
+      // Preserve entry words even if compile() rejects at step 0 so repeated
+      // hits do not look like code modification and drain all waves' helpers.
+      plan.first = first;
       ++stats.builds;
-      compile(plan, decoder, fetch_words, key.pc, key.vgprs, key.acc, stats.decodes);
+      compile(plan, decoder, fetch_words, key.pc, key.vgprs, key.acc, stats.decodes,
+              cross_block_enabled() && tail_snapshot_enabled(), batch_pack_limit(),
+              batch_min_chains(), min_job_weight(), key.wave_size);
       ++(plan.accept ? stats.accept : stats.reject);
     } else {
       ++stats.hits;
@@ -1079,6 +1301,7 @@ private:
       size_t hash = std::hash<uint64_t>{}(key.pc ^ (uint64_t{key.vmid} << 32));
       hash ^= size_t{key.vgprs} << 1;
       hash ^= key.acc;
+      hash ^= size_t{key.wave_size} << 9;
       hash ^= std::hash<uint64_t>{}(key.cache_namespace.address_space.generation);
       hash ^= size_t{key.cache_namespace.address_space.slot} << 2;
       hash ^= std::hash<uint64_t>{}(key.cache_namespace.translation_epoch);

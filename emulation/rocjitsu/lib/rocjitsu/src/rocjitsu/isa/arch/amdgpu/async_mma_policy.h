@@ -19,13 +19,92 @@
 
 namespace rocjitsu::amdgpu::async_mma_policy {
 
-// CDNA4 dense MFMA handlers touch no wave status register. They only read the
-// issuer-owned instruction error field, which stays clear on valid kernels.
+// CDNA4 dense MFMA handlers touch no wave status register. RDNA4 dense WMMA
+// and sparse SWMMAC only read MODE.FP16_OVFL, which stays constant within a
+// safe_inline() block and triggers a drain on cross-block mode writes.
 // CDNA5 WMMA remains synchronous.
-constexpr bool supported(rocjitsu::IsaFamily arch) { return arch == rocjitsu::IsaFamily::Cdna4; }
+constexpr bool supported(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Cdna4 || arch == rocjitsu::IsaFamily::Rdna4;
+}
+
+inline bool is_rdna4_dense_wmma(Operation operation) {
+  switch (operation) {
+  case Operation::V_WMMA_F32_16X16X16_F16:
+  case Operation::V_WMMA_F32_16X16X16_BF16:
+  case Operation::V_WMMA_F16_16X16X16_F16:
+  case Operation::V_WMMA_BF16_16X16X16_BF16:
+  case Operation::V_WMMA_I32_16X16X16_IU8:
+  case Operation::V_WMMA_I32_16X16X16_IU4:
+  case Operation::V_WMMA_I32_16X16X32_IU4:
+  case Operation::V_WMMA_F32_16X16X16_FP8_FP8:
+  case Operation::V_WMMA_F32_16X16X16_FP8_BF8:
+  case Operation::V_WMMA_F32_16X16X16_BF8_FP8:
+  case Operation::V_WMMA_F32_16X16X16_BF8_BF8:
+    return true;
+  default:
+    return false;
+  }
+}
+
+inline bool is_rdna4_swmmac(Operation operation) {
+  switch (operation) {
+  case Operation::V_SWMMAC_F32_16X16X32_F16:
+  case Operation::V_SWMMAC_F32_16X16X32_BF16:
+  case Operation::V_SWMMAC_F16_16X16X32_F16:
+  case Operation::V_SWMMAC_BF16_16X16X32_BF16:
+  case Operation::V_SWMMAC_I32_16X16X32_IU8:
+  case Operation::V_SWMMAC_I32_16X16X32_IU4:
+  case Operation::V_SWMMAC_I32_16X16X64_IU4:
+  case Operation::V_SWMMAC_F32_16X16X32_FP8_FP8:
+  case Operation::V_SWMMAC_F32_16X16X32_FP8_BF8:
+  case Operation::V_SWMMAC_F32_16X16X32_BF8_FP8:
+  case Operation::V_SWMMAC_F32_16X16X32_BF8_BF8:
+    return true;
+  default:
+    return false;
+  }
+}
+
+inline bool is_rdna4_wmma(Operation operation) {
+  return is_rdna4_dense_wmma(operation) || is_rdna4_swmmac(operation);
+}
+
+inline bool is_safe_vopd_op(Operation operation) {
+  switch (operation) {
+  case Operation::V_DUAL_FMAC_F32:
+  case Operation::V_DUAL_FMAAK_F32:
+  case Operation::V_DUAL_FMAMK_F32:
+  case Operation::V_DUAL_MUL_F32:
+  case Operation::V_DUAL_ADD_F32:
+  case Operation::V_DUAL_SUB_F32:
+  case Operation::V_DUAL_SUBREV_F32:
+  case Operation::V_DUAL_MUL_DX9_ZERO_F32:
+  case Operation::V_DUAL_MOV_B32:
+  case Operation::V_DUAL_CNDMASK_B32:
+  case Operation::V_DUAL_MAX_NUM_F32:
+  case Operation::V_DUAL_MIN_NUM_F32:
+  case Operation::V_DUAL_DOT2ACC_F32_F16:
+  case Operation::V_DUAL_DOT2ACC_F32_BF16:
+  case Operation::V_DUAL_ADD_NC_U32:
+  case Operation::V_DUAL_LSHLREV_B32:
+  case Operation::V_DUAL_AND_B32:
+    return true;
+  default:
+    return false;
+  }
+}
+
+inline bool is_safe_vopd(const Instruction &inst) {
+  return is_safe_vopd_op(inst.amdgpu_operation()) &&
+         is_safe_vopd_op(inst.amdgpu_secondary_operation()) &&
+         !(inst.flags() & INVALID_VOPD_OPERANDS);
+}
 
 inline bool candidate(const Instruction &inst) {
-  switch (inst.amdgpu_operation()) {
+  const Operation op = inst.amdgpu_operation();
+  if (is_rdna4_wmma(op))
+    return true;
+  switch (op) {
   case Operation::V_MFMA_SCALE_F32_16X16X128_F8F6F4:
   case Operation::V_MFMA_SCALE_F32_32X32X64_F8F6F4:
   case Operation::V_MFMA_F32_16X16X128_F8F6F4:
@@ -50,7 +129,7 @@ inline bool candidate(const Instruction &inst) {
   }
 }
 
-// Reject non-MFMA encodings on CDNA4, and non-candidates in the CDNA5 allowlist.
+// Reject non-MFMA/WMMA encodings on CDNA4/RDNA4, and non-candidates on CDNA5.
 // This is only a hint: decoded eligibility remains authoritative.
 inline bool encoding_may_be_candidate(rocjitsu::IsaFamily arch, uint32_t word) {
   if (arch == rocjitsu::IsaFamily::Cdna4) {
@@ -64,6 +143,13 @@ inline bool encoding_may_be_candidate(rocjitsu::IsaFamily arch, uint32_t word) {
                                (uint64_t{0xff} << (112 - 64));
     const uint32_t opcode = (word >> 16) & 0x7f;
     return word >> 23 == 423 && ((opcode < 64 ? kLow >> opcode : kHigh >> (opcode - 64)) & 1);
+  }
+  if (arch == rocjitsu::IsaFamily::Rdna4) {
+    // RDNA4 VOP3P encoding byte is 0xcc (primary 408..409); opcodes 64..74 are
+    // dense V_WMMA_* and 80..90 are sparse V_SWMMAC_*.
+    const uint32_t opcode = (word >> 16) & 0x7f;
+    return (word >> 24) == 0xcc && ((opcode >= 64 && opcode <= 74) ||
+                                    (opcode >= 80 && opcode <= 90));
   }
   if (arch != rocjitsu::IsaFamily::Cdna5)
     return true;
@@ -191,11 +277,13 @@ inline constexpr int kM0Encoding = 124;
 
 inline bool safe_inline(const Instruction &inst) {
   const Operation operation = inst.amdgpu_operation();
-  if (operation == Operation::Unknown || inst.amdgpu_secondary_operation() != Operation::Unknown)
+  if (operation == Operation::Unknown)
     return false;
   if (inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR |
                       BARRIER | WRITES_EXEC))
     return false;
+  if (inst.amdgpu_secondary_operation() != Operation::Unknown)
+    return is_safe_vopd(inst);
   RegisterModifiers modifiers;
   inst.amdgpu_register_modifiers(modifiers);
   // DPP execution temporarily narrows the wave's VGPR write mask. Keep that
@@ -203,14 +291,15 @@ inline bool safe_inline(const Instruction &inst) {
   if (modifiers.dpp)
     return false;
   if (operation == Operation::S_DELAY_ALU || operation == Operation::S_NOP ||
-      operation == Operation::V_NOP || operation == Operation::S_SETPRIO)
+      operation == Operation::V_NOP || operation == Operation::S_SETPRIO ||
+      operation == Operation::S_CLAUSE || operation == Operation::S_WAIT_ALU)
     return true;
   if (lds_access(operation))
     return !global_data_share(inst);
   if (candidate(inst) || ordinary_memory(inst))
     return true;
   if (inst.is_waitcnt())
-    return operation != Operation::S_WAIT_ALU && operation != Operation::S_WAIT_IDLE;
+    return operation != Operation::S_WAIT_IDLE;
   // Explicitly exclude instructions with hidden EXEC, MODE, cache, scheduling,
   // register-allocation or cross-lane register-index side effects.
   if (inline_operation_kind(operation) != InlineOperationKind::Arithmetic &&
@@ -232,9 +321,18 @@ inline bool safe_inline(const Instruction &inst) {
   return true;
 }
 
+// RDNA4 WMMA/SWMMAC operands decode with Wave32 bit widths; Wave64 halves the
+// VGPR count per operand (rounding up to 1 for 32-bit operands).
+inline uint32_t matrix_operand_width(const Instruction &inst, uint32_t width, uint32_t wave_size) {
+  if (wave_size == 64 && is_rdna4_wmma(inst.amdgpu_operation()))
+    return (width + 1u) / 2u;
+  return width;
+}
+
 inline std::optional<Access> footprint(const Instruction &inst, uint32_t num_vgprs,
-                                       bool has_accvgprs = false) {
+                                       bool has_accvgprs = false, uint32_t wave_size = 32) {
   Access access;
+  const bool tied_dst = is_rdna4_swmmac(inst.amdgpu_operation());
   for (bool dst : {false, true}) {
     const int count = dst ? inst.num_dst_operands() : inst.num_src_operands();
     for (int i = 0; i != count; ++i) {
@@ -250,14 +348,16 @@ inline std::optional<Access> footprint(const Instruction &inst, uint32_t num_vgp
       const bool acc = ref->cls == RegClass::ACC_VGPR;
       const uint32_t limit = acc ? (has_accvgprs ? Access::kRegistersPerBank : 0)
                                  : std::min(Access::kRegistersPerBank, num_vgprs);
-      const uint32_t index = ref->index, width = ref->width;
+      const uint32_t index = ref->index;
+      const uint32_t width = matrix_operand_width(inst, ref->width, wave_size);
       if (index >= limit || width > limit - index)
         return std::nullopt;
       const uint32_t reg = index + (acc ? Access::kRegistersPerBank : 0);
       for (uint32_t r = reg; r != reg + width; ++r) {
         (dst ? access.writes : access.reads).set(r);
-        // A store's encoding can describe its data as a destination operand.
-        if (inst.is_memory_op())
+        // A store's encoding can describe its data as a destination operand,
+        // and sparse WMMA reads its tied accumulator destination.
+        if (inst.is_memory_op() || (dst && tied_dst))
           access.reads.set(r);
       }
     }

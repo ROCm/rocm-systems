@@ -63,9 +63,9 @@ TEST(AsyncMmaPolicyTest, EncodingHintDoesNotExcludeEnabledDecodedCandidates) {
       EXPECT_TRUE(policy::encoding_may_be_candidate(rocjitsu::IsaFamily::Cdna5, words[0]));
     }
   }
-  for (auto arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Rdna4})
-    EXPECT_TRUE(policy::encoding_may_be_candidate(arch, 0));
+  EXPECT_TRUE(policy::encoding_may_be_candidate(rocjitsu::IsaFamily::Cdna3, 0));
   EXPECT_FALSE(policy::encoding_may_be_candidate(rocjitsu::IsaFamily::Cdna5, 0));
+  EXPECT_FALSE(policy::encoding_may_be_candidate(rocjitsu::IsaFamily::Rdna4, 0));
 }
 
 TEST(AsyncMmaPolicyTest, Cdna4EncodingHintCoversOrdinaryAndExtendedMfma) {
@@ -167,19 +167,31 @@ TEST(AsyncMmaPolicyTest, Cdna4LdsReadsAndM0MovesStayInsideTheWindow) {
 
 TEST(AsyncMmaPolicyTest, TargetSelectionMatchesTheAcceptedInstructionShapes) {
   EXPECT_TRUE(policy::supported(rocjitsu::IsaFamily::Cdna4));
+  EXPECT_TRUE(policy::supported(rocjitsu::IsaFamily::Rdna4));
   EXPECT_FALSE(policy::supported(rocjitsu::IsaFamily::Cdna5));
   EXPECT_FALSE(policy::supported(rocjitsu::IsaFamily::Cdna3));
   EXPECT_FALSE(policy::supported(rocjitsu::IsaFamily::Rdna3));
-  EXPECT_FALSE(policy::supported(rocjitsu::IsaFamily::Rdna4));
 
   auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
+  for (unsigned opcode = 0; opcode != 128; ++opcode) {
+    const auto words = rdna4::build_vop3p(
+        opcode, {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
+    auto decoded = decoder->decode(words.data());
+    if (decoded.succeeded() && policy::candidate(*decoded.value())) {
+      EXPECT_TRUE(policy::encoding_may_be_candidate(rocjitsu::IsaFamily::Rdna4, words[0]))
+          << decoded.value()->mnemonic();
+    }
+  }
   for (auto opcode : {rdna4::kVWmmaF3216x16x16F16Vop3p, rdna4::kVWmmaI3216x16x32Iu4Vop3p,
                       rdna4::kVSwmmacF3216x16x32F16Vop3p}) {
     const auto words = rdna4::build_vop3p(
         opcode, {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
-    EXPECT_FALSE(policy::candidate(*inst));
+    EXPECT_TRUE(policy::candidate(*inst));
+    EXPECT_TRUE(policy::encoding_may_be_candidate(rocjitsu::IsaFamily::Rdna4, words[0]));
   }
+  const auto add = rdna4::build_sop2(rdna4::kSAddF32Sop2, {.ssrc0 = 1, .ssrc1 = 2, .sdst = 0});
+  EXPECT_FALSE(policy::encoding_may_be_candidate(rocjitsu::IsaFamily::Rdna4, add[0]));
 }
 
 TEST(AsyncMmaPolicyTest, QualifiedMfmaFamiliesExcludeUnmeasuredShapes) {
@@ -212,12 +224,13 @@ TEST(AsyncMmaPolicyTest, Cdna5DefaultFamiliesIncludeK32AndScaledWmma) {
            Operation::V_WMMA_F32_16X16X64_FP8_FP8,
            Operation::V_WMMA_F32_16X16X128_FP8_FP8,
            Operation::V_WMMA_SCALE_F32_16X16X128_F8F6F4,
-           Operation::V_WMMA_F32_16X16X16_F16,
        })
     EXPECT_FALSE(policy::candidate(mma_test::PolicyInstruction(operation)));
+  // RDNA4 16x16x16 WMMA is enabled for RDNA4.
+  EXPECT_TRUE(policy::candidate(mma_test::PolicyInstruction(Operation::V_WMMA_F32_16X16X16_F16)));
 }
 
-TEST(AsyncMmaPolicyTest, AdmissionRequiresMetadataAndKeepsDualInstructionsInline) {
+TEST(AsyncMmaPolicyTest, AdmissionRequiresMetadataAndAdmitsSafeDualInstructions) {
   Instruction named_candidate("v_wmma_f32_32x16x128_f4", nullptr);
   EXPECT_FALSE(policy::candidate(named_candidate));
   EXPECT_FALSE(policy::safe_inline(named_candidate));
@@ -238,7 +251,7 @@ TEST(AsyncMmaPolicyTest, AdmissionRequiresMetadataAndKeepsDualInstructionsInline
                                         (16u << 24) | (8u << 17) | (12u << 9) | 264u};
   std::unique_ptr<Instruction> dual_inst(decode_valid(*decoder, dual.data()));
   ASSERT_NE(dual_inst->amdgpu_secondary_operation(), amdgpu::Operation::Unknown);
-  EXPECT_FALSE(policy::safe_inline(*dual_inst));
+  EXPECT_TRUE(policy::safe_inline(*dual_inst));
 }
 
 // These are the production decoder restrictions that keep the defensive

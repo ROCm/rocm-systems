@@ -42,10 +42,10 @@ inline void exec_swmmac(Wavefront &wave, SwmmacFunction function, uint64_t flags
   assert(result_registers > 0 && result_registers <= 8);
   const uint64_t all_lanes = lanes == 64 ? ~uint64_t{0} : 0xffffffffu;
   const uint64_t compressed_lanes = a_lanes == 64 ? ~uint64_t{0} : 0xffffffffu;
-  auto a_region = registers.read_vgpr_region(matrix_source_base(wave, source_a, a_registers),
-                                             a_registers, compressed_lanes);
-  auto b_region = registers.read_vgpr_region(matrix_source_base(wave, source_b, b_registers),
-                                             b_registers, all_lanes);
+  const uint32_t a_base = matrix_source_base(wave, source_a, a_registers);
+  const uint32_t b_base = matrix_source_base(wave, source_b, b_registers);
+  auto a_region = registers.read_vgpr_region(a_base, a_registers, compressed_lanes);
+  auto b_region = registers.read_vgpr_region(b_base, b_registers, all_lanes);
   auto index_region =
       registers.read_vgpr_region(matrix_source_base(wave, source_index, 1), 1, compressed_lanes);
   auto accumulator = registers.read_vgpr_region(
@@ -57,6 +57,16 @@ inline void exec_swmmac(Wavefront &wave, SwmmacFunction function, uint64_t flags
   if (!read_matrix_pointers(a_region, a.data()) || !read_matrix_pointers(b_region, b.data()) ||
       !read_matrix_pointers(index_region, index) || !read_matrix_pointers(accumulator, c.data()))
     return;
+  if (const MatrixInputSnapshot *snapshot = matrix_input_snapshot) [[unlikely]] {
+    const auto redirect = [&](const MatrixInputSnapshot::Operand &operand, uint32_t source,
+                              uint32_t count, auto &pointers) {
+      if (operand.regs && operand.base == source)
+        for (uint32_t reg = 0; reg < std::min(count, operand.regs); ++reg)
+          pointers[reg] = operand.lanes + reg * lanes;
+    };
+    redirect(snapshot->a, a_base, a_registers, a);
+    redirect(snapshot->b, b_base, b_registers, b);
+  }
   // The tied accumulator is already observed. rj-arith owns its alias-safe update.
   {
     auto status =

@@ -74,6 +74,8 @@ struct Isa : amdgpu::RdnaIsaBase {
   using OperandType = rdna4::OperandType;
   using StatusReg = rdna4::StatusReg;
 
+  static constexpr uint32_t ASYNC_MMA_WAVE_SIZE = 32; ///< Async MMA adapter (Wave32 & Wave64).
+
   // SIMD fast-path traits — consumed by AmdgpuIsaOperand<Isa> in
   // rocjitsu/isa/isa_operand_simd_inl.h. Definitions live in this arch's
   // operand.cpp; bodies forward to the anonymous-namespace helpers.

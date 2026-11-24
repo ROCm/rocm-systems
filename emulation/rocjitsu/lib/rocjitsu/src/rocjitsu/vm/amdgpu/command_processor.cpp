@@ -3052,15 +3052,20 @@ FunctionalQuantumResult CommandProcessor::run_active_cus_once(simdojo::Tick now)
     append_due(cus_);
   }
 
-  if (active_cu_scratch_.empty())
+  if (active_cu_scratch_.empty()) {
+    const uint32_t remaining =
+        std::min<uint32_t>(dispatch_threads_, static_cast<uint32_t>(pooled_due_ticks_.size()));
+    occupancy_.occupy(remaining > 1 ? int(remaining) - 1 : 0);
     return {};
+  }
 
   quantum_result_scratch_.resize(active_cu_scratch_.size());
   uint32_t effective_threads =
       std::min<uint32_t>(dispatch_threads_, static_cast<uint32_t>(active_cu_scratch_.size()));
   FunctionalQuantumResult result;
-  // Publish the dispatch workers this quantum adds, and the engine thread itself
-  // unless engines are reserved statically.
+  // Publish the dispatch workers this quantum adds, and keep the shard steady
+  // across epochs while multiple CUs remain runnable on this XCD so helper
+  // borrowers do not see occupied_threads() drop to zero between quanta.
   occupancy_.occupy(int(effective_threads) - 1);
   if (shared_dispatch_pool_)
     result =
@@ -3074,7 +3079,6 @@ FunctionalQuantumResult CommandProcessor::run_active_cus_once(simdojo::Tick now)
     quantum_result_scratch_.front() = active_cu_scratch_.front()->run_quantum();
     result = quantum_result_scratch_.front();
   }
-  occupancy_.occupy(0);
 
   for (size_t i = 0; i < active_cu_scratch_.size(); ++i) {
     auto *cu = active_cu_scratch_[i];
@@ -3083,6 +3087,9 @@ FunctionalQuantumResult CommandProcessor::run_active_cus_once(simdojo::Tick now)
     else
       pooled_due_ticks_.erase(cu);
   }
+  const uint32_t remaining =
+      std::min<uint32_t>(dispatch_threads_, static_cast<uint32_t>(pooled_due_ticks_.size()));
+  occupancy_.occupy(remaining > 1 ? int(remaining) - 1 : 0);
   return result;
 }
 

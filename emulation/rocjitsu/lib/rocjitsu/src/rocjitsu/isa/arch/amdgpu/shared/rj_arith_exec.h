@@ -5,9 +5,11 @@
 
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_wmma.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/matrix_input_snapshot.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -84,14 +86,24 @@ inline void exec_wmma(Wavefront &wave, WmmaFunction function, uint64_t flags,
   assert(factor_lanes == 0 || factor_lanes == 32 || factor_lanes == lanes);
   const uint64_t all_lanes = lanes == 64 ? ~uint64_t{0} : 0xffffffffu;
   const uint64_t input_lanes = factor_lanes == 32 ? 0xffffffffu : all_lanes;
-  auto a_region = registers.read_vgpr_region(matrix_source_base(wave, source_a, factor_registers),
-                                             factor_registers, input_lanes);
-  auto b_region = registers.read_vgpr_region(matrix_source_base(wave, source_b, factor_registers),
-                                             factor_registers, input_lanes);
+  const uint32_t a_base = matrix_source_base(wave, source_a, factor_registers);
+  const uint32_t b_base = matrix_source_base(wave, source_b, factor_registers);
+  auto a_region = registers.read_vgpr_region(a_base, factor_registers, input_lanes);
+  auto b_region = registers.read_vgpr_region(b_base, factor_registers, input_lanes);
   std::array<const uint32_t *, 8> a{}, b{}, c{};
   std::array<uint32_t, 64> broadcast{};
   if (!read_matrix_pointers(a_region, a.data()) || !read_matrix_pointers(b_region, b.data()))
     return;
+  if (const MatrixInputSnapshot *snapshot = matrix_input_snapshot) [[unlikely]] {
+    const auto redirect = [&](const MatrixInputSnapshot::Operand &operand, uint32_t source,
+                              uint32_t count, auto &pointers) {
+      if (operand.regs && operand.base == source)
+        for (uint32_t reg = 0; reg < std::min(count, operand.regs); ++reg)
+          pointers[reg] = operand.lanes + reg * lanes;
+    };
+    redirect(snapshot->a, a_base, factor_registers, a);
+    redirect(snapshot->b, b_base, factor_registers, b);
+  }
   // Keep the region alive through the call: invalid source views may own their
   // zero backing storage. A constant accumulator is not a register read.
   std::optional<RegisterAccess::VgprReadRegion> c_region;

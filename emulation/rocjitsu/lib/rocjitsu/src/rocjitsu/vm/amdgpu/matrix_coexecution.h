@@ -49,11 +49,17 @@ inline unsigned spin_override() {
 }
 inline int borrow_budget();
 inline unsigned idle_spin_count() {
-  const unsigned pauses = spin_override();
-  if (pauses)
-    return pauses;
-  // A borrowed core belongs to dispatch the moment the helper is idle.
-  return borrow_budget() ? 1u << 10 : 1u << 13;
+  static const unsigned count = [] {
+    if (const char *override_idle = std::getenv("RJ_MMA_IDLE_SPIN");
+        override_idle && *override_idle)
+      return static_cast<unsigned>(std::strtoul(override_idle, nullptr, 0));
+    const unsigned pauses = spin_override();
+    if (pauses)
+      return pauses;
+    // A borrowed core belongs to dispatch the moment the helper is idle.
+    return borrow_budget() ? 1u << 10 : 1u << 13;
+  }();
+  return count;
 }
 inline unsigned completion_spin_count() {
   const unsigned pauses = spin_override();
@@ -210,10 +216,32 @@ struct CacheDomains {
     return result;
   }
 };
-/// RJ_MMA_LOCAL_ONLY=1 never lets an issuer use another cache domain's helpers.
-inline bool local_helpers_only() {
-  static const bool enabled = [] {
+/// RJ_MMA_LOCAL_ONLY=1 never lets an issuer use another cache domain's helpers;
+/// RJ_MMA_LOCAL_ONLY=0 forces cross-domain fallback even for lightweight MMAs.
+inline int local_helpers_only_override() {
+  static const int mode = [] {
     const char *value = std::getenv("RJ_MMA_LOCAL_ONLY");
+    if (!value || !*value)
+      return -1;
+    return *value != '0' ? 1 : 0;
+  }();
+  return mode;
+}
+inline bool local_helpers_only() { return local_helpers_only_override() == 1; }
+
+struct PoolStats {
+  alignas(64) std::atomic<uint64_t> claims{0};
+  std::atomic<uint64_t> warm_claims{0};
+  std::atomic<uint64_t> wake_submits{0};
+  std::atomic<uint64_t> wait_ready{0};
+  std::atomic<uint64_t> wait_spun{0};
+  std::atomic<uint64_t> wait_slept{0};
+  alignas(64) std::atomic<uint64_t> helper_sleeps{0};
+};
+
+inline bool pool_stats_enabled() {
+  static const bool enabled = [] {
+    const char *value = std::getenv("RJ_ASYNC_STATS");
     return value && *value && *value != '0';
   }();
   return enabled;
@@ -228,15 +256,25 @@ inline bool local_helpers_only() {
 /// @brief Persistent worker executing one published instruction at a time.
 class Helper {
 public:
+  static constexpr int kStop = -1;
+  static constexpr int kIdle = 0;
+  static constexpr int kBusy = 1;
+  static constexpr int kIdleSleeping = 2;
+  static constexpr int kBusyWaiting = 3;
+
   /// `awake` counts helpers not blocked in the kernel; `awake_word`/`awake_bit`
   /// publish this helper's bit so borrowers reuse warm spinning helpers before
   /// waking sleeping ones.
   explicit Helper(std::atomic<int> *awake = nullptr,
-                  std::atomic<uint64_t> *awake_word = nullptr, uint64_t awake_bit = 0)
-      : awake_(awake), awake_word_(awake_word), awake_bit_(awake_bit),
-        thread_([this] { work(); }) {}
+                  std::atomic<uint64_t> *awake_word = nullptr, uint64_t awake_bit = 0,
+                  PoolStats *stats = nullptr)
+      : awake_(awake), awake_word_(awake_word), awake_bit_(awake_bit), stats_(stats) {
+    mark_awake();
+    thread_ = std::thread([this] { work(); });
+  }
   ~Helper() {
-    publish(-1);
+    if (state_.exchange(kStop, std::memory_order_seq_cst) == kIdleSleeping)
+      state_.notify_one();
     thread_.join();
   }
 
@@ -257,15 +295,43 @@ public:
       std::fill_n(snapshots_.begin(), count, nullptr);
     count_ = count;
     wave_ = wave;
-    publish(1);
+    // Exchange orders publication before any notify_one() bucket check in
+    // libstdc++, while skipping notify_one() entirely when the helper is warm.
+    if (state_.exchange(kBusy, std::memory_order_seq_cst) == kIdleSleeping) {
+      if (stats_) [[unlikely]]
+        stats_->wake_submits.fetch_add(1, std::memory_order_relaxed);
+      state_.notify_one();
+    }
   }
 
   void wait() {
-    while (state_.load(std::memory_order_acquire) != 0)
-      wait_while(1);
+    if (state_.load(std::memory_order_acquire) == kIdle) {
+      if (stats_) [[unlikely]]
+        stats_->wait_ready.fetch_add(1, std::memory_order_relaxed);
+      return;
+    }
+    const unsigned spins = completion_spin_count();
+    for (unsigned i = 0; i != spins; ++i) {
+      if (state_.load(std::memory_order_acquire) == kIdle) {
+        if (stats_) [[unlikely]]
+          stats_->wait_spun.fetch_add(1, std::memory_order_relaxed);
+        return;
+      }
+      relax_cpu();
+    }
+    int expected = kBusy;
+    if (state_.compare_exchange_strong(expected, kBusyWaiting, std::memory_order_seq_cst,
+                                       std::memory_order_acquire)) {
+      if (stats_) [[unlikely]]
+        stats_->wait_slept.fetch_add(1, std::memory_order_relaxed);
+      while (state_.load(std::memory_order_acquire) == kBusyWaiting)
+        state_.wait(kBusyWaiting, std::memory_order_acquire);
+    } else if (stats_) [[unlikely]] {
+      stats_->wait_spun.fetch_add(1, std::memory_order_relaxed);
+    }
   }
 
-  bool ready() const { return state_.load(std::memory_order_acquire) == 0; }
+  bool ready() const { return state_.load(std::memory_order_acquire) == kIdle; }
   void pin(const std::vector<int> &cpus) {
 #if defined(__linux__)
     cpu_set_t set;
@@ -282,19 +348,6 @@ public:
   const HelperErrorSink &error() const { return error_; }
 
 private:
-  void publish(int value) {
-    // A release store followed by notification is sufficient for this protocol
-    // under the C++ atomic wait/notify rules. The seq_cst store is a library
-    // workaround for libstdc++'s implementation.
-    // In libstdc++'s int-sized futex path, notify_one checks the bucket's
-    // waiter count before deciding whether to wake. Order publication before
-    // that check: on x86 a release store can remain buffered while the check
-    // sees no waiter and a newly registered waiter still sees the old state.
-    // Apply the ordering to job, completion, and shutdown publication.
-    state_.store(value, std::memory_order_seq_cst);
-    state_.notify_one();
-  }
-
   void mark_awake() {
     if (awake_) {
       awake_->fetch_add(1, std::memory_order_relaxed);
@@ -310,32 +363,34 @@ private:
     }
   }
 
-  void wait_while(int expected) {
-    const unsigned spins = expected == 0 ? idle_spin_count() : completion_spin_count();
+  void idle_wait() {
+    const unsigned spins = idle_spin_count();
     for (unsigned i = 0; i != spins; ++i) {
-      if (state_.load(std::memory_order_acquire) != expected)
+      if (state_.load(std::memory_order_acquire) != kIdle)
         return;
       relax_cpu();
     }
-    // There is one waiter per helper: the issuer during execution, or the
-    // helper while idle. Atomic waiting rechecks the value before sleeping.
-    if (expected == 0)
-      mark_asleep();
-    state_.wait(expected, std::memory_order_acquire);
-    if (expected == 0)
-      mark_awake();
+    mark_asleep();
+    int expected = kIdle;
+    if (state_.compare_exchange_strong(expected, kIdleSleeping, std::memory_order_seq_cst,
+                                       std::memory_order_acquire)) {
+      if (stats_) [[unlikely]]
+        stats_->helper_sleeps.fetch_add(1, std::memory_order_relaxed);
+      while (state_.load(std::memory_order_acquire) == kIdleSleeping)
+        state_.wait(kIdleSleeping, std::memory_order_acquire);
+    }
+    mark_awake();
   }
 
   void work() {
-    mark_awake();
     for (;;) {
       int state = state_.load(std::memory_order_acquire);
-      if (state == -1) {
+      if (state == kStop) {
         mark_asleep();
         return;
       }
-      if (state == 0) {
-        wait_while(0);
+      if (state == kIdle) {
+        idle_wait();
         continue;
       }
       HelperErrorSink sink;
@@ -353,14 +408,16 @@ private:
       matrix_input_snapshot = nullptr;
       helper_error_sink = nullptr;
       error_ = sink;
-      publish(0);
+      if (state_.exchange(kIdle, std::memory_order_seq_cst) == kBusyWaiting)
+        state_.notify_one();
     }
   }
 
   std::atomic<int> *awake_ = nullptr;
   std::atomic<uint64_t> *awake_word_ = nullptr;
   uint64_t awake_bit_ = 0;
-  alignas(64) std::atomic<int> state_{0};
+  PoolStats *stats_ = nullptr;
+  alignas(64) std::atomic<int> state_{kIdle};
   alignas(64) std::array<Instruction *, kMaxChain> chain_{};
   std::array<const MatrixInputSnapshot *, kMaxChain> snapshots_{};
   unsigned failed_ = 0;
@@ -386,16 +443,27 @@ struct SnapshotBuffer {
 
 // Each claim covers publication through joining, so another issuer cannot
 // reuse a helper's payload while its previous owner still reads completion.
-// There is no pending-job queue and no wait for capacity. Two bitmap words
-// cover the entire pool; an exhausted pool needs no atomic RMW.
+// There is no pending-job queue and no wait for capacity. Each LLC domain owns
+// its own cache-line-isolated bitmap shard so local claims and releases never
+// bounce cache lines across CCD boundaries.
 /// @brief Shared CPU budget with bounded nonblocking reservation.
 class SharedPool {
+  struct alignas(64) Shard {
+    std::atomic<uint64_t> free{0};
+    std::atomic<uint64_t> awake_mask{0};
+    std::atomic<int> awake{0};
+    unsigned base = 0;
+    unsigned count = 0;
+  };
   struct Slot {
     Helper helper;
     unsigned index;
+    unsigned shard;
+    unsigned bit;
     SnapshotBuffer snapshot;
-    Slot(unsigned i, std::atomic<int> *awake, std::atomic<uint64_t> *awake_word)
-        : helper(awake, awake_word, uint64_t{1} << (i % 64)), index(i) {}
+    Slot(unsigned i, unsigned s, unsigned b, Shard &owner, PoolStats *stats)
+        : helper(&owner.awake, &owner.awake_mask, uint64_t{1} << b, stats), index(i), shard(s),
+          bit(b) {}
   };
 
 public:
@@ -417,34 +485,49 @@ public:
     return ticket;
   }
   /// Reserve a helper without publishing; start() must follow on success.
-  Ticket claim() { return {try_claim(within_budget() ? kUnlimited : 0)}; }
+  Ticket claim() { return {try_claim(within_budget() ? kUnlimited : 0, local_helpers_only())}; }
   /// Reserve a helper while fewer than `cap` are claimed pool-wide. The cap is
   /// the caller's share of the borrowing budget, computed once per quantum by
   /// borrow_cap(): summing every occupancy shard on each claim bounced those
   /// lines between cores on every block.
-  Ticket claim(unsigned cap) { return {try_claim(cap)}; }
+  Ticket claim(unsigned cap, bool local_only = false) {
+    const int override_mode = local_helpers_only_override();
+    const bool restrict_local = override_mode >= 0 ? (override_mode != 0) : local_only;
+    return {try_claim(cap, restrict_local)};
+  }
   static constexpr unsigned kUnlimited = ~0u;
   /// Helpers this issuer may hold right now: unlimited without a budget,
   /// otherwise the budget minus reserved and occupied threads (zero when the
   /// host is saturated, so the caller issues synchronously). Warm spinning
-  /// helpers are reused via awake_mask_ without shrinking the cap.
+  /// helpers are reused via each shard's awake_mask without shrinking the cap.
   unsigned borrow_cap() const { return borrow_cap_for(borrow_budget()); }
   unsigned borrow_cap_for(int budget) const {
     if (!budget)
       return kUnlimited;
-    const int room =
-        budget - reserved_threads.load(std::memory_order_relaxed) - occupied_threads();
-    return room > 0 ? unsigned(room) : 0u;
+    const int reserved = reserved_threads.load(std::memory_order_relaxed);
+    const int occupied = occupied_threads();
+    const int room = budget - reserved - occupied;
+    if (room <= 0)
+      return 0u;
+    // When dispatch workers are already scaling across CUs (occupied > 0),
+    // borrowing a tiny helper pool (< 0.5 helpers per active CU) thrashes the
+    // shared bitmap and cores without improving the critical path.
+    const int active_cus = std::max(1, reserved - 1) + occupied;
+    if (occupied > 0 && room * 2 < active_cus)
+      return 0u;
+    return unsigned(room);
   }
   unsigned awake() const {
-    const int n = awake_.load(std::memory_order_relaxed);
-    return n > 0 ? unsigned(n) : 0u;
+    int total = 0;
+    for (size_t s = 0; s != num_shards_; ++s)
+      total += shards_[s].awake.load(std::memory_order_relaxed);
+    return total > 0 ? unsigned(total) : 0u;
   }
   unsigned claimed() const {
-    unsigned claimed = unsigned(slots_.size());
-    for (const auto &word : free_)
-      claimed -= unsigned(std::popcount(word.load(std::memory_order_relaxed)));
-    return claimed;
+    unsigned free_count = 0;
+    for (size_t s = 0; s != num_shards_; ++s)
+      free_count += unsigned(std::popcount(shards_[s].free.load(std::memory_order_relaxed)));
+    return unsigned(slots_.size()) - free_count;
   }
   static SnapshotBuffer &snapshot_buffer(Ticket ticket) { return ticket.slot->snapshot; }
   static void start(Ticket ticket, Instruction *const *chain, unsigned count, void *context,
@@ -469,35 +552,89 @@ public:
     return util::Result::success();
   }
 
-  explicit SharedPool(unsigned count) : domains_(CacheDomains::detect()) {
+  explicit SharedPool(unsigned count)
+      : domains_(CacheDomains::detect()), stats_(pool_stats_enabled() ? &stats_storage_ : nullptr) {
     assert(count <= 128);
     register_helper_fork_guard();
     if (!helpers_enabled())
       count = 0;
-    slots_.reserve(count);
-    for (unsigned i = 0; i != count; ++i)
-      slots_.push_back(std::make_unique<Slot>(i, &awake_, &awake_mask_[i / 64]));
-    for (unsigned word = 0; word != 2; ++word) {
-      const unsigned bits = count > word * 64 ? std::min(64u, count - word * 64) : 0;
-      free_[word].store(bits == 64 ? ~uint64_t{0} : (uint64_t{1} << bits) - 1,
-                        std::memory_order_relaxed);
-    }
-    // Split helpers evenly over cache domains, contiguous per domain, and pin them.
     const size_t domains = domains_.cpus.size();
-    if (domains > 1 && count) {
-      domain_masks_.assign(domains, {});
+    multi_domain_ = domains > 1 && count > 0;
+    if (multi_domain_) {
+      // One cache-line-isolated shard per LLC domain (up to 64 helpers/domain).
+      // Split helpers evenly starting from the constructing issuer's domain so
+      // small pools (< domains) always place helpers locally.
+      size_t start_domain = 0;
+#if defined(__linux__)
+      const int cpu = sched_getcpu();
+      if (cpu >= 0 && size_t(cpu) < domains_.domain_of_cpu.size() &&
+          domains_.domain_of_cpu[cpu] >= 0)
+        start_domain = size_t(domains_.domain_of_cpu[cpu]);
+#endif
+      shards_ = std::make_unique<Shard[]>(domains);
+      num_shards_ = domains;
+      std::vector<unsigned> shares(domains, 0);
+      for (size_t i = 0; i != domains; ++i)
+        shares[(start_domain + i) % domains] = unsigned(count / domains + (i < count % domains));
+      slots_.reserve(count);
       unsigned next = 0;
       for (size_t d = 0; d != domains; ++d) {
-        const unsigned share = unsigned(count / domains + (d < count % domains));
-        for (unsigned k = 0; k != share; ++k, ++next) {
-          domain_masks_[d][next / 64] |= uint64_t{1} << (next % 64);
-          slots_[next]->helper.pin(domains_.cpus[d]);
+        const unsigned share = shares[d];
+        assert(share <= 64);
+        shards_[d].base = next;
+        shards_[d].count = share;
+        shards_[d].free.store(share == 64 ? ~uint64_t{0} : (uint64_t{1} << share) - 1,
+                              std::memory_order_relaxed);
+        for (unsigned b = 0; b != share; ++b, ++next) {
+          slots_.push_back(std::make_unique<Slot>(next, unsigned(d), b, shards_[d], stats_));
+          slots_.back()->helper.pin(domains_.cpus[d]);
         }
+      }
+    } else if (count) {
+      const unsigned num_shards = (count + 63u) / 64u;
+      shards_ = std::make_unique<Shard[]>(num_shards);
+      num_shards_ = num_shards;
+      slots_.reserve(count);
+      unsigned next = 0;
+      for (unsigned s = 0; s != num_shards; ++s) {
+        const unsigned share = std::min(64u, count - next);
+        shards_[s].base = next;
+        shards_[s].count = share;
+        shards_[s].free.store(share == 64 ? ~uint64_t{0} : (uint64_t{1} << share) - 1,
+                              std::memory_order_relaxed);
+        for (unsigned b = 0; b != share; ++b, ++next)
+          slots_.push_back(std::make_unique<Slot>(next, s, b, shards_[s], stats_));
       }
     }
   }
 
+  void flush_stats() {
+    if (!stats_)
+      return;
+    const uint64_t claims = stats_->claims.exchange(0, std::memory_order_relaxed);
+    if (!claims)
+      return;
+    const uint64_t warm = stats_->warm_claims.exchange(0, std::memory_order_relaxed);
+    const uint64_t wakes = stats_->wake_submits.exchange(0, std::memory_order_relaxed);
+    const uint64_t ready = stats_->wait_ready.exchange(0, std::memory_order_relaxed);
+    const uint64_t spun = stats_->wait_spun.exchange(0, std::memory_order_relaxed);
+    const uint64_t slept = stats_->wait_slept.exchange(0, std::memory_order_relaxed);
+    const uint64_t hsleeps = stats_->helper_sleeps.exchange(0, std::memory_order_relaxed);
+    std::fprintf(stderr,
+                 "RJ_POOL helpers=%zu domains=%zu claims=%llu warm_claims=%llu "
+                 "wake_submits=%llu wait(ready=%llu spun=%llu slept=%llu) helper_sleeps=%llu\n",
+                 slots_.size(), domains_.cpus.size(),
+                 static_cast<unsigned long long>(claims),
+                 static_cast<unsigned long long>(warm),
+                 static_cast<unsigned long long>(wakes),
+                 static_cast<unsigned long long>(ready),
+                 static_cast<unsigned long long>(spun),
+                 static_cast<unsigned long long>(slept),
+                 static_cast<unsigned long long>(hsleeps));
+  }
+
   ~SharedPool() {
+    flush_stats();
     // Inherited std::thread objects cannot be joined or destroyed in the child.
     // Leave their storage to process teardown; the parent's ownership is intact.
     if (!helpers_enabled())
@@ -509,86 +646,109 @@ public:
   bool available() const {
     if (!helpers_enabled() || !within_budget())
       return false;
-    return free_[0].load(std::memory_order_relaxed) != 0 ||
-           (slots_.size() > 64 && free_[1].load(std::memory_order_relaxed) != 0);
+    for (size_t s = 0; s != num_shards_; ++s)
+      if (shards_[s].free.load(std::memory_order_relaxed) != 0)
+        return true;
+    return false;
   }
 
 private:
   bool within_budget() const { return claimed() < borrow_cap(); }
 
-  /// Helpers of the issuer's cache domain, or none with a single domain.
-  std::array<uint64_t, 2> local_mask() const {
+  /// Current issuer's LLC domain index, or -1 on a single-domain host.
+  int local_domain() const {
 #if defined(__linux__)
-    if (!domain_masks_.empty()) {
+    if (multi_domain_) {
       const int cpu = sched_getcpu();
-      if (cpu >= 0 && size_t(cpu) < domains_.domain_of_cpu.size() &&
-          domains_.domain_of_cpu[cpu] >= 0)
-        return domain_masks_[domains_.domain_of_cpu[cpu]];
+      if (cpu >= 0 && size_t(cpu) < domains_.domain_of_cpu.size())
+        return domains_.domain_of_cpu[cpu];
     }
 #endif
-    return {0, 0};
+    return -1;
   }
 
-  Slot *claim_from(const std::array<uint64_t, 2> &mask, unsigned start) {
-    for (unsigned word = 0; word != (slots_.size() > 64 ? 2u : 1u); ++word) {
-      auto free = free_[word].load(std::memory_order_relaxed);
-      for (unsigned attempt = 0; (free & mask[word]) && attempt != 2; ++attempt) {
-        const uint64_t candidates = free & mask[word];
-        const unsigned bit = (std::countr_zero(std::rotr(candidates, int(start))) + start) & 63;
-        if (!free_[word].compare_exchange_strong(free, free & ~(uint64_t{1} << bit),
-                                                 std::memory_order_acquire,
-                                                 std::memory_order_relaxed))
-          continue;
-        return slots_[word * 64 + bit].get();
-      }
+  Slot *claim_shard(unsigned shard_idx, uint64_t mask, unsigned start) {
+    Shard &shard = shards_[shard_idx];
+    if (!shard.count || !mask)
+      return nullptr;
+    const unsigned local_start = start % shard.count;
+    uint64_t free = shard.free.load(std::memory_order_relaxed);
+    for (unsigned attempt = 0; (free & mask) && attempt != 2; ++attempt) {
+      const uint64_t candidates = free & mask;
+      const unsigned bit =
+          (std::countr_zero(std::rotr(candidates, int(local_start))) + local_start) & 63;
+      if (!shard.free.compare_exchange_strong(free, free & ~(uint64_t{1} << bit),
+                                              std::memory_order_acquire,
+                                              std::memory_order_relaxed))
+        continue;
+      return slots_[shard.base + bit].get();
     }
     return nullptr;
   }
 
-  Slot *try_claim(unsigned cap) {
-    if (!helpers_enabled() || claimed() >= cap)
+  Slot *try_claim(unsigned cap, bool local_only) {
+    if (!helpers_enabled() || num_shards_ == 0)
       return nullptr;
-    // Bound claims and fall back inline on a miss: one or two loads detect an
-    // exhausted pool, and after two failed CAS attempts per word the chain
-    // runs on the issuer. A stable per-issuer start keeps reusing an awake
-    // helper. Helpers sharing the issuer's last-level cache come first.
+    if (cap != kUnlimited && claimed() >= cap)
+      return nullptr;
+    // Bound claims and fall back inline on a miss: one load detects an
+    // exhausted local shard, and after two failed CAS attempts the chain runs
+    // on the issuer. Dedicated local claims touch only the issuer's own LLC
+    // shard — zero cross-CCD cache-line traffic.
     static thread_local const uint32_t issuer_hash =
         static_cast<uint32_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
     const unsigned start = preferred_helper_start(issuer_hash, slots_.size());
-    const auto local = local_mask();
-    const bool has_local = (local[0] | local[1]) != 0;
-    if (cap != kUnlimited) {
-      // Reuse an already-awake idle helper first so claiming adds zero host
-      // threads, even when another CU's hash originally woke it.
-      const std::array<uint64_t, 2> warm = {awake_mask_[0].load(std::memory_order_relaxed),
-                                            awake_mask_[1].load(std::memory_order_relaxed)};
-      if (has_local && ((local[0] & warm[0]) | (local[1] & warm[1])))
-        if (Slot *slot = claim_from({local[0] & warm[0], local[1] & warm[1]}, start))
-          return slot;
-      if (!(has_local && local_helpers_only()) && (warm[0] | warm[1]))
-        if (Slot *slot = claim_from(warm, start))
-          return slot;
-      // Waking a sleeping helper adds an active thread; stay within cap.
-      if (awake_.load(std::memory_order_relaxed) >= int(cap))
-        return nullptr;
+    const int local_d = local_domain();
+    const bool has_local = local_d >= 0 && shards_[size_t(local_d)].count != 0;
+    const bool forbid_remote = multi_domain_ && local_only;
+    const auto record = [&](Slot *slot, bool warm) -> Slot * {
+      if (stats_) [[unlikely]] {
+        stats_->claims.fetch_add(1, std::memory_order_relaxed);
+        if (warm)
+          stats_->warm_claims.fetch_add(1, std::memory_order_relaxed);
+      }
+      return slot;
+    };
+    const auto claim_warm_in = [&](unsigned s) -> Slot * {
+      const uint64_t w = shards_[s].awake_mask.load(std::memory_order_relaxed);
+      return w ? claim_shard(s, w, start) : nullptr;
+    };
+    if (has_local) {
+      if (Slot *slot = claim_warm_in(unsigned(local_d)))
+        return record(slot, true);
+      if (cap == kUnlimited || awake() < cap)
+        if (Slot *slot = claim_shard(unsigned(local_d), ~uint64_t{0}, start))
+          return record(slot, false);
     }
-    if (has_local)
-      if (Slot *slot = claim_from(local, start))
-        return slot;
-    if (has_local && local_helpers_only())
+    if (forbid_remote)
       return nullptr;
-    return claim_from({~uint64_t{0}, ~uint64_t{0}}, start);
+    // Single-domain or remote fallback: prefer warm helpers first.
+    for (size_t s = 0; s != num_shards_; ++s) {
+      if (int(s) == local_d)
+        continue;
+      if (Slot *slot = claim_warm_in(unsigned(s)))
+        return record(slot, true);
+    }
+    if (cap != kUnlimited && awake() >= cap)
+      return nullptr;
+    for (size_t s = 0; s != num_shards_; ++s) {
+      if (int(s) == local_d)
+        continue;
+      if (Slot *slot = claim_shard(unsigned(s), ~uint64_t{0}, start))
+        return record(slot, false);
+    }
+    return nullptr;
   }
   void release(Slot *slot) {
-    free_[slot->index / 64].fetch_or(uint64_t{1} << (slot->index % 64), std::memory_order_release);
+    shards_[slot->shard].free.fetch_or(uint64_t{1} << slot->bit, std::memory_order_release);
   }
-  alignas(64) std::array<std::atomic<uint64_t>, 2> free_{};
-  alignas(64) std::atomic<int> awake_{0};
-  alignas(64) std::array<std::atomic<uint64_t>, 2> awake_mask_{};
-
   CacheDomains domains_;
-  std::vector<std::array<uint64_t, 2>> domain_masks_;
+  bool multi_domain_ = false;
+  size_t num_shards_ = 0;
+  std::unique_ptr<Shard[]> shards_;
   std::vector<std::unique_ptr<Slot>> slots_;
+  PoolStats stats_storage_{};
+  PoolStats *stats_ = nullptr;
 };
 
 /// Shared by all CUs and GPUs in one VM. Config parsing does not start helpers;

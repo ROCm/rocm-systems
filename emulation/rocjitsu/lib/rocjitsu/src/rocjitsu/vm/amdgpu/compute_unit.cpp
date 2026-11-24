@@ -2830,6 +2830,9 @@ void ComputeUnitCore::clear_mma_plans() {
 void ComputeUnitCore::flush_mma_plans() {
   if (mma_plans_)
     mma_plans_->flush();
+  if (config_.async_resources && config_.async_resources->helpers() &&
+      async_execution::report_enabled())
+    async_pool().flush_stats();
 }
 
 void ComputeUnitCore::report_pending_mma_failure(Wavefront &wf, mma_plan::PendingJobs &jobs) {
@@ -2889,9 +2892,17 @@ void ComputeUnitCore::join_pending_mma_for(Wavefront &wf, const Instruction &ins
     if (wf.is_halted() || !jobs->pending())
       return;
   }
-  const auto footprint = async_execution::footprint(inst, wf.num_vgprs(), mma_has_accvgprs_);
-  // An unrepresentable footprint joins everything.
-  const uint32_t mask = footprint ? jobs->conflicting(*footprint) : jobs->active();
+  // RDNA4 WMMA reads MODE.FP16_OVFL, so mode-modifying scalar ops drain first.
+  const Operation op = inst.amdgpu_operation();
+  const bool mode_write =
+      config_.arch == IsaFamily::Rdna4 &&
+      (op == Operation::S_SETREG_B32 || op == Operation::S_SETREG_IMM32_B32 ||
+       op == Operation::S_ROUND_MODE || op == Operation::S_DENORM_MODE);
+  const auto footprint =
+      mode_write ? std::nullopt
+                 : async_execution::footprint(inst, wf.num_vgprs(), mma_has_accvgprs_, wf.wf_size());
+  // An unrepresentable footprint or mode write joins everything.
+  const mma_plan::JobMask mask = footprint ? jobs->conflicting(*footprint) : jobs->active();
   if (!mask) {
     ++mma_plans_->stats.gap_passes;
     return;
@@ -2928,10 +2939,12 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
   auto &cache = *mma_plans_;
   // Replay skips per-step debugger, plugin, VSKIP and ALU-trap handling, so
   // every such mode keeps the ordinary path. Wait checks run per step below.
+  const uint32_t wf_size = active->wf_size();
+  const bool wave_size_ok = arch() == IsaFamily::Rdna4 ? (wf_size == 32 || wf_size == 64)
+                                                       : wf_size == wave_size;
   if (active->memory_trap_pending() || (active->mode_raw() & Wavefront::VSKIP_BIT) ||
       observes_before_execute_instruction_ || observes_after_execute_instruction_ ||
-      observes_async_instruction_issued_ || alu_exception_trap_enables(*active) ||
-      active->wf_size() != wave_size) {
+      observes_async_instruction_issued_ || alu_exception_trap_enables(*active) || !wave_size_ok) {
     ++cache.stats.entry_rejects;
     return false;
   }
@@ -2965,9 +2978,12 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
   if (!fetch_words(fetch_pc, first) ||
       !async_mma_policy::encoding_may_be_candidate(arch(), first[0]))
     return false;
-  const mma_plan::PlanCache::Key key{fetch_pc, vmid, active->num_vgprs(), has_accvgprs,
-                                     vm_access ? vm_access->cache_namespace()
-                                               : VmCacheNamespace{}};
+  const mma_plan::PlanCache::Key key{fetch_pc,
+                                     vmid,
+                                     active->num_vgprs(),
+                                     has_accvgprs,
+                                     vm_access ? vm_access->cache_namespace() : VmCacheNamespace{},
+                                     wf_size};
   const mma_plan::Plan *plan = cache.lookup(*decoder_, inst_cache_, fetch_words, key, first);
   if (!plan->accept) {
     // The planner found nothing that can run concurrently here, e.g. one
@@ -3015,8 +3031,8 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
 
   // Jobs of earlier blocks may still run; each step joins only the ones it
   // depends on, found once here from the plan's first-touch index.
-  std::array<uint32_t, mma_plan::kMaxSteps> result_wait;
-  std::array<uint32_t, mma_plan::kMaxSteps> factor_wait;
+  std::array<mma_plan::JobMask, mma_plan::kMaxSteps> result_wait;
+  std::array<mma_plan::JobMask, mma_plan::kMaxSteps> factor_wait;
   const bool had_pending = replay.pending();
   bool filtered = false;
   const bool has_entry_waits = replay.begin_block(*plan, entry_pc, helper_cap_, result_wait,
@@ -3085,11 +3101,11 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
   };
   for (unsigned k = 0; k != plan->steps.size(); ++k) {
     const mma_plan::Step &step = plan->steps[k];
-    uint32_t waits = replay.slots_of(step.wait);
+    mma_plan::JobMask waits = replay.slots_of(step.wait);
     if (has_entry_waits) {
-      const uint32_t inherited = replay.inherited();
-      const uint32_t rwait = result_wait[k] & inherited;
-      const uint32_t fwait = factor_wait[k] & inherited;
+      const mma_plan::JobMask inherited = replay.inherited();
+      const mma_plan::JobMask rwait = result_wait[k] & inherited;
+      const mma_plan::JobMask fwait = factor_wait[k] & inherited;
       if (rwait)
         ++cache.stats.result_waits;
       if (fwait)
@@ -3116,53 +3132,91 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
         check_static_isa_diagnostics(*step.chain[i], *active);
       active->clear_setreg_vgpr_msb_hazard();
       // Copy only the factor registers a later step overwrites, into the
-      // claimed helper's buffer; a chain that finds no helper copies nothing.
-      const auto fill = [&](matrix_coexecution::SnapshotBuffer &buffer) {
-        size_t words = 0;
-        for (unsigned i = 0; i != step.members; ++i)
-          words += size_t(step.snapshot[i].a_regs + step.snapshot[i].b_regs +
-                          step.snapshot[i].sa_regs + step.snapshot[i].sb_regs) *
-                   wave_size;
-        buffer.data.resize(words);
-        uint32_t *out = buffer.data.data();
-        const auto copy = [&](uint16_t base, uint8_t regs, MatrixInputSnapshot::Operand &operand) {
-          if (!regs)
-            return;
-          operand = {vgpr_base + base, regs, out};
-          for (uint32_t r = 0; r != regs; ++r, out += wave_size)
-            std::memcpy(out, raw_vgpr_data(vgpr_base + base + r), wave_size * sizeof(uint32_t));
+      // claimed helper's buffer; deduplicate identical (base, regs) tiles
+      // shared across members of an A/B-grouped batch.
+      const auto make_fill = [&](unsigned start_member) {
+        return [&, start_member](matrix_coexecution::SnapshotBuffer &buffer) {
+          size_t max_words = 0;
+          for (unsigned i = start_member; i != step.members; ++i)
+            max_words += size_t(step.snapshot[i].a_regs + step.snapshot[i].b_regs +
+                                step.snapshot[i].sa_regs + step.snapshot[i].sb_regs) *
+                         wf_size;
+          buffer.data.resize(max_words);
+          uint32_t *out = buffer.data.data();
+          const auto find_cached = [&](unsigned upto, uint32_t phys_base,
+                                       uint8_t regs) -> const uint32_t * {
+            for (unsigned p = 0; p != upto; ++p) {
+              const auto &e = buffer.entries[p];
+              if (e.a.regs == regs && e.a.base == phys_base)
+                return e.a.lanes;
+              if (e.b.regs == regs && e.b.base == phys_base)
+                return e.b.lanes;
+              if (e.scale_a.regs == regs && e.scale_a.base == phys_base)
+                return e.scale_a.lanes;
+              if (e.scale_b.regs == regs && e.scale_b.base == phys_base)
+                return e.scale_b.lanes;
+            }
+            return nullptr;
+          };
+          const auto copy = [&](unsigned dst_idx, uint16_t base, uint8_t regs,
+                                MatrixInputSnapshot::Operand &operand) {
+            if (!regs)
+              return;
+            const uint32_t phys_base = vgpr_base + base;
+            if (const uint32_t *cached = find_cached(dst_idx + 1, phys_base, regs)) {
+              operand = {phys_base, regs, cached};
+              return;
+            }
+            operand = {phys_base, regs, out};
+            for (uint32_t r = 0; r != regs; ++r, out += wf_size)
+              std::memcpy(out, raw_vgpr_data(phys_base + r), wf_size * sizeof(uint32_t));
+          };
+          for (unsigned i = start_member; i != step.members; ++i) {
+            const unsigned dst_idx = i - start_member;
+            const mma_plan::SnapshotSpec &spec = step.snapshot[i];
+            buffer.entries[dst_idx] = {};
+            copy(dst_idx, spec.a_base, spec.a_regs, buffer.entries[dst_idx].a);
+            copy(dst_idx, spec.b_base, spec.b_regs, buffer.entries[dst_idx].b);
+            copy(dst_idx, spec.sa_base, spec.sa_regs, buffer.entries[dst_idx].scale_a);
+            copy(dst_idx, spec.sb_base, spec.sb_regs, buffer.entries[dst_idx].scale_b);
+            buffer.pointers[dst_idx] =
+                spec.a_regs || spec.b_regs || spec.sa_regs || spec.sb_regs
+                    ? &buffer.entries[dst_idx]
+                    : nullptr;
+          }
+          ++cache.stats.snapshot_chains;
+          cache.stats.snapshot_bytes += size_t(out - buffer.data.data()) * sizeof(uint32_t);
+          return static_cast<const MatrixInputSnapshot *const *>(buffer.pointers.data());
         };
-        for (unsigned i = 0; i != step.members; ++i) {
-          const mma_plan::SnapshotSpec &spec = step.snapshot[i];
-          buffer.entries[i] = {};
-          copy(spec.a_base, spec.a_regs, buffer.entries[i].a);
-          copy(spec.b_base, spec.b_regs, buffer.entries[i].b);
-          copy(spec.sa_base, spec.sa_regs, buffer.entries[i].scale_a);
-          copy(spec.sb_base, spec.sb_regs, buffer.entries[i].scale_b);
-          buffer.pointers[i] = spec.a_regs || spec.b_regs || spec.sa_regs || spec.sb_regs
-                                   ? &buffer.entries[i]
-                                   : nullptr;
-        }
-        ++cache.stats.snapshot_chains;
-        cache.stats.snapshot_bytes += words * sizeof(uint32_t);
-        return static_cast<const MatrixInputSnapshot *const *>(buffer.pointers.data());
       };
       const auto reap = [&] { return cache.reap_finished_except(active->wf_id()); };
-      if (!inline_only && replay.submit(step.job, step, active, fill, reap)) {
+      const auto record_offload = [&](unsigned count) {
         ++cache.stats.offloads;
-        cache.stats.chained += step.members - 1u;
+        cache.stats.chained += count - 1u;
         // A replay is one asynchronous window; every accepted job is joined.
         if (!offloaded++)
           ++async_execution::stats.windows;
-        async_execution::stats.mma += step.members;
-        async_execution::stats.retired_mma += step.members;
+        async_execution::stats.mma += count;
+        async_execution::stats.retired_mma += count;
+      };
+      if (!inline_only && replay.submit(step.job, step, active, make_fill(0), reap)) {
+        record_offload(step.members);
       } else {
-        // Members precede every step that could observe them, so running the
-        // whole job now is equivalent to its helper. Each reports its own PC.
+        // Members precede every step that could observe them, so running on the
+        // issuer is equivalent. After each inline member of a multi-member job,
+        // retry claiming a helper for the remaining tail so the issuer does not
+        // serialize an entire 4-MFMA batch while helpers become free.
         ++cache.stats.pool_full;
-        for (unsigned i = 0; i != step.members; ++i)
+        for (unsigned i = 0; i != step.members; ++i) {
           if (!run_inline(*step.chain[i], entry_pc + plan->steps[step.member_step[i]].offset))
             return true;
+          if (!inline_only && i + 1 < step.members &&
+              replay.submit(step.job, step, active, make_fill(i + 1), reap,
+                            mma_plan::bounded_wait_enabled(), i + 1)) {
+            record_offload(step.members - (i + 1));
+            break;
+          }
+        }
       }
       advance(step);
       break;
@@ -3244,7 +3298,10 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
     issue_instruction(active);
     return;
   }
-  if (active->wf_size() != wave_size || active->vgpr_msb_mode() != 0 || active->gpr_idx_en() ||
+  const bool wave_size_ok = arch() == IsaFamily::Rdna4
+                                ? (active->wf_size() == 32 || active->wf_size() == 64)
+                                : active->wf_size() == wave_size;
+  if (!wave_size_ok || active->vgpr_msb_mode() != 0 || active->gpr_idx_en() ||
       debug_active() || active->debug_single_step() || active->in_trap_handler() ||
       !plugin_group_->supports_async_instructions()) {
     drain_pending_mma(*active, MmaDrain::Mode);
@@ -3493,7 +3550,8 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     return outcome;
   };
   if (mma_plans_ && !in_replay_ && mma_plan::cross_block_enabled()) [[unlikely]] {
-    if (config_.arch != IsaFamily::Cdna4 || !mma_plan::scalar_only_encoding(words[0])) {
+    if (!async_mma_policy::supported(config_.arch) ||
+        !mma_plan::scalar_only_encoding(config_.arch, words[0])) {
       join_pending_mma_for(*active, *inst);
     } else if (auto *jobs = mma_plans_->pending_if_any(active->wf_id()); jobs && jobs->failure()) {
       report_pending_mma_failure(*active, *jobs);

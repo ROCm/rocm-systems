@@ -162,11 +162,11 @@ TEST(MmaAdmissionCacheTest, KeepsWiderGroupsAndStopsAtANonAdjacentHazard) {
               pc + (hazard ? 16 : 24));
   }
 }
-static_assert(HasAsyncMma<cdna5::Isa> && HasAsyncMma<cdna4::Isa>);
-static_assert(!HasAsyncMma<cdna3::Isa> && !HasAsyncMma<rdna3::Isa> && !HasAsyncMma<rdna4::Isa>);
+static_assert(HasAsyncMma<cdna5::Isa> && HasAsyncMma<cdna4::Isa> && HasAsyncMma<rdna4::Isa>);
+static_assert(!HasAsyncMma<cdna3::Isa> && !HasAsyncMma<rdna3::Isa>);
 static_assert(
     std::is_same_v<
-        decltype(&amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, rdna4::Isa>::step),
+        decltype(&amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, rdna3::Isa>::step),
         bool (amdgpu::ComputeUnitCore::*)()>);
 static_assert(std::is_same_v<
               decltype(&amdgpu::IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, cdna5::Isa>::step),
@@ -177,10 +177,12 @@ static_assert(
     !amdgpu::IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, cdna5::Isa>::supports_async_execution);
 static_assert(amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL,
                                          cdna4::Isa>::supports_async_execution);
+static_assert(amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL,
+                                         rdna4::Isa>::supports_async_execution);
 static_assert(!amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL,
                                           cdna3::Isa>::supports_async_execution);
 static_assert(!amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL,
-                                          rdna4::Isa>::supports_async_execution);
+                                          rdna3::Isa>::supports_async_execution);
 
 TEST(MatrixCoexecutionTest, SelectsOnlySupportedLargeMatrixInstructions) {
   using amdgpu::Operation;
@@ -910,9 +912,9 @@ TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossReg
     std::unique_ptr<Instruction> first(decode_valid(*decoder, c.words.data()));
     SCOPED_TRACE(first->mnemonic());
     SCOPED_TRACE(c.arch);
-    // Only CDNA4 MFMA families currently run on helpers.
-    const bool expect_async =
-        c.arch == rocjitsu::IsaFamily::Cdna4 && amdgpu::async_mma_policy::candidate(*first);
+    // Supported architectures (CDNA4 MFMA and RDNA4 WMMA) run on helpers.
+    const bool expect_async = amdgpu::async_mma_policy::supported(c.arch) &&
+                              amdgpu::async_mma_policy::candidate(*first);
     const size_t suffix = c.words.size() - 2;
     const bool acc = c.mfma && ((c.words[suffix] >> 15) & 1);
     for (unsigned hazard = 0; hazard != 5; ++hazard) {

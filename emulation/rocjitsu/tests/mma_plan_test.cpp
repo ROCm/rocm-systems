@@ -4,8 +4,11 @@
 /// @file mma_plan_test.cpp
 /// @brief Straight-line MMA plan scheduling: profitability, placement and chaining legality.
 
+#include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/mma_plan.h"
 
@@ -26,12 +29,14 @@ constexpr uint64_t kPc = 0x10000;
 
 struct Program {
   std::vector<uint32_t> words;
-  // f16 16x16x32: A and B are four VGPRs, C/D four VGPRs. acc selects the accumulator tuple.
+  // f16 16x16x32: A and B are four VGPRs, C/D four VGPRs (acc < 48) or AccVGPRs (acc >= 48).
   void mfma(unsigned acc, unsigned a = 0, unsigned b = 16) {
+    const bool use_acc = acc >= 48;
+    const uint8_t reg = uint8_t(use_acc ? 4 * (acc - 48) : 64 + 4 * acc);
     const auto w = cdna4::build_vop3p_mfma(
         cdna4::kVMfmaF3216x16x32F16Vop3pMfma,
-        {.vdst = uint8_t(64 + 4 * acc), .src0 = uint16_t(256 + a), .src1 = uint16_t(256 + b),
-         .src2 = uint16_t(256 + 64 + 4 * acc)});
+        {.vdst = reg, .acc_cd = uint8_t(use_acc ? 1 : 0), .src0 = uint16_t(256 + a),
+         .src1 = uint16_t(256 + b), .src2 = uint16_t(256 + reg)});
     words.insert(words.end(), w.begin(), w.end());
   }
   void ds_read_b128(unsigned vdst) {
@@ -66,15 +71,20 @@ struct Program {
     plan::Plan result;
     uint64_t decodes = 0;
     const auto fetch = [&](uint64_t address, plan::Plan::Words &out) {
-      const size_t index = (address - kPc) / 4;
+      const size_t index = (address - entry_pc) / 4;
       for (size_t i = 0; i != out.size(); ++i)
         out[i] = index + i < words.size() ? words[index + i] : 0;
       return true;
     };
-    plan::compile(result, *decoder, fetch, kPc, 256, true, decodes, cross_block);
+    plan::compile(result, *decoder, fetch, entry_pc, 256, true, decodes, cross_block, pack_limit,
+                  min_chains, min_weight);
     return result;
   }
+  uint64_t entry_pc = kPc;
   bool cross_block = false;
+  unsigned pack_limit = plan::batch_pack_limit();
+  unsigned min_chains = plan::batch_min_chains();
+  unsigned min_weight = plan::min_job_weight();
   const plan::Plan &build() { return compiled = compile(); }
 };
 
@@ -115,6 +125,7 @@ TEST(MmaPlanTest, EightAccumulatorsKeepEveryPairingWithoutEarlyJoins) {
 
 TEST(MmaPlanTest, EveryIndependentChainIsItsOwnJob) {
   Program p;
+  p.pack_limit = 1;
   for (unsigned acc = 0; acc != 16; ++acc)
     p.mfma(acc);
   const auto result = p.compile();
@@ -135,11 +146,12 @@ TEST(MmaPlanTest, EveryIndependentChainIsItsOwnJob) {
 
 TEST(MmaPlanTest, ChainsPastTheJobLimitAppendToRunningJobs) {
   Program p;
-  for (unsigned acc = 0; acc != 40; ++acc)
+  p.pack_limit = 1;
+  for (unsigned acc = 0; acc != 72; ++acc)
     p.mfma(acc);
   const auto result = p.compile();
   ASSERT_TRUE(result.accept);
-  ASSERT_EQ(result.steps.size(), 40u);
+  ASSERT_EQ(result.steps.size(), 72u);
   unsigned jobs = 0, members = 0;
   for (const auto &step : result.steps)
     if (step.kind == plan::StepKind::Offload) {
@@ -147,7 +159,7 @@ TEST(MmaPlanTest, ChainsPastTheJobLimitAppendToRunningJobs) {
       members += step.members;
     }
   EXPECT_EQ(jobs, plan::kMaxJobs);
-  EXPECT_EQ(members, 40u);
+  EXPECT_EQ(members, 72u);
   EXPECT_EQ(count(result, plan::StepKind::IssuerMma), 0u);
 }
 
@@ -207,6 +219,7 @@ TEST(MmaPlanTest, LdsReadsBetweenIndependentChainsDoNotEndJobs) {
   // Ten independent accumulators interleaved with LDS reads of other registers
   // all hand off; the reads stay issuer steps inside the block.
   Program p;
+  p.pack_limit = 1;
   for (unsigned acc = 0; acc != 10; ++acc) {
     p.mfma(acc);
     p.ds_read_b128(40 + 4 * (acc % 4));
@@ -363,7 +376,7 @@ TEST(MmaPlanTest, ReapFinishedExceptFreesSiblingHelpersAndPreservesFailure) {
   });
   const plan::Plan p0 = make_synthetic_job_plan(0, 64, &fail_inst);
   const plan::Plan p1 = make_synthetic_job_plan(16, 68, &ok_inst);
-  std::array<uint32_t, plan::kMaxSteps> rwait, fwait;
+  std::array<plan::JobMask, plan::kMaxSteps> rwait, fwait;
   bool filtered = false;
 
   auto &w0 = cache.pending(0, pool);
@@ -419,7 +432,7 @@ TEST(MmaPlanTest, ReusedSlotDropsOutOfInheritedMask) {
   next.first_write[64] = 2;
 
   plan::PendingJobs jobs(&pool);
-  std::array<uint32_t, plan::kMaxSteps> rwait, fwait;
+  std::array<plan::JobMask, plan::kMaxSteps> rwait, fwait;
   bool filtered = false;
   const auto no_fill = [](matrix_coexecution::SnapshotBuffer &) { return nullptr; };
   (void)jobs.begin_block(prev, kPc, matrix_coexecution::SharedPool::kUnlimited, rwait, fwait,
@@ -471,7 +484,7 @@ TEST(MmaPlanTest, BeginBlockSplitsResultAndFactorWaits) {
   next.first_write[0] = 3;
 
   plan::PendingJobs jobs(&pool);
-  std::array<uint32_t, plan::kMaxSteps> rwait, fwait;
+  std::array<plan::JobMask, plan::kMaxSteps> rwait, fwait;
   bool filtered = false;
   const auto no_fill = [](matrix_coexecution::SnapshotBuffer &) { return nullptr; };
   (void)jobs.begin_block(prev, kPc, matrix_coexecution::SharedPool::kUnlimited, rwait, fwait,
@@ -552,6 +565,268 @@ TEST(MmaPlanTest, BorrowClaimReusesWarmHelperBeforeWakingSleeper) {
   go.store(true, std::memory_order_release);
   other.join();
   EXPECT_LE(max_awake, 1u);
+}
+
+TEST(MmaPlanTest, IndependentMfmasBatchBySharedFactor) {
+  // Four A-tile groups of 4 independent MFMAs each (Tensile outer-product pattern):
+  // pack_limit=4 should produce 4 jobs of 4 MFMAs grouped by shared A registers.
+  Program p;
+  p.pack_limit = 4;
+  p.min_chains = 9;
+  for (unsigned tile_a = 0; tile_a != 4; ++tile_a)
+    for (unsigned tile_b = 0; tile_b != 4; ++tile_b)
+      p.mfma(tile_a * 4 + tile_b, tile_a * 4, 16 + tile_b * 4);
+  const auto result = p.compile();
+  ASSERT_TRUE(result.accept);
+  EXPECT_EQ(count(result, plan::StepKind::Offload), 4u);
+  EXPECT_EQ(count(result, plan::StepKind::Chained), 12u);
+  EXPECT_EQ(count(result, plan::StepKind::IssuerMma), 0u);
+  for (unsigned tile_a = 0; tile_a != 4; ++tile_a) {
+    const auto &head = result.steps[tile_a * 4];
+    EXPECT_EQ(head.kind, plan::StepKind::Offload);
+    EXPECT_EQ(head.members, 4u);
+    for (unsigned m = 0; m != 4; ++m)
+      EXPECT_EQ(head.member_step[m], tile_a * 4 + m);
+  }
+}
+
+TEST(MmaPlanTest, IndependentBatchingDoesNotMergeDifferentJoinPoints) {
+  // acc0 is consumed mid-block by ds_write; acc1..acc9 live to block end.
+  // acc0 must not absorb unrelated MFMAs that would delay the ds_write join.
+  Program p;
+  p.pack_limit = 4;
+  p.min_chains = 9;
+  p.mfma(0, 0, 16);
+  p.mfma(1, 0, 20);
+  p.mfma(2, 0, 24);
+  p.ds_write_b128(64); // consumes acc0 (v[64:67])
+  for (unsigned acc = 3; acc != 10; ++acc)
+    p.mfma(acc, 0, 16 + (acc % 4) * 4);
+  const auto result = p.compile();
+  ASSERT_TRUE(result.accept);
+  EXPECT_EQ(result.steps[0].kind, plan::StepKind::Offload);
+  EXPECT_EQ(result.steps[0].members, 1u);
+  EXPECT_EQ(result.steps[3].wait, uint32_t{1} << result.steps[0].job);
+  EXPECT_LT(count(result, plan::StepKind::Offload), 10u);
+}
+
+TEST(MmaPlanTest, IndependentBatchingStartsFreshJobsAfterVectorMemoryWall) {
+  Program p;
+  p.pack_limit = 4;
+  p.min_chains = 9;
+  for (unsigned acc = 0; acc != 8; ++acc)
+    p.mfma(acc, (acc / 4) * 4, 16 + (acc % 4) * 4);
+  p.buffer_load_dwordx4(220);
+  for (unsigned acc = 8; acc != 16; ++acc)
+    p.mfma(acc, (acc / 4) * 4, 16 + (acc % 4) * 4);
+  const auto result = p.compile();
+  ASSERT_TRUE(result.accept);
+  // Pre-wall 8 MFMAs -> 2 jobs of 4; post-wall 8 MFMAs -> 2 fresh jobs of 4.
+  EXPECT_EQ(count(result, plan::StepKind::Offload), 4u);
+  EXPECT_EQ(count(result, plan::StepKind::Chained), 12u);
+  EXPECT_EQ(count(result, plan::StepKind::IssuerMma), 0u);
+}
+
+TEST(MmaPlanTest, PageBoundaryPlanCompilesAcrossPageAndCachesZeroStepReject) {
+  // Block starting 8 bytes before a 4 KiB page boundary still compiles cleanly.
+  Program p;
+  p.entry_pc = kPc + GpuMemory::PAGE_SIZE - 8;
+  for (unsigned acc = 0; acc != 4; ++acc)
+    p.mfma(acc);
+  const auto result = p.compile();
+  ASSERT_TRUE(result.accept);
+  EXPECT_EQ(result.steps.size(), 4u);
+
+  // A 0-step rejected lookup (e.g. step 0 fails fetch inside compile) must cache
+  // `first` so repeated lookups hit cleanly without calling drain_all(drains_evict).
+  matrix_coexecution::SharedPool pool(1);
+  plan::PlanCache cache;
+  InstructionCache icache;
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
+  MockJobInstruction inst("mock_mfma", [](Instruction &, void *) {});
+  const plan::Plan active_plan = make_synthetic_job_plan(0, 64, &inst);
+  std::array<plan::JobMask, plan::kMaxSteps> rwait, fwait;
+  bool filtered = false;
+  auto &w0 = cache.pending(0, pool);
+  (void)w0.begin_block(active_plan, kPc, matrix_coexecution::SharedPool::kUnlimited, rwait, fwait,
+                       filtered);
+  ASSERT_TRUE(w0.submit(0, active_plan.steps[0], nullptr,
+                        [](matrix_coexecution::SnapshotBuffer &) { return nullptr; }));
+
+  const plan::PlanCache::Key key{kPc + 0xff8, 0, 256, true, {}};
+  const plan::Plan::Words first{0xd3ac0040u, 0x04020000u, 0u, 0u};
+  const auto fail_fetch = [](uint64_t, plan::Plan::Words &) { return false; };
+  const auto *p1 = cache.lookup(*decoder, icache, fail_fetch, key, first);
+  ASSERT_NE(p1, nullptr);
+  EXPECT_FALSE(p1->accept);
+  const auto *p2 = cache.lookup(*decoder, icache, fail_fetch, key, first);
+  EXPECT_EQ(p2, p1);
+  EXPECT_EQ(cache.stats.builds, 1u);
+  EXPECT_EQ(cache.stats.hits, 1u);
+  EXPECT_EQ(cache.stats.drains_evict, 0u);
+  EXPECT_TRUE(w0.drain());
+}
+
+TEST(MmaPlanTest, MinJobWeightRejectsUnderweightBlocks) {
+  Program p;
+  p.min_weight = 20; // 4 * f16 (weight 9 each = 36) < 2 * 20 = 40
+  for (unsigned acc = 0; acc != 4; ++acc)
+    p.mfma(acc);
+  EXPECT_FALSE(p.compile().accept);
+  p.min_weight = 18; // 36 >= 2 * 18
+  EXPECT_TRUE(p.compile().accept);
+}
+
+TEST(MmaPlanTest, BorrowCapSkipsUndersizedPoolWhenDispatchWorkersAreActive) {
+  const int saved_reserved =
+      matrix_coexecution::reserved_threads.exchange(9, std::memory_order_relaxed);
+  struct Restore {
+    int value;
+    ~Restore() { matrix_coexecution::reserved_threads.store(value, std::memory_order_relaxed); }
+  } restore{saved_reserved};
+
+  matrix_coexecution::SharedPool pool(7);
+  matrix_coexecution::ScopedOccupancyShard shard;
+  // 8 engines + 4 dispatch workers = 12 active CUs on 16 cores (room = 3 < 6):
+  // do not thrash a tiny 3-helper pool across 12 CUs.
+  shard.occupy(4);
+  EXPECT_EQ(pool.borrow_cap_for(16), 0u);
+  // With ample spare cores (32-core host, room = 19 >= 6), borrowing stays active.
+  EXPECT_EQ(pool.borrow_cap_for(32), 19u);
+  shard.occupy(0);
+  EXPECT_EQ(pool.borrow_cap_for(16), 7u);
+}
+
+TEST(MmaPlanTest, PartialBatchSubmitReportsTailMemberErrorPc) {
+  matrix_coexecution::SharedPool pool(1);
+  MockJobInstruction ok_inst("mock_ok", [](Instruction &, void *) {});
+  MockJobInstruction fail_inst("mock_tail_fail", [](Instruction &, void *) {
+    if (helper_error_sink)
+      *helper_error_sink = {1u, "tail failure"};
+  });
+  plan::Plan p;
+  p.accept = true;
+  p.first_access.fill(plan::Plan::kNoStep);
+  p.first_write.fill(plan::Plan::kNoStep);
+  plan::Step s0;
+  s0.kind = plan::StepKind::Offload;
+  s0.job = 0;
+  s0.offset = 0;
+  s0.members = 2;
+  s0.inst = &ok_inst;
+  s0.chain[0] = &ok_inst;
+  s0.chain[1] = &fail_inst;
+  s0.member_step[0] = 0;
+  s0.member_step[1] = 1;
+  plan::Step s1;
+  s1.kind = plan::StepKind::Chained;
+  s1.offset = 24;
+  s1.inst = &fail_inst;
+  p.steps.push_back(s0);
+  p.steps.push_back(s1);
+  plan::Access access;
+  access.writes.set(64);
+  p.job_accesses.push_back(access);
+
+  plan::PendingJobs jobs(&pool);
+  std::array<plan::JobMask, plan::kMaxSteps> rwait, fwait;
+  bool filtered = false;
+  (void)jobs.begin_block(p, kPc, matrix_coexecution::SharedPool::kUnlimited, rwait, fwait, filtered);
+  ASSERT_TRUE(jobs.submit(
+      0, p.steps[0], nullptr, [](matrix_coexecution::SnapshotBuffer &) { return nullptr; },
+      [] { return false; }, /*bounded_wait=*/false, /*start_member=*/1));
+  ASSERT_TRUE(jobs.drain());
+  ASSERT_TRUE(jobs.failure().has_value());
+  EXPECT_EQ(jobs.failure()->mnemonic, "mock_tail_fail");
+  EXPECT_EQ(jobs.failure()->pc, kPc + 24);
+}
+
+TEST(MmaPlanTest, Rdna4PlanAdmitsWaitAluClauseAndVopdAndSnapshotsWar) {
+  auto decoder = Decoder::create(IsaFamily::Rdna4);
+  GpuMemory memory("mem");
+  InstructionCache icache;
+  uint64_t addr = kPc;
+  const auto emit = [&](const auto &words) {
+    for (uint32_t w : words) {
+      memory.write32(addr, w);
+      addr += 4;
+    }
+  };
+  // Four independent Wave32 FP16 WMMAs (A=v[0:3], B=v[4:7], C/D=v[16..47]),
+  // separated by s_wait_alu, s_clause, and v_dual_mov_b32 :: v_dual_mov_b32
+  // (which overwrites A's v[0:1] -> WAR snapshot instead of join).
+  emit(rdna4::build_vop3p(rdna4::kVWmmaF3216x16x16F16Vop3p,
+                          {.vdst = 16, .src0 = 256 + 0, .src1 = 256 + 4, .src2 = 256 + 16}));
+  emit(rdna4::build_sopp(rdna4::kSWaitAluSopp, {.simm16 = 0x0f9f}));
+  emit(rdna4::build_vop3p(rdna4::kVWmmaF3216x16x16F16Vop3p,
+                          {.vdst = 24, .src0 = 256 + 0, .src1 = 256 + 8, .src2 = 256 + 24}));
+  emit(rdna4::build_sopp(rdna4::kSClauseSopp, {.simm16 = 1}));
+  emit(rdna4::build_vop3p(rdna4::kVWmmaF3216x16x16F16Vop3p,
+                          {.vdst = 32, .src0 = 256 + 0, .src1 = 256 + 4, .src2 = 256 + 32}));
+  emit(rdna4::build_vop3p(rdna4::kVWmmaF3216x16x16F16Vop3p,
+                          {.vdst = 40, .src0 = 256 + 0, .src1 = 256 + 8, .src2 = 256 + 40}));
+  // v_dual_mov_b32 v0, v12 :: v_dual_mov_b32 v1, v13 (overwrites factor A v[0:1]).
+  const std::array<uint32_t, 2> vopd = {
+      (0x32u << 26) | (8u << 22) | (8u << 17) | (0u << 9) | (256u + 12u),
+      (0u << 24) | (0u << 17) | (0u << 9) | (256u + 13u)};
+  emit(vopd);
+  emit(rdna4::build_sopp(rdna4::kSEndpgmSopp, {.simm16 = 0}));
+
+  plan::Plan p;
+  uint64_t decodes = 0;
+  plan::compile(
+      p, *decoder,
+      [&](uint64_t a, plan::Plan::Words &w) {
+        icache.fetch(memory, a, reinterpret_cast<uint8_t *>(w.data()));
+        return true;
+      },
+      kPc, 64, /*has_accvgprs=*/false, decodes, /*tail_snapshot=*/false, /*pack_limit=*/4,
+      /*min_chains=*/4, /*min_weight=*/0, /*wave_size=*/32);
+  ASSERT_TRUE(p.accept);
+  // s_wait_alu, s_clause, and v_dual_* must all stay inside the block as Alu steps.
+  EXPECT_EQ(p.steps.size(), 7u);
+  EXPECT_EQ(p.alu, 3u);
+  EXPECT_EQ(p.ordinary, 0u);
+  // Lightweight RDNA4 packing merges the 4 shared-factor chains into 1 job,
+  // and v_dual_mov overwriting v[0:1] is resolved by WAR snapshotting (no join).
+  EXPECT_EQ(p.chains, 1u);
+  EXPECT_EQ(p.chained, 3u);
+  EXPECT_TRUE(p.steps[0].snapshots);
+  EXPECT_EQ(p.steps[6].wait, 0u);
+}
+
+TEST(MmaPlanTest, Rdna4Wave64AndSwmmacFootprintsAndScalarFilter) {
+  auto decoder = Decoder::create(IsaFamily::Rdna4);
+  // Wave64 halves RDNA4 WMMA VGPR widths: v[0:3] (4 regs), not v[0:7] (8 regs).
+  const auto wmma_words = rdna4::build_vop3p(
+      rdna4::kVWmmaF3216x16x16F16Vop3p,
+      {.vdst = 60, .src0 = 256 + 0, .src1 = 256 + 2, .src2 = 256 + 60});
+  std::unique_ptr<Instruction> wmma(decode_valid(*decoder, wmma_words.data()));
+  EXPECT_FALSE(async_mma_policy::footprint(*wmma, 64, false, 32).has_value());
+  const auto w64_fp = async_mma_policy::footprint(*wmma, 64, false, 64);
+  ASSERT_TRUE(w64_fp.has_value());
+  EXPECT_EQ(w64_fp->writes.count(), 4u);
+  EXPECT_TRUE(w64_fp->writes.test(60) && w64_fp->writes.test(63));
+  EXPECT_TRUE(w64_fp->reads.test(0) && w64_fp->reads.test(1) && !w64_fp->reads.test(4));
+
+  // Sparse SWMMAC reads and writes its tied accumulator vdst.
+  const auto swmmac_words = rdna4::build_vop3p(
+      rdna4::kVSwmmacF3216x16x32Fp8Fp8Vop3p,
+      {.vdst = 16, .src0 = 256 + 0, .src1 = 256 + 4, .src2 = 256 + 8});
+  std::unique_ptr<Instruction> swmmac(decode_valid(*decoder, swmmac_words.data()));
+  const auto sw_fp = async_mma_policy::footprint(*swmmac, 64, false, 32);
+  ASSERT_TRUE(sw_fp.has_value());
+  EXPECT_EQ(sw_fp->writes.count(), 8u);
+  EXPECT_TRUE(sw_fp->reads.test(16) && sw_fp->reads.test(23));
+  EXPECT_TRUE(sw_fp->reads.test(8));
+
+  // RDNA4 scalar_only_encoding must reject MODE-modifying ops (fp16_ovfl).
+  const auto round_mode = rdna4::build_sopp(rdna4::kSRoundModeSopp, {.simm16 = 0});
+  const auto setreg = rdna4::build_sopk(rdna4::kSSetregB32Sopk, {.simm16 = 0, .sdst = 0});
+  const auto s_add = rdna4::build_sop2(rdna4::kSAddF32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 2});
+  EXPECT_FALSE(plan::scalar_only_encoding(IsaFamily::Rdna4, round_mode[0]));
+  EXPECT_FALSE(plan::scalar_only_encoding(IsaFamily::Rdna4, setreg[0]));
+  EXPECT_TRUE(plan::scalar_only_encoding(IsaFamily::Rdna4, s_add[0]));
 }
 
 } // namespace
