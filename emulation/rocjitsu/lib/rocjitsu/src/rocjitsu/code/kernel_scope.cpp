@@ -10,6 +10,7 @@
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/target_registry.h"
 #include "util/diagnostic.h"
@@ -209,6 +210,10 @@ const Instruction *KernelOwnership::instruction_at(size_t kernel_index, uint64_t
   return nullptr;
 }
 
+static bool has_descriptor_sgpr_aliases(IsaFamily arch) {
+  return arch == IsaFamily::Cdna3 || arch == IsaFamily::Cdna4;
+}
+
 /// Prove that a setpc pair contains a scoped call continuation on every incoming
 /// path. Syntactic return matching is sufficient for liveness edges, but cannot
 /// establish ownership: hardware entries start with unknown registers, and any
@@ -253,10 +258,31 @@ proved_call_return_offsets(std::span<BasicBlock *const> scope, std::span<const u
   }
   if (return_registers.empty())
     return ProvedReturns{};
+  const bool descriptor_aliases = has_descriptor_sgpr_aliases(arch);
+  const uint32_t alias_end = descriptor_aliases ? cdna3::sgpr_alias_end(kernel_sgpr_count) : 0;
   std::vector<FlowState> states(scope.size());
   for (size_t position = 0; position < scope.size(); ++position) {
     BasicBlock &block = *scope[position];
     FlowState &state = states[position];
+    const auto invalidate_special_alias = [&](RegClass cls) {
+      if (!descriptor_aliases)
+        return;
+      uint16_t base = 0;
+      if (cls == RegClass::VCC)
+        base = cdna3::vcc_base(alias_end);
+      else if (cls == RegClass::FLAT_SCRATCH)
+        base = cdna3::flat_scratch_base(alias_end);
+      else
+        return;
+      // A selector may name only one half. Killing the whole alias is safe for
+      // this proof, including conditional writes and implicit definitions.
+      for (size_t sgpr = base; sgpr < static_cast<size_t>(base) + 2; ++sgpr) {
+        if (sgpr < state.killed.size())
+          state.killed.set(sgpr);
+        if (sgpr != 0 && sgpr - 1 < state.killed.size())
+          state.killed.set(sgpr - 1);
+      }
+    };
     auto add_successor = [&](const BasicBlock *successor) {
       const std::unordered_map<const BasicBlock *, size_t>::const_iterator found =
           positions.find(successor);
@@ -275,6 +301,33 @@ proved_call_return_offsets(std::span<BasicBlock *const> scope, std::span<const u
         if (ref.index != 0)
           state.killed.set(ref.index - 1);
       });
+      if (descriptor_aliases) {
+        // Ordinary def/use intentionally projects selector-encoded specials
+        // out. Return ownership instead needs their physical SGPR aliases.
+        for (int destination = 0; destination < instruction.num_dst_operands(); ++destination) {
+          const Operand *operand = instruction.dst_operand(destination);
+          if (!operand)
+            continue;
+          const std::optional<RegisterRef> ref = operand->to_register_ref();
+          if (ref)
+            invalidate_special_alias(ref->cls);
+          const std::optional<RegClass> special = operand->to_special_reg_class();
+          if (special)
+            invalidate_special_alias(*special);
+          if (operand->has_register_selector()) {
+            const int selector = operand->encoding_value();
+            if (selector >= static_cast<int>(amdgpu::kVccSelectorFirst) &&
+                selector <= static_cast<int>(amdgpu::kVccSelectorLast))
+              invalidate_special_alias(RegClass::VCC);
+            else if (selector >= static_cast<int>(amdgpu::kFlatScratchSelectorFirst) &&
+                     selector <= static_cast<int>(amdgpu::kFlatScratchSelectorLast))
+              invalidate_special_alias(RegClass::FLAT_SCRATCH);
+          }
+        }
+        RegisterSet implicit_defs;
+        instruction.implicit_defs(implicit_defs);
+        implicit_defs.for_each([&](RegisterRef ref) { invalidate_special_alias(ref.cls); });
+      }
     }
     const Instruction *term = block.terminator();
     if (!term)
@@ -292,16 +345,9 @@ proved_call_return_offsets(std::span<BasicBlock *const> scope, std::span<const u
       call_continuation = call.continuation;
       // Only ordinary SGPR destinations are tracked. Special scalar selectors
       // do not have the lane-wise def semantics needed for this proof.
-      // gfx942 also aliases VCC/FLAT_SCRATCH into the descriptor's SGPR block.
-      // Their selector-based writes do not appear as ordinary SGPR defs, so
-      // this proof cannot establish preservation of an aliased return link.
-      const bool aliases_special =
-          arch == IsaFamily::Cdna3 &&
-          cdna3::sgpr_pair_overlaps_vcc_or_flat_scratch(kernel_sgpr_count, call.return_sreg);
       const std::unordered_map<const BasicBlock *, size_t>::const_iterator continuation =
           positions.find(call.continuation);
-      if (!aliases_special && call.return_sreg + 1u < pair_positions.size() &&
-          continuation != positions.end() &&
+      if (call.return_sreg + 1u < pair_positions.size() && continuation != positions.end() &&
           InstDefUse(*term, wave_size).defs.contains({RegClass::SGPR, call.return_sreg, 2}))
         state.saved_link = {pair_positions[call.return_sreg], continuation->second};
       add_successor(call.callee);
@@ -712,14 +758,14 @@ KernelOwnership::build(std::shared_ptr<const AmdGpuCodeObject> source_handle,
           // Recovery has no descriptor allocation with which to model the
           // special registers' physical backing. Its producer and consumer
           // must both name ordinary, unaliased pairs in this owner's layout.
-          if (architecture->family == IsaFamily::Cdna3 &&
+          if (has_descriptor_sgpr_aliases(architecture->family) &&
               (fixup.source_builder_sreg + 1u >= REGISTER_SET_ALLOCATABLE_SGPRS ||
                fixup.source_call_sreg + 1u >= REGISTER_SET_ALLOCATABLE_SGPRS ||
                cdna3::sgpr_pair_overlaps_vcc_or_flat_scratch(*kernel_sgpr_count,
                                                              fixup.source_builder_sreg) ||
                cdna3::sgpr_pair_overlaps_vcc_or_flat_scratch(*kernel_sgpr_count,
                                                              fixup.source_call_sreg)))
-            return reject("gfx942 PC ownership requires unaliased ordinary SGPR pairs");
+            return reject("recovered PC ownership requires unaliased ordinary SGPR pairs");
           const BasicBlock *producer = block_for_offset(index, fixup.source_getpc_offset);
           if (!producer)
             return reject("recovered target lacks incoming-path proof");
