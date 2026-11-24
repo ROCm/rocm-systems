@@ -88,6 +88,11 @@ file(GLOB RAS_DECODE_SOURCES "${RAS_DECODE_SRC_DIR}/*.c")
 # Absolute path: a bare "main.c" never matches the GLOB'd paths and would leak
 # a second main() into libamd_smi.
 list(REMOVE_ITEM RAS_DECODE_SOURCES "${RAS_DECODE_SRC_DIR}/main.c")
+foreach(ras_decode_src IN LISTS RAS_DECODE_SOURCES)
+    if(ras_decode_src MATCHES "/main\\.c$")
+        message(FATAL_ERROR "ras-decode main.c must not be built into libamd_smi")
+    endif()
+endforeach()
 
 set(SRC_LIST ${SRC_LIST} ${RAS_DECODE_SOURCES})
 set(INC_LIST ${INC_LIST} ${RAS_DECODE_INCLUDES})
