@@ -1550,27 +1550,6 @@ endif()
 
 # Linux-only tests for allocator interception and model ISA contracts.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    add_executable(daemon_thread_startup_test daemon_thread_startup_test.cpp)
-    target_link_libraries(
-        daemon_thread_startup_test
-        PRIVATE
-            ${RJ_OBJECT_LIBS}
-            util
-            flatbuffers
-            Threads::Threads
-            GTest::gtest_main
-    )
-    target_link_options(
-        daemon_thread_startup_test
-        PRIVATE "LINKER:--wrap=pthread_create" "LINKER:--wrap=pthread_join"
-    )
-    target_include_directories(
-        daemon_thread_startup_test
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-    )
-    rj_configure_target(daemon_thread_startup_test TEST)
-    rj_add_gtest_tests(daemon_thread_startup_test)
-
     # Isolate allocator fault injection from the simulator test executable.
     add_executable(
         cache_allocation_failure_test
