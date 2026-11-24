@@ -535,7 +535,9 @@ add_executable(
     cdna5_architecture_test.cpp
     cdna5_cluster_test.cpp
     cdna5_dispatch_memory_test.cpp
+    cdna5_encoded_fields_test.cpp
     cdna5_execution_test.cpp
+    cdna_ds_encoded_fields_test.cpp
     numeric_encoding_regression_test.cpp
     older_conversion32_test.cpp
     older_conversion64_test.cpp
@@ -553,6 +555,7 @@ add_executable(
     sdma_packet_processor_test.cpp
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
+    ds_address_encoded_fields_test.cpp
     ds_memory_snapshot_test.cpp
     rdna1_memory_test.cpp
     ds_gws_test.cpp
@@ -585,6 +588,7 @@ add_executable(
     rdna4_dot_dpp_test.cpp
     rdna1_valu_test.cpp
     rdna4_memory_test.cpp
+    rdna4_encoded_fields_test.cpp
     readlane_selector_test.cpp
     pc_extension_test.cpp
     pc_fetch_test.cpp
@@ -1360,10 +1364,12 @@ target_link_libraries(
 rj_configure_target(rocjitsu_text_edit_tests PRIVATE_INCLUDES WARNINGS)
 rj_add_gtest_tests(rocjitsu_text_edit_tests)
 
-# Host-only Drop recipe tests use shared DBI replacement and model ISA providers.
+# Host-only FI recipe tests use shared DBI replacement and model ISA providers.
 add_executable(
     rocjitsu_fault_injection_tests
     patch/fault_injection/drop_barrier_test.cpp
+    patch/fault_injection/lds_wrong_address_test.cpp
+    patch/fault_injection/cdna_lds_wrong_address_test.cpp
 )
 target_include_directories(
     rocjitsu_fault_injection_tests
@@ -1410,6 +1416,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(
         rocjitsu_fault_mutation_cli_tests
         patch/fault_injection/mutation_cli_test.cpp
+        patch/fault_injection/lds_cli_test.cpp
+        patch/fault_injection/cdna_lds_cli_test.cpp
     )
     target_include_directories(
         rocjitsu_fault_mutation_cli_tests

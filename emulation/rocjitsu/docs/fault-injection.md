@@ -1,8 +1,8 @@
 # Fault injection
 
 The fault-injection library creates deliberately modified AMDGPU code objects
-for experiments with synchronization failures. It runs offline on the host:
-callers supply an image, select a qualified operation, and receive a mutant
+for experiments with synchronization and LDS address failures. It runs offline
+on the host: callers supply an image, select a qualified operation, and receive a mutant
 image or a typed error. It neither initializes HSA nor dispatches GPU work.
 
 The internal C++ library and `rj_code_mutate` CLI perform the same mutation.
@@ -12,8 +12,9 @@ There is no persistent selection, manifest, or replay-bundle format.
 
 ## Architecture and lifetime
 
-This flow shows the current complete-barrier Drop path and its shared DBI
-transaction boundary:
+This flow shows the complete-barrier Drop path and its shared DBI transaction
+boundary. The LDS recipe uses the same source facts and a fresh Instrumentor
+fork, with its own instruction qualification and address replacement:
 
 ```mermaid
 flowchart TD
@@ -29,15 +30,16 @@ flowchart TD
     Transaction --> Mutant[Owned mutant ELF in result.image]
 ```
 
-[`FaultMutationContext`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h)
+[`FaultMutationContext`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.h)
 owns one immutable copy of the input. Retain it in the input/session owner until
 all discovery, selection, and apply operations finish. One context can serve
 many requests for that original image; each apply produces an independent
 mutant. A session handling several inputs keeps a separate context for each.
 To analyze or mutate an emitted image, create a new context from its bytes.
 
-The context supplies target, section, and owner facts. It caches the fixed
-all-entry ownership analysis and per-kernel qualification once. Full-text
+The context supplies target, section, and owner facts independently of any
+barrier. It caches the fixed all-entry ownership analysis; Drop separately
+caches per-kernel barrier qualification. Full-text
 structural facts belong to a retained `Instrumentor` seed: references in
 unreachable code still matter to byte editing. Each apply forks a fresh request
 batch that shares those immutable facts and repeats request-specific validation.
@@ -45,10 +47,15 @@ The batches have independent queues and patch attempts; they do not inherit
 previous mutations. Facts are reusable for the same immutable source and analysis
 profile, not arbitrary new roots or broader helper ownership.
 Selections expire with their source context and cannot be replayed in another
-context, even if its input bytes are identical. Their kind, owner, and barrier
-facts are value snapshots exposed through const accessors; they remain readable
-after expiry but cannot authorize another mutation. The in-process API does not
-require callers to supply a target or content digest.
+context, even if its input bytes are identical. Drop selections expose kind,
+owner, and barrier snapshots; LDS selections expose kind and site snapshots.
+Those snapshots remain readable after expiry but cannot authorize a mutation.
+The in-process API does not require callers to supply a target or content digest.
+
+The common source context and admission live in `fault_mutation_context.{h,cpp}`.
+The Drop and LDS recipes live in `drop_barrier.{h,cpp}` and
+`lds_wrong_address.{h,cpp}`, respectively. Each recipe includes the common
+context header; LDS callers include `lds_wrong_address.h`.
 
 The library reuses the ISA registry and concrete decoder, `BasicBlock` and
 `KernelScopeSpec`, descriptor scanning, instruction builders, and
@@ -75,6 +82,11 @@ Generic mechanics and recipe semantics have separate responsibilities:
   as the checked-edit transaction, including facts from unreachable text.
   Recipe tests verify output semantics; emission does not run a second
   FI domain validator.
+- The LDS frontend checks a supported instruction and register allocation,
+  then uses a target-specific ISA helper, such as the
+  [RDNA4 source-preserving helper](../lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/rdna4/encoded_fields.h)
+  to change only its encoded address field. It sends the complete replacement
+  through the same transaction; the helper does not choose a fault or a register.
 - [`Instrumentor`](../lib/rocjitsu/src/rocjitsu/code/patch/instrumentor.cpp)
   owns both replacement transactions and observational instrumentation. Each
   selected barrier member becomes a branch to an appended cave containing
@@ -93,13 +105,14 @@ Generic mechanics and recipe semantics have separate responsibilities:
 | Feature | Status and main boundary | References |
 | --- | --- | --- |
 | Complete barrier Drop | Implemented for the target/wave forms below. Removes one logical barrier: an ordered two-member signal/wait pair or one true full-barrier instruction. A half-pair is never a singleton. | [`StaticBarrier` / family policy](../lib/rocjitsu/src/rocjitsu/code/analysis/static_barriers.h), [qualification](../lib/rocjitsu/src/rocjitsu/code/analysis/static_barriers.cpp), [analysis regressions](../tests/analysis/static_barriers_test.cpp), [Drop regressions](../tests/patch/fault_injection/drop_barrier_test.cpp) |
-| Exact and logical-ordinal selection | Implemented. Exact kernel name chooses one inventory; an exact context-bound handle takes precedence over the zero-based logical ordinal. Invalid exact requests fail without fallback. Default ordinal zero deterministically chooses the first barrier in first-member source order; there is no race ranking or legacy physical-index adapter. | [`DropBarrierSelector`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h), [`select_drop_barrier`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp), [selection regressions](../tests/patch/fault_injection/drop_barrier_test.cpp) |
-| Multiple kernels in one text section | Limited support for independent sibling kernels. Discovery checks all entries before exposing one exact kernel's inventory; shared blocks, calls, aliased entries, and unresolved owners are rejected. | [`FaultMutationContext`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h), [ownership analysis](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp), [sibling preservation tests](../tests/patch/fault_injection/drop_barrier_test.cpp) |
+| LDS wrong address | Implemented for gfx1200/gfx1201 wave32/wave64 `ds_store_b32`/`ds_load_b32`, gfx942/gfx950 wave64 `ds_write_b32`/`ds_write_b128`, and gfx1250 wave32 `ds_store_b32`/`ds_load_b32` in the direct, independently owned CFG profile. Replaces only the address VGPR with an explicitly supplied, distinct, allocated VGPR. Other LDS forms and targets remain follow-up work. | [LDS API](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h), [library tests](../tests/patch/fault_injection/lds_wrong_address_test.cpp), [CLI tests](../tests/patch/fault_injection/lds_cli_test.cpp) |
+| Exact and logical-ordinal selection | An exact kernel name chooses one inventory; an exact context-bound handle takes precedence over the zero-based logical ordinal. Invalid exact requests fail without fallback. Ordinal zero chooses the first barrier by first-member offset, or the first LDS instruction by source offset. There is no race ranking or legacy physical-index adapter. | [`DropBarrierSelector`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h), [`select_drop_barrier`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp), [`LdsSelector`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h) and [`select_lds_wrong_address`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.cpp), [selection regressions](../tests/patch/fault_injection/drop_barrier_test.cpp) |
+| Multiple kernels in one text section | Limited support for independent sibling kernels. Discovery checks all entries before exposing one exact kernel's inventory; shared blocks, calls, aliased entries, and unresolved owners are rejected. | [`FaultMutationContext`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.h), [ownership analysis](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.cpp), [sibling preservation tests](../tests/patch/fault_injection/drop_barrier_test.cpp) |
 | Shared DBI instruction replacement | Consumed through `InstrumentationKind::ReplaceWithInst`. One transaction replaces complete source instructions through trampolines. Drop supplies one 4-byte NOP body for each qualified 4-byte barrier member. This does not widen observational trampoline-anchor admission. | [Instrumentor contract](../lib/rocjitsu/src/rocjitsu/code/patch/instrumentor.h), [DBI design](dbi-design.md), [transaction tests](../tests/patch/checked_text_edits_test.cpp), [replacement tests](../tests/patch/instrumentor_replacement_test.cpp) |
-| Offline CLI | Implemented: list current-input sites and emit one complete Drop using the same selector and library. | [usage](#command-line-usage), [frontend](../tools/rj_code_mutate.cpp), [integration tests](../tests/patch/fault_injection/mutation_cli_test.cpp) |
+| Offline CLI | Lists current-input sites and emits one complete Drop or one supported LDS address mutation using the same library. | [usage](#command-line-usage), [frontend](../tools/rj_code_mutate.cpp), [integration tests](../tests/patch/fault_injection/mutation_cli_test.cpp) |
 | Persistent selection files and replay bundles | Not provided; no durable replay format is committed. | — |
 | Helper, indirect-flow and firmware-preload ownership | Planned extensions; these inputs are not admitted by the current ownership profile. | — |
-| Other mutation recipes and composition | Planned. Barrier movement, address/order/scope changes, grouped or destructive partial Drop, and multi-mutation composition are not implemented here. | — |
+| Other mutation recipes and composition | Planned. Barrier movement, other address/order/scope changes, grouped or destructive partial Drop, and multi-mutation composition are not implemented here. | — |
 | Multiple text sections or dynamic occurrence selection | Unsupported. | — |
 
 A caller uses `discover_drop_barriers` with an exact kernel name to obtain an
@@ -133,6 +146,15 @@ targets and ten target/wave combinations:
 | CDNA3 | gfx942 | 64 | Full `s_barrier` singleton, workgroup |
 | CDNA4 | gfx950 | 64 | Full `s_barrier` singleton, workgroup |
 
+The table above describes Drop only. `lds_wrong_address_capabilities()` separately
+reports linked LDS profiles: gfx1200/gfx1201 wave32/wave64 `ds_store_b32`/`ds_load_b32`,
+gfx942/gfx950 wave64 `ds_write_b32`/`ds_write_b128`, and gfx1250 wave32
+`ds_store_b32`/`ds_load_b32`, restricted to independently owned direct CFGs.
+CDNA GDS encodings are excluded; the ACC data selector is preserved.
+A target is omitted if its decoder or binding is not linked. Other targets,
+waves, and DS forms are not advertised by this recipe; the Drop table does not
+imply LDS support.
+
 The [host regression matrix](../tests/patch/fault_injection/drop_barrier_test.cpp) covers
 discovery, exact/ordinal selection, emission, concrete decoding, and preservation
 for these rows. RDNA3 has its own instruction encodings and descriptor-selected
@@ -165,7 +187,8 @@ comes from source inspection; it does not qualify physical GPU execution.
 
 These are host transformation capabilities. Neither the listing nor a successful
 mutation establishes GPU execution or detector qualification.
-`DropBarrierResult` leaves those evidence states `Unverified`. A removed barrier
+`DropBarrierResult` leaves those evidence states `Unverified`; `LdsResult` does
+not itself contain execution or detector evidence fields. A removed barrier
 may be redundant, unreachable in a particular run, or insufficient to cause a
 race; successful execution alone also does not establish a detector finding.
 
@@ -198,8 +221,20 @@ text. Non-aliasing unselected sections are preserved; their executable flag alon
 does not imply another text section. Additional allocated executable sections
 must decode completely and satisfy the shared source checks before discovery
 can return an inventory. Detailed admission and diagnostics are in
-the [frontend](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp)
+the [source context](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.cpp)
 and [shared Instrumentor contract](../lib/rocjitsu/src/rocjitsu/code/patch/instrumentor.h).
+
+The LDS inventory contains complete, reachable instructions of the admitted forms in
+the kernel; clause members are not advertised. It does not require a
+barrier or successful Drop qualification. The replacement register must be
+explicit, representable in the eight-bit encoded address field, different from
+the original, and inside the entry descriptor's allocated ordinary VGPR window.
+For CDNA3/4 this window ends at the accumulator allocation base when that base
+is below the total allocation. These checks do not prove that the register has
+been initialized or holds a valid LDS address at runtime: the caller must arrange
+both. Static mutation affects every
+execution of the selected instruction. Other target/wave/form and shared-owner
+profiles remain follow-up work.
 
 Barrier qualification is all-or-nothing for a kernel's analyzed reachable
 scope: an unsupported form or incomplete barrier rejects that kernel's entire
@@ -308,7 +343,7 @@ emulation/rocjitsu/build/tools/rj_code_mutate --capabilities
 ```
 
 List complete logical barriers for one exact kernel entry, then create a new
-mutant file:
+mutant file. `DropBarrier` is the default kind:
 
 ```bash
 emulation/rocjitsu/build/tools/rj_code_mutate \
@@ -318,7 +353,66 @@ emulation/rocjitsu/build/tools/rj_code_mutate \
   --ordinal 0 --output mutant.hsaco
 ```
 
-For a `gfx1250` mutant that meets ConSan's native LDS admission, fresh
+The `--address-vgpr` argument is the encoded 8-bit selector, not a physical VGPR
+number. Listing reports `address_bank`; for gfx1250, allocation is checked for
+`256 * address_bank + address-vgpr`. The caller must initialize that full VGPR
+with the intended runtime address: bank 1 with selector 6 reads v262, so initialize
+v262. The mutation preserves the bank and does not initialize register values.
+
+To list the supported LDS instructions in a gfx1200 or gfx1201 wave32 or wave64 kernel and mutate one,
+choose an address register whose runtime value the caller has initialized. Here
+`v6` is an example only: it must differ from the selected instruction's address
+register and fall within the kernel descriptor's allocated VGPR window.
+
+```bash
+emulation/rocjitsu/build/tools/rj_code_mutate \
+  --input original.hsaco --kernel my_kernel --kind LdsWrongAddress --list
+emulation/rocjitsu/build/tools/rj_code_mutate \
+  --input original.hsaco --kernel my_kernel --kind LdsWrongAddress \
+  --ordinal 0 --address-vgpr 6 --output lds-mutant.hsaco
+```
+
+Alternatively, copy an `exact` offset from that listing into `lds_exact` and
+use it in place of the ordinal. An invalid exact offset never falls back:
+
+```bash
+emulation/rocjitsu/build/tools/rj_code_mutate \
+  --input original.hsaco --kernel my_kernel --kind LdsWrongAddress \
+  --exact "$lds_exact" --address-vgpr 6 --output lds-exact-mutant.hsaco
+```
+
+The equivalent library flow retains the context for discovery, selection, and
+application. Handle the returned typed error at each failure; on success,
+`result.value().image` owns the mutant ELF:
+
+```cpp
+#include "rocjitsu/code/patch/fault_injection/lds_wrong_address.h"
+
+using namespace rocjitsu;
+
+void mutate_lds(std::span<const uint8_t> image) {
+  FaultMutationContext context(image);
+  FaultMutationError error;
+  FailureOr<LdsInventory> inventory = discover_lds_wrong_address(context, "my_kernel", error);
+  if (inventory.failed())
+    return; // Handle error.
+  LdsSelector selector = {.exact = std::nullopt, .ordinal = 0};
+  FailureOr<LdsSelection> selection = select_lds_wrong_address(inventory.value(), selector, error);
+  if (selection.failed())
+    return; // Handle error.
+  FailureOr<LdsResult> result = apply_lds_wrong_address(context, selection.value(), 6u, error);
+  if (result.failed())
+    return; // Handle error, including an unallocated or unchanged v6.
+  // Consume result.value().image before leaving this example.
+}
+```
+
+To select an exact library handle instead, put a previously obtained
+`LdsSelection` in `LdsSelector::exact` and call `select_lds_wrong_address` on
+an inventory from the same context and entry. Exact takes precedence over the
+ordinal; a foreign or expired handle fails without fallback.
+
+For a `gfx1250` Drop mutant that meets ConSan's native LDS admission, fresh
 preparation consumes `mutant.hsaco` as its new original image:
 
 ```bash
@@ -333,21 +427,24 @@ and capture bindings and links to the existing execution/analysis steps.
 
 `--kernel` requires the exact descriptor-derived spelling. After shared image
 analysis succeeds, an unknown name reports the descriptor entries in its
-diagnostic. Those names do not promise that each entry passes barrier
-qualification.
+diagnostic. Those names do not promise that each entry passes the selected
+recipe's qualification.
 
-`DropBarrier` is currently the only kind and is also the default. Each listing
-line includes the zero-based logical `ordinal`, `exact` first-member byte offset
-relative to `.text`, concrete target, section index, form, ID, scope, and ordered
-`members=offset:size,...`. A singleton has one member; a split pair has two.
-Coordinates describe only this input and exact entry. They are not reusable
-handles for another image or legacy physical instruction indices.
+For `DropBarrier`, each listing line includes the zero-based logical `ordinal`,
+`exact` first-member byte offset relative to `.text`, concrete target, section
+index, form, ID, scope, and ordered `members=offset:size,...`. A singleton has
+one member; a split pair has two. `LdsWrongAddress` listing lines contain
+`ordinal`, the instruction's `.text`-relative `exact` byte offset, its original
+`address_vgpr`, `address_bank`, target, and form. Coordinates describe only this input and exact entry;
+they are not reusable handles for another image or legacy physical indices.
 
-Emission redirects each selected member through a NOP trampoline. The mutant's
-text and ELF layout can grow, and descriptor-relative entry fields can change.
-Reparse the output and list its sites again before selecting another mutation.
+Drop emission redirects each selected member through a NOP trampoline. LDS
+emission redirects the selected instruction through a trampoline containing the
+replacement instruction. The mutant's text and ELF layout can grow, and
+descriptor-relative entry fields can change. Reparse the output and list its
+sites again before selecting another mutation.
 
-Discovery rejects trap-handler forms (-2 on RDNA4/CDNA5 and -4 on CDNA5)
+Drop discovery rejects trap-handler forms (-2 on RDNA4/CDNA5 and -4 on CDNA5)
 instead of assigning them a logical ordinal, including when an admitted user
 barrier follows them. CDNA5 cluster ID -3 remains admitted subject to the
 dispatch assumptions described above; listing or mutation does not establish
@@ -356,10 +453,11 @@ that cluster semantics are active.
 Use `--exact TEXT-OFFSET` to resolve that coordinate into a context-bound library
 selection. Exact takes precedence over `--ordinal`, including an out-of-range
 ordinal; invalid exact requests fail without fallback. Without either selector,
-ordinal zero selects the first complete barrier. Numbers accept unsigned decimal
-or `0x` hexadecimal. `--target gfx1250`, if supplied, asserts the parsed identity
-and never selects a different decoder. Input ABI and wave admission are the
-library's shared DBI checks, without another CLI version gate.
+ordinal zero selects the first complete barrier or supported LDS instruction in
+source order. Numbers accept unsigned decimal or `0x` hexadecimal.
+`--target gfx1250`, if supplied, asserts the parsed identity and never selects a
+different decoder. Input ABI and wave admission are the library's shared DBI
+checks, without another CLI version gate.
 
 The input must be a regular extracted code-object file of 1 through 256 MiB.
 The CLI refuses host executables, bundles, archives, relocatable objects, and
@@ -390,25 +488,28 @@ An invalid `--exact` request has an explicitly known coordinate and reports
 `code=InvalidParameters offset=N`, including when the requested `.text` byte
 coordinate is zero. Such requests never fall back to an ordinal.
 
-Successful mutation prints the kind, concrete target, exact coordinate,
-logical/member counts and output byte count to stdout. It also prints each
-returned library assumption to stderr, prefixed by `rj_code_mutate: assumption:`,
-including convergence and execution-qualification limits and the clustered
-dispatch requirement when applicable. Failure to write these assumptions
-returns status 3 before printing a success summary. The CLI emits only the
-mutant file and does not load HSA or a capture plugin. Mutation success and the
-capability listing make no execution or detector qualification claim.
+Successful mutation prints the kind, concrete target, exact coordinate, logical
+count and output byte count to stdout. Drop also reports the member count and
+prints returned library assumptions to stderr, prefixed by
+`rj_code_mutate: assumption:`. These include convergence and execution limits
+and the clustered dispatch requirement when applicable. Failure to write Drop
+assumptions returns status 3 before printing a success summary. LDS reports its
+replacement `address_vgpr`; its runtime preconditions are described above. The
+CLI emits only the mutant file and does not load HSA or a capture plugin.
+Mutation success and the capability listing make no execution or detector
+qualification claim.
 
-The [CLI tests](../tests/patch/fault_injection/mutation_cli_test.cpp) exercise all ten
-rows above using the built executable, compare library and CLI bytes, decode
-selected members independently, reparse the mutant and check unchanged bytes,
-sibling kernels, deterministic repeat output and rejection/I/O paths. The
+The [Drop CLI tests](../tests/patch/fault_injection/mutation_cli_test.cpp) exercise
+all ten Drop rows above using the built executable. The [LDS CLI tests](../tests/patch/fault_injection/lds_cli_test.cpp)
+cover the bounded LDS profile. These tests compare library and CLI bytes, decode
+selected instructions, reparse mutants and check preservation and rejection
+paths; the Drop tests also cover sibling kernels and I/O paths. The
 symbol-boundary test checks the actual executable for runtime and execution
 provider dependencies. To run the focused suites:
 
 ```bash
 ctest --test-dir emulation/rocjitsu/build --show-only \
-  -R 'FaultMutationCli|FaultDropBarrier|CheckedTextEdits'
+  -R 'FaultMutationCli|FaultDropBarrier|FaultLds|CdnaLds|CheckedTextEdits'
 ctest --test-dir emulation/rocjitsu/build --output-on-failure --no-tests=error \
-  -R 'FaultMutationCli|FaultDropBarrier|CheckedTextEdits'
+  -R 'FaultMutationCli|FaultDropBarrier|FaultLds|CdnaLds|CheckedTextEdits'
 ```
