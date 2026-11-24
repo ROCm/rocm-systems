@@ -595,11 +595,15 @@ TEST(ExecutionThreadBudgetTest, OlderCdnaPresetsUseDispatchWorkers) {
     ASSERT_TRUE(resolve_valid_execution_threads(serial, settings, 64));
     EXPECT_EQ(serial.engines, 1u);
     EXPECT_EQ(serial.dispatch, (std::vector<uint32_t>{1}));
-    settings.request.budget = 32;
-    config::ExecutionThreadAllocation parallel;
-    ASSERT_TRUE(resolve_valid_execution_threads(parallel, settings, 64));
-    EXPECT_EQ(parallel.engines, settings.xcds);
-    EXPECT_EQ(parallel.dispatch, (std::vector<uint32_t>{25 - parallel.engines}));
+    for (uint32_t budget : {32u, 64u}) {
+      settings.request.budget = budget;
+      config::ExecutionThreadAllocation parallel;
+      ASSERT_TRUE(resolve_valid_execution_threads(parallel, settings, 64));
+      EXPECT_EQ(parallel.engines, settings.xcds);
+      const uint32_t ceiling = settings.xcds == 1 ? 32 : 48;
+      const uint32_t total = std::min(budget, ceiling);
+      EXPECT_EQ(parallel.dispatch, (std::vector<uint32_t>{total + 1 - parallel.engines}));
+    }
   }
 }
 
@@ -634,9 +638,10 @@ TEST(ExecutionThreadBudgetTest, DisablingHelpersKeepsSynchronousServerGranules) 
     ASSERT_TRUE(settings_result.succeeded()) << settings_diagnostic.message();
     auto settings = std::move(settings_result).value();
     settings.request.helpers = 0;
-    for (Case c : {Case{1, 1, 1}, Case{2, 1, 2}, Case{4, cdna5 ? 1u : 2u, cdna5 ? 4u : 3u},
-                   Case{8, 2, 7}, Case{16, 8, 9}, Case{24, 8, 17}, Case{32, 8, 25},
-                   Case{40, 8, cdna5 ? 33u : 25u}, Case{48, 8, cdna5 ? 41u : 25u}}) {
+    for (Case c :
+         {Case{1, 1, 1}, Case{2, 1, 2}, Case{4, cdna5 ? 1u : 2u, cdna5 ? 4u : 3u}, Case{8, 2, 7},
+          Case{16, 8, 9}, Case{24, 8, 17}, Case{32, 8, 25}, Case{40, 8, cdna5 ? 33u : 25u},
+          Case{48, 8, 41}, Case{56, 8, cdna5 ? 49u : 41u}, Case{64, 8, cdna5 ? 57u : 41u}}) {
       SCOPED_TRACE(name);
       SCOPED_TRACE(c.budget);
       settings.request.budget = c.budget;
@@ -653,7 +658,7 @@ TEST(ExecutionThreadBudgetTest, ServerPresetsDoNotReserveUnusedHelpers) {
   for (const char *name : {"gfx950_mi350x.json", "gfx950_mi350x_kmd.json", "gfx1250_mi455x.json"}) {
     SCOPED_TRACE(name);
     const bool cdna5 = std::string_view(name) == "gfx1250_mi455x.json";
-    const uint32_t max_cpu = cdna5 ? 48 : 32;
+    const uint32_t max_cpu = cdna5 ? 64u : 48u;
     util::StringDiagnostic settings_diagnostic;
     auto settings_result = config::load_execution_thread_settings(
         std::string(CONFIG_DIR) + "/" + name, rocjitsu::kEmbeddedSchema,
@@ -671,7 +676,9 @@ TEST(ExecutionThreadBudgetTest, ServerPresetsDoNotReserveUnusedHelpers) {
       EXPECT_EQ(plan.helpers, 0u);
       if (affinity >= 24) {
         EXPECT_EQ(plan.engines, 8u);
-        const uint32_t expected_cpu = std::min(affinity / 8 * 8, max_cpu);
+        uint32_t expected_cpu = std::min(affinity / 8 * 8, max_cpu);
+        if (!cdna5 && expected_cpu == 40)
+          expected_cpu -= 8;
         EXPECT_EQ(cpu, expected_cpu);
       }
     }

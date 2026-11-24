@@ -51,8 +51,16 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 option(PROFILER_HUB_BUILD_TESTS "Build unit tests" ON)
 option(PROFILER_HUB_BUILD_BENCHMARKS "Build performance benchmarks" OFF)
+option(PROFILER_HUB_BUILD_EXAMPLES "Build examples" ON)
 option(PROFILER_HUB_ENABLE_LOGGING "Enable logging" OFF)
+option(PROFILER_HUB_ENABLE_ROCPD_V2 "Read legacy rocpd schema 2 traces" ON)
+option(PROFILER_HUB_ENABLE_ROCPD_V3 "Read rocpd schema 3 traces" ON)
 option(PROFILER_HUB_ENABLE_COVERAGE "Enable code coverage" OFF)
+option(
+    PH_USE_NOMUTEX_OPTIMIZATION
+    "Open SQLite connections without the per-connection mutex. Faster, but every connection must then be used by one thread at a time (pooled connections are; a standalone reader_t or writer shared between threads is not)."
+    ON
+)
 option(
     PROFILER_HUB_FETCH_DEPENDENCIES
     "Download missing or unsuitable dependencies at configure time"
@@ -93,6 +101,20 @@ target_compile_definitions(
         $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_VERSION_PATCH=${profiler-hub_VERSION_PATCH}>
 )
 
+if(PH_USE_NOMUTEX_OPTIMIZATION)
+    target_compile_definitions(
+        profiler-hub-objects
+        PRIVATE PH_USE_NOMUTEX_OPTIMIZATION
+    )
+endif()
+
+target_compile_definitions(
+    profiler-hub-objects
+    PRIVATE
+        PROFILER_HUB_ENABLE_ROCPD_V2=$<BOOL:${PROFILER_HUB_ENABLE_ROCPD_V2}>
+        PROFILER_HUB_ENABLE_ROCPD_V3=$<BOOL:${PROFILER_HUB_ENABLE_ROCPD_V3}>
+)
+
 target_compile_options(
     profiler-hub-objects
     PRIVATE
@@ -128,10 +150,18 @@ list(
     ${CMAKE_CURRENT_SOURCE_DIR}/include/writer.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/reader.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/storage.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/trimmer.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/version.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/writer_types.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/reader_types.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/shared_types.hpp
+)
+
+list(
+    APPEND profiler-hub_public_headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/c/profiler_hub.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/c/profiler_hub_trim.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/c/profiler_hub_types.h
 )
 
 file(REMOVE_RECURSE ${CMAKE_BINARY_DIR}/include/profiler-hub)
@@ -397,6 +427,7 @@ install(
     COMPONENT profiler-hub
     FILES_MATCHING
     PATTERN "*.hpp"
+    PATTERN "*.h"
 )
 
 install(
@@ -545,4 +576,8 @@ endif()
 
 if(PROFILER_HUB_BUILD_TESTS OR PROFILER_HUB_BUILD_BENCHMARKS)
     add_subdirectory(tests)
+endif()
+
+if(PROFILER_HUB_BUILD_EXAMPLES)
+    add_subdirectory(examples/clients)
 endif()

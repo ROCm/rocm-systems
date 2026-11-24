@@ -9727,8 +9727,9 @@ def test_generated_operands_validate_vgpr_source_selectors(
 ):
     validation = (
         'case OperandType::OPR_SRC_VGPR:\n'
-        '    if (!((encoding_value >= 256 && encoding_value <= 511)))\n'
-        '      defer_encoding_error(EncodingError::InvalidVgprSourceSelector);'
+        '    if (!((encoding_value >= 256 && encoding_value <= 511))) {\n'
+        '      defer_encoding_error(EncodingError::InvalidVgprSourceSelector);\n'
+        '    }'
     )
     for arch in (
         'cdna1',
@@ -10097,8 +10098,9 @@ def test_generated_flat_saddr_null_selector_follows_encoding(
     assert 'inst_.saddr != 127' in rdna3_flat
     assert 'inst_.saddr != OPR_SREG_NULL' not in rdna3_flat
     assert (
-        'if (inst_.seg != 2)\n'
-        '    src_operands_[num_src_++] = &flat_scratch;' in rdna3_flat
+        'if (inst_.seg != 2) {\n'
+        '    src_operands_[num_src_++] = &flat_scratch;\n'
+        '  }' in rdna3_flat
     )
 
     gfx1250_root = amdgpu_generated_root / _generated_dir_name('cdna5')

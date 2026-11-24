@@ -54,12 +54,13 @@ template <typename Bits> Bits comparison_magnitude(Bits bits) {
 
 template <typename Bits> Bits overflow(Bits sign, uint32_t round_mode) {
   Bits magnitude = Bits(kInfinity);
-  if (round_mode == 1)
+  if (round_mode == 1) {
     magnitude = select<Bits>(sign != Bits(0), Bits(kMaxFinite), magnitude);
-  else if (round_mode == 2)
+  } else if (round_mode == 2) {
     magnitude = select<Bits>(sign == Bits(0), Bits(kMaxFinite), magnitude);
-  else if (round_mode == 3)
+  } else if (round_mode == 3) {
     magnitude = Bits(kMaxFinite);
+  }
   return sign | magnitude;
 }
 
@@ -97,9 +98,10 @@ Bits execute_bits(Bits x, Bits y, Bits z, uint32_t round_mode, bool quiet_nan) {
     result = select<Bits>(magnitude >= Bits(kInfinity), major, result);
     result = select<Bits>(magnitude == Bits(0), round_mode == 2 ? sign : Bits(0), result);
   }
-  if (quiet_nan)
+  if (quiet_nan) {
     result = select<Bits>((result & Bits(kMagnitude)) > Bits(kInfinity), result | Bits(kQuietNaN),
                           result);
+  }
   return result;
 }
 
@@ -125,8 +127,9 @@ template <typename Float>
 Float apply_omod(Float value, uint32_t round_mode, rocjitsu::IsaFamily arch, bool ieee_mode,
                  uint32_t omod) {
   omod = fp_mode::effective_omod(arch, 0, ieee_mode, omod);
-  if (omod == 0)
+  if (omod == 0) {
     return value;
+  }
   using Bits = std::conditional_t<std::is_same_v<Float, float>, uint32_t, util::native<uint32_t>>;
   const Bits bits = std::bit_cast<Bits>(value);
   const Bits sign = bits & Bits(detail::kSign);
