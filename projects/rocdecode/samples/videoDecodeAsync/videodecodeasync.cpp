@@ -768,6 +768,13 @@ int main(int argc, char **argv) {
         bool parse_failed = false;
         do {
             demuxer.Demux(&packet, &packet_size, &pts);
+            // An empty packet is also returned on a demux error; don't treat that as the end of the
+            // stream, or a truncated decode could pass (and -expect_mismatch would report a mismatch).
+            if (demuxer.DemuxFailed()) {
+                std::cerr << "Error: demuxing failed" << std::endl;
+                parse_failed = true;
+                break;
+            }
             RocdecSourceDataPacket pkt = {};
             pkt.payload = packet;
             pkt.payload_size = static_cast<uint32_t>(packet_size);
