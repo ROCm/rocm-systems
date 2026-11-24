@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace
@@ -137,4 +138,45 @@ TEST(track_file_store_test, a_window_keeps_a_long_event_from_an_earlier_checkpoi
     track_file_store stale;
     ASSERT_TRUE(stale.open(fixture.config.string(), sources, 1, 2, 0, 0));
     EXPECT_FALSE(stale.ready());
+}
+
+TEST(track_file_store_test, interning_from_several_threads_returns_stable_strings)
+{
+    cache_fixture_t                fixture;
+    const std::vector<std::string> sources{ fixture.trace.string() };
+    track_file_store               store{ 2 };
+    ASSERT_TRUE(store.open(fixture.config.string(), sources, 1, 2, 0, 0));
+    ASSERT_TRUE(store.begin_write());
+
+    constexpr size_t thread_count = 8;
+    constexpr size_t string_count = 20000;
+    std::vector<std::vector<const char*>> interned(thread_count);
+    {
+        std::vector<std::thread> workers;
+        for(size_t worker = 0; worker < thread_count; ++worker)
+        {
+            workers.emplace_back([&store, &interned, worker] {
+                interned[worker].reserve(string_count);
+                for(size_t index = 0; index < string_count; ++index)
+                {
+                    interned[worker].push_back(
+                        store.intern("name-" + std::to_string(index)));
+                }
+            });
+        }
+        for(std::thread& worker : workers)
+        {
+            worker.join();
+        }
+    }
+
+    for(size_t index = 0; index < string_count; ++index)
+    {
+        const std::string expected = "name-" + std::to_string(index);
+        ASSERT_EQ(interned[0][index], interned[thread_count - 1][index]);
+        for(size_t worker = 0; worker < thread_count; ++worker)
+        {
+            ASSERT_STREQ(interned[worker][index], expected.c_str());
+        }
+    }
 }
