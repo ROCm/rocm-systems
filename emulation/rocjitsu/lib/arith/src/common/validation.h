@@ -79,6 +79,24 @@ inline int validate_semantics(uint64_t flags) {
              : RJ_ARITH_SUCCESS;
 }
 
+// Resolve Compatibility to Loose and reject exact requests for an entry point whose numeric
+// model has not been checked against its architecture's hardware. Mode 2 reports the missing
+// exactness evidence; so does mode 3 on an entry without a status operand. Mode 3 on an entry
+// with a status operand passes through, so the shared entry validates the remaining controls
+// and reports the missing status model exactly as its exact-capable sibling does.
+inline int loose_only(uint64_t &flags, bool status_operand) {
+  flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = validate_semantics(flags)) {
+    return error;
+  }
+  const bool exact_request =
+      (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+  if (exact_request && !(status_operand && reports_fp_status(flags))) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  return RJ_ARITH_SUCCESS;
+}
+
 // Validate CPU, semantics, instruction bits, and supported guest FP flags. Return an error
 // without accessing operands or outputs. Callers mask out supported instruction bits;
 // unsupported_instruction_flags must be zero.

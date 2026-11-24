@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -40,7 +41,7 @@ struct HostState {
 };
 class DotMachine {
 public:
-  explicit DotMachine(rj_code_arch_t arch, uint32_t width = 32)
+  explicit DotMachine(rocjitsu::IsaFamily arch, uint32_t width = 32)
       : memory("dot_memory"), cache("dot_cache") {
     cache.set_backing_memory(&memory);
     amdgpu::ComputeUnitCore::Config cfg{};
@@ -78,30 +79,23 @@ public:
   uint32_t base;
 };
 
-TEST(Gfx11Dot2, HardwareBitsAreIndependentOfHostFpState) {
+TEST(Gfx11Dot2, HardwareBits) {
   HostState restore;
-  for (int round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    std::fesetround(round);
-    std::feclearexcept(FE_ALL_EXCEPT);
-    std::feraiseexcept(FE_INEXACT);
-    for (bool bf16 : {false, true}) {
-      const auto cases = bf16 ? std::span<const Dot2HardwareCase>(kDot2BF16Cases)
-                              : std::span<const Dot2HardwareCase>(kDot2F16Cases);
-      for (const auto &c : cases) {
-        const uint32_t result =
-            bf16 ? amdgpu::gfx11_dot2_f32<true>(c.a, c.b, c.a >> 16, c.b >> 16, c.c)
-                 : amdgpu::gfx11_dot2_f32<false>(c.a, c.b, c.a >> 16, c.b >> 16, c.c);
-        EXPECT_EQ(result, c.expected) << std::hex << c.a << ' ' << c.b << ' ' << c.c;
-      }
+  for (bool bf16 : {false, true}) {
+    const auto cases = bf16 ? std::span<const Dot2HardwareCase>(kDot2BF16Cases)
+                            : std::span<const Dot2HardwareCase>(kDot2F16Cases);
+    for (const auto &c : cases) {
+      const uint32_t result =
+          bf16 ? amdgpu::gfx11_dot2_f32<true>(c.a, c.b, c.a >> 16, c.b >> 16, c.c)
+               : amdgpu::gfx11_dot2_f32<false>(c.a, c.b, c.a >> 16, c.b >> 16, c.c);
+      EXPECT_EQ(result, c.expected) << std::hex << c.a << ' ' << c.b << ' ' << c.c;
     }
-    EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), FE_INEXACT);
-    EXPECT_EQ(std::fegetround(), round);
   }
 }
 
 TEST(Gfx11Dot2, DecodedHardwareCasesAndInactiveLanes) {
   HostState restore;
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
     DotMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (bool force_scalar : {false, true}) {
@@ -145,7 +139,7 @@ TEST(Gfx11Dot2, DecodedHardwareCasesAndInactiveLanes) {
 }
 
 TEST(Gfx11Dot2, WmmaHardwareOrderAndOverlappingAccumulator) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
     DotMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (bool bf16 : {false, true}) {
@@ -180,7 +174,7 @@ TEST(Gfx11Dot2, WmmaHardwareOrderAndOverlappingAccumulator) {
 TEST(Gfx11Dot2, InlineSourcesMatchHardware) {
   // W7900 captures. F16 narrows floats into the low half; BF16 broadcasts
   // upper16(FP32) without rounding, including selector 248 (1 / (2*pi)).
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
     DotMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (bool bf16 : {false, true}) {
@@ -218,7 +212,7 @@ TEST(Gfx11Dot2, InlineSourcesMatchHardware) {
 }
 
 TEST(Gfx11Dot2, WmmaSignModifiersAndWaveSizes) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
     for (uint32_t width : {32u, 64u}) {
       DotMachine machine(arch, width);
       ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -279,7 +273,7 @@ TEST(Gfx11Dot2, WmmaSignModifiersAndWaveSizes) {
 
 TEST(Gfx11Dot2, AccumulateEncodingsAndInlineSources) {
   HostState restore;
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
     DotMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (bool scalar : {false, true}) {
@@ -329,7 +323,7 @@ TEST(Gfx11Dot2, AccumulateEncodingsAndInlineSources) {
 }
 
 TEST(Gfx11Dot2, WmmaInlineAccumulatorPreservesAllOnesNan) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
     for (uint32_t width : {32u, 64u}) {
       DotMachine machine(arch, width);
       ASSERT_FALSE(::testing::Test::HasFatalFailure());

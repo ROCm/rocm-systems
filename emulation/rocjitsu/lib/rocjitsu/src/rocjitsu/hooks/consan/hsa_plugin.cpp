@@ -9,6 +9,7 @@
 #include "rocjitsu/hooks/consan/api.h"
 #include "rocjitsu/hooks/consan/runtime_core.h"
 #include "rocjitsu/hooks/consan/testing.h"
+#include "util/diagnostic.h"
 
 #include <atomic>
 #include <cerrno>
@@ -162,13 +163,14 @@ public:
       loading_ = true;
     }
     auto module = std::make_shared<Module>();
-    ContractError error;
+    util::StringDiagnostic artifact_diagnostic;
     const std::string target = agent_target(agent);
-    FailureOr<LoadedArtifact> artifact = load_artifact(artifact_path_, *original, target, &error);
+    FailureOr<LoadedArtifact> artifact =
+        load_artifact(artifact_path_, *original, target, artifact_diagnostic.emitter());
     if (artifact.failed()) {
       std::lock_guard lock(mutex_);
       loading_ = false;
-      return reject_locked(error.message);
+      return reject_locked(artifact_diagnostic.message());
     }
     module->artifact = std::move(artifact.value());
     module->facts = std::make_shared<const Manifest>(module->artifact.manifest);

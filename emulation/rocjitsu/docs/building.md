@@ -135,7 +135,7 @@ UBSan builds with `RJ_UBSAN_VPTR=OFF`, including GCC's default.
 
 ### Static analysis
 
-Configure a Clang build and generate the schema headers. From the RocJITsu
+Configure a Clang build and generate the schema headers. From the rocjitsu
 source directory, point `run-clang-tidy` at the directory containing
 `compile_commands.json` and select the source paths to check. This example checks the simulator and its project headers.
 

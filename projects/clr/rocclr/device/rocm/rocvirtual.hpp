@@ -377,7 +377,7 @@ class VirtualGPU : public device::VirtualDevice {
     virtual void PreparePooledSignals(const std::vector<ProfilingSignal*>& /*signals*/) {}
 
     //! Puts a signal in the current slot whose memory suits the use
-    virtual void PlaceForUse(bool /*timing_only*/) {}
+    virtual void PlaceForUse(bool /*host_memory*/) {}
 
     //! Moves current_id_ to the slot of the next use and makes its signal reusable
     virtual void AcquireSlot() = 0;
@@ -533,8 +533,11 @@ class VirtualGPU : public device::VirtualDevice {
    private:
     void PreparePooledSignals(const std::vector<ProfilingSignal*>& signals) override;
     //! A timing-only use gets a host-memory signal, whose timestamps the host reads without
-    //! crossing the bus; any other use, which a GPU waiter or a sync may read, a device one
-    void PlaceForUse(bool timing_only) override;
+    //! crossing the bus. So does an SDMA use: a GPU waiter then polls the signal across the bus,
+    //! which costs less than the reads and flush a device-memory signal adds to the submission
+    //! and the synchronize. Any other use, which a GPU waiter or a sync may read, gets a
+    //! device-memory signal.
+    void PlaceForUse(bool host_memory) override;
     //! Advances current_id_ to an armed slot
     void AcquireSlot() override;
     void ArmForUse(ProfilingSignal* signal, hsa_signal_value_t init_val, uint64_t aql_slot,

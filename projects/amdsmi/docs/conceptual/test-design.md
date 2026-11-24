@@ -65,6 +65,7 @@ tests/amd_smi_test/
 ├── unit/                            # No hardware required; pure TEST() macro tests
 │   ├── gpu/
 │   │   ├── dynamic_metrics_test.cc  # Metric struct versioning and compatibility checks
+│   │   ├── driver_info_v2_test.cc   # amdsmi_driver_info_v2_t layout and amdsmi_get_gpu_driver_info_v2() errors
 │   │   ├── cper_read_test.cc        # CPER read path: synthetic edge cases (no fixtures)
 │   │   ├── mock_cper_test.cc        # CPER parse/severity filtering vs mock_cper/ fixtures
 │   │   └── mock_cper/               # Sanitized real CPER fixtures used by mock_cper_test.cc
@@ -84,6 +85,7 @@ tests/amd_smi_test/
 │   │   ├── nic_stats_copy_test.cc   # Statistics array copy, two-call protocol and scope mapping
 │   │   └── nic_driver_stats_test.cc # ethtool -S read: retry on a changing count, headroom, errno
 │   └── system/
+│       ├── driver_versions_test.cc  # amdgpu version split, DKMS and amdgpu-kmod lookup against a temp tree and a stand-in rpm
 │       └── lib_loader_test.cc       # Library loader soname fallback (no hardware; uses libm)
 │
 └── functional/                      # Requires live hardware; uses TestBase lifecycle
@@ -94,6 +96,7 @@ tests/amd_smi_test/
     │   ├── events/
     │   │   └── evt_notif_read_write{.h,_test.cc}
     │   ├── identity/
+    │   │   ├── driver_info_read{.h,_test.cc}
     │   │   ├── id_info_read{.h,_test.cc}
     │   │   └── version_read{.h,_test.cc}
     │   ├── memory/

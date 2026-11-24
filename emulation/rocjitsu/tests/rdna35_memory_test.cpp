@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -24,7 +25,7 @@ protected:
   static constexpr uint64_t kShared = 0x1000100000000ULL;
   static constexpr uint64_t kPrivate = 0x1000000000000ULL;
 
-  virtual rj_code_arch_t architecture() const { return ROCJITSU_CODE_ARCH_RDNA3_5; }
+  virtual rocjitsu::IsaFamily architecture() const { return rocjitsu::IsaFamily::Rdna3_5; }
 
   void make_cu(std::unique_ptr<ComputeUnitCore> &unit) {
     ComputeUnitCore::Config cfg{};
@@ -44,7 +45,7 @@ protected:
     l2_.set_backing_memory(&memory_);
     ASSERT_NO_FATAL_FAILURE(make_cu(cu_));
     cu_->set_apertures(kShared, kShared + UINT32_MAX, kPrivate, kPrivate + UINT32_MAX);
-    wf_ = cu_->dispatch_wf(0, 0, 106, 32, architecture() == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32);
+    wf_ = cu_->dispatch_wf(0, 0, 106, 32, architecture() == rocjitsu::IsaFamily::Cdna4 ? 64 : 32);
     ASSERT_NE(wf_, nullptr);
     wf_->set_apertures(kShared, kShared + UINT32_MAX, kPrivate, kPrivate + UINT32_MAX,
                        /*override_launch=*/true);
@@ -99,12 +100,12 @@ protected:
 };
 
 class Gfx11MemoryTest : public Rdna35MemoryTest,
-                        public testing::WithParamInterface<rj_code_arch_t> {
-  rj_code_arch_t architecture() const override { return GetParam(); }
+                        public testing::WithParamInterface<rocjitsu::IsaFamily> {
+  rocjitsu::IsaFamily architecture() const override { return GetParam(); }
 };
 
 INSTANTIATE_TEST_SUITE_P(Gfx11, Gfx11MemoryTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5));
+                         testing::Values(rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5));
 
 TEST_P(Gfx11MemoryTest, ScratchAndFlatPrivateShareDwordInterleaving) {
   wf_->set_exec(2);
@@ -153,19 +154,19 @@ TEST_P(Gfx11MemoryTest, ScratchAndFlatPrivateShareDwordInterleaving) {
 }
 
 class ReturningDsAtomicRouteTest : public Rdna35MemoryTest,
-                                   public testing::WithParamInterface<rj_code_arch_t> {
-  rj_code_arch_t architecture() const override { return GetParam(); }
+                                   public testing::WithParamInterface<rocjitsu::IsaFamily> {
+  rocjitsu::IsaFamily architecture() const override { return GetParam(); }
 };
 
 INSTANTIATE_TEST_SUITE_P(Memory, ReturningDsAtomicRouteTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
-                                         ROCJITSU_CODE_ARCH_RDNA3_5));
+                         testing::Values(rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna3,
+                                         rocjitsu::IsaFamily::Rdna3_5));
 
 TEST_P(ReturningDsAtomicRouteTest, DirectRouteQualifiesReturningAtomicBeforeWritingLds) {
   write_vector(2, 8);
   write_vector(3, 1);
   const auto address = wf_->lds_base() + 8;
-  const bool cdna4 = GetParam() == ROCJITSU_CODE_ARCH_CDNA4;
+  const bool cdna4 = GetParam() == rocjitsu::IsaFamily::Cdna4;
   const uint32_t ordinary_vgprs = cdna4 ? 16 : 32;
   if (cdna4)
     wf_->set_accum_offset(ordinary_vgprs);

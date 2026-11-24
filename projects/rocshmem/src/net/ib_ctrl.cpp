@@ -171,7 +171,7 @@ bool IbCtrl::create_queues(const LaneMap &lm, int cq_depth,
       qa.send_cq = cqs_[ctx];
       qa.recv_cq = cqs_[ctx];
       qa.qp_type = IBV_QPT_RC;
-      qa.sq_sig_all = 0;  // conduit signals selectively
+      qa.sq_sig_all = 0;  // backend signals selectively
       qa.cap.max_send_wr = static_cast<uint32_t>(qp_send_depth);
       qa.cap.max_recv_wr = 1;
       qa.cap.max_send_sge = 1;

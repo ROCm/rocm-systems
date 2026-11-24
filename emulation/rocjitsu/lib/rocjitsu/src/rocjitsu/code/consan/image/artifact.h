@@ -19,12 +19,12 @@ struct LoadedArtifact {
 [[nodiscard]] Result verify_artifact_images(const Manifest &manifest,
                                             std::span<const uint8_t> original,
                                             std::span<const uint8_t> prepared,
-                                            ContractError *error = nullptr);
+                                            util::DiagnosticEmitter diagnostic = {});
 
 /// @brief Read one ready artifact with bounded owning storage; never compile.
 [[nodiscard]] FailureOr<LoadedArtifact> load_artifact(const std::filesystem::path &directory,
                                                       std::span<const uint8_t> original,
                                                       std::string_view concrete_target,
-                                                      ContractError *error = nullptr);
+                                                      util::DiagnosticEmitter diagnostic = {});
 
 } // namespace rocjitsu::consan

@@ -547,7 +547,7 @@ public:
 
                 // Issue WaitRegMem command to wait until SQTT event has completed
                 const uint32_t mask_val      = Primitives::sqtt_busy_mask();
-                auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_OFFSET;
+                auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_ADDR;
                 builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, true, mask_val, 0);
 
                 ReadValues(cmd_buffer, config, se_index);
@@ -750,7 +750,7 @@ public:
         if(Primitives::GFXIP_LEVEL == 9)
         {
             const uint32_t mask_val      = Primitives::sqtt_busy_mask();
-            auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_OFFSET;
+            auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_ADDR;
             builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, true, mask_val, 0);
 
             builder.BuildWriteUConfigRegPacket(cmd_buffer,

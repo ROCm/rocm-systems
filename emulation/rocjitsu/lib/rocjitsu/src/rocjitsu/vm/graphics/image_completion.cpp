@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/graphics/image_completion.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/buffer_format_detail.h"
 #include "rocjitsu/vm/graphics/image_bc.h"
 #include "rocjitsu/vm/graphics/image_filter.h"
@@ -211,7 +211,6 @@ void complete_image_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemStat
   if (!d.lds_dst && !cu.owns_vgpr_range(wf, d.dst_reg_base, registers))
     return;
   const auto &format = d.decoded_buffer_format;
-  const fp_mode::detail::ScopedFenv environment(0);
   // Fixed UNORM8 filtering consumes integer texel units. Decode those units
   // directly instead of normalizing to FP32 and rounding back for each tap.
   const bool unorm8_texels =
@@ -419,7 +418,7 @@ void complete_image_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemStat
             const uint32_t normalization = std::bit_floor(filter_count);
             for (uint32_t pass = 0; pass < levels; ++pass) {
               const uint32_t level =
-                  cu.arch() == ROCJITSU_CODE_ARCH_RDNA4 ? pass : levels - 1 - pass;
+                  cu.arch() == rocjitsu::IsaFamily::Rdna4 ? pass : levels - 1 - pass;
               const double mip_weight = levels == 1 ? 1.0
                                         : level     ? d.graphics_sample->mip_fractions[lane]
                                                     : 1.0 - d.graphics_sample->mip_fractions[lane];
