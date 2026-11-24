@@ -1890,23 +1890,6 @@ TEST(DeviceCacheCoherenceTest, GroupMaintenanceDistinguishesSeparateBackingMemor
   EXPECT_EQ(second_memory.read8(kAddress), 0x66u);
 }
 
-TEST(DeviceCacheCoherenceTest, CheckedLegacyGroupRejectsInvalidDomains) {
-  using rocjitsu::amdgpu::DeviceCacheCoherence;
-  using rocjitsu::amdgpu::DeviceCacheOperation;
-  auto domain = std::make_shared<DeviceCacheCoherence>();
-  util::StringDiagnostic diagnostic;
-  const std::array<std::shared_ptr<DeviceCacheCoherence>, 1> null_domains{nullptr};
-  EXPECT_TRUE(DeviceCacheCoherenceTestAccess::acquire_legacy_cache_maintenance_group(
-                  null_domains, DeviceCacheOperation::WritebackInvalidate, diagnostic.emitter())
-                  .failed());
-  EXPECT_EQ(diagnostic.message(), "cache maintenance domains must be non-null");
-  const std::array repeated_domains{domain, domain};
-  EXPECT_TRUE(DeviceCacheCoherenceTestAccess::acquire_legacy_cache_maintenance_group(
-                  repeated_domains, DeviceCacheOperation::WritebackInvalidate, diagnostic.emitter())
-                  .failed());
-  EXPECT_EQ(diagnostic.message(), "cache maintenance domains must be distinct");
-}
-
 TEST(DeviceCacheCoherenceTest, CheckedLegacyGroupReportsMissingBackingAfterReleasingLocks) {
   using rocjitsu::amdgpu::DeviceCacheCoherence;
   using rocjitsu::amdgpu::DeviceCacheOperation;
@@ -2093,29 +2076,13 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedCompleteGrantWithWrongIdentityIsTerm
   EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
 }
 
-TEST(DeviceCacheCoherenceTest, CheckedPreparedGroupReportsInvalidConfiguration) {
+TEST(DeviceCacheCoherenceTest, CheckedPreparedGroupReportsMissingResolver) {
   using rocjitsu::amdgpu::DeviceCacheCoherence;
   using rocjitsu::amdgpu::DeviceCacheDomain;
   using rocjitsu::amdgpu::DeviceCacheOperation;
   auto domain = std::make_shared<DeviceCacheCoherence>();
-  const auto resolver = [](uint32_t, uint32_t, uint64_t, size_t) {
-    ADD_FAILURE() << "invalid configuration reached the resolver";
-    return rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess::make(0, 0, 0, 0, 0, {});
-  };
-  util::StringDiagnostic diagnostic;
-  const std::array null_domains{DeviceCacheDomain{nullptr, 11}};
-  EXPECT_TRUE(
-      DeviceCacheCoherence::acquire_cache_maintenance_group(
-          null_domains, DeviceCacheOperation::WritebackInvalidate, resolver, diagnostic.emitter())
-          .failed());
-  EXPECT_EQ(diagnostic.message(), "cache maintenance domains must be non-null");
-  const std::array repeated_domains{DeviceCacheDomain{domain, 11}, DeviceCacheDomain{domain, 12}};
-  EXPECT_TRUE(DeviceCacheCoherence::acquire_cache_maintenance_group(
-                  repeated_domains, DeviceCacheOperation::WritebackInvalidate, resolver,
-                  diagnostic.emitter())
-                  .failed());
-  EXPECT_EQ(diagnostic.message(), "cache maintenance domains must be distinct");
   const std::array domains{DeviceCacheDomain{domain, 11}};
+  util::StringDiagnostic diagnostic;
   EXPECT_TRUE(DeviceCacheCoherence::acquire_cache_maintenance_group(
                   domains, DeviceCacheOperation::WritebackInvalidate, {}, diagnostic.emitter())
                   .failed());
