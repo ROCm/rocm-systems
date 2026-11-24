@@ -722,7 +722,17 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
         return hipErrorInvalidSymbol;
       }
 
-      if (!device.writeDeviceGlobal(*mem, 0, mem->getSize(), var->GetManagedVarPtr())) {
+      // The slot must hold an address the device can dereference. Without HMM the managed
+      // storage is host memory locked to the agent, so its GPU address differs from the host
+      // one the shadow pointer carries; with HMM this resolves to the same value.
+      void* device_addr = *static_cast<void**>(var->GetManagedVarPtr());
+      size_t offset = 0;
+      if (amd::Memory* storage = getMemoryObject(g_devices.at(deviceId), device_addr, offset)) {
+        device_addr = reinterpret_cast<void*>(
+            storage->getDeviceMemory(device)->virtualAddress() + offset);
+      }
+
+      if (!device.writeDeviceGlobal(*mem, 0, mem->getSize(), &device_addr)) {
         LogPrintfError("Failed to write the device pointer of managed var %s on device %d",
                        var->GetName().c_str(), deviceId);
         return hipErrorRuntimeMemory;
