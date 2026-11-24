@@ -505,6 +505,8 @@ private:
       diagnostics(addr).backing_reads.fetch_add(1, std::memory_order_relaxed);
       diagnostics(addr).backing_writes.fetch_add(1, std::memory_order_relaxed);
       if (vmid == 0) {
+        if ((addr & (size - 1)) != 0)
+          return VmAccessOutcome::Malformed;
         const bool modified =
             backing_memory_->atomic_modify(addr, size, [&](uint8_t *target) { fn(target, 0); });
         return modified ? VmAccessOutcome::Complete : VmAccessOutcome::Malformed;

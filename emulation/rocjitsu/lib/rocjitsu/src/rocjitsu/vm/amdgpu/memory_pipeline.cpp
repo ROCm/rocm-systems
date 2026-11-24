@@ -1487,15 +1487,19 @@ VmAccessOutcome execute_atomic_rmw(
   for (uint32_t lane = d.translated.atomic_lane; lane < d.wf_size; ++lane) {
     if (!(lane_mask & (uint64_t{1} << lane)))
       continue;
+    // A terminal failure on the admitted view must reach the fault sink, as a
+    // load's does: halting the queue without the memory event leaves the
+    // runtime waiting on a dispatch that will never complete.
     const VmAccessOutcome outcome =
         prepared_boundary_handler && vmid != 0
-            ? d.translated.access->query_access(d.per_lane_addr[lane], esz, VmAccessKind::Atomic)
+            ? d.translated.access->probe(d.per_lane_addr[lane], esz, VmAccessKind::Atomic)
             : l2->preflight_atomic_access(d.per_lane_addr[lane], esz, vmid);
     if (outcome != VmAccessOutcome::Complete)
       return outcome;
     if (prepared_boundary_handler && vmid != 0) {
       // Use the retained L2 view that will perform the RMW. The admitted view
-      // above is side-effect free, so this remains the only faulting preflight.
+      // above reports only when it fails, so this stays the single report for
+      // a lane it admits.
       const VmAccessOutcome l2_outcome =
           vm_access->admit_access(d.per_lane_addr[lane], esz, VmAccessKind::Atomic).outcome;
       if (l2_outcome != VmAccessOutcome::Complete)
@@ -2467,7 +2471,8 @@ bool native_ds_atomic_misaligned(const VectorMemState &d, rocjitsu::IsaFamily ar
     return false;
   for (uint64_t lanes = request_lanes; lanes; lanes &= lanes - 1) {
     const auto lane = std::countr_zero(lanes);
-    if (d.per_lane_addr[lane] % d.elem_size)
+    if ((d.per_lane_addr[lane] % d.elem_size) ||
+        (d.ds2_active && (d.ds2_per_lane_addr[lane] % d.elem_size)))
       return true;
   }
   return false;

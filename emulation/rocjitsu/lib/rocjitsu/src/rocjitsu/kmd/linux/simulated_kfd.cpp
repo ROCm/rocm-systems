@@ -3876,6 +3876,19 @@ void SimulatedKfd::report_memory_fault(const std::shared_ptr<KfdProcess> &proc, 
   }
 }
 
+void SimulatedKfd::set_process_passthrough_for_testing(uint32_t process_id, bool passthrough) {
+  std::lock_guard<std::mutex> lk(process_mutex_);
+  auto it = processes_.find(process_id);
+  if (it == processes_.end())
+    return;
+  for (auto &g : gpus_) {
+    if (!g.legacy_vm)
+      continue;
+    if (auto as = g.legacy_vm->address_space_snapshot(process_id))
+      as->set_process_passthrough(process_id, passthrough);
+  }
+}
+
 void SimulatedKfd::set_process_client_pid(uint32_t process_id, pid_t client_pid) {
   std::lock_guard<std::mutex> lk(process_mutex_);
   auto it = processes_.find(process_id);

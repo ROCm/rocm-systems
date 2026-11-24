@@ -335,6 +335,8 @@ public:
     runtime_exception_result_hook_for_testing_ = std::move(hook);
   }
 
+  void set_process_passthrough_for_testing(uint32_t process_id, bool passthrough);
+
   /// @brief Inject an errno for debugger-notifier duplication.
   void set_debug_notifier_dup_error_for_testing(std::optional<int> error) {
     std::lock_guard<std::mutex> lock(debug_sessions_mutex_);

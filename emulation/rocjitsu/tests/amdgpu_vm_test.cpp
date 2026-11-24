@@ -5537,6 +5537,76 @@ TEST(GpuMemoryTest, UnregisteredVmidPassthroughRespectsUserSpaceLimit) {
   EXPECT_EQ(memory.resolve_host_ptr(page.addr() + 0x40), page.data + 0x40);
 }
 
+TEST(GpuMemoryTest, PassthroughStrictAccessesFaultOnNullAndAboveUserSpaceLimit) {
+  amdgpu::GpuMemory backing("passthrough_fault_mem");
+  amdgpu::LegacyAddressSpace as(backing);
+  constexpr uint32_t kPid = 7;
+
+  KfdProcess process(kPid);
+  ASSERT_TRUE(as.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                                  process.page_table_generation())
+                  .succeeded());
+  as.set_process_passthrough(kPid, true);
+
+  struct RecordingReporter final : amdgpu::MemoryFaultReporter {
+    std::vector<uint64_t> addresses;
+    void report_memory_fault(uint32_t, uint64_t addr, amdgpu::MemoryFaultCause) override {
+      addresses.push_back(addr);
+    }
+  } reporter;
+  as.set_process_fault_reporter(kPid, &reporter);
+
+  for (uint64_t bad_addr : {uint64_t{0}, uint64_t{0x0000800000000000ULL},
+                            uint64_t{0x0000fffffffffffcULL}, uint64_t{0x0001fffffffffffcULL}}) {
+    SCOPED_TRACE(testing::Message() << std::hex << "addr=0x" << bad_addr);
+    std::array<uint8_t, 4> buf{0x11, 0x22, 0x33, 0x44};
+    reporter.addresses.clear();
+    EXPECT_EQ(as.read_step(bad_addr, buf, kPid).outcome, amdgpu::CopyOutcome::Faulted);
+    EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{bad_addr}));
+
+    reporter.addresses.clear();
+    EXPECT_EQ(as.write_step(bad_addr, buf, kPid).outcome, amdgpu::CopyOutcome::Faulted);
+    EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{bad_addr}));
+
+    reporter.addresses.clear();
+    uint64_t loaded = 0xdeadbeefULL;
+    EXPECT_EQ(as.atomic_load(bad_addr, 4, loaded, kPid), amdgpu::CopyOutcome::Faulted);
+    EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{bad_addr}));
+
+    reporter.addresses.clear();
+    EXPECT_EQ(
+        as.atomic_modify_strict(bad_addr, 4, [](uint8_t *) {}, kPid), amdgpu::CopyOutcome::Faulted);
+    EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{bad_addr}));
+  }
+}
+
+TEST(GpuMemoryTest, MisalignedDualAddressDsAtomicAndVmidZeroL2AtomicReject) {
+  amdgpu::VectorMemState ds(amdgpu::LOCAL_MEM);
+  ds.atomic_op = amdgpu::AtomicOp::SWAP;
+  ds.elem_size = 4;
+  ds.ds2_active = true;
+  ds.per_lane_addr[0] = 0x10;
+  ds.ds2_per_lane_addr[0] = 0x12; // Misaligned secondary address.
+  EXPECT_TRUE(amdgpu::native_ds_atomic_misaligned(ds, rocjitsu::IsaFamily::Rdna4, 1u));
+  EXPECT_TRUE(amdgpu::native_ds_atomic_misaligned(ds, rocjitsu::IsaFamily::Cdna5, 1u));
+  ds.ds2_per_lane_addr[0] = 0x14;
+  EXPECT_FALSE(amdgpu::native_ds_atomic_misaligned(ds, rocjitsu::IsaFamily::Rdna4, 1u));
+
+  amdgpu::GpuMemory backing("atomic_align_mem");
+  amdgpu::L2Cache l2("atomic_align_l2");
+  l2.set_backing_memory(&backing);
+  backing.write64(0x100, 0x1122334455667788ULL);
+  bool mutated = false;
+  EXPECT_EQ(l2.atomic_rmw(
+                0x102, 4, [&](uint8_t *, uint32_t) { mutated = true; }, /*vmid=*/0),
+            amdgpu::VmAccessOutcome::Malformed);
+  EXPECT_EQ(l2.atomic_rmw(
+                0x104, 8, [&](uint8_t *, uint32_t) { mutated = true; }, /*vmid=*/0),
+            amdgpu::VmAccessOutcome::Malformed);
+  EXPECT_FALSE(mutated);
+  EXPECT_EQ(backing.read64(0x100), 0x1122334455667788ULL);
+}
+
 /// @brief An identity translation must resolve only to a live host page.
 /// @details Passthrough reinterprets an unresolved GPU address as a host
 /// address. These cases cover the two ways that address can be uninhabited: a

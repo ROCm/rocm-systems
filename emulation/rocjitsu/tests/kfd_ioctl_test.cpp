@@ -29015,6 +29015,8 @@ TEST_P(KfdPendingMemorySaveTest, SnapshotDrainsRetainedLoadsBeforeCapturingRegis
   create.queue_percentage = 100;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
   auto *cu = soc_->xcd(0)->command_processor()->compute_units().front();
+  // Disable host passthrough so an unmapped page stays Unavailable until mapped.
+  driver_->set_process_passthrough_for_testing(process->process_id(), false);
   auto *wave = fault_a_wave_on_a_scalar_load(soc_, driver_, kernel, create.queue_id, cu);
   ASSERT_NE(wave, nullptr);
   ASSERT_FALSE(wave->wait_counters().empty());
@@ -29123,6 +29125,8 @@ TEST_F(KfdIoctlTest, RuntimeSnapshotSettlesTheWaveAfterARetainedFault) {
   create.ctx_save_restore_size = area_size;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
   auto *cu = soc_->xcd(0)->command_processor()->compute_units().front();
+  // Disable host passthrough so an unmapped page stays Unavailable until mapped.
+  driver_->set_process_passthrough_for_testing(process->process_id(), false);
   auto *first = fault_a_wave_on_a_scalar_load(soc_, driver_, kernel, create.queue_id, cu);
   ASSERT_NE(first, nullptr);
   auto *second = cu->dispatch_wf(1, kernel, 16, 4);
@@ -30213,6 +30217,54 @@ void KfdIoctlTest::check_rejected_memory_violation(bool private_atomic) {
 
 TEST_F(KfdIoctlTest, DbgTrapRejectedMemoryViolationFallsBackToRuntime) {
   check_rejected_memory_violation(false);
+}
+
+// An atomic rejected by its pre-RMW check must still raise the memory-exception
+// event a load raises. Halting the queue without it leaves the runtime waiting
+// on a dispatch that never completes.
+TEST_F(KfdIoctlTest, UnmappedGlobalAtomicRaisesMemoryExceptionEvent) {
+  constexpr uint64_t kKernelAddress = 0x600000000ULL;
+  constexpr uint64_t kUnmapped = 0x700000040ULL;
+  constexpr std::array<uint32_t, 3> kCode{0xdd098000u,
+                                          0x007f0102u,  // global_atomic_add v0, v[2:3], v1, off sc0
+                                          0xbf810000u}; // s_endpgm
+  std::vector<uint8_t> code_page(4096);
+  std::memcpy(code_page.data(), kCode.data(), sizeof(kCode));
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kKernelAddress, code_page.data(), code_page.size());
+
+  kfd_ioctl_create_event_args event{};
+  event.event_type = KFD_IOC_EVENT_MEMORY;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_EVENT, &event), 0);
+
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (cu == nullptr && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, kKernelAddress, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(driver_->local_process_id());
+  wave->set_dispatch_id(7);
+  wave->set_exec(1);
+  const auto base = wave->vgpr_alloc().base;
+  cu->write_vgpr(base + 1, 0, 1u);
+  cu->write_vgpr(base + 2, 0, static_cast<uint32_t>(kUnmapped));
+  cu->write_vgpr(base + 3, 0, static_cast<uint32_t>(kUnmapped >> 32));
+  cu->step();
+
+  kfd_event_data fault{};
+  fault.event_id = event.event_id;
+  kfd_ioctl_wait_events_args wait{};
+  wait.events_ptr = reinterpret_cast<uint64_t>(&fault);
+  wait.num_events = 1;
+  wait.wait_for_all = 1;
+  wait.timeout = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+  EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_COMPLETE);
+  EXPECT_EQ(fault.memory_exception_data.va, kUnmapped);
 }
 
 TEST_F(KfdIoctlCdna5Test, RejectedPrivateAtomicApertureViolationPreservesCwsrCause) {
