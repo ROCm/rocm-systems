@@ -452,6 +452,77 @@ how to control that frontend's cache without imposing it on other workloads.
 Run the throughput plugin alone when comparing its instruction-family timing;
 other execution plugins add observer cost and may change interval boundaries.
 
+## Benchmark the VFIO-user server
+
+`scripts/bench-vfio-user.py` checks and times the
+[VFIO-user server](qemu-vfio.md) without QEMU or a guest. The script is the
+vfio-user client. It shares guest memory, programs the GART and the MES ring as
+the guest AMDGPU driver would, registers one AQL compute queue, and dispatches
+OpenCL kernels that it compiles for the emulated target. It drives the GC 12.1
+/ MES front end only, so use a gfx1250 config such as
+`configs/gfx1250_mi455x.json`. The numbers describe the server's transport and
+simulation paths. A guest adds QEMU, the kernel driver and ROCr on top, so
+measure a guest workload as well before claiming a guest-visible change.
+
+Build each revision with `-DROCJITSU_ENABLE_VFIO=ON`, as in
+[Build the VFIO-user server](qemu-vfio.md#build-the-vfio-user-server). The
+script needs Python 3.10 or newer and an amdgcn-capable clang with the
+`llvm-objdump` of the same LLVM. It uses `--clang` when given, else the LLVM
+under `$ROCM_PATH` (`/opt/rocm` when unset), else `amdclang` or `clang` on
+`PATH`. `--check-toolchain` compiles the kernels, prints the tools it used and
+exits without starting a server.
+
+```bash
+python3 scripts/bench-vfio-user.py \
+  --variant baseline:bin="$baseline_build/tools/rocjitsu/rocjitsu" \
+  --variant candidate:bin="$build/tools/rocjitsu/rocjitsu" \
+  --output results.json
+```
+
+Each `--variant` starts its own server; the first one is the baseline of the
+`vs first` column. Besides `bin=`, a variant can set `config=`,
+`cfg=dotted.path=JSON` (applied to a copy of the config, for example
+`cfg=cpu_dispatch_threads=1`), `env=NAME=VALUE`, `arg=FLAG`, `cpus=LIST`
+(affinity through `taskset`) and `target=GPU`. Without `--variant` the script
+runs `build/tools/rocjitsu/rocjitsu` from the source tree.
+
+Every run begins by checking each kernel's output for all 4096 work items
+against a model in the script. `--verify-only` stops there. A variant with
+wrong output, or whose server fails, makes the script exit with status 1; it
+then prints the end of the server log and keeps the work directory that holds
+the full logs.
+
+| Kernel | Exercises |
+|---|---|
+| `int_loop`, `i64_loop` | 32-bit and 64-bit integer loops with no memory access |
+| `fp_loop` | Single-precision multiply-add |
+| `mem_loop` | Loads from a buffer in guest RAM |
+| `mem_loop_vram` | The same kernel with the buffer in VRAM |
+| `lds_loop` | LDS loads behind a workgroup barrier |
+
+| Report table | Content |
+|---|---|
+| Verify | Per-kernel verdict and any startup or dispatch error |
+| Transport | Register-read round trip, no-op dispatch latency (polled, interrupt-driven, posted doorbell), and dispatches per second when one doorbell covers a batch |
+| Throughput | Per kernel and grid: lane-iterations and wave-instructions per second, server cores in use, system-time share, run-queue wait share and voluntary context switches |
+
+A grid of 64 is one workgroup; 4096 is 64 workgroups, which a server with
+several dispatch threads can run side by side. A timed dispatch is calibrated
+to last about `--target-seconds`, which means two variants can run different
+iteration counts: compare the rates, not the seconds. The table shows the best
+of `--repeats`; `results.json` also holds the median. The
+[sampling protocol](#sampling-protocol) still applies. Run an identical-binary
+pair first to find the noise floor, repeat the invocation with the variant
+order swapped, and report medians over several invocations. On a shared host,
+[reserve CPUs](#reserve-cpus-with-systemd) and pin each server with `cpus=`;
+the client spins on one more CPU while it waits for a dispatch.
+
+Two CTest entries cover the script. `VfioUserBenchUnitTest` tests it against
+fakes and needs no server. `RocjitsuVfioUserBenchVerify` runs `--verify-only`
+against the built server. It is registered only when `ROCJITSU_ENABLE_VFIO` is
+`ON` and the clang under the selected `ROCM_PATH` compiles the kernels for
+gfx1250; the configure output says which was missing otherwise.
+
 ## Case study: gfx1250 IREE and Gluon
 
 This case study records how the protocol behaved during recent functional
