@@ -570,6 +570,7 @@ add_executable(
     l2_shard_epoch_test.cpp
     instruction_cache_test.cpp
     async_mma_policy_test.cpp
+    mma_plan_test.cpp
     matrix_coexecution_test.cpp
     matrix_execution_error_test.cpp
     packed_fmac_constants_test.cpp
