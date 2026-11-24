@@ -53,7 +53,7 @@ A process that never configures the domain does not pay that tracking cost. Only
 subscribe; a second configure call returns ``ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED``.
 
 Set ``replay_pass_count``
-=====================
+=========================
 
 ``CONFIG`` ``PHASE_ENTER`` is where the tool installs the pass-count callback. The SDK calls
 that callback after ``CONFIG`` ``PHASE_ENTER`` returns:
