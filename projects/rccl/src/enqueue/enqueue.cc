@@ -1376,16 +1376,16 @@ int rcclP2pTaskConnIndex(struct ncclComm* comm, ncclFunc_t collAPI, int peer) {
   return rcclP2pTaskUsesCe(comm, collAPI, peer) ? NCCL_CONN_IDX_P2P_CE : 1;
 }
 
-// Number of the p2pnChannelsPerPeer parts a task of collAPI uses and connects. Multi-node AINIC scatter
-// uses and connects only the most parts whose flows from the root still fit the pool; connecting more
-// slows it down. A user-set nChannelsPerNetPeer is kept, as in ncclTopoComputeP2pChannels. Depend only
-// on values both ends of a pair share, or they disagree on the parts.
+// Number of the p2pnChannelsPerPeer parts a task of collAPI uses and connects. Multi-node AINIC Scatter
+// and AlltoAll use and connect only the most parts whose nRanks - 1 flows per rank still fit the pool;
+// connecting more slows them down. A user-set nChannelsPerNetPeer is kept, as in
+// ncclTopoComputeP2pChannels. Depend only on values both ends of a pair share, or they disagree on the parts.
 int rcclP2pTaskParts(struct ncclComm* comm, ncclFunc_t collAPI, int peer) {
   if (rcclP2pTaskUsesCe(comm, collAPI, peer))
     return rcclP2pCeChannelsPerPeerCap(comm->p2pnChannelsPerPeer, comm->p2pnChannels, comm->cudaArch == 1250,
                                        /*useMemcpy=*/true, rcclParamP2pCeChannelsPerPeer());
-  if (collAPI == ncclFuncScatter && comm->nNodes > 1 && comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT &&
-      rcclUseAinic()) {
+  if ((collAPI == ncclFuncScatter || collAPI == ncclFuncAlltoAll) && comm->nNodes > 1 &&
+      comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT && rcclUseAinic()) {
     int partsThatFit = comm->p2pnChannels / (comm->nRanks - 1);
     return std::min(comm->p2pnChannelsPerPeer, partsThatFit >= 1 ? pow2Down(partsThatFit) : 1);
   }
@@ -1401,7 +1401,7 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
     int nChannels;
   };
   if (task == nullptr) return -1;
-  // The Scatter part limit is about network flows, so it applies with P2P disabled too.
+  // The Scatter/AlltoAll part limit is about network flows, so it applies with P2P disabled too.
   int taskParts = rcclP2pTaskParts(comm, task->collAPI, task->root);
   if (taskParts < comm->p2pnChannelsPerPeer) return taskParts;
   // Remote gfx942 alltoall peers share one NIC. 2 is the count the 2x8
@@ -1421,8 +1421,8 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
   if (ncclParamP2pDisable()) return -1;
   constexpr Policy policies[] = {
     // Two-channel full-mesh traffic has high variance on gfx110x. Keep the
-    // workaround specific to AllToAll so Gather, SendRecv and Scatter (outside the
-    // AINIC part limit above) retain their higher-throughput multi-channel paths.
+    // workaround specific to AllToAll (outside the AINIC part limit above) so Gather,
+    // SendRecv and Scatter retain their higher-throughput multi-channel paths.
     {"gfx110", ncclFuncAlltoAll, 1},
   };
   for (const auto& policy : policies) {
