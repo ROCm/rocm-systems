@@ -59,14 +59,16 @@ TEST(ConversionTest, Fp8DecodeIsExactAndCanonicalizesNan) {
   for (uint32_t byte = 0; byte < 0x100u; ++byte) {
     const uint32_t fp8 = conversion::decode_fp8<conversion::Fp8>(byte);
     const uint32_t bf8 = conversion::decode_fp8<conversion::Bf8>(byte);
-    if ((byte & 0x7fu) == 0x7fu)
+    if ((byte & 0x7fu) == 0x7fu) {
       EXPECT_EQ(fp8, 0xffc00000u) << byte;
-    else
+    } else {
       EXPECT_EQ(conversion::encode_fp8<conversion::Fp8>(fp8, false), byte) << byte;
-    if ((byte & 0x7fu) > 0x7cu)
+    }
+    if ((byte & 0x7fu) > 0x7cu) {
       EXPECT_EQ(bf8, 0xffc00000u) << byte;
-    else
+    } else {
       EXPECT_EQ(conversion::encode_fp8<conversion::Bf8>(bf8, false), byte) << byte;
+    }
   }
   EXPECT_EQ(conversion::decode_fp8<conversion::Fp8>(0x7eu), 0x43e00000u); // 448
   EXPECT_EQ(conversion::decode_fp8<conversion::Fp8>(0x01u), 0x3b000000u); // 2^-9
@@ -240,8 +242,9 @@ TEST(FloatRoundingTest, NarrowF64ToF32MatchesIeeeInEveryMode) {
     for (int i = 0; i < 200000; ++i) {
       uint64_t bits = random();
       // Most samples land near the F32 range, including its subnormals.
-      if (i % 4 != 0)
+      if (i % 4 != 0) {
         bits = (bits & 0x800fffffffffffffull) | (uint64_t{random() % 320 + 1023 - 170} << 52);
+      }
       ASSERT_EQ(f64_to_f32(bits, policy), uint64_t{host_f64_to_f32(bits, direction)})
           << std::hex << bits << " direction " << static_cast<int>(direction);
     }
@@ -315,8 +318,9 @@ TEST(FloatRoundingTest, WidenF32ToF64IsExact) {
   std::mt19937_64 random(3);
   for (int i = 0; i < 200000; ++i) {
     auto bits = static_cast<uint32_t>(random());
-    if (i % 2 == 0)
+    if (i % 2 == 0) {
       bits &= 0x807fffffu; // zero or subnormal
+    }
     volatile float value = std::bit_cast<float>(bits);
     ASSERT_EQ(f32_to_f64(uint64_t{bits}), std::bit_cast<uint64_t>(static_cast<double>(value)))
         << std::hex << bits;

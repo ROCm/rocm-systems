@@ -37,8 +37,8 @@ TEST_P(ScalarCacheDiscard, AddressedLinesAndWaitMetadataIgnoreExec) {
   const unsigned base = wave->sgpr_alloc().base;
   cu->write_sgpr(base, 0x4000);
   cu->write_sgpr(base + 1, 0);
-  for (unsigned address_offset : {4u, 60u, 68u})
-    for (unsigned lines : {1u, 2u})
+  for (unsigned address_offset : {4u, 60u, 68u}) {
+    for (unsigned lines : {1u, 2u}) {
       for (unsigned mode = 0; mode < 3; ++mode) {
         SCOPED_TRACE(testing::Message() << "lines=" << lines << " address_mode=" << mode);
         cache.invalidate_all();
@@ -77,6 +77,8 @@ TEST_P(ScalarCacheDiscard, AddressedLinesAndWaitMetadataIgnoreExec) {
           EXPECT_EQ(value, (i >= first_line && i < first_line + lines ? 200 : 100) + i);
         }
       }
+    }
+  }
   wave->halt();
 }
 

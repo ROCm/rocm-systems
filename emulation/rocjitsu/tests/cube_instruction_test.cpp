@@ -228,8 +228,9 @@ TEST_P(CubeInstructionTest, FaceCoordinatesAndModeMatchPhysicalWitnesses) {
           for (uint32_t start = 0; start < std::size(kCases); start += wf->wf_size()) {
             for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
               const auto &c = kCases[(start + lane) % std::size(kCases)];
-              for (uint32_t source = 0; source < 3; ++source)
+              for (uint32_t source = 0; source < 3; ++source) {
                 cu->write_vgpr(vb + source, lane, c.input[source]);
+              }
               cu->write_vgpr(vb + 3, lane, 0xdeadbeefu);
             }
             ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
@@ -239,10 +240,12 @@ TEST_P(CubeInstructionTest, FaceCoordinatesAndModeMatchPhysicalWitnesses) {
               // RDNA4/CDNA5 always quiet sNaNs; earlier targets honor IEEE.
               if ((ieee || arch == rocjitsu::IsaFamily::Rdna4 ||
                    arch == rocjitsu::IsaFamily::Cdna5) &&
-                  (expected & 0x7fffffffu) > 0x7f800000u)
+                  (expected & 0x7fffffffu) > 0x7f800000u) {
                 expected |= 0x00400000u;
-              if (!(exec & (1ull << lane)))
+              }
+              if (!(exec & (1ull << lane))) {
                 expected = 0xdeadbeefu;
+              }
               EXPECT_EQ(cu->read_vgpr(vb + 3, lane), expected)
                   << "case=" << (start + lane) % std::size(kCases) << " op=" << op
                   << " mode=" << mode << " scalar=" << scalar << " exec=" << exec;
@@ -531,8 +534,9 @@ TEST_P(CubeInstructionTest, SourceAndOutputModifiersMatchPhysicalWitnesses) {
         for (uint64_t exec : {wf->wf_size() == 64 ? ~0ull : 0xffffffffull, 0x55555555ull}) {
           wf->set_exec(exec);
           for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-            for (uint32_t source = 0; source < 3; ++source)
+            for (uint32_t source = 0; source < 3; ++source) {
               cu->write_vgpr(vb + source, lane, c.input[source]);
+            }
             cu->write_vgpr(vb + 3, lane, 0xdeadbeefu);
           }
           ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
