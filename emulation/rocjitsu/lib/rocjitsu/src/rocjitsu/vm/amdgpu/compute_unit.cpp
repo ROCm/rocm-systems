@@ -3098,14 +3098,19 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
   };
   // Retained steps are neither memory producers nor waits. Check their
   // operands against outstanding memory in program order, as ordinary issue does.
+  // Precompiled VGPR masks skip per-operand virtual calls when no bit overlaps.
   const bool wait_checks = config_.memory_wait_checks_enabled();
-  const auto check_waits = [&](const Instruction &inst) {
+  const auto check_waits = [&](const mma_plan::Step &step) {
     if (!wait_checks)
       return;
-    if (auto *wait_state = active->memory_wait_scoreboard()) {
-      wait_state->bind(active->pc, active, &ComputeUnitCore::report_memory_wait);
-      wait_state->check_instruction(inst, *active);
-    }
+    auto *wait_state = active->memory_wait_scoreboard();
+    if (!wait_state || wait_state->empty())
+      return;
+    if (!wait_state->has_pending_scalar() && step.direct_vgpr_wait && !active->gpr_idx_en() &&
+        active->vgpr_msb_mode() == 0 && !wait_state->shadow().any_vgpr_in(step.vgpr_wait_mask))
+      return;
+    wait_state->bind(active->pc, active, &ComputeUnitCore::report_memory_wait);
+    wait_state->check_instruction(*step.inst, *active);
   };
   // Executes on the issuer exactly as execute_instruction() would during ordinary issue.
   const auto run_inline = [&](Instruction &inst, uint64_t pc) {
@@ -3154,11 +3159,11 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
       return true;
     switch (step.kind) {
     case mma_plan::StepKind::Chained:
-      check_waits(*step.inst);
+      check_waits(step);
       advance(step);
       break;
     case mma_plan::StepKind::Offload: {
-      check_waits(*step.inst);
+      check_waits(step);
       // Submission bypasses execute_instruction(); keep its per-issue effects.
       for (unsigned i = 0; i != step.members; ++i)
         check_static_isa_diagnostics(*step.chain[i], *active);
@@ -3257,12 +3262,27 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
     case mma_plan::StepKind::Alu: {
       ++(step.kind == mma_plan::StepKind::Alu ? cache.stats.alu : cache.stats.issuer_mma);
       ++active->trace_inst_count_;
-      check_waits(*step.inst);
+      check_waits(step);
       if (!run_inline(*step.inst, active->pc))
         return true;
       active->pc += step.size;
       record_gws_instruction_progress(process);
       break;
+    }
+    case mma_plan::StepKind::Wait: {
+      if (active->wait_counters().empty()) {
+        ++cache.stats.wait;
+        if (wait_checks) {
+          if (auto *wait_state = active->memory_wait_scoreboard();
+              wait_state && !wait_state->empty()) {
+            wait_state->bind(active->pc, active, &ComputeUnitCore::report_memory_wait);
+            wait_state->before(*step.inst, config_.arch);
+          }
+        }
+        advance(step);
+        break;
+      }
+      [[fallthrough]];
     }
     case mma_plan::StepKind::Ordinary: {
       ++cache.stats.ordinary;
@@ -3293,11 +3313,20 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
 
 void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCache *admission,
                                               uint32_t wave_size, bool has_accvgprs) {
-  // CDNA4 MFMA and the default gfx1250 allowlist have cheap encoding filters.
-  // For retained dispatch bindings and legacy memory, resident non-candidates
-  // use the ordinary issue body, including its fetchability and
-  // debugger checks. A cache miss uses full decoding below.
-  // This hint never executes a cached word or bypasses instruction validation.
+  if (helper_budget_serial_ != quantum_serial_) {
+    // Borrowed helpers exist only while engines and dispatch leave cores idle.
+    // Summing the occupancy once per quantum keeps the hot path free of it.
+    helper_budget_serial_ = quantum_serial_;
+    helper_cap_ = async_pool().borrow_cap();
+  }
+  if (helper_cap_ == 0) {
+    // Every borrowable core is busy: behave like a synchronous CU without
+    // paying the extra instruction-cache peek on every non-candidate op.
+    issue_instruction(active);
+    return;
+  }
+  // CDNA4 MFMA, RDNA4 WMMA, and the default gfx1250 allowlist have cheap
+  // encoding filters. Resident non-candidates use ordinary issue directly.
   if (async_mma_policy::supported(arch())) {
     uint32_t word;
     const GpuVmAccess *vm_access = active->vm_access();
@@ -3310,25 +3339,13 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
         // Between blocks, ordinary issue joins only the running jobs whose
         // registers the instruction touches.
         issue_instruction(active);
-        if (active->is_halted())
-          {
-      async_execution::stats.flush();
-      flush_mma_plans();
-    }
+        if (active->is_halted()) {
+          async_execution::stats.flush();
+          flush_mma_plans();
+        }
         return;
       }
     }
-  }
-  if (helper_budget_serial_ != quantum_serial_) {
-    // Borrowed helpers exist only while engines and dispatch leave cores idle.
-    // Summing the occupancy once per quantum keeps the hot path free of it.
-    helper_budget_serial_ = quantum_serial_;
-    helper_cap_ = async_pool().borrow_cap();
-  }
-  if (helper_cap_ == 0) {
-    // Every borrowable core is busy: behave like a synchronous CU.
-    issue_instruction(active);
-    return;
   }
   const bool wave_size_ok = arch() == IsaFamily::Rdna4
                                 ? (active->wf_size() == 32 || active->wf_size() == 64)

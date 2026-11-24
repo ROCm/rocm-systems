@@ -78,7 +78,8 @@ enum class StepKind : uint8_t {
   Chained,   ///< Executed by an earlier Offload step's helper.
   IssuerMma, ///< Matrix instruction kept on the issuer.
   Alu,       ///< Retained pure arithmetic executed on the issuer.
-  Ordinary,  ///< Ordinary issue: memory, waits and other stateful instructions.
+  Wait,      ///< Retained non-SOPK waitcnt executed directly when wait counters are zero.
+  Ordinary,  ///< Ordinary issue: memory and other stateful instructions.
 };
 
 /// @brief Factor registers copied at submission because a later issuer step overwrites them.
@@ -95,6 +96,8 @@ struct Step {
   uint8_t job = 0;   ///< Helper job of an Offload or Chained step.
   JobMask wait = 0;  ///< Helper jobs joined before the step.
   uint8_t members = 0;
+  bool direct_vgpr_wait = false; ///< True when vgpr_wait_mask suffices for MemoryWaitScoreboard prefilter.
+  std::array<uint64_t, 4> vgpr_wait_mask{}; ///< Precompiled VGPR [0..255] reads|writes for wait checks.
   Instruction *inst = nullptr;
   std::array<Instruction *, kMaxChain> chain{};
   bool snapshots = false;
@@ -136,6 +139,13 @@ inline bool pure_alu(const Instruction &inst) {
          operation == Operation::V_NOP || operation == Operation::S_DELAY_ALU ||
          async_mma_policy::inline_operation_kind(operation) ==
              async_mma_policy::InlineOperationKind::Arithmetic;
+}
+
+/// @brief Explicit waitcnt instruction (non-SOPK, non-S_WAIT_IDLE) that can
+/// execute inline in functional mode when wait counters are already zero.
+inline bool fast_wait(const Instruction &inst) {
+  return inst.is_waitcnt() && inst.amdgpu_operation() != Operation::S_WAIT_IDLE && !inst.data() &&
+         inst.num_src_operands() < 2;
 }
 
 /// @brief Issuer steps that can neither stall nor trap, so a helper may run a
@@ -434,7 +444,7 @@ struct Plan {
   std::vector<Snapshot> code;
   std::vector<Step> steps;
   std::vector<std::unique_ptr<Instruction>> owned;
-  unsigned chains = 0, chained = 0, issuer_mma = 0, alu = 0, ordinary = 0;
+  unsigned chains = 0, chained = 0, issuer_mma = 0, alu = 0, wait = 0, ordinary = 0;
   /// Union of every step's registers, and per register the first step that
   /// touches or writes it (kNoStep if none): a block entered while earlier
   /// jobs still run joins each job at the first step that depends on it.
@@ -464,6 +474,7 @@ struct Plan {
     chained = other.chained;
     issuer_mma = other.issuer_mma;
     alu = other.alu;
+    wait = other.wait;
     ordinary = other.ordinary;
     return *this;
   }
@@ -598,6 +609,33 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
     Step step;
     step.size = static_cast<uint8_t>(inst->size());
     step.offset = static_cast<uint16_t>(offset);
+    // Precompile the VGPR [0..255] wait-check mask so replay_mma_plan can skip
+    // per-operand virtual calls in MemoryWaitScoreboard::check_instruction().
+    {
+      const auto touched = access->reads | access->writes;
+      bool has_acc_bits = false;
+      for_each_register(touched, [&](unsigned r) {
+        if (r < 256u)
+          step.vgpr_wait_mask[r >> 6] |= uint64_t{1} << (r & 63u);
+        else
+          has_acc_bits = true;
+      });
+      bool direct = !has_acc_bits && (inst->flags() & DIRECT_REGISTER_ACCESSES) != 0;
+      if (direct) {
+        for (int i = 0; i < inst->num_src_operands() && direct; ++i) {
+          const auto *op = inst->src_operand(i);
+          if (!inst->tracks_explicit_source(i) ||
+              (op && !op->decoded_vgpr() && op->is_fieldless() && op->is_vgpr()))
+            direct = false;
+        }
+        for (int i = 0; i < inst->num_dst_operands() && direct; ++i) {
+          const auto *op = inst->dst_operand(i);
+          if (op && !op->decoded_vgpr() && op->is_fieldless() && op->is_vgpr())
+            direct = false;
+        }
+      }
+      step.direct_vgpr_wait = direct;
+    }
     std::optional<MemberOperands> operands;
     if (offloadable(*inst, has_accvgprs))
       operands = member_operands(*inst, k, num_vgprs, has_accvgprs, wave_size);
@@ -638,10 +676,13 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
     } else {
       join(conflicts);
       joins.back() = conflicts;
-      // Retain only stateless arithmetic. Memory instructions keep per-issue
-      // state and go through ordinary issue and its decoded-instruction cache.
+      // Retain stateless arithmetic and non-SOPK waits. Memory instructions
+      // keep per-issue state and go through ordinary issue.
       if (alu_enabled() && pure_alu(*inst)) {
         step.kind = StepKind::Alu;
+        step.inst = inst.get();
+      } else if (alu_enabled() && fast_wait(*inst)) {
+        step.kind = StepKind::Wait;
         step.inst = inst.get();
       }
       // An issuer step that could stall or fault closes every running chain
@@ -665,14 +706,41 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
     plan.footprint.reads |= accesses[k].reads;
     plan.footprint.writes |= accesses[k].writes;
   }
-  // Profitability: offloading pays only while another chain runs at the same
-  // time. A serial chain (even one split at kMaxChain) never qualifies.
+  // Profitability: offloading pays when at least two chains run concurrently,
+  // OR when a single multi-op chain overlaps with substantial non-wait issuer
+  // work (memory loads/stores or ALU instructions) before its join.
   unsigned max_concurrent = 0;
   for (unsigned t = 0; t != steps; ++t) {
     unsigned alive = 0;
     for (const auto &chain : chains)
       alive += chain.head <= t && t < chain.joined;
     max_concurrent = std::max(max_concurrent, alive);
+  }
+  unsigned total_issuer_work = 0;
+  for (unsigned k = 0; k != steps; ++k) {
+    if (plan.steps[k].kind == StepKind::Alu || plan.steps[k].kind == StepKind::Ordinary)
+      ++total_issuer_work;
+  }
+  bool single_chain_overlap = false;
+  if (max_concurrent == 1) {
+    for (const auto &chain : chains) {
+      unsigned chain_weight = 0;
+      for (unsigned i = 0; i != chain.count; ++i)
+        chain_weight += mma_weight(*plan.steps[chain.members[i].step].inst);
+      if (chain.count < 2 && chain_weight < 8)
+        continue;
+      unsigned mem_overlap = 0, alu_overlap = 0;
+      for (unsigned k = chain.head + 1; k < chain.joined; ++k) {
+        if (plan.steps[k].kind == StepKind::Ordinary)
+          ++mem_overlap;
+        else if (plan.steps[k].kind == StepKind::Alu)
+          ++alu_overlap;
+      }
+      if (mem_overlap >= 2 || (mem_overlap >= 1 && alu_overlap >= 4) || alu_overlap >= 8) {
+        single_chain_overlap = true;
+        break;
+      }
+    }
   }
   // Placement: pack independent chains into helper jobs of up to `pack_limit`
   // members once a block has enough chains to keep helpers busy, grouping
@@ -693,16 +761,22 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
     for (unsigned i = 0; i != chain.count; ++i)
       total_weight += mma_weight(*plan.steps[chain.members[i].step].inst);
   }
-  const bool profitable = max_concurrent >= 2 && (min_weight == 0 || total_weight >= 2 * min_weight);
+  const bool profitable = (max_concurrent >= 2 || single_chain_overlap) &&
+                          (min_weight == 0 || total_weight >= 2 * min_weight);
   if (profitable) {
     // Lightweight MMAs (e.g. RDNA4 16x16x16 WMMA at 200-300 ns/op) need fuller
-    // jobs to amortize helper handoff and must never cross a CCD boundary; pack
-    // up to kMaxChain once >= 4 chains exist unless explicitly overridden.
+    // jobs to amortize helper handoff and must never cross a CCD boundary.
+    // Exception: pure WMMA bursts with <= 4 chains and almost no issuer work
+    // (e.g. triton_persistent K-loop tail) hit drain() immediately, so keeping
+    // 1 job per chain halves critical-path drain latency on multi-helper runs.
     const bool lightweight = total_members != 0 && total_weight <= 4u * total_members;
     plan.local_only = lightweight;
+    const bool pure_small_burst = lightweight && chains.size() <= 4 &&
+                                  total_members >= chains.size() * 2 && total_issuer_work < 4;
     const unsigned default_pack =
-        lightweight && !batch_pack_explicit() && pack_limit == batch_pack_limit() ? kMaxChain
-                                                                                  : pack_limit;
+        !batch_pack_explicit() && pack_limit == batch_pack_limit() && lightweight
+            ? (pure_small_burst ? 1u : kMaxChain)
+            : pack_limit;
     const unsigned default_min_chains =
         lightweight && !batch_min_chains_explicit() && min_chains == batch_min_chains()
             ? 4u
@@ -866,6 +940,7 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
     plan.chained += step.kind == StepKind::Chained;
     plan.issuer_mma += step.kind == StepKind::IssuerMma;
     plan.alu += step.kind == StepKind::Alu;
+    plan.wait += step.kind == StepKind::Wait;
     plan.ordinary += step.kind == StepKind::Ordinary;
   }
 }
@@ -1149,7 +1224,7 @@ public:
   using Words = Plan::Words;
   struct Counters {
     uint64_t decodes = 0, builds = 0, accept = 0, reject = 0, hits = 0, validations = 0;
-    uint64_t replays = 0, offloads = 0, chained = 0, issuer_mma = 0, alu = 0, ordinary = 0;
+    uint64_t replays = 0, offloads = 0, chained = 0, issuer_mma = 0, alu = 0, wait = 0, ordinary = 0;
     uint64_t pool_full = 0, early_exit = 0, entry_rejects = 0;
     uint64_t snapshot_chains = 0, snapshot_bytes = 0;
     /// Cross-block: blocks entered with jobs outstanding, of which the fast
@@ -1275,14 +1350,14 @@ public:
     std::fprintf(stderr, "%s\n",
                  std::format("RJ_PLAN builds={} accept={} reject={} hits={} validations={} "
                              "decodes={} replays={} offloads={} chained={} issuer_mma={} alu={} "
-                             "ordinary={} pool_full={} early_exit={} entry_rejects={} "
+                             "wait={} ordinary={} pool_full={} early_exit={} entry_rejects={} "
                              "snapshot_chains={} snapshot_bytes={} pending_entries={} "
                              "filtered={} result_waits={} factor_waits={} drains(gap={} mode={} "
                              "fault={} wave_end={} evict={} reject={} quantum={}) gap_passes={} "
                              "gap_joins={}",
                              stats.builds, stats.accept, stats.reject, stats.hits,
                              stats.validations, stats.decodes, stats.replays, stats.offloads,
-                             stats.chained, stats.issuer_mma, stats.alu, stats.ordinary,
+                             stats.chained, stats.issuer_mma, stats.alu, stats.wait, stats.ordinary,
                              stats.pool_full, stats.early_exit, stats.entry_rejects,
                              stats.snapshot_chains, stats.snapshot_bytes, stats.pending_entries,
                              stats.filtered_entries, stats.result_waits, stats.factor_waits,

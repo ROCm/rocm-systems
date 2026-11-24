@@ -829,4 +829,94 @@ TEST(MmaPlanTest, Rdna4Wave64AndSwmmacFootprintsAndScalarFilter) {
   EXPECT_TRUE(plan::scalar_only_encoding(IsaFamily::Rdna4, s_add[0]));
 }
 
+TEST(MmaPlanTest, Rdna4SplitWaitsUseStepKindWaitAndPureBurstKeepsFanOut) {
+  auto decoder = Decoder::create(IsaFamily::Rdna4);
+  GpuMemory memory("rdna4_wait_burst_mem");
+  InstructionCache icache;
+  constexpr uint64_t kPc = 0x1000;
+  uint64_t addr = kPc;
+  auto emit = [&](const auto &words) {
+    for (uint32_t w : words) {
+      memory.write32(addr, w);
+      addr += 4;
+    }
+  };
+  // Four 2-WMMA chains separated by s_wait_dscnt (pure burst, 0 issuer ALU/mem):
+  // s_wait_dscnt must compile to StepKind::Wait (ordinary == 0), and the 4
+  // multi-member chains must stay 4 independent jobs for helper fan-out.
+  for (uint32_t k = 0; k != 2; ++k) {
+    emit(rdna4::build_sopp(rdna4::kSWaitDscntSopp, {.simm16 = static_cast<uint16_t>(1 - k)}));
+    for (uint32_t c = 0; c != 4; ++c) {
+      emit(rdna4::build_vop3p(
+          rdna4::kVWmmaF3216x16x16F16Vop3p,
+          {.vdst = static_cast<uint8_t>(c * 8),
+           .src0 = static_cast<uint16_t>(256 + 32 + k * 8 + (c & 1) * 4),
+           .src1 = static_cast<uint16_t>(256 + 48 + k * 8 + (c >> 1) * 4),
+           .src2 = static_cast<uint16_t>(256 + c * 8)}));
+    }
+  }
+  emit(rdna4::build_sopp(rdna4::kSEndpgmSopp, {.simm16 = 0}));
+
+  plan::Plan p;
+  uint64_t decodes = 0;
+  // Entry at the first WMMA (skip leading s_wait_dscnt at kPc).
+  plan::compile(
+      p, *decoder,
+      [&](uint64_t a, plan::Plan::Words &w) {
+        icache.fetch(memory, a, reinterpret_cast<uint8_t *>(w.data()));
+        return true;
+      },
+      kPc + 4, 80, /*has_accvgprs=*/false, decodes, /*tail_snapshot=*/false,
+      plan::batch_pack_limit(), plan::batch_min_chains(), /*min_weight=*/0, /*wave_size=*/32);
+  ASSERT_TRUE(p.accept);
+  EXPECT_EQ(p.wait, 1u);
+  EXPECT_EQ(p.ordinary, 0u);
+  EXPECT_EQ(p.chains, 4u);
+  EXPECT_EQ(p.chained, 4u);
+}
+
+TEST(MmaPlanTest, SingleMultiOpChainWithIssuerOverlapIsAccepted) {
+  auto decoder = Decoder::create(IsaFamily::Rdna4);
+  GpuMemory memory("rdna4_single_overlap_mem");
+  InstructionCache icache;
+  constexpr uint64_t kPc = 0x2000;
+  uint64_t addr = kPc;
+  auto emit = [&](const auto &words) {
+    for (uint32_t w : words) {
+      memory.write32(addr, w);
+      addr += 4;
+    }
+  };
+  // One 4-WMMA chain into v[0:7] followed by 8 independent VALU ops:
+  // single-chain overlap profitability should accept and offload it.
+  for (uint32_t k = 0; k != 4; ++k) {
+    emit(rdna4::build_vop3p(rdna4::kVWmmaF3216x16x16Fp8Fp8Vop3p,
+                            {.vdst = 0,
+                             .src0 = static_cast<uint16_t>(256 + 16 + k * 2),
+                             .src1 = static_cast<uint16_t>(256 + 24 + k * 2),
+                             .src2 = static_cast<uint16_t>(256 + 0)}));
+  }
+  for (uint32_t i = 0; i != 8; ++i) {
+    emit(rdna4::build_vop1(rdna4::kVMovB32Vop1,
+                           {.src0 = static_cast<uint16_t>(256 + 40 + i),
+                            .vdst = static_cast<uint8_t>(48 + i)}));
+  }
+  emit(rdna4::build_sopp(rdna4::kSEndpgmSopp, {.simm16 = 0}));
+
+  plan::Plan p;
+  uint64_t decodes = 0;
+  plan::compile(
+      p, *decoder,
+      [&](uint64_t a, plan::Plan::Words &w) {
+        icache.fetch(memory, a, reinterpret_cast<uint8_t *>(w.data()));
+        return true;
+      },
+      kPc, 64, /*has_accvgprs=*/false, decodes, /*tail_snapshot=*/false, /*pack_limit=*/4,
+      /*min_chains=*/9, /*min_weight=*/0, /*wave_size=*/32);
+  ASSERT_TRUE(p.accept);
+  EXPECT_EQ(p.chains, 1u);
+  EXPECT_EQ(p.chained, 3u);
+  EXPECT_EQ(p.alu, 8u);
+}
+
 } // namespace

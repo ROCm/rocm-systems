@@ -8,6 +8,7 @@
 #define ROCJITSU_VM_AMDGPU_CPU_DISPATCH_POOL_H_
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 
 #include <algorithm>
 #include <atomic>
@@ -47,8 +48,35 @@ public:
   explicit CpuDispatchPool(uint32_t threads) {
     const uint32_t worker_count = std::max(threads, 1u) - 1;
     workers_.reserve(worker_count);
-    for (uint32_t i = 0; i < worker_count; ++i)
+    const auto domains = matrix_coexecution::CacheDomains::detect();
+    size_t start_domain = 0;
+#if defined(__linux__)
+    if (domains.cpus.size() > 1) {
+      const int cpu = sched_getcpu();
+      if (cpu >= 0 && size_t(cpu) < domains.domain_of_cpu.size() &&
+          domains.domain_of_cpu[cpu] >= 0)
+        start_domain = size_t(domains.domain_of_cpu[cpu]);
+    }
+#endif
+    for (uint32_t i = 0; i < worker_count; ++i) {
       workers_.emplace_back([this](std::stop_token stop) { worker_loop(stop); });
+#if defined(__linux__)
+      // Distribute dispatch workers evenly across LLC domains (matching
+      // SharedPool's per-CCD helper placement, with the calling engine thread
+      // occupying slot 0 on start_domain) so dispatch threads stay local to
+      // their CCD's helper shard without oversubscribing one CCD.
+      if (domains.cpus.size() > 1) {
+        const auto &cpus = domains.cpus[(start_domain + i + 1) % domains.cpus.size()];
+        if (!cpus.empty()) {
+          cpu_set_t set;
+          CPU_ZERO(&set);
+          for (int c : cpus)
+            CPU_SET(c, &set);
+          (void)pthread_setaffinity_np(workers_.back().native_handle(), sizeof(set), &set);
+        }
+      }
+#endif
+    }
   }
 
   ~CpuDispatchPool() {
