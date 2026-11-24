@@ -2720,6 +2720,36 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_TmaKernel_ShippingGeometry_Thr
   EXPECT_EQ(argsBuf->maxDynamicSmem, kSymTmaGrantBytes);
 }
 
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_HierKernel_LaunchTuningReachesKernelArgs) {
+  SymmetricTaskScheduler_Scene scene;
+  scene.comm->symkState.kcomm.hierChunkSize = 128 << 10;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.func = ncclFuncAllReduce;
+  task.devFuncId = ncclSymkKernelId_AllReduce_HierLsaLDST;
+  task.datatype = ncclFloat32;
+  task.count = 1024;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  size_t seenBytes = 0;
+  int seenBlocks = 0;
+  ScopedHook tuning(g_symkHierLaunchTuning, [&](struct ncclComm*, enum ncclSymkKernelId kernelId, size_t nBytes,
+                                                int nBlocks, struct ncclSymkHierTuning* tuned) {
+    EXPECT_EQ(kernelId, ncclSymkKernelId_AllReduce_HierLsaLDST);
+    seenBytes = nBytes;
+    seenBlocks = nBlocks;
+    *tuned = ncclSymkHierTuning{nBlocks, 512, true, 32 << 10};
+    return true;
+  });
+
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
+  ASSERT_NE(argsBuf, nullptr);
+  EXPECT_EQ(seenBytes, size_t(1024 * sizeof(float)));
+  EXPECT_GT(seenBlocks, 0);
+  EXPECT_EQ(argsBuf->kcomm.hierChunkSize, 32u << 10);
+  EXPECT_TRUE(argsBuf->kcomm.hierPipeline);
+  EXPECT_EQ(scene.comm->symkState.kcomm.hierChunkSize, 128u << 10);
+}
+
 // The tuned width's windows, one byte short: the plan has to fail rather than launch an overrun
 // that gets DMA'd to peers.
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_TmaKernel_GrantBelowWarpWindows_RejectsWithWarn) {

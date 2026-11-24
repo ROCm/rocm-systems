@@ -596,11 +596,15 @@ TEST_F(SymKernelMaskTest, HierKernels_OnlyOnGfx1250PartitionModeWithTwoOrMorePac
     EXPECT_EQ(KernelBitSet(kmask, ncclSymkKernelId_AllGather_HierLsaTmaST), c.offered && TmaReachableOnThisBuild())
         << c.name;
     EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllGather_ST)) << c.name;
-    // The hierarchical ReduceScatter has the same gate, and is sum only.
+    // The hierarchical ReduceScatter and AllReduce have the same gate, and are sum only.
     ncclSymkKernelMask rsSum = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
     EXPECT_EQ(KernelBitSet(rsSum, ncclSymkKernelId_ReduceScatter_HierLsaLDST), c.offered) << c.name;
     ncclSymkKernelMask rsAvg = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSumPostDiv, kTy, /*nElts=*/1024);
     EXPECT_FALSE(KernelBitSet(rsAvg, ncclSymkKernelId_ReduceScatter_HierLsaLDST)) << c.name;
+    ncclSymkKernelMask arSum = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024);
+    EXPECT_EQ(KernelBitSet(arSum, ncclSymkKernelId_AllReduce_HierLsaLDST), c.offered) << c.name;
+    ncclSymkKernelMask arAvg = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSumPostDiv, kTy, /*nElts=*/1024);
+    EXPECT_FALSE(KernelBitSet(arAvg, ncclSymkKernelId_AllReduce_HierLsaLDST)) << c.name;
   }
 }
 
@@ -625,6 +629,40 @@ TEST_F(SymKernelMicrotest, HierLaunch_BlocksAndChunkSize) {
   EXPECT_EQ(rsTuning(ncclSymkHierChunkSwitchBlockBytes, 1).chunkBytes, ncclSymkHierMaxChunkBytes);
   comm_->symkState.kcomm.hierChunkSize = 16 << 10;  // slots shrunk to fit many packages
   EXPECT_EQ(rsTuning(0, 1).chunkBytes, 16u << 10);
+}
+
+// Every setting switches above 64 MiB. The chunk, overridden or not, never exceeds what the slots were sized for.
+TEST_F(SymKernelMicrotest, HierLaunch_AllReduceSettings) {
+  SetTdmCapableArch(comm_.get());
+  comm_->hasMloPart = true;
+  comm_->symkState.kcomm.hierChunkSize = ncclSymkHierMaxChunkBytes;
+  struct ncclSymkHierTuning t;
+  auto arTuning = [&](size_t nBytes) {
+    return ncclSymkHierLaunchTuning(comm_.get(), ncclSymkKernelId_AllReduce_HierLsaLDST, nBytes, /*nBlocks=*/1, &t);
+  };
+  ASSERT_TRUE(arTuning(size_t(64) << 20));
+  EXPECT_EQ(t.blocks, 64);
+  EXPECT_EQ(t.threads, 256);
+  EXPECT_FALSE(t.pipeline);
+  EXPECT_EQ(t.chunkBytes, 128u << 10);
+  ASSERT_TRUE(arTuning((size_t(64) << 20) + 1));
+  EXPECT_EQ(t.blocks, 88);
+  EXPECT_EQ(t.threads, 512);
+  EXPECT_TRUE(t.pipeline);
+  EXPECT_EQ(t.chunkBytes, 32u << 10);
+
+  g_loadParam = ParamOverride({{"SYM_HIER_CHUNK_BYTES", (64 << 10) + 100}, {"SYM_HIER_PIPELINE", 1}});
+  ASSERT_TRUE(arTuning(1 << 20));
+  EXPECT_EQ(t.chunkBytes, 64u << 10);
+  EXPECT_TRUE(t.pipeline);
+  g_loadParam = ParamOverride({{"SYM_HIER_CHUNK_BYTES", int64_t(1) << 30}, {"SYM_HIER_PIPELINE", 0}});
+  ASSERT_TRUE(arTuning(size_t(1) << 30));
+  EXPECT_EQ(t.chunkBytes, ncclSymkHierMaxChunkBytes);
+  EXPECT_FALSE(t.pipeline);
+  EXPECT_EQ(t.threads, 512);
+
+  comm_->hasMloPart = false;
+  EXPECT_FALSE(arTuning(1 << 20));
 }
 
 // The mask drops the hierarchical kernels across LSA teams, so the groups that open their window must be 0 too.

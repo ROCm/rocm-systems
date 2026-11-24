@@ -488,9 +488,9 @@ static int computeHierScaleInSize(struct ncclComm* comm) {
   return size;
 }
 
-// Packages the hierarchical kernels (AllGather and ReduceScatter) span, or 0 where they can't run: they need
-// gfx1250 in partition mode and an LSA team of at least two equal packages, so there is a cross-package hop
-// to save.
+// Packages the hierarchical kernels (AllGather, ReduceScatter and AllReduce) span, or 0 where they can't run: they
+// need gfx1250 in partition mode and an LSA team of at least two equal packages, so there is a cross-package hop to
+// save.
 int ncclSymkHierGroups(struct ncclComm* comm) {
   int scaleIn = comm->symkState.kcomm.hierScaleInSize;
   if (!ncclSymkHierAvailable(comm) || scaleIn <= 0) return 0;
