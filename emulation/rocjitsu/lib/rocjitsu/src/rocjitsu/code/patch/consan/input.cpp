@@ -300,6 +300,11 @@ FailureOr<InputProgram> build_entry_program(std::span<const uint8_t> image,
     return reject(error, InputErrorCode::UnsupportedEntry,
                   "selected entry requires a statically bounded private frame");
   }
+  if (metadata.value().required_workgroup_size[1] > 1 ||
+      metadata.value().required_workgroup_size[2] > 1) {
+    return reject(error, InputErrorCode::UnsupportedEntry,
+                  "selected entry requires a 1D workgroup shape");
+  }
   program.original_sgprs = metadata.value().sgprs;
   program.maximum_workgroup_size = metadata.value().maximum_workgroup_size;
   program.kernarg_alignment = metadata.value().kernarg_alignment;

@@ -138,10 +138,9 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
         !util::is_range_in_bounds(binding.original_entry_offset, 4, image.original_text_bytes) ||
         !util::is_range_in_bounds(binding.prepared_entry_offset, 4, image.prepared_text_bytes) ||
         binding.original_entry_offset % 4 != 0 || binding.prepared_entry_offset % 4 != 0 ||
-        !std::has_single_bit(binding.kernarg_alignment) || binding.kernarg_alignment < 8 ||
-        binding.original_kernarg_bytes == 0 || binding.maximum_workgroup_size == 0 ||
-        binding.maximum_workgroup_size > 1024 || binding.original_group_bytes > 65536 ||
-        binding.prepared_group_bytes > 65536 ||
+        !std::has_single_bit(binding.kernarg_alignment) || binding.original_kernarg_bytes == 0 ||
+        binding.maximum_workgroup_size == 0 || binding.maximum_workgroup_size > 1024 ||
+        binding.original_group_bytes > 65536 || binding.prepared_group_bytes > 65536 ||
         !valid_workgroup_requirement(binding.required_workgroup_size,
                                      binding.maximum_workgroup_size) ||
         entry.original_sgprs == 0 || entry.original_sgprs > 106 || entry.original_vgprs == 0 ||

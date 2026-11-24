@@ -189,6 +189,55 @@ TEST(ConSanImageFacts, NativeOwnershipRoundTripsAcrossAnotherEntry) {
   EXPECT_EQ(decoded.value(), image);
 }
 
+TEST(ConSanImageFacts, NativeKernargAlignmentPreservesSmallPowersOfTwo) {
+  for (const uint32_t alignment : {1u, 2u, 4u}) {
+    SCOPED_TRACE(alignment);
+    ImageFacts image = example_image();
+    image.entries.back().binding.kernarg_alignment = alignment;
+    util::StringDiagnostic error;
+    EXPECT_TRUE(validate_image_facts(image, error.emitter()).succeeded()) << error.message();
+    const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(image, error.emitter());
+    EXPECT_TRUE(encoded.succeeded()) << error.message();
+    if (encoded.failed())
+      continue;
+    const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value(), error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+    EXPECT_EQ(decoded.value(), image);
+    const FailureOr<std::vector<uint8_t>> reencoded = encode_image_facts(decoded.value());
+    ASSERT_TRUE(reencoded.succeeded());
+    EXPECT_EQ(reencoded.value(), encoded.value());
+  }
+}
+
+TEST(ConSanImageFacts, RejectsZeroAndNonPowerOfTwoKernargAlignment) {
+  for (const uint32_t alignment : {0u, 3u}) {
+    SCOPED_TRACE(alignment);
+    for (const size_t index : {size_t{0}, size_t{2}}) {
+      SCOPED_TRACE(index);
+      ImageFacts image = example_image();
+      ImageEntryFacts &entry = image.entries[index];
+      entry.binding.kernarg_alignment = alignment;
+      if (entry.selected)
+        entry.selected->entry = entry.binding;
+      EXPECT_TRUE(validate_image_facts(image).failed());
+      EXPECT_TRUE(encode_image_facts(image).failed());
+    }
+  }
+}
+
+TEST(ConSanImageFacts, SelectedKernargAlignmentRetainsMinimumEight) {
+  for (const uint32_t alignment : {1u, 2u, 4u}) {
+    SCOPED_TRACE(alignment);
+    ImageFacts image = example_image();
+    ImageEntryFacts &selected = image.entries.front();
+    selected.binding.kernarg_alignment = alignment;
+    selected.selected->entry = selected.binding;
+    EXPECT_TRUE(validate_manifest(*selected.selected).failed());
+    EXPECT_TRUE(validate_image_facts(image).failed());
+    EXPECT_TRUE(encode_image_facts(image).failed());
+  }
+}
+
 TEST(ConSanImageFacts, SuccessfulValidationEmitsNoDiagnostic) {
   std::vector<std::string> messages;
   auto collect = [&messages](std::string_view message) { messages.emplace_back(message); };

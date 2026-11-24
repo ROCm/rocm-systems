@@ -121,8 +121,9 @@ bool parse(std::span<const uint8_t> image, const KernelDescriptorInfo &kernel,
   }
   if (!entry.text_field_is(".name", kernel.kernel_name) ||
       !entry.text_field_is(".symbol", kernel.kernel_name + ".kd") || !kernarg ||
-      *kernarg != kernel.descriptor.kernarg_size || !alignment || *alignment < 8 ||
-      !std::has_single_bit(*alignment) || !sgprs || *sgprs == 0 || *sgprs > 106 || !valid_vgprs ||
+      *kernarg != kernel.descriptor.kernarg_size || !alignment ||
+      !std::has_single_bit(*alignment) || (policy == MetadataPolicy::Selected && *alignment < 8) ||
+      !sgprs || *sgprs == 0 || *sgprs > 106 || !valid_vgprs ||
       entry.integer_field(".wavefront_size") != wave_size || !supports_wave(*target, wave_size) ||
       entry.integer_field(".group_segment_fixed_size") !=
           kernel.descriptor.group_segment_fixed_size ||

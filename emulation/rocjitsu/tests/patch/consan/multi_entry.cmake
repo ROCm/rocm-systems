@@ -94,3 +94,33 @@ add_custom_command(
 )
 add_custom_target(consan_multi_entry_abi_fixture DEPENDS ${_multi_abi_image})
 add_dependencies(consan_multi_entry_fixture consan_multi_entry_abi_fixture)
+
+set(_multi_scalar_object ${_fixture_dir}/multi-entry-native-scalar.o)
+set(_multi_scalar_image ${_fixture_dir}/multi-entry-native-scalar.hsaco)
+add_custom_command(
+    OUTPUT ${_multi_scalar_object}
+    COMMAND
+        ${CMAKE_CXX_COMPILER_LAUNCHER} ${AMDCXX} -x assembler-with-cpp -target
+        amdgcn-amd-amdhsa -mcpu=gfx1250 -mcode-object-version=5
+        -mno-wavefrontsize64 -DMK_EXTENDED_ABI=1 -DMK_NATIVE_SCALAR=1 -c
+        ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/multi_entry.s -o
+        ${_multi_scalar_object}
+    DEPENDS fixtures/multi_entry.s ${AMDCXX}
+    VERBATIM
+)
+add_custom_command(
+    OUTPUT ${_multi_scalar_image}
+    COMMAND
+        ${ROCM_PATH}/lib/llvm/bin/ld.lld -shared ${_multi_scalar_object} -o
+        ${_multi_scalar_image}
+    DEPENDS ${_multi_scalar_object}
+    VERBATIM
+)
+add_custom_target(
+    consan_multi_entry_native_scalar_fixture
+    DEPENDS ${_multi_scalar_image}
+)
+add_dependencies(
+    consan_multi_entry_fixture
+    consan_multi_entry_native_scalar_fixture
+)

@@ -235,6 +235,65 @@ TEST_F(ConSanPrepareImage, PreservesCompilerHiddenArgumentsAndNativePrivateAbi) 
   EXPECT_EQ(decoded.value(), artifact.value().facts);
 }
 
+TEST_F(ConSanPrepareImage, PreservesFourByteAlignedNativeScalarSibling) {
+  const std::filesystem::path path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() /
+      "multi-entry-native-scalar.hsaco";
+  const std::vector<uint8_t> original = test::read_fixture(path);
+  ASSERT_FALSE(original.empty());
+  const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+  const FailureOr<PreparedImageArtifact> artifact =
+      prepare_image(original, *target_profile("gfx1250"), selected, error_);
+  ASSERT_TRUE(artifact.succeeded()) << error_.message;
+  const ImageEntryFacts &native = artifact.value().facts.entries.back();
+  EXPECT_EQ(native.binding.name, "mk_c");
+  EXPECT_EQ(native.disposition, EntryDisposition::Native);
+  EXPECT_FALSE(native.selected);
+  EXPECT_EQ(native.binding.original_kernarg_bytes, 4u);
+  EXPECT_EQ(native.binding.kernarg_alignment, 4u);
+  EXPECT_EQ(native.binding.required_workgroup_size, (std::array<uint32_t, 3>{32, 2, 1}));
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(verify_artifact_images(artifact.value().facts, original, artifact.value().image,
+                                     diagnostic.emitter())
+                  .succeeded())
+      << diagnostic.message();
+  const FailureOr<std::vector<uint8_t>> encoded =
+      encode_image_facts(artifact.value().facts, diagnostic.emitter());
+  ASSERT_TRUE(encoded.succeeded()) << diagnostic.message();
+  const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value(), diagnostic.emitter());
+  ASSERT_TRUE(decoded.succeeded()) << diagnostic.message();
+  EXPECT_EQ(decoded.value(), artifact.value().facts);
+}
+
+TEST_F(ConSanPrepareImage, SelectedMultidimensionalRequirementsCannotPublishPreparedFacts) {
+  const std::filesystem::path path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() / "multi-entry-abi.hsaco";
+  const std::vector<uint8_t> original = test::read_fixture(path);
+  ASSERT_FALSE(original.empty());
+  for (const size_t dimension : {1u, 2u}) {
+    SCOPED_TRACE(dimension);
+    std::vector<uint8_t> image = original;
+    const FailureOr<amdhsa::MetadataDocument> metadata = amdhsa::MetadataDocument::parse(image);
+    ASSERT_TRUE(metadata.succeeded());
+    const amdhsa::MetadataValue *entries = metadata.value().root().field("amdhsa.kernels");
+    ASSERT_NE(entries, nullptr);
+    const amdhsa::MetadataValue *shape = entries->array.front().field(".reqd_workgroup_size");
+    ASSERT_NE(shape, nullptr);
+    ASSERT_EQ(shape->array.size(), 3u);
+    const size_t payload_offset = metadata.value().payload().data() - image.data();
+    ASSERT_EQ(shape->array[0].integer_bytes, 0u);
+    ASSERT_EQ(shape->array[dimension].integer_bytes, 0u);
+    image[payload_offset + shape->array[0].offset] = 32;
+    image[payload_offset + shape->array[dimension].offset] = 2;
+    const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+    const FailureOr<PreparedImageArtifact> artifact =
+        prepare_image(image, *target_profile("gfx1250"), selected, error_);
+    EXPECT_TRUE(artifact.failed());
+    EXPECT_EQ(error_.code, InputErrorCode::UnsupportedEntry);
+    EXPECT_EQ(error_.message, "selected entry requires a 1D workgroup shape");
+  }
+}
+
 TEST_F(ConSanPrepareImage, SelectedDynamicStackCannotPublishPreparedFacts) {
   const std::filesystem::path path =
       std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() / "multi-entry-abi.hsaco";
