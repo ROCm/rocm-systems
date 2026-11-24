@@ -259,7 +259,7 @@ ncclResult_t p2pCanConnect(int* ret, struct ncclComm* comm, struct ncclTopoGraph
 // zeroing, before the buffer is exported, avoids it. The reads are queued on ncclCudaCalloc's zeroing stream
 // ahead of its synchronize, so they add no extra sync.
 // RCCL_P2P_PRIME: -1 (default) = on for gfx950, 0 = off, 1 = on for every architecture. gfx942 does not show the
-// issue with the same driver mapping (ROCM-34582).
+// issue with the same driver mapping.
 RCCL_PARAM(P2pPrime, "P2P_PRIME", -1);
 
 static bool p2pPrimeLegacyIpcEnabled() {
