@@ -204,9 +204,10 @@ if [[ ${#FILTERS[@]} -gt 0 ]]; then
   # path to one relative to projects/rccl (pre-commit passes repo-relative
   # paths such as projects/rccl/src/x.cc), then anchor it to /hipify/ and the
   # end so src/init.cc does not also match src/transport/init.cc. x.cu is
-  # hipified to x.cu.cpp.
+  # hipified to x.cu.cpp, and add_file_unique (cmake/Dependencies.cmake)
+  # renames a repeated basename to x_tmp.cc.
   FILTER_REGEX="$(printf '%s\n' "${FILTERS[@]}" \
-    | sed -E 's|^(.*/)?projects/rccl/||; s|^\./||; s/\./\\./g; s|^|/hipify/|; s|$|(\\.cpp)?$|' \
+    | sed -E 's|^(.*/)?projects/rccl/||; s|^\./||; s|(\.[A-Za-z0-9]+)$|(_tmp)?\1|; s/\./\\./g; s|^|/hipify/|; s|$|(\\.cpp)?$|' \
     | paste --serial --delimiters='|')"
   # A filter that matches nothing would analyse nothing and read as clean.
   if ! sed -nE 's|^ *"file": "(.*)",?$|\1|p' "${BUILD_DIR}/compile_commands.json" \
