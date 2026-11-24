@@ -161,8 +161,16 @@ TEST(AsyncMmaPolicyTest, Cdna4LdsReadsAndM0MovesStayInsideTheWindow) {
   EXPECT_TRUE(fmac.writes.test(7));
   EXPECT_FALSE(policy::safe_inline(
       *decode(cdna4::build_sop1(cdna4::kSMovB32Sop1, {.ssrc0 = 3, .sdst = 126}))));
+  // FLAT_SCRATCH_LO (102) stays excluded on CDNA4; explicit VCC_LO (106) is safe
+  // because matrix helpers never read VCC.
   EXPECT_FALSE(policy::safe_inline(
+      *decode(cdna4::build_sop1(cdna4::kSMovB32Sop1, {.ssrc0 = 3, .sdst = 102}))));
+  EXPECT_TRUE(policy::safe_inline(
       *decode(cdna4::build_sop1(cdna4::kSMovB32Sop1, {.ssrc0 = 3, .sdst = 106}))));
+  EXPECT_TRUE(policy::safe_inline(
+      *decode(cdna4::build_sop1(cdna4::kSMovB64Sop1, {.ssrc0 = 2, .sdst = 106}))));
+  EXPECT_FALSE(policy::safe_inline(
+      *decode(cdna4::build_sop1(cdna4::kSMovB32Sop1, {.ssrc0 = 3, .sdst = 108}))));
 }
 
 TEST(AsyncMmaPolicyTest, TargetSelectionMatchesTheAcceptedInstructionShapes) {
@@ -192,6 +200,36 @@ TEST(AsyncMmaPolicyTest, TargetSelectionMatchesTheAcceptedInstructionShapes) {
   }
   const auto add = rdna4::build_sop2(rdna4::kSAddF32Sop2, {.ssrc0 = 1, .ssrc1 = 2, .sdst = 0});
   EXPECT_FALSE(policy::encoding_may_be_candidate(rocjitsu::IsaFamily::Rdna4, add[0]));
+
+  // RDNA4 ordinary SGPRs extend to s105; VCC (106..107), NULL (124), and M0 (125)
+  // are safe, while TTMP (108..123) and EXEC (126..127) still terminate blocks.
+  const auto decode_r4 = [&](const auto &encoding) {
+    std::array<uint32_t, 4> words{};
+    std::ranges::copy(encoding, words.begin());
+    return std::unique_ptr<Instruction>(decode_valid(*decoder, words.data()));
+  };
+  for (uint8_t sdst : {uint8_t{102}, uint8_t{105}, uint8_t{106}, uint8_t{107}, uint8_t{124},
+                       uint8_t{125}}) {
+    EXPECT_TRUE(policy::safe_inline(
+        *decode_r4(rdna4::build_sop1(rdna4::kSMovB32Sop1, {.ssrc0 = 1, .sdst = sdst})),
+        rocjitsu::IsaFamily::Rdna4))
+        << "sdst=" << unsigned(sdst);
+  }
+  EXPECT_TRUE(policy::safe_inline(
+      *decode_r4(rdna4::build_sop2(rdna4::kSAndB32Sop2, {.ssrc0 = 0, .ssrc1 = 106, .sdst = 106})),
+      rocjitsu::IsaFamily::Rdna4));
+  for (uint8_t sdst : {uint8_t{108}, uint8_t{126}, uint8_t{127}}) {
+    EXPECT_FALSE(policy::safe_inline(
+        *decode_r4(rdna4::build_sop1(rdna4::kSMovB32Sop1, {.ssrc0 = 1, .sdst = sdst})),
+        rocjitsu::IsaFamily::Rdna4))
+        << "sdst=" << unsigned(sdst);
+  }
+  for (auto op : {amdgpu::Operation::DS_PERMUTE_B32, amdgpu::Operation::DS_BPERMUTE_FI_B32,
+                  amdgpu::Operation::DS_SWIZZLE_B32, amdgpu::Operation::DS_LOAD_ADDTID_B32,
+                  amdgpu::Operation::DS_STORE_ADDTID_B32, amdgpu::Operation::DS_NOP,
+                  amdgpu::Operation::S_PREFETCH_DATA, amdgpu::Operation::S_PREFETCH_INST}) {
+    EXPECT_TRUE(policy::safe_inline(mma_test::PolicyInstruction(op), rocjitsu::IsaFamily::Rdna4));
+  }
 }
 
 TEST(AsyncMmaPolicyTest, QualifiedMfmaFamiliesExcludeUnmeasuredShapes) {

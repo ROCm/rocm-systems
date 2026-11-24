@@ -1007,4 +1007,95 @@ TEST(MmaPlanTest, LocalOnlyFiniteCapRespectsBudget) {
   EXPECT_EQ(pool.claimed(), 0u);
 }
 
+TEST(MmaPlanTest, Rdna4ExplicitVccAndHighSgprStayInOnePlanAbove128Steps) {
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
+  amdgpu::GpuMemory memory("mem");
+  amdgpu::InstructionCache icache;
+  uint64_t addr = kPc;
+  const auto emit = [&](const auto &enc) {
+    for (uint32_t w : enc) {
+      memory.write32(addr, w);
+      addr += 4;
+    }
+  };
+  // WMMA #0 -> s_and_b32 vcc_lo -> s_mov_b32 s104 -> 140 ALUs -> WMMA #1 -> s_endpgm.
+  // Verifies explicit VCC/s104 writes do not split the block and >128 steps fit.
+  emit(rdna4::build_vop3p(rdna4::kVWmmaF3216x16x16Bf16Vop3p,
+                          {.vdst = 0, .src0 = 256 + 16, .src1 = 256 + 20, .src2 = 256 + 0}));
+  emit(rdna4::build_sop2(rdna4::kSAndB32Sop2, {.ssrc0 = 0, .ssrc1 = 106, .sdst = 106}));
+  emit(rdna4::build_sop1(rdna4::kSMovB32Sop1, {.ssrc0 = 1, .sdst = 104}));
+  for (unsigned i = 0; i != 140; ++i) {
+    emit(rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = 256 + 32, .vdst = 33}));
+  }
+  emit(rdna4::build_vop3p(rdna4::kVWmmaF3216x16x16Bf16Vop3p,
+                          {.vdst = 8, .src0 = 256 + 24, .src1 = 256 + 28, .src2 = 256 + 8}));
+  emit(rdna4::build_sopp(rdna4::kSEndpgmSopp, {.simm16 = 0}));
+
+  plan::Plan p;
+  uint64_t decodes = 0;
+  plan::compile(
+      p, *decoder,
+      [&](uint64_t a, plan::Plan::Words &w) {
+        icache.fetch(memory, a, reinterpret_cast<uint8_t *>(w.data()));
+        return true;
+      },
+      kPc, 64, /*has_accvgprs=*/false, decodes, /*tail_snapshot=*/false, /*pack_limit=*/4,
+      /*min_chains=*/9, /*min_weight=*/0, /*wave_size=*/32, rocjitsu::IsaFamily::Rdna4);
+  ASSERT_TRUE(p.accept);
+  EXPECT_FALSE(p.truncated);
+  EXPECT_EQ(p.steps.size(), 144u);
+  EXPECT_EQ(p.chains, 2u);
+  EXPECT_EQ(p.alu, 142u);
+}
+
+TEST(MmaPlanTest, RejectedSerialChainSetsNonTruncatedSpanAndInvalidatesOnEpochChange) {
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
+  amdgpu::GpuMemory memory("mem");
+  amdgpu::InstructionCache icache;
+  uint64_t addr = kPc;
+  const auto emit = [&](const auto &enc) {
+    for (uint32_t w : enc) {
+      memory.write32(addr, w);
+      addr += 4;
+    }
+  };
+  // 4 serial WMMAs into v[0:7] followed immediately by a consumer -> rejected, non-truncated.
+  std::array<uint64_t, 4> wmma_pcs{};
+  for (unsigned i = 0; i != 4; ++i) {
+    wmma_pcs[i] = addr;
+    emit(rdna4::build_vop3p(rdna4::kVWmmaF3216x16x16Fp8Fp8Vop3p,
+                            {.vdst = 0,
+                             .src0 = static_cast<uint16_t>(256 + 16 + 2 * i),
+                             .src1 = static_cast<uint16_t>(256 + 32 + 2 * i),
+                             .src2 = 256 + 0}));
+  }
+  emit(rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = 256 + 0, .vdst = 40}));
+  emit(rdna4::build_sopp(rdna4::kSEndpgmSopp, {.simm16 = 0}));
+
+  plan::PlanCache cache;
+  const auto fetch_words = [&](uint64_t a, plan::Plan::Words &w) {
+    icache.fetch(memory, a, reinterpret_cast<uint8_t *>(w.data()));
+    return true;
+  };
+  plan::Plan::Words first{};
+  ASSERT_TRUE(fetch_words(wmma_pcs[0], first));
+  const plan::PlanCache::Key key{wmma_pcs[0], 0, 64, false, {}, 32};
+  const plan::Plan *p =
+      cache.lookup(*decoder, icache, fetch_words, key, first, rocjitsu::IsaFamily::Rdna4);
+  ASSERT_FALSE(p->accept);
+  EXPECT_FALSE(p->truncated);
+  EXPECT_GT(p->length, 0u);
+
+  int fake_wave = 0;
+  auto &span = cache.rejected_span(0);
+  span = {&fake_wave, 1, icache.epoch(), 64, wmma_pcs[0], wmma_pcs[0] + p->length};
+  for (uint64_t pc : wmma_pcs)
+    EXPECT_TRUE(span.contains(&fake_wave, 1, icache.epoch(), 64, pc));
+  EXPECT_FALSE(span.contains(&fake_wave, 1, icache.epoch() + 1, 64, wmma_pcs[1]));
+  EXPECT_FALSE(span.contains(&fake_wave, 1, icache.epoch(), 128, wmma_pcs[1]));
+  EXPECT_FALSE(span.contains(&fake_wave, 2, icache.epoch(), 64, wmma_pcs[1]));
+  cache.clear();
+  EXPECT_FALSE(cache.rejected_span(0).contains(&fake_wave, 1, icache.epoch(), 64, wmma_pcs[0]));
+}
+
 } // namespace

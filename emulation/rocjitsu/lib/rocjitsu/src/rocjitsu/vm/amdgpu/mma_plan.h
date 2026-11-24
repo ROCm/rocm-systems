@@ -28,8 +28,10 @@
 
 namespace rocjitsu::amdgpu::mma_plan {
 
-// Long enough for full Tensile/HipKittens straight-line K-step tiles (71-128 insns).
-inline constexpr unsigned kMaxSteps = 128;
+// Long enough for full Tensile/HipKittens K-step tiles and mixed-ALU attention
+// blocks (e.g., 16-WMMA blocks with ~150 interleaved ALU/LDS ops), while still
+// fitting inside uint8_t step indices (< Plan::kNoStep = 0xff).
+inline constexpr unsigned kMaxSteps = 240;
 /// Helper jobs a block may hand off. Each is one submission; wait masks are 64 bits.
 inline constexpr unsigned kMaxJobs = 64;
 using JobMask = uint64_t;
@@ -438,6 +440,7 @@ struct Plan {
   };
   bool accept = false;
   bool local_only = false; ///< Lightweight MMAs stay inside the issuer's LLC domain.
+  bool truncated = false;  ///< True when compile() stopped at kMaxSteps rather than a terminator.
   uint64_t epoch = 0;
   uint64_t length = 0; ///< Bytes covered by the steps.
   Words first{};
@@ -449,6 +452,7 @@ struct Plan {
   /// touches or writes it (kNoStep if none): a block entered while earlier
   /// jobs still run joins each job at the first step that depends on it.
   static constexpr uint8_t kNoStep = 0xff;
+  static_assert(kMaxSteps < kNoStep, "kMaxSteps must leave kNoStep as sentinel");
   Access footprint;
   std::array<uint8_t, 2 * Access::kRegistersPerBank> first_access{}, first_write{};
   /// Per-job register accesses (snapshotted factors excluded), indexed by Step::job.
@@ -460,6 +464,7 @@ struct Plan {
     release();
     accept = other.accept;
     local_only = other.local_only;
+    truncated = other.truncated;
     footprint = other.footprint;
     first_access = other.first_access;
     first_write = other.first_write;
@@ -499,7 +504,8 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
              bool tail_snapshot = cross_block_enabled() && tail_snapshot_enabled(),
              unsigned pack_limit = batch_pack_limit(),
              unsigned min_chains = batch_min_chains(),
-             unsigned min_weight = min_job_weight(), uint32_t wave_size = 32) {
+             unsigned min_weight = min_job_weight(), uint32_t wave_size = 32,
+             rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4) {
   Instruction::ScopedHeapAllocation heap;
   // A logical chain: one helper job if offloaded. `joined` is the first step
   // that must wait for it; the block end if none does.
@@ -600,7 +606,7 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
     if (k == 0)
       plan.first = words;
-    if (!async_mma_policy::safe_inline(*inst))
+    if (!async_mma_policy::safe_inline(*inst, arch))
       break;
     const auto access = async_execution::footprint(*inst, num_vgprs, has_accvgprs, wave_size);
     if (!access)
@@ -700,6 +706,7 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
   }
   plan.length = offset;
   const unsigned steps = unsigned(plan.steps.size());
+  plan.truncated = steps == kMaxSteps;
   for (auto &chain : chains)
     chain.joined = std::min(chain.joined, steps);
   for (unsigned k = 0; k != steps; ++k) {
@@ -1265,7 +1272,8 @@ public:
   /// @brief Find or build the plan for a block entry; check accept before replaying.
   template <typename Fetch>
   const Plan *lookup(Decoder &decoder, const InstructionCache &icache, Fetch &&fetch_words,
-                     const Key &key, const Words &first) {
+                     const Key &key, const Words &first,
+                     rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4) {
     auto it = plans_.find(key);
     bool valid = it != plans_.end() && it->second.first == first;
     if (valid && it->second.epoch != icache.epoch()) {
@@ -1298,12 +1306,34 @@ public:
       ++stats.builds;
       compile(plan, decoder, fetch_words, key.pc, key.vgprs, key.acc, stats.decodes,
               cross_block_enabled() && tail_snapshot_enabled(), batch_pack_limit(),
-              batch_min_chains(), min_job_weight(), key.wave_size);
+              batch_min_chains(), min_job_weight(), key.wave_size, arch);
       ++(plan.accept ? stats.accept : stats.reject);
     } else {
       ++stats.hits;
     }
     return &it->second;
+  }
+
+  /// Non-truncated rejected straight-line span last observed by a wave slot.
+  /// Any MMA inside [start, end) is a strict suffix ending at the same
+  /// terminator and cannot become profitable unless code/VGPR state changes.
+  struct RejectedSpan {
+    const void *wave = nullptr;
+    uint64_t generation = ~uint64_t{0};
+    uint64_t epoch = ~uint64_t{0};
+    uint32_t vgprs = 0;
+    uint64_t start = 0;
+    uint64_t end = 0;
+    bool contains(const void *w, uint64_t gen, uint64_t ep, uint32_t num_vgprs,
+                  uint64_t pc) const {
+      return wave == w && generation == gen && epoch == ep && vgprs == num_vgprs &&
+             pc >= start && pc < end;
+    }
+  };
+  RejectedSpan &rejected_span(uint32_t wave_slot) {
+    if (wave_slot >= rejected_spans_.size())
+      rejected_spans_.resize(wave_slot + 1);
+    return rejected_spans_[wave_slot];
   }
 
   /// Wave whose lazy VGPR chunks were last allocated in a slot.
@@ -1350,6 +1380,7 @@ public:
   void clear() {
     drain_all(stats.drains_evict);
     plans_.clear();
+    rejected_spans_.clear();
   }
 
   void flush() {
@@ -1395,6 +1426,7 @@ private:
   size_t capacity_;
   std::unordered_map<Key, Plan, Hash> plans_;
   std::vector<Materialized> materialized_;
+  std::vector<RejectedSpan> rejected_spans_;
   std::vector<PendingJobs> pending_;
 };
 

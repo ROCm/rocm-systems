@@ -1698,12 +1698,22 @@ protected:
   };
   /// @brief Fetch, decode, execute one instruction from the given wavefront.
   IssueOutcome issue_instruction(Wavefront *wf);
-  /// @brief Try the diagnostic adjacent-MMA batch modes before ordinary issue.
   /// @brief Issue a bounded MMA window and drain it before returning to scheduling.
   void issue_async_instruction(Wavefront *wf, MmaAdmissionCache *admission, uint32_t wave_size,
                                bool has_accvgprs);
-  /// @brief Replay a compiled straight-line MMA plan; false leaves the wave untouched.
-  bool replay_mma_plan(Wavefront *wf, uint32_t wave_size, bool has_accvgprs);
+  enum class MmaPlanReplayOutcome : uint8_t {
+    Fallback, ///< Entry mode/config disallows plan replay; fall back to lookahead window.
+    Rejected, ///< Block is unprofitable; issue the already-fetched instruction ordinarily.
+    Replayed, ///< Plan executed (or terminated the wave).
+  };
+  /// @brief Replay a compiled straight-line MMA plan using the already-fetched entry words.
+  MmaPlanReplayOutcome replay_mma_plan_fetched(Wavefront *wf, uint32_t wave_size,
+                                               bool has_accvgprs, const GpuVmAccess *vm_access,
+                                               uint64_t fetch_pc,
+                                               const std::array<uint32_t, 4> &first);
+  /// @brief Fallback bounded lookahead MMA window when plan replay cannot run.
+  IssueOutcome issue_async_lookahead(Wavefront *wf, MmaAdmissionCache *admission,
+                                     bool has_accvgprs);
   void clear_mma_plans();
   void flush_mma_plans();
   /// @brief Convert a guest instruction execution failure into wave termination.
@@ -1719,9 +1729,12 @@ protected:
       std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow>;
   /// @brief Share ordinary instruction execution with the optional scoreboard adapter.
   /// @returns Whether an instruction issued, as for issue_instruction().
-  template <bool EnableAsync>
+  template <bool EnableAsync, bool TryMmaPlan = false>
   IssueOutcome issue_instruction_impl(Wavefront *wf, MaybeAsyncWindow<EnableAsync> window = {},
-                                      MaybeAsyncWindowStorage<EnableAsync> storage = {});
+                                      MaybeAsyncWindowStorage<EnableAsync> storage = {},
+                                      MmaAdmissionCache *async_admission = nullptr,
+                                      uint32_t async_wave_size = 0,
+                                      bool async_has_accvgprs = false);
   /// @brief Advance CU scheduling with compile-time selection of the issue adapter.
   /// @param selected_slots Slots whose running wave may issue; every slot by default.
   /// @param issued If set, receives the selected slots that issued an instruction.

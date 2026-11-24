@@ -2959,13 +2959,15 @@ void ComputeUnitCore::drain_all_pending_mma(MmaDrain cause) {
 // VGPR MSB or index mode, no debugger, single step or trap handler, and
 // plugins that permit asynchronous execution. EXEC may be partial: helpers
 // execute matrix instructions that ignore it, and inline steps apply it.
-bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, bool has_accvgprs) {
+ComputeUnitCore::MmaPlanReplayOutcome ComputeUnitCore::replay_mma_plan_fetched(
+    Wavefront *active, uint32_t wave_size, bool has_accvgprs, const GpuVmAccess *vm_access,
+    uint64_t fetch_pc, const std::array<uint32_t, 4> &first) {
   static const bool enabled = [] {
     const char *value = std::getenv("RJ_MMA_PLAN");
     return !value || *value != '0';
   }();
   if (!enabled)
-    return false;
+    return MmaPlanReplayOutcome::Fallback;
   if (!mma_plans_)
     mma_plans_ = std::make_unique<mma_plan::PlanCache>();
   auto &cache = *mma_plans_;
@@ -2978,27 +2980,15 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
       observes_before_execute_instruction_ || observes_after_execute_instruction_ ||
       observes_async_instruction_issued_ || alu_exception_trap_enables(*active) || !wave_size_ok) {
     ++cache.stats.entry_rejects;
-    return false;
+    return MmaPlanReplayOutcome::Fallback;
   }
+  const uint64_t icache_epoch = inst_cache_.epoch();
+  const uint32_t num_vgprs = active->num_vgprs();
+  auto &rejected_span = cache.rejected_span(active->wf_id());
+  if (rejected_span.contains(active, active->dispatch_generation(), icache_epoch, num_vgprs,
+                             fetch_pc))
+    return MmaPlanReplayOutcome::Rejected;
   const uint32_t vmid = active->process_id();
-  const GpuVmAccess *vm_access = active->vm_access();
-  if (!vm_access && (active->address_space() || vmid != 0)) {
-    // Borrow the quantum's current snapshot; refreshing it is left to ordinary issue.
-    const InstructionVmSnapshot *snapshot = instruction_vm_snapshot_;
-    if (!snapshot || snapshot->compute_unit != this || snapshot->owner != gpu_vm_ ||
-        snapshot->address_space != active->address_space() || snapshot->vmid != vmid ||
-        !snapshot->access || !snapshot->access->is_current() ||
-        !active->same_execution_root(*snapshot->access)) {
-      ++cache.stats.entry_rejects;
-      return false;
-    }
-    vm_access = &*snapshot->access;
-  } else if (vm_access && !vm_access->is_current()) {
-    ++cache.stats.entry_rejects;
-    return false;
-  }
-  sync_inst_cache_debug_epoch();
-  const uint64_t fetch_pc = vm_access ? active->vm_instruction_pc() : active->pc;
   const auto fetch_words = [&](uint64_t address, mma_plan::Plan::Words &words) {
     if (vm_access)
       return inst_cache_.fetch(*vm_access, address, reinterpret_cast<uint8_t *>(words.data())) ==
@@ -3006,23 +2996,19 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
     inst_cache_.fetch(*memory_, address, reinterpret_cast<uint8_t *>(words.data()));
     return true;
   };
-  mma_plan::Plan::Words first;
-  if (!fetch_words(fetch_pc, first) ||
-      !async_mma_policy::encoding_may_be_candidate(arch(), first[0]))
-    return false;
   const mma_plan::PlanCache::Key key{fetch_pc,
                                      vmid,
-                                     active->num_vgprs(),
+                                     num_vgprs,
                                      has_accvgprs,
                                      vm_access ? vm_access->cache_namespace() : VmCacheNamespace{},
                                      wf_size};
-  const mma_plan::Plan *plan = cache.lookup(*decoder_, inst_cache_, fetch_words, key, first);
+  const mma_plan::Plan *plan = cache.lookup(*decoder_, inst_cache_, fetch_words, key, first, arch());
   if (!plan->accept) {
-    // The planner found nothing that can run concurrently here, e.g. one
-    // serial chain. Issue synchronously through ordinary issue so any
-    // conflicting cross-block job is joined by footprint.
-    (void)issue_instruction_impl<false>(active);
-    return true;
+    if (!plan->truncated && plan->length > 0) {
+      rejected_span = {active,    active->dispatch_generation(), inst_cache_.epoch(),
+                       num_vgprs, fetch_pc,                      fetch_pc + plan->length};
+    }
+    return MmaPlanReplayOutcome::Rejected;
   }
   auto &pool = async_pool();
   const uint64_t entry_pc = active->pc;
@@ -3036,7 +3022,7 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
   if (replay.failure()) {
     report_pending_mma_failure(*active, replay);
     if (active->is_halted())
-      return true;
+      return MmaPlanReplayOutcome::Replayed;
   }
   // An exhausted pool still replays: each chain that finds no helper runs on
   // the issuer, which keeps the saved fetch, decode and scoreboard work.
@@ -3152,11 +3138,11 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
     if (waits) {
       if (!replay.join(waits)) {
         helpers_failed(active->pc, *plan->steps.front().inst);
-        return true;
+        return MmaPlanReplayOutcome::Replayed;
       }
     }
     if (helper_error())
-      return true;
+      return MmaPlanReplayOutcome::Replayed;
     switch (step.kind) {
     case mma_plan::StepKind::Chained:
       check_waits(step);
@@ -3246,7 +3232,7 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
         ++cache.stats.pool_full;
         for (unsigned i = 0; i != step.members; ++i) {
           if (!run_inline(*step.chain[i], entry_pc + plan->steps[step.member_step[i]].offset))
-            return true;
+            return MmaPlanReplayOutcome::Replayed;
           if (!inline_only && i + 1 < step.members &&
               replay.submit(step.job, step, active, make_fill(i + 1), reap,
                             mma_plan::bounded_wait_enabled(), i + 1)) {
@@ -3264,7 +3250,7 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
       ++active->trace_inst_count_;
       check_waits(step);
       if (!run_inline(*step.inst, active->pc))
-        return true;
+        return MmaPlanReplayOutcome::Replayed;
       active->pc += step.size;
       record_gws_instruction_progress(process);
       break;
@@ -3296,7 +3282,7 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
           (void)replay.drain();
         if (!active->is_halted())
           (void)helper_error();
-        return true;
+        return MmaPlanReplayOutcome::Replayed;
       }
       break;
     }
@@ -3308,94 +3294,50 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
     helpers_failed(active->pc, *plan->steps.front().inst);
   else
     (void)helper_error();
-  return true;
+  return MmaPlanReplayOutcome::Replayed;
 }
 
-void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCache *admission,
-                                              uint32_t wave_size, bool has_accvgprs) {
-  if (helper_budget_serial_ != quantum_serial_) {
-    // Borrowed helpers exist only while engines and dispatch leave cores idle.
-    // Summing the occupancy once per quantum keeps the hot path free of it.
-    helper_budget_serial_ = quantum_serial_;
-    helper_cap_ = async_pool().borrow_cap();
-  }
-  if (helper_cap_ == 0) {
-    // Every borrowable core is busy: behave like a synchronous CU without
-    // paying the extra instruction-cache peek on every non-candidate op.
-    issue_instruction(active);
-    return;
-  }
-  // CDNA4 MFMA, RDNA4 WMMA, and the default gfx1250 allowlist have cheap
-  // encoding filters. Resident non-candidates use ordinary issue directly.
-  if (async_mma_policy::supported(arch())) {
-    uint32_t word;
-    const GpuVmAccess *vm_access = active->vm_access();
-    const uint64_t pc =
-        vm_access || active->process_id() ? active->vm_instruction_pc() : active->pc;
-    const bool resident = vm_access ? inst_cache_.peek_word(*vm_access, pc, word)
-                                    : inst_cache_.peek_word(pc, active->process_id(), word);
-    if (resident) {
-      if (!async_mma_policy::encoding_may_be_candidate(arch(), word)) {
-        // Between blocks, ordinary issue joins only the running jobs whose
-        // registers the instruction touches.
-        issue_instruction(active);
-        if (active->is_halted()) {
-          async_execution::stats.flush();
-          flush_mma_plans();
-        }
-        return;
-      }
-    }
-  }
-  const bool wave_size_ok = arch() == IsaFamily::Rdna4
-                                ? (active->wf_size() == 32 || active->wf_size() == 64)
-                                : active->wf_size() == wave_size;
-  if (!wave_size_ok || active->vgpr_msb_mode() != 0 || active->gpr_idx_en() ||
-      debug_active() || active->debug_single_step() || active->in_trap_handler() ||
-      !plugin_group_->supports_async_instructions()) {
-    drain_pending_mma(*active, MmaDrain::Mode);
-    issue_instruction_impl<true>(active);
-    return;
-  }
-  if (replay_mma_plan(active, wave_size, has_accvgprs)) {
-    if (active->is_halted())
-      flush_mma_plans();
-    return;
-  }
+ComputeUnitCore::IssueOutcome
+ComputeUnitCore::issue_async_lookahead(Wavefront *active, MmaAdmissionCache *admission,
+                                       bool has_accvgprs) {
   // The lookahead window tracks only its own jobs.
   drain_pending_mma(*active, MmaDrain::Gap);
   AsyncInstructionWindowStorage storage;
   storage.admission = admission;
   storage.has_accvgprs = has_accvgprs;
   unsigned issued = 0;
+  IssueOutcome first_outcome = IssueOutcome::NotIssued;
   do {
-    issue_instruction_impl<true>(active, storage.window ? &*storage.window : nullptr, &storage);
-    if (!storage.window) {
-      if (active->is_halted())
-        {
-      async_execution::stats.flush();
-      flush_mma_plans();
-    }
-      return;
-    }
+    const IssueOutcome outcome = issue_instruction_impl<true>(
+        active, storage.window ? &*storage.window : nullptr, &storage);
+    if (issued == 0)
+      first_outcome = outcome;
+    if (!storage.window)
+      return first_outcome;
     storage.window->poll();
   } while (++issued < async_execution::issue_limit() && storage.window->pending() &&
            !storage.window->stopped() && active->state() == WfState::RUNNING);
   storage.window->drain();
-  if (active->is_halted())
-    {
-      async_execution::stats.flush();
-      flush_mma_plans();
-    }
+  return first_outcome;
+}
+
+void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCache *admission,
+                                              uint32_t wave_size, bool has_accvgprs) {
+  // Single fused fetch: non-candidate instructions skip peek_word() and go
+  // straight to decode/execute; candidates divert into replay_mma_plan_fetched()
+  // using the already-fetched words and fall through on rejection without re-fetching.
+  (void)issue_instruction_impl<false, true>(active, {}, {}, admission, wave_size, has_accvgprs);
 }
 
 constinit thread_local ComputeUnitCore::InstructionVmSnapshot
     *ComputeUnitCore::instruction_vm_snapshot_ = nullptr;
 
-template <bool EnableAsync>
+template <bool EnableAsync, bool TryMmaPlan>
 [[gnu::always_inline]] inline ComputeUnitCore::IssueOutcome
 ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<EnableAsync> window,
-                                        MaybeAsyncWindowStorage<EnableAsync> storage) {
+                                        MaybeAsyncWindowStorage<EnableAsync> storage,
+                                        MmaAdmissionCache *async_admission,
+                                        uint32_t async_wave_size, bool async_has_accvgprs) {
   uint32_t vmid = active->process_id();
   const auto drain_async_window = [&]() {
     if constexpr (EnableAsync) {
@@ -3564,6 +3506,27 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
                      " vmid=", vmid, " outcome=", static_cast<unsigned>(fetch_outcome));
     handle_terminal_vm_fault(*active, fetch_outcome);
     return IssueOutcome::NotIssued;
+  }
+
+  if constexpr (TryMmaPlan) {
+    if (async_mma_policy::encoding_may_be_candidate(arch(), words[0])) [[unlikely]] {
+      const bool wave_size_ok = arch() == IsaFamily::Rdna4
+                                    ? (active->wf_size() == 32 || active->wf_size() == 64)
+                                    : active->wf_size() == async_wave_size;
+      if (!wave_size_ok || active->vgpr_msb_mode() != 0 || active->gpr_idx_en() ||
+          debugger_active || active->debug_single_step() || active->in_trap_handler() ||
+          !plugin_group_->supports_async_instructions()) {
+        drain_pending_mma(*active, MmaDrain::Mode);
+      } else {
+        const mma_plan::Plan::Words first{words[0], words[1], words[2], words[3]};
+        const MmaPlanReplayOutcome outcome = replay_mma_plan_fetched(
+            active, async_wave_size, async_has_accvgprs, vm_access, fetch_pc, first);
+        if (outcome == MmaPlanReplayOutcome::Replayed)
+          return IssueOutcome::Issued;
+        if (outcome == MmaPlanReplayOutcome::Fallback)
+          return issue_async_lookahead(active, async_admission, async_has_accvgprs);
+      }
+    }
   }
 
   const bool reuse_decoded = !debugger_active;
@@ -4337,6 +4300,15 @@ ComputeUnitCore::step_impl(MmaAdmissionCache *admission, uint32_t async_wave_siz
   tick_pipelines();
   update_wf_states();
 
+  if constexpr (EnableAsync) {
+    if (helper_budget_serial_ != quantum_serial_) {
+      // Borrowed helpers exist only while engines and dispatch leave cores idle.
+      // Summing occupancy once per quantum keeps the per-wave issue loop free of it.
+      helper_budget_serial_ = quantum_serial_;
+      helper_cap_ = async_pool().borrow_cap();
+    }
+  }
+
   for (uint32_t slot = 0; slot < active_slot_limit_; ++slot) {
     auto &wf = wfs_[slot];
     if (!wf)
@@ -4371,13 +4343,20 @@ ComputeUnitCore::step_impl(MmaAdmissionCache *admission, uint32_t async_wave_siz
         drain_pending_mma(*wf, MmaDrain::Mode);
         retired = issue_instruction(wf.get()) == IssueOutcome::Issued;
       } else if constexpr (EnableAsync) {
-        issue_async_instruction(wf.get(), admission, async_wave_size, has_accvgprs);
+        if (helper_cap_ == 0)
+          (void)issue_instruction(wf.get());
+        else
+          issue_async_instruction(wf.get(), admission, async_wave_size, has_accvgprs);
       } else {
         retired = issue_instruction(wf.get()) == IssueOutcome::Issued;
       }
       if constexpr (EnableAsync) {
-        if (admission && wf->is_halted())
-          admission->flush();
+        if (wf->is_halted()) [[unlikely]] {
+          if (admission)
+            admission->flush();
+          async_execution::stats.flush();
+          flush_mma_plans();
+        }
       } else if (retired && issued) {
         *issued |= slot_bit;
       }

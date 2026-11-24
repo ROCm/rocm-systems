@@ -225,6 +225,10 @@ inline bool lds_read(Operation operation) {
   case Operation::DS_LOAD_TR6_B96:
   case Operation::DS_LOAD_TR8_B64:
   case Operation::DS_LOAD_TR16_B128:
+  case Operation::DS_LOAD_ADDTID_B32:
+  case Operation::DS_PERMUTE_B32:
+  case Operation::DS_BPERMUTE_FI_B32:
+  case Operation::DS_SWIZZLE_B32:
     return true;
   default:
     return false;
@@ -258,6 +262,7 @@ inline bool lds_write(Operation operation) {
   case Operation::DS_STORE_2ADDR_B64:
   case Operation::DS_STORE_2ADDR_STRIDE64_B32:
   case Operation::DS_STORE_2ADDR_STRIDE64_B64:
+  case Operation::DS_STORE_ADDTID_B32:
     return true;
   default:
     return false;
@@ -273,9 +278,16 @@ inline bool global_data_share(const Instruction &inst) {
       return true;
   return false;
 }
+inline constexpr int kCdna4MaxSgprCount = 102;
+inline constexpr int kRdna4MaxSgprCount = 106;
+inline constexpr int kVccLoEncoding = 106;
+inline constexpr int kVccHiEncoding = 107;
 inline constexpr int kM0Encoding = 124;
+inline constexpr int kRdna4NullEncoding = 124;
+inline constexpr int kRdna4M0Encoding = 125;
 
-inline bool safe_inline(const Instruction &inst) {
+inline bool safe_inline(const Instruction &inst,
+                        rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4) {
   const Operation operation = inst.amdgpu_operation();
   if (operation == Operation::Unknown)
     return false;
@@ -291,8 +303,13 @@ inline bool safe_inline(const Instruction &inst) {
   if (modifiers.dpp)
     return false;
   if (operation == Operation::S_DELAY_ALU || operation == Operation::S_NOP ||
-      operation == Operation::V_NOP || operation == Operation::S_SETPRIO ||
-      operation == Operation::S_CLAUSE || operation == Operation::S_WAIT_ALU)
+      operation == Operation::V_NOP || operation == Operation::DS_NOP ||
+      operation == Operation::S_SETPRIO || operation == Operation::S_CLAUSE ||
+      operation == Operation::S_WAIT_ALU || operation == Operation::S_PREFETCH_DATA ||
+      operation == Operation::S_PREFETCH_DATA_PC_REL ||
+      operation == Operation::S_PREFETCH_INST ||
+      operation == Operation::S_PREFETCH_INST_PC_REL ||
+      operation == Operation::S_BUFFER_PREFETCH_DATA)
     return true;
   if (lds_access(operation))
     return !global_data_share(inst);
@@ -305,18 +322,24 @@ inline bool safe_inline(const Instruction &inst) {
   if (inline_operation_kind(operation) != InlineOperationKind::Arithmetic &&
       operation != Operation::S_MOVK_I32 && operation != Operation::S_ADDK_I32)
     return false;
+  const bool is_rdna4 = arch == rocjitsu::IsaFamily::Rdna4;
+  const int max_sgpr_count = is_rdna4 ? kRdna4MaxSgprCount : kCdna4MaxSgprCount;
   for (int i = 0; i != inst.num_dst_operands(); ++i) {
     const auto *op = inst.dst_operand(i);
-    // Ordinary SGPRs only. Fieldless SCC/VCC are permitted by the whitelist;
-    // WMMA workers do not read them. Explicit special-register writes drain,
-    // except M0: matrix helpers never read M0, and the LDS and buffer-to-LDS
-    // instructions that do run on the issuer in program order, whichever
-    // scalar instruction computed it.
-    if (op && op->encoding_value() == kM0Encoding && !op->is_vgpr())
+    if (!op || op->is_vgpr() || op->is_fieldless())
       continue;
-    if (op && !op->is_vgpr() && !op->is_fieldless() &&
-        (op->encoding_value() < 0 || op->encoding_value() + (op->size_bits() + 31) / 32 > 102))
-      return false;
+    const int enc = op->encoding_value();
+    const int dwords = (op->size_bits() + 31) / 32;
+    // Ordinary SGPRs (s0..s101 on CDNA4, s0..s105 on RDNA4).
+    if (enc >= 0 && enc + dwords <= max_sgpr_count)
+      continue;
+    // Matrix helpers never read VCC, M0, or RDNA4 NULL.
+    if (enc >= kVccLoEncoding && enc + dwords <= kVccHiEncoding + 1)
+      continue;
+    if (dwords == 1 && (enc == kM0Encoding || (is_rdna4 && (enc == kRdna4NullEncoding ||
+                                                            enc == kRdna4M0Encoding))))
+      continue;
+    return false;
   }
   return true;
 }
