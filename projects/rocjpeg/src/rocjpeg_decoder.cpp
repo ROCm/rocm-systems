@@ -483,7 +483,8 @@ RocJpegStatus RocJpegDecoder::FinalizeSubBatches(const VASurfaceID *surface_ids,
                         // GetChromaHeight rounds down, to the native chroma height. The planar chroma planes also get
                         // the last chroma row of an odd height, which only the last picture row uses, so they have
                         // (picture_height + 1) >> 1 rows: for the whole image, the rounded up height that
-                        // rocJpegGetImageInfo reports; for a crop, the crop height halved and rounded up.
+                        // rocJpegGetImageInfo reports; for a crop, the crop height halved and rounded up. For NV12,
+                        // AccumulatePlanarYUVOutputFormat leaves that row out when the two chroma pitches differ.
                         chroma_height = (picture_height + 1) >> 1;
                     }
                     CHECK_ROCJPEG(AccumulatePlanarYUVOutputFormat(mem, picture_width, picture_height, chroma_height, &destinations[idx], &decode_params[idx], is_roi_valid));
@@ -1162,9 +1163,12 @@ RocJpegStatus RocJpegDecoder::AccumulatePlanarYUVOutputFormat(HipInteropDeviceMe
     // The chroma planes of the horizontally subsampled formats (YUY2 and NV12) are (picture_width + 1) >> 1 wide: with
     // an odd width, the last chroma column is the one only the last picture column uses. That column is written only
     // if the destination chroma pitch has room for it, so that a destination sized with the chroma width rounded down
-    // is not overrun.
+    // is not overrun. Both conversions below also write channel 2 with the pitch of channel 1, so when the two chroma
+    // pitches differ, the last chroma column, and for NV12 the last chroma row of an odd height, could be written past
+    // the end of channel 2. With different chroma pitches, the chroma width and the NV12 chroma height are rounded down.
+    const bool same_chroma_pitch = destination->pitch[2] == destination->pitch[1];
     uint32_t chroma_width = (picture_width + 1) >> 1;
-    if (chroma_width > destination->pitch[1]) {
+    if (!same_chroma_pitch || chroma_width > destination->pitch[1]) {
         chroma_width = picture_width >> 1;
     }
     if (mem.surface_format == VA_FOURCC_YUY2) {
@@ -1186,7 +1190,7 @@ RocJpegStatus RocJpegDecoder::AccumulatePlanarYUVOutputFormat(HipInteropDeviceMe
         CHECK_ROCJPEG(CopyChannel(mem, picture_width, picture_height, 0, destination, decode_params, is_roi_valid));
         if (mem.surface_format == VA_FOURCC_NV12) {
             uint32_t uv_width  = chroma_width;
-            uint32_t uv_height = chroma_height;
+            uint32_t uv_height = same_chroma_pitch ? chroma_height : picture_height >> 1;
             InterleavedUVToPlanarUVBatchParams bp;
             bp.dst_width                 = uv_width;
             bp.dst_height                = uv_height;

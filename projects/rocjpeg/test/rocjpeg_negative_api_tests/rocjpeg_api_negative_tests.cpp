@@ -2471,6 +2471,43 @@ int RocJpegApiNegativeTests::TestOddDimensionChroma() {
                 result = EXIT_FAILURE;
             }
         }
+
+        // Scenario 7: ROCJPEG_OUTPUT_YUV_PLANAR into chroma planes of different pitches, channel 2 with the smaller one,
+        // writes past neither of them. The conversion writes channel 2 with the pitch of channel 1, which overruns such a
+        // channel 2 from the second chroma row it writes, so these crops of the first rows have a single chroma row apart
+        // from the last one of an odd height. With an odd width, the crop is one row of 4:2:2 or two of 4:2:0, and channel
+        // 1 has room for the last chroma column but channel 2 has not, so the column is left out of both. With an odd
+        // 4:2:0 height, the crop is three rows, and the last chroma row covers only the third. The first chroma row has
+        // the body color.
+        if (decode_caps.hw_roi_decode == 0 && (!odd_height || image.subsampling == ROCJPEG_CSS_420)) {
+            RocJpegDecodeParams pitch_params = {};
+            pitch_params.output_format = ROCJPEG_OUTPUT_YUV_PLANAR;
+            pitch_params.crop_rectangle.right = static_cast<int16_t>(image.width);
+            pitch_params.crop_rectangle.bottom = odd_height ? 3 : (image.subsampling == ROCJPEG_CSS_420 ? 2 : 1);
+            const uint32_t crop_height = pitch_params.crop_rectangle.bottom;
+            const uint32_t chroma_rows = image.chroma_height == image.height ? crop_height : (crop_height + 1) / 2;
+            const PlaneSize v_size = {image.width >> 1, chroma_rows};
+            const PlaneSize u_size = {v_size.pitch + 1, chroma_rows};
+            const std::string pitch_label = "ROCJPEG_OUTPUT_YUV_PLANAR of the crop (0, 0, " + std::to_string(image.width) + ", " +
+                                            std::to_string(crop_height) + ")" + of_image + " with chroma pitches of " +
+                                            std::to_string(u_size.pitch) + " and " + std::to_string(v_size.pitch);
+            int pitch_result = DecodeIntoPlanes(rocjpeg_handle_, rocjpeg_stream_handle_, pitch_params, {{image.width, crop_height}, u_size, v_size},
+                                                pitch_label, planes);
+            for (uint32_t i = 0; pitch_result == EXIT_SUCCESS && i < v_size.pitch; i++) {
+                if (std::abs(planes[1][i] - kBodyColor.cb) > kSampleTolerance || std::abs(planes[2][i] - kBodyColor.cr) > kSampleTolerance) {
+                    std::cerr << pitch_label << ": Expected the body color in chroma column " << i << " of the first row but got "
+                              << static_cast<int>(planes[1][i]) << ", " << static_cast<int>(planes[2][i]) << std::endl;
+                    pitch_result = EXIT_FAILURE;
+                }
+            }
+            if (pitch_result == EXIT_SUCCESS && planes[1][v_size.pitch] != kOutputFill) {
+                std::cerr << pitch_label << ": Expected chroma column " << v_size.pitch << " of channel 1 to be left out but it was written" << std::endl;
+                pitch_result = EXIT_FAILURE;
+            }
+            if (pitch_result != EXIT_SUCCESS) {
+                result = EXIT_FAILURE;
+            }
+        }
     }
     return result;
 }
