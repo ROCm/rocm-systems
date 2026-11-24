@@ -54,6 +54,7 @@ struct StoreRequest {
   const uint32_t *data[4]; ///< Payload VGPRs (data_vgpr + i), one row each.
   uint64_t exec;
   uint32_t offset; ///< Byte offset, LDS base included.
+  bool byte_granule = false; ///< GFX12 native stores retain partial bytes up to capacity.
 };
 
 /// @brief The Lds internals the writers use.
@@ -192,7 +193,9 @@ template <StoreFormat F>
 RJ_NOINLINE void exact_rule(Lds &lds, const StoreRequest &r, uint64_t lanes, const uint8_t *src) {
   uint64_t addrs[64];
   lds_shapes::exact_addresses(r.addr, r.offset, lanes, addrs);
-  Access::store_lanes(lds, addrs, lanes, F.elem_size, F.num_elems, src);
+  const uint32_t elem_size = r.byte_granule ? 1u : F.elem_size;
+  const uint32_t num_elems = r.byte_granule ? kWidth<F> : F.num_elems;
+  Access::store_lanes(lds, addrs, lanes, elem_size, num_elems, src);
 }
 
 /// The reference for one lane. Its lane-major buffer lives here, out of the hot

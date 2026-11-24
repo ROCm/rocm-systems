@@ -37,11 +37,11 @@ constexpr uint64_t kCodeBase = 0x10000;
 /// @brief The target a DsCu emulates: CDNA4 (gfx950) has SRAM ECC, which makes
 /// D16 loads zero the other half; RDNA4 (gfx1201) does not, and runs wave32.
 struct Target {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   uint32_t s_endpgm;
   uint32_t wave;
 };
-constexpr Target kCdna4{ROCJITSU_CODE_ARCH_CDNA4, 0xBF810000u, 64};
+constexpr Target kCdna4{rocjitsu::IsaFamily::Cdna4, 0xBF810000u, 64};
 constexpr uint32_t kVgprs = 256;
 constexpr uint32_t kLdsBytes = 64 * 1024;
 
@@ -231,7 +231,7 @@ TEST(DsInlineCompletion, EveryDsOpcodeMatchesTheRoutedPath) {
 TEST(DsInlineCompletion, EveryRdna4DsOpcodeMatchesTheRoutedPathInBothWaveSizes) {
   for (const uint32_t wave : {32u, 64u}) {
     const auto [compared, inline_completions] =
-        compare_every_ds_opcode(Target{ROCJITSU_CODE_ARCH_RDNA4, 0xBFB00000u, wave},
+        compare_every_ds_opcode(Target{rocjitsu::IsaFamily::Rdna4, 0xBFB00000u, wave},
                                 [](uint16_t op, uint8_t data0, uint8_t data1, uint8_t vdst) {
                                   return rdna4::build_vds(op, {.offset0 = 8,
                                                                .offset1 = 1,

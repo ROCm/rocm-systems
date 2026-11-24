@@ -85,6 +85,10 @@ RJ_ALWAYS_INLINE inline void read_steps(const LdsAccessRequest &req, Wavefront &
   //    reader adds the offset only where it needs an address.
   const uint32_t *address_lanes = vgpr_lanes(cu, req.addr_vgpr);
   const uint32_t lds_offset = offset + wf.lds_base();
+  const bool gfx12 =
+      cu.arch() == rocjitsu::IsaFamily::Rdna4 || cu.arch() == rocjitsu::IsaFamily::Cdna5;
+  const uint32_t elem_size = gfx12 ? std::min<uint32_t>(req.elem_size, 4u) : req.elem_size;
+  const uint32_t num_elems = (req.elem_size * req.num_elems) / elem_size;
 
   // 3. LDS -> staging, by address shape (lds_load_plans.h, on the proofs in
   //    lds_lane_shapes.h): contiguous 16-lane groups are not copied but pointed
@@ -92,8 +96,8 @@ RJ_ALWAYS_INLINE inline void read_steps(const LdsAccessRequest &req, Wavefront &
   //    16-byte column per pair, up to four lanes take fixed copies, and other
   //    dense masks one bounds check, then fixed copies. Lanes not fully backed
   //    keep Lds' exact rule. The reader may write any lane of the span.
-  wf.lds().vector_load32<Wave>(address_lanes, lds_offset, exec, req.elem_size, req.num_elems,
-                               staging, load.group);
+  wf.lds().vector_load32<Wave>(address_lanes, lds_offset, exec, elem_size, num_elems, staging,
+                               load.group);
 
   // 4. The writeback's registers (ownership was checked in 1d) and lanes. The
   //    caller's typed writeback (lds_writeback.h) stores the active lanes,
@@ -191,9 +195,14 @@ RJ_ALWAYS_INLINE inline bool LdsInlineAccess::write(const Instruction &inst,
   //    No LDS write can reach them, so the writer may read them as it goes.
   const uint32_t *addr = lds_inline::vgpr_lanes(cu, req.addr_vgpr);
   const uint64_t exec = wf.exec(); // no lanes past the wave
+  const bool byte_granule =
+      cu.arch() == rocjitsu::IsaFamily::Rdna4 || cu.arch() == rocjitsu::IsaFamily::Cdna5;
   const auto request = [&](uint32_t offset, uint32_t data_vgpr) {
-    lds_store::StoreRequest r{
-        .addr = addr, .data = {}, .exec = exec, .offset = offset + wf.lds_base()};
+    lds_store::StoreRequest r{.addr = addr,
+                              .data = {},
+                              .exec = exec,
+                              .offset = offset + wf.lds_base(),
+                              .byte_granule = byte_granule};
     for (uint32_t i = 0; i < regs; ++i)
       r.data[i] = lds_inline::vgpr_lanes(cu, data_vgpr + i);
     return r;

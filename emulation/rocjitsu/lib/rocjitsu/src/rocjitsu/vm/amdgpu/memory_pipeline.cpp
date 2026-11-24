@@ -58,7 +58,6 @@ MemoryPipeline::~MemoryPipeline() {
     delete returned_.front().inst;
     returned_.pop();
   }
-  delete recyclable_;
 }
 
 MemoryPipeline::WaitCounterTokens MemoryPipeline::issue_counters(const Instruction &inst) const {
@@ -2573,6 +2572,8 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
 
 VmAccessOutcome LocalMemPipeline::initiate_lds_access(VectorMemState &d, Wavefront &wf,
                                                       uint64_t request_lanes) {
+  if (rejects_atomic_operation(d, wf, true))
+    return VmAccessOutcome::Malformed;
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
   if (d.ordered_count) {

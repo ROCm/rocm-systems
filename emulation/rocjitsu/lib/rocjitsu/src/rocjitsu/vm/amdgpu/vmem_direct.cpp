@@ -311,28 +311,29 @@ std::optional<VmAccessOutcome> try_direct_vector_access(const DirectVectorReques
   uint32_t count = 0;
   std::optional<LegacyLocalExtent> extent;
   uint64_t lo = UINT64_MAX, hi = 0;
-  const bool resolved = for_each_coalesced_lane_run(
-      request.addrs, request.lanes, request.wf_size, stride, request.transactions,
-      [&](const CoalescedLaneRun &run) {
-        if (count == runs.size() || run.size == 0)
-          return false;
-        if (!extent || !extent->contains(run.address, run.size)) {
-          extent = backing.extent(run.address, generation);
-          if (!extent || !extent->contains(run.address, run.size))
-            return false;
-          const Mtype mtype = effective_mtype(request.instruction_mtype, extent->mtype);
-          if (mtype == Mtype::UC || mtype == Mtype::CC)
-            return false;
-        }
-        if (!request.is_load &&
-            (l1.may_hold(run.address, run.size) || !l2.may_bypass(run.address, run.size)))
-          return false;
-        runs[count++] = {run, extent->host(run.address),
-                         extent->owner != LegacyHostExtentOwner::DriverSealedRam};
-        lo = std::min(lo, run.address);
-        hi = std::max(hi, run.address + run.size);
-        return true;
-      });
+  const bool resolved =
+      for_each_coalesced_lane_run(
+          request.addrs, request.lanes, request.wf_size, stride, request.transactions,
+          [&](const CoalescedLaneRun &run) {
+            if (count == runs.size() || run.size == 0)
+              return false;
+            if (!extent || !extent->contains(run.address, run.size)) {
+              extent = backing.extent(run.address, generation);
+              if (!extent || !extent->contains(run.address, run.size))
+                return false;
+              const Mtype mtype = effective_mtype(request.instruction_mtype, extent->mtype);
+              if (mtype == Mtype::UC || mtype == Mtype::CC)
+                return false;
+            }
+            if (!request.is_load &&
+                (l1.may_hold(run.address, run.size) || !l2.may_bypass(run.address, run.size)))
+              return false;
+            runs[count++] = {run, extent->host(run.address),
+                             extent->owner != LegacyHostExtentOwner::DriverSealedRam};
+            lo = std::min(lo, run.address);
+            hi = std::max(hi, run.address + run.size);
+            return true;
+          }) == ScanEnd::Completed;
   if (!resolved || count == 0 || l2.has_unpublished_lines())
     return std::nullopt;
 
