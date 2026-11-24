@@ -213,7 +213,10 @@ endif()
 list(TRANSFORM _archs REPLACE ":.*$" "")
 list(REMOVE_DUPLICATES _archs)
 if(_archs)
-    message(STATUS "HIP: the Fortran binding tests build GPU code for ${_archs}")
+    message(
+        STATUS
+        "HIP: the Fortran binding tests build GPU code for ${_archs}"
+    )
 endif()
 if(_archs AND NOT CMAKE_HIP_ARCHITECTURES)
     set(CMAKE_HIP_ARCHITECTURES "${_archs}")
@@ -256,46 +259,29 @@ else()
     )
 endif()
 
-# module_kernel loads the same kernel as a standalone code object at runtime.
-find_program(
-    HIP_FORTRAN_HIPCC
-    hipcc
-    HINTS "${HIPCC_BIN_DIR}" "${ROCM_PATH}/bin" /opt/rocm/bin
-)
-
-if(NOT HIP_FORTRAN_HIPCC)
+# module_kernel loads the same kernel as a standalone code object at runtime,
+# built by the HIP compiler alone: --offload-device-only makes the object the
+# clang offload bundle that hipModuleLoad takes, as hipcc --genco would.
+if(_archs AND NOT CMAKE_HIP_COMPILER_LOADED)
     message(
         STATUS
-        "HIP: hipcc not found, skipping the module_kernel and library_module "
-        "Fortran binding tests (they load a code object built with hipcc --genco)"
+        "HIP: no HIP compiler, skipping the module_kernel and library_module "
+        "Fortran binding tests (they load a code object of a GPU kernel)"
     )
 elseif(_archs)
-    set(_arch_flags "")
-    foreach(_a IN LISTS _archs)
-        list(APPEND _arch_flags "--offload-arch=${_a}")
-    endforeach()
-
-    # Against an installed ROCm, take its headers and device libraries rather
-    # than a distro HIP in /usr/include, which clang searches first.
-    set(_rocm_flags "")
-    if(ROCM_PATH)
-        set(_rocm_flags --rocm-path=${ROCM_PATH} -isystem ${ROCM_PATH}/include)
-    endif()
-    set(HIP_FORTRAN_GENCO_FLAGS
-        ""
-        CACHE STRING
-        "Extra hipcc flags for the code object of the module_kernel test"
+    add_library(hip_fortran_test_kernel_object OBJECT vecadd_kernel.hip.cpp)
+    target_compile_options(
+        hip_fortran_test_kernel_object
+        PRIVATE --offload-device-only
     )
 
     set(_code_object "${CMAKE_CURRENT_BINARY_DIR}/vecadd_kernel.co")
     add_custom_command(
         OUTPUT "${_code_object}"
         COMMAND
-            ${HIP_FORTRAN_HIPCC} --genco ${_arch_flags} ${_rocm_flags}
-            ${HIP_FORTRAN_GENCO_FLAGS}
-            "${CMAKE_CURRENT_SOURCE_DIR}/vecadd_kernel.hip.cpp" -o
-            "${_code_object}"
-        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/vecadd_kernel.hip.cpp"
+            ${CMAKE_COMMAND} -E copy
+            "$<TARGET_OBJECTS:hip_fortran_test_kernel_object>" "${_code_object}"
+        DEPENDS "$<TARGET_OBJECTS:hip_fortran_test_kernel_object>"
         COMMENT "Building the HIP code object used by the module_kernel test"
     )
     add_custom_target(hip_fortran_test_code_object DEPENDS "${_code_object}")
