@@ -900,6 +900,15 @@ TEST_P(LegacyMathRegression, UnsignedHalfwordProductClampFollowsTheVop3AndSdwaPo
   }
 }
 
+// LLVM's gfx1030 encoding selects each high source half and preserves D's low half.
+TEST_P(Rdna2NumericEncoding, TernaryIntegerSelectionHonorsHighHalf) {
+  put(0, 0x00030009);
+  put(1, 0x00040002);
+  put(2, 0x00050001);
+  wave_->set_exec(1ULL | (1ULL << (wave_->wf_size() - 1)));
+  check({0xd7527804U, 0x040a0300U}, 0x0003beefU);
+}
+
 TEST_P(Rdna2NumericEncoding, ClampsUnsignedHalfwordProductsAndDifferences) {
   put(0, 0xffff);
   put(1, 32);
