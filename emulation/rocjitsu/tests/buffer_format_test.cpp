@@ -94,6 +94,106 @@ TEST(BufferFormatTest, Gfx11TwoBitSnormRoundsHalfAwayFromZero) {
     }
 }
 
+TEST(BufferFormatTest, Gfx11Float16StoresRoundTowardZeroAndSaturateFiniteOverflow) {
+  struct Case {
+    uint32_t f32;
+    uint16_t f16;
+  };
+  // Measured on gfx1201 hardware (buffer_store_format_x with BUF_FMT_16_FLOAT).
+  constexpr std::array cases{
+      Case{0x00000000u, 0x0000u}, // +0.0
+      Case{0x80000000u, 0x8000u}, // -0.0
+      Case{0x3f800000u, 0x3c00u}, // 1.0
+      Case{0x3f801001u, 0x3c00u}, // 1.0 + >0.5 ulp_f16 -> RTZ truncates down
+      Case{0x3f801fffu, 0x3c00u}, // 1.0 + (1-eps) ulp_f16 -> RTZ
+      Case{0x3f803000u, 0x3c01u}, // tie-to-odd -> RTZ
+      Case{0xbf801fffu, 0xbc00u}, // negative RTZ toward zero
+      Case{0x387fffffu, 0x03ffu}, // just below min normal -> max subnormal
+      Case{0x337fffffu, 0x0000u}, // just below min subnormal -> 0
+      Case{0x477fe000u, 0x7bffu}, // 65504.0 (max finite f16)
+      Case{0x477ff000u, 0x7bffu}, // 65520.0 -> saturates to 0x7bff (not +Inf)
+      Case{0x47800000u, 0x7bffu}, // 65536.0 -> saturates to 0x7bff
+      Case{0x7f7fffffu, 0x7bffu}, // FLT_MAX -> saturates to 0x7bff
+      Case{0xc77ff000u, 0xfbffu}, // -65520.0 -> saturates to 0xfbff
+      Case{0xff7fffffu, 0xfbffu}, // -FLT_MAX -> saturates to 0xfbff
+      Case{0x7f800000u, 0x7c00u}, // +Inf stays +Inf
+      Case{0xff800000u, 0xfc00u}, // -Inf stays -Inf
+      Case{0x7fc00000u, 0x7e00u}, // qNaN
+      Case{0x7f800001u, 0x7c01u}, // sNaN preserves nonzero payload
+  };
+  for (auto test : cases) {
+    SCOPED_TRACE(testing::Message() << std::hex << "f32=0x" << test.f32);
+    const std::array<uint32_t, 1> source{test.f32};
+    std::array<uint8_t, 2> bytes{};
+    ASSERT_TRUE(amdgpu::pack_buffer_format(13u, identity, source, bytes,
+                                           amdgpu::BufferFormatEncoding::Gfx11)
+                    .succeeded());
+    EXPECT_EQ(std::bit_cast<uint16_t>(bytes), test.f16);
+  }
+  // Legacy Gfx9 encoding retains round-to-nearest-even until measured.
+  const std::array<uint32_t, 1> overflow{0x477ff000u};
+  std::array<uint8_t, 2> legacy{};
+  ASSERT_TRUE(amdgpu::pack_buffer_format(2u | (7u << 4), identity, overflow, legacy,
+                                         amdgpu::BufferFormatEncoding::Gfx9)
+                  .succeeded());
+  EXPECT_EQ(std::bit_cast<uint16_t>(legacy), 0x7c00u);
+}
+
+TEST(BufferFormatTest, Gfx11GeneralStoreSelectorsMatchHardwareRouting) {
+  auto sel = [](uint32_t x, uint32_t y, uint32_t z, uint32_t w) {
+    return x | (y << 3) | (z << 6) | (w << 9);
+  };
+  const std::array<uint32_t, 4> src{0x11111111u, 0x22222222u, 0x33333333u, 0x44444444u};
+  auto pack4 = [&](uint32_t format, uint32_t selectors, uint32_t count = 4,
+                   amdgpu::BufferStoreMissingChannel missing =
+                       amdgpu::BufferStoreMissingChannel::ReplicateFirst) {
+    std::array<uint8_t, 16> raw{};
+    EXPECT_TRUE(amdgpu::pack_buffer_format(format, selectors, std::span(src).first(count), raw,
+                                           amdgpu::BufferFormatEncoding::Gfx11, missing)
+                    .succeeded());
+    std::array<uint32_t, 4> out{};
+    std::memcpy(out.data(), raw.data(), raw.size());
+    return out;
+  };
+  // 4-channel (32_32_32_32_UINT, format 61): direct when s1==Y, reversed otherwise.
+  EXPECT_EQ(pack4(61, sel(4, 5, 6, 7)), (std::array{src[0], src[1], src[2], src[3]}));
+  EXPECT_EQ(pack4(61, sel(4, 4, 4, 4)), (std::array{src[3], src[3], src[3], src[3]}));
+  EXPECT_EQ(pack4(61, sel(5, 5, 5, 5)), (std::array{src[1], src[1], src[1], src[1]}));
+  EXPECT_EQ(pack4(61, sel(6, 6, 6, 6)), (std::array{src[1], src[1], src[1], src[1]}));
+  EXPECT_EQ(pack4(61, sel(7, 7, 7, 7)), (std::array{src[0], src[0], src[0], src[0]}));
+  EXPECT_EQ(pack4(61, sel(0, 1, 4, 5)), (std::array{src[2], src[3], 1u, 0u}));
+  EXPECT_EQ(pack4(61, sel(4, 0, 5, 1)), (std::array{1u, src[2], 0u, src[3]}));
+  EXPECT_EQ(pack4(61, sel(4, 5, 0, 1)), (std::array{src[0], src[1], 0u, 1u}));
+  EXPECT_EQ(pack4(61, sel(5, 6, 7, 4)), (std::array{src[3], src[0], src[1], src[2]}));
+  EXPECT_EQ(pack4(61, sel(0, 1, 4, 5), 4), (std::array{src[2], src[3], 1u, 0u}));
+  // Float constant 1 writes 1.0f on any selected channel (32_32_32_32_FLOAT, format 63).
+  EXPECT_EQ(pack4(63, sel(0, 1, 4, 5)), (std::array{src[2], src[3], 0x3f800000u, 0u}));
+  // 3-channel (32_32_32_UINT, format 58): direct s0, s1, s2.
+  EXPECT_EQ(pack4(58, sel(6, 5, 4, 0)), (std::array{src[2], src[1], src[0], 0u}));
+  EXPECT_EQ(pack4(58, sel(7, 6, 5, 4)), (std::array{src[3], src[2], src[1], 0u}));
+  EXPECT_EQ(pack4(58, sel(4, 4, 4, 0)), (std::array{src[0], src[0], src[0], 0u}));
+  // 2-channel (32_32_UINT, format 48): controlled by s0==X, s1>=4, s2>=4.
+  EXPECT_EQ(pack4(48, sel(4, 5, 0, 0)), (std::array{src[0], src[1], 0u, 0u}));
+  EXPECT_EQ(pack4(48, sel(5, 4, 0, 0)), (std::array{src[1], src[0], 0u, 0u}));
+  EXPECT_EQ(pack4(48, sel(4, 5, 6, 7)), (std::array{src[0], src[3], 0u, 0u}));
+  EXPECT_EQ(pack4(48, sel(0, 0, 4, 5)), (std::array{src[3], src[0], 0u, 0u}));
+  // 1-channel (32_UINT, format 20): s0==X ? X : W.
+  EXPECT_EQ(pack4(20, sel(4, 0, 0, 0)), (std::array{src[0], 0u, 0u, 0u}));
+  EXPECT_EQ(pack4(20, sel(0, 0, 0, 0)), (std::array{src[3], 0u, 0u, 0u}));
+  EXPECT_EQ(pack4(20, sel(0, 0, 0, 0), 1, amdgpu::BufferStoreMissingChannel::Zero),
+            (std::array{0u, 0u, 0u, 0u}));
+  // Reserved selector values 2 and 3 remain rejected.
+  std::array<uint8_t, 16> untouched{};
+  untouched.fill(0xa5);
+  EXPECT_TRUE(amdgpu::pack_buffer_format(61, sel(2, 5, 6, 7), src, untouched,
+                                         amdgpu::BufferFormatEncoding::Gfx11)
+                  .failed());
+  EXPECT_TRUE(amdgpu::pack_buffer_format(61, sel(4, 3, 6, 7), src, untouched,
+                                         amdgpu::BufferFormatEncoding::Gfx11)
+                  .failed());
+  EXPECT_EQ(untouched[0], 0xa5u);
+}
+
 TEST(BufferFormatTest, ZeroSelectorsUseA8RoutingOnlyForSingleChannelFloat32) {
   using E = amdgpu::BufferFormatEncoding;
   const std::array<uint32_t, 4> components{bits(1), bits(2), bits(3), bits(4)};
@@ -970,8 +1070,15 @@ TEST_P(BufferFormatExecutionTest, D16FloatRgb1ConvertsRgbAndFillsMissingChannels
 }
 
 TEST_P(BufferFormatExecutionTest, UnqualifiedStoreSelectorsAreRejectedBeforeMemoryIssue) {
+  const bool gfx11 = GetParam() == rocjitsu::IsaFamily::Rdna3 ||
+                     GetParam() == rocjitsu::IsaFamily::Rdna3_5 ||
+                     GetParam() == rocjitsu::IsaFamily::Rdna4;
   auto decoder = Decoder::create(GetParam());
-  descriptor(46, 4, 4 | (4 << 3) | (4 << 6) | (4 << 9));
+  // Reserved selector values (2/3) are rejected on all architectures; unmeasured
+  // selector patterns remain rejected on pre-Gfx11 encodings.
+  const uint32_t rejected_sel =
+      gfx11 ? (2u | (5u << 3) | (6u << 6) | (7u << 9)) : (4u | (4u << 3) | (4u << 6) | (4u << 9));
+  descriptor(46, 4, rejected_sel);
   memory.write32(0x1000, 0xa5a5a5a5u);
   std::unique_ptr<Instruction> inst;
   if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
@@ -987,9 +1094,14 @@ TEST_P(BufferFormatExecutionTest, UnqualifiedStoreSelectorsAreRejectedBeforeMemo
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed());
   EXPECT_EQ(inst->data(), nullptr);
   EXPECT_EQ(memory.read32(0x1000), 0xa5a5a5a5u);
-  for (uint32_t selectors :
-       {4u | (5u << 3) | (0u << 6) | (1u << 9), 7u | (7u << 3) | (5u << 6) | (5u << 9),
-        4u | (6u << 3) | (7u << 6) | (5u << 9)}) {
+  const std::array<uint32_t, 3> candidates =
+      gfx11 ? std::array{2u | (5u << 3) | (6u << 6) | (7u << 9),
+                         4u | (3u << 3) | (6u << 6) | (7u << 9),
+                         4u | (5u << 3) | (2u << 6) | (3u << 9)}
+            : std::array{4u | (5u << 3) | (0u << 6) | (1u << 9),
+                         7u | (7u << 3) | (5u << 6) | (5u << 9),
+                         4u | (6u << 3) | (7u << 6) | (5u << 9)};
+  for (uint32_t selectors : candidates) {
     descriptor(46, 4, selectors);
     amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
     state.is_load = false;
@@ -1065,6 +1177,8 @@ TEST_P(BufferFormatExecutionTest, ZeroSelectorsRejectUnqualifiedFormatsThroughBo
       : GetParam() == rocjitsu::IsaFamily::Rdna1 ? amdgpu::BufferFormatEncoding::Rdna1
       : GetParam() == rocjitsu::IsaFamily::Rdna2 ? amdgpu::BufferFormatEncoding::Rdna2
                                                  : amdgpu::BufferFormatEncoding::Gfx11;
+  if (encoding == amdgpu::BufferFormatEncoding::Gfx11)
+    GTEST_SKIP() << "Gfx11 supports all defined DST_SEL store patterns";
   const std::array<uint32_t, 4> components{bits(1), bits(2), bits(3), bits(4)};
   for (uint32_t format : {20u, 21u, 13u, 50u, 46u}) {
     SCOPED_TRACE(format);
@@ -1133,16 +1247,25 @@ TEST_P(BufferFormatExecutionTest, NarrowStoreRoutingUsesQualifiedSelectorPattern
       }
     }
   }
-  for (uint32_t selectors :
-       {identity, 4u | (5u << 3) | (4u << 6) | (5u << 9), 7u | (6u << 3) | (5u << 6) | (4u << 9)}) {
-    descriptor(18, 16, selectors);
-    amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
-    state.is_load = false;
-    EXPECT_TRUE(amdgpu::prepare_buffer_format(*wf, state, 4, -1, 4).failed());
-    std::array<uint8_t, 2> bytes{0xa5, 0xa5};
-    const std::array<uint32_t, 4> components{0x11, 0x22, 0x33, 0x44};
-    EXPECT_TRUE(amdgpu::pack_buffer_format(18, selectors, components, bytes).failed());
-    EXPECT_EQ(bytes, (std::array<uint8_t, 2>{0xa5, 0xa5}));
+  const auto encoding =
+      arch_is_cdna_4_or_lower(GetParam())        ? amdgpu::BufferFormatEncoding::Gfx9
+      : GetParam() == rocjitsu::IsaFamily::Rdna1 ? amdgpu::BufferFormatEncoding::Rdna1
+      : GetParam() == rocjitsu::IsaFamily::Rdna2 ? amdgpu::BufferFormatEncoding::Rdna2
+                                                 : amdgpu::BufferFormatEncoding::Gfx11;
+  if (encoding != amdgpu::BufferFormatEncoding::Gfx11) {
+    for (uint32_t selectors : {identity, 4u | (5u << 3) | (4u << 6) | (5u << 9),
+                               7u | (6u << 3) | (5u << 6) | (4u << 9)}) {
+      descriptor(18, 16, selectors);
+      amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
+      state.is_load = false;
+      EXPECT_TRUE(amdgpu::prepare_buffer_format(*wf, state, 4, -1, 4).failed());
+      std::array<uint8_t, 2> bytes{0xa5, 0xa5};
+      const std::array<uint32_t, 4> components{0x11, 0x22, 0x33, 0x44};
+      EXPECT_TRUE(
+          amdgpu::pack_buffer_format(encoded_format(18), selectors, components, bytes, encoding)
+              .failed());
+      EXPECT_EQ(bytes, (std::array<uint8_t, 2>{0xa5, 0xa5}));
+    }
   }
 }
 

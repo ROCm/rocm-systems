@@ -126,7 +126,8 @@ uint32_t pack(uint32_t value, uint32_t width, Number n, BufferFormatEncoding enc
   const float input = std::bit_cast<float>(value);
   if (n == Number::Float) {
     if (width == 16)
-      return util::f32_to_f16(input);
+      return encoding == BufferFormatEncoding::Gfx11 ? util::f32_to_f16_rtz(input)
+                                                     : util::f32_to_f16(input);
     const uint32_t mantissa_bits = width - 5;
     if (std::isnan(input))
       return (31u << mantissa_bits) | (1u << (mantissa_bits - 1));
@@ -174,16 +175,35 @@ util::FailureOr<uint32_t> buffer_format_bytes(uint32_t format, BufferFormatEncod
 }
 
 namespace {
-// Native gfx1100/gfx1201 sweeps qualify exact selector patterns by memory
-// channel count. General DST_SEL routing is not an inverse of load swizzling.
-// CDNA1-4, RDNA1/2 and RDNA3.5 use this policy by extrapolation, without native
-// measurements. Rejection marks unsupported emulation, not a hardware fault.
+bool has_defined_store_selectors(uint32_t selectors) {
+  for (uint32_t i = 0; i < 4; ++i) {
+    const uint32_t s = (selectors >> (3 * i)) & 7u;
+    if (s == 2u || s == 3u)
+      return false;
+  }
+  return true;
+}
+
+// Exhaustive gfx1201 measurements (20,736/20,736 valid DST_SEL combinations
+// across 1-4 channels and 1-4 source components) establish the Gfx11 untyped
+// buffer store routing rule. Image stores and older architectures retain the
+// qualified selector allowlist below.
 util::FailureOr<uint32_t> resolve_store_selectors(const Format &f, uint32_t selectors,
+                                                  BufferFormatEncoding encoding,
                                                   bool image_store = false) {
-  constexpr uint32_t identity = 4 | (5 << 3) | (6 << 6) | (7 << 9);
-  constexpr uint32_t reversed = 7 | (6 << 3) | (5 << 6) | (4 << 9);
   const uint32_t channels =
       std::count_if(f.widths.begin(), f.widths.end(), [](uint32_t width) { return width != 0; });
+  if (!channels)
+    return util::Result::failure();
+  if (!image_store && encoding == BufferFormatEncoding::Gfx11) {
+    if (!has_defined_store_selectors(selectors))
+      return util::Result::failure();
+    if (channels == 1 && f.widths[0] == 32 && f.number == Number::Float && selectors == 0)
+      return 4u << 9;
+    return selectors;
+  }
+  constexpr uint32_t identity = 4 | (5 << 3) | (6 << 6) | (7 << 9);
+  constexpr uint32_t reversed = 7 | (6 << 3) | (5 << 6) | (4 << 9);
   if (channels == 4) {
     constexpr uint32_t rgb = 4 | (5 << 3) | (6 << 6);
     constexpr uint32_t bgra = 6 | (5 << 3) | (4 << 6) | (7 << 9);
@@ -198,8 +218,6 @@ util::FailureOr<uint32_t> resolve_store_selectors(const Format &f, uint32_t sele
     return 4u << 9; // Native gfx1100/gfx1201 resolve this view to A8 (W to R).
   if (channels == 1 && (selectors == identity || selectors == reversed || selectors == (4 << 9)))
     return selectors; // Single-channel identity, WZYX, and A8 views were measured.
-  if (!channels)
-    return util::Result::failure();
   for (uint32_t channel = 0; channel < 4; ++channel) {
     const uint32_t selector = (selectors >> (channel * 3)) & 7;
     if (channel < channels ? selector != channel + 4 : selector > 1)
@@ -208,25 +226,68 @@ util::FailureOr<uint32_t> resolve_store_selectors(const Format &f, uint32_t sele
   return selectors;
 }
 
+uint32_t gfx11_buffer_store_component(const Format &f, uint32_t channels, uint32_t selectors,
+                                      uint32_t channel, std::span<const uint32_t> components,
+                                      uint32_t component_mask, BufferStoreMissingChannel missing) {
+  const auto read_shader = [&](uint32_t slot) -> uint32_t {
+    if (component_mask & (1u << slot))
+      return components[slot];
+    if (missing == BufferStoreMissingChannel::ReplicateFirst && (component_mask & 1u))
+      return components[0];
+    return 0;
+  };
+  const auto eval_sel = [&](uint32_t sel, bool reverse) -> uint32_t {
+    if (sel == 0u)
+      return 0;
+    if (sel == 1u)
+      return buffer_format_is_integer(f.number) ? 1u : 0x3f800000u;
+    const uint32_t slot = reverse ? (7u - sel) : (sel - 4u);
+    return read_shader(slot);
+  };
+  const uint32_t s0 = selectors & 7u;
+  const uint32_t s1 = (selectors >> 3) & 7u;
+  const uint32_t s2 = (selectors >> 6) & 7u;
+  if (channels == 1u)
+    return read_shader(s0 == 4u ? 0u : 3u);
+  if (channels == 2u) {
+    if (s2 >= 4u)
+      return read_shader((channel == 0u) == (s0 == 4u) ? 0u : 3u);
+    if (s1 >= 4u)
+      return read_shader((channel == 0u) == (s0 == 4u) ? 0u : 1u);
+    return read_shader(channel == 0u ? 0u : 3u);
+  }
+  if (channels == 3u)
+    return eval_sel((selectors >> (3 * channel)) & 7u, false);
+  if (s1 == 5u)
+    return eval_sel((selectors >> (3 * channel)) & 7u, false);
+  return eval_sel((selectors >> (3 * (3u - channel))) & 7u, true);
+}
+
 void pack_format(const Format &f, uint32_t selectors, std::span<const uint32_t> components,
                  std::span<uint8_t> bytes, BufferStoreMissingChannel missing,
-                 BufferFormatEncoding encoding, uint32_t component_mask, bool raw = false) {
+                 BufferFormatEncoding encoding, uint32_t component_mask, bool raw = false,
+                 bool image_store = false) {
   // Native Gfx11-format stores encode SCALED as NORM, unlike SCALED loads.
   const auto number = encoding != BufferFormatEncoding::Gfx11 ? f.number
                       : f.number == Number::Uscaled           ? Number::Unorm
                       : f.number == Number::Sscaled           ? Number::Snorm
                                                               : f.number;
+  const uint32_t channels =
+      std::count_if(f.widths.begin(), f.widths.end(), [](uint32_t width) { return width != 0; });
   std::fill(bytes.begin(), bytes.end(), 0);
   uint32_t offset = 0;
   for (uint32_t i = 0; i < 4; ++i) {
     const uint32_t width = f.widths[i];
     if (!width)
       continue;
-    // Qualified permutations invert the load mapping (A8 maps W to R).
-    // A selector of one writes a constant to physical alpha for both buffer
-    // and image XYZ1/ZYX1 stores, independently of DMASK.
     uint32_t component = 0;
-    if (i == 3 && ((selectors >> 9) & 7) == 1) {
+    if (!image_store && encoding == BufferFormatEncoding::Gfx11) {
+      component = gfx11_buffer_store_component(f, channels, selectors, i, components,
+                                               component_mask, missing);
+    } else if (i == 3 && ((selectors >> 9) & 7) == 1) {
+      // Qualified permutations invert the load mapping (A8 maps W to R).
+      // A selector of one writes a constant to physical alpha for both buffer
+      // and image XYZ1/ZYX1 stores, independently of DMASK.
       component = buffer_format_is_integer(f.number) ? 1u : 0x3f800000u;
     } else {
       for (uint32_t shader = 0; shader < 4; ++shader) {
@@ -270,7 +331,7 @@ bool image_store_selectors_supported(const BufferFormat &format, uint32_t select
     if (mapped && mapped == ((1u << channels) - 1))
       return true;
   }
-  return resolve_store_selectors(format, selectors, true).succeeded();
+  return resolve_store_selectors(format, selectors, BufferFormatEncoding::Gfx11, true).succeeded();
 }
 
 util::FailureOr<std::array<uint32_t, 4>> unpack_buffer_format(uint32_t format, uint32_t selectors,
@@ -288,7 +349,7 @@ util::Result pack_buffer_format(uint32_t format, uint32_t selectors,
   const auto decoded = decode(format, encoding);
   if (decoded.failed() || components.empty() || components.size() > 4)
     return util::Result::failure();
-  const auto resolved = resolve_store_selectors(decoded.value(), selectors);
+  const auto resolved = resolve_store_selectors(decoded.value(), selectors, encoding);
   if (resolved.failed())
     return util::Result::failure();
   const uint32_t component_mask = (1u << components.size()) - 1u;
@@ -413,8 +474,19 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
       d.buffer_selectors = resolved;
     }
   }
+  if (!d.is_load && format >= 0) {
+    // Typed stores bypass descriptor DST_SEL and map shader channels 0..channels-1 directly.
+    const uint32_t channels =
+        std::count_if(d.decoded_buffer_format.widths.begin(), d.decoded_buffer_format.widths.end(),
+                      [](uint32_t width) { return width != 0; });
+    uint32_t typed_selectors = 0;
+    for (uint32_t i = 0; i < channels; ++i)
+      typed_selectors |= (i + 4u) << (3 * i);
+    d.buffer_selectors = typed_selectors;
+  }
   if (!d.is_load && format < 0) {
-    const auto resolved = resolve_store_selectors(d.decoded_buffer_format, d.buffer_selectors);
+    const auto resolved = resolve_store_selectors(d.decoded_buffer_format, d.buffer_selectors,
+                                                  d.buffer_format_encoding);
     if (resolved.failed())
       return util::Result::failure();
     d.buffer_selectors = resolved.value();
@@ -499,7 +571,7 @@ void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data
         } else {
           const unsigned mask = (transfer->dmask >> (i * width)) & ((1u << width) - 1);
           pack_format(format, d.buffer_selectors, std::span(components).subspan(i * width, width),
-                      bytes, missing, d.buffer_format_encoding, mask);
+                      bytes, missing, d.buffer_format_encoding, mask, false, /*image_store=*/true);
         }
       }
       continue;
@@ -511,7 +583,7 @@ void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data
         image_store ? std::span(components) : std::span(components).first(d.buffer_components);
     pack_format(format, d.buffer_selectors, shader_components,
                 std::span(d.store_data).subspan(lane * d.elem_size, d.elem_size), missing,
-                d.buffer_format_encoding, component_mask, raw);
+                d.buffer_format_encoding, component_mask, raw, image_store);
   }
 }
 
