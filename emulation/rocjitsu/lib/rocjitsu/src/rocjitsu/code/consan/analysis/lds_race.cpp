@@ -85,7 +85,7 @@ void expand_dual_group(const SiteGroup &group, const SiteFacts &site, bool coale
     bool out_of_bounds = false;
     for (unsigned ordinal = 0; ordinal < count; ++ordinal) {
       const uint64_t start = uint64_t{base.offset} + recipe.byte_offset(ordinal, site.width);
-      if (start + site.width > extent) {
+      if (start > extent || site.width > extent - start) {
         out_of_bounds = true;
         continue;
       }

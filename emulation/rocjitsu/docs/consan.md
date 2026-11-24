@@ -486,15 +486,17 @@ widths and byte immediates, and preserve every guest result word. For b96 the
 range spans three dwords. Its effective start must be 16-byte aligned so the
 range is independent of the launch alignment mode. FLAT forms remain unsupported. The minimum fixed LDS extent remains four bytes.
 
-Two-address native LDS loads and stores support 32- and 64-bit elements.
+Two-address native LDS loads and stores support 32- and 64-bit elements,
+including stride-64 variants (`ds_read2`/`ds_write2` on gfx942/gfx950 and
+`ds_load_2addr`/`ds_store_2addr` on gfx1100/gfx1201/gfx1250).
 One guest instruction produces one occurrence and shares the four sampled
 address groups across both elements. Each group records the pre-instruction
 base and lane mask. Saved site facts retain both encoded offsets in operand
 order. Replay adds each offset times the element size to the recorded base,
 with an additional factor of 64 for stride-64 forms. For example, a b32
 operation with offsets 3 and 5 covers bytes [base + 12, base + 16) and
-[base + 20, base + 24). With equal offsets, gfx942/gfx950 coalesce the access
-and a store uses DATA0.
+[base + 20, base + 24). With equal offsets, gfx942/gfx950 coalesce the access;
+a store uses DATA0. Two read destinations do not imply two physical requests.
 
 The following matrix transpose reads gather LDS data from physical source lanes
 and distribute the result across destination lanes. Each source lane contributes
@@ -529,6 +531,23 @@ must explicitly supply 1, 2, 4, 8, 12, or 16; zero never implies b32 or a zero-l
 access. Manifest admission rejects zero, and a committed observation must match
 its site's width. An all-zero uncommitted report slot still represents vacant
 storage, not an access.
+
+A dual-address instruction still owns one physical site and one dynamic access
+sequence. Its probe captures the original base and active lane mask once before
+the guest load can overwrite its address register. Static facts retain both
+8-bit element indices and the ordinary or stride-64 scale. The analyzer expands
+the retained base into two separate ranges and renders their `range_id` as 0 or
+1. For b64 indices 3 and 5, the ranges are `[base+24, base+32)` and
+`[base+40, base+48)`; the bytes between them are not accessed. Each range is
+bounds-checked with wide arithmetic, independently of the other range.
+
+Different lane bases can make opposite ordinals of the same store collide.
+Those findings retain both lane masks and range ordinals. Coincident element
+indices follow the concrete target's request semantics: targets that ignore the
+second coincident request retain only ordinal 0. Both ordinals share the existing
+four-base-group reservation and loss evidence, rather than synthesizing a second
+probe call or barrier phase. Single-range static facts retain their zero recipe
+word and wire representation; older readers reject nonzero dual recipes.
 
 Range admission checks bounds by subtraction before calculating ends. Diagnosis
 sweeps checked ranges, retaining grouped counts for identical ranges, excluding

@@ -81,6 +81,50 @@ TEST_P(ConSanTargetStatic, CallableArtifactsPreserveStaticSitesAndPrivateFrameAd
   }
 }
 
+TEST_P(ConSanTargetStatic, DualAccessesOwnOneBaseAndTwoStaticElementIndices) {
+  const test::TargetMode mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
+  for (const uint32_t width : {4u, 8u}) {
+    for (const std::string_view spacing : {"normal", "stride64"}) {
+      const std::string name =
+          "width-dual-b" + std::to_string(width * 8) + "-" + std::string(spacing) + "-values";
+      SCOPED_TRACE(name);
+      const std::vector<uint8_t> original =
+          test::read_fixture(test::target_fixture_path(mode, name));
+      ASSERT_FALSE(original.empty());
+      InputError error;
+      const FailureOr<InputProgram> input =
+          build_input_program(original, target, "lds_producer_consumer", error);
+      ASSERT_TRUE(input.succeeded()) << error.message;
+      ASSERT_EQ(input.value().accesses.size(), 2u);
+      EXPECT_EQ(input.value().accesses[0].kind, AccessKind::Write);
+      EXPECT_EQ(input.value().accesses[1].kind, AccessKind::Read);
+      for (const NativeLdsAccess &access : input.value().accesses) {
+        EXPECT_EQ(access.width, width);
+        EXPECT_EQ(access.immediate_bytes, 0u);
+        EXPECT_EQ(access.lds_ranges.shape,
+                  spacing == "normal" ? LdsRangeShape::Dual : LdsRangeShape::DualStride64);
+        EXPECT_EQ(access.lds_ranges.offset0, 3u);
+        EXPECT_EQ(access.lds_ranges.offset1, 5u);
+      }
+      const FailureOr<PreparedArtifact> artifact =
+          prepare(original, target, "lds_producer_consumer", error);
+      ASSERT_TRUE(artifact.succeeded()) << error.message;
+      ASSERT_EQ(artifact.value().manifest.sites.size(), 2u);
+      for (size_t index = 0; index < input.value().accesses.size(); ++index) {
+        const SiteFacts &site = artifact.value().manifest.sites[index];
+        EXPECT_EQ(site.lds_ranges, input.value().accesses[index].lds_ranges);
+        EXPECT_EQ(site.width, width);
+        EXPECT_EQ(site.original_offset, input.value().accesses[index].original_offset);
+      }
+      PreparedArtifact changed = artifact.value();
+      ++changed.manifest.sites[0].lds_ranges.offset1;
+      EXPECT_TRUE(validate_prepared(original, changed, error).failed());
+      EXPECT_EQ(error.message, "prepared bytes/facts do not match the canonical preservation plan");
+    }
+  }
+}
+
 TEST(ConSanNativeWidthsStatic, AdmitGfx1250B64WithExactWidths) {
   const std::vector<uint8_t> original =
       test::read_fixture(test::target_fixture_path({"gfx1250", 32}, "native-9"));

@@ -283,6 +283,153 @@ protected:
   uint32_t stride_ = 0;
 };
 
+TEST_F(ConSanAnalysis, DualRangesPreserveTheGapAndAttributeSecondOrdinalConflicts) {
+  Manifest &manifest = test::manifest(capture_.header);
+  manifest.sites[0].width = 8;
+  manifest.sites[0].lds_ranges = {.shape = LdsRangeShape::Dual, .offset0 = 3, .offset1 = 5};
+  manifest.sites[1].width = 8;
+  for (const uint32_t peer : {24u, 32u, 40u, 48u}) {
+    SCOPED_TRACE(peer);
+    capture_.executions.clear();
+    append_execution();
+    access(0, 0, 1, 0);
+    access(1, 1, 1, peer);
+    const FailureOr<LdsRaceResult> result = analyze();
+    ASSERT_TRUE(result.succeeded()) << error_.message();
+    const LdsRaceExecutionResult &execution = result.value().executions.front();
+    EXPECT_TRUE(result.value().has_dual_ranges);
+    EXPECT_TRUE(execution.coverage_complete);
+    EXPECT_EQ(execution.valid_observations, 3u);
+    EXPECT_EQ(execution.cross_wave_pairs, peer == 24 || peer == 40 ? 1u : 0u);
+    if (!execution.cross_wave_examples.empty()) {
+      const LdsRaceFinding &finding = execution.cross_wave_examples.front();
+      const LdsRaceParticipant &dual = finding.first.site == 0 ? finding.first : finding.second;
+      EXPECT_EQ(dual.range_id, peer == 24 ? 0u : 1u);
+      EXPECT_EQ(dual.offset, peer);
+    }
+  }
+}
+
+TEST_F(ConSanAnalysis, DualStoreCollisionsIncludeDifferentOrdinalsOfOneOccurrence) {
+  test::manifest(capture_.header).sites[0].lds_ranges = {
+      .shape = LdsRangeShape::Dual, .offset0 = 3, .offset1 = 5};
+  access(0, 0, 1, 0, 1);
+  access(0, 0, 1, 8, 2, 1);
+  const FailureOr<LdsRaceResult> result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const LdsRaceExecutionResult &execution = result.value().executions.front();
+  EXPECT_TRUE(execution.coverage_complete);
+  EXPECT_EQ(execution.valid_observations, 4u);
+  EXPECT_EQ(execution.collision_groups, 1u);
+  EXPECT_EQ(execution.collision_lane_pairs, 1u);
+  ASSERT_EQ(execution.collision_examples.size(), 1u);
+  const LdsRaceFinding &finding = execution.collision_examples.front();
+  EXPECT_EQ(finding.first.offset, 20u);
+  EXPECT_EQ(finding.second.offset, 20u);
+  EXPECT_EQ(finding.first.range_id, 1u);
+  EXPECT_EQ(finding.second.range_id, 0u);
+  EXPECT_EQ(finding.first.mask, 1u);
+  EXPECT_EQ(finding.second.mask, 2u);
+  const std::string rendered = render_lds_race_analysis(result.value());
+  EXPECT_NE(rendered.find("\"scope\":\"native_lds_multi_range_"), std::string::npos);
+  EXPECT_NE(rendered.find("\"range_id\":1"), std::string::npos);
+  EXPECT_NE(rendered.find("\"second\":"), std::string::npos);
+}
+
+TEST_F(ConSanAnalysis, DualStrideOffsetsDoNotTruncateOrInvalidateTheOtherValidRange) {
+  Manifest &manifest = test::manifest(capture_.header);
+  manifest.sites[0].width = 8;
+  manifest.sites[0].lds_ranges = {
+      .shape = LdsRangeShape::DualStride64, .offset0 = 0, .offset1 = 255};
+  EXPECT_EQ(manifest.sites[0].lds_ranges.byte_offset(1, 8), 130560u);
+  access(0, 0, 1, 16);
+  access(1, 1, 1, 16);
+  const FailureOr<LdsRaceResult> result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const LdsRaceExecutionResult &execution = result.value().executions.front();
+  EXPECT_FALSE(execution.coverage_complete);
+  EXPECT_EQ(execution.rejected_records, 1u);
+  EXPECT_EQ(execution.valid_observations, 2u);
+  EXPECT_EQ(execution.cross_wave_pairs, 1u);
+}
+
+TEST_F(ConSanAnalysis, DualCoincidentOffsetsFollowTheConcreteTargetSemantics) {
+  Manifest &manifest = test::manifest(capture_.header);
+  for (const uint32_t target : {950u, 1100u}) {
+    SCOPED_TRACE(target);
+    manifest.target = target;
+    manifest.wave_size = 64;
+    manifest.sites[0].lds_ranges = {.shape = LdsRangeShape::Dual, .offset0 = 3, .offset1 = 3};
+    capture_.executions.clear();
+    append_execution({{128, 1, 1}, {128, 1, 1}});
+    access(0, 0, 1, 0);
+    access(1, 1, 1, 12);
+    const FailureOr<LdsRaceResult> result = analyze();
+    ASSERT_TRUE(result.succeeded()) << error_.message();
+    EXPECT_EQ(result.value().cross_wave_pairs, target == 950 ? 1u : 2u);
+    EXPECT_EQ(result.value().collision_groups, 0u);
+    EXPECT_TRUE(result.value().coverage_complete);
+  }
+}
+
+TEST_F(ConSanAnalysis, DualCoincidentReadsCountConcreteRequestsAndAttributeRetainedOrdinals) {
+  Manifest &manifest = test::manifest(capture_.header);
+  for (const uint32_t target : {942u, 950u, 1100u}) {
+    for (const uint32_t width : {4u, 8u}) {
+      SCOPED_TRACE(::testing::Message() << "target=" << target << " width=" << width);
+      manifest.target = target;
+      manifest.wave_size = 64;
+      manifest.sites[0].access = AccessKind::Read;
+      manifest.sites[0].width = width;
+      manifest.sites[0].lds_ranges = {.shape = LdsRangeShape::Dual, .offset0 = 3, .offset1 = 3};
+      manifest.sites[1].access = AccessKind::Write;
+      manifest.sites[1].width = width;
+      capture_.executions.clear();
+      append_execution({{128, 1, 1}, {128, 1, 1}});
+      access(0, 0, 1, 0);
+      access(1, 1, 1, 3 * width);
+      const FailureOr<LdsRaceResult> result = analyze();
+      ASSERT_TRUE(result.succeeded()) << error_.message();
+      const LdsRaceExecutionResult &execution = result.value().executions.front();
+      // CDNA3/4 suppress the coincident second read request; RDNA3 retains it.
+      // Keep these expectations independent of the policy used by the analyzer.
+      const uint64_t expected_pairs = target == 1100 ? 2u : 1u;
+      const uint32_t expected_range_mask = target == 1100 ? 0b11u : 0b01u;
+      EXPECT_TRUE(result.value().has_dual_ranges);
+      EXPECT_TRUE(result.value().coverage_complete);
+      EXPECT_TRUE(execution.coverage_complete);
+      EXPECT_EQ(execution.valid_observations, expected_pairs + 1);
+      EXPECT_EQ(execution.rejected_records, 0u);
+      EXPECT_EQ(execution.integrity_events, 0u);
+      EXPECT_EQ(execution.cross_wave_pairs, expected_pairs);
+      EXPECT_EQ(execution.cross_wave_lane_pairs, expected_pairs);
+      EXPECT_EQ(execution.collision_groups, 0u);
+      EXPECT_EQ(execution.cross_wave_examples.size(), expected_pairs);
+      uint32_t read_range_mask = 0;
+      for (const LdsRaceFinding &finding : execution.cross_wave_examples) {
+        const LdsRaceParticipant &read = finding.first.site == 0 ? finding.first : finding.second;
+        const LdsRaceParticipant &write = finding.first.site == 0 ? finding.second : finding.first;
+        EXPECT_EQ(read.site, 0u);
+        EXPECT_EQ(read.access, AccessKind::Read);
+        EXPECT_EQ(read.wave, 0u);
+        EXPECT_EQ(read.offset, 3 * width);
+        EXPECT_EQ(read.width, width);
+        EXPECT_LE(read.range_id, 1u);
+        if (read.range_id <= 1)
+          read_range_mask |= 1u << read.range_id;
+        EXPECT_EQ(write.site, 1u);
+        EXPECT_EQ(write.access, AccessKind::Write);
+        EXPECT_EQ(write.wave, 1u);
+        EXPECT_EQ(write.offset, 3 * width);
+        EXPECT_EQ(write.width, width);
+        EXPECT_EQ(write.range_id, 0u);
+        EXPECT_EQ(finding.lane_pairs, 1u);
+      }
+      EXPECT_EQ(read_range_mask, expected_range_mask);
+    }
+  }
+}
+
 TEST_F(ConSanAnalysis, DecoderControlUnequalLoopFinalPhasesCannotConfirmAnUnorderedPair) {
   access(0, 0, 1);
   access(1, 1, 1);

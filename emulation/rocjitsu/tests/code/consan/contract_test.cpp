@@ -344,6 +344,33 @@ Manifest trace_example() {
   return manifest;
 }
 
+TEST(ConSanDualRangeContract, RoundTripPreservesElementIndicesAndRejectsInvalidRecipes) {
+  for (const LdsRangeShape shape : {LdsRangeShape::Dual, LdsRangeShape::DualStride64}) {
+    for (const uint32_t width : {4u, 8u}) {
+      Manifest manifest = example();
+      manifest.sites[0].width = width;
+      manifest.sites[0].lds_ranges = {.shape = shape, .offset0 = 255, .offset1 = 3};
+      const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(manifest);
+      ASSERT_TRUE(encoded.succeeded());
+      const FailureOr<Manifest> decoded = decode_manifest(encoded.value());
+      ASSERT_TRUE(decoded.succeeded());
+      EXPECT_EQ(decoded.value(), manifest);
+      EXPECT_EQ(decoded.value().sites[0].lds_ranges.byte_offset(0, width),
+                255u * width * (shape == LdsRangeShape::DualStride64 ? 64u : 1u));
+    }
+  }
+  Manifest manifest = example();
+  manifest.sites[0].lds_ranges = {.shape = LdsRangeShape::Single, .offset1 = 1};
+  EXPECT_TRUE(encode_manifest(manifest).failed());
+  manifest.sites[0].lds_ranges = {.shape = static_cast<LdsRangeShape>(0xff)};
+  EXPECT_TRUE(encode_manifest(manifest).failed());
+  manifest.sites[0].lds_ranges = {.shape = LdsRangeShape::Dual};
+  for (const uint32_t width : {2u, 16u}) {
+    manifest.sites[0].width = width;
+    EXPECT_TRUE(encode_manifest(manifest).failed());
+  }
+}
+
 TEST(ConSanExecutionTraceContract, OwnsBoundaryFactsAndPlansEveryWorkgroupRow) {
   const Manifest manifest = trace_example();
   EXPECT_NE(manifest.options, mvp_options_digest());

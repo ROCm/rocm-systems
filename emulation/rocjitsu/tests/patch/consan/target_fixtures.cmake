@@ -278,6 +278,35 @@ foreach(
                         -DCONSAN_DUAL_PEER=${_peer}
                     )
                 endforeach()
+                foreach(
+                    _regression
+                    IN
+                    ITEMS values high cross-ordinal-collision
+                )
+                    if(
+                        _regression STREQUAL "cross-ordinal-collision"
+                        AND NOT _spacing STREQUAL "normal"
+                    )
+                        continue()
+                    endif()
+                    set(_name dual-b${_bits}-${_spacing}-${_regression})
+                    set(_high 0)
+                    set(_colliding 0)
+                    if(_regression STREQUAL "high")
+                        set(_high 1)
+                    elseif(_regression STREQUAL "cross-ordinal-collision")
+                        set(_colliding 1)
+                    endif()
+                    list(
+                        APPEND _dual_specs
+                        ${_name}:${_bits}:0:${_high}:0:${_colliding}
+                    )
+                    set(_dual_options_${_name}
+                        -DCONSAN_DUAL_READ=${_dual_read}
+                        -DCONSAN_DUAL_WRITE=${_dual_write}
+                        -DCONSAN_DUAL_REGRESSION=1
+                    )
+                endforeach()
             endforeach()
         endforeach()
         set(_transpose_specs)
