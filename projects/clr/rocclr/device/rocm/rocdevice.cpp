@@ -4451,9 +4451,14 @@ bool Device::CreateSignals(uint32_t count, hsa_signal_value_t initial_value, uin
                                                 ? cpu_agent_info_->kern_arg_pool
                                                 : getHostMemoryPool(kAtomics);
     const hsa_amd_memory_pool_t pool = device_memory ? device_signal_pool_ : host_pool;
+    // No GPU cache may hold device signal lines: a freed batch's page can come back as an
+    // ordinary buffer while an L2 still holds cache-coherent lines from the CP's completions
+    // there, and later stores to those lines can be lost.
+    const uint64_t batch_attributes = device_memory ? (attributes | HSA_AMD_SIGNAL_UNCACHED)
+                                                    : attributes;
     hsa_amd_signal_batch_t batch;
     if (HSA_STATUS_SUCCESS == Hsa::signal_batch_create(count, initial_values.data(), 0, nullptr,
-                                                       attributes, pool, &batch, signals)) {
+                                                       batch_attributes, pool, &batch, signals)) {
       Hsa::signal_batch_destroy(batch);
       in_device_memory = device_memory;
       return true;

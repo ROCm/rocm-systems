@@ -100,9 +100,10 @@
  *          (development and BKC snapshots only), so the 1.36 query is removed without a
  *          deprecation period.
  * - 1.40 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_MAX_BROADCAST_DESTINATIONS
+ * - 1.41 - hsa_amd_signal_batch_create: HSA_AMD_SIGNAL_UNCACHED
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 40
+#define HSA_AMD_INTERFACE_VERSION_MINOR 41
 
 #ifdef __cplusplus
 extern "C" {
@@ -1474,6 +1475,12 @@ typedef enum {
    * another process is undefined.
    */
   HSA_AMD_SIGNAL_IPC = 2,
+  /**
+   * ::hsa_amd_signal_batch_create only: allocate the members from a device pool
+   * as with ::HSA_AMD_MEMORY_POOL_UNCACHED_FLAG, so no GPU cache holds their
+   * lines. Ignored for system memory pools and by ::hsa_amd_signal_create.
+   */
+  HSA_AMD_SIGNAL_UNCACHED = 4,
 } hsa_amd_signal_attribute_t;
 
 /**
@@ -2246,7 +2253,8 @@ typedef struct hsa_amd_signal_batch_s {
  * ::hsa_amd_signal_create. Applies to every member.
  *
  * @param[in] attributes Signal attributes applied to every member.
- * ::HSA_AMD_SIGNAL_IPC is not supported.
+ * ::HSA_AMD_SIGNAL_IPC is not supported. ::HSA_AMD_SIGNAL_UNCACHED allocates
+ * device memory uncached.
  *
  * @param[in] pool Memory pool providing the signal memory: one that reports
  * ::HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE. That is a fine-grained system

@@ -112,7 +112,9 @@ void SignalBatchTest::HostPoolBatch() {
   ASSERT_NE(host_pool.handle, 0u);
   ASSERT_TRUE(SignalCapable(host_pool));
 
-  for (uint64_t attributes : {uint64_t{0}, uint64_t{HSA_AMD_SIGNAL_AMD_GPU_ONLY}}) {
+  // HSA_AMD_SIGNAL_UNCACHED is ignored for host memory
+  for (uint64_t attributes : {uint64_t{0}, uint64_t{HSA_AMD_SIGNAL_AMD_GPU_ONLY},
+                              uint64_t{HSA_AMD_SIGNAL_UNCACHED}}) {
     constexpr uint32_t kCount = 16;
     std::vector<hsa_signal_value_t> initial_values(kCount);
     for (uint32_t member = 0; member < kCount; ++member) initial_values[member] = 100 + member;
@@ -170,28 +172,31 @@ void SignalBatchTest::DevicePoolsFollowQuery() {
     uint32_t num_capable = 0;
     for (const PoolInfo& pool_info : GlobalPools(gpus[gpu_idx])) {
       const bool signal_capable = SignalCapable(pool_info.pool);
-      constexpr uint32_t kCount = 4;
-      const hsa_signal_value_t initial_values[kCount] = {1, 2, 3, 4};
-      hsa_signal_t signals[kCount];
-      hsa_amd_signal_batch_t batch;
-      const hsa_status_t status =
-          hsa_amd_signal_batch_create(kCount, initial_values, 0, nullptr, HSA_AMD_SIGNAL_AMD_GPU_ONLY,
-                                      pool_info.pool, &batch, signals);
-      if (!signal_capable) {
-        ASSERT_EQ(status, static_cast<hsa_status_t>(HSA_STATUS_ERROR_INVALID_MEMORY_POOL));
-        continue;
-      }
-      ++num_capable;
-      ASSERT_EQ(status, HSA_STATUS_SUCCESS);
-      // Device-memory members take host loads and stores; RMW needs host atomics.
-      for (uint32_t member = 0; member < kCount; ++member) {
-        ASSERT_EQ(hsa_signal_load_scacquire(signals[member]), initial_values[member]);
-        hsa_signal_store_screlease(signals[member], 0);
-        ASSERT_EQ(hsa_signal_load_scacquire(signals[member]), 0);
-      }
-      ASSERT_EQ(hsa_amd_signal_batch_destroy(batch), HSA_STATUS_SUCCESS);
-      for (uint32_t member = 0; member < kCount; ++member) {
-        ASSERT_EQ(hsa_signal_destroy(signals[member]), HSA_STATUS_SUCCESS);
+      num_capable += signal_capable;
+      for (uint64_t attributes :
+           {uint64_t{HSA_AMD_SIGNAL_AMD_GPU_ONLY},
+            uint64_t{HSA_AMD_SIGNAL_AMD_GPU_ONLY | HSA_AMD_SIGNAL_UNCACHED}}) {
+        constexpr uint32_t kCount = 4;
+        const hsa_signal_value_t initial_values[kCount] = {1, 2, 3, 4};
+        hsa_signal_t signals[kCount];
+        hsa_amd_signal_batch_t batch;
+        const hsa_status_t status = hsa_amd_signal_batch_create(
+            kCount, initial_values, 0, nullptr, attributes, pool_info.pool, &batch, signals);
+        if (!signal_capable) {
+          ASSERT_EQ(status, static_cast<hsa_status_t>(HSA_STATUS_ERROR_INVALID_MEMORY_POOL));
+          continue;
+        }
+        ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+        // Device-memory members take host loads and stores; RMW needs host atomics.
+        for (uint32_t member = 0; member < kCount; ++member) {
+          ASSERT_EQ(hsa_signal_load_scacquire(signals[member]), initial_values[member]);
+          hsa_signal_store_screlease(signals[member], 0);
+          ASSERT_EQ(hsa_signal_load_scacquire(signals[member]), 0);
+        }
+        ASSERT_EQ(hsa_amd_signal_batch_destroy(batch), HSA_STATUS_SUCCESS);
+        for (uint32_t member = 0; member < kCount; ++member) {
+          ASSERT_EQ(hsa_signal_destroy(signals[member]), HSA_STATUS_SUCCESS);
+        }
       }
     }
     std::stringstream summary;
@@ -234,20 +239,22 @@ void SignalBatchTest::AsyncCopyCompletesMember() {
   memset(host_buffer, 0x5a, kBytes);
 
   for (const hsa_amd_memory_pool_t& signal_pool : signal_pools) {
-    const hsa_signal_value_t initial_value = 1;
-    hsa_signal_t completion;
-    hsa_amd_signal_batch_t batch;
-    ASSERT_EQ(hsa_amd_signal_batch_create(1, &initial_value, 0, nullptr, 0, signal_pool, &batch,
-                                          &completion),
-              HSA_STATUS_SUCCESS);
-    ASSERT_EQ(hsa_amd_memory_async_copy(device_buffer, gpu, host_buffer, cpus[0], kBytes, 0,
-                                        nullptr, completion),
-              HSA_STATUS_SUCCESS);
-    ASSERT_EQ(hsa_signal_wait_scacquire(completion, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX,
-                                        HSA_WAIT_STATE_BLOCKED),
-              0);
-    ASSERT_EQ(hsa_signal_destroy(completion), HSA_STATUS_SUCCESS);
-    ASSERT_EQ(hsa_amd_signal_batch_destroy(batch), HSA_STATUS_SUCCESS);
+    for (uint64_t attributes : {uint64_t{0}, uint64_t{HSA_AMD_SIGNAL_UNCACHED}}) {
+      const hsa_signal_value_t initial_value = 1;
+      hsa_signal_t completion;
+      hsa_amd_signal_batch_t batch;
+      ASSERT_EQ(hsa_amd_signal_batch_create(1, &initial_value, 0, nullptr, attributes,
+                                            signal_pool, &batch, &completion),
+                HSA_STATUS_SUCCESS);
+      ASSERT_EQ(hsa_amd_memory_async_copy(device_buffer, gpu, host_buffer, cpus[0], kBytes, 0,
+                                          nullptr, completion),
+                HSA_STATUS_SUCCESS);
+      ASSERT_EQ(hsa_signal_wait_scacquire(completion, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX,
+                                          HSA_WAIT_STATE_BLOCKED),
+                0);
+      ASSERT_EQ(hsa_signal_destroy(completion), HSA_STATUS_SUCCESS);
+      ASSERT_EQ(hsa_amd_signal_batch_destroy(batch), HSA_STATUS_SUCCESS);
+    }
   }
   ASSERT_EQ(hsa_amd_memory_pool_free(host_buffer), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_amd_memory_pool_free(device_buffer), HSA_STATUS_SUCCESS);

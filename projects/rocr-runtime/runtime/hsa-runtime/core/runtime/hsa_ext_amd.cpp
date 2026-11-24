@@ -1132,10 +1132,11 @@ hsa_status_t hsa_amd_signal_batch_create(uint32_t count,
     }
   }
 
+  const bool uncached = device_pool && (attributes & HSA_AMD_SIGNAL_UNCACHED);
   core::SignalBatch* signal_batch;
   status = core::SignalBatch::Create(count, initial_values, use_interrupt, region, access_agents,
                                      host_access_via_hdp, host_access_across_link,
-                                     host_caches_arena, &signal_batch, signals);
+                                     host_caches_arena, uncached, &signal_batch, signals);
   if (status != HSA_STATUS_SUCCESS) return status;
 
   *batch = core::SignalBatch::Convert(signal_batch);
