@@ -385,10 +385,18 @@ __device__ __forceinline__ void LoadNV12ChromaRowOddCrop(const uint8_t *src, uin
 
 // Odd-crop loads for one 8-pixel row of a YUYV block whose first pixel is the second pixel of the macropixel at `src`
 // (the odd-crop kernels only see YUYV with x_phase 1): luma is bytes 2, 4, ..., 16 and pixel i takes its chroma from
-// macropixel (i + 1) >> 1.
-__device__ __forceinline__ void LoadYUYVRowOddLeft(const uint8_t *src, uint2 &yv, uint2 &u, uint2 &v) {
-    uint4 l = *((const uint4 *)src);
-    uint32_t e = *((const uint32_t *)(src + 16));
+// macropixel (i + 1) >> 1. Only the macropixels holding the first num_pixels pixels are read, so the fifth one is read
+// only for a block of 8 pixels.
+__device__ __forceinline__ void LoadYUYVRowOddLeft(const uint8_t *src, uint32_t num_pixels, uint2 &yv, uint2 &u, uint2 &v) {
+    uint4 l;
+    uint32_t e = 0;
+    if (num_pixels >= 8) {
+        l = *((const uint4 *)src);
+        e = *((const uint32_t *)(src + 16));
+    } else {
+        // The last pixel takes its chroma from macropixel num_pixels >> 1, which ends within the first 16 bytes.
+        l = LoadPartialUint4(src, (num_pixels >> 1) * 4 + 4);
+    }
     yv.x = hipPack(make_float4(hipUnpack2(l.x), hipUnpack0(l.y), hipUnpack2(l.y), hipUnpack0(l.z)));
     yv.y = hipPack(make_float4(hipUnpack2(l.z), hipUnpack0(l.w), hipUnpack2(l.w), hipUnpack0(e)));
     u.x = hipPack(make_float4(hipUnpack1(l.x), hipUnpack1(l.y), hipUnpack1(l.y), hipUnpack1(l.z)));
@@ -415,8 +423,8 @@ __device__ __forceinline__ void LoadYUVSamples(uint32_t layout, uint32_t x_phase
 
     if (kOddCrop && layout == YUV_LAYOUT_YUYV && x_phase) {
         uint32_t l0_idx = y * src_y_row_pair_stride + (x << 4);
-        LoadYUYVRowOddLeft(&src_y_image[l0_idx], y0, u0, v0);
-        LoadYUYVRowOddLeft(&src_y_image[l0_idx + src_y_stride], y1, u1, v1);
+        LoadYUYVRowOddLeft(&src_y_image[l0_idx], num_pixels, y0, u0, v0);
+        LoadYUYVRowOddLeft(&src_y_image[l0_idx + src_y_stride], num_pixels, y1, u1, v1);
         return;
     }
     if (layout == YUV_LAYOUT_YUYV) {
