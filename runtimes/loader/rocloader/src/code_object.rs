@@ -150,8 +150,8 @@ pub enum FloatRoundingMode {
 pub struct CodeObjectContract {
     /// Declared HSA profile, or `None` when the format imposes no requirement.
     pub profile: Option<Profile>,
-    /// Required default floating-point rounding mode.
-    pub rounding: FloatRoundingMode,
+    /// Declared rounding mode, or `None` when the format imposes no requirement.
+    pub rounding: Option<FloatRoundingMode>,
 }
 
 impl CodeObjectContract {
@@ -165,7 +165,9 @@ impl CodeObjectContract {
             mode => mode,
         };
         if self.profile.is_some_and(|required| required != profile)
-            || (self.rounding != FloatRoundingMode::Default && self.rounding != rounding)
+            || self.rounding.is_some_and(|required| {
+                required != FloatRoundingMode::Default && required != rounding
+            })
         {
             return Err(Error::IncompatibleTarget);
         }
@@ -201,12 +203,13 @@ impl<'a> CodeObject<'a> {
     /// Returns the execution contract of a modern AMDGPU HSA code object.
     #[must_use]
     pub fn contract(&self) -> CodeObjectContract {
-        // V3 and later do not declare the legacy HSAIL profile. The executable
-        // may use either profile; the GPU ABI does not impose a BASE-only
-        // executable policy. V1/V2 objects are rejected by the parser below.
+        // V3 and later do not declare the legacy HSAIL profile or default
+        // rounding mode. Per-kernel descriptor rounding fields describe initial
+        // GPU state, not an object-wide executable requirement. V1/V2 objects
+        // are rejected by the parser below.
         CodeObjectContract {
             profile: None,
-            rounding: FloatRoundingMode::Near,
+            rounding: None,
         }
     }
 
@@ -665,18 +668,55 @@ mod tests {
     }
 
     #[test]
-    fn modern_contract_accepts_either_executable_profile() {
-        let bytes = modern_object(AMDGPU_MACHINE_GFX1201);
-        let contract = CodeObject::parse(&bytes).unwrap().contract();
-        assert_eq!(contract.profile, None);
+    fn modern_contract_accepts_each_executable_profile_and_rounding_mode() {
+        let mut bytes = modern_object(AMDGPU_MACHINE_GFX1201);
+        for abi in 1..=4 {
+            bytes[8] = abi;
+            let contract = CodeObject::parse(&bytes).unwrap().contract();
+            assert_eq!(contract.profile, None);
+            assert_eq!(contract.rounding, None);
+            for profile in [Profile::Base, Profile::Full] {
+                for rounding in [
+                    FloatRoundingMode::Default,
+                    FloatRoundingMode::Zero,
+                    FloatRoundingMode::Near,
+                ] {
+                    assert!(contract.validate(profile, rounding).is_ok());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn declared_contract_rejects_profile_and_rounding_mismatches() {
         for profile in [Profile::Base, Profile::Full] {
-            assert!(
-                contract
-                    .validate(profile, FloatRoundingMode::Default)
-                    .is_ok()
-            );
-            assert!(contract.validate(profile, FloatRoundingMode::Near).is_ok());
-            assert!(contract.validate(profile, FloatRoundingMode::Zero).is_err());
+            for rounding in [
+                FloatRoundingMode::Default,
+                FloatRoundingMode::Zero,
+                FloatRoundingMode::Near,
+            ] {
+                let contract = CodeObjectContract {
+                    profile: Some(Profile::Full),
+                    rounding: Some(FloatRoundingMode::Near),
+                };
+                assert_eq!(
+                    contract.validate(profile, rounding).is_ok(),
+                    profile == Profile::Full && rounding != FloatRoundingMode::Zero
+                );
+                let contract = CodeObjectContract {
+                    profile: None,
+                    rounding: Some(FloatRoundingMode::Zero),
+                };
+                assert_eq!(
+                    contract.validate(profile, rounding).is_ok(),
+                    rounding == FloatRoundingMode::Zero
+                );
+                let contract = CodeObjectContract {
+                    profile: None,
+                    rounding: Some(FloatRoundingMode::Default),
+                };
+                assert!(contract.validate(profile, rounding).is_ok());
+            }
         }
     }
 
