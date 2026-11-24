@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <format>
@@ -90,16 +91,24 @@ void write_input(const std::filesystem::path &path, std::span<const uint8_t> inp
     throw std::system_error(publish_error, "cannot create input: " + filename);
 }
 
-void emit_seeds(const std::filesystem::path &directory) {
+bool emit_seeds(const std::filesystem::path &directory) {
   if (std::filesystem::exists(directory) &&
       (!std::filesystem::is_directory(directory) ||
        std::filesystem::directory_iterator(directory) != std::filesystem::directory_iterator()))
     throw std::invalid_argument("seed destination must be an empty directory");
   std::filesystem::create_directories(directory);
-  const std::vector<std::vector<uint8_t>> seeds = seed_corpus();
+  util::StringDiagnostic diagnostic;
+  const util::FailureOr<std::vector<std::vector<uint8_t>>> result =
+      seed_corpus(diagnostic.emitter());
+  if (result.failed()) {
+    std::cerr << "rj_concurrent_dispatch_fuzz: " << diagnostic.message() << '\n';
+    return false;
+  }
+  const std::vector<std::vector<uint8_t>> &seeds = result.value();
   for (std::size_t index = 0; index < seeds.size(); ++index)
     write_input(directory / std::format("seed-{:04}.bin", index), seeds[index]);
   std::cout << "wrote " << seeds.size() << " concurrent-dispatch seeds to " << directory << '\n';
+  return true;
 }
 
 void print_stats(const RunStats &stats) {
@@ -169,7 +178,8 @@ int run_afl() {
   while (__AFL_LOOP(1000)) {
     const std::size_t size = __AFL_FUZZ_TESTCASE_LEN;
     if (size > 0 && size <= kMaxInputSize)
-      (void)run_input(std::span<const uint8_t>(buffer, size));
+      if (run_input(std::span<const uint8_t>(buffer, size)).failed())
+        std::abort();
   }
 #ifdef __clang__
 #pragma clang diagnostic pop
@@ -184,6 +194,11 @@ int run_afl() {
 int main(int argc, char **argv) {
   bool fuzz_loop_running = false;
   try {
+    util::StringDiagnostic diagnostic;
+    const auto fail = [&] {
+      std::cerr << "rj_concurrent_dispatch_fuzz: " << diagnostic.message() << '\n';
+      return 1;
+    };
     std::string input_path;
     std::string output_path;
     std::string seed_path;
@@ -230,13 +245,14 @@ int main(int argc, char **argv) {
       return run_afl();
     }
     if (!seed_path.empty()) {
-      emit_seeds(seed_path);
-      return 0;
+      return emit_seeds(seed_path) ? 0 : 1;
     }
     if (!input_path.empty()) {
       const std::vector<uint8_t> input = read_input(input_path);
-      const RunStats stats = run_input(input);
-      print_stats(stats);
+      const util::FailureOr<RunStats> stats = run_input(input, diagnostic.emitter());
+      if (stats.failed())
+        return fail();
+      print_stats(stats.value());
       return 0;
     }
 
@@ -244,11 +260,18 @@ int main(int argc, char **argv) {
     RunStats total;
     for (uint64_t index = 0; index < *cases; ++index) {
       const uint64_t seed = seed_start + index;
-      const std::vector<uint8_t> input = random_input(seed);
+      const util::FailureOr<std::vector<uint8_t>> generated =
+          random_input(seed, diagnostic.emitter());
+      if (generated.failed())
+        return fail();
+      const std::vector<uint8_t> &input = generated.value();
       const std::filesystem::path replay =
           std::filesystem::path(output_path) / std::format("failure-seed-{}.bin", seed);
       write_input(replay, input);
-      accumulate_stats(total, run_input(input));
+      const util::FailureOr<RunStats> stats = run_input(input, diagnostic.emitter());
+      if (stats.failed())
+        return fail();
+      accumulate_stats(total, stats.value());
       std::filesystem::remove(replay);
     }
     print_stats(total);
