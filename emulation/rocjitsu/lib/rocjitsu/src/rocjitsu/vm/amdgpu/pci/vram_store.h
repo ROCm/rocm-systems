@@ -13,14 +13,17 @@
 ///
 /// The whole of memory is backed, sparsely; only the aperture is mapped. The
 /// driver reaches past the aperture through the indirect window, which is why
-/// the file is larger than the mapping and why reads and writes here are by
-/// file offset rather than through the pointer.
+/// the file is larger than the mapping and why reads and writes here take a
+/// file offset. A range inside the aperture is served from the mapping; only a
+/// range that reaches past it needs file I/O.
 ///
 /// Linux-only, like the device that owns it: sharing memory with a VMM by
 /// descriptor is how every POSIX transport does it, and there is no portable
 /// equivalent.
 
 #pragma once
+
+#include "util/bit.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -41,6 +44,15 @@ struct VramAtomicLoadResult {
 };
 
 /// @brief Memfd-backed video memory, with a mapped window onto its start.
+///
+/// @details Safe to use from several threads at once. A plain read or write
+/// that lies wholly inside the aperture copies through the mapping without
+/// taking a lock, so concurrent dispatch threads do not serialize on it. Such a
+/// write stores each byte exactly once (@ref util::store_once), so it cannot
+/// undo a concurrent compare_exchange() or atomic_store() on the same word. A
+/// range that reaches past the aperture is transferred by file offset under a
+/// mutex, which also makes the compare/exchange emulated there atomic against
+/// those transfers.
 class VramStore final {
 public:
   /// @brief Back @p bytes of memory and map its first @p aperture_bytes.
@@ -114,6 +126,12 @@ public:
   [[nodiscard]] bool atomic_store(uint64_t offset, uint32_t width, uint64_t value);
 
 private:
+  /// @brief Whether a range lies wholly in the mapped window, so that it can
+  ///        be reached through the mapping rather than by file offset.
+  [[nodiscard]] bool in_aperture(uint64_t offset, uint64_t length) const {
+    return mapping_ != nullptr && util::is_range_in_bounds(offset, length, aperture_bytes_);
+  }
+
   uint64_t bytes_ = 0;
   uint64_t aperture_bytes_ = 0;
   int fd_ = -1;

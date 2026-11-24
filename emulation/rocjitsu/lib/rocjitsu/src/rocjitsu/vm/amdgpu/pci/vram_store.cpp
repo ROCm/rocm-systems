@@ -6,11 +6,13 @@
 #include "rocjitsu/vm/canonical_backing_id.h"
 
 #include "util/log.h"
+#include "util/store_once.h"
 
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
@@ -76,6 +78,10 @@ VramStore::~VramStore() {
 }
 
 bool VramStore::read(uint64_t offset, uint32_t &value) const {
+  if (in_aperture(offset, sizeof(value))) {
+    std::memcpy(&value, mapping_ + offset, sizeof(value));
+    return true;
+  }
   const std::lock_guard lock(access_mutex_);
   if (fd_ < 0 || offset > bytes_ || sizeof(value) > bytes_ - offset) {
     return false;
@@ -85,6 +91,11 @@ bool VramStore::read(uint64_t offset, uint32_t &value) const {
 }
 
 bool VramStore::read_all(std::span<std::byte> bytes, uint64_t at) const {
+  if (in_aperture(at, bytes.size())) {
+    // copy_n rather than memcpy: an empty span may carry a null pointer.
+    std::copy_n(mapping_ + at, bytes.size(), bytes.data());
+    return true;
+  }
   const std::lock_guard lock(access_mutex_);
   if (fd_ < 0 || at > bytes_ || bytes.size() > bytes_ - at) {
     return false;
@@ -108,6 +119,12 @@ bool VramStore::read_all(std::span<std::byte> bytes, uint64_t at) const {
 }
 
 bool VramStore::write(uint64_t offset, uint32_t value) {
+  if (in_aperture(offset, sizeof(value))) {
+    // One store, not memcpy: a repeated store would undo a compare/exchange
+    // that another thread completes on this word in between.
+    util::store_once(mapping_ + offset, reinterpret_cast<const std::byte *>(&value), sizeof(value));
+    return true;
+  }
   const std::lock_guard lock(access_mutex_);
   if (fd_ < 0 || offset > bytes_ || sizeof(value) > bytes_ - offset) {
     return false;
@@ -117,6 +134,10 @@ bool VramStore::write(uint64_t offset, uint32_t value) {
 }
 
 bool VramStore::write_all(std::span<const std::byte> bytes, uint64_t at) {
+  if (in_aperture(at, bytes.size())) {
+    util::store_once(mapping_ + at, bytes.data(), bytes.size());
+    return true;
+  }
   const std::lock_guard lock(access_mutex_);
   if (fd_ < 0 || at > bytes_ || bytes.size() > bytes_ - at) {
     return false;
@@ -150,7 +171,7 @@ std::optional<VramAtomicLoadResult> VramStore::atomic_load(uint64_t offset, uint
     return std::nullopt;
   }
 
-  if (mapping_ != nullptr && offset <= aperture_bytes_ && width <= aperture_bytes_ - offset) {
+  if (in_aperture(offset, width)) {
     std::byte *target = mapping_ + offset;
     uint64_t value = 0;
     if (width == sizeof(uint64_t)) {
@@ -185,7 +206,7 @@ bool VramStore::atomic_store(uint64_t offset, uint32_t width, uint64_t value) {
     return false;
   }
 
-  if (mapping_ != nullptr && offset <= aperture_bytes_ && width <= aperture_bytes_ - offset) {
+  if (in_aperture(offset, width)) {
     std::byte *target = mapping_ + offset;
     if (width == sizeof(uint64_t)) {
       std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(target))
@@ -215,7 +236,7 @@ VramStore::compare_exchange(uint64_t offset, uint32_t width, uint64_t expected, 
   }
 
   VramAtomicCompareExchangeResult result{.observed = 0, .exchanged = false};
-  if (mapping_ != nullptr && offset <= aperture_bytes_ && width <= aperture_bytes_ - offset) {
+  if (in_aperture(offset, width)) {
     std::byte *target = mapping_ + offset;
     if (width == sizeof(uint64_t)) {
       uint64_t observed = expected;

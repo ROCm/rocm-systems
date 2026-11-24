@@ -732,6 +732,7 @@ add_executable(
     util_unique_handle_test.cpp
     util_intrusive_shared_ptr_test.cpp
     util_simd_test.cpp
+    util_store_once_test.cpp
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
     wmma_simd_benchmark.cpp
@@ -807,6 +808,7 @@ add_executable(
     drm_info_layout_test.cpp
     pci/bar_access_trace_test.cpp
     pci/gpu_pci_device_test.cpp
+    pci/vram_store_test.cpp
     pci/scratch_pci_device_test.cpp
     pci/ip_discovery_test.cpp
     pci/ip_block_model_test.cpp

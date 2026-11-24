@@ -65,8 +65,9 @@ A failed fence mapping rejects submission and can be retried after sufficient
 address space becomes available.
 
 Socket tokens support these mapping/metadata adapters, not file-offset I/O.
-The PCI model's `VramStore` still uses its own memfd with `pread`/`pwrite` and
-is outside this KFD backing support for file limits.
+The PCI model's `VramStore` still uses its own memfd, reached through its mapped
+aperture and with `pread`/`pwrite` past it, and is outside this KFD backing
+support for file limits.
 
 ## GPU core dump classification
 
