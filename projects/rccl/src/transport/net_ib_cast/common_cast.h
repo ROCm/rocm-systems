@@ -755,7 +755,8 @@ struct ncclIbSendComm {
   int ar; // Use adaptive routing when all merged devices have it enabled
   // Ring buffer of scratchpads for AINIC WRITE-based signaling.
   // Each in-flight RDMA WRITE needs its own slot to avoid overwriting values before NIC reads them.
-  static constexpr int kPutSignalScratchpadSlots = 64;
+  // Size must cover max outstanding WRITEs per connection (NET_IB_MAX_REQUESTS = 256).
+  static constexpr int kPutSignalScratchpadSlots = 256;
   uint64_t putSignalScratchpads[kPutSignalScratchpadSlots];
   int putSignalScratchpadIdx;
   bool useCtsOffload;
