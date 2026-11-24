@@ -143,10 +143,10 @@ namespace envvar {
     const var<std::string> host_transport("HOST_TRANSPORT",
       "Selects the transport backing the host-initiated API. The default (empty) keeps the MPI-window host path. Set to 'verbs' to use the native host-verbs stack. Example value: verbs");
     const var<bool> disable_mixed_ipc("DISABLE_MIXED_IPC",
-      "Defines whether to force using the network conduit even when IPC is available. 0: Use IPC when available; 1: Force network conduit",
+      "Defines whether to force using the network backend even when IPC is available. 0: Use IPC when available; 1: Force network backend",
       false);
     const var<bool> disable_ipc("DISABLE_IPC",
-      "DEPRECATED: Synonym for ROCSHMEM_DISABLE_MIXED_IPC. Force using network conduit even when IPC is available",
+      "DEPRECATED: Synonym for ROCSHMEM_DISABLE_MIXED_IPC. Force using network backend even when IPC is available",
       false);
     const var<size_t> max_wavefront_buffers("MAX_WF_BUFFERS",
       "Maximum number of wavefront buffer arrays in default context (determines size of status, return, and atomic return buffers)",
@@ -172,7 +172,7 @@ namespace envvar {
 
   namespace ro {
     const var<bool> disable_ipc("DISABLE_IPC",
-      "DEPRECATED: Synonym for ROCSHMEM_DISABLE_MIXED_IPC. Force using network conduit even when IPC is available",
+      "DEPRECATED: Synonym for ROCSHMEM_DISABLE_MIXED_IPC. Force using network backend even when IPC is available",
       false);
     const var<useconds_t> progress_delay("PROGRESS_DELAY",
       "Progress engine delay in microseconds (reduces memory subsystem load for performance)",

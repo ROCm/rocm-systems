@@ -67,7 +67,7 @@ The `build/` directory is not checked into the repo, so on a fresh checkout it m
 created and configured first. `cmake -B build -DENABLE_EXTENDED_TESTS=ON` is idempotent —
 it creates and configures `build/` if missing, and is a cheap no-op if it is already
 configured. `-DENABLE_EXTENDED_TESTS=ON` enables the additional FFmpeg-based CTest cases
-(the CTest phase covers 6 tests without it, 15 with it); those extra tests are only added
+(the CTest phase covers 7 tests without it, 16 with it); those extra tests are only added
 when FFmpeg is found, so the flag is harmless on machines without FFmpeg.
 
 Run these four commands separately:

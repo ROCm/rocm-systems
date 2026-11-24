@@ -9,4 +9,5 @@ hipfile_add_executable(
     DEPS hipfile
     SRCS "aiscp.cpp"
     SYSINCLS ${HIPFILE_INCLUDE_PATH}
+    NO_SAFE_BUFFERS
 )

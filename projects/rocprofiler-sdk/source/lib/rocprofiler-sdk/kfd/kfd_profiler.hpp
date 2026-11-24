@@ -42,6 +42,11 @@ namespace kfd
 std::unordered_set<uint32_t>
 discover_stream_dispatch_log_gpus(const char* nodes_path);
 
+// Gate @profiler_abi_version (from the profiler VERSION ioctl), then discover
+// stream-capable GPUs under @nodes_path. Empty means fall back to HSA timestamps.
+std::unordered_set<uint32_t>
+discover_dispatch_log_gpus(uint32_t profiler_abi_version, const char* nodes_path);
+
 // Env opt-out, open /dev/kfd, profiler VERSION ioctl, ABI check, GPU discovery.
 // Idempotent, never throws. Starts no reader thread; it arms the ring eagerly only
 // when a kernel-dispatch context is already registered (F15), otherwise a process

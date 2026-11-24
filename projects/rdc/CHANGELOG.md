@@ -10,6 +10,8 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdcd` pings the connection of each client every 60 seconds and closes a connection whose client does not answer within 20 seconds.
 
+- `rdcd` runs at most two diagnostics at a time, `rdc_diagnostic_run()` and `rdc_test_case_run()` together for all of its clients, and returns `RDC_ST_MAX_LIMIT` for another, so that clients cannot keep the GPUs busy with diagnostics without limit. A run keeps its place until it ends, also after its client has gone away.
+
 - **`rdc_health_get()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**.
   - It returned `RDC_ST_OK` with no health watches, so `rdci health -f` showed every watch as Off and exited successfully, and `rdci health -c` failed asking for watches to be enabled. Both commands now fail with a message that the group does not exist.
 
@@ -34,6 +36,10 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
   - `rdcd` holds up to 1,024 notifications for a client that is slow to read them, and drops the oldest beyond that.
 
 - `rdc_policy_register()` through `rdcd` works again for a group whose registration ended by itself, for example because `rdcd` restarted. It returned `RDC_ST_CONFLICT` for that group until the connection was closed.
+
+- `rdci diag`, and `rdc_diagnostic_run()` and `rdc_test_case_run()` with `rdcd`, report the error of a diagnostic that `rdcd` cannot run, for example for a GPU group that does not exist, and return `RDC_ST_CLIENT_ERROR` when `rdcd` cannot be reached. They reported success with an empty or stale result.
+
+- `rdc_diagnostic_run()` and `rdc_test_case_run()` with `rdcd` no longer crash when `config` is NULL.
 
 - `rdci health -s` on a GPU group that does not exist no longer leaves an unused field group in rdcd. Repeated failures filled the field group table, and commands that need a new field group, such as `rdci dmon`, then failed until rdcd was restarted.
 
@@ -82,6 +88,9 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - Certificates signed with the RDC certificate authority setup in `authentication/openssl.cnf` can no longer sign other certificates. A certificate request could ask to become a signing certificate, and its holder could then create client and server certificates that `rdcd` and `rdci` trust.
   - If you signed requests that other people created, check the certificates in the `newcerts` directory of your CA for `CA:TRUE`. If you find one, create a new root certificate and reissue all certificates.
+
+- A compute partition's `RDC_FI_GPU_CLOCK` no longer reports 65535 MHz or another partition's clock when the GPU lists unavailable clock readings before the available ones. It stops updating, instead of reporting a wrong clock, when the GPU's partition count drops to the partition's index or below while the partition is watched (for example, when AMD SMI reports the partition profile as not supported).
+  - A reading of 0 MHz now counts like any other. RDC skipped it, so partitions could report another partition's clock, or no clock.
 
 - `rdci discovery` now reports an error instead of exiting successfully with an incomplete GPU list when `rdcd` cannot read a GPU's attributes. Failed `rdc_device_get_attributes()` calls now return zeroed attributes, and `rdcd` replies to failed requests no longer contain garbage values.
 

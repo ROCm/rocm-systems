@@ -344,6 +344,67 @@ class TestLowerVectorAdd:
         assert 'amdgpu::clamp_floating_result(v, wf)' in result
         assert 'std::clamp' not in result
 
+    def test_apply_clamp_omits_scope_for_helper_lowered_mul_legacy(self):
+        mul_legacy = SemaNode(
+            SemaNodeKind.CALL,
+            call_name='mul_legacy',
+            ty=SemaType.F32,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='mul_legacy'),
+                SemaNode(SemaNodeKind.LIT, lit_value='0.5', ty=SemaType.F32),
+                SemaNode(SemaNodeKind.LIT, lit_value='2.0', ty=SemaType.F32),
+            ),
+        )
+        node = SemaNode(
+            SemaNodeKind.CALL,
+            call_name='apply_clamp',
+            ty=SemaType.F32,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='apply_clamp'),
+                mul_legacy,
+            ),
+        )
+
+        result = _lower_apply_clamp(node, LoweringContext(exec_model=ExecModel.VECTOR))
+
+        # The vector MUL_LEGACY helper installs the guest rounding itself and
+        # CLAMP compares raw bits, so the lowering adds no scope of its own.
+        assert 'MUL_LEGACY' in result
+        assert 'ScopedFenv' not in result
+
+    def test_apply_clamp_scopes_inline_host_arithmetic(self):
+        divide = SemaNode(
+            SemaNodeKind.DIV,
+            ty=SemaType.F64,
+            children=(
+                SemaNode(SemaNodeKind.LIT, lit_value='1.0', ty=SemaType.F64),
+                SemaNode(SemaNodeKind.LIT, lit_value='3.0', ty=SemaType.F64),
+            ),
+        )
+        add = SemaNode(
+            SemaNodeKind.ADD,
+            ty=SemaType.F64,
+            children=(
+                SemaNode(SemaNodeKind.LIT, lit_value='0.5', ty=SemaType.F64),
+                divide,
+            ),
+        )
+        node = SemaNode(
+            SemaNodeKind.CALL,
+            call_name='apply_clamp',
+            ty=SemaType.F64,
+            children=(SemaNode(SemaNodeKind.ID, id_name='apply_clamp'), add),
+        )
+
+        result = _lower_apply_clamp(node, LoweringContext(exec_model=ExecModel.VECTOR))
+
+        # The division rounds inline on the host, so the operand still needs the
+        # guest rounding installed around it.
+        assert (
+            'amdgpu::fp_mode::detail::ScopedFenv environment('
+            'wf.fp_round_mode_f16_f64());' in result
+        )
+
     @pytest.mark.parametrize(
         ('result_type', 'expected_helper', 'expected_denorm_mode'),
         [

@@ -29,6 +29,7 @@ foreach(example ${BASICS_EXAMPLES})
         DEPS examples_common
         SRCS "${example}.cpp"
         SYSINCLS ${HIPFILE_INCLUDE_PATH}
+        NO_SAFE_BUFFERS
     )
 endforeach()
 

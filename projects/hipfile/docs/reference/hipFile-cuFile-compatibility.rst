@@ -18,4 +18,6 @@ There is no hipFile counterpart to cuFile's ``cuFileDriverClose_v2`` alias. Both
 
 There is no hipFile counterpart to cuFile's ``sockaddr_t`` typedef. Use ``struct sockaddr`` or add a custom implementation of the typedef.
 
+Stream registration with ``hipFileStreamRegister()`` is optional in both hipFile and cuFile, and neither keeps persistent state for an unregistered stream, so only streams you explicitly registered need to be deregistered before they are destroyed. hipFile runs asynchronous I/O on an unregistered stream on a slower blocking path, while cuFile allocates per-transfer resources; register a stream for the best asynchronous performance.
+
 `HIPIFY <https://rocm.docs.amd.com/projects/HIPIFY/en/latest/index.html>`_ provides information about converting CUDA code to ROCm code. A `cuFile-to-hipFile API map <https://rocm.docs.amd.com/projects/HIPIFY/en/latest/reference/tables/cuFile_API_supported_by_HIP.html>`_ is available.
