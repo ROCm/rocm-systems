@@ -273,8 +273,12 @@ RocJpegStatus RocJpegDecoder::ValidateCropRectangle(const RocJpegDecodeParams &d
  *         and the crop rectangle passes ValidateCropRectangle(), ROCJPEG_STATUS_INVALID_PARAMETER otherwise.
  */
 RocJpegStatus RocJpegDecoder::ValidateDecodeParams(const RocJpegDecodeParams &decode_params, const JpegStreamParameters &jpeg_stream_params) {
-    // Compare as unsigned, so that a negative value stored by a C caller is rejected as well.
-    const uint32_t output_format = static_cast<uint32_t>(decode_params.output_format);
+    // Copy the field into an integer rather than read it as a RocJpegOutputFormat: a C caller can store any 32-bit value
+    // there, and reading a value outside the range of the enumeration as the enum type is undefined in C++. Compare as
+    // unsigned, so that a negative value is rejected as well.
+    uint32_t output_format = 0;
+    static_assert(sizeof(output_format) == sizeof(decode_params.output_format), "RocJpegOutputFormat is not 32 bits wide");
+    std::memcpy(&output_format, &decode_params.output_format, sizeof(output_format));
     if (output_format >= static_cast<uint32_t>(ROCJPEG_OUTPUT_FORMAT_MAX)) {
         ErrorLog(g_rocjpeg_logger, "Invalid output format " + ROCJPEG_TOSTR(static_cast<int32_t>(output_format)));
         return ROCJPEG_STATUS_INVALID_PARAMETER;
