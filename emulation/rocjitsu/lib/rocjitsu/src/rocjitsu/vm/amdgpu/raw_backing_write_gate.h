@@ -10,15 +10,13 @@
 #include <array>
 #include <atomic>
 #include <cassert>
-#include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <memory>
 #include <mutex>
 #include <new>
 #include <optional>
-#include <span>
 #include <utility>
+#include <vector>
 
 namespace rocjitsu::amdgpu {
 
@@ -54,7 +52,7 @@ public:
       if (gate_) {
         auto &shard = gate_->shards_[shard_];
         std::lock_guard lock(shard.mutex);
-        shard.active.erase(id_);
+        erase_entry(shard.active, id_);
       }
       gate_ = nullptr;
     }
@@ -84,7 +82,7 @@ public:
     void reopen() noexcept {
       if (gate_) {
         auto locks = gate_->lock_all_shards();
-        gate_->closed_.erase(id_);
+        erase_entry(gate_->closed_, id_);
       }
       gate_ = nullptr;
     }
@@ -103,12 +101,11 @@ public:
     if (shard.next_id == 0)
       return std::nullopt;
     const Span requested{begin, size};
-    for (const Entry &closed : closed_.entries())
+    for (const Entry &closed : closed_)
       if (overlaps(requested, closed.span))
         return std::nullopt;
     const uint64_t id = shard.next_id;
-    if (!shard.active.append({requested, id}))
-      return std::nullopt;
+    shard.active.push_back({requested, id});
     ++shard.next_id;
     return Permit(this, index, id);
   }
@@ -121,12 +118,11 @@ public:
       return std::nullopt;
     const Span requested{begin, size};
     for (const auto &shard : shards_)
-      for (const Entry &active : shard.active.entries())
+      for (const Entry &active : shard.active)
         if (overlaps(requested, active.span))
           return std::nullopt;
     const uint64_t id = next_id_;
-    if (!closed_.append({requested, id}))
-      return std::nullopt;
+    closed_.push_back({requested, id});
     ++next_id_;
     return Closed(this, id);
   }
@@ -151,46 +147,15 @@ private:
                                      : left.begin - right.begin < right.size;
   }
 
-  // Admission failure must leave existing tokens intact, including when
-  // growing their bookkeeping runs out of memory.
-  class EntryStorage {
-  public:
-    bool append(Entry entry) noexcept {
-      if (size_ == capacity_) {
-        constexpr size_t max_capacity = std::numeric_limits<std::ptrdiff_t>::max() / sizeof(Entry);
-        if (capacity_ == max_capacity)
-          return false;
-        const size_t capacity =
-            capacity_ == 0 ? 8 : (capacity_ > max_capacity / 2 ? max_capacity : capacity_ * 2);
-        std::unique_ptr<Entry[]> storage(new (std::nothrow) Entry[capacity]);
-        if (!storage)
-          return false;
-        if (size_ != 0)
-          std::copy_n(storage_.get(), size_, storage.get());
-        storage_ = std::move(storage);
-        capacity_ = capacity;
-      }
-      storage_[size_++] = entry;
-      return true;
+  static void erase_entry(std::vector<Entry> &entries, uint64_t id) noexcept {
+    const auto found = std::find_if(entries.begin(), entries.end(),
+                                    [id](const Entry &entry) { return entry.id == id; });
+    assert(found != entries.end());
+    if (found != entries.end()) {
+      *found = entries.back();
+      entries.pop_back();
     }
-
-    std::span<const Entry> entries() const noexcept { return {storage_.get(), size_}; }
-
-    void erase(uint64_t id) noexcept {
-      for (size_t index = 0; index < size_; ++index) {
-        if (storage_[index].id == id) {
-          storage_[index] = storage_[--size_];
-          return;
-        }
-      }
-      assert(false && "raw backing gate token is no longer registered");
-    }
-
-  private:
-    std::unique_ptr<Entry[]> storage_;
-    size_t size_ = 0;
-    size_t capacity_ = 0;
-  };
+  }
 
   // Raw writes on independent CU workers only touch their own shard. Closing
   // a controlled range takes every shard in order so the overlap check and
@@ -206,7 +171,7 @@ private:
 #endif
   struct alignas(64) Shard {
     std::mutex mutex;
-    EntryStorage active;
+    std::vector<Entry> active;
     uint64_t next_id = 1;
   };
   std::array<std::unique_lock<std::mutex>, kShards> lock_all_shards() {
@@ -217,7 +182,7 @@ private:
   }
 
   std::array<Shard, kShards> shards_;
-  EntryStorage closed_;
+  std::vector<Entry> closed_;
   uint64_t next_id_ = 1;
 };
 

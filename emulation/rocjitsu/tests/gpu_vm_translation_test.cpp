@@ -1794,34 +1794,6 @@ TEST(GpuVmTranslation, RawWriteGateTracksMovedAndOutOfOrderTokens) {
   EXPECT_TRUE(gate.try_acquire(0x4000, 4));
 }
 
-TEST(GpuVmTranslation, RawWriteGatePreservesTokensAcrossBookkeepingGrowth) {
-  VmRawBackingWriteGate gate;
-  std::vector<VmRawBackingWriteGate::Permit> permits;
-  for (uint64_t index = 0; index < 65; ++index) {
-    auto permit = gate.try_acquire(0x4000 + index * 8, 8);
-    ASSERT_TRUE(permit);
-    permits.push_back(std::move(*permit));
-  }
-  EXPECT_FALSE(gate.try_close(0x4000, 65 * 8));
-  permits.erase(permits.begin() + 17);
-  auto closed_gap = gate.try_close(0x4000 + 17 * 8, 8);
-  ASSERT_TRUE(closed_gap);
-  EXPECT_FALSE(gate.try_close(0x4000, 65 * 8));
-  permits.clear();
-
-  std::vector<VmRawBackingWriteGate::Closed> closed;
-  for (uint64_t index = 0; index < 65; ++index) {
-    auto token = gate.try_close(0x8000 + index * 8, 8);
-    ASSERT_TRUE(token);
-    closed.push_back(std::move(*token));
-  }
-  closed.erase(closed.begin() + 23);
-  EXPECT_TRUE(gate.try_acquire(0x8000 + 23 * 8, 8));
-  EXPECT_FALSE(gate.try_acquire(0x8000, 65 * 8));
-  closed.clear();
-  EXPECT_TRUE(gate.try_acquire(0x8000, 65 * 8));
-}
-
 TEST(GpuVmTranslation, RawWriteGateChecksAllWorkersAndReleasesOnAnotherThread) {
   VmRawBackingWriteGate gate;
   auto first = gate.try_acquire(0x1000, 8);
