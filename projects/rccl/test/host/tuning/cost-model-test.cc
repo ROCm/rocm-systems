@@ -510,7 +510,7 @@ TEST_F(CostModelMicrotest, InitDisablesLl128ByDefaultButHonoursAnExplicitRequest
 TEST_F(CostModelMicrotest, Ll128ReachOverPxnDoesNotDependOnDriverVersionOnAmd) {
   // gfx1250 reports compCap 125, which RUBIN_AND_LATER() matches. Upstream's Rubin gate keeps LL128
   // over PXN only from CUDA driver 13030; on AMD minDriverVersion is a HIP version, so a PXN graph
-  // must keep LL128 whatever its value, exactly as on gfx942.
+  // gfx1250 (compCap 125) matches RUBIN_AND_LATER(); on AMD, PXN keeps LL128 at any minDriverVersion.
   const int ll128 = NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + NCCL_PROTO_LL128;
   ASSERT_NE(0, modelMap[ll128].enabled[ncclFuncAllReduce]) << "Ring/LL128 AllReduce must start enabled";
   for (int compCap : {94, 125}) {
