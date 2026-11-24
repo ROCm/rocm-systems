@@ -160,10 +160,11 @@ struct gmock_sqlite_policy
     using database_t  = sqlite_api::database_t;
     using statement_t = sqlite_api::statement_t;
 
-    static constexpr int result_ok   = 0;
-    static constexpr int result_row  = 100;
-    static constexpr int result_done = 101;
-    static constexpr int column_null = 5;
+    static constexpr int result_ok        = 0;
+    static constexpr int result_row       = 100;
+    static constexpr int result_done      = 101;
+    static constexpr int result_interrupt = 9;  // SQLITE_INTERRUPT
+    static constexpr int column_null      = 5;
 
     static sqlite_api* instance;
 
@@ -171,9 +172,10 @@ struct gmock_sqlite_policy
     {
         return instance->open(path, out_db);
     }
-    static int close(database_t db) { return instance->close(db); }
-    static int exec(database_t db, const char* sql) { return instance->exec(db, sql); }
-    static int prepare(database_t db, const char* sql, statement_t* out_stmt)
+    static int  close(database_t db) { return instance->close(db); }
+    static void interrupt(database_t) noexcept {}  // Not exercised by these tests.
+    static int  exec(database_t db, const char* sql) { return instance->exec(db, sql); }
+    static int  prepare(database_t db, const char* sql, statement_t* out_stmt)
     {
         return instance->prepare(db, sql, out_stmt);
     }
