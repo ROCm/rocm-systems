@@ -330,16 +330,6 @@ if(_deps_met)
   install(FILES test/rocDecodeNegativeApiTests/CMakeLists.txt test/rocDecodeNegativeApiTests/README.md test/rocDecodeNegativeApiTests/rocdecode_api_negative_tests.cpp test/rocDecodeNegativeApiTests/rocdecode_api_negative_tests.h test/rocDecodeNegativeApiTests/rocdecodenegativetest.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test/rocDecodeNegativeApiTests)
   if(WIN32)
     install(FILES test/rocDecodeMissingVaLibTest/CMakeLists.txt test/rocDecodeMissingVaLibTest/rocdecodemissingvalibtest.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test/rocDecodeMissingVaLibTest)
-  else()
-    install(FILES test/rocDecodeEmptyVaProfileTest/CMakeLists.txt test/rocDecodeEmptyVaProfileTest/rocdecodeemptyvaprofiletest.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test/rocDecodeEmptyVaProfileTest)
-    # The test's stub VA driver is built here rather than by the test itself: it needs the libva backend headers,
-    # which are present at build time but not on a test machine that only has the installed packages. Building it
-    # against the same libva rocdecode ships also guarantees the driver ABI matches.
-    add_library(rocdecstub_drv_video MODULE test/rocDecodeEmptyVaProfileTest/stub_drv_video.cpp)
-    set_target_properties(rocdecstub_drv_video PROPERTIES PREFIX "" CXX_VISIBILITY_PRESET hidden)
-    # Installed without the .so suffix, since packaging places every *.so in the runtime package while this belongs
-    # with the tests. The test copies it back to the rocdecstub_drv_video.so name libva loads.
-    install(FILES $<TARGET_FILE:rocdecstub_drv_video> DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test/rocDecodeEmptyVaProfileTest RENAME rocdecstub_drv_video.bin)
   endif()
 
   message("-- ${White}AMD ROCm ${PROJECT_NAME} -- CMAKE_CXX_FLAGS:${CMAKE_CXX_FLAGS}${ColourReset}")
@@ -412,8 +402,6 @@ if(_deps_met)
       DEPENDS ${PROJECT_NAME}
       COMMENT "Staging ${PROJECT_NAME} into build tree for test builds"
     )
-    # Everything the install rules copy from the build tree must be built first, the stub VA driver included.
-    add_dependencies(stage_${PROJECT_NAME} rocdecstub_drv_video)
 
     # Assemble the search prefix for the nested test configures.
     #

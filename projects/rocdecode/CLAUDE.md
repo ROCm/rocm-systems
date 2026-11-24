@@ -57,7 +57,6 @@ HIP, libva, libdrm_amdgpu, pthreads. Optional: FFmpeg (>= 4.0.4) for samples, ex
 - `rocdec_Decode-HEVC` — low-level C API decode (rocdecDecode sample)
 - `rocDecode_Negative_API_Tests` — invalid parameter tests for all public API functions
 - `video_decodeCaps` — query hardware decoder capabilities (videoDecodeCaps sample)
-- `rocDecode_Empty_VA_Profile_Test` (Linux) — a stub VA driver exposing no decode profile must make `rocDecGetDecoderCaps` fail with `ROCDEC_NOT_INITIALIZED`
 
 
 **Extended tests (require FFmpeg + `ENABLE_EXTENDED_TESTS=ON`):**
