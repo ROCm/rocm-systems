@@ -9,6 +9,8 @@
 
 use super::super::memory;
 use super::*;
+#[path = "backing_ranges.rs"]
+mod backing_ranges;
 #[path = "queue_context.rs"]
 mod context;
 use crate::session::DriverContextLifetime;
@@ -373,6 +375,8 @@ enum RingBacking {
 
 #[derive(Default)]
 struct State {
+    /// Number of native exception queries, including production health checks.
+    native_waits: usize,
     next_handle: u64,
     next_offset: u64,
     buffers: BTreeMap<u64, uapi::AllocMemory>,
@@ -442,6 +446,7 @@ impl Fixture {
                 let mut state = observed.lock().unwrap();
                 match call {
                     connection::Call::Wait(args, event) if event.event_id == 19 => {
+                        state.native_waits += 1;
                         if state.lost {
                             event.payload[0] = 42;
                             event.payload[1] = 1;
@@ -451,6 +456,7 @@ impl Fixture {
                         }
                     }
                     connection::Call::Wait(args, event) if event.event_id == 20 => {
+                        state.native_waits += 1;
                         args.result = uapi::WAIT_TIMEOUT;
                     }
                     connection::Call::ResetEvent(args) if args.event_id == 19 => {

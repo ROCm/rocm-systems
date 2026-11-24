@@ -44,6 +44,7 @@ fn write_failure_state_diagnostic(
 #[cold]
 fn write_failure_address_diagnostic(
     output: &mut impl Write,
+    (executable_address, executable_byte_length): (u64, u64),
     (host, gpu_address, page): (usize, u64, u64),
     (indirect_buffer_address, command_count): (u64, usize),
     transport: QueueTransport,
@@ -53,6 +54,8 @@ fn write_failure_address_diagnostic(
         output,
         concat!(
             "rocddi code-cache: addresses; ",
+            "logical_executable_gpu={executable_address:#x}; logical_executable_size_bytes={executable_byte_length}; ",
+            "native_executable_allocation=unavailable(not_retained); ",
             "command_page_cpu={host:#x}; command_page_gpu={gpu_address:#x}; command_page_size_bytes={page}; ",
             "completion_cpu={host:#x}; completion_gpu={gpu_address:#x}; completion_size_bytes={completion_size}; ",
             "completion_value_cpu={completion_value_host:#x}; completion_value_gpu={completion_value_device:#x}; ",
@@ -62,6 +65,8 @@ fn write_failure_address_diagnostic(
             "write_index_cpu={write_index_host:#x}; write_index_gpu={write_index_device:#x}; ",
             "doorbell_cpu={doorbell_host:#x}; doorbell_gpu="
         ),
+        executable_address = executable_address,
+        executable_byte_length = executable_byte_length,
         host = host,
         gpu_address = gpu_address,
         page = page,
@@ -125,6 +130,7 @@ impl GpuDevice<'_> {
         &self,
         boundary: &str,
         completed: bool,
+        executable_range: (u64, u64),
         command_page: (usize, u64, u64),
         indirect_buffer: (u64, usize),
         transport: QueueTransport,
@@ -155,8 +161,13 @@ impl GpuDevice<'_> {
         let mut output = io::stderr().lock();
         let _ =
             write_failure_state_diagnostic(&mut output, boundary, completed, progress, completion);
-        let _ =
-            write_failure_address_diagnostic(&mut output, command_page, indirect_buffer, transport);
+        let _ = write_failure_address_diagnostic(
+            &mut output,
+            executable_range,
+            command_page,
+            indirect_buffer,
+            transport,
+        );
     }
 
     /// Publishes newly written code to instruction and scalar caches.
@@ -305,6 +316,7 @@ impl GpuDevice<'_> {
             self.diagnose_code_cache_failure(
                 "wait-incomplete",
                 completed,
+                (address, byte_length),
                 (host, gpu_address, page),
                 (ib, count),
                 transport,
@@ -314,6 +326,7 @@ impl GpuDevice<'_> {
             self.diagnose_code_cache_failure(
                 "inactivation-error",
                 completed,
+                (address, byte_length),
                 (host, gpu_address, page),
                 (ib, count),
                 transport,
@@ -396,6 +409,7 @@ mod tests {
         let mut output = Vec::new();
         write_failure_address_diagnostic(
             &mut output,
+            (0x9000_0000, 0x1234),
             (0x1000_0000, 0x2000_0000, 8192),
             (0x2000_0100, 7),
             transport,
@@ -404,6 +418,8 @@ mod tests {
             output,
             concat!(
                 "rocddi code-cache: addresses; ",
+                "logical_executable_gpu=0x90000000; logical_executable_size_bytes=4660; ",
+                "native_executable_allocation=unavailable(not_retained); ",
                 "command_page_cpu=0x10000000; command_page_gpu=0x20000000; command_page_size_bytes=8192; ",
                 "completion_cpu=0x10000000; completion_gpu=0x20000000; completion_size_bytes=64; ",
                 "completion_value_cpu=0x10000008; completion_value_gpu=0x20000008; ",
@@ -419,6 +435,7 @@ mod tests {
         output.clear();
         write_failure_address_diagnostic(
             &mut output,
+            (0x9000_0000, 0x1234),
             (0x1000_0000, 0x2000_0000, 4096),
             (0x2000_0100, 8),
             transport,
@@ -429,6 +446,7 @@ mod tests {
         assert!(
             write_failure_address_diagnostic(
                 &mut full,
+                (0x9000_0000, 0x1234),
                 (0x1000_0000, 0x2000_0000, 4096),
                 (0x2000_0100, 7),
                 transport,

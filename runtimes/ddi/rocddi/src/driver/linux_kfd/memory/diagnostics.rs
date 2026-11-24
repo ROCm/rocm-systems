@@ -3,7 +3,7 @@
 
 //! Bounded, read-only evidence capture at a failed native queue update.
 
-use super::{DeviceEvent, DeviceVm, LossEvent};
+use super::{DeviceEvent, DeviceVm, GpuMapping, KfdAllocation, LossEvent, uapi};
 use std::fmt;
 use std::io::{self, Write};
 use std::sync::TryLockError;
@@ -134,6 +134,67 @@ impl DeviceVm {
             source,
             &snapshot,
         );
+    }
+}
+
+impl KfdAllocation {
+    /// Formats owned allocation metadata without a health poll or memory read.
+    #[cold]
+    pub(in super::super) fn write_queue_backing_diagnostic(
+        &self,
+        output: &mut impl Write,
+        queue_id: u32,
+        role: &str,
+    ) -> io::Result<()> {
+        let kind = if self.native_flags & uapi::VRAM != 0 {
+            "vram"
+        } else if self.native_flags & uapi::GTT != 0 {
+            "gtt"
+        } else if self.native_flags & uapi::USERPTR != 0 {
+            "userptr"
+        } else {
+            "other"
+        };
+        write!(
+            output,
+            "rocddi: queue_backing; queue_id={queue_id}; role={role}; kind={kind}; cpu="
+        )?;
+        match self.host_address {
+            Some(address) => write!(output, "{address:#x}")?,
+            None => write!(output, "unavailable(no_host_mapping)")?,
+        }
+        write!(output, "; native_gpu_base=")?;
+        match &self.reservation {
+            Some(reservation) => write!(
+                output,
+                "{:#x}; native_size_bytes={}",
+                reservation.address(),
+                reservation.usable_size(),
+            )?,
+            None => write!(
+                output,
+                "unavailable(no_reservation); native_size_bytes=unavailable"
+            )?,
+        }
+        write!(
+            output,
+            "; logical_size_bytes={}; device_byte_offset={}; native_flags={:#x}; \
+             access_bits={:#x}; freeing={}; uncertain={}; gpu_map_state=",
+            self.logical_size,
+            self.device_byte_offset,
+            self.native_flags,
+            self.access_permissions.bits(),
+            self.freeing,
+            self.uncertain,
+        )?;
+        match self.mapping {
+            GpuMapping::NotStarted => write!(output, "not_started"),
+            GpuMapping::Mapping(count) => write!(output, "mapping({count})"),
+            GpuMapping::Mapped => write!(output, "mapped"),
+            GpuMapping::Unmapping(count) => write!(output, "unmapping({count})"),
+            GpuMapping::Unmapped => write!(output, "unmapped"),
+        }?;
+        writeln!(output)
     }
 }
 
