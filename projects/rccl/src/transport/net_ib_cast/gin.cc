@@ -748,6 +748,10 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
                                         bool isStrongSignal, uint32_t optFlags, void** request) {
   (void)isStrongSignal;
   (void)optFlags;
+
+  INFO(NCCL_NET, "IbCastRmaIbProxyIPutSignal ENTRY: context=%d rank=%u signalOp=%u signalOff=%lu IbCastAinicRoce=%d",
+       context, rank, signalOp, signalOff, (int)IbCastAinicRoce);
+
   if (signalOp != NCCL_NET_SIGNAL_OP_INC && signalOp != NCCL_NET_SIGNAL_OP_ADD) {
     WARN("IbCastRmaIbProxyIPutSignal: Unsupported signalOp %u", signalOp);
     return ncclInvalidArgument;
