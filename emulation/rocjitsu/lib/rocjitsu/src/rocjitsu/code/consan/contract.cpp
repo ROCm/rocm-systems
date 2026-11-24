@@ -137,13 +137,20 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
     return diagnostic.emit() << "static facts exceed metadata budget";
   }
 
+  // Older captures have the same wire layout, but could not declare a b96 site.
+  constexpr Digest kPriorWidths = {
+      0x8e, 0x4e, 0x17, 0xc7, 0x9d, 0x00, 0x15, 0x6a, 0x93, 0x8a, 0xeb,
+      0xa2, 0x32, 0x06, 0x3d, 0xb0, 0xa7, 0x24, 0x2c, 0x81, 0x8f, 0xe1,
+      0x9f, 0xa8, 0x3e, 0x6c, 0x37, 0x78, 0xd4, 0x3c, 0xff, 0x17,
+  };
+  const bool prior_widths = manifest.options == kPriorWidths;
   const TargetProfile *target = target_profile(manifest.target);
   if (manifest.original.bytes == 0 || manifest.prepared.bytes == 0 || target == nullptr ||
       !supports_wave(*target, manifest.wave_size) || manifest.code_object_abi != 5 ||
       (manifest.scope != ScopeKind::NativeLdsNoSynchronization &&
        manifest.scope != ScopeKind::NativeLdsWorkgroupBarrier &&
        manifest.scope != ScopeKind::NativeLdsWorkgroupBarrierLoop) ||
-      manifest.options != mvp_options_digest()) {
+      (!prior_widths && manifest.options != mvp_options_digest())) {
     return diagnostic.emit() << "empty image or unsupported target, ABI, scope or options";
   }
 
@@ -233,7 +240,8 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
         site.analysis != AnalysisKind::LdsRaceDetection || site.record != RecordKind::Access ||
         site.range_id != 0 ||
         (site.access != AccessKind::Read && site.access != AccessKind::Write) ||
-        (site.width != 2 && site.width != 4 && site.width != 8 && site.width != 16) ||
+        (site.width != 2 && site.width != 4 && site.width != 8 && site.width != 16 &&
+         (prior_widths || site.width != 12)) ||
         site.original_size != 8 || site.prepared_guest_size != 8 || site.probe_size == 0 ||
         (site.probe_size % 4) != 0 || (site.original_offset % 4) != 0 ||
         (site.prepared_guest_offset % 4) != 0 || (site.probe_offset % 4) != 0 ||

@@ -96,8 +96,14 @@ TEST(ConSanNativeWidthsStatic, AdmitGfx1250B64WithExactWidths) {
 
 TEST_P(ConSanTargetStatic, QualifyOnlyWholeRegisterSingleRangeForms) {
   const test::TargetMode mode = GetParam();
-  for (const auto &[name, width] : std::array<std::pair<const char *, uint32_t>, 5>{
-           {{"u16", 2}, {"i16", 2}, {"b64", 8}, {"b128", 16}, {"b128-alias", 16}}}) {
+  for (const auto &[name, width] :
+       std::array<std::pair<const char *, uint32_t>, 7>{{{"u16", 2},
+                                                         {"i16", 2},
+                                                         {"b64", 8},
+                                                         {"b96", 12},
+                                                         {"b96-alias-high", 12},
+                                                         {"b128", 16},
+                                                         {"b128-alias", 16}}}) {
     SCOPED_TRACE(name);
     const std::vector<uint8_t> original =
         test::read_fixture(test::target_fixture_path(mode, "width-" + std::string(name)));
@@ -112,7 +118,7 @@ TEST_P(ConSanTargetStatic, QualifyOnlyWholeRegisterSingleRangeForms) {
     }
     EXPECT_TRUE(validate_prepared(original, artifact.value(), error).succeeded()) << error.message;
   }
-  for (const char *name : {"excluded-b8", "excluded-b96", "excluded-partial"}) {
+  for (const char *name : {"excluded-b8", "excluded-partial"}) {
     SCOPED_TRACE(name);
     const std::vector<uint8_t> original =
         test::read_fixture(test::target_fixture_path(mode, "width-" + std::string(name)));

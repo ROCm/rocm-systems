@@ -104,7 +104,7 @@ int run(int argc, char **argv) {
                  "[--threads N] [--test-statistics] [--batch-barrier-and|--batch-barrier-or] "
                  "[--separate-barrier] [--high-lane] [--workgroups N] [--amd-signals]\n"
                  "MODE: grouped, grouped_sync, defined, synchronized, mixed, wide_u16, wide_i16, "
-                 "wide_b64, wide_b128, observe\n";
+                 "wide_b64, wide_b96, wide_b128, observe\n";
     return 3;
   }
   uint32_t launches = 0;
@@ -121,6 +121,7 @@ int run(int argc, char **argv) {
   const bool synchronized = mode == "synchronized" || mixed;
   const uint32_t wide_width = mode == "wide_u16" || mode == "wide_i16" ? 2
                               : mode == "wide_b64"                     ? 8
+                              : mode == "wide_b96"                     ? 12
                               : mode == "wide_b128"                    ? 16
                                                                        : 0;
   if (!defined && !synchronized && !grouped && wide_width == 0 && mode != "observe") {
@@ -452,8 +453,10 @@ int run(int argc, char **argv) {
         } else {
           expected[1] = 0x89abcdefu;
         }
-        if (wide_width == 16) {
+        if (wide_width >= 12) {
           expected[2] = 0x13579bdfu;
+        }
+        if (wide_width == 16) {
           expected[3] = 0xfedcba98u;
         }
         if (high_lane && wave * wave_size + wave_size - 1 >= threads) {

@@ -30,7 +30,7 @@ inline constexpr std::array<uint8_t, 16> kProducerContract = {
 // Canonical hash input for the manifest's options identity. Changing any byte
 // changes the identity required by artifact and capture admission.
 inline constexpr std::string_view kMvpOptions =
-    "native-lds-widths=2,4,8,16;native-lds-epoch-workgroup-barriers;single-block-loop;"
+    "native-lds-widths=2,4,8,12,16;native-lds-epoch-workgroup-barriers;single-block-loop;"
     "loop-lane-bank=ctz-mod4;sync-"
     "quota=16;workgroup-id=entry-scalar;workgroups-1d=1..16;mask64;address-groups-per-"
     "site=4;collision=on";

@@ -481,7 +481,14 @@ if(TARGET consan_hsa_runner)
                 )
             endforeach()
             if(RJ_BUILD_CONSAN_ANALYZER)
-                set(_width_cases wide_u16 wide_i16 wide_b64 wide_b128)
+                set(_width_cases
+                    wide_u16
+                    wide_i16
+                    wide_b64
+                    wide_b96
+                    wide_b96_alias_high
+                    wide_b128
+                )
                 if(_gpu STREQUAL "gfx1250")
                     list(
                         APPEND _width_cases
@@ -500,6 +507,11 @@ if(TARGET consan_hsa_runner)
                 foreach(_width_case IN LISTS _width_cases)
                     consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
                         ${_width_case} ${_width_threads} production analysis
+                    )
+                endforeach()
+                foreach(_peer IN ITEMS overlap adjacent disjoint)
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                        wide_b96_${_peer} ${_threads} production analysis
                     )
                 endforeach()
                 foreach(_groups IN ITEMS 1 4 16)

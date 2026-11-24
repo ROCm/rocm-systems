@@ -44,6 +44,11 @@ CORE_WIDTH_CASES = (
     'wide_u16',
     'wide_i16',
     'wide_b64',
+    'wide_b96',
+    'wide_b96_alias_high',
+    'wide_b96_overlap',
+    'wide_b96_adjacent',
+    'wide_b96_disjoint',
     'wide_b128',
 )
 GFX1250_WIDTH_CASES = (

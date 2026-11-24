@@ -146,7 +146,8 @@ protected:
   void run(std::string_view fixture, Bootstrap mode, RunResult &result,
            test::TargetMode target_mode = {"gfx1100", 32}, uint32_t threads = 64,
            bool target_fixture = false, uint32_t output_words_per_wave = 1,
-           bool seed_counters = false, uint32_t workgroups = 1) {
+           bool seed_counters = false, uint32_t workgroups = 1,
+           std::unique_ptr<ExecutionPlugin> observer = {}) {
 #ifdef CONSAN_FIXTURE_DIR
     const std::vector<uint8_t> original =
         test::read_fixture(target_fixture ? test::target_fixture_path(target_mode, fixture)
@@ -282,6 +283,9 @@ protected:
       counter_seed = seed.get();
       ASSERT_TRUE(plugins->add(std::move(seed)));
     }
+    if (observer) {
+      ASSERT_TRUE(plugins->add(std::move(observer)));
+    }
     soc->set_plugin_group(plugins);
     object.load_to_memory(memory, kImageBase);
     const uint64_t descriptor = object.kernel_descriptor_offset("lds_producer_consumer");
@@ -372,6 +376,7 @@ protected:
     (void)target_fixture;
     (void)output_words_per_wave;
     (void)workgroups;
+    (void)observer;
 #endif
   }
 };
@@ -1135,6 +1140,114 @@ TEST_P(ConSanTargetSim, NativeWidthsPreserveEveryWordAndAllGuestState) {
         EXPECT_EQ(record.mask, high ? uint64_t{1} << (wave_size - 1) : 1);
       }
     }
+  }
+}
+
+// The capture counts probes. Count the original memory operations independently,
+// including a second execution if instrumentation accidentally duplicates one.
+class B96IssueCounter final : public ExecutionPlugin {
+public:
+  explicit B96IssueCounter(std::vector<std::array<unsigned, 2>> &counts)
+      : ExecutionPlugin("b96_issue_counter"), counts_(counts) {}
+  bool requires_serial_hot_hooks() const override { return true; }
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &instruction,
+                                        amdgpu::Wavefront &wave) override {
+    if (!wave.exec())
+      return;
+    switch (instruction.amdgpu_operation()) {
+    case amdgpu::Operation::DS_STORE_B96:
+    case amdgpu::Operation::DS_WRITE_B96:
+      ++counts_.at(wave.wave_in_group())[0];
+      break;
+    case amdgpu::Operation::DS_LOAD_B96:
+    case amdgpu::Operation::DS_READ_B96:
+      ++counts_.at(wave.wave_in_group())[1];
+      break;
+    default:
+      break;
+    }
+  }
+
+private:
+  std::vector<std::array<unsigned, 2>> &counts_;
+};
+
+TEST_P(ConSanTargetSim, B96PreservesThreeWordsAndRecordsThePreGuestAddressOnce) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size + 1;
+  for (const bool high : {false, true}) {
+    const char *fixture = high ? "width-b96-alias-high" : "width-b96";
+    SCOPED_TRACE(fixture);
+    RunResult before, after;
+    std::vector<std::array<unsigned, 2>> before_counts(3), after_counts(3);
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true, 4, false,
+                                1, std::make_unique<B96IssueCounter>(before_counts)));
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true, 4,
+                                false, 1, std::make_unique<B96IssueCounter>(after_counts)));
+    expect_guest_state(before, after);
+    const unsigned active_waves = high ? 2 : 3;
+    std::vector<uint32_t> expected;
+    for (unsigned wave = 0; wave < 3; ++wave) {
+      const unsigned count = wave < active_waves ? 1 : 0;
+      EXPECT_EQ(before_counts[wave], (std::array<unsigned, 2>{count, count}));
+      EXPECT_EQ(after_counts[wave], before_counts[wave]);
+      std::array<uint32_t, 4> words{7 + wave, 0x89abcdefu, 0x13579bdfu, 0xa5a5a5a5u};
+      if (!count)
+        words.fill(0);
+      expected.insert(expected.end(), words.begin(), words.end());
+    }
+    EXPECT_EQ(before.full_output, expected);
+    EXPECT_EQ(after.full_output, expected);
+    const std::vector<ObservedAccess> records = published_accesses(after);
+    ASSERT_EQ(after.manifest.sites.size(), 2u);
+    EXPECT_EQ(after.manifest.sites[0].access, AccessKind::Write);
+    EXPECT_EQ(after.manifest.sites[1].access, AccessKind::Read);
+    ASSERT_EQ(records.size(), 2 * active_waves);
+    for (unsigned index = 0; index < records.size(); ++index) {
+      const ObservedAccess &record = records[index];
+      EXPECT_EQ(record.site, index % 2);
+      EXPECT_EQ(after.manifest.sites[index % 2].width, 12u);
+      EXPECT_EQ(record.wave, index / 2);
+      EXPECT_EQ(record.offset, 16 + 16 * (index / 2));
+      EXPECT_EQ(record.mask, high ? uint64_t{1} << (target.wave_size - 1) : 1u);
+    }
+  }
+}
+
+TEST_P(ConSanTargetSim, B96OnlyConflictsWithTheOverlappingPeerDword) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size;
+  for (const auto &[fixture, peer_offset] : std::array<std::pair<const char *, uint32_t>, 3>{
+           {{"width-b96-overlap", 24}, {"width-b96-adjacent", 28}, {"width-b96-disjoint", 32}}}) {
+    SCOPED_TRACE(fixture);
+    RunResult before, after;
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true, 4));
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true, 4));
+    expect_guest_state(before, after);
+    const std::vector<ObservedAccess> records = published_accesses(after);
+    ASSERT_EQ(records.size(), 2u);
+    ASSERT_EQ(after.manifest.sites.size(), 2u);
+    for (unsigned index = 0; index < 2; ++index) {
+      EXPECT_EQ(records[index].wave, index);
+      EXPECT_EQ(records[index].mask, 1u);
+      EXPECT_EQ(records[index].site, index);
+      EXPECT_EQ(records[index].offset, index == 0 ? 16u : peer_offset);
+      EXPECT_EQ(after.manifest.sites[index].access, AccessKind::Write);
+      EXPECT_EQ(after.manifest.sites[index].width, index == 0 ? 12u : 4u);
+    }
+#ifdef CONSAN_ANALYZER_ENABLED
+    const CapturedExecution execution = {.serial = 41,
+                                         .dimensions = {{threads, 1, 1}, {threads, 1, 1}},
+                                         .group_bytes = after.manifest.entry.prepared_group_bytes,
+                                         .arguments = {},
+                                         .report = after.report};
+    const LdsRaceExecutionResult analysis =
+        analyze_lds_race_execution(after.manifest, execution, 8);
+    EXPECT_TRUE(analysis.coverage_complete);
+    EXPECT_EQ(analysis.valid_observations, 2u);
+    EXPECT_EQ(analysis.cross_wave_pairs, peer_offset == 24 ? 1u : 0u);
+    EXPECT_EQ(analysis.rejected_records, 0u);
+#endif
   }
 }
 

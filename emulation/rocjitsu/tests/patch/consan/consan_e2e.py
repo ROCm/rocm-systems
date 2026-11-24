@@ -74,6 +74,7 @@ class AnalysisDriver(Driver):
                 in (
                     'race',
                     'high_lane',
+                    'wide_b96_overlap',
                     'mixed_overlap',
                     'mixed_b16',
                     'barrier_missing_second',
@@ -177,6 +178,7 @@ class AnalysisDriver(Driver):
                         'race',
                         'repeat_race',
                         'high_lane',
+                        'wide_b96_overlap',
                         'mixed_overlap',
                         'mixed_b16',
                         'barrier_missing_second',

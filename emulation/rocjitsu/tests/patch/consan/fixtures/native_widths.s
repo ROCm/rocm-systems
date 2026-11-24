@@ -20,12 +20,14 @@
 #define LOAD64 s_load_dwordx2
 #define DS_STORE_B8 ds_write_b8
 #define DS_STORE_B16 ds_write_b16
+#define DS_STORE_B32 ds_write_b32
 #define DS_STORE_B64 ds_write_b64
 #define DS_STORE_B96 ds_write_b96
 #define DS_STORE_B128 ds_write_b128
 #define DS_LOAD_U16 ds_read_u16
 #define DS_LOAD_I16 ds_read_i16
 #define DS_LOAD_PARTIAL ds_read_u16_d16_hi
+#define DS_LOAD_B96 ds_read_b96
 #define DS_LOAD_B64 ds_read_b64
 #define DS_LOAD_B128 ds_read_b128
 #define GLOBAL_STORE global_store_dword
@@ -35,12 +37,14 @@
 #define LOAD64 s_load_b64
 #define DS_STORE_B8 ds_store_b8
 #define DS_STORE_B16 ds_store_b16
+#define DS_STORE_B32 ds_store_b32
 #define DS_STORE_B64 ds_store_b64
 #define DS_STORE_B96 ds_store_b96
 #define DS_STORE_B128 ds_store_b128
 #define DS_LOAD_U16 ds_load_u16
 #define DS_LOAD_I16 ds_load_i16
 #define DS_LOAD_PARTIAL ds_load_u16_d16_hi
+#define DS_LOAD_B96 ds_load_b96
 #define DS_LOAD_B64 ds_load_b64
 #define DS_LOAD_B128 ds_load_b128
 #define GLOBAL_STORE global_store_b32
@@ -50,6 +54,7 @@
 #define MASK_EXEC exec
 #define MASK_VCC vcc
 #define MASK_SAVE s[8:9]
+#define MASK_PEER_SAVE s[10:11]
 #define MASK_MOVE s_mov_b64
 #define MASK_AND_SAVE s_and_saveexec_b64
 #define WAVE_SHIFT 6
@@ -57,6 +62,7 @@
 #define MASK_EXEC exec_lo
 #define MASK_VCC vcc_lo
 #define MASK_SAVE s8
+#define MASK_PEER_SAVE s10
 #define MASK_MOVE s_mov_b32
 #define MASK_AND_SAVE s_and_saveexec_b32
 #define WAVE_SHIFT 5
@@ -74,6 +80,9 @@
 #endif
 #ifndef CONSAN_ALIAS
 #define CONSAN_ALIAS 0
+#endif
+#ifndef CONSAN_B96_PEER_OFFSET
+#define CONSAN_B96_PEER_OFFSET 0
 #endif
 #ifndef CONSAN_COLLISION
 #define CONSAN_COLLISION 0
@@ -108,6 +117,9 @@ CONSAN_KERNEL:
   consan_wait_all
   v_lshrrev_b32 v6, WAVE_SHIFT, v0
   v_lshlrev_b32 v1, 4, v6
+#if CONSAN_WIDTH == 96
+  VECTOR_ADD v1, 4, v1
+#endif
   v_lshlrev_b32 v7, 4, v6
   VECTOR_ADD v2, s4, v6
 #if CONSAN_WIDTH == 16
@@ -130,7 +142,29 @@ CONSAN_KERNEL:
 #if CONSAN_WIDTH == 8
   DS_STORE_B8 v1, v2
 #elif CONSAN_WIDTH == 96
-  DS_STORE_B96 v1, v[2:4]
+#if CONSAN_B96_PEER_OFFSET
+  // Only wave zero writes the 12-byte range. The next wave writes one dword.
+  v_cmp_eq_u32 MASK_VCC, 0, v6
+  MASK_AND_SAVE MASK_PEER_SAVE, MASK_VCC
+  DS_STORE_B96 v1, v[2:4] offset:12
+  MASK_MOVE MASK_EXEC, MASK_PEER_SAVE
+  v_cmp_eq_u32 MASK_VCC, 1, v6
+  MASK_AND_SAVE MASK_PEER_SAVE, MASK_VCC
+  DS_STORE_B32 v1, v2 offset:CONSAN_B96_PEER_OFFSET
+  MASK_MOVE MASK_EXEC, MASK_PEER_SAVE
+  v_mov_b32 v8, v2
+  v_mov_b32 v9, v3
+  v_mov_b32 v10, v4
+#else
+  DS_STORE_B96 v1, v[2:4] offset:12
+  consan_wait_all
+#if CONSAN_ALIAS
+  v_mov_b32 v8, v1
+  DS_LOAD_B96 v[8:10], v8 offset:12
+#else
+  DS_LOAD_B96 v[8:10], v1 offset:12
+#endif
+#endif
 #elif CONSAN_WIDTH == 17
   DS_STORE_B16 v1, v2
   consan_wait_all

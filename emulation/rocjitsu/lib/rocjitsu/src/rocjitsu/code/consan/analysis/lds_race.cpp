@@ -198,7 +198,10 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
         issue(result, wave, site.id, "invalid_or_out_of_bounds_effective_range", workgroup);
         continue;
       }
-      if ((offset % width) != 0) {
+      // Three-dword DS accesses use the same native alignment as four dwords.
+      // Without the launch alignment mode we can only trust mode-independent addresses.
+      const uint32_t alignment = width == 12 ? 16 : width;
+      if ((offset % alignment) != 0) {
         ++result.rejected_records;
         issue(result, wave, site.id, "unaligned_lds_alignment_mode_unavailable", workgroup);
         continue;

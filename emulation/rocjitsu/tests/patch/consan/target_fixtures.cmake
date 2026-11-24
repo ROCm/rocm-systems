@@ -191,7 +191,11 @@ foreach(
                 b128-alias:128:0:0:1:0
                 b64-collision:64:0:0:0:1
                 excluded-b8:8:0:0:0:0
-                excluded-b96:96:0:0:0:0
+                b96:96:0:0:0:0
+                b96-alias-high:96:0:1:1:0
+                b96-overlap:96:0:0:0:0:4
+                b96-adjacent:96:0:0:0:0:8
+                b96-disjoint:96:0:0:0:0:12
                 excluded-partial:17:0:0:0:0
         )
             string(REPLACE ":" ";" _parts ${_spec})
@@ -212,6 +216,12 @@ foreach(
             list(GET _parts 3 _high)
             list(GET _parts 4 _alias)
             list(GET _parts 5 _collision)
+            set(_peer_option)
+            list(LENGTH _parts _part_count)
+            if(_part_count EQUAL 7)
+                list(GET _parts 6 _peer_offset)
+                set(_peer_option -DCONSAN_B96_PEER_OFFSET=${_peer_offset})
+            endif()
             set(_object ${_directory}/width-${_name}.o)
             set(_image ${_directory}/width-${_name}.hsaco)
             add_custom_command(
@@ -224,7 +234,8 @@ foreach(
                     -DCONSAN_WAVE_SIZE=${_wave_size} -DCONSAN_LEGACY=${_legacy}
                     -DCONSAN_GFX12=${_gfx12} -DCONSAN_WIDTH=${_width}
                     -DCONSAN_SIGNED=${_signed} -DCONSAN_HIGH=${_high}
-                    -DCONSAN_ALIAS=${_alias} -DCONSAN_COLLISION=${_collision} -c
+                    -DCONSAN_ALIAS=${_alias} -DCONSAN_COLLISION=${_collision}
+                    ${_peer_option} -c
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native_widths.s -o
                     ${_object}
                 DEPENDS fixtures/native_widths.s ${AMDCXX}

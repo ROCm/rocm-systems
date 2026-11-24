@@ -524,9 +524,27 @@ TEST_F(ConSanAnalysis, UnequalStartMixedWidthRangesOverlapAndAdjacentRangesDoNot
   }
 }
 
+TEST_F(ConSanAnalysis, ThreeDwordAccessRequiresNativeAlignmentAndCoversOnlyTwelveBytes) {
+  test::manifest(capture_.header).sites[0].width = 12;
+  for (uint32_t start : {12u, 16u}) {
+    for (uint32_t peer : {24u, 28u, 32u}) {
+      SCOPED_TRACE(::testing::Message() << start << ", " << peer);
+      capture_.executions.clear();
+      append_execution();
+      access(0, 0, 1, start);
+      access(1, 1, 1, peer);
+      const FailureOr<LdsRaceResult> result = analyze();
+      ASSERT_TRUE(result.succeeded()) << error_.message();
+      EXPECT_EQ(result.value().coverage_complete, start == 16);
+      EXPECT_EQ(result.value().executions[0].valid_observations, start == 16 ? 2u : 1u);
+      EXPECT_EQ(result.value().cross_wave_pairs, start == 16 && peer == 24 ? 1u : 0u);
+    }
+  }
+}
+
 TEST_F(ConSanAnalysis, DecoderControlWideBoundsCannotWrapOrSilentlyBecomeB32) {
   test::manifest(capture_.header).target = 1250;
-  for (const uint32_t width : {2u, 8u, 16u}) {
+  for (const uint32_t width : {2u, 8u, 12u, 16u}) {
     test::manifest(capture_.header).sites[0].width = width;
     for (const uint32_t offset : {1u, 128u - width + 1, UINT32_MAX - 7}) {
       capture_.executions.clear();
@@ -542,7 +560,7 @@ TEST_F(ConSanAnalysis, DecoderControlWideBoundsCannotWrapOrSilentlyBecomeB32) {
       EXPECT_FALSE(result.value().coverage_complete);
     }
   }
-  for (const uint32_t width : {0u, 1u, 3u, 12u, 32u}) {
+  for (const uint32_t width : {0u, 1u, 3u, 10u, 32u}) {
     test::manifest(capture_.header).sites[0].width = width;
     EXPECT_TRUE(validate_manifest(test::manifest(capture_.header)).failed());
   }

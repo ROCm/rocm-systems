@@ -120,6 +120,11 @@ uint32_t native_lds_width(const Instruction &instruction) {
   case amdgpu::Operation::DS_READ_B64:
   case amdgpu::Operation::DS_WRITE_B64:
     return 8;
+  case amdgpu::Operation::DS_LOAD_B96:
+  case amdgpu::Operation::DS_STORE_B96:
+  case amdgpu::Operation::DS_READ_B96:
+  case amdgpu::Operation::DS_WRITE_B96:
+    return 12;
   case amdgpu::Operation::DS_LOAD_B128:
   case amdgpu::Operation::DS_STORE_B128:
   case amdgpu::Operation::DS_READ_B128:
@@ -250,8 +255,8 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
     const Operand *value = read ? instruction.dst_operand(0) : instruction.src_operand(1);
     const std::optional<RegisterRef> address_reg = address->decoded_vgpr();
     const std::optional<RegisterRef> value_reg = value->decoded_vgpr();
-    // b16 loads extend into one full VGPR; b64/b128 use a contiguous 2/4-word
-    // tuple. Validate the whole value tuple, including store sources.
+    // b16 loads extend into one full VGPR. Wider accesses use contiguous VGPRs,
+    // including every source word of a store.
     const uint32_t value_words = std::max(width / 4, 1u);
     if (!address_reg || !value_reg || address_reg->width != 1 || value_reg->width != value_words ||
         address_reg->index >= allocated_vgprs ||

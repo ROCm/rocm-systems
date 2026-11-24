@@ -55,6 +55,11 @@ CASES = (
     'wide_u16',
     'wide_i16',
     'wide_b64',
+    'wide_b96',
+    'wide_b96_alias_high',
+    'wide_b96_overlap',
+    'wide_b96_adjacent',
+    'wide_b96_disjoint',
     'wide_b128',
     'wide_u16_high',
     'wide_i16_high',
@@ -312,6 +317,8 @@ class Driver:
                     else fixture_name.removesuffix('_high')
                 )
             )
+        if fixture_name.startswith('wide_b96'):
+            mode = 'wide_b96'
         if fixture_name == 'mixed_barrier':
             mode = 'mixed'
         grouped = fixture_name in (
@@ -711,6 +718,13 @@ class Driver:
             if '16' in fixture
             else (16 if '128' in fixture or fixture == 'wide_alias' else 8)
         )
+        if fixture.startswith('wide_b96'):
+            width = 12
+        peer_offset = {
+            'wide_b96_overlap': 24,
+            'wide_b96_adjacent': 28,
+            'wide_b96_disjoint': 32,
+        }.get(fixture)
         high = fixture.endswith('_high')
         for index, execution in enumerate(decoded['executions']):
             assert execution['serial'] == index + 1
@@ -720,7 +734,16 @@ class Driver:
                 assert row['wave'] == wave and row['serial'] == index + 1
                 assert row['status'] == ROW_ENTERED | ROW_EXITED and row['loss'] == 0
                 records = row['records']
-                if wide:
+                if peer_offset is not None:
+                    assert waves == 2
+                    assert row['final_sequence'] == len(records) == 1
+                    record = records[0]
+                    assert record['mask'] == record['sequence'] == 1
+                    site = decoded['sites'][record['site']]
+                    assert site['access'] == 2
+                    assert site['width'] == record['width'] == (4 if wave else 12)
+                    assert record['offset'] == (peer_offset if wave else 16)
+                elif wide:
                     active = (
                         not high or wave * wave_size + wave_size - 1 < self.args.threads
                     )
@@ -739,9 +762,13 @@ class Driver:
                     for sequence, record in enumerate(records, 1):
                         assert record['sequence'] == sequence
                         assert record['mask'] == mask
+                        assert decoded['sites'][record['site']]['access'] == (
+                            2 if sequence == 1 else 1
+                        )
                         assert record['width'] == width
                         assert (
-                            record['offset'] == wave * 16 + {2: 2, 8: 8, 16: 16}[width]
+                            record['offset']
+                            == wave * 16 + {2: 2, 8: 8, 12: 16, 16: 16}[width]
                         )
                         assert (
                             record['width'] == decoded['sites'][record['site']]['width']
