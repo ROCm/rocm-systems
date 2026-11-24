@@ -8,6 +8,7 @@
 #define ROCJITSU_VM_AMDGPU_INSTRUCTION_COMPUTE_UNIT_VIEW_H_
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "simdojo/sim/sim_types.h"
 #include "util/result.h"
 
@@ -34,6 +35,7 @@ class L2Cache;
 class Lds;
 class OperandExecutionAccess;
 class RegisterAccess;
+struct LdsBarrierArrivalObservation;
 struct TensorDmaIssueObservation;
 struct TensorDmaMemoryAccessObservation;
 class Wavefront;
@@ -80,8 +82,9 @@ public:
   /// Whether register accesses have a diagnostic or plugin consumer.
   bool observes_register_access() const;
   bool debug_active() const;
-  rj_code_arch_t arch() const;
+  rocjitsu::IsaFamily arch() const;
   uint64_t arithmetic_flags() const;
+  bool force_scalar() const;
   uint64_t shader_cycles() const;
   ImageAddressConfig image_address_config() const;
   uint32_t cus_per_shader_array() const;
@@ -129,6 +132,8 @@ public:
   void report_tensor_dma_memory_access(const TensorDmaMemoryAccessObservation &access);
   bool observes_tensor_dma_issue() const;
   void report_tensor_dma_issue(const TensorDmaIssueObservation &issue);
+  bool observes_lds_barrier_arrival() const;
+  void report_lds_barrier_arrival(const LdsBarrierArrivalObservation &arrival);
 
 private:
   ComputeUnitCore &raw_cu() { return *cu_; }

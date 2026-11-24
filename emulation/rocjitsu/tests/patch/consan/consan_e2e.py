@@ -120,6 +120,11 @@ class AnalysisDriver(Driver):
         assert result['ordered_pairs'] == sum(
             execution['ordered_pairs'] for execution in result['executions']
         )
+        if case == 'loop_three':
+            assert result['ordered_pairs'] == 9 * len(result['executions']), (
+                'loop_three total ordered pairs',
+                result['ordered_pairs'],
+            )
         assert result['collision_groups'] == collisions
         assert result['coverage_complete'] == (
             case
@@ -225,9 +230,7 @@ class AnalysisDriver(Driver):
                             and finding['second']['wave'] == 1
                         )
                         assert finding['ordering'] == 'unordered'
-                if case in ('grouped_barrier', 'grouped_empty') or (
-                    case == 'grouped_repeat' and self.args.target == 'gfx1250'
-                ):
+                if case in ('grouped_barrier', 'grouped_empty', 'grouped_repeat'):
                     assert analyzed['ordered_pairs'] == groups * (waves - 1)
                     assert (
                         analyzed['required_barrier_waves']
@@ -257,6 +260,12 @@ class AnalysisDriver(Driver):
                     )
             if case.startswith('loop_'):
                 assert analyzed['integrity_events'] == 0
+                if case == 'loop_three':
+                    assert analyzed['ordered_pairs'] == 9, (
+                        'loop_three dispatch ordered pairs',
+                        analyzed['serial'],
+                        analyzed['ordered_pairs'],
+                    )
                 if case.startswith('loop_no_b0_'):
                     # The same first four endpoints remain confirmed on either
                     # side of the journal limit, despite later access/sync loss.
@@ -310,7 +319,7 @@ class AnalysisDriver(Driver):
                 assert certificate['ordering'] == 'ordered'
                 assert certificate['first']['wave'] == 0
                 assert certificate['second']['wave'] == 1
-                mask = (1 << 31) if case == 'barrier_high' else 1
+                mask = (1 << (self.args.wave_size - 1)) if case == 'barrier_high' else 1
                 assert (
                     certificate['first']['mask']
                     == certificate['second']['mask']

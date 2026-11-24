@@ -219,7 +219,7 @@ target_compile_definitions(hrr-integration-tests PRIVATE
   HRR_API_ARGS_IMPLEMENTATION
   __HIP_PLATFORM_AMD__
   HRR_TEST_EXE="$<TARGET_FILE:hrr-integration-tests>"
-  HRR_PLAYBACK_EXE="$<TARGET_FILE:hrr-playback>"
+  HRR_PLAYBACK_BIN="$<TARGET_FILE:hrr-playback>"
   HRR_RAW_TRACE_EXE="${HRR_RAW_TRACE_EXE}"
   ROCM_BIN_PATH="${ROCM_PATH}/bin"
 )
@@ -246,3 +246,5 @@ if(NOT WIN32)
 endif()
 
 add_test(NAME hrr-integration-tests COMMAND hrr-integration-tests)
+# Needs an AMD GPU or the rocJitsu simulator, and a capture-enabled amdhip64.
+set_tests_properties(hrr-integration-tests PROPERTIES LABELS "simulator;gpu")

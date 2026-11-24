@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
@@ -35,9 +36,9 @@ namespace config {
 
 namespace {
 
-bool checkpoint_cu_owned_lds(rj_code_arch_t arch) {
-  return arch != ROCJITSU_CODE_ARCH_RDNA1 && arch != ROCJITSU_CODE_ARCH_RDNA2 &&
-         arch != ROCJITSU_CODE_ARCH_RV32I && arch != ROCJITSU_CODE_ARCH_RV64I;
+bool checkpoint_cu_owned_lds(rocjitsu::IsaFamily arch) {
+  return arch != rocjitsu::IsaFamily::Rdna1 && arch != rocjitsu::IsaFamily::Rdna2 &&
+         arch != rocjitsu::IsaFamily::Rv32i && arch != rocjitsu::IsaFamily::Rv64i;
 }
 
 flatbuffers::Optional<fb::GraphicsWait> graphics_wait(const amdgpu::Wavefront &wave) {
@@ -81,31 +82,32 @@ util::Result restore_graphics_status(amdgpu::Wavefront &wave, const fb::Wavefron
     // independent grants, so keep a partial grant from a legacy frontend.
     constexpr uint32_t grants =
         amdgpu::Wavefront::kStatusExportReadyMask | amdgpu::Wavefront::kStatusParamReadyMask;
-    if (arch != ROCJITSU_CODE_ARCH_RDNA3_5 || (status & grants) == 0)
+    if (arch != rocjitsu::IsaFamily::Rdna3_5 || (status & grants) == 0)
       status |= wave.status_raw() & grants;
   }
   wave.set_status_raw(status);
   return util::Result::success();
 }
 
-const char *checkpoint_group_target(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+const char *checkpoint_group_target(rocjitsu::IsaFamily arch) {
+  if (arch == rocjitsu::IsaFamily::Rdna4)
     return "RDNA4";
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+  if (arch == rocjitsu::IsaFamily::Cdna5)
     return "CDNA5";
   return arch_to_string(arch);
 }
 
-bool checkpoint_tracks_workgroups(rj_code_arch_t arch) {
-  return arch_is_cdna_4_or_lower(arch) || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+bool checkpoint_tracks_workgroups(rocjitsu::IsaFamily arch) {
+  return arch_is_cdna_4_or_lower(arch) || arch == rocjitsu::IsaFamily::Rdna3 ||
+         arch == rocjitsu::IsaFamily::Rdna3_5 ||
          amdgpu::Wavefront::supports_sleep_wakeup_credit(arch);
 }
 
 // Check the group graph before modifying a CU, or opening the output file on save.
 util::Result validate_checkpoint_groups(const fb::ComputeUnitState &state, uint32_t slots,
                                         const flatbuffers::Vector<uint32_t> *cursors,
-                                        rj_code_arch_t arch, util::DiagnosticEmitter emit_error) {
+                                        rocjitsu::IsaFamily arch,
+                                        util::DiagnosticEmitter emit_error) {
   const auto *target = checkpoint_group_target(arch);
   const auto *groups = state.rdna4_workgroups();
   if ((cursors != nullptr) != (groups != nullptr))
@@ -133,7 +135,7 @@ util::Result validate_checkpoint_groups(const fb::ComputeUnitState &state, uint3
       const auto waiting = wave->waiting_barrier();
       const auto complete = wave->barrier_complete_mask();
       const bool split_barriers =
-          arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+          arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
       if ((!split_barriers && (waiting || complete)) || complete > 3 || (waiting && !groups))
         return emit_error.emit() << "Invalid " << target
                                  << " checkpoint wave barrier or wake state";
@@ -141,7 +143,7 @@ util::Result validate_checkpoint_groups(const fb::ComputeUnitState &state, uint3
         // RDNA4 has required identity for sleep since this layout was introduced.
         // Older CDNA5 files stored wave-local timers and may carry a wake
         // credit. Restore those fields even when no group table was recorded.
-        if (arch == ROCJITSU_CODE_ARCH_RDNA4 && (wave->sleep_cycles() || wave->sleep_wakeup()))
+        if (arch == rocjitsu::IsaFamily::Rdna4 && (wave->sleep_cycles() || wave->sleep_wakeup()))
           return emit_error.emit()
                  << "Legacy RDNA4 checkpoint lacks workgroup identity for sleeping wave";
         continue;
@@ -370,7 +372,7 @@ config_from_checkpoint(const fb::SimulationConfig *fb_config, util::DiagnosticEm
   auto *vm = fb_config->vm();
   if (vm->arch())
     vm_config.soc.arch = parse_arch(vm->arch()->str());
-  if (vm_config.soc.arch == ROCJITSU_CODE_ARCH_INVALID)
+  if (vm_config.soc.arch == rocjitsu::IsaFamily::Invalid)
     return emit_error.emit() << "Checkpoint has missing or invalid architecture";
   vm_config.soc.exec_mode =
       parse_exec_mode(fb_config->exec_mode() ? fb_config->exec_mode()->str() : "");
@@ -494,7 +496,7 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
             return util::Result::failure();
           cu_scheduling = scheduling.value();
         }
-        const bool cdna3_wave = cu->arch() == ROCJITSU_CODE_ARCH_CDNA3;
+        const bool cdna3_wave = cu->arch() == rocjitsu::IsaFamily::Cdna3;
         const bool cu_owned_lds = checkpoint_cu_owned_lds(cu->arch());
         const auto lds_cursor =
             cu_owned_lds ? std::optional{cu->reserved_lds_bytes()} : std::nullopt;
@@ -517,7 +519,7 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
           if (gfx12 && w->barrier_state(1) != 0)
             return emit_error.emit()
                    << "Cannot checkpoint a GFX12 workgroup with allocated named barriers";
-          const bool rdna2 = cu->arch() == ROCJITSU_CODE_ARCH_RDNA2;
+          const bool rdna2 = cu->arch() == rocjitsu::IsaFamily::Rdna2;
           // Only the SoC's built-in identity mapping and direct standalone memory
           // are present in this file. A PASID alone cannot restore a frontend VM.
           const bool internal =
@@ -578,7 +580,7 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
                      << "Cannot checkpoint separately placed RDNA2 register blocks";
             register_blocks.push_back(block);
           }
-          const bool cdna4 = cu->arch() == ROCJITSU_CODE_ARCH_CDNA4;
+          const bool cdna4 = cu->arch() == rocjitsu::IsaFamily::Cdna4;
           const bool rounded_sgprs = arch_is_cdna_4_or_lower(cu->arch()) && !cdna3_wave;
           uint32_t sgpr_words = w->num_sgprs();
           if (rdna2)
@@ -692,7 +694,7 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
             record.add_num_sgprs(w->num_sgprs());
           if (!gfx10)
             record.add_num_vgprs(w->num_vgprs());
-          if (cdna4 || cdna3_wave || cu->arch() == ROCJITSU_CODE_ARCH_CDNA2)
+          if (cdna4 || cdna3_wave || cu->arch() == rocjitsu::IsaFamily::Cdna2)
             record.add_accum_vgpr_base(w->accum_vgpr_base());
           record.add_sleep_cycles(w->sleep_cycles());
           if (gfx12) {
@@ -701,7 +703,8 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
                                              (unsigned(w->trap_barrier_complete()) << 1));
             record.add_waiting_barrier(w->checkpoint_waiting_barrier());
           }
-          if (cu->arch() == ROCJITSU_CODE_ARCH_RDNA3 || cu->arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+          if (cu->arch() == rocjitsu::IsaFamily::Rdna3 ||
+              cu->arch() == rocjitsu::IsaFamily::Rdna3_5)
             record.add_ib_sts2_gfx11(w->ib_sts2_gfx11() & ~(1u << 11));
           if (!rdna2)
             record.add_uses_internal_address_space(internal);
@@ -901,7 +904,9 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
   vm_config.soc.xcd.shader_engine.compute_unit.async_resources = result.async_resources;
 
   // Rebuild the SoC root expected by LoadedConfig and create_from_loaded().
-  auto soc = std::make_unique<SoC>("gpu_soc", vm_config.soc);
+  auto soc = SoC::create("gpu_soc", vm_config.soc, emit_error);
+  if (!soc)
+    return util::Result::failure();
   auto *soc_ptr = soc.get();
   auto *mem_ptr = soc->memory();
 
@@ -1001,7 +1006,7 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
           return emit_error.emit() << "Invalid checkpoint LDS reservation";
         cu->lds().write(0u, lds->data(), lds->size());
       }
-      const bool rdna2 = cu->arch() == ROCJITSU_CODE_ARCH_RDNA2;
+      const bool rdna2 = cu->arch() == rocjitsu::IsaFamily::Rdna2;
       const auto *blocks = rdna2 ? cu_state->rdna2_register_blocks() : nullptr;
       const auto *wf_states = cu_state->wavefronts();
       if (blocks && blocks->size() != (wf_states ? wf_states->size() : 0))
@@ -1032,7 +1037,7 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
           if ((wave_resources != nullptr) != (cu_resources != nullptr) ||
               (wave_scheduling != nullptr) != (cu_scheduling != nullptr))
             return emit_error.emit() << "Inconsistent GFX10 wave checkpoint records";
-          if (cu->arch() == ROCJITSU_CODE_ARCH_RDNA1 && !wave_resources) {
+          if (cu->arch() == rocjitsu::IsaFamily::Rdna1 && !wave_resources) {
             if (wf_state->halted())
               continue;
             return emit_error.emit() << "Cannot restore active RDNA1 wave: checkpoint omitted "
@@ -1069,31 +1074,34 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
               return emit_error.emit() << "Invalid RDNA2 checkpoint VGPR payload or lane count";
           }
           uint32_t accum_base = 0;
-          if (cu->arch() != ROCJITSU_CODE_ARCH_CDNA4 && !Gfx10CheckpointResources::supported(*cu)) {
+          if (cu->arch() != rocjitsu::IsaFamily::Cdna4 &&
+              !Gfx10CheckpointResources::supported(*cu)) {
             if (const auto total = wf_state->num_vgprs()) {
               if (*total > cu->vgpr_allocation_block_size())
                 return emit_error.emit() << "Invalid checkpoint VGPR allocation";
               num_vgprs = *total;
             }
-            if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA2 || cu->arch() == ROCJITSU_CODE_ARCH_CDNA3) {
+            if (cu->arch() == rocjitsu::IsaFamily::Cdna2 ||
+                cu->arch() == rocjitsu::IsaFamily::Cdna3) {
               accum_base = wf_state->accum_vgpr_base();
               if (accum_base > amdgpu::ACC_VGPR_OFFSET || accum_base % 4 != 0 ||
                   (accum_base && !wf_state->num_vgprs()))
                 return emit_error.emit()
-                       << "Invalid " << (cu->arch() == ROCJITSU_CODE_ARCH_CDNA2 ? "CDNA2" : "CDNA3")
+                       << "Invalid "
+                       << (cu->arch() == rocjitsu::IsaFamily::Cdna2 ? "CDNA2" : "CDNA3")
                        << " checkpoint AccVGPR boundary";
             }
           }
-          if (arch_is_cdna_4_or_lower(cu->arch()) && cu->arch() != ROCJITSU_CODE_ARCH_CDNA3) {
+          if (arch_is_cdna_4_or_lower(cu->arch()) && cu->arch() != rocjitsu::IsaFamily::Cdna3) {
             if (const auto requested = wf_state->num_sgprs()) {
               num_sgprs = *requested;
               restore_sgpr_words = amdgpu::Wavefront::rounded_sgpr_count(num_sgprs, sgpr_capacity);
               if (!num_sgprs || num_sgprs > sgpr_capacity || !sgprs ||
                   sgprs->size() != restore_sgpr_words)
                 return emit_error.emit() << "Invalid "
-                                         << (cu->arch() == ROCJITSU_CODE_ARCH_CDNA1   ? "CDNA1"
-                                             : cu->arch() == ROCJITSU_CODE_ARCH_CDNA2 ? "CDNA2"
-                                                                                      : "CDNA4")
+                                         << (cu->arch() == rocjitsu::IsaFamily::Cdna1   ? "CDNA1"
+                                             : cu->arch() == rocjitsu::IsaFamily::Cdna2 ? "CDNA2"
+                                                                                        : "CDNA4")
                                          << " checkpoint SGPR allocation";
             } else {
               // A pre-TTMP-file record may also contain trap selectors after its SGPRs.
@@ -1101,7 +1109,7 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
               restore_sgpr_words = num_sgprs;
             }
           }
-          if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA4) {
+          if (cu->arch() == rocjitsu::IsaFamily::Cdna4) {
             const auto saved_total = wf_state->num_vgprs();
             accum_base = wf_state->accum_vgpr_base();
             num_vgprs = saved_total.value_or(num_vgprs);
@@ -1136,8 +1144,8 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
             wf->set_lds_size(window->size());
           }
           if (wf_state->ib_sts2_gfx11()) {
-            if ((cu->arch() != ROCJITSU_CODE_ARCH_RDNA3 &&
-                 cu->arch() != ROCJITSU_CODE_ARCH_RDNA3_5) ||
+            if ((cu->arch() != rocjitsu::IsaFamily::Rdna3 &&
+                 cu->arch() != rocjitsu::IsaFamily::Rdna3_5) ||
                 (wf_state->ib_sts2_gfx11() & ~0x703u))
               return emit_error.emit() << "Invalid GFX11 checkpoint IB_STS2";
             wf->set_ib_sts2_gfx11(wf_state->ib_sts2_gfx11());
@@ -1204,8 +1212,8 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
                     .failed())))
             return util::Result::failure();
           if (const auto *exceptions = wf_state->exceptions()) {
-            const bool gfx12 =
-                cu->arch() == ROCJITSU_CODE_ARCH_RDNA4 || cu->arch() == ROCJITSU_CODE_ARCH_CDNA5;
+            const bool gfx12 = cu->arch() == rocjitsu::IsaFamily::Rdna4 ||
+                               cu->arch() == rocjitsu::IsaFamily::Cdna5;
             if ((!gfx12 && (exceptions->gfx12_user_extra() || exceptions->gfx12_trap_ctrl())) ||
                 (exceptions->gfx12_user_extra() & ~(3u << 30)))
               return emit_error.emit() << "Invalid checkpoint wave exception registers";

@@ -208,22 +208,29 @@ public:
   /// @retval false Cache miss.
   bool lookup(uint64_t addr, CacheTag **tag_out = nullptr, uint32_t vmid = 0,
               uint64_t address_space_identity = 0) {
+    const Allocation line = lookup_with_data(addr, vmid, address_space_identity);
+    if (line.tag && tag_out)
+      *tag_out = line.tag;
+    return line.tag != nullptr;
+  }
+
+  /// Look up and promote a line, borrowing its tag and bytes together.
+  Allocation lookup_with_data(uint64_t addr, uint32_t vmid = 0,
+                              uint64_t address_space_identity = 0) {
     uint32_t set = set_index(addr);
     if constexpr (LazyStorage)
       if (!touched_sets_[set])
-        return false;
+        return {};
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
       if (t.valid && t.tag == tag && t.vmid == vmid &&
           t.address_space_identity == address_space_identity) {
         policy_.access(set, w);
-        if (tag_out)
-          *tag_out = &t;
-        return true;
+        return {&t, line_data(set, w)};
       }
     }
-    return false;
+    return {};
   }
 
   /// Inspect residency without changing replacement order or cache contents.
@@ -358,6 +365,21 @@ public:
     return &tag_at(set, policy_.victim(set));
   }
 
+  /// Invalidate a known resident way without changing replacement order.
+  static void invalidate_tag(CacheTag &tag) {
+    tag.coherence_epoch = 0;
+    tag.admission_generation = 0;
+    tag.cache_identity = 0;
+    tag.address_space_identity = 0;
+    tag.backing_address = 0;
+    tag.mapping_attributes = 0;
+    tag.local_backing_epoch = 0;
+    tag.local_line_epoch = 0;
+    tag.valid = false;
+    tag.dirty = false;
+    tag.coherence = CoherenceState::INVALID;
+  }
+
   /// @brief Invalidate the cache line for an address (if present).
   /// @param addr The memory address whose cache line to invalidate.
   /// @param vmid Owning process address space.
@@ -371,17 +393,7 @@ public:
       auto &t = tag_at(set, w);
       if (t.valid && t.tag == tag && t.vmid == vmid &&
           t.address_space_identity == address_space_identity) {
-        t.coherence_epoch = 0;
-        t.admission_generation = 0;
-        t.cache_identity = 0;
-        t.address_space_identity = 0;
-        t.backing_address = 0;
-        t.mapping_attributes = 0;
-        t.local_backing_epoch = 0;
-        t.local_line_epoch = 0;
-        t.valid = false;
-        t.dirty = false;
-        t.coherence = CoherenceState::INVALID;
+        invalidate_tag(t);
         return;
       }
     }
@@ -398,17 +410,7 @@ public:
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
       if (t.valid && t.tag == tag) {
-        t.coherence_epoch = 0;
-        t.admission_generation = 0;
-        t.cache_identity = 0;
-        t.address_space_identity = 0;
-        t.backing_address = 0;
-        t.mapping_attributes = 0;
-        t.local_backing_epoch = 0;
-        t.local_line_epoch = 0;
-        t.valid = false;
-        t.dirty = false;
-        t.coherence = CoherenceState::INVALID;
+        invalidate_tag(t);
       }
     }
   }
@@ -546,13 +548,17 @@ public:
       auto &t = tag_at(set, w);
       if (t.valid && t.tag == tag && t.vmid == vmid &&
           t.address_space_identity == address_space_identity) {
-        assert(offset + size <= LINE_SIZE);
-        std::memcpy(line_data(set, w) + offset, src, size);
-        mark_valid_bytes(t, offset, size);
+        write_line({&t, line_data(set, w)}, src, offset, size);
         return;
       }
     }
     assert(false && "write_line called on a miss");
+  }
+
+  static void write_line(Allocation line, const uint8_t *src, uint32_t offset, uint32_t size) {
+    assert(offset <= LINE_SIZE && size <= LINE_SIZE - offset);
+    std::memcpy(line.data + offset, src, size);
+    mark_valid_bytes(*line.tag, offset, size);
   }
 
   /// @brief Fill an entire cache line with data (used after allocate on a miss).
@@ -595,15 +601,18 @@ public:
       auto &t = tag_at(set, w);
       if (t.valid && t.tag == tag && t.vmid == vmid &&
           t.address_space_identity == address_space_identity) {
-        uint8_t *line = line_data(set, w);
-        for (uint32_t byte = 0; byte < LINE_SIZE; ++byte)
-          if (!bytes_valid(t, byte, 1))
-            line[byte] = data[byte];
-        t.valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
+        fill_missing_bytes({&t, line_data(set, w)}, data);
         return;
       }
     }
     assert(false && "fill_missing_bytes called on a miss");
+  }
+
+  static void fill_missing_bytes(Allocation line, const uint8_t *data) {
+    for (uint32_t byte = 0; byte < LINE_SIZE; ++byte)
+      if (!bytes_valid(*line.tag, byte, 1))
+        line.data[byte] = data[byte];
+    line.tag->valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
   }
 
   /// @brief Return a mutable pointer to the data for a cache line (must be a hit).

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/isa/isa_family.h"
 #include "target_fixture.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -9,7 +10,9 @@
 #include "rocjitsu/code/consan/image/artifact.h"
 #include "rocjitsu/code/consan/image/metadata.h"
 #include "rocjitsu/code/patch/consan/prepare.h"
+#include "rocjitsu/code/patch/fault_injection/drop_barrier.h"
 #include "rocjitsu/isa/register_set.h"
+#include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
 
@@ -55,11 +58,11 @@ TEST_F(ConSanPrepare, AllAdmittedCompanionsHaveOwningValidatedReplayableArtifact
     ASSERT_TRUE(artifact.succeeded()) << name << ": " << error_.message;
     EXPECT_TRUE(validate_prepared(original, artifact.value(), error_).succeeded())
         << error_.message;
-    ContractError image_error;
+    util::StringDiagnostic image_error;
     EXPECT_TRUE(verify_artifact_images(artifact.value().manifest, original, artifact.value().image,
-                                       &image_error)
+                                       image_error.emitter())
                     .succeeded())
-        << name << ": " << image_error.message;
+        << name << ": " << image_error.message();
     const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(artifact.value().manifest);
     ASSERT_TRUE(encoded.succeeded());
     const FailureOr<Manifest> decoded = decode_manifest(encoded.value());
@@ -71,6 +74,68 @@ TEST_F(ConSanPrepare, AllAdmittedCompanionsHaveOwningValidatedReplayableArtifact
     EXPECT_EQ(repeated.value().image, artifact.value().image);
     EXPECT_EQ(repeated.value().manifest, artifact.value().manifest);
   }
+}
+
+TEST_F(ConSanPrepare, DropBarrierMutantReceivesFreshPreparation) {
+  std::vector<uint8_t> source_image = load("barrier");
+  ASSERT_FALSE(source_image.empty());
+  const std::vector<uint8_t> pristine = source_image;
+  const TargetProfile *target = target_profile("gfx1100");
+  ASSERT_NE(target, nullptr);
+  EXPECT_TRUE(prepare(pristine, *target, "lds_producer_consumer", error_).failed());
+  EXPECT_EQ(error_.code, InputErrorCode::UnsupportedSynchronization);
+
+  std::vector<uint8_t> mutant;
+  {
+    FaultMutationContext context(source_image);
+    FaultMutationError mutation_error;
+    const FailureOr<FaultBarrierInventory> inventory =
+        discover_drop_barriers(context, "lds_producer_consumer", mutation_error);
+    ASSERT_TRUE(inventory.succeeded()) << mutation_error.message;
+    ASSERT_EQ(inventory.value().owner().entry_offset, 0u);
+    ASSERT_EQ(inventory.value().barriers().size(), 1u);
+    const FailureOr<DropBarrierSelection> selected =
+        select_drop_barrier(inventory.value(), {}, mutation_error);
+    ASSERT_TRUE(selected.succeeded()) << mutation_error.message;
+    ASSERT_EQ(selected.value().barrier().members.size(), 1u);
+    EXPECT_EQ(selected.value().barrier().members.front().offset, 0x34u);
+    const FailureOr<DropBarrierResult> dropped =
+        apply_drop_barrier(context, selected.value(), mutation_error);
+    ASSERT_TRUE(dropped.succeeded()) << mutation_error.message;
+    EXPECT_EQ(dropped.value().logical_mutation_count, 1u);
+    EXPECT_TRUE(std::ranges::equal(context.image(), pristine));
+    EXPECT_EQ(source_image, pristine);
+    mutant = dropped.value().image;
+  }
+  ASSERT_FALSE(mutant.empty());
+  EXPECT_NE(mutant, pristine);
+
+  // Preparation must own and reanalyze the emitted image after the FI context,
+  // inventory, selection and result have expired, including a second DBI pass.
+  const FailureOr<PreparedArtifact> artifact =
+      prepare(mutant, *target, "lds_producer_consumer", error_);
+  ASSERT_TRUE(artifact.succeeded()) << error_.message;
+  const Manifest &manifest = artifact.value().manifest;
+  EXPECT_EQ(manifest.original.sha256, digest(mutant));
+  EXPECT_NE(manifest.original.sha256, digest(pristine));
+  EXPECT_EQ(manifest.original.bytes, mutant.size());
+  ASSERT_EQ(manifest.sites.size(), 2u);
+  // native_lds.s case 7 has ds_store_b32 at 0x28 and ds_load_b32 at 0x40.
+  // Keep these source expectations independent of the mutant input analysis.
+  EXPECT_EQ(manifest.sites[0].id, 0u);
+  EXPECT_EQ(manifest.sites[0].original_offset, 0x28u);
+  EXPECT_EQ(manifest.sites[0].access, AccessKind::Write);
+  EXPECT_EQ(manifest.sites[0].original_size, 8u);
+  EXPECT_EQ(manifest.sites[1].id, 1u);
+  EXPECT_EQ(manifest.sites[1].original_offset, 0x40u);
+  EXPECT_EQ(manifest.sites[1].access, AccessKind::Read);
+  EXPECT_EQ(manifest.sites[1].original_size, 8u);
+  util::StringDiagnostic image_error;
+  EXPECT_TRUE(
+      verify_artifact_images(manifest, mutant, artifact.value().image, image_error.emitter())
+          .succeeded())
+      << image_error.message();
+  EXPECT_EQ(source_image, pristine);
 }
 
 TEST_F(ConSanPrepare, NonExecutableOriginalCannotProduceAPublishableArtifact) {
@@ -235,10 +300,11 @@ TEST_F(ConSanPrepare, RegisterPressureReturnsAResourceErrorInsteadOfAnInternalAs
       EXPECT_LE(manifest.entry.prepared_sgprs, REGISTER_SET_ALLOCATABLE_SGPRS);
       EXPECT_GE(manifest.entry.prepared_vgprs, metadata.value().vgprs);
       EXPECT_LE(manifest.entry.prepared_vgprs, 256u);
-      ContractError image_error;
+      util::StringDiagnostic image_error;
       EXPECT_TRUE(
-          verify_artifact_images(manifest, image, artifact.value().image, &image_error).succeeded())
-          << image_error.message;
+          verify_artifact_images(manifest, image, artifact.value().image, image_error.emitter())
+              .succeeded())
+          << image_error.message();
     } else {
       EXPECT_TRUE(artifact.failed());
       EXPECT_EQ(error_.code, InputErrorCode::ResourceLimit);
@@ -290,7 +356,7 @@ TEST_F(ConSanPrepare, Gfx1100Wave32RequiresTheInputSgprPaddingWorkaround) {
       build_input_program(original_, *target_profile("gfx1100"), "lds_producer_consumer", error_);
   ASSERT_TRUE(input.succeeded());
   rocjitsu::amdhsa::kernel_descriptor_t descriptor = input.value().kernel.descriptor;
-  set_kernel_descriptor_user_sgpr_count(ROCJITSU_CODE_ARCH_RDNA3, descriptor, 2);
+  set_kernel_descriptor_user_sgpr_count(rocjitsu::IsaFamily::Rdna3, descriptor, 2);
   std::memcpy(original_.data() + input.value().kernel.descriptor_file_offset, &descriptor,
               sizeof(descriptor));
   EXPECT_TRUE(

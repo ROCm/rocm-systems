@@ -4,10 +4,10 @@
 # Multi-Arch CI ASAN for rocm-systems
 #
 # On-demand host-asan builds for every component. The reusable workflow YAML
-# is called from TheRock main (includes #10034). The source ref is
-# users/dileepr1/host-asan-all-5405 (9c073c680 plus llvm-project #5405
-# cherry-picked onto the amd-llvm pin). Those are different commits because a
-# reusable workflow is only callable from the default branch.
+# is called from TheRock d48ffb2 (develop's pin, on TheRock main). The source
+# ref is users/dileepr1/host-asan-all-d48ffb2 (726fcacf6: d48ffb2 plus
+# llvm-project #5405 on the amd-llvm pin). Those are different commits because
+# a reusable workflow is only callable from the default branch.
 # run_rocm_tests lets a pull request keep its test runners. The default
 # family is gfx90a, which has no sandbox runner, so it uses its normal runner
 # (linux-gfx90a-1gpu-ossci-rocm). A pull request runs when it has ci:host-asan.
@@ -67,7 +67,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@3a449c0e6ba8f35c5d56470e103f6f473d0061d2 # TheRock main, includes #10034
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@d48ffb2a9ce6a6a4f897dd83f8dab52feff426d7 # 2026-11-23 (develop pin)
     with:
       build_variant: "host-asan"
       # Required by TheRock#10034. Without it a pull request clears the test runner.
@@ -88,7 +88,7 @@ jobs:
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       repository: ROCm/TheRock
-      ref: e12a2a324dad7d0c51cf6b40c0c82fc6a3679c52 # users/dileepr1/host-asan-all-5405 (#5405)
+      ref: 726fcacf693ccc198d913a7edf2546e4530cff98 # users/dileepr1/host-asan-all-d48ffb2 (d48ffb2 + llvm #5405)
       external_repo: >-
         {
           "repository": "${{ github.repository }}",
@@ -108,7 +108,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@3a449c0e6ba8f35c5d56470e103f6f473d0061d2 # TheRock main, includes #10034
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@d48ffb2a9ce6a6a4f897dd83f8dab52feff426d7 # 2026-11-23 (develop pin)
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -118,7 +118,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: e12a2a324dad7d0c51cf6b40c0c82fc6a3679c52 # users/dileepr1/host-asan-all-5405 (#5405)
+      ref: 726fcacf693ccc198d913a7edf2546e4530cff98 # users/dileepr1/host-asan-all-d48ffb2 (d48ffb2 + llvm #5405)
     permissions:
       contents: read
       id-token: write
@@ -136,7 +136,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: e12a2a324dad7d0c51cf6b40c0c82fc6a3679c52 # users/dileepr1/host-asan-all-5405 (#5405)
+          ref: 726fcacf693ccc198d913a7edf2546e4530cff98 # users/dileepr1/host-asan-all-d48ffb2 (d48ffb2 + llvm #5405)
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

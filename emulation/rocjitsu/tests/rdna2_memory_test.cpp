@@ -6,6 +6,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -24,7 +25,7 @@ protected:
   void SetUp() override {
     cache_.set_backing_memory(&memory_);
     amdgpu::ComputeUnitCore::Config config{};
-    config.arch = ROCJITSU_CODE_ARCH_RDNA2;
+    config.arch = rocjitsu::IsaFamily::Rdna2;
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256; // The wave below requests 16 registers from this block.
@@ -239,7 +240,17 @@ TEST_F(Rdna2MemoryTest, DsAndGdsNullifyTheWholeReturnBeforeChangingStorage) {
       auto *d = inst->data_as<amdgpu::VectorMemState>();
       EXPECT_EQ(d->exec_mask, active ? 1u : 0u);
       EXPECT_EQ(d->lane_mask, active ? 1u : 0u);
-      ASSERT_EQ(local.issue(inst.release(), *wave_), amdgpu::VmAccessOutcome::Complete);
+      ASSERT_EQ(local.issue_deferred(inst, *wave_), amdgpu::VmAccessOutcome::Complete);
+      if (!active) {
+        ASSERT_TRUE(inst);
+        inst->retire_data();
+        EXPECT_EQ(inst->data(), nullptr);
+        ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wave_).succeeded());
+        ASSERT_EQ(inst->data(), d);
+        EXPECT_EQ(d->exec_mask, 0u);
+        EXPECT_EQ(d->lane_mask, 0u);
+        ASSERT_EQ(local.issue_deferred(inst, *wave_), amdgpu::VmAccessOutcome::Complete);
+      }
     };
     write_vector(15, 0xfeedbeef);
     ASSERT_NO_FATAL_FAILURE(check(rdna2::kDsRead2B32, 15, false));
@@ -683,7 +694,7 @@ TEST_F(Rdna2MemoryTest, IndexedGdsUsesDeviceBackingAndSnapshotsTheM0Window) {
   EXPECT_EQ(wave_->lds().read32(1024), 0xccccu);
 
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_RDNA2;
+  config.arch = rocjitsu::IsaFamily::Rdna2;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 16;

@@ -38,6 +38,29 @@ inline __device__ ssize_t loadSsize(ssize_t* ptr) {
   return v;
 }
 
+// Stores one warp's hunk (Unroll packs per lane, a warp of packs apart) from dst. With RCCL_SIMPLE_BUFFER_STORE,
+// 16-byte packs go out as buffer stores where the lanes allow (op128.h waveStore16).
+template <int Unroll, int BytePerPack>
+__device__ __forceinline__ void stGlobalHunk(uintptr_t dst, BytePack<BytePerPack> const (&vals)[Unroll]) {
+#if RCCL_SIMPLE_BUFFER_STORE
+  if constexpr (BytePerPack == 16) {
+    WaveStore16 w;
+    if (waveStore16Begin(dst, w)) {
+#pragma unroll Unroll
+      for (int u = 0; u < Unroll; u++) {
+        waveStore16(w, u * WARP_SIZE * BytePerPack, vals[u]);
+      }
+      return;
+    }
+  }
+#endif
+#pragma unroll Unroll
+  for (int u = 0; u < Unroll; u++) {
+    st_global<BytePerPack>(dst, vals[u]);
+    dst += WARP_SIZE * BytePerPack;
+  }
+}
+
 template <typename RedFn, typename T, int Unroll, int BytePerPack, int MultimemSrcs, int MinSrcs, int MaxSrcs,
           int MultimemDsts, int MinDsts, int MaxDsts, int PreOpSrcs, typename IntBytes, typename SrcPtrFn,
           typename DstPtrFn>
@@ -158,27 +181,22 @@ __device__ __forceinline__ static void reduceCopyPacks(int nThreads, int& thread
 
 #pragma unroll Unroll
     for (int d = 0; d < MinDsts; d++) {
-#pragma unroll Unroll
       // Yes, for some template arguments this code will be unreachable.  That's fine.
-      // coverity[dead_error_begin]
-      for (int u = 0; u < Unroll; u++) {
-        // coverity[dead_error_condition]
-        if (d < MultimemDsts) {
+      // coverity[dead_error_condition]
+      if (d < MultimemDsts) {
+#pragma unroll Unroll
+        // coverity[dead_error_begin]
+        for (int u = 0; u < Unroll; u++) {
           multimem_st_global(minDsts[d], acc[u]);
-        } else {
-          st_global<BytePerPack>(minDsts[d], acc[u]);
+          minDsts[d] += WARP_SIZE * BytePerPack;
         }
-        minDsts[d] += WARP_SIZE * BytePerPack;
+      } else {
+        stGlobalHunk<Unroll, BytePerPack>(minDsts[d], acc);
+        minDsts[d] += Unroll * WARP_SIZE * BytePerPack;
       }
     }
     for (int d = MinDsts; (MinDsts < MaxDsts) && (d < MaxDsts) && (d < nDsts); d++) {
-      uintptr_t dstPtr = cvta_to_global(dstPtrFn(d));
-      uintptr_t dst = dstPtr + threadBytesBehind;
-#pragma unroll Unroll
-      for (int u = 0; u < Unroll; u++) {
-        st_global<BytePerPack>(dst, acc[u]);
-        dst += WARP_SIZE * BytePerPack;
-      }
+      stGlobalHunk<Unroll, BytePerPack>(cvta_to_global(dstPtrFn(d)) + threadBytesBehind, acc);
     }
 
     nWarps = nThreads / WARP_SIZE;
@@ -263,24 +281,22 @@ __device__ __forceinline__ void reduceAndStore(RedFn redFn, BytePack<BytePerPack
 
 #pragma unroll Unroll
   for (int d = 0; d < MinDsts; d++) {
+    // Yes, for some template arguments this code will be unreachable.  That's fine.
+    // coverity[dead_error_condition]
+    if (d < MultimemDsts) {
 #pragma unroll Unroll
-    for (int u = 0; u < Unroll; u++) {
-      if (d < MultimemDsts) {
+      // coverity[dead_error_begin]
+      for (int u = 0; u < Unroll; u++) {
         multimem_st_global(minDsts[d], buff[0][u]);
-      } else {
-        st_global<BytePerPack>(minDsts[d], buff[0][u]);
+        minDsts[d] += WARP_SIZE * BytePerPack;
       }
-      minDsts[d] += WARP_SIZE * BytePerPack;
+    } else {
+      stGlobalHunk<Unroll, BytePerPack>(minDsts[d], buff[0]);
+      minDsts[d] += Unroll * WARP_SIZE * BytePerPack;
     }
   }
   for (int d = MinDsts; (MinDsts < MaxDsts) && (d < MaxDsts) && (d < nDsts); d++) {
-    uintptr_t dstPtr = cvta_to_global(dstPtrFn(d));
-    uintptr_t dst = dstPtr + tailThreadBytesBehind;
-#pragma unroll Unroll
-    for (int u = 0; u < Unroll; u++) {
-      st_global<BytePerPack>(dst, buff[0][u]);
-      dst += WARP_SIZE * BytePerPack;
-    }
+    stGlobalHunk<Unroll, BytePerPack>(cvta_to_global(dstPtrFn(d)) + tailThreadBytesBehind, buff[0]);
   }
 }
 
@@ -839,8 +855,9 @@ template <int Unroll, int useAcc, typename RedFn, typename T, int MultimemSrcs, 
 __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t redArg, bool postOp, int nSrcs,
                                            void** srcPtrs, int nDsts, void** dstPtrs, IntBytes nElts,
                                            void* accPtr = nullptr) {
-  if (tryTdmCopy<useAcc, RedFn, T, MultimemSrcs, MultimemDsts, PreOpSrcs, Pipeline>(
-        thread, nThreads, postOp, nSrcs, srcPtrs, nDsts, dstPtrs, nElts))
+  if ((!EnableTdmReduce || !tdmReduceTakesCopy(nDsts)) &&
+      tryTdmCopy<useAcc, RedFn, T, MultimemSrcs, MultimemDsts, PreOpSrcs, Pipeline>(thread, nThreads, postOp, nSrcs,
+                                                                                     srcPtrs, nDsts, dstPtrs, nElts))
     return;
   reduceCopy<Unroll, useAcc, RedFn, T, MultimemSrcs, MinSrcs, MaxSrcs, MultimemDsts, MinDsts, MaxDsts, PreOpSrcs,
              IntBytes, Pipeline, EnableTdmReduce>(

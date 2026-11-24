@@ -69,6 +69,10 @@ public:
   bool read_modify_write = false;
   // A nonzero width proves all atomic elements have this width and natural alignment.
   uint8_t aligned_atomic_bytes = 0;
+  /// The access is an arrival at an LDS barrier cell (CDNA5 ISA 11.2.2). It
+  /// updates the cell atomically, so it conflicts only with non-atomic writes
+  /// of the cell, never with reads of it.
+  bool barrier_arrive = false;
 
   MemoryOrderClass order(MemoryOrderClass wholeEventOrder) const {
     return uses_flat_lds ? MemoryOrderClass::LDS : wholeEventOrder;
