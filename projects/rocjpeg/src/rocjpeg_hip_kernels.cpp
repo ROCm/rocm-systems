@@ -120,7 +120,8 @@ __global__ void ConvertInterleavedUVToPlanarUVBatchedKernel(const InterleavedUVT
     uint32_t dst_height = p.dst_height;
     uint8_t *dst_image1 = p.dst_image1;
     uint8_t *dst_image2 = p.dst_image2;
-    uint32_t dst_image_stride_in_bytes = p.dst_image_stride_in_bytes;
+    uint32_t dst_image1_stride_in_bytes = p.dst_image1_stride_in_bytes;
+    uint32_t dst_image2_stride_in_bytes = p.dst_image2_stride_in_bytes;
     const uint8_t *src_image = p.src_image;
     uint32_t src_image_stride_in_bytes = p.src_image_stride_in_bytes;
 
@@ -132,7 +133,8 @@ __global__ void ConvertInterleavedUVToPlanarUVBatchedKernel(const InterleavedUVT
     }
 
     uint32_t src_idx = y * src_image_stride_in_bytes + x + x;
-    uint32_t dst_idx = y * dst_image_stride_in_bytes + x;
+    uint32_t dst1_idx = y * dst_image1_stride_in_bytes + x;
+    uint32_t dst2_idx = y * dst_image2_stride_in_bytes + x;
 
     uint4 src = *((uint4 *)(&src_image[src_idx]));
     uint2 dst1, dst2;
@@ -144,11 +146,11 @@ __global__ void ConvertInterleavedUVToPlanarUVBatchedKernel(const InterleavedUVT
 
     uint32_t num_pixels = dst_width - x;
     if (num_pixels >= 8) {
-        *((uint2 *)(&dst_image1[dst_idx])) = dst1;
-        *((uint2 *)(&dst_image2[dst_idx])) = dst2;
+        *((uint2 *)(&dst_image1[dst1_idx])) = dst1;
+        *((uint2 *)(&dst_image2[dst2_idx])) = dst2;
     } else {
-        StorePartial(&dst_image1[dst_idx], &dst1, num_pixels);
-        StorePartial(&dst_image2[dst_idx], &dst2, num_pixels);
+        StorePartial(&dst_image1[dst1_idx], &dst1, num_pixels);
+        StorePartial(&dst_image2[dst2_idx], &dst2, num_pixels);
     }
 }
 
@@ -207,7 +209,8 @@ __global__ void ConvertPackedYUYVToPlanarYUVBatchedKernel(const PackedYUYVToPlan
     uint8_t *destination_u = p.destination_u;
     uint8_t *destination_v = p.destination_v;
     uint32_t dst_luma_stride_in_bytes = p.dst_luma_stride_in_bytes;
-    uint32_t dst_chroma_stride_in_bytes = p.dst_chroma_stride_in_bytes;
+    uint32_t dst_u_stride_in_bytes = p.dst_u_stride_in_bytes;
+    uint32_t dst_v_stride_in_bytes = p.dst_v_stride_in_bytes;
     const uint8_t *src_image = p.src_image;
     uint32_t src_image_stride_in_bytes = p.src_image_stride_in_bytes;
     uint32_t dst_width_in_8px_blocks = p.dst_width_in_8px_blocks;
@@ -218,7 +221,8 @@ __global__ void ConvertPackedYUYVToPlanarYUVBatchedKernel(const PackedYUYVToPlan
     if ((x < dst_width_in_8px_blocks && y < dst_height)) {
         uint32_t src_idx = y * src_image_stride_in_bytes + (x << 4);
         uint32_t dst_y_idx = y * dst_luma_stride_in_bytes + (x << 3);
-        uint32_t dst_uv_idx = y * dst_chroma_stride_in_bytes + (x << 2);
+        uint32_t dst_u_idx = y * dst_u_stride_in_bytes + (x << 2);
+        uint32_t dst_v_idx = y * dst_v_stride_in_bytes + (x << 2);
 
         uint4 src = *((uint4 *)(&src_image[src_idx]));
         uint2 dst_y;
@@ -232,14 +236,14 @@ __global__ void ConvertPackedYUYVToPlanarYUVBatchedKernel(const PackedYUYVToPlan
         uint32_t num_pixels = p.dst_width - (x << 3);
         if (num_pixels >= 8) {
             *((uint2 *)(&destination_y[dst_y_idx])) = dst_y;
-            *((uint32_t *)(&destination_u[dst_uv_idx])) = dst_u;
-            *((uint32_t *)(&destination_v[dst_uv_idx])) = dst_v;
+            *((uint32_t *)(&destination_u[dst_u_idx])) = dst_u;
+            *((uint32_t *)(&destination_v[dst_v_idx])) = dst_v;
         } else {
             // The chroma planes are (dst_width >> 1) wide, so this block has (dst_width >> 1) - 4 * x chroma samples left.
             uint32_t num_chroma = (p.dst_width >> 1) - (x << 2);
             StorePartial(&destination_y[dst_y_idx], &dst_y, num_pixels);
-            StorePartial(&destination_u[dst_uv_idx], &dst_u, num_chroma);
-            StorePartial(&destination_v[dst_uv_idx], &dst_v, num_chroma);
+            StorePartial(&destination_u[dst_u_idx], &dst_u, num_chroma);
+            StorePartial(&destination_v[dst_v_idx], &dst_v, num_chroma);
         }
     }
 }

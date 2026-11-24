@@ -36,6 +36,11 @@ THE SOFTWARE.
  * of the rocJPEG library when invalid or unexpected inputs are provided.
  * It ensures the robustness and error handling capabilities of the library.
  *
+ * It also checks that the YUV planar output writes each plane with its own
+ * pitch (TestPlanarChromaPitches): with U and V pitches that differ, every
+ * plane must hold the same rows as with pitches equal to the plane widths, and
+ * nothing may be written past a plane.
+ *
  * In addition to the hand-written negative scenarios, the class hosts a fuzz
  * target for rocJpegStreamParse (TestStreamParseFuzz). The fuzz target derives
  * malformed streams from embedded valid JPEGs and checks two properties on
@@ -70,6 +75,7 @@ class RocJpegApiNegativeTests {
         int TestInvalidDecode();
         int TestInvalidDecodeBatched();
         int TestInvalidGetErrorName();
+        int TestPlanarChromaPitches();
         int TestInvalidGetDecoderCaps();
         int TestStreamParseFuzz();
         int TestCrossDeviceDecode();

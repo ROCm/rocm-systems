@@ -1153,7 +1153,8 @@ RocJpegStatus RocJpegDecoder::AccumulatePlanarYUVOutputFormat(HipInteropDeviceMe
         bp.destination_u               = destination->channel[1];
         bp.destination_v               = destination->channel[2];
         bp.dst_luma_stride_in_bytes    = destination->pitch[0];
-        bp.dst_chroma_stride_in_bytes  = destination->pitch[1];
+        bp.dst_u_stride_in_bytes       = destination->pitch[1];
+        bp.dst_v_stride_in_bytes       = destination->pitch[2];
         bp.src_image                   = mem.hip_mapped_device_mem + roi_offset;
         bp.src_image_stride_in_bytes   = mem.pitch[0];
         bp.dst_width_in_8px_blocks     = (picture_width + 7) / 8;
@@ -1170,7 +1171,8 @@ RocJpegStatus RocJpegDecoder::AccumulatePlanarYUVOutputFormat(HipInteropDeviceMe
             bp.dst_height                = uv_height;
             bp.dst_image1                = destination->channel[1];
             bp.dst_image2                = destination->channel[2];
-            bp.dst_image_stride_in_bytes = destination->pitch[1];
+            bp.dst_image1_stride_in_bytes = destination->pitch[1];
+            bp.dst_image2_stride_in_bytes = destination->pitch[2];
             bp.src_image                 = mem.hip_mapped_device_mem + mem.offset[1] + roi_offset;
             bp.src_image_stride_in_bytes = mem.pitch[1];
             b_nv12_uvp_.Add(bp, (uv_width + 7) >> 3, uv_height);
