@@ -202,8 +202,8 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 569 · build snapshot" aria-label="Stars: 569">569</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 511 · build snapshot" aria-label="Forks: 511">511</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 570 · build snapshot" aria-label="Stars: 570">570</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 513 · build snapshot" aria-label="Forks: 513">513</li>
       </ul>
     </div>
   </a>
@@ -255,8 +255,8 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 569 · build snapshot" aria-label="Stars: 569">569</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 511 · build snapshot" aria-label="Forks: 511">511</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 570 · build snapshot" aria-label="Stars: 570">570</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 513 · build snapshot" aria-label="Forks: 513">513</li>
       </ul>
     </div>
   </a>
@@ -3045,6 +3045,32 @@ owning object, not the caller's original input buffer.</p>
 For later processing of an emitted mutant, create a new code object and analyze its
 emitted bytes afresh; pristine facts cannot be attached to a different source.</p>
 <h3 id="key-design-constraint">Key design constraint<a class="headerlink" href="#key-design-constraint" title="Permanent link">&para;</a></h3>
+<p>Explicit <code>InstrumentationOptions::entries</code> requests plan each selected descriptor's
+reachable code, register preservation, bootstrap and resource changes separately,
+then commit one combined original-text edit transaction. Every selected or native
+entry must have a closed, disjoint scope. Explicit-entry requests support
+observations; combining them with <code>ReplaceWithInst</code> is rejected because a
+replacement could invalidate ownership proved from the original CFG. Replacement
+requests without explicit entries retain their existing support.
+Kernarg-preloaded siblings are rejected:
+their additional firmware entry is outside this bounded ownership model. Validation
+records retain caller insertion order, including a <code>KernelEntry</code> callback and an
+ordinary point sharing the same source offset.</p>
+<p>Explicit-entry requests require <code>.text</code> to be the sole allocated executable
+section, including unmaterialized executable ranges. Otherwise native code
+outside the decoded CFG could enter a selected scope without its dispatch
+bootstrap or resource allocation.</p>
+<p>Descriptor ownership also requires a complete symbol inventory: weak <code>.kd</code>
+definitions and distinct names aliasing one descriptor are rejected before
+planning. Identical name/location records in <code>.symtab</code> and <code>.dynsym</code> remain
+valid. Program-path terminators, including ROCr's non-returning <code>s_trap 2</code>, end
+the ownership scope. Other unknown PC-writing branch targets are rejected for
+native siblings even when only a <code>KernelEntry</code> callback is requested.</p>
+<p>For explicit requests, look up <code>InstrumentedCodeObject::entries</code> by
+<code>InstrumentedEntry::original_descriptor_offset</code> and read that entry's <code>resources</code>,
+including <code>kernarg_bytes</code> for its wrapper size. Entries are sorted by original
+descriptor offset, independently of request order. The top-level <code>resources</code>
+field is zero on this path, including a single selected entry.</p>
 <p>Callable <code>AfterInst</code> requires an ordinary relocatable anchor and a supported
 post-anchor state. Pre-anchor liveness alone cannot justify a callback after
 the instruction; addressing and storage must be valid at the observation point.</p>
