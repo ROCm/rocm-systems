@@ -230,8 +230,8 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   if (inst.idxen || inst.offen)
     vaddr.emplace(regs.read_vgpr_region(wf.vgpr_alloc().base + inst.vaddr,
                                         inst.idxen && inst.offen ? 2 : 1, d.exec_mask));
-  amdgpu::addr_calc::rdna_buffer_apply_swizzle(d, srd1, srd3, inst.idxen != 0, d.exec_mask,
-                                               base_addr, *soffset);
+  amdgpu::addr_calc::rdna_buffer_apply_add_tid_swizzle(d, srd1, srd3, inst.idxen != 0, d.exec_mask,
+                                                       base_addr, *soffset);
   const bool per_element =
       d.num_elems > 1 && !d.buffer_components && d.atomic_op == amdgpu::AtomicOp::NONE;
   d.element_lane_masks.clear();
