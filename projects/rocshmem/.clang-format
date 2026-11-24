@@ -1,0 +1,104 @@
+# rocSHMEM code style, enforced with clang-format.
+#
+# Based on Google style (which the code already largely follows: 2-space
+# indent, LIBRARY_SRC_*_HPP_ include guards, cpplint NOLINT comments), with a
+# 100-column limit. Only options that differ from the base, or that we want to
+# pin explicitly so results do not change between clang-format versions, are
+# listed here.
+#
+# To check/format only the lines you changed (recommended):
+#
+#   unstaged changes: git clang-format --style file -f
+#   staged changes:   git clang-format --style file
+#
+# To see the fully expanded configuration:
+#
+#   clang-format --style=file --dump-config
+#
+# Use `// clang-format off` / `// clang-format on` around hand-aligned blocks
+# (e.g. inline assembly operand lists, register tables).
+#
+# Minimum clang-format version: 22 (see scripts/run-clang-format.sh).
+---
+Language: Cpp
+BasedOnStyle: Google
+
+# --- Layout -----------------------------------------------------------------
+ColumnLimit: 100
+IndentWidth: 2
+ContinuationIndentWidth: 4
+TabWidth: 8
+UseTab: Never
+AccessModifierOffset: -1
+NamespaceIndentation: None
+FixNamespaceComments: true
+MaxEmptyLinesToKeep: 1
+KeepEmptyLines:
+  AtStartOfFile: false
+IndentCaseLabels: false
+# Extra indentation for compound statements inside a `case` block.
+IndentCaseBlocks: true
+IndentExternBlock: NoIndent
+
+# --- Pointers/references ----------------------------------------------------
+# Existing code is mixed; the majority is `T* p`. (Open MPI uses Right.)
+DerivePointerAlignment: false
+PointerAlignment: Left
+
+# --- Wrapping ----------------------------------------------------------------
+AlignAfterOpenBracket: Align
+# Multi-line `asm volatile(...)`: put the `:` operand sections on their own
+# lines; keep single-line asm as is.
+BreakBeforeInlineASMColon: OnlyMultiline
+AlignOperands: true
+# Line up `=` in runs of consecutive assignments, declarations with
+# initializers, and enumerators, as the existing code does. A blank line or a
+# comment line starts a new run, so one long name only realigns its own group.
+AlignConsecutiveAssignments:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: false
+  AlignCompound: false
+  PadOperators: true
+AlignTrailingComments: true
+BinPackArguments: true
+BinPackParameters: true
+BreakBeforeBinaryOperators: None
+BreakBeforeTernaryOperators: true
+BreakConstructorInitializers: BeforeColon
+BreakStringLiterals: true
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+
+# --- Macros ------------------------------------------------------------------
+# Keeps the trailing backslashes of multi-line macros (CHECK_HIP, DLSYM_*,
+# NOWARN, ...) lined up at the end of each line.
+AlignEscapedNewlines: Left
+AlignConsecutiveMacros: Consecutive
+# Keep `#if`/`#define` at column 0; the code relies on nested #if gfx guards.
+IndentPPDirectives: None
+
+# --- Includes ----------------------------------------------------------------
+# Do not reorder includes in the initial pass. Order matters in HIP code
+# (config headers first, <hip/...> before ROCm/HSA headers), and a blanket sort
+# would change what existing translation units see. Blocks are left alone.
+# To enable sorting later, switch to `SortIncludes: CaseSensitive` and add
+# IncludeCategories that put "*_config.h" first (see Open MPI's .clang-format).
+SortIncludes: Never
+IncludeBlocks: Preserve
+
+# --- Spacing -----------------------------------------------------------------
+SpaceAfterCStyleCast: false
+SpaceBeforeParens: ControlStatements
+SpacesBeforeTrailingComments: 2
+Cpp11BracedListStyle: true
+Standard: Latest
+
+# --- Comments ----------------------------------------------------------------
+# Re-indent comments but do not rewrap them (Doxygen blocks carry @param
+# alignment, and existing line breaks are intentional).
+ReflowComments: IndentOnly
+CommentPragmas: '^ IWYU pragma:'
