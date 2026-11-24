@@ -40,8 +40,9 @@ void publish_record(LogBuffer &buf, uint32_t record_type, uint32_t site, uint64_
 std::vector<RjLogRecord> drain_all(LogBuffer &buf, DrainStats *stats_out) {
   std::vector<RjLogRecord> out;
   DrainStats stats = buf.drain([&](const RjLogRecord &r) { out.push_back(r); });
-  if (stats_out)
+  if (stats_out) {
     *stats_out = stats;
+  }
   return out;
 }
 
@@ -114,8 +115,9 @@ TEST(LogBufferTest, SyntheticDrainInOrder) {
   auto buf = LogBufferTestAccess::create(8);
   ASSERT_NE(buf, nullptr);
   constexpr uint32_t kN = 5;
-  for (uint32_t i = 0; i < kN; ++i)
+  for (uint32_t i = 0; i < kN; ++i) {
     publish_record(*buf, /*record_type=*/1, /*site=*/0x100 + i, /*payload=*/i);
+  }
 
   DrainStats stats;
   auto drained = drain_all(*buf, &stats);
@@ -141,8 +143,9 @@ TEST(LogBufferTest, DrainClearsValidFlags) {
   publish_record(*buf, 1, 0x10, 0);
   publish_record(*buf, 1, 0x20, 0);
   drain_all(*buf, nullptr);
-  for (uint32_t i = 0; i < buf->slot_count(); ++i)
+  for (uint32_t i = 0; i < buf->slot_count(); ++i) {
     EXPECT_EQ(LogBufferTestAccess::records(*buf)[i].valid, 0u) << "slot " << i;
+  }
 }
 
 TEST(LogBufferTest, WraparoundReusesSlots) {
@@ -150,14 +153,16 @@ TEST(LogBufferTest, WraparoundReusesSlots) {
   ASSERT_NE(buf, nullptr);
 
   // First fill: indices 0..3 -> slots 0..3.
-  for (uint32_t i = 0; i < 4; ++i)
+  for (uint32_t i = 0; i < 4; ++i) {
     publish_record(*buf, 1, 0x200 + i, i);
+  }
   auto first = drain_all(*buf, nullptr);
   ASSERT_EQ(first.size(), 4u);
 
   // Second fill: indices 4..7 -> slots 0..3 again.
-  for (uint32_t i = 0; i < 4; ++i)
+  for (uint32_t i = 0; i < 4; ++i) {
     publish_record(*buf, 2, 0x300 + i, 100 + i);
+  }
   DrainStats stats;
   auto second = drain_all(*buf, &stats);
   ASSERT_EQ(second.size(), 4u);
@@ -212,8 +217,9 @@ TEST(LogBufferTest, ReinitializeResetsForReuse) {
   EXPECT_EQ(LogBufferTestAccess::header(*buf)->write_ptr, 0u);
   EXPECT_EQ(LogBufferTestAccess::header(*buf)->read_ptr, 0u);
   EXPECT_EQ(buf->overflow_count(), 0u);
-  for (uint32_t i = 0; i < buf->slot_count(); ++i)
+  for (uint32_t i = 0; i < buf->slot_count(); ++i) {
     EXPECT_EQ(LogBufferTestAccess::records(*buf)[i].valid, 0u);
+  }
   // Header control fields survive reinitialization.
   EXPECT_EQ(LogBufferTestAccess::header(*buf)->magic, kRjLogMagic);
   EXPECT_EQ(LogBufferTestAccess::header(*buf)->slot_count, 4u);
@@ -256,8 +262,9 @@ TEST(LogBufferTest, NullCallbackStillDrainsAndClears) {
   EXPECT_EQ(stats.invalid_slots, 0u);
   EXPECT_EQ(LogBufferTestAccess::header(*buf)->read_ptr,
             LogBufferTestAccess::header(*buf)->write_ptr);
-  for (uint32_t i = 0; i < buf->slot_count(); ++i)
+  for (uint32_t i = 0; i < buf->slot_count(); ++i) {
     EXPECT_EQ(LogBufferTestAccess::records(*buf)[i].valid, 0u) << "slot " << i;
+  }
 }
 
 TEST(LogBufferTest, InvalidThenValidSlotBothHandled) {
@@ -301,8 +308,9 @@ TEST(LogBufferTest, SingleSlotRingDrainsAcrossCycles) {
 TEST(LogBufferTest, ExactFullDrainAtCapacity) {
   auto buf = LogBufferTestAccess::create(4);
   ASSERT_NE(buf, nullptr);
-  for (uint32_t i = 0; i < 4; ++i) // write_ptr - read_ptr == slot_count
+  for (uint32_t i = 0; i < 4; ++i) { // write_ptr - read_ptr == slot_count
     publish_record(*buf, 1, 0x10 + i, i);
+  }
   DrainStats stats;
   auto drained = drain_all(*buf, &stats);
   EXPECT_EQ(drained.size(), 4u);
@@ -318,16 +326,18 @@ TEST(LogBufferTest, Uint64IndexWraparound) {
   constexpr uint64_t kNearMax = 0xFFFFFFFFFFFFFFFEULL;
   LogBufferTestAccess::header(*buf)->write_ptr = kNearMax;
   LogBufferTestAccess::header(*buf)->read_ptr = kNearMax;
-  for (uint32_t i = 0; i < 3; ++i)
+  for (uint32_t i = 0; i < 3; ++i) {
     publish_record(*buf, 1, 0xA0 + i, i);
+  }
   EXPECT_EQ(LogBufferTestAccess::header(*buf)->write_ptr, 1u); // wrapped: FE -> FF -> 00 -> 01
 
   DrainStats stats;
   auto drained = drain_all(*buf, &stats);
   ASSERT_EQ(drained.size(), 3u);
   EXPECT_EQ(stats.invalid_slots, 0u);
-  for (uint32_t i = 0; i < 3; ++i)
+  for (uint32_t i = 0; i < 3; ++i) {
     EXPECT_EQ(drained[i].site, 0xA0u + i);
+  }
   EXPECT_EQ(LogBufferTestAccess::header(*buf)->read_ptr, 1u);
 }
 
@@ -401,8 +411,9 @@ TEST(LogBufferTest, ValidateRejectsEachCorruptedSelfDescribingField) {
 TEST(LogBufferTest, DrainClampsProducerOverrun) {
   auto buf = LogBufferTestAccess::create(4);
   ASSERT_NE(buf, nullptr);
-  for (uint32_t i = 0; i < 4; ++i)
+  for (uint32_t i = 0; i < 4; ++i) {
     publish_record(*buf, 1, 0x10 + i, i);
+  }
   // Simulate a buggy/untrusted producer that broke the drop-newest contract and
   // advanced write_ptr past read_ptr + slot_count. Without clamping, indices 4
   // and 5 would alias slots 0 and 1 and deliver those records a second time.
@@ -419,8 +430,9 @@ TEST(LogBufferTest, DrainClampsProducerOverrun) {
   ASSERT_EQ(drained.size(), 4u);
   // Assert contents order-independently
   std::set<uint32_t> sites;
-  for (const RjLogRecord &record : drained)
+  for (const RjLogRecord &record : drained) {
     sites.insert(record.site);
+  }
   EXPECT_EQ(sites.size(), 4u);
   EXPECT_EQ(sites, (std::set<uint32_t>{0x10u, 0x11u, 0x12u, 0x13u}));
 }

@@ -311,12 +311,13 @@ TEST(WaitcheckTarget, AtomicsDistinguishRegisterResultsFromMemoryDestinations) {
         rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     for (bool returns : {false, true}) {
       std::vector<uint32_t> words;
-      if (arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4)
+      if (arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4) {
         words = {returns ? 0xdd098000u : 0xdd088000u, 0x007f0102u};
-      else if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5)
+      } else if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5) {
         words = {returns ? 0xdcd64000u : 0xdcd60000u, 0x007c0102u};
-      else
+      } else {
         words = {0xee0d4000u, returns ? 0x011c0000u : 0x010c0000u, 1u};
+      }
       std::unique_ptr<Instruction> inst = decode(words, arch);
       ASSERT_NE(inst, nullptr);
       auto events_result = Target::classify_events(*inst, arch);
@@ -612,7 +613,7 @@ TEST(WaitcheckTarget, PrefetchesDoNotContributeCompletionEntries) {
        {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
         rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Rdna1,
         rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
-        rocjitsu::IsaFamily::Rdna4})
+        rocjitsu::IsaFamily::Rdna4}) {
     for (Operation operation :
          {Operation::S_PREFETCH_INST, Operation::S_PREFETCH_DATA, Operation::S_BUFFER_PREFETCH_DATA,
           Operation::GLOBAL_PREFETCH_B8, Operation::FLAT_PREFETCH_B8}) {
@@ -630,6 +631,7 @@ TEST(WaitcheckTarget, PrefetchesDoNotContributeCompletionEntries) {
       ASSERT_TRUE(events.succeeded());
       EXPECT_TRUE(events.value().empty());
     }
+  }
 }
 
 TEST(WaitcheckTarget, ImageQueriesUseTheirLoadOrSampleQueue) {
@@ -742,9 +744,10 @@ TEST(WaitcheckTarget, FlatAndOrdinaryStoresUseTheSameHardwareCompletionEvent) {
   for (auto model : {WaitcntModel::LegacyVscnt, WaitcntModel::SplitGfx12}) {
     const auto ordinary = Target::normalized_hardware_event_kind(WaitCounterKind::Store,
                                                                  WaitEventKind::VmemStore, model);
-    for (auto kind : {WaitEventKind::FlatStore, WaitEventKind::GlobalWb})
+    for (auto kind : {WaitEventKind::FlatStore, WaitEventKind::GlobalWb}) {
       EXPECT_EQ(Target::normalized_hardware_event_kind(WaitCounterKind::Store, kind, model),
                 ordinary);
+    }
   }
 }
 

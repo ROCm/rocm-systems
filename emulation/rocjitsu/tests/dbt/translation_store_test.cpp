@@ -111,10 +111,12 @@ TEST_F(TranslationStoreTest, MalformedEntriesAreMisses) {
   std::filesystem::path manifest;
   std::filesystem::path object;
   for (const auto &item : std::filesystem::directory_iterator(entries)) {
-    if (item.path().extension() == ".man")
+    if (item.path().extension() == ".man") {
       manifest = item.path();
-    if (item.path().extension() == ".obj")
+    }
+    if (item.path().extension() == ".obj") {
       object = item.path();
+    }
   }
   ASSERT_FALSE(manifest.empty());
   ASSERT_FALSE(object.empty());
@@ -139,29 +141,35 @@ TEST_F(TranslationStoreTest, MalformedEntriesAreMisses) {
 
 TEST_F(TranslationStoreTest, OversizedObjectMismatchIsRejectedBeforeAllocation) {
   if (dlsym(RTLD_DEFAULT, "__asan_init") || dlsym(RTLD_DEFAULT, "__tsan_init") ||
-      dlsym(RTLD_DEFAULT, "__msan_init"))
+      dlsym(RTLD_DEFAULT, "__msan_init")) {
     GTEST_SKIP() << "address-space limits conflict with sanitizer shadow mappings";
+  }
   auto store = open("pair-a");
   put(*store, kObject);
   ASSERT_EQ(get(*store), kObject);
   const std::filesystem::path entries = std::filesystem::path(root_.path()) / "pair-a" / "v1";
   std::filesystem::path object;
-  for (const auto &item : std::filesystem::directory_iterator(entries))
-    if (item.path().extension() == ".obj")
+  for (const auto &item : std::filesystem::directory_iterator(entries)) {
+    if (item.path().extension() == ".obj") {
       object = item.path();
+    }
+  }
   ASSERT_FALSE(object.empty());
   std::filesystem::resize_file(object, 512u << 20);
 
   ASSERT_EXIT(
       {
         struct rlimit limit {};
-        if (getrlimit(RLIMIT_AS, &limit) != 0)
+        if (getrlimit(RLIMIT_AS, &limit) != 0) {
           _exit(2);
+        }
         limit.rlim_cur = std::min<rlim_t>(limit.rlim_max, 256u << 20);
-        if (setrlimit(RLIMIT_AS, &limit) != 0)
+        if (setrlimit(RLIMIT_AS, &limit) != 0) {
           _exit(3);
-        if (!get(*store).empty())
+        }
+        if (!get(*store).empty()) {
           _exit(4);
+        }
         put(*store, kObject);
         _exit(get(*store) == kObject ? 0 : 5);
       },
@@ -176,19 +184,23 @@ TEST_F(TranslationStoreTest, FailedPublicationLeavesNoTemporaryOrPartialEntry) {
 
     const std::filesystem::path entries = std::filesystem::path(root_.path()) / "pair-a" / "v1";
     std::filesystem::path blocked;
-    for (const auto &item : std::filesystem::directory_iterator(entries))
-      if (item.path().extension() == suffix)
+    for (const auto &item : std::filesystem::directory_iterator(entries)) {
+      if (item.path().extension() == suffix) {
         blocked = item.path();
+      }
+    }
     ASSERT_FALSE(blocked.empty());
-    for (const auto &item : std::filesystem::directory_iterator(entries))
+    for (const auto &item : std::filesystem::directory_iterator(entries)) {
       std::filesystem::remove(item.path());
+    }
     // renameat() cannot publish a regular file over this directory. Blocking
     // the object also exercises cleanup after the manifest was published.
     ASSERT_TRUE(std::filesystem::create_directory(blocked));
     put(*store, kObject);
     EXPECT_TRUE(get(*store).empty());
-    for (const auto &item : std::filesystem::directory_iterator(entries))
+    for (const auto &item : std::filesystem::directory_iterator(entries)) {
       EXPECT_EQ(item.path(), blocked) << "failed publication left an entry or temporary";
+    }
 
     std::filesystem::remove(blocked);
     put(*store, kObject);
@@ -219,8 +231,9 @@ TEST_F(TranslationStoreTest, ADomainThatIsNotOneComponentDisablesTheStore) {
     EXPECT_FALSE(store->key_for(kSource, kIdentity).valid) << "domain: " << domain;
   }
   // Nothing was created outside the domain directories.
-  for (const auto &item : std::filesystem::recursive_directory_iterator(root_.path()))
+  for (const auto &item : std::filesystem::recursive_directory_iterator(root_.path())) {
     EXPECT_TRUE(std::filesystem::is_directory(item)) << item.path();
+  }
 }
 
 TEST_F(TranslationStoreTest, AStoreRootMustBeAnAbsoluteDescendedPath) {
@@ -352,12 +365,14 @@ TEST_F(TranslationStoreTest, ASharedTreeAnyoneCanWriteIsRefused) {
 open_against_module(const char *module, std::string_view domain, const char *root) {
   void *handle = dlopen(module, RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE);
   EXPECT_NE(handle, nullptr) << dlerror();
-  if (handle == nullptr)
+  if (handle == nullptr) {
     return nullptr;
+  }
   void *anchor = dlsym(handle, "rj_probe_translator_anchor");
   EXPECT_NE(anchor, nullptr) << module;
-  if (anchor == nullptr)
+  if (anchor == nullptr) {
     return nullptr;
+  }
   return std::make_unique<TranslationStore>(domain, anchor, root,
                                             TranslationStore::Access::kReadWrite,
                                             TranslationStore::KeyMode::kTranslatorBuild);
@@ -368,12 +383,14 @@ open_portable_against_module(const char *module, std::string_view domain, const 
                              TranslationStore::Access access) {
   void *handle = dlopen(module, RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE);
   EXPECT_NE(handle, nullptr) << dlerror();
-  if (handle == nullptr)
+  if (handle == nullptr) {
     return nullptr;
+  }
   void *anchor = dlsym(handle, "rj_probe_translator_anchor");
   EXPECT_NE(anchor, nullptr) << module;
-  if (anchor == nullptr)
+  if (anchor == nullptr) {
     return nullptr;
+  }
   return std::make_unique<TranslationStore>(domain, anchor, root, access,
                                             TranslationStore::KeyMode::kPortablePrebuilt);
 }
@@ -438,8 +455,9 @@ TEST_F(TranslationStoreTest, APortablePrebuiltEntrySurvivesATranslatorRebuild) {
 
   std::filesystem::path manifest;
   for (const auto &item : std::filesystem::recursive_directory_iterator(root_.path())) {
-    if (item.path().extension() == ".man")
+    if (item.path().extension() == ".man") {
       manifest = item.path();
+    }
   }
   ASSERT_FALSE(manifest.empty());
   std::ifstream manifest_stream(manifest);
@@ -506,23 +524,27 @@ TEST_F(TranslationStoreTest, AManifestWithNoObjectIsReclaimed) {
   ASSERT_EQ(get(*store), kObject);
 
   const std::filesystem::path entries = std::filesystem::path(root_.path()) / "pair-a" / "v1";
-  for (const auto &item : std::filesystem::directory_iterator(entries))
-    if (item.path().extension() == ".obj")
+  for (const auto &item : std::filesystem::directory_iterator(entries)) {
+    if (item.path().extension() == ".obj") {
       std::filesystem::remove(item.path());
+    }
+  }
   ASSERT_GT(store->size_for_test(), 0u) << "the orphan manifest must still be accounted";
 
   // Age it past the threshold that separates an abandoned write from one still
   // in progress, then re-open: the sweep runs once when the store opens.
-  for (const auto &item : std::filesystem::directory_iterator(entries))
+  for (const auto &item : std::filesystem::directory_iterator(entries)) {
     std::filesystem::last_write_time(item.path(), std::filesystem::file_time_type::clock::now() -
                                                       std::chrono::hours(1));
+  }
   auto reopened = open("pair-a");
   EXPECT_TRUE(get(*reopened).empty());
 
   size_t orphans = 0;
   for (const auto &item : std::filesystem::directory_iterator(entries)) {
-    if (item.path().extension() != ".man")
+    if (item.path().extension() != ".man") {
       continue;
+    }
     auto object = item.path();
     object.replace_extension(".obj");
     orphans += std::filesystem::exists(object) ? 0 : 1;
@@ -553,8 +575,9 @@ TEST_F(TranslationStoreTest, AbandonedFileSweepWaitsForTheDirectoryWriter) {
     const int fd = ::open(entries.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     char token = 'x';
     if (fd < 0 || flock(fd, LOCK_EX) != 0 || write(ready[1], &token, 1) != 1 ||
-        read(release[0], &token, 1) != 1)
+        read(release[0], &token, 1) != 1) {
       _exit(1);
+    }
     close(fd);
     _exit(0);
   }
@@ -601,8 +624,9 @@ TEST_F(TranslationStoreTest, AGroupWritableStoreRootIsStillUsable) {
 
   // The directories holding entries are still strict, whatever the root allows.
   for (const auto &item : std::filesystem::recursive_directory_iterator(root)) {
-    if (!std::filesystem::is_directory(item))
+    if (!std::filesystem::is_directory(item)) {
       continue;
+    }
     EXPECT_EQ(std::filesystem::status(item).permissions() &
                   (std::filesystem::perms::group_write | std::filesystem::perms::others_write),
               std::filesystem::perms::none)

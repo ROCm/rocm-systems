@@ -11,8 +11,9 @@
 namespace {
 
 bool write(const std::filesystem::path &path, std::span<const uint8_t> bytes) {
-  if (!std::in_range<std::streamsize>(bytes.size()))
+  if (!std::in_range<std::streamsize>(bytes.size())) {
     return false;
+  }
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
   file.write(reinterpret_cast<const char *>(bytes.data()),
              static_cast<std::streamsize>(bytes.size()));
@@ -21,8 +22,24 @@ bool write(const std::filesystem::path &path, std::span<const uint8_t> bytes) {
 }
 
 int run(int argc, char **argv) {
-  if (argc != 5) {
-    std::cerr << "Usage: rj_consan_prepare ORIGINAL.hsaco TARGET ENTRY NEW-ARTIFACT-DIRECTORY\n";
+  std::vector<std::string_view> entries;
+  std::filesystem::path destination;
+  if (argc == 5) {
+    entries.push_back(argv[3]);
+    destination = argv[4];
+  } else if (argc >= 6 && (argc % 2) == 0) {
+    destination = argv[3];
+    for (int index = 4; index < argc; index += 2) {
+      if (std::string_view(argv[index]) != "--entry") {
+        std::cerr << "Expected --entry NAME\n";
+        return 2;
+      }
+      entries.push_back(argv[index + 1]);
+    }
+  } else {
+    std::cerr
+        << "Usage: rj_consan_prepare ORIGINAL TARGET NEW-DIRECTORY --entry NAME [--entry NAME]\n"
+           "   or: rj_consan_prepare ORIGINAL TARGET ENTRY NEW-DIRECTORY\n";
     return 2;
   }
   const rocjitsu::consan::TargetProfile *target = rocjitsu::consan::target_profile(argv[2]);
@@ -47,19 +64,18 @@ int run(int argc, char **argv) {
     return 2;
   }
   rocjitsu::consan::InputError error;
-  const rocjitsu::FailureOr<rocjitsu::consan::PreparedArtifact> artifact =
-      rocjitsu::consan::prepare(original, *target, argv[3], error);
+  const rocjitsu::FailureOr<rocjitsu::consan::PreparedImageArtifact> artifact =
+      rocjitsu::consan::prepare_image(original, *target, entries, error);
   if (artifact.failed()) {
     std::cerr << "Preparation rejected input: " << error.message << '\n';
     return 2;
   }
   const rocjitsu::FailureOr<std::vector<uint8_t>> facts =
-      rocjitsu::consan::encode_manifest(artifact.value().manifest);
+      rocjitsu::consan::encode_image_facts(artifact.value().facts);
   if (facts.failed()) {
     std::cerr << "Cannot encode validated static facts\n";
     return 3;
   }
-  const std::filesystem::path destination(argv[4]);
   std::error_code status;
   if (!std::filesystem::create_directory(destination, status)) {
     std::cerr << "Artifact directory must be new: "
@@ -74,15 +90,29 @@ int run(int argc, char **argv) {
     std::cerr << "Artifact write/close failed\n";
     return 3;
   }
-  const rocjitsu::consan::Manifest &manifest = artifact.value().manifest;
-  std::cout << "prepared_bytes=" << manifest.prepared.bytes << " sites=" << manifest.sites.size()
-            << " entry_offset=" << manifest.entry.prepared_entry_offset
-            << " sgprs=" << manifest.entry.prepared_sgprs
-            << " vgprs=" << manifest.entry.prepared_vgprs << '\n';
-  for (const rocjitsu::consan::SiteFacts &site : manifest.sites)
-    std::cout << "site=" << site.id << " original=" << site.original_offset
-              << " guest=" << site.prepared_guest_offset << " probe=" << site.probe_offset
-              << " probe_bytes=" << site.probe_size << '\n';
+  constexpr std::string_view kHex = "0123456789abcdef";
+  std::cout << "selection_profile=";
+  for (const uint8_t byte : artifact.value().facts.selection_profile) {
+    std::cout << kHex[byte >> 4] << kHex[byte & 15];
+  }
+  std::cout << '\n';
+  for (const rocjitsu::consan::ImageEntryFacts &entry : artifact.value().facts.entries) {
+    std::cout << "entry=" << entry.binding.name << " key=" << entry.key
+              << " disposition=" << (entry.selected ? "selected" : "native") << '\n';
+    if (!entry.selected) {
+      continue;
+    }
+    const rocjitsu::consan::Manifest &manifest = *entry.selected;
+    std::cout << "prepared_bytes=" << manifest.prepared.bytes << " sites=" << manifest.sites.size()
+              << " entry_offset=" << manifest.entry.prepared_entry_offset
+              << " sgprs=" << manifest.entry.prepared_sgprs
+              << " vgprs=" << manifest.entry.prepared_vgprs << '\n';
+    for (const rocjitsu::consan::SiteFacts &site : manifest.sites) {
+      std::cout << "site=" << site.id << " original=" << site.original_offset
+                << " guest=" << site.prepared_guest_offset << " probe=" << site.probe_offset
+                << " probe_bytes=" << site.probe_size << '\n';
+    }
+  }
   return 0;
 }
 

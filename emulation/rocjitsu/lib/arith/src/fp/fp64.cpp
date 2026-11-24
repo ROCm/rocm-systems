@@ -72,7 +72,9 @@ template <rocjitsu::arith::Fp64 Op>
 
 // Evaluate FP64 arithmetic or selection for the selected lanes. Reject invalid controls before
 // changing outputs.
-template <rocjitsu::arith::Fp64 Op, bool Rdna3 = false, bool Cdna = false>
+// AcceptExact marks entry points whose results were checked against their architecture's
+// captures (gfx12 and RDNA3 arithmetic and rounding); the RDNA2 FMA entry stays loose-only.
+template <rocjitsu::arith::Fp64 Op, bool Rdna3 = false, bool Cdna = false, bool AcceptExact = false>
 int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
          const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
   if constexpr (Op == rocjitsu::arith::Fp64::Rcp || Op == rocjitsu::arith::Fp64::Rsq ||
@@ -99,9 +101,10 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  if (!rocjitsu::arith::is_selection(Op) &&
-      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  if constexpr (!AcceptExact && !rocjitsu::arith::is_selection(Op)) {
+    if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+      return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+    }
   }
   if constexpr (Rdna3) {
     instruction_flags = uint32_t(rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags));
@@ -328,12 +331,12 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
 
 // Evaluate FP64 arithmetic or selection for Wave64. Reject invalid controls before changing
 // outputs.
-template <rocjitsu::arith::Fp64 Op, bool Rdna3 = false, bool Cdna = false>
+template <rocjitsu::arith::Fp64 Op, bool Rdna3 = false, bool Cdna = false, bool AcceptExact = false>
 int fp64_wave64(uint64_t flags, uint64_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
                 const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
-  if (int error =
-          fp64<Op, Rdna3, Cdna>(flags, 0, instruction_flags, nullptr, nullptr, nullptr, nullptr)) {
+  if (int error = fp64<Op, Rdna3, Cdna, AcceptExact>(flags, 0, instruction_flags, nullptr, nullptr,
+                                                     nullptr, nullptr)) {
     return error;
   }
   if (!exec_mask) {
@@ -353,8 +356,8 @@ int fp64_wave64(uint64_t flags, uint64_t exec_mask, uint32_t instruction_flags, 
         z[word] = c[word] + half * 32;
       }
     }
-    if (int error = fp64<Op, Rdna3, Cdna>(flags, uint32_t(exec_mask >> (half * 32)),
-                                          instruction_flags, dest, x, y, z)) {
+    if (int error = fp64<Op, Rdna3, Cdna, AcceptExact>(flags, uint32_t(exec_mask >> (half * 32)),
+                                                       instruction_flags, dest, x, y, z)) {
       return error;
     }
   }
@@ -386,15 +389,16 @@ int cdna_unary(uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d
 int rj_arith_v_add_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Add, true>(flags, exec_mask, instruction_flags, d, a, b,
-                                                nullptr);
+  return fp64<rocjitsu::arith::Fp64::Add, true, false, true>(flags, exec_mask, instruction_flags, d,
+                                                             a, b, nullptr);
 }
 
 // Add the operands for selected lanes.
@@ -403,14 +407,16 @@ int rj_arith_v_add_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b,
                                  [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Add>(flags, exec_mask, instruction_flags, d, a, b, nullptr);
+  return fp64<rocjitsu::arith::Fp64::Add, false, false, true>(flags, exec_mask, instruction_flags,
+                                                              d, a, b, nullptr);
 }
 
 // Multiply the operands for selected lanes.
@@ -418,15 +424,16 @@ int rj_arith_v_add_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
 int rj_arith_v_mul_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Mul, true>(flags, exec_mask, instruction_flags, d, a, b,
-                                                nullptr);
+  return fp64<rocjitsu::arith::Fp64::Mul, true, false, true>(flags, exec_mask, instruction_flags, d,
+                                                             a, b, nullptr);
 }
 
 // Multiply the operands for selected lanes.
@@ -435,14 +442,16 @@ int rj_arith_v_mul_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b,
                                  [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Mul>(flags, exec_mask, instruction_flags, d, a, b, nullptr);
+  return fp64<rocjitsu::arith::Fp64::Mul, false, false, true>(flags, exec_mask, instruction_flags,
+                                                              d, a, b, nullptr);
 }
 
 // Compute fused A*B+C for selected lanes.
@@ -450,14 +459,16 @@ int rj_arith_v_mul_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
 int rj_arith_v_fma_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            const uint32_t *const *c, [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Fma, true>(flags, exec_mask, instruction_flags, d, a, b, c);
+  return fp64<rocjitsu::arith::Fp64::Fma, true, false, true>(flags, exec_mask, instruction_flags, d,
+                                                             a, b, c);
 }
 
 // Compute fused A*B+C for selected lanes.
@@ -466,14 +477,16 @@ int rj_arith_v_fma_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Fma>(flags, exec_mask, instruction_flags, d, a, b, c);
+  return fp64<rocjitsu::arith::Fp64::Fma, false, false, true>(flags, exec_mask, instruction_flags,
+                                                              d, a, b, c);
 }
 
 // Round toward zero for selected lanes.
@@ -481,15 +494,16 @@ int rj_arith_v_fma_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
 int rj_arith_v_trunc_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Trunc>(flags, exec_mask, instruction_flags, d, a, nullptr,
-                                            nullptr);
+  return fp64<rocjitsu::arith::Fp64::Trunc, false, false, true>(flags, exec_mask, instruction_flags,
+                                                                d, a, nullptr, nullptr);
 }
 
 // Round toward positive infinity for selected lanes.
@@ -497,15 +511,16 @@ int rj_arith_v_trunc_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
 int rj_arith_v_ceil_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Ceil>(flags, exec_mask, instruction_flags, d, a, nullptr,
-                                           nullptr);
+  return fp64<rocjitsu::arith::Fp64::Ceil, false, false, true>(flags, exec_mask, instruction_flags,
+                                                               d, a, nullptr, nullptr);
 }
 
 // Round to the nearest integer with ties to even for selected lanes.
@@ -513,15 +528,16 @@ int rj_arith_v_ceil_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t i
 int rj_arith_v_rndne_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Rndne>(flags, exec_mask, instruction_flags, d, a, nullptr,
-                                            nullptr);
+  return fp64<rocjitsu::arith::Fp64::Rndne, false, false, true>(flags, exec_mask, instruction_flags,
+                                                                d, a, nullptr, nullptr);
 }
 
 // Round toward negative infinity for selected lanes.
@@ -529,15 +545,16 @@ int rj_arith_v_rndne_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
 int rj_arith_v_floor_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Floor>(flags, exec_mask, instruction_flags, d, a, nullptr,
-                                            nullptr);
+  return fp64<rocjitsu::arith::Fp64::Floor, false, false, true>(flags, exec_mask, instruction_flags,
+                                                                d, a, nullptr, nullptr);
 }
 
 // Compute the fractional part for selected lanes.
@@ -545,15 +562,16 @@ int rj_arith_v_floor_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
 int rj_arith_v_fract_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Fract>(flags, exec_mask, instruction_flags, d, a, nullptr,
-                                            nullptr);
+  return fp64<rocjitsu::arith::Fp64::Fract, false, false, true>(flags, exec_mask, instruction_flags,
+                                                                d, a, nullptr, nullptr);
 }
 
 // Compute the square root for selected lanes.
@@ -683,15 +701,16 @@ int rj_arith_v_frexp_mant_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                         uint64_t instruction_flags, uint32_t *const *d,
                                         const uint32_t *const *a,
                                         [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::FrexpMant>(flags, exec_mask, instruction_flags, d, a, nullptr,
-                                                nullptr);
+  return fp64<rocjitsu::arith::Fp64::FrexpMant, false, false, true>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
 // Select the minimum for selected lanes.
@@ -733,15 +752,16 @@ int rj_arith_v_max_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
 int rj_arith_v_add_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Add, true>(flags, exec_mask, instruction_flags, d, a, b,
-                                                       nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Add, true, false, true>(
+      flags, exec_mask, instruction_flags, d, a, b, nullptr);
 }
 
 // Add the operands for selected lanes.
@@ -750,15 +770,16 @@ int rj_arith_v_add_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b,
                                  [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Add>(flags, exec_mask, instruction_flags, d, a, b,
-                                                 nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Add, false, false, true>(
+      flags, exec_mask, instruction_flags, d, a, b, nullptr);
 }
 
 // Multiply the operands for selected lanes.
@@ -766,15 +787,16 @@ int rj_arith_v_add_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
 int rj_arith_v_mul_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Mul, true>(flags, exec_mask, instruction_flags, d, a, b,
-                                                       nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Mul, true, false, true>(
+      flags, exec_mask, instruction_flags, d, a, b, nullptr);
 }
 
 // Multiply the operands for selected lanes.
@@ -783,15 +805,16 @@ int rj_arith_v_mul_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b,
                                  [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Mul>(flags, exec_mask, instruction_flags, d, a, b,
-                                                 nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Mul, false, false, true>(
+      flags, exec_mask, instruction_flags, d, a, b, nullptr);
 }
 
 // Compute fused A*B+C for selected lanes.
@@ -799,15 +822,16 @@ int rj_arith_v_mul_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
 int rj_arith_v_fma_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            const uint32_t *const *c, [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Fma, true>(flags, exec_mask, instruction_flags, d, a, b,
-                                                       c);
+  return fp64_wave64<rocjitsu::arith::Fp64::Fma, true, false, true>(flags, exec_mask,
+                                                                    instruction_flags, d, a, b, c);
 }
 
 // Compute fused A*B+C for selected lanes.
@@ -816,14 +840,16 @@ int rj_arith_v_fma_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Fma>(flags, exec_mask, instruction_flags, d, a, b, c);
+  return fp64_wave64<rocjitsu::arith::Fp64::Fma, false, false, true>(flags, exec_mask,
+                                                                     instruction_flags, d, a, b, c);
 }
 
 // Round toward zero for selected lanes.
@@ -831,15 +857,16 @@ int rj_arith_v_fma_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
 int rj_arith_v_trunc_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Trunc>(flags, exec_mask, instruction_flags, d, a,
-                                                   nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Trunc, false, false, true>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
 // Round toward positive infinity for selected lanes.
@@ -847,15 +874,16 @@ int rj_arith_v_trunc_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
 int rj_arith_v_ceil_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Ceil>(flags, exec_mask, instruction_flags, d, a,
-                                                  nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Ceil, false, false, true>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
 // Round to the nearest integer with ties to even for selected lanes.
@@ -863,15 +891,16 @@ int rj_arith_v_ceil_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t i
 int rj_arith_v_rndne_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Rndne>(flags, exec_mask, instruction_flags, d, a,
-                                                   nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Rndne, false, false, true>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
 // Round toward negative infinity for selected lanes.
@@ -879,15 +908,16 @@ int rj_arith_v_rndne_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
 int rj_arith_v_floor_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Floor>(flags, exec_mask, instruction_flags, d, a,
-                                                   nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Floor, false, false, true>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
 // Compute the fractional part for selected lanes.
@@ -895,15 +925,16 @@ int rj_arith_v_floor_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
 int rj_arith_v_fract_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Fract>(flags, exec_mask, instruction_flags, d, a,
-                                                   nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Fract, false, false, true>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
 // Compute the square root for selected lanes.
@@ -1035,15 +1066,16 @@ int rj_arith_v_frexp_mant_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                         uint64_t instruction_flags, uint32_t *const *d,
                                         const uint32_t *const *a,
                                         [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::FrexpMant>(flags, exec_mask, instruction_flags, d, a,
-                                                       nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::FrexpMant, false, false, true>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
 // Select the minimum for selected lanes.
@@ -1085,15 +1117,16 @@ int rj_arith_v_max_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
 int rj_arith_v_trunc_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a,
                              [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Trunc, true>(flags, exec_mask, instruction_flags, d, a,
-                                                  nullptr, nullptr);
+  return fp64<rocjitsu::arith::Fp64::Trunc, true, false, true>(flags, exec_mask, instruction_flags,
+                                                               d, a, nullptr, nullptr);
 }
 
 // Round toward zero for selected lanes.
@@ -1101,15 +1134,16 @@ int rj_arith_v_trunc_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instru
 int rj_arith_v_trunc_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a,
                              [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Trunc, true>(flags, exec_mask, instruction_flags, d, a,
-                                                         nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Trunc, true, false, true>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
 // Round toward positive infinity for selected lanes.
@@ -1117,15 +1151,16 @@ int rj_arith_v_trunc_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instru
 int rj_arith_v_ceil_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                             uint32_t *const *d, const uint32_t *const *a,
                             [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Ceil, true>(flags, exec_mask, instruction_flags, d, a, nullptr,
-                                                 nullptr);
+  return fp64<rocjitsu::arith::Fp64::Ceil, true, false, true>(flags, exec_mask, instruction_flags,
+                                                              d, a, nullptr, nullptr);
 }
 
 // Round toward positive infinity for selected lanes.
@@ -1133,15 +1168,16 @@ int rj_arith_v_ceil_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruc
 int rj_arith_v_ceil_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                             uint32_t *const *d, const uint32_t *const *a,
                             [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Ceil, true>(flags, exec_mask, instruction_flags, d, a,
-                                                        nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Ceil, true, false, true>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
 // Round to the nearest integer with ties to even for selected lanes.
@@ -1149,15 +1185,16 @@ int rj_arith_v_ceil_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruc
 int rj_arith_v_rndne_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a,
                              [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Rndne, true>(flags, exec_mask, instruction_flags, d, a,
-                                                  nullptr, nullptr);
+  return fp64<rocjitsu::arith::Fp64::Rndne, true, false, true>(flags, exec_mask, instruction_flags,
+                                                               d, a, nullptr, nullptr);
 }
 
 // Round to the nearest integer with ties to even for selected lanes.
@@ -1165,15 +1202,16 @@ int rj_arith_v_rndne_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instru
 int rj_arith_v_rndne_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a,
                              [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Rndne, true>(flags, exec_mask, instruction_flags, d, a,
-                                                         nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Rndne, true, false, true>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
 // Round toward negative infinity for selected lanes.
@@ -1181,15 +1219,16 @@ int rj_arith_v_rndne_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instru
 int rj_arith_v_floor_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a,
                              [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Floor, true>(flags, exec_mask, instruction_flags, d, a,
-                                                  nullptr, nullptr);
+  return fp64<rocjitsu::arith::Fp64::Floor, true, false, true>(flags, exec_mask, instruction_flags,
+                                                               d, a, nullptr, nullptr);
 }
 
 // Round toward negative infinity for selected lanes.
@@ -1197,15 +1236,16 @@ int rj_arith_v_floor_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instru
 int rj_arith_v_floor_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a,
                              [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Floor, true>(flags, exec_mask, instruction_flags, d, a,
-                                                         nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Floor, true, false, true>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
 // Compute the fractional part for selected lanes.
@@ -1213,15 +1253,16 @@ int rj_arith_v_floor_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instru
 int rj_arith_v_fract_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a,
                              [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Fract, true>(flags, exec_mask, instruction_flags, d, a,
-                                                  nullptr, nullptr);
+  return fp64<rocjitsu::arith::Fp64::Fract, true, false, true>(flags, exec_mask, instruction_flags,
+                                                               d, a, nullptr, nullptr);
 }
 
 // Compute the fractional part for selected lanes.
@@ -1229,15 +1270,16 @@ int rj_arith_v_fract_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instru
 int rj_arith_v_fract_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a,
                              [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Fract, true>(flags, exec_mask, instruction_flags, d, a,
-                                                         nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Fract, true, false, true>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
 // Compute the square root for selected lanes.
@@ -1347,15 +1389,16 @@ int rj_arith_v_rsq_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
 int rj_arith_v_frexp_mant_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::FrexpMant, true>(flags, exec_mask, instruction_flags, d, a,
-                                                      nullptr, nullptr);
+  return fp64<rocjitsu::arith::Fp64::FrexpMant, true, false, true>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
 // Extract the requested exponent or mantissa component for selected lanes.
@@ -1363,15 +1406,16 @@ int rj_arith_v_frexp_mant_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t i
 int rj_arith_v_frexp_mant_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::FrexpMant, true>(flags, exec_mask, instruction_flags, d,
-                                                             a, nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::FrexpMant, true, false, true>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
 // Fused A*B+D, retaining the inherited FMA rounding and output policy.
@@ -1816,4 +1860,26 @@ int rj_arith_v_frexp_mant_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                          const uint32_t *const *a,
                                          [[maybe_unused]] uint32_t *trapsts) {
   return cdna_unary<rocjitsu::arith::Fp64::FrexpMant>(flags, exec_mask, instruction_flags, d, a);
+}
+
+// RDNA2 FMA inherits the RDNA3 numeric model; strict exact is unsupported pending gfx10 captures.
+int rj_arith_v_fma_f64_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b, const uint32_t *const *c,
+                                 [[maybe_unused]] uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_fma_f64_w32(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
+}
+
+// RDNA2 FMA inherits the RDNA3 numeric model; strict exact is unsupported pending gfx10 captures.
+int rj_arith_v_fma_f64_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b, const uint32_t *const *c,
+                                 [[maybe_unused]] uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_fma_f64_w64(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
 }

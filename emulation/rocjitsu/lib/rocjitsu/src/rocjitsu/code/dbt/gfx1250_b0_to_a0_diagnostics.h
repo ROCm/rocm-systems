@@ -17,10 +17,12 @@ namespace rocjitsu {
 inline rj_status_t
 gfx1250_b0_to_a0_translation_status(const std::vector<TranslationDiagnostic> &diagnostics,
                                     bool has_output, bool dispatchable) {
-  if (has_diagnostic_kind(diagnostics, DiagnosticKind::InternalError))
+  if (has_diagnostic_kind(diagnostics, DiagnosticKind::InternalError)) {
     return ROCJITSU_STATUS_ERROR;
-  if (!has_output || !dispatchable)
+  }
+  if (!has_output || !dispatchable) {
     return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
+  }
   return ROCJITSU_STATUS_SUCCESS;
 }
 

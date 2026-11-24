@@ -113,6 +113,7 @@ test_categories:
       - "Recorder.*"
       - "ProxyTraceTestFixture.*"
       - "CollTraceUtilsTest.*"
+      - "DebugAttn.*"
       - "GinPluginInitFail.*"
       - "TunerPluginConstants.*"
       - "CpuAffinity.*"

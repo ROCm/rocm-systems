@@ -44,6 +44,7 @@ set(rj_arith_x86_64_v3_sources
     wmma/x86_64/wmma_gfx1250_f32_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_half_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_f64_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/gfx1250_integer_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/matrix_i8_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/sparse_matrix_i8_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/mixed_bf16_x86_64_v3.cpp
@@ -122,6 +123,7 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/rcp_iflag_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/root_exact_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trans_f64_exact_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_exact_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_preop_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/unary_x86_64_v3.cpp
@@ -155,6 +157,7 @@ set(rj_arith_x86_64_v4_sources
     wmma/x86_64/wmma_gfx1250_f32_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_half_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_f64_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/gfx1250_integer_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/matrix_i8_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/sparse_matrix_i8_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/mixed_bf16_x86_64_v4.cpp
@@ -229,6 +232,7 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/root_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/round_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trans_f64_exact_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_preop_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/dpp_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/ds_routing_x86_64_v4.cpp
@@ -250,6 +254,7 @@ set(rj_arith_x86_64_v4_bf16_sources
 )
 
 set(rj_arith_avx512vnni_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/gfx1250_integer_avx512vnni.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/integer_wmma_avx512vnni.cpp
 )
 

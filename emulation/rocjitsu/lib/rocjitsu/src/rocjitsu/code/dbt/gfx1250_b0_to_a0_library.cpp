@@ -73,15 +73,17 @@ const char *diagnostic_kind_name(rocjitsu::DiagnosticKind kind) noexcept {
 void invoke_diagnostic_callback(rocjitsu::Gfx1250B0ToA0DiagnosticCallback callback,
                                 const rocjitsu::Gfx1250B0ToA0DiagnosticView &diagnostic,
                                 void *user_data) noexcept {
-  if (callback == nullptr)
+  if (callback == nullptr) {
     return;
+  }
   callback(&diagnostic, user_data);
 }
 
 void emit_diagnostic(rocjitsu::Gfx1250B0ToA0DiagnosticCallback callback, void *user_data,
                      const char *severity, const char *kind, const char *message) noexcept {
-  if (callback == nullptr)
+  if (callback == nullptr) {
     return;
+  }
   const rocjitsu::Gfx1250B0ToA0DiagnosticView view{
       severity, kind, 0, 0, "", message, 0,
   };
@@ -91,8 +93,9 @@ void emit_diagnostic(rocjitsu::Gfx1250B0ToA0DiagnosticCallback callback, void *u
 void emit_diagnostics_impl(
     rocjitsu::Gfx1250B0ToA0DiagnosticCallback callback, void *user_data,
     const std::vector<rocjitsu::TranslationDiagnostic> &diagnostics) noexcept {
-  if (callback == nullptr)
+  if (callback == nullptr) {
     return;
+  }
   for (const rocjitsu::TranslationDiagnostic &diagnostic : diagnostics) {
     const rocjitsu::Gfx1250B0ToA0DiagnosticView view{
         diagnostic_severity_name(diagnostic.severity),
@@ -147,8 +150,9 @@ rj_status_t rocjitsu::translate_gfx1250_b0_to_a0(
   options.output_revision = ProcessorRevision::Gfx1250A0;
   BinaryTranslator translator(IsaFamily::Cdna5, IsaFamily::Cdna5, 0, options);
   translator.set_trace_callback([&](const TranslationTraceEvent &trace) {
-    if (trace.changed)
+    if (trace.changed) {
       ++info.changed_instruction_count;
+    }
   });
   TranslatedCodeObject result = translator.translate(source);
   // Successful translations can still report unsupported pass-through behavior.
@@ -158,9 +162,10 @@ rj_status_t rocjitsu::translate_gfx1250_b0_to_a0(
   const rj_status_t status = gfx1250_b0_to_a0_translation_status(
       result.diagnostics, !result.elf_bytes.empty(), result.dispatchable());
   if (status != ROCJITSU_STATUS_SUCCESS) {
-    if (result.diagnostics.empty())
+    if (result.diagnostics.empty()) {
       emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindResultNotDispatchable,
                       "translation produced no dispatchable code object");
+    }
     return status;
   }
 

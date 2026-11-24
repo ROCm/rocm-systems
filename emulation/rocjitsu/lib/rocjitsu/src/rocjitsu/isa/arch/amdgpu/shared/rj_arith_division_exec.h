@@ -38,10 +38,11 @@ inline void execute_division(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint
           wave.wf_size() == 32
               ? wave32(flags, 0, modifiers, nullptr, &narrow_condition, nullptr, nullptr, nullptr)
               : wave64(flags, 0, modifiers, nullptr, &condition, nullptr, nullptr, nullptr);
-      if (error != RJ_ARITH_SUCCESS)
+      if (error != RJ_ARITH_SUCCESS) {
         wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
-      else
+      } else {
         commit_condition(wave.wf_size() == 32 ? narrow_condition : condition);
+      }
     }
     return;
   }
@@ -50,10 +51,11 @@ inline void execute_division(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint
   Input a(registers, wave, lhs, exec_mask), b(registers, wave, rhs, exec_mask),
       c(registers, wave, third, exec_mask);
   const auto words = [](Input &input) -> const uint32_t *const * {
-    if constexpr (Width == 64)
+    if constexpr (Width == 64) {
       return input.data.data();
-    else
+    } else {
       return &input.data;
+    }
   };
   uint64_t condition = 0;
   uint32_t causes = 0;
@@ -69,28 +71,31 @@ inline void execute_division(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint
       return wave64(flags, write_mask, modifiers, d, &condition, words(a), words(b), words(c));
     } else {
       uint32_t *state = &causes;
-      if constexpr (Op == DivisionOperation::Fixup)
+      if constexpr (Op == DivisionOperation::Fixup) {
         return wave.wf_size() == 32
                    ? wave32(flags, uint32_t(write_mask), modifiers, d, words(a), words(b), words(c),
                             state)
                    : wave64(flags, write_mask, modifiers, d, words(a), words(b), words(c), state);
-      else
+      } else {
         return wave.wf_size() == 32 ? wave32(flags, uint32_t(write_mask), modifiers, d, words(a),
                                              words(b), words(c), uint32_t(old_condition), state)
                                     : wave64(flags, write_mask, modifiers, d, words(a), words(b),
                                              words(c), old_condition, state);
+      }
     }
   };
   bool success;
-  if constexpr (Width == 64)
+  if constexpr (Width == 64) {
     success = write_vector64_result(wave, registers, destination, exec_mask, invoke);
-  else
+  } else {
     success = write_vector32_result(wave, registers, destination, exec_mask, invoke);
-  if (!success)
+  }
+  if (!success) {
     return;
-  if constexpr (Op == DivisionOperation::Scale)
+  }
+  if constexpr (Op == DivisionOperation::Scale) {
     commit_condition(condition);
-  else {
+  } else {
     wave.set_trapsts(wave.trapsts() | causes);
     wave.raise_alu_causes(causes);
   }

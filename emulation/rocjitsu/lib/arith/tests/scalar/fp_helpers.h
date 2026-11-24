@@ -113,9 +113,10 @@ void check_scalar_fp(Call call, Reference reference, bool exact = false, int out
       0);
 }
 
-// One gfx1201 SALU capture: MODE, operands (c is the accumulator or literal) and result.
+// One gfx1201 SALU capture: MODE, operands (c is the accumulator or literal), result and
+// the EXCP_FLAG_USER causes the instruction raised (cleared before, read after it).
 struct ScalarCapture {
-  uint32_t mode, a, b, c, d;
+  uint32_t mode, a, b, c, d, causes;
 };
 
 // Translate captured MODE into the flags rocjitsu passes for one instruction. Input
@@ -139,9 +140,9 @@ inline uint64_t scalar_capture_flags(uint32_t mode, int input_bits, int output_b
   return flags;
 }
 
-// Check captured results in every semantics mode that resolves to exact arithmetic;
-// mode 3 FP status is rejected before outputs change. call(flags, d, a, b, c, status)
-// receives d preloaded with c.
+// Check captured results in every semantics mode that resolves to exact arithmetic, and
+// the captured causes under Compatibility; mode 3 FP status is rejected before outputs
+// change. call(flags, d, a, b, c, status) receives d preloaded with c.
 template <size_t N, typename Call>
 void check_scalar_captures(Call call, const ScalarCapture (&captures)[N], int input_bits,
                            int output_bits, bool rounded = true) {
@@ -162,7 +163,7 @@ void check_scalar_captures(Call call, const ScalarCapture (&captures)[N], int in
                   status ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS : RJ_ARITH_SUCCESS);
         EXPECT_EQ(d, status ? test.c : test.d);
         if (semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-          EXPECT_EQ(fp_status & 0x80000000U, 0x80000000U);
+          EXPECT_EQ(fp_status, 0x80000000U | test.causes);
         } else {
           EXPECT_EQ(fp_status, 0x80000000U);
         }

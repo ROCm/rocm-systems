@@ -17,6 +17,57 @@ from amdisa.codegen.execute.rj_arith_float import (
 )
 from rj_arith_headers import public_headers
 
+# Expected architecture routing of the shared entry points. RDNA3 owns the unsuffixed
+# entries and RDNA4 the _gfx12 entries; both accept bit-exact semantics. The remaining
+# architectures must reach a suffixed loose-only wrapper. These are spelled out rather than
+# imported from the generator so that changing its map fails these tests.
+CONVERSION_SUFFIX = {
+    'rdna3': '',
+    'rdna4': '_gfx12',
+    'cdna1': '_gfx942',
+    'cdna2': '_gfx942',
+    'cdna3': '_gfx942',
+    'cdna4': '_gfx942',
+    'cdna5': '_gfx1250',
+    'rdna1': '_gfx942',
+    'rdna2': '_gfx942',
+    'rdna3_5': '_gfx942',
+}
+
+# Byte and nibble conversions predate the per-architecture split: every architecture shares
+# the two RDNA entries, which carry no MODE-dependent behaviour to qualify.
+BYTE_SUFFIX = {
+    'rdna3': '',
+    'rdna4': '_gfx12',
+    'cdna3': '',
+    'cdna4': '',
+    'cdna5': '_gfx12',
+}
+
+FMA64_SUFFIX = {
+    'rdna2': '_gfx10',
+    'rdna3': '',
+    'rdna4': '_gfx12',
+    'cdna3': '_gfx942',
+    'cdna4': '_gfx942',
+    'cdna5': '_gfx1250',
+}
+
+
+def assert_routes_to(body, api, suffix):
+    """Assert both wave entry points, matching complete identifiers.
+
+    A plain substring check lets a longer suffix satisfy a shorter expectation, so an
+    exact-capable `_w64_gfx12` would pass a `_w64_gfx1250` expectation and an unsuffixed
+    RDNA entry would pass a `_gfx942` one. Either way strict exact could be re-enabled on
+    an architecture whose captures have not been reviewed.
+    """
+    for wave in ('_w32', '_w64'):
+        expected = api + wave + suffix
+        assert re.search(
+            rf'\b{re.escape(expected)}\b', body
+        ), f'{expected} not routed; body routes {sorted(set(re.findall(r"rj_arith_\w+", body)))}'
+
 
 def test_other_architectures_keep_existing_path():
     for arch in ('rdna1', 'rdna2', 'rdna3_5', 'cdna1', 'cdna2'):
@@ -790,9 +841,7 @@ def test_byte_conversion_policy_and_selected_read_byte(arch):
             body = gen_byte_nibble_conversion(
                 context(arch, name, ['dst'], ['src'], is_vop3=vop3)
             )
-            arch_suffix = '_gfx12' if arch in ('rdna4', 'cdna5') else ''
-            api = 'rj_arith_' + name.lower()
-            assert api + '_w64' + arch_suffix in body
+            assert_routes_to(body, 'rj_arith_' + name.lower(), BYTE_SUFFIX[arch])
             assert 'execute_unary32' in body
             assert f'dst, src, {1 << byte}' in body
             assert 'arithmetic_flags()' in body
@@ -909,9 +958,7 @@ def test_conversion64_operand_layouts_and_policy(arch):
         from_integer = source in ('I32', 'U32')
         for vop3 in (False, True):
             body = gen_conversion64(context(arch, name, ['dst'], ['src'], is_vop3=vop3))
-            arch_suffix = '_gfx12' if arch in ('rdna4', 'cdna5') else ''
-            api = 'rj_arith_' + name.lower()
-            assert api + '_w64' + arch_suffix in body
+            assert_routes_to(body, 'rj_arith_' + name.lower(), CONVERSION_SUFFIX[arch])
             assert 'arithmetic_flags()' in body
             assert (
                 'execute_widen32_to_pair'
@@ -954,11 +1001,11 @@ def test_conversion32_modifiers_and_state_policy(arch):
         fixed_round = name in ('V_CVT_NEAREST_I32_F32', 'V_CVT_FLOOR_I32_F32')
         for vop3 in (False, True):
             body = gen_conversion32(context(arch, name, ['dst'], ['src'], is_vop3=vop3))
-            api = 'rj_arith_' + name.lower()
+            # Fixed-rounding forms share one RDNA entry; CDNA still reaches its wrapper.
             arch_suffix = (
-                '_gfx12' if arch in ('rdna4', 'cdna5') and not fixed_round else ''
+                '' if fixed_round and arch == 'rdna4' else CONVERSION_SUFFIX[arch]
             )
-            assert api + '_w64' + arch_suffix in body
+            assert_routes_to(body, 'rj_arith_' + name.lower(), arch_suffix)
             assert 'float32_flags' in body
             assert 'arithmetic_flags()' in body
             assert 'arithmetic_reports_fp_status' not in body
@@ -979,9 +1026,7 @@ def test_conversion16_halves_and_guest_modes(arch):
         output, source = name.split('_')[-2:]
         for vop3 in (False, True):
             body = gen_conversion16(context(arch, name, ['dst'], ['src'], is_vop3=vop3))
-            arch_suffix = '_gfx12' if arch == 'rdna4' else ''
-            api = 'rj_arith_' + name.lower()
-            assert api + '_w64' + arch_suffix in body
+            assert_routes_to(body, 'rj_arith_' + name.lower(), CONVERSION_SUFFIX[arch])
             assert 'execute_float_conversion' in body
             assert 'arithmetic_flags()' in body
             assert 'arithmetic_reports_fp_status' not in body
@@ -1019,9 +1064,7 @@ def test_packed_conversion_uses_fixed_rounding_and_optional_state(arch):
             body = gen_packed_conversion(
                 context(arch, name, ['dst'], ['a', 'b'], is_vop3=vop3)
             )
-            arch_suffix = '_gfx12' if arch in ('rdna4', 'cdna5') else ''
-            api = 'rj_arith_' + name.lower()
-            assert api + '_w64' + arch_suffix in body
+            assert_routes_to(body, 'rj_arith_' + name.lower(), CONVERSION_SUFFIX[arch])
             assert 'arithmetic_flags()' in body
             assert 'arithmetic_reports_fp_status' not in body
             assert 'execute_float_pack' in body
@@ -1059,13 +1102,14 @@ def test_normalized_conversion_layouts_and_state_contract(arch):
         sources = ['a', 'b'] if packed else ['a']
         for vop3 in (False, True):
             body = gen_normalized(context(arch, name, ['d'], sources, is_vop3=vop3))
-            api = 'rj_arith_' + name.lower()
+            # Packed-half forms have an RDNA4-specific entry; the other RDNA forms share
+            # one entry. Every CDNA form reaches its own loose-only wrapper.
             arch_suffix = (
-                '_gfx12'
-                if packed and half and arch in ('rdna4', 'cdna5')
-                else '_gfx942' if not packed and arch in ('cdna3', 'cdna4') else ''
+                CONVERSION_SUFFIX[arch]
+                if arch not in ('rdna3', 'rdna4')
+                else '_gfx12' if packed and half and arch == 'rdna4' else ''
             )
-            assert api + '_w64' + arch_suffix in body
+            assert_routes_to(body, 'rj_arith_' + name.lower(), arch_suffix)
             assert 'arithmetic_flags()' in body
             assert 'arithmetic_reports_fp_status' not in body
             assert ('RJ_ARITH_ALU_HIGH_A' in body) == (half and (vop3 or not packed))
@@ -1122,9 +1166,7 @@ def test_bit_pack_input_layouts_and_state_policy(arch):
         half = name == 'V_PACK_B32_F16'
         sources = ['a', 'b'] if half else ['a', 'b', 'c']
         body = gen_bit_pack(context(arch, name, ['d'], sources, is_vop3=True))
-        arch_suffix = '_gfx12' if arch in ('rdna4', 'cdna5') else ''
-        api = 'rj_arith_' + name.lower()
-        assert api + '_w64' + arch_suffix in body
+        assert_routes_to(body, 'rj_arith_' + name.lower(), CONVERSION_SUFFIX[arch])
         assert 'arithmetic_flags()' in body
         assert 'arithmetic_reports_fp_status' not in body
         assert ('execute_float_pack' in body) == half
@@ -1140,21 +1182,16 @@ def test_bit_pack_input_layouts_and_state_policy(arch):
         assert gen_bit_pack(context(arch, name, ['d'], [], is_vop3=True)) is None
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize('arch', ['rdna2', 'rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'])
 def test_fma64_pair_layout_modifiers_and_policy(arch):
     from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES, gen_float_fma64
 
     body = gen_float_fma64(
         context(arch, 'V_FMA_F64', ['d'], ['a', 'b', 'c'], is_vop3=True)
     )
-    arch_suffix = (
-        ('_gfx1250' if arch == 'cdna5' else '_gfx942')
-        if arch.startswith('cdna')
-        else ('_gfx12' if arch == 'rdna4' else '')
-    )
-    api = 'rj_arith_v_fma_f64'
-    for wave in (32, 64):
-        assert api + f'_w{wave}' + arch_suffix + ',' in body
+    # RDNA2 has no capture yet, so it must reach the loose-only _gfx10 entry rather than
+    # the shared RDNA3 one.
+    assert_routes_to(body, 'rj_arith_v_fma_f64', FMA64_SUFFIX[arch])
     assert 'execute_float_ternary64' in body
     assert 'd, a, b, c,' in body
     for source in 'ABC':
@@ -1200,7 +1237,7 @@ def test_fma64_pair_layout_modifiers_and_policy(arch):
         body = source[match.end() : end - 1]
         assert 'execute_float_ternary64' in body
         for wave in (32, 64):
-            assert api + f'_w{wave}' + arch_suffix + ',' in body
+            assert f'rj_arith_v_fma_f64_w{wave}' + FMA64_SUFFIX[arch] + ',' in body
         assert 'try_execute_' not in body
         assert 'amdgpu::execute_v_' not in body
 
@@ -2170,9 +2207,10 @@ def test_cdna_half_arithmetic_modes_and_destination(arch):
 
     for name in sorted(BINARY_ARITHMETIC_F16):
         body = gen_float_binary16(context(arch, name, ['d'], ['a', 'b'], is_vop3=True))
-        suffix = '_gfx12' if arch == 'cdna5' else '_gfx942'
-        if arch == 'cdna5' and name == 'V_MUL_F16':
-            suffix = '_gfx1250'
+        # gfx1250 F16 arithmetic calls loose-only entries; its LDEXP shares the gfx12 entry.
+        suffix = '_gfx1250' if arch == 'cdna5' else '_gfx942'
+        if arch == 'cdna5' and name == 'V_LDEXP_F16':
+            suffix = '_gfx12'
         for lanes in (32, 64):
             assert f'rj_arith_{name.lower()}_w{lanes}{suffix},' in body
         assert (

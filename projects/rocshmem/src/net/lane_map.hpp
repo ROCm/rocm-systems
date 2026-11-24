@@ -31,7 +31,7 @@ namespace net {
 /**
  * @brief Maps a (context, peer-PE) pair to a flat "lane" index.
  *
- * A lane is the unit of independent network resource a conduit owns: one QP +
+ * A lane is the unit of independent network resource a backend owns: one QP +
  * CQ (verbs), one tx-context + counter (OFI), or one device (LCI). Using
  * lane = ctx * num_pes + pe gives each (context, destination) its own ordered
  * stream and its own completion counter, so quiet(ctx) drains only the lanes
@@ -53,7 +53,7 @@ struct LaneMap {
     return ctx * num_pes + pe;
   }
 
-  //! Total number of lanes the conduit must allocate resources for.
+  //! Total number of lanes the backend must allocate resources for.
   int num_lanes() const { return num_ctx * num_pes; }
 
   //! First and one-past-last lane owned by a context (for quiet(ctx)).

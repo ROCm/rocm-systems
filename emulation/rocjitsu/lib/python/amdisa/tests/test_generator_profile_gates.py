@@ -23,7 +23,6 @@ from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen.execute import ExecuteContext
 from amdisa.codegen.execute.floating_policy import (
     F16_TRANS_OPERATIONS,
-    FLUSH_NEAREST_F32_OPS,
     INPUT_FLUSHED_ROUNDING,
 )
 from amdisa.codegen.execute.vector_special import (
@@ -780,25 +779,6 @@ def test_generated_execution_helper_includes_are_scoped(
     assert fp_include in shared
 
 
-def test_generated_flush_nearest_f32_keeps_modifiers_in_nearest_environment(
-    execute_shared_path: Path,
-):
-    shared = execute_shared_path.read_text()
-    for instruction in sorted(FLUSH_NEAREST_F32_OPS):
-        for encoding in ('vop1', 'vop3'):
-            body = _generated_function_body(
-                shared,
-                f'inline void execute_{instruction.lower()}_{encoding}',
-            )
-            assert body.count('fp_mode::ScopedEnvironment environment(0);') == 1
-
-    for encoding in ('vop1', 'vop3'):
-        sin_body = _generated_function_body(
-            shared, f'inline void execute_v_sin_f32_{encoding}'
-        )
-        assert 'fp_mode::ScopedEnvironment environment(0);' not in sin_body
-
-
 def test_gfx1250_model_include_graph_does_not_reach_vm(
     rocjitsu_source_root: Path,
     gfx1250_generated_root: Path,
@@ -967,13 +947,6 @@ def test_generated_scc_accesses_match_mrisa(isa_name, profile_type):
 
             if sem is not None:
                 body = generator._gen_execute_body(inst, sem, enc.enc_name)
-                if 'scalar_fp::compare<' in body:
-                    implementation = (
-                        _repo_root()
-                        / 'emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/isa'
-                        / 'arch/amdgpu/shared/scalar_fp.h'
-                    ).read_text()
-                    body += _generated_function_body(implementation, 'void compare(')
                 body_reads_scc = 'read_scc()' in body
                 body_writes_scc = 'write_scc(' in body
                 if body_reads_scc != mrisa_reads_scc:
@@ -2087,8 +2060,8 @@ def test_true16_vop3_integer_ops_do_not_use_whole_dword_simd_probe():
 
 
 def test_vop3_compare_simd_probe_can_commit_raw_result():
-    default_probe = simd_probe_line('v_cmp_eq_u32_vop3')
-    commit_probe = simd_probe_line('v_cmp_eq_u32_vop3', result_writer='commit_result')
+    default_probe = simd_probe_line('v_cmp_eq_f32_vop3')
+    commit_probe = simd_probe_line('v_cmp_eq_f32_vop3', result_writer='commit_result')
 
     assert default_probe is not None
     assert commit_probe is not None
@@ -3913,40 +3886,6 @@ def test_scalar_f16_source_lowering_uses_numeric_operand_format(arch_name):
             inst, semantics.instructions[name], enc.enc_name
         )
 
-        if numeric_sources and arch_name == 'rdna3_5':
-            implementation = (
-                _repo_root()
-                / 'emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/isa'
-                / 'arch/amdgpu/shared/scalar_fp.h'
-            ).read_text()
-            # This target shares the typed reader between arithmetic and
-            # conversions. Check the generated call and the actual source path.
-            for operand in inst.src_operands:
-                assert operand.data_format_name == 'FMT_NUM_F16', name
-            reader = _generated_function_body(implementation, 'uint32_t read(')
-            assert 'std::is_same_v<Fmt, F16>' in reader
-            assert 'amdgpu::read_scalar_f16_carrier(op, wf, high)' in reader
-            assert '>> (high ? 16 : 0)' in reader
-            if name == 'S_MIN_F16':
-                assert (
-                    'select<amdgpu::scalar_fp::F16, amdgpu::minmax::LegacyMin>(wf, sdst, ssrc0, ssrc1)'
-                    in body
-                )
-                selection = _generated_function_body(implementation, 'void select(')
-                assert (
-                    'read<Fmt>(wf, lhs)' in selection
-                    and 'read<Fmt>(wf, rhs)' in selection
-                )
-            else:
-                suffix = ', true' if high else ''
-                assert (
-                    f'convert<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::F32>(wf, sdst, ssrc0{suffix})'
-                    in body
-                )
-                conversion = _generated_function_body(implementation, 'void convert(')
-                assert 'read<From>(wf, src, high)' in conversion
-            continue
-
         for operand in inst.src_operands:
             if operand.name in numeric_sources:
                 assert operand.data_format_name == 'FMT_NUM_F16', name
@@ -3962,9 +3901,13 @@ def test_scalar_f16_source_lowering_uses_numeric_operand_format(arch_name):
         if not numeric_sources:
             assert 'read_scalar_f16_carrier' not in body, name
         if high:
-            if arch_name in ('rdna4', 'cdna5'):
+            if arch_name in ('rdna4', 'cdna5', 'rdna3_5'):
                 # The rj-arith entry point selects the high half of the carrier.
-                suffix = '_gfx1250' if arch_name == 'cdna5' else ''
+                suffix = (
+                    '_gfx1250'
+                    if arch_name == 'cdna5'
+                    else '_gfx1150' if arch_name == 'rdna3_5' else ''
+                )
                 assert f'rj_arith_s_cvt_hi_f32_f16{suffix}(' in body
             else:
                 assert '>> 16' in body, name
@@ -7054,13 +6997,8 @@ def test_generated_vop3_compare_dpp_masks_scalar_or_exec_destination(
             == 1
         )
         assert 'amdgpu::dpp::write_vop3_compare_result(' not in cmp_body
-        if arch in ('rdna3', 'rdna4', 'gfx1250'):
-            assert (
-                'arith::execute_compare<32>(wf, rj_arith_v_cmp_eq_u32_w32,' in cmp_body
-            )
-            assert re.search(r'false,\s*commit_result\);', cmp_body)
-        else:
-            assert 'execute_v_cmp_eq_u32_vop3(*this, wf, commit_result)' in cmp_body
+        assert 'arith::execute_compare<32>(wf, rj_arith_v_cmp_eq_u32_w32,' in cmp_body
+        assert re.search(r'false,\s*commit_result\);', cmp_body)
         assert 'write_vgpr_storage' not in cmp_body
 
         cmpx_body = _generated_method_body(vop3, 'VCmpxEqU32Vop3', 'VCmpxLeU32Vop3')
@@ -7098,12 +7036,9 @@ def test_generated_vop3_compare_dpp_masks_scalar_or_exec_destination(
         assert cmpx_class_body.count('commit_result') >= 2
         assert cmpx_class_body.count('wf.set_exec(final_result);') == 1
 
-    shared = execute_shared_path.read_text()
-    shared_cmp = _shared_execute_body(shared, 'v_cmp_eq_u32_vop3', 'v_cmp_eq_u32_vopc')
-    assert 'CommitResult commit_result' in shared_cmp
-    assert 'ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result,' in shared_cmp
-    assert 'commit_result(vcc);' in shared_cmp
-    assert 'write_wave_mask_scalar' not in shared_cmp
+    assert (
+        'inline void execute_v_cmp_eq_u32_vop3' not in execute_shared_path.read_text()
+    )
 
 
 def test_generated_modern_dpp_source_policy_covers_non_vop1_families(
@@ -9792,8 +9727,9 @@ def test_generated_operands_validate_vgpr_source_selectors(
 ):
     validation = (
         'case OperandType::OPR_SRC_VGPR:\n'
-        '    if (!((encoding_value >= 256 && encoding_value <= 511)))\n'
-        '      defer_encoding_error(EncodingError::InvalidVgprSourceSelector);'
+        '    if (!((encoding_value >= 256 && encoding_value <= 511))) {\n'
+        '      defer_encoding_error(EncodingError::InvalidVgprSourceSelector);\n'
+        '    }'
     )
     for arch in (
         'cdna1',
@@ -10162,8 +10098,9 @@ def test_generated_flat_saddr_null_selector_follows_encoding(
     assert 'inst_.saddr != 127' in rdna3_flat
     assert 'inst_.saddr != OPR_SREG_NULL' not in rdna3_flat
     assert (
-        'if (inst_.seg != 2)\n'
-        '    src_operands_[num_src_++] = &flat_scratch;' in rdna3_flat
+        'if (inst_.seg != 2) {\n'
+        '    src_operands_[num_src_++] = &flat_scratch;\n'
+        '  }' in rdna3_flat
     )
 
     gfx1250_root = amdgpu_generated_root / _generated_dir_name('cdna5')
@@ -10581,29 +10518,33 @@ def test_half_mfma_migration_retains_bank_resolution(arch, format, shape):
     migrated = arch in ('cdna3', 'cdna4')
     assert ('amdgpu::arith::exec_dense_fp_matrix<' in body) == migrated
     assert ('wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL' in body) == (
-        arch == 'cdna4' and format == 'BF16'
+        arch == 'cdna3' or arch == 'cdna4' and format == 'BF16'
     )
     assert 'inst_.acc_cd' in body
     assert f'{arch}::resolve_acc' in body
     if migrated:
-        assert 'rj_arith_' + name.lower() in body
+        suffix = '_gfx950' if arch == 'cdna4' else ''
+        assert 'rj_arith_' + name.lower() + f'_w64{suffix},' in body
         assert 'arithmetic_flags()' in body
         assert 'inst_.cbsz' in body and 'inst_.abid' in body and 'inst_.blgp' in body
         assert 'std::optional<uint32_t>(const_acc)' in body
 
 
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
 @pytest.mark.parametrize('m,k', [(16, 8), (32, 4)])
-def test_xf32_mfma_library_dispatch(m, k):
+def test_xf32_mfma_library_dispatch(arch, m, k):
     name = f'V_MFMA_F32_{m}X{m}X{k}_XF32'
     destination = Operand('vdst', m * m // 2, 'OPR_VGPR', False, True, False, False, 0)
     body = _gen_mfma(
         Instruction(name, 'ENC_VOP3P_MFMA', 0, [destination]),
-        'cdna3',
+        arch,
         enc_field_names={'acc_cd'},
     )
     assert f'exec_dense_fp_matrix<2, {m * m // 64}, 64>' in body
-    assert f'rj_arith_{name.lower()}_w64' in body
+    suffix = '_gfx950' if arch == 'cdna4' else ''
+    assert f'rj_arith_{name.lower()}_w64{suffix},' in body
     assert 'inst_.acc_cd' in body
+    assert ('wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL' in body) == (arch == 'cdna3')
 
 
 @pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
@@ -10621,6 +10562,7 @@ def test_fp8_mfma_library_dispatch_distinguishes_fnuz_and_ocp(arch, formats, m, 
     assert f'rj_arith_{name.lower()}_w64{suffix},' in body
     assert f'exec_dense_fp_matrix<2, {m * m // 64}, 64>' in body
     assert 'inst_.acc_cd' in body
+    assert ('wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL' in body) == (arch == 'cdna3')
 
 
 @pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])

@@ -199,8 +199,9 @@ public:
     constexpr uint64_t mask = INVALID_MFMA_BROADCAST | INVALID_VOPD_OPERANDS |
                               INVALID_IU_MODIFIERS | MISALIGNED_SCALAR_DATA |
                               RESERVED_CVT_SCALE_SELECTOR | CHECK_CVT_SCALE_OVERLAP;
-    if (inst.flags() & mask) [[unlikely]]
+    if (inst.flags() & mask) [[unlikely]] {
       report_static_isa_diagnostics(inst, wf);
+    }
   }
   void report_static_isa_diagnostics(const Instruction &inst, Wavefront &wf);
   /// @brief Report only conditions explicitly undefined for the executing architecture.
@@ -379,8 +380,9 @@ public:
       ProgressBatch &operator=(const ProgressBatch &) = delete;
       ~ProgressBatch() {
         cu_.gws_progress_batch_active_ = nested_;
-        if (!nested_)
+        if (!nested_) {
           cu_.publish_gws_instruction_progress();
+        }
       }
 
     private:
@@ -393,16 +395,19 @@ public:
     FunctionalQuantumResult result;
     const uint32_t quantum = debug_active() ? kDebugFunctionalQuantum : functional_quantum();
     for (uint32_t i = 0; i < quantum; ++i) {
-      if (!has_active_wfs())
+      if (!has_active_wfs()) {
         break;
+      }
       result.ran = true;
-      if (!step())
+      if (!step()) {
         break;
+      }
       ++result.iterations;
       if (std::exchange(functional_yield_requested_, false)) {
         result.yielded = true;
-        if (gws_wait_yield_requested_)
+        if (gws_wait_yield_requested_) {
           result.retry_delay = std::min(quantum, kFunctionalQuantum);
+        }
         break;
       }
     }
@@ -515,8 +520,9 @@ public:
     trap_completion_handler_ = std::move(cb);
   }
   void notify_trap_complete(Wavefront &wf) {
-    if (trap_completion_handler_)
+    if (trap_completion_handler_) {
       trap_completion_handler_(wf);
+    }
   }
 
   /// @brief Callback after a single-stepped wave executes one instruction.
@@ -590,8 +596,9 @@ public:
   /// ioctl thread, and the I$ is lock-free precisely because the CU's own thread
   /// is its sole accessor. That thread consumes it at its next fetch.
   void set_debug_active(bool active) {
-    if (debug_active_.exchange(active, std::memory_order_relaxed) != active)
+    if (debug_active_.exchange(active, std::memory_order_relaxed) != active) {
       inst_cache_debug_epoch_.fetch_add(1, std::memory_order_release);
+    }
   }
   bool debug_active() const { return debug_active_.load(std::memory_order_relaxed); }
 
@@ -761,8 +768,9 @@ public:
       // its dispatch. A replacement group may have the same plugin count but
       // different per-wave subscriptions, so force it onto the live-query path.
       for (const auto &wf : wfs_) {
-        if (!wf)
+        if (!wf) {
           continue;
+        }
         wf->hot_hook_subscriptions_valid_ = false;
         wf->hot_hook_observer_count_ = 0;
       }
@@ -917,8 +925,9 @@ public:
   bool restore_lds_cursor(uint32_t saved) {
     const uint64_t capacity = lds_.size_bytes();
     const uint64_t next = std::min(capacity, lds_allocation_bytes(arch(), saved));
-    if (saved > capacity || saved % 256 != 0 || next > UINT32_MAX)
+    if (saved > capacity || saved % 256 != 0 || next > UINT32_MAX) {
       return false;
+    }
     next_lds_alloc_ = static_cast<uint32_t>(next);
     return true;
   }
@@ -950,10 +959,11 @@ public:
   void flush_all(uint32_t vmid = 0) {
     std::lock_guard lock(wave_state_mutex_);
     util::Logger::vm([&](auto &os) {
-      if (l1_vector_.store_count() > 0)
+      if (l1_vector_.store_count() > 0) {
         os << std::format("CU {}@{} L1 stores: total={} active={} l2_writes={}", this->name(),
                           reinterpret_cast<uintptr_t>(this), l1_vector_.store_count(),
                           l1_vector_.store_active_count(), l1_vector_.store_l2_writes());
+      }
     });
     flush_l1(vmid);
     l2_->flush_all(vmid);
@@ -1028,8 +1038,9 @@ public:
   /// @brief Program the shader aperture register bank selected by a guest VMID.
   void set_vmid_apertures(uint32_t vmid, uint64_t shared_base, uint64_t shared_limit,
                           uint64_t private_base, uint64_t private_limit) {
-    if (vmid >= vmid_apertures_.size())
+    if (vmid >= vmid_apertures_.size()) {
       return;
+    }
     std::lock_guard lock(vmid_aperture_mutex_);
     vmid_apertures_[vmid] = {shared_base, shared_limit, private_base, private_limit};
   }
@@ -1040,22 +1051,26 @@ public:
   /// refuses that fallback even when the PASID numerically matches a VMID.
   [[nodiscard]] std::optional<ShaderApertures>
   resolve_shader_apertures(uint32_t identity, ProcessIdentityKind kind) const {
-    if (identity == 0)
+    if (identity == 0) {
       return std::nullopt;
+    }
     std::lock_guard lock(vmid_aperture_mutex_);
     if (kind == ProcessIdentityKind::Vmid && identity < vmid_apertures_.size() &&
-        vmid_apertures_[identity])
+        vmid_apertures_[identity]) {
       return vmid_apertures_[identity];
+    }
     std::optional<ShaderApertures> uniform;
     for (uint32_t vmid = 1; vmid < vmid_apertures_.size(); ++vmid) {
-      if (!vmid_apertures_[vmid])
+      if (!vmid_apertures_[vmid]) {
         continue;
+      }
       const ShaderApertures &candidate = *vmid_apertures_[vmid];
       if (uniform && (uniform->shared_base != candidate.shared_base ||
                       uniform->shared_limit != candidate.shared_limit ||
                       uniform->private_base != candidate.private_base ||
-                      uniform->private_limit != candidate.private_limit))
+                      uniform->private_limit != candidate.private_limit)) {
         return std::nullopt;
+      }
       uniform = candidate;
     }
     return uniform;
@@ -1147,9 +1162,11 @@ public:
 
   bool has_active_wfs_for_process(uint32_t process_id) const {
     std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
-    for (const auto &w : wfs_)
-      if (w && !w->is_halted() && w->process_id() == process_id)
+    for (const auto &w : wfs_) {
+      if (w && !w->is_halted() && w->process_id() == process_id) {
         return true;
+      }
+    }
     return false;
   }
 
@@ -1167,8 +1184,9 @@ public:
   void restore_cycle_count(uint64_t count) { cycle_counter_ = count; }
 
   bool restore_performance_levels(std::span<const uint32_t> levels) {
-    if (levels.size() != shader_perf_levels_.size())
+    if (levels.size() != shader_perf_levels_.size()) {
       return false;
+    }
     std::ranges::copy(levels, shader_perf_levels_.begin());
     return true;
   }
@@ -1204,8 +1222,9 @@ public:
   // even when its reserved physical slot has room for additional registers.
   [[nodiscard]] bool valid_operand_vgpr_range(const Wavefront &wf, uint32_t base,
                                               uint32_t count) const {
-    if (arch() == rocjitsu::IsaFamily::Rdna1 || arch() == rocjitsu::IsaFamily::Rdna2)
+    if (arch() == rocjitsu::IsaFamily::Rdna1 || arch() == rocjitsu::IsaFamily::Rdna2) {
       return wf.vgpr_alloc().contains(base, count);
+    }
     return owns_vgpr_range(wf, base, count);
   }
 
@@ -1215,8 +1234,9 @@ public:
                                               uint32_t count) const {
     if (arch() == rocjitsu::IsaFamily::Rdna4 || arch() == rocjitsu::IsaFamily::Rdna3 ||
         arch() == rocjitsu::IsaFamily::Rdna3_5 || arch() == rocjitsu::IsaFamily::Rdna1 ||
-        arch() == rocjitsu::IsaFamily::Rdna2)
+        arch() == rocjitsu::IsaFamily::Rdna2) {
       return &wf.raw_cu() == this && wf.vgpr_alloc().contains(base, count);
+    }
     return owns_memory_result_vgprs(wf, base, count);
   }
 
@@ -1237,11 +1257,13 @@ private:
   [[nodiscard]] const Wavefront *sgpr_owner_for_range(uint32_t physical_base,
                                                       uint32_t physical_count) const {
     if (physical_count == 0 || physical_base >= sgpr_file_.total_regs() ||
-        physical_count > sgpr_file_.total_regs() - physical_base)
+        physical_count > sgpr_file_.total_regs() - physical_base) {
       return nullptr;
+    }
     const Wavefront *owner = sgpr_owner(physical_base);
-    if (!owner || !owns_sgpr_range(*owner, physical_base, physical_count))
+    if (!owner || !owns_sgpr_range(*owner, physical_base, physical_count)) {
       return nullptr;
+    }
     return owner;
   }
 
@@ -1252,24 +1274,27 @@ private:
                                                               uint32_t physical_count) const = 0;
 
   [[nodiscard]] uint32_t read_sgpr(const Wavefront &wf, uint32_t reg_idx) const {
-    if (!owns_sgpr_range(wf, reg_idx, 1))
+    if (!owns_sgpr_range(wf, reg_idx, 1)) {
       return 0;
+    }
     notify_scalar_register_read(
         wf, RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg_idx - wf.sgpr_alloc().base), 1});
     return sgpr_file_[reg_idx];
   }
 
   void write_sgpr(const Wavefront &wf, uint32_t reg_idx, uint32_t val) {
-    if (!owns_sgpr_range(wf, reg_idx, 1))
+    if (!owns_sgpr_range(wf, reg_idx, 1)) {
       return;
+    }
     notify_scalar_register_write(
         wf, RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg_idx - wf.sgpr_alloc().base), 1});
     sgpr_file_[reg_idx] = val;
   }
 
   void write_sgpr64(const Wavefront &wf, uint32_t reg_idx, uint64_t val) {
-    if (!owns_sgpr_range(wf, reg_idx, 2))
+    if (!owns_sgpr_range(wf, reg_idx, 2)) {
       return;
+    }
     notify_scalar_register_write(
         wf, RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg_idx - wf.sgpr_alloc().base), 2});
     sgpr_file_[reg_idx] = static_cast<uint32_t>(val);
@@ -1277,17 +1302,21 @@ private:
   }
 
   void notify_scalar_register_read(const Wavefront &wf, RegisterRef reg) const {
-    if (!observes_register_access_)
+    if (!observes_register_access_) {
       return;
-    if (observes_sgpr_reads_)
+    }
+    if (observes_sgpr_reads_) {
       observe_scalar_register_read(wf, reg);
+    }
   }
 
   void notify_scalar_register_write(const Wavefront &wf, RegisterRef reg) const {
-    if (!observes_register_access_)
+    if (!observes_register_access_) {
       return;
-    if (observes_scalar_register_writes_)
+    }
+    if (observes_scalar_register_writes_) {
       observe_scalar_register_write(wf, reg);
+    }
   }
 
   // Keep observer-only TLS suspension out of instruction access paths when no
@@ -1310,11 +1339,14 @@ public:
   /// @param reg_idx Physical register index.
   /// @returns Register value.
   uint32_t read_sgpr(uint32_t reg_idx) const {
-    if (reg_idx >= sgpr_file_.total_regs())
+    if (reg_idx >= sgpr_file_.total_regs()) {
       return 0;
-    if (observes_sgpr_reads_)
-      if (auto *wf = sgpr_owner(reg_idx))
+    }
+    if (observes_sgpr_reads_) {
+      if (auto *wf = sgpr_owner(reg_idx)) {
         return read_sgpr(*wf, reg_idx);
+      }
+    }
     return sgpr_file_[reg_idx];
   }
 
@@ -1330,8 +1362,9 @@ public:
   /// @param reg_idx Physical register index.
   /// @param val Value to write.
   void write_sgpr(uint32_t reg_idx, uint32_t val) {
-    if (reg_idx < sgpr_file_.total_regs())
+    if (reg_idx < sgpr_file_.total_regs()) {
       sgpr_file_[reg_idx] = val;
+    }
   }
 
   /// @brief Notify plugins that a wavefront read lanes of a physical VGPR.
@@ -1341,11 +1374,13 @@ public:
   /// storage access with this hook.
   void notify_vgpr_read(const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
                         uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
-    if (!observes_register_access_)
+    if (!observes_register_access_) {
       return;
+    }
     if (wf && lane_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1)) {
-      if (observes_vgpr_reads_)
+      if (observes_vgpr_reads_) {
         observe_vgpr_read(wf, reg_idx, lane_mask, byte_mask);
+      }
     }
   }
 
@@ -1354,13 +1389,16 @@ public:
   /// Raw VM/storage writes deliberately bypass this hook.
   void notify_vgpr_write(const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
                          uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
-    if (!observes_register_access_)
+    if (!observes_register_access_) {
       return;
-    if (wf)
+    }
+    if (wf) {
       lane_mask &= wf->vgpr_write_mask();
+    }
     if (wf && lane_mask != 0 && byte_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1)) {
-      if (observes_vgpr_writes_)
+      if (observes_vgpr_writes_) {
         observe_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
+      }
     }
   }
 
@@ -1370,11 +1408,13 @@ public:
   void notify_scalar_lane_vgpr_write(
       const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
       uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
-    if (!observes_register_access_)
+    if (!observes_register_access_) {
       return;
+    }
     if (wf && lane_mask != 0 && byte_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1)) {
-      if (observes_vgpr_writes_)
+      if (observes_vgpr_writes_) {
         observe_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
+      }
     }
   }
 
@@ -1578,11 +1618,13 @@ public:
     assert(inst->execute && "instruction execution backend is not linked");
     wf.begin_instruction_execution();
     const bool drop_set_vgpr_msb = wf.consume_setreg_vgpr_msb_hazard();
-    if (drop_set_vgpr_msb && inst->amdgpu_operation() == Operation::S_SET_VGPR_MSB)
+    if (drop_set_vgpr_msb && inst->amdgpu_operation() == Operation::S_SET_VGPR_MSB) {
       return util::Result::success();
+    }
     check_static_isa_diagnostics(*inst, wf);
-    if (wf.discards_valu_result(*inst))
+    if (wf.discards_valu_result(*inst)) {
       return util::Result::success();
+    }
     // A SALU instruction with a protected TTMP destination also preserves SCC.
     bool preserve_scc = false;
     if (!wf.shader_can_write_ttmp() && (inst->flags() & SALU) && inst->num_dst_operands()) {
@@ -1598,16 +1640,21 @@ public:
     inst->execute(*inst, &wf);
     if (inst->is_memory_op() && inst->data() &&
         (config_.arch == rocjitsu::IsaFamily::Rdna3 ||
-         config_.arch == rocjitsu::IsaFamily::Rdna3_5))
+         config_.arch == rocjitsu::IsaFamily::Rdna3_5)) {
       qualify_gfx11_memory(*inst, wf);
-    if (config_.arch == rocjitsu::IsaFamily::Rdna4 && inst->data())
+    }
+    if (config_.arch == rocjitsu::IsaFamily::Rdna4 && inst->data()) {
       nullify_unallocated_memory_result(*inst, wf);
-    if (preserve_scc)
+    }
+    if (preserve_scc) {
       wf.write_scc(saved_scc);
-    if (inst->data() && config_.arch == rocjitsu::IsaFamily::Cdna4)
+    }
+    if (inst->data() && config_.arch == rocjitsu::IsaFamily::Cdna4) {
       qualify_cdna4_memory_destination(*inst, wf);
-    if (failure_detail && wf.instruction_execution_error_detail())
+    }
+    if (failure_detail && wf.instruction_execution_error_detail()) {
       *failure_detail = wf.instruction_execution_error_detail();
+    }
     return wf.instruction_execution_failed() ? util::Result::failure() : util::Result::success();
   }
 
@@ -1623,8 +1670,9 @@ protected:
                              bool retain_failure_for_debugger = true,
                              QueueExceptionDeliveryPolicy delivery_policy =
                                  QueueExceptionDeliveryPolicy::WaitForAcknowledgment) {
-    if (!cp_ || status == 0)
+    if (!cp_ || status == 0) {
       return false;
+    }
     pending_queue_exceptions_.push_back({queue_id, process_id, status, wave,
                                          clear_debug_stop_on_success, retain_failure_for_debugger,
                                          delivery_policy});
@@ -1697,8 +1745,9 @@ protected:
   /// See set_debug_active() for why the transition cannot invalidate directly.
   void sync_inst_cache_debug_epoch() {
     const uint64_t epoch = inst_cache_debug_epoch_.load(std::memory_order_acquire);
-    if (epoch == inst_cache_debug_epoch_seen_)
+    if (epoch == inst_cache_debug_epoch_seen_) {
       return;
+    }
     inst_cache_.invalidate_all();
     inst_cache_debug_epoch_seen_ = epoch;
   }
@@ -1718,10 +1767,12 @@ protected:
 
   [[nodiscard]] bool owns_memory_result_vgprs(const Wavefront &wf, uint32_t base,
                                               uint32_t count) const {
-    if (!owns_vgpr_range(wf, base, count))
+    if (!owns_vgpr_range(wf, base, count)) {
       return false;
-    if (arch() != rocjitsu::IsaFamily::Cdna4)
+    }
+    if (arch() != rocjitsu::IsaFamily::Cdna4) {
       return true;
+    }
 
     return wf.unified_vgpr_range_is_allocated(base - wf.vgpr_alloc().base, count);
   }
@@ -1744,13 +1795,15 @@ protected:
 
   /// @brief Fire the on_idle callback if registered.
   void notify_idle() {
-    if (on_idle_)
+    if (on_idle_) {
       on_idle_();
+    }
   }
 
   void notify_pool_ready() {
-    if (on_pool_ready_)
+    if (on_pool_ready_) {
       on_pool_ready_();
+    }
   }
 
   /// @brief Materialize an ISA-specific wavefront when dispatch first uses a slot.
@@ -1805,18 +1858,21 @@ protected:
     ~WaveStateGuard() {
       const bool outermost = --cu_.wave_state_depth_ == 0;
       std::function<void()> notification_flush_hook;
-      if (outermost)
+      if (outermost) {
         notification_flush_hook = std::exchange(cu_.notification_flush_hook_for_testing_, {});
+      }
       // Inspect while locked. A later producer holds its own outer guard and
       // will flush its notifications; an ordinary instruction has none to send.
       const bool needs_flush =
           outermost && (cu_.has_pending_cp_notifications() || notification_flush_hook);
       lock_.unlock();
       if (outermost) {
-        if (notification_flush_hook)
+        if (notification_flush_hook) {
           notification_flush_hook();
-        if (needs_flush)
+        }
+        if (needs_flush) {
           cu_.flush_cp_notifications();
+        }
       }
     }
 
@@ -1855,7 +1911,14 @@ protected:
   /// @param issue_pc Original instruction PC, before advancing to the resume PC.
   void handle_memory_access_failure(Wavefront &wf, VmAccessOutcome outcome, uint64_t issue_pc);
   /// @brief Cancel a terminal VM failure and notify the CP without offering it again.
-  void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome);
+  /// @details A failure that no VM fault reporter covered also aborts the queue:
+  /// the CP cancellation does not wake the dispatch's waiter, and ROCr acts on a
+  /// memory-violation status only after a VM fault event.
+  /// @param issue_pc PC of the failing instruction, for the diagnostic.
+  /// @param unreported Static cause of a failure known to have no VM fault
+  ///        event, or null to decide from the outcome and the wave's binding.
+  void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome, uint64_t issue_pc,
+                                const char *unreported = nullptr);
   /// @brief Fault a dispatch for an exhausted GWS inactivity budget or a barrier before INIT.
   void fail_gws_wait(Wavefront &wf, const char *reason);
 
@@ -2123,18 +2186,22 @@ protected:
   std::vector<uint32_t> gws_step_progress_processes_;
 
   void record_gws_instruction_progress(uint32_t process_id) {
-    if (!gws_device_->any_parked())
+    if (!gws_device_->any_parked()) {
       return;
-    if (std::ranges::find(gws_progress_processes_, process_id) == gws_progress_processes_.end())
+    }
+    if (std::ranges::find(gws_progress_processes_, process_id) == gws_progress_processes_.end()) {
       gws_progress_processes_.push_back(process_id);
+    }
     if (std::ranges::find(gws_step_progress_processes_, process_id) ==
-        gws_step_progress_processes_.end())
+        gws_step_progress_processes_.end()) {
       gws_step_progress_processes_.push_back(process_id);
+    }
   }
 
   void publish_gws_instruction_progress() {
-    for (uint32_t process_id : gws_progress_processes_)
+    for (uint32_t process_id : gws_progress_processes_) {
       gws_device_->note_instruction_progress(process_id);
+    }
     gws_progress_processes_.clear();
   }
 
@@ -2246,6 +2313,13 @@ inline void
 InstructionComputeUnitView::report_tensor_dma_issue(const TensorDmaIssueObservation &issue) {
   raw_cu().plugin_group().onAmdgpuTensorDmaIssued(issue, raw_wavefront());
 }
+inline bool InstructionComputeUnitView::observes_lds_barrier_arrival() const {
+  return raw_cu().plugin_group().observes_lds_barrier_arrival(raw_wavefront());
+}
+inline void InstructionComputeUnitView::report_lds_barrier_arrival(
+    const LdsBarrierArrivalObservation &arrival) {
+  raw_cu().plugin_group().onAmdgpuLdsBarrierArrived(arrival, raw_wavefront());
+}
 
 /// @brief Execution-mode-aware compute unit shell.
 ///
@@ -2302,8 +2376,9 @@ public:
     // resident on this CU, so scheduling work for it would spin the engine
     // against a wave that cannot retire an instruction until the debugger
     // resumes it.
-    if (!this->engine())
+    if (!this->engine()) {
       return;
+    }
     if (this->pool_driven()) {
       this->notify_pool_ready();
       return;
@@ -2313,8 +2388,9 @@ public:
   }
 
   void schedule_work_at(simdojo::Tick tick) override {
-    if (this->pool_driven() || executing_ || !this->engine() || !this->has_runnable_wfs())
+    if (this->pool_driven() || executing_ || !this->engine() || !this->has_runnable_wfs()) {
       return;
+    }
     executing_ = true;
     schedule_next_tick(tick);
   }
@@ -2328,8 +2404,9 @@ public:
   }
 
   void schedule_work_async() override {
-    if (this->engine())
+    if (this->engine()) {
       this->engine()->schedule_event_now(&resume_event_);
+    }
   }
 
 private:
@@ -2351,21 +2428,24 @@ private:
   // strictly in the future so re-entries never collapse onto one tick.
   simdojo::Event tick_event_{this, simdojo::EventType::TIMER_CALLBACK,
                              [this](simdojo::Tick now, simdojo::Message *message) {
-                               if (!message || message->payload() != driver_generation_)
+                               if (!message || message->payload() != driver_generation_) {
                                  return;
+                               }
                                scheduled_tick_ = simdojo::TICK_MAX;
-                               if (execute_quantum())
+                               if (execute_quantum()) {
                                  schedule_next_tick(now +
                                                     std::max<uint64_t>(1, last_quantum_delay_));
+                               }
                              }};
   // Cross-thread debugger resumes first enter this event. Its handler runs on
   // the CU/CP partition and wakes whichever driver currently owns execution.
   simdojo::Event resume_event_{this, simdojo::EventType::TIMER_CALLBACK,
                                [this](simdojo::Tick, simdojo::Message *) {
-                                 if (this->pool_driven())
+                                 if (this->pool_driven()) {
                                    this->notify_pool_ready();
-                                 else
+                                 } else {
                                    schedule_work();
+                                 }
                                }};
   uint64_t last_quantum_delay_ = 0;
   simdojo::Tick scheduled_tick_ = simdojo::TICK_MAX;
@@ -2422,40 +2502,47 @@ public:
 
   /// @returns Lane value from the VGPR file.
   uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const override {
-    if (reg_idx >= vgpr_file_.total_regs() || lane >= Isa::WF_SIZE_MAX)
+    if (reg_idx >= vgpr_file_.total_regs() || lane >= Isa::WF_SIZE_MAX) {
       return 0;
+    }
     notify_vgpr_read_by_reg(reg_idx, uint64_t{1} << lane);
     return vgpr_file_[reg_idx][lane];
   }
 
   uint32_t read_vgpr_storage_bounded(uint32_t reg_idx, uint32_t lane) const override {
-    if (reg_idx >= vgpr_file_.total_regs() || lane >= Isa::WF_SIZE_MAX)
+    if (reg_idx >= vgpr_file_.total_regs() || lane >= Isa::WF_SIZE_MAX) {
       return 0;
+    }
     return vgpr_file_[reg_idx][lane];
   }
 
   void notify_vgpr_read_by_reg(
       uint32_t reg_idx, uint64_t lane_mask,
       uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const override {
-    if (!this->observes_vgpr_reads_)
+    if (!this->observes_vgpr_reads_) {
       return;
-    if (auto *wf = vgpr_owner(reg_idx))
+    }
+    if (auto *wf = vgpr_owner(reg_idx)) {
       this->notify_vgpr_read(wf, reg_idx, lane_mask, byte_mask);
+    }
   }
 
   void notify_vgpr_write_by_reg(
       uint32_t reg_idx, uint64_t lane_mask,
       uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const override {
-    if (!this->observes_vgpr_writes_)
+    if (!this->observes_vgpr_writes_) {
       return;
-    if (auto *wf = vgpr_owner(reg_idx))
+    }
+    if (auto *wf = vgpr_owner(reg_idx)) {
       this->notify_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
+    }
   }
 
   const Wavefront *vgpr_owner(uint32_t reg_idx) const override {
     const uint32_t vgprs_per_block = this->vgpr_allocation_block_size();
-    if (vgprs_per_block == 0)
+    if (vgprs_per_block == 0) {
       return nullptr;
+    }
     const size_t block = reg_idx / vgprs_per_block;
     return block < this->config_.num_wf_slots ? vgpr_block_owners_[block] : nullptr;
   }
@@ -2464,8 +2551,9 @@ private:
   const Wavefront *vgpr_owner_for_range(uint32_t physical_base,
                                         uint32_t physical_count) const override {
     if (physical_count == 0 || physical_base >= vgpr_file_.total_regs() ||
-        physical_count > vgpr_file_.total_regs() - physical_base)
+        physical_count > vgpr_file_.total_regs() - physical_base) {
       return nullptr;
+    }
     const Wavefront *owner = vgpr_owner(physical_base);
     return owner && this->owns_vgpr_range(*owner, physical_base, physical_count) ? owner : nullptr;
   }
@@ -2481,8 +2569,9 @@ public:
 
   /// @brief Write a value to the VGPR file.
   void write_vgpr(uint32_t reg_idx, uint32_t lane, uint32_t val) override {
-    if (reg_idx < vgpr_file_.total_regs() && lane < Isa::WF_SIZE_MAX)
+    if (reg_idx < vgpr_file_.total_regs() && lane < Isa::WF_SIZE_MAX) {
       vgpr_file_[reg_idx][lane] = val;
+    }
   }
 
   /// @returns Const pointer to one VGPR's raw lane data.

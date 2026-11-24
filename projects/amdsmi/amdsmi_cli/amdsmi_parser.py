@@ -1665,7 +1665,7 @@ class AMDSMIParser(argparse.ArgumentParser):
     ):
         # Device arguments help text
         gpu_help = _T(
-            "Select a GPU ID, BDF, or UUID from the possible choices:\n{gpu_choices_str}"
+            "Select a GPU ID, BDF, UUID or CUID from the possible choices:\n{gpu_choices_str}"
         ).format(gpu_choices_str=self.gpu_choices_str)
         vf_help = _T(
             "Gets general information about the specified VF (timeslice, fb info, …).\
@@ -1796,7 +1796,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(version_parser)
 
         # help info
-        gpu_version_help = _T("Display the current amdgpu driver version")
+        gpu_version_help = _T("Display the current amdgpu driver version and package")
         cpu_version_help = _T("Display the current amd_hsmp or hsmp_acpi driver version")
         nic_version_help = _T("Display the current nic driver version")
 
@@ -1835,7 +1835,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         list_help = _T("List GPU information")
         list_optionals_title = _T("List Arguments")
         list_subcommand_help = _T(
-            "{description}\n\nLists all detected devices on the system.                            \nLists the BDF, UUID, KFD_ID, NODE_ID, and Partition ID for each GPU and/or CPUs.                            \nIn virtualization environments, it can also list VFs associated to each                            \nGPU with some basic information for each VF."
+            "{description}\n\nLists all detected devices on the system.                            \nLists the BDF, UUID, KFD_ID, NODE_ID, Partition ID and CUID for each GPU and/or CPUs.                            \nIn virtualization environments, it can also list VFs associated to each                            \nGPU with some basic information for each VF."
         ).format(description=self.description)
         enumeration_help = _T(
             "Enumeration mapping to other features.\
@@ -1870,7 +1870,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         bus_help = _T("All bus information")
         vbios_help = _T("All video bios/IFWI information (if available)")
         limit_help = _T("All limit metric values (i.e. power and thermal limits)")
-        driver_help = _T("Displays driver version")
+        driver_help = _T("Displays driver version and package")
         vram_help = _T("All vram information")
         cache_help = _T("All cache information")
         board_help = _T("All board information")
@@ -1878,16 +1878,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         xgmi_plpd_help = _T("The available XGMI per-link power down policy")
         process_isolation_help = _T("The process isolation status")
         cuid_help = _T(
-            "Component Unified ID: the derived CUID, its component type, whether it is a\n"
-            "temporary (auxiliary) identifier, and which layer answered.\n"
-            "Not part of the default `amd-smi static` output; ask for it.\n"
-            "The primary CUID is not shown by default either: its payload embeds the raw\n"
-            "serial number. Add --cuid-primary, as root, to include it."
-        )
-        cuid_primary_help = _T(
-            "Include the primary CUID in the CUID output, implying --cuid. Requires\n"
-            "privilege, and prints a value that embeds the device serial number. Do not\n"
-            "paste it into a bug report."
+            "Component Unified ID: the CUID, its component type, which layer answered,\n"
+            "and whether it is temporary.\n"
+            "Not part of the default `amd-smi static` output; ask for it."
         )
         profile_help = _T("Display current and available power profiles")
         clk_options = self.helpers.get_clock_types()[0]
@@ -1973,9 +1966,6 @@ class AMDSMIParser(argparse.ArgumentParser):
             )
             static_parser.add_argument(
                 "-Y", "--cuid", action="store_true", required=False, help=cuid_help
-            )
-            static_parser.add_argument(
-                "-y", "--cuid-primary", action="store_true", required=False, help=cuid_primary_help
             )
             static_parser.add_argument(
                 "-C",
@@ -3910,9 +3900,6 @@ class AMDSMIParser(argparse.ArgumentParser):
             "Lists the CUID of every component on the node: the platform, CPU\n"
             "packages, GPUs, NPUs and NICs. Every CUID is temporary."
         )
-        node_cuid_primary_help = _T(
-            "Include each component's primary CUID, implying --cuid. Requires root."
-        )
 
         node_parser = subparsers.add_parser(
             "node", help=node_help, description=node_subcommand_help
@@ -3942,9 +3929,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         node_parser.add_argument(
             "-Y", "--cuid", action="store_true", required=False, help=node_cuid_help
-        )
-        node_parser.add_argument(
-            "-y", "--cuid-primary", action="store_true", required=False, help=node_cuid_primary_help
         )
 
         # Add Universal Arguments
