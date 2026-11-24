@@ -587,13 +587,19 @@ TEST_F(GraphCaptureStreamOrdering, InterleavedUserWork)
 }
 
 // Network transport: plans carry proxy ops, so every captured launch also adds
-// host-callback nodes via hostStream.
+// host-callback nodes via hostStream. Socket stays on loopback with IB and GIN off so
+// connection setup does not depend on the host's NICs.
 TEST_F(GraphCaptureStreamOrdering, InterleavedUserWorkNetTransport)
 {
     RUN_ISOLATED_TESTS_WITH_OPTIONS(
         parallelOptions(),
         isolated("Socket", [] { interleavedUserWork(hipStreamCaptureModeThreadLocal, true, false, true); },
-                 {{"NCCL_P2P_DISABLE", "1"}, {"NCCL_SHM_DISABLE", "1"}, {"NCCL_NET", "Socket"}}));
+                 {{"NCCL_P2P_DISABLE", "1"},
+                  {"NCCL_SHM_DISABLE", "1"},
+                  {"NCCL_NET", "Socket"},
+                  {"NCCL_SOCKET_IFNAME", "lo"},
+                  {"NCCL_IB_DISABLE", "1"},
+                  {"NCCL_GIN_ENABLE", "0"}}));
 }
 
 // The user stream already depends on two branches (fork/join with plain HIP work on a
