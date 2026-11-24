@@ -281,10 +281,13 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
         site.access == AccessKind::Read || site.access == AccessKind::Write ||
         (site.access == AccessKind::Atomic && admits_atomics &&
          ranges.shape == LdsRangeShape::Single && (site.width == 4 || site.width == 8));
-    const bool valid_origin = site.origin == AccessOrigin::Native ||
-                              (site.origin == AccessOrigin::GroupFlat && admits_flat &&
-                               target->id == 950 && site.access == AccessKind::Read &&
-                               site.width == 4 && ranges.shape == LdsRangeShape::Single);
+    const bool valid_origin =
+        site.origin == AccessOrigin::Native ||
+        (site.origin == AccessOrigin::GroupFlat && admits_flat &&
+         (target->arch == IsaFamily::Cdna3 || target->arch == IsaFamily::Cdna4 ||
+          target->arch == IsaFamily::Rdna3) &&
+         (site.access == AccessKind::Read || site.access == AccessKind::Write) && site.width == 4 &&
+         ranges.shape == LdsRangeShape::Single);
     if (site.id != index || site.owner_entry != entry.id ||
         site.analysis != AnalysisKind::LdsRaceDetection || site.record != RecordKind::Access ||
         !valid_ranges || !valid_access || !valid_origin ||

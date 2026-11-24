@@ -58,6 +58,8 @@ struct InputProgram {
   uint32_t original_vgprs = 0;
   std::vector<uint64_t> exit_offsets;
   std::vector<NativeLdsAccess> accesses;
+  // PCs of proven private FLAT operations which execute without LDS probes.
+  std::vector<uint64_t> non_lds_flat;
   std::vector<BarrierFacts> barriers;
   bool repeated = false;
 };

@@ -107,14 +107,15 @@ Result validate_entry_abi(const kd::kernel_descriptor_t &descriptor, const Targe
   return Result::success();
 }
 
-// Each tracked word equals the high dword of SRC_SHARED_BASE. A vector
+// Track a shared or private aperture high word. A vector
 // definition under unknown EXEC proves this only for lanes active at that
 // point. A later EXEC change can expose older values in the other lanes.
-struct SharedAperture {
+struct ApertureWords {
   RegisterSet active;
   RegisterSet all_lanes;
 
-  void transfer(const Instruction &inst, const InstDefUse &effects, ExecState exec) {
+  void transfer(const Instruction &inst, const InstDefUse &effects, ExecState exec,
+                std::string_view base_name) {
     using Op = amdgpu::Operation;
     const Op op = inst.amdgpu_operation();
     const auto *source = inst.num_src_operands() ? inst.src_operand(0) : nullptr;
@@ -128,7 +129,7 @@ struct SharedAperture {
       const auto src = source->to_register_ref();
       writes_exec |= dst && dst->cls == RegClass::EXEC;
       if (dst && op == Op::S_MOV_B64 && dst->cls == RegClass::SGPR && dst->width == 2 &&
-          source->name() == "src_shared_base") {
+          source->name() == base_name) {
         proven = RegisterRef{RegClass::SGPR, static_cast<uint16_t>(dst->index + 1), 1};
         all = true;
       } else if (dst && src && dst->width == 1 && src->width == 1 && active.contains(*src) &&
@@ -157,6 +158,16 @@ struct SharedAperture {
   }
 };
 
+struct FlatPointers {
+  ApertureWords shared, scratch;
+  void intersect(const FlatPointers &other) {
+    shared.active &= other.shared.active;
+    shared.all_lanes &= other.shared.all_lanes;
+    scratch.active &= other.scratch.active;
+    scratch.all_lanes &= other.scratch.all_lanes;
+  }
+};
+
 Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                              InputProgram &program, RegisterSet &used, const InputLimits &limits,
                              InputError &error) {
@@ -173,7 +184,7 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
   for (const auto &block : blocks)
     scope.push_back(block.get());
   const ExecMaskAnalysis exec(scope, program.wave_size);
-  std::unordered_map<const BasicBlock *, SharedAperture> outgoing;
+  std::unordered_map<const BasicBlock *, FlatPointers> outgoing;
   size_t instruction_count = 0;
   for (const BasicBlock *block : ordered.value()) {
     if (block->has_implicit_terminator() ||
@@ -182,7 +193,7 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
       return reject(error, InputErrorCode::UnsupportedFlow, "original control flow is not closed",
                     block->start_offset());
     }
-    SharedAperture aperture;
+    FlatPointers aperture;
     bool first = true;
     for (const BasicBlock *predecessor : block->predecessors()) {
       // A deferred backedge cannot inherit first-iteration proofs.
@@ -193,10 +204,8 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
       }
       if (first)
         aperture = it->second;
-      else {
-        aperture.active &= it->second.active;
-        aperture.all_lanes &= it->second.all_lanes;
-      }
+      else
+        aperture.intersect(it->second);
       first = false;
     }
     std::optional<uint64_t> latest = latest_access.find(block)->second;
@@ -211,7 +220,8 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
       }
       const size_t previous_accesses = program.accesses.size();
       if (classify_lds_race_instruction(instruction, program.target->arch, program.original_vgprs,
-                                        program.accesses, error, &aperture.active)
+                                        program.accesses, error, &aperture.shared.active,
+                                        &aperture.scratch.active)
               .failed()) {
         return Result::failure();
       }
@@ -227,7 +237,11 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
         latest = access;
       }
       const InstDefUse effects(instruction, program.wave_size);
-      aperture.transfer(instruction, effects, exec.before(instruction));
+      aperture.shared.transfer(instruction, effects, exec.before(instruction), "src_shared_base");
+      aperture.scratch.transfer(instruction, effects, exec.before(instruction), "src_private_base");
+      if (program.accesses.size() == previous_accesses &&
+          instruction.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Flat)
+        program.non_lds_flat.push_back(offset);
       used |= effects.uses;
       used |= effects.defs;
       const std::optional<int64_t> branch = instruction.branch_offset_bytes();

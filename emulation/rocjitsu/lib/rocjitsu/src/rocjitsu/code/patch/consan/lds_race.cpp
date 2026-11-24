@@ -217,6 +217,21 @@ std::optional<RegisterRef> allocated_vgpr_tuple(const Operand *operand, uint32_t
   return reg;
 }
 
+bool is_flat_b32(const Instruction &instruction) {
+  if (instruction.amdgpu_memory_addressing() != amdgpu::MemoryAddressing::Flat)
+    return false;
+  using Op = amdgpu::Operation;
+  switch (instruction.amdgpu_operation()) {
+  case Op::FLAT_LOAD_B32:
+  case Op::FLAT_LOAD_DWORD:
+  case Op::FLAT_STORE_B32:
+  case Op::FLAT_STORE_DWORD:
+    return true;
+  default:
+    return false;
+  }
+}
+
 } // namespace
 
 Result qualify_lds_race_entry(const InputProgram &program, InputError &error) {
@@ -298,7 +313,8 @@ qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputE
 Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::IsaFamily arch,
                                      uint32_t allocated_vgprs,
                                      std::vector<NativeLdsAccess> &accesses, InputError &error,
-                                     const RegisterSet *shared_high) {
+                                     const RegisterSet *shared_high,
+                                     const RegisterSet *private_high) {
   const std::string_view name = instruction.mnemonic();
   const amdgpu::Operation operation = instruction.amdgpu_operation();
   const amdgpu::MemoryAddressing addressing = instruction.amdgpu_memory_addressing();
@@ -308,28 +324,39 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
       (!uses_split_workgroup_barrier(arch) && operation == amdgpu::Operation::S_BARRIER)) {
     return Result::success(); // The complete original group/CFG is qualified below.
   }
-  if (addressing == amdgpu::MemoryAddressing::Flat &&
-      operation == amdgpu::Operation::FLAT_LOAD_DWORD) {
+  if (is_flat_b32(instruction)) {
+    const bool rdna = arch == IsaFamily::Rdna3;
+    const bool read = instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Load;
     const uint32_t *words = instruction.raw_encoding();
-    // Admit the plain CDNA4 vector form: no offset, LDS routing, cache
-    // modifiers, scalar address, ACC destination or reserved operand fields.
-    if (arch != IsaFamily::Cdna4 || instruction.size() != 8 || (words[0] & 0x0203ffffu) != 0 ||
-        (words[1] & 0x00ffff00u) != 0)
+    // These generic-address forms have an unsigned 12-bit byte offset. Exclude
+    // target-specific cache, segment, routing, scalar-address and ACC modes.
+    const uint32_t saddr = rdna ? 0x7c : 0;
+    const uint32_t unused_value = read ? 0x0000ff00u : 0xff000000u;
+    if ((!rdna && arch != IsaFamily::Cdna3 && arch != IsaFamily::Cdna4) ||
+        instruction.size() != 8 || (words[0] & 0x0203f000u) || (words[1] & unused_value) ||
+        ((words[1] >> 16) & 0xff) != saddr)
       return reject_instruction(error, InputErrorCode::UnsupportedAccess,
                                 "unsupported Group-FLAT encoding", offset);
     const auto address = allocated_vgpr_tuple(instruction.src_operand(0), 2, allocated_vgprs);
-    const auto value = allocated_vgpr_tuple(instruction.dst_operand(0), 1, allocated_vgprs);
-    if (!address || !value || !shared_high ||
-        !shared_high->contains({RegClass::VGPR, static_cast<uint16_t>(address->index + 1), 1}))
+    const auto value = allocated_vgpr_tuple(
+        read ? instruction.dst_operand(0) : instruction.src_operand(1), 1, allocated_vgprs);
+    if (!address || !value)
       return reject_instruction(error, InputErrorCode::UnsupportedAccess,
-                                "FLAT load requires proven shared aperture and allocated operands",
-                                offset);
-    // These apertures are 4-GiB aligned; with a proven high dword, the
-    // pre-guest low VGPR is exactly the byte offset from this WG's LDS base.
+                                "FLAT operands exceed allocation", offset);
+    const RegisterRef high{RegClass::VGPR, static_cast<uint16_t>(address->index + 1), 1};
+    if (private_high && private_high->contains(high))
+      return Result::success();
+    if (!shared_high || !shared_high->contains(high))
+      return reject_instruction(error, InputErrorCode::UnsupportedAccess,
+                                "FLAT access requires proven shared aperture", offset);
+    // The shared aperture is 4-GiB aligned. Its high dword is proven, so
+    // BeforeInst captures its relative byte offset in the low VGPR. The
+    // ordinary probe widens before adding the immediate and flags overflow.
     accesses.push_back({.site = static_cast<uint32_t>(accesses.size()),
                         .original_offset = offset,
-                        .kind = AccessKind::Read,
+                        .kind = read ? AccessKind::Read : AccessKind::Write,
                         .address_vgpr = address->index,
+                        .immediate_bytes = static_cast<uint16_t>(words[0] & 0xfff),
                         .width = 4,
                         .origin = AccessOrigin::GroupFlat});
     return Result::success();
@@ -612,9 +639,7 @@ Result validate_lds_race_accesses(const InputProgram &program, const Manifest &m
           operation == amdgpu::Operation::S_BARRIER_WAIT) {
         barrier_offsets.insert(instruction.src_loc());
       }
-      if (native_lds_form(instruction).width != 0 ||
-          (instruction.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Flat &&
-           operation == amdgpu::Operation::FLAT_LOAD_DWORD)) {
+      if (native_lds_form(instruction).width != 0 || is_flat_b32(instruction)) {
         access_offsets.insert(instruction.src_loc());
       }
     }
@@ -633,15 +658,31 @@ Result validate_lds_race_accesses(const InputProgram &program, const Manifest &m
   if (barrier_offsets != expected_barriers) {
     return reject(error, "final reachable barrier multiplicity differs from original");
   }
-  if (access_offsets.size() != manifest.sites.size()) {
+  if (access_offsets.size() != manifest.sites.size() + program.non_lds_flat.size()) {
     return reject(error, "final reachable guest access multiplicity differs from original");
   }
   for (const SiteFacts &site : manifest.sites) {
-    if (!access_offsets.contains(site.prepared_guest_offset) ||
+    if (access_offsets.erase(site.prepared_guest_offset) != 1 ||
         std::memcmp(program.image.data() + program.text_file_offset + site.original_offset,
                     prepared_text.data() + site.prepared_guest_offset, 8) != 0) {
       return reject(error, "final guest LDS operation/map differs from original bytes");
     }
+  }
+  // Uninstrumented private instructions can share an opcode with an observed
+  // FLAT site. Check their bytes/multiplicity after consuming the mapped sites.
+  std::multiset<std::array<uint8_t, 8>> private_guests;
+  for (const uint64_t pc : program.non_lds_flat) {
+    std::array<uint8_t, 8> words;
+    std::memcpy(words.data(), program.image.data() + program.text_file_offset + pc, words.size());
+    private_guests.insert(words);
+  }
+  for (const uint64_t pc : access_offsets) {
+    std::array<uint8_t, 8> words;
+    std::memcpy(words.data(), prepared_text.data() + pc, words.size());
+    const auto found = private_guests.find(words);
+    if (found == private_guests.end())
+      return reject(error, "unmapped guest FLAT operation differs from the private original");
+    private_guests.erase(found);
   }
   return Result::success();
 }

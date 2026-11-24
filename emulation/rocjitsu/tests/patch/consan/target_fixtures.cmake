@@ -177,22 +177,35 @@ foreach(
             list(APPEND _target_fixtures ${_image})
         endforeach()
         set(_flat_specs)
-        if(_gpu STREQUAL "gfx950")
-            foreach(
-                _scenario
-                IN
-                ITEMS overlap adjacent empty ordered oob
-            )
-                set(_name flat-load-${_scenario})
-                string(TOUPPER "${_scenario}" _scenario_define)
-                list(APPEND _flat_specs "${_name}:32:0:0:0:0")
-                set(_flat_options_${_name}
-                    -DCONSAN_GROUP_FLAT=1
-                    -DFLAT_${_scenario_define}=1
-                )
-                if(NOT _scenario STREQUAL "oob")
-                    list(APPEND _flat_cases_${_gpu}_${_wave_size} ${_name})
+        if(_legacy OR _gpu STREQUAL "gfx1100")
+            foreach(_direction IN ITEMS load store)
+                if(_direction STREQUAL "load")
+                    set(_scenarios
+                        overlap
+                        adjacent
+                        empty
+                        ordered
+                        oob
+                        offset
+                        readread
+                    )
+                else()
+                    set(_scenarios overlap adjacent ordered tail)
                 endif()
+                string(TOUPPER "${_direction}" _direction_define)
+                foreach(_scenario IN LISTS _scenarios)
+                    set(_name flat-${_direction}-${_scenario})
+                    string(TOUPPER "${_scenario}" _scenario_define)
+                    list(APPEND _flat_specs "${_name}:32:0:0:0:0")
+                    set(_flat_options_${_name}
+                        -DCONSAN_GROUP_FLAT=1
+                        -DFLAT_${_direction_define}=1
+                        -DFLAT_${_scenario_define}=1
+                    )
+                    if(NOT _scenario STREQUAL "oob")
+                        list(APPEND _flat_cases_${_gpu}_${_wave_size} ${_name})
+                    endif()
+                endforeach()
             endforeach()
         endif()
         set(_atomic_specs)

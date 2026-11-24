@@ -64,7 +64,18 @@ CASES = (
     ),
     *(
         f'flat_load_{scenario}'
-        for scenario in ('overlap', 'adjacent', 'empty', 'ordered')
+        for scenario in (
+            'overlap',
+            'adjacent',
+            'empty',
+            'ordered',
+            'offset',
+            'readread',
+        )
+    ),
+    *(
+        f'flat_store_{scenario}'
+        for scenario in ('overlap', 'adjacent', 'ordered', 'tail')
     ),
     'wide_u8',
     'wide_i8_alias_high',
@@ -743,11 +754,15 @@ class Driver:
                 )
 
     def assert_flat_observations(self, decoded, fixture):
-        _, _, scenario = fixture.split('_')
+        _, direction, scenario = fixture.split('_')
+        flat_store = direction == 'store'
         high = 1 << (self.args.wave_size - 1)
         ordered = scenario == 'ordered'
-        assert [(s['access'], s['width']) for s in decoded['sites']] == [(2, 4), (1, 4)]
-        assert decoded['sites'][1]['origin'] == 'group_flat'
+        assert [(s['access'], s['width']) for s in decoded['sites']] == [
+            (1 if scenario == 'readread' else 2, 4),
+            (1, 8 if scenario == 'tail' else 4),
+        ]
+        assert decoded['sites'][0 if flat_store else 1]['origin'] == 'group_flat'
         (execution,) = decoded['executions']
         assert (
             execution['grid_x']
@@ -774,8 +789,8 @@ class Driver:
             assert record['commit'] == 0x43534143 and record['flags'] == 1
             assert record['phase'] == int(ordered and wave == 1)
             assert (record['width'], record['offset'], record['mask']) == (
-                4,
-                1016 if wave and scenario == 'adjacent' else 1020,
+                8 if wave and scenario == 'tail' else 4,
+                1016 if wave and scenario in ('adjacent', 'tail') else 1020,
                 high,
             )
 
