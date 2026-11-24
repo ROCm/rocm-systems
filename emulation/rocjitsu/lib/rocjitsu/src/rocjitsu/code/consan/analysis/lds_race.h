@@ -24,13 +24,14 @@ struct LdsRaceParticipant {
   AccessKind access = AccessKind::Read;
   uint32_t phase = 0;
   uint32_t workgroup = 0;
+  uint32_t range_id = 0;
   bool operator==(const LdsRaceParticipant &) const = default;
 };
 
 struct LdsRaceFinding {
   LdsRaceFindingKind kind = LdsRaceFindingKind::CrossWave;
   LdsRaceParticipant first;
-  // Collision participants are the lanes in first.mask; second is unused.
+  // A collision between two range ordinals carries a second participant.
   LdsRaceParticipant second;
   uint64_t lane_pairs = 0;
   LdsRaceOrdering ordering = LdsRaceOrdering::Unordered;
@@ -107,6 +108,7 @@ struct LdsRaceResult {
   uint32_t target = 0;
   uint32_t wave_size = 0;
   ScopeKind scope = ScopeKind::NativeLdsNoSynchronization;
+  bool has_dual_ranges = false;
   // Totals over executions, using the same record-pair/group units as above.
   uint64_t ordered_pairs = 0;
   uint64_t cross_wave_pairs = 0;

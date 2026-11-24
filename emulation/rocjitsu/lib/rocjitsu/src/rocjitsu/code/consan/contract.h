@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/kernarg_extension.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/ds2_addressing.h"
 #include "rocjitsu/result.h"
 #include "util/diagnostic.h"
 
@@ -157,6 +158,21 @@ public:
   bool operator==(const ImageIdentity &) const = default;
 };
 
+enum class LdsRangeShape : uint32_t { Single = 0, Dual = 1, DualStride64 = 2 };
+
+struct LdsRangeRecipe {
+  LdsRangeShape shape = LdsRangeShape::Single;
+  uint8_t offset0 = 0;
+  uint8_t offset1 = 0;
+
+  constexpr uint32_t byte_offset(unsigned ordinal, uint32_t width) const {
+    const amdgpu::Ds2Addressing addressing{.element_bytes = width,
+                                           .stride64 = shape == LdsRangeShape::DualStride64};
+    return addressing.byte_offset(ordinal == 0 ? offset0 : offset1);
+  }
+  bool operator==(const LdsRangeRecipe &) const = default;
+};
+
 /// @brief One physical native LDS instruction, owned by the sole entry.
 /// @details Offsets are .text-relative. A zero mapping size means missing,
 /// whereas offset zero is a valid location. Both checks share this reservation.
@@ -166,10 +182,10 @@ public:
   uint32_t owner_entry = 0;
   AnalysisKind analysis = AnalysisKind::Invalid;
   RecordKind record = RecordKind::Access;
-  uint32_t range_id = 0;
   AccessKind access = AccessKind::Read;
-  // Byte count: explicitly set to 2, 4, 8 or 16. Zero is unspecified/invalid.
+  // Byte width of each range. Zero is unspecified/invalid.
   uint32_t width = 0;
+  LdsRangeRecipe lds_ranges{};
   uint64_t original_offset = 0;
   uint32_t original_size = 0;
   uint64_t prepared_guest_offset = 0;

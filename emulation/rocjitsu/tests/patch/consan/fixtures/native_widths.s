@@ -75,7 +75,11 @@
 #define MASK_AND_SAVE s_and_saveexec_b32
 #define WAVE_SHIFT 5
 #endif
+#ifdef CONSAN_DUAL_WRITE
+#define GROUP_BYTES 4096
+#else
 #define GROUP_BYTES 1024
+#endif
 #define CONSAN_MAX_WORKGROUP 1024
 #ifndef CONSAN_WIDTH
 #define CONSAN_WIDTH 16
@@ -124,7 +128,17 @@ CONSAN_KERNEL:
   LOAD64 s[6:7], s[0:1], 8
   consan_wait_all
   v_lshrrev_b32 v6, WAVE_SHIFT, v0
-#if defined(CONSAN_B8_PEER_STRIDE)
+#ifdef CONSAN_DUAL_WRITE
+#if CONSAN_COLLISION
+  v_lshlrev_b32 v1, 3, v0
+  VECTOR_ADD v1, 8, v1
+#elif CONSAN_DUAL_PEER
+  v_mov_b32 v1, 8
+#else
+  v_lshlrev_b32 v1, 5, v6
+  VECTOR_ADD v1, 8, v1
+#endif
+#elif defined(CONSAN_B8_PEER_STRIDE)
 #if CONSAN_B8_PEER_STRIDE == 0
   v_mov_b32 v1, 0
 #elif CONSAN_B8_PEER_STRIDE == 1
@@ -165,7 +179,9 @@ CONSAN_KERNEL:
   v_cmp_eq_u32 MASK_VCC, ((CONSAN_WAVE_SIZE-1)*CONSAN_HIGH), v12
 #endif
   MASK_AND_SAVE MASK_SAVE, MASK_VCC
-#if defined(CONSAN_B8_PEER_STRIDE)
+#ifdef CONSAN_DUAL_WRITE
+#include "native_dual.inc"
+#elif defined(CONSAN_B8_PEER_STRIDE)
   DS_STORE_B8 v1, v2 offset:1020
   v_and_b32 v8, 0xff, v2
 #elif CONSAN_WIDTH == 8

@@ -220,8 +220,18 @@ gfx942/gfx950 use the corresponding `ds_write_*` and `ds_read_*` names.
 Access probes capture addresses before an aliased load can overwrite them, record actual byte
 widths and byte immediates, and preserve every guest result word. For b96 the
 range spans three dwords. Its effective start must be 16-byte aligned so the
-range is independent of the launch alignment mode. Dual-range, transpose,
-FLAT, and atomic forms remain unsupported. The existing minimum fixed LDS extent remains four bytes.
+range is independent of the launch alignment mode. Transpose, FLAT and atomic
+forms remain unsupported. The minimum fixed LDS extent remains four bytes.
+
+Two-address native LDS loads and stores support 32- and 64-bit elements.
+One guest instruction produces one occurrence and shares the four sampled
+address groups across both elements. Each group records the pre-instruction
+base and lane mask. Saved site facts retain both encoded offsets in operand
+order. Replay adds each offset times the element size to the recorded base,
+with an additional factor of 64 for stride-64 forms. For example, a b32
+operation with offsets 3 and 5 covers bytes [base + 12, base + 16) and
+[base + 20, base + 24). With equal offsets, gfx942/gfx950 coalesce the access
+and a store uses DATA0.
 
 Access widths are measured in bytes. `NativeLdsAccess::width` and
 `SiteFacts::width` default to zero, meaning unspecified and invalid. Producers

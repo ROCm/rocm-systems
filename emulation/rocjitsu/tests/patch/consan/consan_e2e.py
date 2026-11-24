@@ -90,6 +90,9 @@ class AnalysisDriver(Driver):
         )
         if case == 'wide_d16_overlap':
             pairs = 8
+        dual = case.startswith('wide_dual_')
+        if dual:
+            pairs = 2 if case.endswith('_overlap') else 0
         if case.startswith('loop_'):
             pairs = 2 * {
                 'loop_no_b0': 3,
@@ -148,7 +151,9 @@ class AnalysisDriver(Driver):
         for observed, analyzed in zip(raw['executions'], result['executions']):
             assert analyzed['serial'] == observed['serial']
             assert analyzed['valid_observations'] == sum(
-                len(row['records']) for row in observed['rows']
+                len(raw['sites'][record['site']].get('range_offsets', [0]))
+                for row in observed['rows']
+                for record in row['records']
             )
             assert analyzed['rejected_records'] == 0
             assert analyzed['lost_occurrences'] == (
@@ -171,31 +176,13 @@ class AnalysisDriver(Driver):
                     'loop_no_b0_sync_loss',
                 )
             )
-            assert analyzed['cross_wave_pairs'] == (
-                self.args.workgroups
-                if case == 'grouped_race'
-                else (
-                    1
-                    if case
-                    in (
-                        'race',
-                        'repeat_race',
-                        'high_lane',
-                        'wide_b8_overlap',
-                        'wide_b96_overlap',
-                        'mixed_overlap',
-                        'mixed_b16',
-                        'barrier_missing_second',
-                    )
-                    else {
-                        'wide_d16_overlap': 8,
-                        'loop_no_b0': 3,
-                        'loop_no_b1': 2,
-                        'loop_no_b0_full_journal': 4,
-                        'loop_no_b0_sync_loss': 4,
-                    }.get(case, 0)
-                )
+            # Each repeat-race or loop fixture replays two identical launches.
+            per_launch_pairs = (
+                pairs // 2
+                if case == 'repeat_race' or case.startswith('loop_')
+                else pairs
             )
+            assert analyzed['cross_wave_pairs'] == per_launch_pairs
             assert analyzed['collision_groups'] == collisions
             if case == 'wide_d16_overlap':
                 endpoints = set()
@@ -214,6 +201,33 @@ class AnalysisDriver(Driver):
                     assert a['mask'] == b['mask'] == 1
                     endpoints.add(a['site'])
                 assert endpoints == set(range(8))
+            if dual and pairs:
+                width = 4 if '_b32_' in case else 8
+                second_offset = 8 + 5 * width * (64 if '_stride64_' in case else 1)
+                examples = analyzed['cross_wave_examples']
+                assert len(examples) == 2
+                dual_accesses = set()
+                for finding in examples:
+                    first, second = sorted(
+                        (finding['first'], finding['second']),
+                        key=lambda item: item['wave'],
+                    )
+                    assert finding['ordering'] == 'unordered'
+                    assert (first['wave'], first['range_id'], first['width']) == (
+                        0,
+                        1,
+                        width,
+                    )
+                    assert (
+                        second['wave'],
+                        second['site'],
+                        second['range_id'],
+                        second['width'],
+                    ) == (1, 2, 0, 4)
+                    assert first['offset'] == second['offset'] == second_offset
+                    assert first['mask'] == second['mask'] == 1
+                    dual_accesses.add((first['site'], first['access']))
+                assert dual_accesses == {(0, 'write'), (1, 'read')}
             if case in ('race', 'repeat_race', 'high_lane'):
                 finding = analyzed['cross_wave_examples'][0]
                 assert finding['ordering'] == 'unordered'

@@ -77,7 +77,9 @@ void encode_site(wire::Encoder &encoder, const SiteFacts &site) {
   encoder.u32(site.owner_entry);
   encoder.u32(static_cast<uint32_t>(site.analysis));
   encoder.u32(static_cast<uint32_t>(site.record));
-  encoder.u32(site.range_id);
+  // The original single-range encoding wrote zero in this word.
+  encoder.u32((static_cast<uint32_t>(site.lds_ranges.shape) << 16) |
+              (uint32_t{site.lds_ranges.offset1} << 8) | site.lds_ranges.offset0);
   encoder.u32(static_cast<uint32_t>(site.access));
   encoder.u32(site.width);
   encoder.u64(site.original_offset);
@@ -92,15 +94,19 @@ void encode_site(wire::Encoder &encoder, const SiteFacts &site) {
 bool decode_site(wire::Decoder &decoder, SiteFacts &site) {
   uint32_t analysis = 0;
   uint32_t record = 0;
+  uint32_t ranges = 0;
   uint32_t access = 0;
   if (!decoder.u32(site.id) || !decoder.u32(site.owner_entry) || !decoder.u32(analysis) ||
-      !decoder.u32(record) || !decoder.u32(site.range_id) || !decoder.u32(access) ||
+      !decoder.u32(record) || !decoder.u32(ranges) || !decoder.u32(access) ||
       !decoder.u32(site.width) || !decoder.u64(site.original_offset) ||
       !decoder.u32(site.original_size) || !decoder.u64(site.prepared_guest_offset) ||
       !decoder.u32(site.prepared_guest_size) || !decoder.u64(site.probe_offset) ||
       !decoder.u32(site.probe_size) || !decoder.u32(site.first_slot)) {
     return false;
   }
+  site.lds_ranges = {.shape = static_cast<LdsRangeShape>(ranges >> 16),
+                     .offset0 = static_cast<uint8_t>(ranges),
+                     .offset1 = static_cast<uint8_t>(ranges >> 8)};
   site.analysis = static_cast<AnalysisKind>(analysis);
   site.record = static_cast<RecordKind>(record);
   site.access = static_cast<AccessKind>(access);
@@ -242,10 +248,15 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
   uint64_t previous_original_end = 0;
   for (size_t index = 0; index < manifest.sites.size(); ++index) {
     const SiteFacts &site = manifest.sites[index];
+    const LdsRangeRecipe &ranges = site.lds_ranges;
+    const bool valid_ranges = ranges.shape == LdsRangeShape::Single
+                                  ? ranges.offset0 == 0 && ranges.offset1 == 0
+                                  : (ranges.shape == LdsRangeShape::Dual ||
+                                     ranges.shape == LdsRangeShape::DualStride64) &&
+                                        admits_bytes && (site.width == 4 || site.width == 8);
     if (site.id != index || site.owner_entry != entry.id ||
         site.analysis != AnalysisKind::LdsRaceDetection || site.record != RecordKind::Access ||
-        site.range_id != 0 ||
-        (site.access != AccessKind::Read && site.access != AccessKind::Write) ||
+        !valid_ranges || (site.access != AccessKind::Read && site.access != AccessKind::Write) ||
         (site.width != 2 && site.width != 4 && site.width != 8 && site.width != 16 &&
          (!admits_b96 || site.width != 12) && (!admits_bytes || site.width != 1)) ||
         site.original_size != 8 || site.prepared_guest_size != 8 || site.probe_size == 0 ||

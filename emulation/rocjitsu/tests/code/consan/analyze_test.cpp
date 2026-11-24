@@ -63,7 +63,7 @@ protected:
               {wire::kRecordAnalysis, uint32_t(facts.analysis)},
               {wire::kRecordKind, uint32_t(facts.record)},
               {wire::kRecordSite, site},
-              {wire::kRecordRange, facts.range_id},
+              {wire::kRecordRange, 0},
               {wire::kRecordSequence, sequence},
               {wire::kRecordLdsOffset, offset},
               {wire::kRecordWidth, facts.width},
@@ -539,6 +539,57 @@ TEST_F(ConSanAnalysis, ThreeDwordAccessRequiresNativeAlignmentAndCoversOnlyTwelv
       EXPECT_EQ(result.value().executions[0].valid_observations, start == 16 ? 2u : 1u);
       EXPECT_EQ(result.value().cross_wave_pairs, start == 16 && peer == 24 ? 1u : 0u);
     }
+  }
+}
+
+TEST_F(ConSanAnalysis, DualBaseGroupsRetainTheSharedStoreOccurrenceAndBothOrdinals) {
+  test::manifest(capture_.header).sites[0].lds_ranges = {LdsRangeShape::Dual, 3, 5};
+  access(0, 0, 1, 0, 1);
+  access(0, 0, 1, 8, 2, 1);
+  const FailureOr<LdsRaceResult> result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const LdsRaceExecutionResult &execution = result.value().executions.front();
+  EXPECT_TRUE(execution.coverage_complete);
+  EXPECT_EQ(execution.valid_observations, 4u);
+  EXPECT_EQ(execution.collision_groups, 1u);
+  EXPECT_EQ(execution.collision_lane_pairs, 1u);
+  ASSERT_EQ(execution.collision_examples.size(), 1u);
+  const LdsRaceFinding &finding = execution.collision_examples.front();
+  EXPECT_EQ(finding.first.offset, 20u);
+  EXPECT_EQ(finding.second.offset, 20u);
+  EXPECT_EQ(finding.first.range_id, 1u);
+  EXPECT_EQ(finding.second.range_id, 0u);
+  EXPECT_EQ(finding.first.mask, 1u);
+  EXPECT_EQ(finding.second.mask, 2u);
+}
+
+TEST_F(ConSanAnalysis, InvalidSecondRangeRetainsTheFirstValidConflict) {
+  test::manifest(capture_.header).sites[0].lds_ranges = {LdsRangeShape::DualStride64, 0, 255};
+  access(0, 0, 1, 16);
+  access(1, 1, 1, 16);
+  const FailureOr<LdsRaceResult> result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const LdsRaceExecutionResult &execution = result.value().executions.front();
+  EXPECT_FALSE(execution.coverage_complete);
+  EXPECT_EQ(execution.rejected_records, 1u);
+  EXPECT_EQ(execution.valid_observations, 2u);
+  EXPECT_EQ(execution.cross_wave_pairs, 1u);
+}
+
+TEST_F(ConSanAnalysis, CoincidentOffsetsFollowTargetRequestSemantics) {
+  Manifest &manifest = test::manifest(capture_.header);
+  for (uint32_t target : {950u, 1100u}) {
+    manifest.target = target;
+    manifest.wave_size = 64;
+    manifest.sites[0].lds_ranges = {LdsRangeShape::Dual, 3, 3};
+    capture_.executions.clear();
+    append_execution({{128, 1, 1}, {128, 1, 1}});
+    access(0, 0, 1, 0);
+    access(1, 1, 1, 12);
+    const FailureOr<LdsRaceResult> result = analyze();
+    ASSERT_TRUE(result.succeeded()) << error_.message();
+    EXPECT_EQ(result.value().cross_wave_pairs, target == 950 ? 1u : 2u);
+    EXPECT_EQ(result.value().collision_groups, 0u);
   }
 }
 
@@ -2146,6 +2197,26 @@ TEST_F(ConSanAnalysis, LargeTruncatedLoopCountsKeepDistinctLatePhasesAggregated)
     EXPECT_EQ(execution.unresolved_examples.size(), examples);
     EXPECT_FALSE(execution.coverage_complete);
   }
+}
+
+TEST_F(ConSanAnalysis, SecondSelectedEntryContributesDualRangeMetadata) {
+  capture_.header = test::multi_entry_header();
+  capture_.executions.clear();
+  Manifest &second = *capture_.header.image.entries[1].selected;
+  second.sites[0].lds_ranges = {LdsRangeShape::Dual, 3, 5};
+  CapturedExecution execution = test::execution(second, 1);
+  for (uint32_t wave = 0; wave < 2; ++wave) {
+    wire::write_u32(execution.report, row(wave) + wire::kRowStatus,
+                    wire::kRowEntered | wire::kRowExited);
+  }
+  capture_.executions.push_back(std::move(execution));
+  access(0, 0, 1);
+  const FailureOr<LdsRaceResult> result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  EXPECT_TRUE(result.value().has_dual_ranges);
+  ASSERT_EQ(result.value().executions.size(), 1u);
+  EXPECT_EQ(result.value().executions.front().entry_key, second.entry.original_descriptor_offset);
+  EXPECT_EQ(result.value().executions.front().valid_observations, 2u);
 }
 
 TEST_F(ConSanAnalysis, SameImageEntriesUseTheirOwnFactsAndRepeatAttribution) {

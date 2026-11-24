@@ -54,6 +54,12 @@ CORE_WIDTH_CASES = (
     'wide_u16',
     'wide_i16',
     'wide_b64',
+    *(
+        f'wide_dual_b{bits}_{spacing}_{scenario}'
+        for bits in (32, 64)
+        for spacing in ('normal', 'stride64')
+        for scenario in ('values_high', 'overlap', 'gap')
+    ),
     'wide_b96',
     'wide_b96_alias_high',
     'wide_b96_overlap',

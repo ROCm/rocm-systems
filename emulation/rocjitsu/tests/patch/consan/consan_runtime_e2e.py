@@ -65,6 +65,12 @@ CASES = (
     'wide_u16',
     'wide_i16',
     'wide_b64',
+    *(
+        f'wide_dual_b{bits}_{spacing}_{scenario}'
+        for bits in (32, 64)
+        for spacing in ('normal', 'stride64')
+        for scenario in ('values_high', 'overlap', 'gap')
+    ),
     'wide_b96',
     'wide_b96_alias_high',
     'wide_b96_overlap',
@@ -333,6 +339,9 @@ class Driver:
             mode = 'wide_b8_peer'
         if fixture_name == 'wide_i8_alias_high':
             mode = 'wide_i8'
+        if fixture_name.startswith('wide_dual_'):
+            # A dual b32 operation returns two dwords, a dual b64 four.
+            mode = 'wide_b64' if '_b32_' in fixture_name else 'wide_b128'
         if fixture_name.startswith('wide_b96'):
             mode = 'wide_b96'
         if fixture_name == 'mixed_barrier':
@@ -592,6 +601,9 @@ class Driver:
         if fixture.startswith('loop_'):
             self.assert_loop_observations(decoded, fixture)
             return
+        if fixture.startswith('wide_dual_'):
+            self.assert_dual_observations(decoded, fixture)
+            return
         if fixture.startswith(('wide_', 'mixed_')):
             self.assert_width_observations(decoded, fixture)
             return
@@ -765,6 +777,53 @@ class Driver:
             assert decoded['sites'][site_id]['access'] == kind
             assert decoded['sites'][site_id]['width'] == record['width'] == width
             assert record['offset'] == address and record['mask'] == mask
+
+    def assert_dual_observations(self, decoded, fixture):
+        width = 4 if '_b32_' in fixture else 8
+        scale = width * (64 if '_stride64_' in fixture else 1)
+        offsets = [3 * scale, 5 * scale]
+        values = fixture.endswith('_values_high')
+        mask = 1 << (self.args.wave_size - 1) if values else 1
+        if values:
+            # Wave zero seeds the two elements with independent ordinary writes.
+            # Wave one reads both elements back with independent ordinary loads.
+            sites = [
+                (2, width),
+                (2, width),
+                (1, width),
+                (2, width),
+                (1, width),
+                (1, width),
+            ]
+            dual_sites = (2, 3)
+            rows = [
+                [(0, 8 + offsets[0]), (1, 8 + offsets[1]), (2, 8)],
+                [(3, 40), (4, 40 + offsets[0]), (5, 40 + offsets[1])],
+                [],
+            ]
+        else:
+            sites = [(2, width), (1, width), (2, 4)]
+            dual_sites = (0, 1)
+            peer = 8 + (5 if fixture.endswith('_overlap') else 4) * scale
+            rows = [[(0, 8), (1, 8)], [(2, peer)]]
+        assert [(site['access'], site['width']) for site in decoded['sites']] == sites
+        for ordinal in dual_sites:
+            assert decoded['sites'][ordinal]['range_offsets'] == offsets
+        for execution in decoded['executions']:
+            assert len(execution['rows']) == len(rows)
+            for wave, (row, expected) in enumerate(zip(execution['rows'], rows)):
+                assert row['wave'] == wave
+                assert row['status'] == ROW_ENTERED | ROW_EXITED and row['loss'] == 0
+                assert row['final_sequence'] == len(expected) == len(row['records'])
+                for sequence, (record, (site, base)) in enumerate(
+                    zip(row['records'], expected), 1
+                ):
+                    assert (record['site'], record['offset'], record['width']) == (
+                        site,
+                        base,
+                        sites[site][1],
+                    )
+                    assert record['sequence'] == sequence and record['mask'] == mask
 
     def assert_width_observations(self, decoded, fixture):
         wave_size = self.args.wave_size

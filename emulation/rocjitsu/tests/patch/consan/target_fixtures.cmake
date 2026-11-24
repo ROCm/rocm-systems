@@ -176,6 +176,58 @@ foreach(
             )
             list(APPEND _target_fixtures ${_image})
         endforeach()
+        set(_dual_specs)
+        foreach(_bits IN ITEMS 32 64)
+            foreach(_spacing IN ITEMS normal stride64)
+                set(_suffix "")
+                if(_legacy)
+                    if(_spacing STREQUAL "stride64")
+                        set(_suffix st64)
+                    endif()
+                    set(_dual_read ds_read2${_suffix}_b${_bits})
+                    set(_dual_write ds_write2${_suffix}_b${_bits})
+                else()
+                    if(_spacing STREQUAL "stride64")
+                        set(_suffix _stride64)
+                    endif()
+                    set(_dual_read ds_load_2addr${_suffix}_b${_bits})
+                    set(_dual_write ds_store_2addr${_suffix}_b${_bits})
+                endif()
+                math(EXPR _scale "${_bits} / 8")
+                if(_spacing STREQUAL "stride64")
+                    math(EXPR _scale "${_scale} * 64")
+                endif()
+                set(_dual_cases values-high overlap gap)
+                if(_bits EQUAL 32 AND _spacing STREQUAL "normal")
+                    list(APPEND _dual_cases collision)
+                endif()
+                foreach(_case IN LISTS _dual_cases)
+                    set(_name dual-b${_bits}-${_spacing}-${_case})
+                    set(_high 0)
+                    set(_peer 0)
+                    set(_colliding 0)
+                    if(_case STREQUAL "values-high")
+                        set(_high 1)
+                    elseif(_case STREQUAL "collision")
+                        set(_colliding 1)
+                    elseif(_case STREQUAL "overlap")
+                        set(_peer 5)
+                    else()
+                        set(_peer 4)
+                    endif()
+                    list(
+                        APPEND _dual_specs
+                        ${_name}:${_bits}:0:${_high}:0:${_colliding}
+                    )
+                    set(_dual_options_${_name}
+                        -DCONSAN_DUAL_READ=${_dual_read}
+                        -DCONSAN_DUAL_WRITE=${_dual_write}
+                        -DCONSAN_DUAL_SCALE=${_scale}
+                        -DCONSAN_DUAL_PEER=${_peer}
+                    )
+                endforeach()
+            endforeach()
+        endforeach()
         foreach(
             _spec
             IN
@@ -190,6 +242,7 @@ foreach(
                 b128-high:128:0:1:0:0
                 b128-alias:128:0:0:1:0
                 b64-collision:64:0:0:0:1
+                ${_dual_specs}
                 u8:8:0:0:0:0
                 i8-alias-high:8:1:1:1:0
                 b8-overlap:8:0:0:0:0:0
@@ -252,12 +305,13 @@ foreach(
                     -DCONSAN_GFX12=${_gfx12} -DCONSAN_WIDTH=${_width}
                     -DCONSAN_SIGNED=${_signed} -DCONSAN_HIGH=${_high}
                     -DCONSAN_ALIAS=${_alias} -DCONSAN_COLLISION=${_collision}
-                    ${_peer_option} -c
+                    ${_peer_option} ${_dual_options_${_name}} -c
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native_widths.s -o
                     ${_object}
                 DEPENDS
                     fixtures/native_widths.s
                     fixtures/native_d16.inc
+                    fixtures/native_dual.inc
                     ${AMDCXX}
                 VERBATIM
             )

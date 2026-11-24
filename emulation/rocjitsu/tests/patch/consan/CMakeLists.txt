@@ -519,6 +519,19 @@ if(TARGET consan_hsa_runner)
                         wide_d16_${_peer} ${_threads} production analysis
                     )
                 endforeach()
+                foreach(_bits IN ITEMS 32 64)
+                    foreach(_spacing IN ITEMS normal stride64)
+                        set(_dual wide_dual_b${_bits}_${_spacing})
+                        consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                            ${_dual}_values_high ${_width_threads} production analysis
+                        )
+                        foreach(_peer IN ITEMS overlap gap)
+                            consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                                ${_dual}_${_peer} ${_threads} production analysis
+                            )
+                        endforeach()
+                    endforeach()
+                endforeach()
                 foreach(_peer IN ITEMS overlap adjacent disjoint)
                     consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
                         wide_b8_${_peer} ${_threads} production analysis

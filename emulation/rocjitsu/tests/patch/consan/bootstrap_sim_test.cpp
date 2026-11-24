@@ -1158,6 +1158,14 @@ public:
     switch (instruction.amdgpu_operation()) {
     case amdgpu::Operation::DS_STORE_B8:
     case amdgpu::Operation::DS_WRITE_B8:
+    case amdgpu::Operation::DS_STORE_2ADDR_B32:
+    case amdgpu::Operation::DS_STORE_2ADDR_STRIDE64_B32:
+    case amdgpu::Operation::DS_WRITE2_B32:
+    case amdgpu::Operation::DS_WRITE2ST64_B32:
+    case amdgpu::Operation::DS_STORE_2ADDR_B64:
+    case amdgpu::Operation::DS_STORE_2ADDR_STRIDE64_B64:
+    case amdgpu::Operation::DS_WRITE2_B64:
+    case amdgpu::Operation::DS_WRITE2ST64_B64:
     case amdgpu::Operation::DS_STORE_B96:
     case amdgpu::Operation::DS_WRITE_B96:
       ++counts_.at(wave.wave_in_group())[0];
@@ -1166,6 +1174,14 @@ public:
     case amdgpu::Operation::DS_READ_I8:
     case amdgpu::Operation::DS_LOAD_U8:
     case amdgpu::Operation::DS_READ_U8:
+    case amdgpu::Operation::DS_LOAD_2ADDR_B32:
+    case amdgpu::Operation::DS_LOAD_2ADDR_STRIDE64_B32:
+    case amdgpu::Operation::DS_READ2_B32:
+    case amdgpu::Operation::DS_READ2ST64_B32:
+    case amdgpu::Operation::DS_LOAD_2ADDR_B64:
+    case amdgpu::Operation::DS_LOAD_2ADDR_STRIDE64_B64:
+    case amdgpu::Operation::DS_READ2_B64:
+    case amdgpu::Operation::DS_READ2ST64_B64:
     case amdgpu::Operation::DS_LOAD_B96:
     case amdgpu::Operation::DS_READ_B96:
       ++counts_.at(wave.wave_in_group())[1];
@@ -1178,6 +1194,71 @@ public:
 private:
   std::vector<std::array<unsigned, 2>> &counts_;
 };
+
+TEST_P(ConSanTargetSim, DualInstructionsExecuteOnceAndPreserveAllGuestRegisters) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size + 1;
+  for (const unsigned bits : {32u, 64u}) {
+    for (const char *spacing : {"normal", "stride64"}) {
+      const std::string fixture =
+          "width-dual-b" + std::to_string(bits) + "-" + spacing + "-values-high";
+      SCOPED_TRACE(fixture);
+      RunResult before, after;
+      std::vector<std::array<unsigned, 2>> before_counts(3), after_counts(3);
+      ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true, 4, false,
+                                  1, std::make_unique<NativeWidthIssueCounter>(before_counts)));
+      ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true, 4,
+                                  false, 1,
+                                  std::make_unique<NativeWidthIssueCounter>(after_counts)));
+      expect_guest_state(before, after);
+      EXPECT_EQ(before_counts, (std::vector<std::array<unsigned, 2>>{{0, 1}, {1, 0}, {0, 0}}));
+      EXPECT_EQ(after_counts, before_counts);
+      const std::vector<uint32_t> expected = {7,
+                                              0x89abcdefu,
+                                              bits == 32 ? 0x76543210u : 0x13579bdfu,
+                                              bits == 32 ? 0xa5a5a5a5u : 0xfedcba98u,
+                                              8,
+                                              0x89abcdefu,
+                                              bits == 32 ? 0x76543210u : 0x13579bdfu,
+                                              bits == 32 ? 0xa5a5a5a5u : 0xfedcba98u,
+                                              0,
+                                              0,
+                                              0,
+                                              0};
+      EXPECT_EQ(before.full_output, expected);
+      EXPECT_EQ(after.full_output, expected);
+    }
+  }
+}
+
+#ifdef CONSAN_ANALYZER_ENABLED
+TEST_P(ConSanTargetSim, DualStoreCollisionMatchesDifferentOrdinalsInDistinctLaneGroups) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = target.wave_size;
+  RunResult after;
+  ASSERT_NO_FATAL_FAILURE(run("width-dual-b32-normal-collision", Bootstrap::Instrumented, after,
+                              target, threads, true, 4));
+  const CapturedExecution execution = {.serial = 41,
+                                       .dimensions = {{threads, 1, 1}, {threads, 1, 1}},
+                                       .group_bytes = after.manifest.entry.prepared_group_bytes,
+                                       .arguments = {},
+                                       .report = after.report};
+  const LdsRaceExecutionResult analysis = analyze_lds_race_execution(after.manifest, execution, 4);
+  EXPECT_TRUE(analysis.coverage_complete);
+  EXPECT_EQ(analysis.valid_observations, 4u);
+  EXPECT_EQ(analysis.cross_wave_pairs, 0u);
+  EXPECT_EQ(analysis.collision_groups, 1u);
+  EXPECT_EQ(analysis.collision_lane_pairs, 1u);
+  ASSERT_EQ(analysis.collision_examples.size(), 1u);
+  const LdsRaceFinding &example = analysis.collision_examples.front();
+  EXPECT_EQ(example.first.offset, 28u);
+  EXPECT_EQ(example.second.offset, 28u);
+  EXPECT_EQ(example.first.mask | example.second.mask, 3u);
+  EXPECT_NE(example.first.mask, example.second.mask);
+  EXPECT_EQ(example.first.range_id, example.first.mask == 1 ? 1u : 0u);
+  EXPECT_EQ(example.second.range_id, example.second.mask == 1 ? 1u : 0u);
+}
+#endif
 
 TEST_P(ConSanTargetSim, B96PreservesThreeWordsAndRecordsThePreGuestAddressOnce) {
   const test::TargetMode target = GetParam();
