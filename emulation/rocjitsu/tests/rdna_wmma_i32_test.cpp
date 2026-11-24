@@ -45,15 +45,17 @@ TEST(RdnaWmmaI32, IntermediateSaturation) {
     for (uint32_t lane = 0; lane < 32; ++lane) {
       iu4[0][lane] = 0x88887777u;
       iu4[8][lane] = iu4[9][lane] = 0x77777777u;
-      for (uint32_t reg = 16; reg < 24; ++reg)
+      for (uint32_t reg = 16; reg < 24; ++reg) {
         iu4[reg][lane] = 0x7ffffff5u;
+      }
     }
     check(rocjitsu::IsaFamily::Rdna3, 32, {0xcc45c018u, 0x7c421100u}, 0xf0, iu4,
           {{0, 0x7fffff1fu}, {255, 0x7fffff1fu}});
     // Inline -1 must not be confused with the sentinel for reading C from a VGPR.
     Registers inline_c{};
-    for (uint32_t reg = 24; reg < 32; ++reg)
+    for (uint32_t reg = 24; reg < 32; ++reg) {
       inline_c[reg].fill(0x55u);
+    }
     check(rocjitsu::IsaFamily::Rdna4, 32, {0xcc444018u, 0x03061100u}, 0xf0, inline_c,
           {{0, 0xffffffffu}, {255, 0xffffffffu}});
   }

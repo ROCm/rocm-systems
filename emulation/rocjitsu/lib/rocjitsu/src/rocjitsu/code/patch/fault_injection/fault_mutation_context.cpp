@@ -37,24 +37,27 @@ Result reject_fault_mutation(FaultMutationError &error, FaultMutationErrorCode c
 
 Result validate_fault_mutation_source_header(std::span<const uint8_t> image, Elf64_Ehdr &header,
                                              FaultMutationError &error) {
-  if (image.size() < sizeof(header))
+  if (image.size() < sizeof(header)) {
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                  "truncated ELF header");
+  }
   std::memcpy(&header, image.data(), sizeof(header));
   if (std::memcmp(header.e_ident, EI_MAGIC, EI_MAGIC_SIZE) != 0 ||
       header.e_ident[EI_CLASS] != ELFCLASS64 || header.e_ident[EI_DATA] != ELFDATA2LSB ||
       header.e_ident[EI_OSABI] != ELFOSABI_AMDGPU_HSA || header.e_type != ET_DYN ||
-      header.e_machine != EM_AMDGPU)
+      header.e_machine != EM_AMDGPU) {
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                  "expected little-endian AMDHSA ET_DYN ELF64");
+  }
   return Result::success();
 }
 
 FaultMutationError translate_fault_mutation_edit_error(const TextEditError &edit) {
-  if (edit.code == TextEditErrorCode::UnsupportedTarget)
+  if (edit.code == TextEditErrorCode::UnsupportedTarget) {
     return {.code = FaultMutationErrorCode::UnsupportedTarget,
             .offset = edit.offset,
             .message = edit.message};
+  }
   const bool unsupported = edit.code == TextEditErrorCode::UnsupportedReferences ||
                            edit.code == TextEditErrorCode::Clause ||
                            edit.code == TextEditErrorCode::InvalidInstruction ||
@@ -72,36 +75,44 @@ namespace {
 std::optional<uint64_t> resolve_file_backed_address(std::span<const Elf64_Phdr> segments,
                                                     uint64_t offset, uint64_t size,
                                                     uint32_t required_flags) {
-  if (size == 0)
+  if (size == 0) {
     return std::nullopt;
+  }
   const Elf64_Phdr *mapping = nullptr;
   uint64_t address = 0;
   for (const Elf64_Phdr &segment : segments) {
-    if (segment.p_type != PT_LOAD || offset < segment.p_offset)
+    if (segment.p_type != PT_LOAD || offset < segment.p_offset) {
       continue;
+    }
     const uint64_t delta = offset - segment.p_offset;
-    if (delta > segment.p_filesz || size > segment.p_filesz - delta)
+    if (delta > segment.p_filesz || size > segment.p_filesz - delta) {
       continue;
-    if (mapping || (segment.p_flags & required_flags) != required_flags)
+    }
+    if (mapping || (segment.p_flags & required_flags) != required_flags) {
       return std::nullopt;
+    }
     mapping = &segment;
     address = segment.p_vaddr + delta;
   }
-  if (!mapping)
+  if (!mapping) {
     return std::nullopt;
+  }
   // A partial file alias can load these bytes at a disjoint address outside the
   // analyzed ownership scope. Reject it independently of virtual overlap, then
   // check memory ranges including zero-fill tails. Neither check depends on the
   // segment order or a particular loader's policy.
   for (const Elf64_Phdr &segment : segments) {
-    if (&segment == mapping || segment.p_type != PT_LOAD)
+    if (&segment == mapping || segment.p_type != PT_LOAD) {
       continue;
+    }
     if (segment.p_filesz != 0 && segment.p_offset < offset + size &&
-        (segment.p_offset >= offset || segment.p_filesz > offset - segment.p_offset))
+        (segment.p_offset >= offset || segment.p_filesz > offset - segment.p_offset)) {
       return std::nullopt;
+    }
     if (segment.p_memsz != 0 && segment.p_vaddr < address + size &&
-        (segment.p_vaddr >= address || segment.p_memsz > address - segment.p_vaddr))
+        (segment.p_vaddr >= address || segment.p_memsz > address - segment.p_vaddr)) {
       return std::nullopt;
+    }
   }
   return address;
 }
@@ -116,15 +127,17 @@ Result validate_descriptor_relocation_writes(std::span<const uint8_t> image,
                                              FaultMutationError &error) {
   for (const Elf64_Shdr &section : sections) {
     if (classify_rocr_relocation_section(header, sections, section) !=
-        RocrRelocationSectionMode::Dynamic)
+        RocrRelocationSectionMode::Dynamic) {
       continue;
+    }
     // ROCr materializes complete contiguous RELA records, including those before
     // a partial tail. Source admission has already validated their file extents.
     const std::optional<std::vector<Elf64_Rela>> relocations = read_elf_table<Elf64_Rela>(
         image, section.sh_offset, section.sh_size / sizeof(Elf64_Rela), sizeof(Elf64_Rela));
-    if (!relocations)
+    if (!relocations) {
       return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                    "unreadable dynamic relocations for kernel descriptors");
+    }
     for (const Elf64_Rela &relocation : *relocations) {
       const std::optional<uint64_t> write_size =
           rocr_dynamic_relocation_write_size(elf_reloc_type(relocation.r_info));
@@ -138,9 +151,10 @@ Result validate_descriptor_relocation_writes(std::span<const uint8_t> image,
             relocation.r_offset >= address
                 ? relocation.r_offset - address < sizeof(amdhsa::kernel_descriptor_t)
                 : *write_size > address - relocation.r_offset;
-        if (overlaps)
+        if (overlaps) {
           return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                        "dynamic relocation writes a kernel descriptor");
+        }
       }
     }
   }
@@ -166,40 +180,47 @@ Result FaultMutationContext::analyze() const {
   const AmdGpuCodeObject &object = source();
   const rj_code_target_id_t target = object.target_id();
   Elf64_Ehdr header = {};
-  if (validate_fault_mutation_source_header(image, header, error).failed())
+  if (validate_fault_mutation_source_header(image, header, error).failed()) {
     return Result::failure();
+  }
   const IsaTargetRegistry &registry = default_isa_target_registry();
   const IsaTargetDescriptor *target_facts = registry.find(target);
   const IsaTargetBinding *binding = registry.find_target(target);
   if (!target_facts || !binding || (header.e_flags & EF_AMDGPU_MACH) != binding->elf_machine ||
-      (header.e_flags & ~uint32_t{0xfff}) != 0)
+      (header.e_flags & ~uint32_t{0xfff}) != 0) {
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedTarget,
                                  "requires a registered target with matching ELF flags");
-  if (!object.is_valid())
+  }
+  if (!object.is_valid()) {
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                  "invalid code object");
-  if (object.text_sections().size() != 1)
+  }
+  if (object.text_sections().size() != 1) {
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                  "requires one executable .text; multi-text is unsupported");
+  }
   const Section &text = *object.text_sections().front();
-  if ((text.flags() & (SHF_ALLOC | SHF_EXECINSTR)) != (SHF_ALLOC | SHF_EXECINSTR))
+  if ((text.flags() & (SHF_ALLOC | SHF_EXECINSTR)) != (SHF_ALLOC | SHF_EXECINSTR)) {
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                  "selected .text must be allocated and executable");
+  }
   // Establish load correspondence for every hardware entry, including siblings.
   // Section-relative descriptor facts alone do not prove a loader uses those bytes.
   const std::vector<KernelDescriptorInfo> kernels =
       scan_kernel_descriptors(image, text.sectionOffset(), text.size(), text.sectionHeaderIndex());
   const std::optional<std::vector<Elf64_Phdr>> segments =
       read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
-  if (!segments)
+  if (!segments) {
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                  "invalid program headers");
+  }
   const std::optional<uint64_t> text_address =
       resolve_file_backed_address(*segments, text.sectionOffset(), text.size(), PF_X);
-  if (!text_address || *text_address != text.vaddr())
+  if (!text_address || *text_address != text.vaddr()) {
     return reject_fault_mutation(
         error, FaultMutationErrorCode::UnsupportedForm,
         "requires unambiguous file-backed executable .text at its declared address");
+  }
   // Loaded VAs of complete descriptors whose file facts define owner admission.
   std::vector<uint64_t> descriptor_addresses;
   descriptor_addresses.reserve(kernels.size());
@@ -211,13 +232,15 @@ Result FaultMutationContext::analyze() const {
             ? add_signed_offset(*descriptor_address, owner.descriptor.kernel_code_entry_byte_offset)
             : std::nullopt;
     // The scanner has already checked each section-based entry extent.
-    if (!loaded_entry || *loaded_entry != text.vaddr() + owner.entry_text_offset)
+    if (!loaded_entry || *loaded_entry != text.vaddr() + owner.entry_text_offset) {
       return reject_fault_mutation(
           error, FaultMutationErrorCode::UnsupportedForm,
           "descriptor load mapping does not resolve to its analyzed entry");
-    if (kernarg_preload_length(owner.descriptor) != 0)
+    }
+    if (kernarg_preload_length(owner.descriptor) != 0) {
       return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                    "firmware preload ownership requires additional entry analysis");
+    }
     descriptor_addresses.push_back(*descriptor_address);
   }
 
@@ -234,39 +257,47 @@ Result FaultMutationContext::analyze() const {
   }
   const std::optional<std::vector<Elf64_Shdr>> section_headers =
       read_elf_table<Elf64_Shdr>(image, header.e_shoff, header.e_shnum, header.e_shentsize);
-  if (!section_headers)
+  if (!section_headers) {
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                  "invalid section headers");
+  }
   const std::span<const Elf64_Shdr> sections = *section_headers;
   if (validate_descriptor_relocation_writes(image, header, sections, descriptor_addresses, error)
-          .failed())
+          .failed()) {
     return Result::failure();
+  }
   for (const Elf64_Shdr &section : sections) {
-    if (section.sh_type != SHT_SYMTAB && section.sh_type != SHT_DYNSYM)
+    if (section.sh_type != SHT_SYMTAB && section.sh_type != SHT_DYNSYM) {
       continue;
-    if (section.sh_entsize != sizeof(Elf64_Sym) || section.sh_size % sizeof(Elf64_Sym) != 0)
+    }
+    if (section.sh_entsize != sizeof(Elf64_Sym) || section.sh_size % sizeof(Elf64_Sym) != 0) {
       return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                    "malformed symbol table");
+    }
     const std::optional<std::vector<Elf64_Sym>> symbols = read_elf_table<Elf64_Sym>(
         image, section.sh_offset, section.sh_size / sizeof(Elf64_Sym), section.sh_entsize);
-    if (!symbols || section.sh_link >= sections.size())
+    if (!symbols || section.sh_link >= sections.size()) {
       return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                    "invalid symbol table range");
+    }
     const Elf64_Shdr &strings = sections[section.sh_link];
     if (strings.sh_type != SHT_STRTAB || strings.sh_offset > image.size() ||
-        strings.sh_size > image.size() - strings.sh_offset)
+        strings.sh_size > image.size() - strings.sh_offset) {
       return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                    "invalid symbol string table");
+    }
     for (const Elf64_Sym &symbol : *symbols) {
-      if (symbol.st_name >= strings.sh_size)
+      if (symbol.st_name >= strings.sh_size) {
         return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                      "invalid symbol name");
+      }
       const char *name =
           reinterpret_cast<const char *>(image.data() + strings.sh_offset + symbol.st_name);
       const void *end = std::memchr(name, 0, strings.sh_size - symbol.st_name);
-      if (!end)
+      if (!end) {
         return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                      "unterminated symbol name");
+      }
       const std::string_view symbol_name(name, static_cast<const char *>(end) - name);
       // The scanner omits malformed descriptors. Every declared owner must
       // resolve before all-entry boundaries can establish exclusive ownership.
@@ -274,33 +305,37 @@ Result FaultMutationContext::analyze() const {
         if (symbol.st_shndx >= sections.size() ||
             symbol.st_size != sizeof(amdhsa::kernel_descriptor_t) ||
             elf_symbol_type(symbol.st_info) != kElfSymbolTypeObject ||
-            elf_symbol_bind(symbol.st_info) != kElfSymbolBindGlobal)
+            elf_symbol_bind(symbol.st_info) != kElfSymbolBindGlobal) {
           return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                        "unresolved descriptor owner");
+        }
         const Elf64_Shdr &owner = sections[symbol.st_shndx];
         if (owner.sh_type == SHT_NOBITS || symbol.st_value < owner.sh_addr ||
             symbol.st_value - owner.sh_addr > owner.sh_size ||
             symbol.st_size > owner.sh_size - (symbol.st_value - owner.sh_addr) ||
-            owner.sh_offset > image.size() || owner.sh_size > image.size() - owner.sh_offset)
+            owner.sh_offset > image.size() || owner.sh_size > image.size() - owner.sh_offset) {
           return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                        "invalid descriptor owner");
+        }
         const uint64_t file_offset = owner.sh_offset + (symbol.st_value - owner.sh_addr);
         if (!std::ranges::any_of(kernels, [&](const KernelDescriptorInfo &candidate) {
               return candidate.kernel_name == symbol_name.substr(0, symbol_name.size() - 3) &&
                      candidate.descriptor_file_offset == file_offset;
-            }))
+            })) {
           return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                        "descriptor symbol was omitted from the owner inventory");
+        }
       }
       const uint8_t type = elf_symbol_type(symbol.st_info);
       if (symbol.st_shndx != text.sectionHeaderIndex()) {
         if ((type == kElfSymbolTypeFunc || type == kElfSymbolTypeAmdGpuHsaKernel) &&
             symbol.st_shndx < sections.size() &&
             (sections[symbol.st_shndx].sh_flags & (SHF_ALLOC | SHF_EXECINSTR)) ==
-                (SHF_ALLOC | SHF_EXECINSTR))
+                (SHF_ALLOC | SHF_EXECINSTR)) {
           return reject_fault_mutation(
               error, FaultMutationErrorCode::UnsupportedForm,
               "executable owners outside .text require broader ownership analysis");
+        }
         continue;
       }
       const bool external = elf_symbol_bind(symbol.st_info) != kElfSymbolBindLocal;
@@ -309,41 +344,46 @@ Result FaultMutationContext::analyze() const {
            (symbol.st_value < text.vaddr() ||
             !std::ranges::any_of(kernels, [&](const KernelDescriptorInfo &candidate) {
               return symbol.st_value - text.vaddr() == candidate.entry_text_offset;
-            }))))
+            })))) {
         return reject_fault_mutation(
             error, FaultMutationErrorCode::UnsupportedForm,
             "separate function/data owners inside .text are outside this profile");
+      }
     }
   }
   // Build Reachable / ExplicitOnly CFG facts from all descriptor entries. Starting
   // only at the selected entry would hide cross-kernel or shared-block ownership;
   // these reachability facts cannot replace the full-text structural scan above.
   std::unique_ptr<Decoder> decoder = Decoder::create(registry, target);
-  if (!decoder)
+  if (!decoder) {
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedTarget,
                                  "concrete target decoder unavailable");
+  }
   std::vector<uint64_t> entries;
   std::unordered_set<uint64_t> all_entries;
   for (const KernelDescriptorInfo &owner : kernels) {
-    if (!all_entries.insert(owner.entry_text_offset).second)
+    if (!all_entries.insert(owner.entry_text_offset).second) {
       return reject_fault_mutation(error, FaultMutationErrorCode::AmbiguousSelection,
                                    "kernel descriptors alias one hardware entry");
+    }
     entries.push_back(owner.entry_text_offset);
   }
   util::StringDiagnostic diagnostic;
   FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks = BasicBlock::build_reachable(
       object, *decoder, target_facts->family, entries, diagnostic.emitter(), {}, {}, {}, target);
-  if (blocks.failed())
+  if (blocks.failed()) {
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                  diagnostic.message());
+  }
   const BlockOffsetIndex index = build_block_offset_index(blocks.value());
   const BlockPositionIndex positions = build_block_position_index(blocks.value());
   std::unordered_map<const BasicBlock *, uint64_t> block_owners;
   for (const KernelDescriptorInfo &owner : kernels) {
     BasicBlock *root = block_for_offset(index, owner.entry_text_offset);
-    if (!root || root->start_offset() != owner.entry_text_offset)
+    if (!root || root->start_offset() != owner.entry_text_offset) {
       return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                    "entry is not a block start");
+    }
     const KernelScopeSpec scope_spec = {.kernel_entries = all_entries,
                                         .own_entries = {owner.entry_text_offset},
                                         .address_taken_entries = {}};
@@ -352,27 +392,31 @@ Result FaultMutationContext::analyze() const {
     for (BasicBlock *block : scope) {
       const std::pair<std::unordered_map<const BasicBlock *, uint64_t>::iterator, bool> inserted =
           block_owners.emplace(block, owner.entry_text_offset);
-      if (!inserted.second && inserted.first->second != owner.entry_text_offset)
+      if (!inserted.second && inserted.first->second != owner.entry_text_offset) {
         return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                      "shared reachable blocks require broader ownership analysis",
                                      block->start_offset());
+      }
       if (block->successor_issue() != BasicBlock::SuccessorIssue::None ||
-          block->has_implicit_terminator() || !block->call_edges().empty())
+          block->has_implicit_terminator() || !block->call_edges().empty()) {
         return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                      "kernel ownership requires a closed direct CFG",
                                      block->start_offset());
+      }
       for (const BasicBlock *successor : block->successors()) {
         if (all_entries.contains(successor->start_offset()) &&
-            successor->start_offset() != owner.entry_text_offset)
+            successor->start_offset() != owner.entry_text_offset) {
           return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                        "control flow crosses another kernel entry",
                                        block->start_offset());
+        }
       }
       for (const Instruction &instruction : block->instructions()) {
         if ((instruction.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 ||
-            (is_control_flow_transfer(instruction) && !instruction.branch_offset_bytes()))
+            (is_control_flow_transfer(instruction) && !instruction.branch_offset_bytes())) {
           return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                        "indirect owner is unsupported", instruction.src_loc());
+        }
       }
     }
     state_->sources.push_back({.section = {.index = *text.sectionHeaderIndex(),
@@ -386,9 +430,10 @@ Result FaultMutationContext::analyze() const {
                                .blocks = std::move(scope),
                                .boundaries = boundaries});
   }
-  if (block_owners.size() != blocks.value().size())
+  if (block_owners.size() != blocks.value().size()) {
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                  "unresolved code ownership");
+  }
   state_->blocks = std::move(blocks).value();
   return Result::success();
 }
@@ -403,13 +448,15 @@ FaultMutationContext::source_facts(std::string_view entry, FaultMutationError &e
   }
   const std::ptrdiff_t matches = std::ranges::count_if(
       state_->sources, [&](const FaultSourceFacts &facts) { return facts.owner.entry == entry; });
-  if (matches > 1)
+  if (matches > 1) {
     return reject_fault_mutation(error, FaultMutationErrorCode::AmbiguousSelection,
                                  "exact entry name identifies multiple descriptors");
+  }
   if (entry.empty() || matches == 0) {
     std::string message = "entry must match one exact kernel name; descriptor entries:";
-    for (const FaultSourceFacts &facts : state_->sources)
+    for (const FaultSourceFacts &facts : state_->sources) {
       message += " " + facts.owner.entry;
+    }
     return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity, std::move(message));
   }
   return &*std::ranges::find_if(

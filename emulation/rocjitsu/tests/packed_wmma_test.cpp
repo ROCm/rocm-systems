@@ -54,16 +54,18 @@ public:
     cfg.vgprs_per_wf = 256;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "dot_test", cfg, &memory, &cache);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(arch);
     wave = cu->dispatch_wf(0, 0, 106, 256, width);
     wave->set_exec(width == 64 ? ~uint64_t{0} : 0xffffffff);
     base = wave->vgpr_alloc().base;
   }
   ~DotMachine() {
-    if (wave)
+    if (wave) {
       wave->halt();
+    }
   }
   void set(uint32_t reg, uint32_t lane, uint32_t bits) { cu->write_vgpr(base + reg, lane, bits); }
   uint32_t get(uint32_t reg, uint32_t lane) { return cu->read_vgpr(base + reg, lane); }
@@ -95,18 +97,19 @@ TEST(Cdna5Wmma, Bf16CancellationPreservesIncomingC) {
                                               -43008, 3072, -7168, 1280, 14336, 2560, 3456,   1536,
                                               -9216,  1536, -5760, 1408, 10240, 896,  7168,   3328};
   constexpr float incoming = -0.012669563293457031f;
-  for (bool scalar : {false, true})
-    for (bool packed : {false, true})
-      for (uint32_t dst : {0u, 4u, 8u, 12u, 16u, 20u, 24u})
-        for (uint16_t src2 : {uint16_t{272}, uint16_t{128}, uint16_t{242}})
+  for (bool scalar : {false, true}) {
+    for (bool packed : {false, true}) {
+      for (uint32_t dst : {0u, 4u, 8u, 12u, 16u, 20u, 24u}) {
+        for (uint16_t src2 : {uint16_t{272}, uint16_t{128}, uint16_t{242}}) {
           for (uint8_t modifier = 0; modifier < 4; ++modifier) {
             SCOPED_TRACE(testing::Message()
                          << "scalar=" << scalar << " packed=" << packed << " dst=" << dst
                          << " src2=" << src2 << " modifier=" << unsigned(modifier));
             util::set_force_scalar_for_testing(scalar);
             for (uint32_t lane = 0; lane < 32; ++lane) {
-              for (uint32_t reg = 0; reg < 32; ++reg)
+              for (uint32_t reg = 0; reg < 32; ++reg) {
                 machine.set(reg, lane, 0xa55a1234u ^ (lane << 16) ^ reg);
+              }
               for (uint32_t reg = 0; reg < 8; ++reg) {
                 const uint32_t k = (reg / 4) * 16 + (lane / 16) * 8 + (reg % 4) * 2;
                 machine.set(reg, lane, 0x3f803f80u); // A = 1 in BF16.
@@ -117,14 +120,18 @@ TEST(Cdna5Wmma, Bf16CancellationPreservesIncomingC) {
               }
             }
             std::array<uint32_t, 32 * 32> before;
-            for (uint32_t reg = 0; reg < 32; ++reg)
-              for (uint32_t lane = 0; lane < 32; ++lane)
+            for (uint32_t reg = 0; reg < 32; ++reg) {
+              for (uint32_t lane = 0; lane < 32; ++lane) {
                 before[reg * 32 + lane] = machine.get(reg, lane);
+              }
+            }
             float expected = src2 == 272 ? incoming : src2 == 128 ? 0.0f : 1.0f;
-            if (modifier & 2)
+            if (modifier & 2) {
               expected = std::fabs(expected);
-            if (modifier & 1)
+            }
+            if (modifier & 1) {
               expected = -expected;
+            }
             // Adding an exactly zero dot produces +0 for either signed zero C.
             expected += 0.0f;
             uint32_t expected_word = std::bit_cast<uint32_t>(expected);
@@ -142,18 +149,24 @@ TEST(Cdna5Wmma, Bf16CancellationPreservesIncomingC) {
                                                 .src2 = src2,
                                                 .opsel_hi = 3,
                                                 .neg = uint8_t((modifier & 1) << 2)}));
-            for (uint32_t reg = 0; reg < 32; ++reg)
-              for (uint32_t lane = 0; lane < 32; ++lane)
+            for (uint32_t reg = 0; reg < 32; ++reg) {
+              for (uint32_t lane = 0; lane < 32; ++lane) {
                 ASSERT_EQ(machine.get(reg, lane), reg >= dst && reg < dst + dst_regs
                                                       ? expected_word
                                                       : before[reg * 32 + lane])
                     << "reg=" << reg << " lane=" << lane;
+              }
+            }
           }
+        }
+      }
+    }
+  }
 }
 
 std::array<uint32_t, 2> packed_encoding(bool gfx12, bool bf16, uint32_t dst, uint32_t high,
                                         uint16_t src2 = 272, uint8_t neg = 0, uint8_t neg_hi = 0) {
-  if (gfx12)
+  if (gfx12) {
     return rdna4::build_vop3p(bf16 ? rdna4::kVWmmaBf1616x16x16Bf16Vop3p
                                    : rdna4::kVWmmaF1616x16x16F16Vop3p,
                               {.vdst = uint8_t(dst),
@@ -163,6 +176,7 @@ std::array<uint32_t, 2> packed_encoding(bool gfx12, bool bf16, uint32_t dst, uin
                                .src2 = src2,
                                .opsel_hi = 3,
                                .neg = neg});
+  }
   return rdna3::build_vop3p(bf16 ? rdna3::kVWmmaBf1616x16x16Bf16Vop3p
                                  : rdna3::kVWmmaF1616x16x16F16Vop3p,
                             {.vdst = uint8_t(dst),
@@ -183,16 +197,17 @@ TEST(PackedWmma, HardwareMatricesBothWavesAndOperandOverlap) {
     for (uint32_t width : {32u, 64u}) {
       DotMachine machine(arch, width);
       ASSERT_FALSE(::testing::Test::HasFatalFailure());
-      for (bool bf16 : {false, true})
-        for (uint32_t high = 0; high < (gfx12 ? 1u : 2u); ++high)
-          for (uint32_t dst : {16u, 24u, 0u, 8u})
-            for (uint32_t fixture = 0; fixture < 7; ++fixture)
+      for (bool bf16 : {false, true}) {
+        for (uint32_t high = 0; high < (gfx12 ? 1u : 2u); ++high) {
+          for (uint32_t dst : {16u, 24u, 0u, 8u}) {
+            for (uint32_t fixture = 0; fixture < 7; ++fixture) {
               for (bool scalar : {false, true}) {
                 util::set_force_scalar_for_testing(scalar);
                 const auto &input = kPackedWmmaInputs[bf16][fixture];
                 for (uint32_t lane = 0; lane < width; ++lane) {
-                  for (uint32_t reg = 0; reg < 32; ++reg)
+                  for (uint32_t reg = 0; reg < 32; ++reg) {
                     machine.set(reg, lane, 0xa55a1234u ^ (lane << 16) ^ reg);
+                  }
                   for (uint32_t reg = 0; reg < (gfx12 ? 128 / width : 8); ++reg) {
                     const uint32_t k = gfx12 ? (lane / 16) * (256 / width) + 2 * reg : 2 * reg;
                     const uint32_t idx = lane % 16;
@@ -209,19 +224,22 @@ TEST(PackedWmma, HardwareMatricesBothWavesAndOperandOverlap) {
                                              ? (lane / 16) * 8 + 2 * reg
                                              : ((lane >> 4) & 1) * 8 + (lane >> 5) * 4 + 2 * reg;
                     uint32_t value = input.c[row * 16 + lane % 16];
-                    if (gfx12)
+                    if (gfx12) {
                       value = (value & 65535) | (input.c[(row + 1) * 16 + lane % 16] << 16);
-                    else if (high)
+                    } else if (high) {
                       value = (value << 16) | (value >> 16);
+                    }
                     machine.set(16 + reg, lane, value);
                   }
                 }
                 std::array<uint32_t, 256> old{};
-                for (uint32_t reg = 0; reg < 256 / width / (gfx12 ? 2 : 1); ++reg)
-                  for (uint32_t lane = 0; lane < width; ++lane)
+                for (uint32_t reg = 0; reg < 256 / width / (gfx12 ? 2 : 1); ++reg) {
+                  for (uint32_t lane = 0; lane < width; ++lane) {
                     old[reg * width + lane] = machine.get(dst + reg, lane);
+                  }
+                }
                 machine.execute(packed_encoding(gfx12, bf16, dst, high));
-                for (uint32_t row = 0; row < 16; ++row)
+                for (uint32_t row = 0; row < 16; ++row) {
                   for (uint32_t col = 0; col < 16; ++col) {
                     const uint32_t lane = !gfx12 ? col + 16 * (row % (width / 16))
                                           : width == 32
@@ -241,7 +259,12 @@ TEST(PackedWmma, HardwareMatricesBothWavesAndOperandOverlap) {
                       EXPECT_EQ(actual & mask, old[reg * width + lane] & mask);
                     }
                   }
+                }
               }
+            }
+          }
+        }
+      }
     }
   }
 }
@@ -254,15 +277,16 @@ TEST(PackedWmma, HardwareModifiersSelectorsAndInlineConstants) {
       DotMachine machine(arch, width);
       ASSERT_FALSE(::testing::Test::HasFatalFailure());
       for (const auto &fixture : kPackedOperandCases) {
-        for (uint32_t lane = 0; lane < width; ++lane)
+        for (uint32_t lane = 0; lane < width; ++lane) {
           for (uint32_t reg = 0; reg < 8; ++reg) {
             machine.set(reg, lane, fixture.a);
             machine.set(8 + reg, lane, fixture.b);
             machine.set(16 + reg, lane, fixture.c);
             machine.set(24 + reg, lane, 0x56781234);
           }
+        }
         machine.execute({fixture.encoding[0], fixture.encoding[1]});
-        for (uint32_t lane = 0; lane < width; ++lane)
+        for (uint32_t lane = 0; lane < width; ++lane) {
           for (uint32_t reg = 0; reg < 8; ++reg) {
             const uint32_t expected =
                 reg < (gfx12 ? 128u : 256u) / width ? fixture.expected[gfx12] : 0x56781234;
@@ -270,6 +294,7 @@ TEST(PackedWmma, HardwareModifiersSelectorsAndInlineConstants) {
                 << "arch=" << arch << " width=" << width << " reg=" << reg
                 << " encoding=" << std::hex << fixture.encoding[0] << ':' << fixture.encoding[1];
           }
+        }
       }
     }
   }
@@ -282,9 +307,9 @@ TEST(PackedWmma, HardwareOverflowModeAtIntermediateSteps) {
     for (uint32_t width : {32u, 64u}) {
       DotMachine machine(arch, width);
       ASSERT_FALSE(::testing::Test::HasFatalFailure());
-      for (bool bf16 : {false, true})
-        for (bool saturate : {false, true})
-          for (uint32_t pattern = 0; pattern < 4; ++pattern)
+      for (bool bf16 : {false, true}) {
+        for (bool saturate : {false, true}) {
+          for (uint32_t pattern = 0; pattern < 4; ++pattern) {
             for (uint32_t mode : {0u, 0xf0u, 0xffu, 0x300u}) {
               machine.wave->set_mode_raw(mode | (uint32_t(saturate) << 23));
               const uint16_t maximum = bf16 ? 0x7f7f : 0x7bff;
@@ -300,8 +325,9 @@ TEST(PackedWmma, HardwareOverflowModeAtIntermediateSteps) {
                     uint16_t av = 0, bv = 0;
                     if (k < 2) {
                       av = pattern == 3 ? infinity : maximum;
-                      if (pattern == 2)
+                      if (pattern == 2) {
                         av |= 0x8000;
+                      }
                       bv = 0x4000;
                     }
                     if (pattern && k == (gfx12 ? 4u : 2u)) {
@@ -321,16 +347,22 @@ TEST(PackedWmma, HardwareOverflowModeAtIntermediateSteps) {
               }
               machine.execute(packed_encoding(gfx12, bf16, 24, 0));
               uint16_t expected = infinity | (pattern == 2 ? 0x8000 : 0);
-              if (!bf16 && saturate && pattern != 3)
+              if (!bf16 && saturate && pattern != 3) {
                 expected = pattern == 0 ? 0x7bff : gfx12 ? 0 : pattern == 1 ? 0x9800 : 0x1c00;
+              }
               const uint32_t word =
                   gfx12 ? expected | (uint32_t(expected) << 16) : 0x56780000 | expected;
-              for (uint32_t lane = 0; lane < width; ++lane)
-                for (uint32_t reg = 0; reg < (gfx12 ? 128u : 256u) / width; ++reg)
+              for (uint32_t lane = 0; lane < width; ++lane) {
+                for (uint32_t reg = 0; reg < (gfx12 ? 128u : 256u) / width; ++reg) {
                   EXPECT_EQ(machine.get(24 + reg, lane), word)
                       << "arch=" << arch << " width=" << width << " bf16=" << bf16
                       << " saturate=" << saturate << " pattern=" << pattern;
+                }
+              }
             }
+          }
+        }
+      }
     }
   }
 }

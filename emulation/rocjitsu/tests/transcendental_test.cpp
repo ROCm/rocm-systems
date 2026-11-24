@@ -40,11 +40,13 @@ TEST(TranscendentalTest, RcpF32MatchesPhysicalRdna3AndRdna4) {
       {0x00800000u, 0x7e800000u}, {0x7f000000u, 0x00000000u}, {0x00000001u, 0x7f800000u},
       {0x7fa12345u, 0x7fe12345u},
   };
-  for (const auto &test : cases)
-    for (uint32_t sign : {0u, 0x80000000u})
+  for (const auto &test : cases) {
+    for (uint32_t sign : {0u, 0x80000000u}) {
       EXPECT_EQ(std::bit_cast<uint32_t>(rcp_f32(std::bit_cast<float>(test[0] | sign))),
                 test[1] | sign)
           << std::hex << test[0] << " sign=" << sign;
+    }
+  }
 }
 
 TEST(TranscendentalTest, RcpF32CompleteNormalizedHardwareDigest) {
@@ -78,9 +80,10 @@ TEST(TranscendentalTest, RsqF32MatchesPhysicalRdna3AndRdna4) {
       {0xff800000u, 0xffc00000u}, {0x7f800000u, 0x00000000u}, {0x7fa12345u, 0x7fe12345u},
       {0xffa12345u, 0xffe12345u},
   };
-  for (const auto &test : cases)
+  for (const auto &test : cases) {
     EXPECT_EQ(std::bit_cast<uint32_t>(rsq_f32(std::bit_cast<float>(test[0]))), test[1])
         << std::hex << test[0];
+  }
 }
 
 TEST(TranscendentalTest, RsqF32CompleteNormalizedHardwareDigest) {
@@ -120,9 +123,10 @@ TEST(TranscendentalTest, SqrtF32MatchesPhysicalRdna3AndRdna4) {
       {0xbf800000u, 0xffc00000u}, {0xff800000u, 0xffc00000u}, {0x7f800000u, 0x7f800000u},
       {0x7fa12345u, 0x7fe12345u}, {0xffa12345u, 0xffe12345u},
   };
-  for (const auto &test : cases)
+  for (const auto &test : cases) {
     EXPECT_EQ(std::bit_cast<uint32_t>(sqrt_f32(std::bit_cast<float>(test[0]))), test[1])
         << std::hex << test[0];
+  }
 }
 
 TEST(TranscendentalTest, SqrtF32CompleteNormalizedHardwareDigest) {
@@ -161,18 +165,20 @@ TEST(TranscendentalTest, LogF32MatchesPhysicalRdna3AndRdna4) {
       {0x3f85ffffu, 0x3d8759afu}, {0x3f860000u, 0x3d8759c5u}, {0x3f860001u, 0x3d8759dbu},
       {0x3fffffffu, 0x3f7fffffu},
   };
-  for (const auto &sample : captured)
+  for (const auto &sample : captured) {
     EXPECT_EQ(std::bit_cast<uint32_t>(log_f32(std::bit_cast<float>(sample[0]))), sample[1])
         << std::hex << sample[0];
+  }
 }
 
 TEST(TranscendentalTest, LogF32CompleteMantissaHardwareDigest) {
   // Independently captured on both cards over [0.5,2), including both
   // near-one paths and every ordinary polynomial interval.
   uint64_t digest = 14695981039346656037ull;
-  for (uint32_t bits = 0x3f000000u; bits < 0x40000000u; ++bits)
+  for (uint32_t bits = 0x3f000000u; bits < 0x40000000u; ++bits) {
     digest =
         (digest ^ std::bit_cast<uint32_t>(log_f32(std::bit_cast<float>(bits)))) * 1099511628211ull;
+  }
   EXPECT_EQ(digest, 0xc33a54efbae098beull);
 }
 
@@ -196,9 +202,10 @@ TEST(TranscendentalTest, ExpF32MatchesPhysicalRdna3AndRdna4) {
       {0x3ec0001au, 0x3fa5fedcu}, {0x3f000013u, 0x3fb504fcu}, {0x3f20002au, 0x3fc56740u},
       {0x3f40006fu, 0x3fd7453eu}, {0x3f600022u, 0x3feac0dcu},
   };
-  for (const auto &sample : captured)
+  for (const auto &sample : captured) {
     EXPECT_EQ(std::bit_cast<uint32_t>(exp_f32(std::bit_cast<float>(sample[0]))), sample[1])
         << std::hex << sample[0];
+  }
 }
 
 TEST(TranscendentalTest, ExpF32CompleteFractionHardwareDigests) {
@@ -266,12 +273,13 @@ TEST(TranscendentalTest, SinCosF32CapturedArithmeticStages) {
       {0x3e7ffa50u, 0x3f800000u, 0x390ef149u}, {0x3efffd28u, 0x390ef149u, 0xbf800000u},
       {0x3f3ffe94u, 0xbf800000u, 0xb90ef149u}, {0x3f7ffe94u, 0xb90ef149u, 0x3f800000u},
   };
-  for (const auto &test : cases)
+  for (const auto &test : cases) {
     for (unsigned op = 0; op < 2; ++op) {
       const float input = std::bit_cast<float>(test[0]);
       const uint32_t actual = std::bit_cast<uint32_t>(op ? cos_f32(input) : sin_f32(input));
       EXPECT_EQ(actual, test[op + 1]) << std::hex << test[0];
     }
+  }
 }
 
 TEST(TranscendentalTest, RcpF64SpecialCases) {

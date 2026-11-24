@@ -59,14 +59,16 @@ protected:
   }
 
   void TearDown() override {
-    if (wave_)
+    if (wave_) {
       wave_->halt();
+    }
     util::set_force_scalar_for_testing(saved_scalar_);
   }
 
   void put(unsigned reg, uint32_t value) {
-    for (unsigned lane = 0; lane != wave_->wf_size(); ++lane)
+    for (unsigned lane = 0; lane != wave_->wf_size(); ++lane) {
       cu_->write_vgpr(wave_->vgpr_alloc().base + reg, lane, value);
+    }
   }
 
   void check(std::array<uint32_t, 2> words, uint32_t expected, uint32_t initial = 0xdeadbeefu) {
@@ -77,10 +79,11 @@ protected:
     SCOPED_TRACE(testing::Message() << instruction->mnemonic() << " words=" << std::hex << words[0]
                                     << ":" << words[1]);
     ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
-    for (unsigned lane = 0; lane != wave_->wf_size(); ++lane)
+    for (unsigned lane = 0; lane != wave_->wf_size(); ++lane) {
       EXPECT_EQ(cu_->read_vgpr_storage(wave_->vgpr_alloc().base + 4, lane),
                 wave_->exec() & (uint64_t{1} << lane) ? expected : initial)
           << "lane=" << lane;
+    }
   }
 
   static std::array<uint32_t, 2> vop1(uint32_t opcode) {
@@ -180,8 +183,9 @@ TEST_P(Cdna2VectorRegression, IndexedDestinationsCannotCrossIntoAccumulators) {
   EXPECT_EQ(read(255), marker);
   EXPECT_EQ(read(256), marker);
   ASSERT_NO_FATAL_FAILURE(execute({0xd3d500fc, 0x02020500})); // MFMA v[252:255], v0, v2, 0
-  for (unsigned reg = 253; reg <= 256; ++reg)
+  for (unsigned reg = 253; reg <= 256; ++reg) {
     EXPECT_EQ(read(reg), marker);
+  }
   // The same encoded MFMA tuple is in range in the separate accumulator file.
   put(508, marker);
   put(2, 0);
@@ -341,13 +345,15 @@ TEST_P(Cdna2VectorRegression, MatrixBroadcastUsesAdjacentBlocks) {
   // AMD's matrix instruction calculator (2ef91896) selects adjacent A blocks on gfx90a.
   // 4x4x1 F32, 16 blocks. In each pair of adjacent blocks, select the
   // first A block. All B entries are one, C is inline zero.
-  for (unsigned lane = 0; lane < 64; ++lane)
+  for (unsigned lane = 0; lane < 64; ++lane) {
     cu_->write_vgpr(wave_->vgpr_alloc().base, lane, std::bit_cast<uint32_t>(float(lane / 4)));
+  }
   put(1, 0x3f800000);
   ASSERT_NO_FATAL_FAILURE(execute({0xd3c20104, 0x02020300}));
-  for (unsigned lane = 0; lane < 64; ++lane)
+  for (unsigned lane = 0; lane < 64; ++lane) {
     EXPECT_EQ(cu_->read_vgpr_storage(wave_->vgpr_alloc().base + 4, lane),
               std::bit_cast<uint32_t>(float((lane / 4) & ~1u)));
+  }
 }
 
 TEST_P(Cdna2VectorRegression, MatrixInlineMinusOneAndDenormals) {
@@ -454,8 +460,9 @@ TEST_P(NumericEncodingRegression, PrngUsesFeedbackAndExecMask) {
                      : vop3(cdna4::kVPrngB32Vop3),
             expected);
     }
-    if (!is_cdna5)
+    if (!is_cdna5) {
       continue;
+    }
 
     // Distinct per-lane inputs distinguish source permutation from ignored DPP.
     // The partial EXEC mask keeps each selected source/destination pair active.
@@ -477,15 +484,17 @@ TEST_P(NumericEncodingRegression, PrngUsesFeedbackAndExecMask) {
     for (const auto &words : {std::bit_cast<std::array<uint32_t, 2>>(dpp),
                               std::bit_cast<std::array<uint32_t, 2>>(dpp8)}) {
       put(4, 0xdeadbeef);
-      for (unsigned lane = 0; lane < wave_->wf_size(); ++lane)
+      for (unsigned lane = 0; lane < wave_->wf_size(); ++lane) {
         cu_->write_vgpr(wave_->vgpr_alloc().base, lane, cases[lane % cases.size()][0]);
+      }
       std::unique_ptr<Instruction> instruction(decode_valid(*decoder_, words.data()));
       ASSERT_NE(instruction, nullptr);
       ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
-      for (unsigned lane = 0; lane < wave_->wf_size(); ++lane)
+      for (unsigned lane = 0; lane < wave_->wf_size(); ++lane) {
         EXPECT_EQ(cu_->read_vgpr_storage(wave_->vgpr_alloc().base + 4, lane),
                   mask & (uint64_t{1} << lane) ? cases[(lane ^ 1) % cases.size()][1] : 0xdeadbeefu)
             << "lane=" << lane << " selector=" << (words[0] & 0x1ff);
+      }
     }
   }
 }
@@ -1131,8 +1140,9 @@ TEST_P(OlderHalfFma, FusedFormsGuestRoundingAndHalfWrites) {
       } else if (vop2 == 56) {
         form.words[1] = 0x8001; // FMAAK's addend literal.
       }
-      if (form.initial == 0xdead0001)
+      if (form.initial == 0xdead0001) {
         form.initial = 0xdead8001; // Accumulator forms read their addend from D.
+      }
       check(form.words, (form.clears_high ? 0 : 0xdead0000U) | 0x3e01U, form.initial);
     }
     // High-half native FMA preserves the low half, including for IEEE-clear sNaNs.

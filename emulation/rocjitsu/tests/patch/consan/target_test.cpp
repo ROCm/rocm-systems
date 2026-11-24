@@ -107,8 +107,9 @@ TEST_P(ConSanTargetStatic, QualifyOnlyWholeRegisterSingleRangeForms) {
         prepare(original, *target_profile(mode.target), "lds_producer_consumer", error);
     ASSERT_TRUE(artifact.succeeded()) << error.message;
     ASSERT_EQ(artifact.value().manifest.sites.size(), 2u);
-    for (const SiteFacts &site : artifact.value().manifest.sites)
+    for (const SiteFacts &site : artifact.value().manifest.sites) {
       EXPECT_EQ(site.width, width);
+    }
     EXPECT_TRUE(validate_prepared(original, artifact.value(), error).succeeded()) << error.message;
   }
   for (const char *name : {"excluded-b8", "excluded-b96", "excluded-partial"}) {
@@ -265,7 +266,7 @@ TEST(ConSanBarrierStatic, CombinedDrainsRequireZeroDsThreshold) {
            {rdna ? rdna4::kSWaitLoadcntDscntSopp : cdna5::kSWaitLoadcntDscntSopp,
             rdna ? rdna4::kSWaitStorecntDscntSopp : cdna5::kSWaitStorecntDscntSopp}) {
         SCOPED_TRACE(opcode);
-        for (const uint32_t other_threshold : {0u, 3u, 63u})
+        for (const uint32_t other_threshold : {0u, 3u, 63u}) {
           for (const uint32_t ds_threshold : {0u, 1u, 63u}) {
             SCOPED_TRACE(other_threshold);
             SCOPED_TRACE(ds_threshold);
@@ -273,9 +274,10 @@ TEST(ConSanBarrierStatic, CombinedDrainsRequireZeroDsThreshold) {
             const FailureOr<uint32_t> drain =
                 build_sopp_encoding(target.arch, opcode, (other_threshold << 8) | ds_threshold);
             ASSERT_TRUE(drain.succeeded());
-            for (const BarrierFacts &barrier : input.value().barriers)
+            for (const BarrierFacts &barrier : input.value().barriers) {
               ASSERT_TRUE(wire::write_u32(
                   changed, input.value().text_file_offset + barrier.original_drain, drain.value()));
+            }
             const FailureOr<InputProgram> qualified =
                 build_input_program(changed, target, "lds_producer_consumer", error);
             if (ds_threshold != 0) {
@@ -284,8 +286,9 @@ TEST(ConSanBarrierStatic, CombinedDrainsRequireZeroDsThreshold) {
               continue;
             }
             EXPECT_TRUE(qualified.succeeded()) << error.message;
-            if (qualified.failed())
+            if (qualified.failed()) {
               continue;
+            }
             EXPECT_EQ(qualified.value().repeated, input.value().repeated);
             const FailureOr<PreparedArtifact> artifact =
                 prepare(changed, target, "lds_producer_consumer", error);
@@ -293,15 +296,17 @@ TEST(ConSanBarrierStatic, CombinedDrainsRequireZeroDsThreshold) {
             EXPECT_TRUE(validate_prepared(changed, artifact.value(), error).succeeded())
                 << error.message;
           }
+        }
       }
       std::vector<uint8_t> missing_ds = original;
       const FailureOr<uint32_t> store_only = build_sopp_encoding(
           target.arch, rdna ? rdna4::kSWaitStorecntSopp : cdna5::kSWaitStorecntSopp, 0);
       ASSERT_TRUE(store_only.succeeded());
-      for (const BarrierFacts &barrier : input.value().barriers)
+      for (const BarrierFacts &barrier : input.value().barriers) {
         ASSERT_TRUE(wire::write_u32(missing_ds,
                                     input.value().text_file_offset + barrier.original_drain,
                                     store_only.value()));
+      }
       EXPECT_TRUE(build_input_program(missing_ds, target, "lds_producer_consumer", error).failed());
       EXPECT_EQ(error.code, InputErrorCode::UnsupportedSynchronization) << error.message;
     }
@@ -429,19 +434,22 @@ TEST_P(ConSanTargetStatic, LoopLaneSelectorsAvoidScalarReadModifyReadHazards) {
         BasicBlock::build_reachable(object, *decoder, target.arch, entries);
     ASSERT_TRUE(blocks.succeeded());
     uint32_t vector_selectors = 0;
-    for (const std::unique_ptr<BasicBlock> &block : blocks.value())
+    for (const std::unique_ptr<BasicBlock> &block : blocks.value()) {
       for (const Instruction &instruction : block->instructions()) {
-        if (instruction.mnemonic() != "v_cmp_eq_u32_e32")
+        if (instruction.mnemonic() != "v_cmp_eq_u32_e32") {
           continue;
+        }
         const Operand *selector = instruction.src_operand(0);
         ASSERT_NE(selector, nullptr);
         // RDNA4 requires an explicit wait when SALU rewrites an SGPR pair
         // previously read by VALU. Keep both rotating selectors in VGPRs.
         const std::optional<RegisterRef> source = selector->to_register_ref();
         EXPECT_FALSE(source && source->cls == RegClass::SGPR);
-        if (selector->decoded_vgpr())
+        if (selector->decoded_vgpr()) {
           ++vector_selectors;
+        }
       }
+    }
     EXPECT_EQ(vector_selectors, 2u);
   }
 }
@@ -468,7 +476,7 @@ TEST_P(ConSanTargetStatic, PreserveRealLoopBackedgesAndRejectMultipleBlockCycles
         BasicBlock::build_reachable(object, *decoder, target.arch, entries);
     ASSERT_TRUE(blocks.succeeded());
     const Instruction *backedge = nullptr;
-    for (const std::unique_ptr<BasicBlock> &block : blocks.value())
+    for (const std::unique_ptr<BasicBlock> &block : blocks.value()) {
       for (const Instruction &instruction : block->instructions()) {
         const std::optional<int64_t> branch = instruction.branch_offset_bytes();
         if (branch && *branch <= -static_cast<int64_t>(instruction.size())) {
@@ -476,6 +484,7 @@ TEST_P(ConSanTargetStatic, PreserveRealLoopBackedgesAndRejectMultipleBlockCycles
           backedge = &instruction;
         }
       }
+    }
     ASSERT_NE(backedge, nullptr);
     const FailureOr<PreparedArtifact> artifact =
         prepare(original, target, "lds_producer_consumer", error);
@@ -513,10 +522,11 @@ TEST_P(ConSanTargetStatic, EquivalentMetadataEnvironmentsPreserveTargetAndAbiVal
     ASSERT_TRUE(input.succeeded()) << error.message;
     const std::span<const uint8_t> text =
         std::span(original).subspan(input.value().text_file_offset, input.value().text_bytes);
-    if (original_text.empty())
+    if (original_text.empty()) {
       original_text.assign(text.begin(), text.end());
-    else
+    } else {
       EXPECT_TRUE(std::ranges::equal(original_text, text));
+    }
     const FailureOr<PreparedArtifact> prepared =
         prepare(original, target, "lds_producer_consumer", error);
     ASSERT_TRUE(prepared.succeeded()) << error.message;
@@ -525,8 +535,9 @@ TEST_P(ConSanTargetStatic, EquivalentMetadataEnvironmentsPreserveTargetAndAbiVal
                                        image_error.emitter())
                     .succeeded())
         << image_error.message();
-    if (fixture == "native-1")
+    if (fixture == "native-1") {
       continue;
+    }
 
     const std::string expected = std::string("amdgcn-amd-amdhsa-unknown-") + mode.target;
     std::vector<std::string> invalid;
@@ -580,8 +591,9 @@ TEST_P(ConSanTargetStatic, EquivalentMetadataEnvironmentsPreserveTargetAndAbiVal
 TEST_P(ConSanTargetStatic, PreparedCdnaDescriptorMustAllocateItsDeclaredOrdinarySgprs) {
   const test::TargetMode mode = GetParam();
   const TargetProfile &target = *target_profile(mode.target);
-  if (target.id != 942 && target.id != 950)
+  if (target.id != 942 && target.id != 950) {
     return;
+  }
   const std::vector<uint8_t> original =
       test::read_fixture(test::target_fixture_path(mode, "native-1"));
   InputError error;
@@ -685,8 +697,9 @@ TEST_P(ConSanTargetStatic, GdsAndAccumulatorAliasingAreRejectedAtTheirActualBoun
             .failed());
     EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess) << error.message;
   }
-  if (target->id != 942 && target->id != 950)
+  if (target->id != 942 && target->id != 950) {
     return;
+  }
   FailureOr<PreparedArtifact> prepared =
       prepare(original, *target_profile(mode.target), "lds_producer_consumer", error);
   ASSERT_TRUE(prepared.succeeded()) << error.message;
@@ -733,8 +746,9 @@ TEST_P(ConSanTargetStatic, HipWorkloadsMustContainQualifiedNativeLdsSites) {
     EXPECT_EQ(input.value().wave_size, mode.wave_size);
     ASSERT_FALSE(input.value().accesses.empty());
     uint32_t reads = 0, writes = 0;
-    for (const NativeLdsAccess &site : input.value().accesses)
+    for (const NativeLdsAccess &site : input.value().accesses) {
       (site.kind == AccessKind::Read ? reads : writes)++;
+    }
     EXPECT_GT(reads, 0u);
     EXPECT_EQ(writes != 0, fixture != 3);
     const FailureOr<PreparedArtifact> prepared =
@@ -745,7 +759,7 @@ TEST_P(ConSanTargetStatic, HipWorkloadsMustContainQualifiedNativeLdsSites) {
 }
 
 TEST(ConSanBoundedStatic, BindOriginalWorkgroupInputAndRejectForgedIdentityFacts) {
-  for (const test::TargetMode mode : test::kTargetModes)
+  for (const test::TargetMode mode : test::kTargetModes) {
     for (const char *fixture : {"native-2", "native-no-workgroup-id"}) {
       SCOPED_TRACE(mode.target);
       SCOPED_TRACE(mode.wave_size);
@@ -780,6 +794,7 @@ TEST(ConSanBoundedStatic, BindOriginalWorkgroupInputAndRejectForgedIdentityFacts
       EXPECT_EQ(contract_error.message(),
                 "artifact workgroup-X input differs from its binding facts");
     }
+  }
 }
 
 TEST_P(ConSanTargetStatic, BoundedWorkgroupFixturesRetainQualifiedLdsSites) {

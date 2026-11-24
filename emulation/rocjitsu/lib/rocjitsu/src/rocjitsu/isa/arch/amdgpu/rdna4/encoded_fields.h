@@ -23,8 +23,9 @@ replace_ds_store_b32_address(rj_code_target_id_t target, std::span<const uint32_
   constexpr uint32_t kOpcodeMask = 0xfffc0000u;
   constexpr uint32_t kDsStoreB32 = 0xd8340000u;
   if ((target != ROCJITSU_CODE_TARGET_GFX1200 && target != ROCJITSU_CODE_TARGET_GFX1201) ||
-      source.size() != 2 || encoded_vgpr > 255 || (source[0] & kOpcodeMask) != kDsStoreB32)
+      source.size() != 2 || encoded_vgpr > 255 || (source[0] & kOpcodeMask) != kDsStoreB32) {
     return std::nullopt;
+  }
   return std::array<uint32_t, 2>{source[0], (source[1] & ~0xffu) | encoded_vgpr};
 }
 
@@ -38,8 +39,9 @@ replace_ds_load_b32_address(rj_code_target_id_t target, std::span<const uint32_t
   constexpr uint32_t kOpcodeMask = 0xfffc0000u;
   constexpr uint32_t kDsLoadB32 = 0xd8d80000u;
   if ((target != ROCJITSU_CODE_TARGET_GFX1200 && target != ROCJITSU_CODE_TARGET_GFX1201) ||
-      source.size() != 2 || encoded_vgpr > 255 || (source[0] & kOpcodeMask) != kDsLoadB32)
+      source.size() != 2 || encoded_vgpr > 255 || (source[0] & kOpcodeMask) != kDsLoadB32) {
     return std::nullopt;
+  }
   return std::array<uint32_t, 2>{source[0], (source[1] & ~0xffu) | encoded_vgpr};
 }
 

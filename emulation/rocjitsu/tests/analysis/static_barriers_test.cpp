@@ -68,18 +68,21 @@ public:
     decode_error_("");
     object_ = std::make_unique<BarrierCodeObject>(words);
     decoder_ = Decoder::create(default_isa_target_registry(), row.target);
-    if (!decoder_)
+    if (!decoder_) {
       return ::testing::AssertionFailure() << "no concrete decoder for " << row.name;
+    }
     FailureOr<std::vector<std::unique_ptr<BasicBlock>>> decoded =
         BasicBlock::build(*object_, *decoder_, row.arch, decode_error_.emitter(), {},
                           ExternalEntryPolicy::InferPredecessorless, {}, row.target);
-    if (decoded.failed())
+    if (decoded.failed()) {
       return ::testing::AssertionFailure() << decode_error_.message();
+    }
     blocks_ = std::move(decoded.value());
     for (const std::unique_ptr<BasicBlock> &block : blocks_) {
       block_views_.push_back(block.get());
-      for (const Instruction &instruction : block->instructions())
+      for (const Instruction &instruction : block->instructions()) {
         boundaries_.record(instruction, 0);
+      }
     }
     return ::testing::AssertionSuccess();
   }
@@ -266,8 +269,9 @@ TEST(StaticBarriers, RejectsPartialInterleavedDynamicAndNamedLifecycle) {
                    .code = StaticBarrierErrorCode::UnsupportedForm,
                    .offset = 4},
   };
-  for (const RejectedCase &rejected : cases)
+  for (const RejectedCase &rejected : cases) {
     expect_rejection(row, rejected.words, rejected.code, rejected.offset);
+  }
 }
 
 TEST_P(StaticBarriersSplit, TrapFormsCannotPrecedeAnAdmittedUserBarrier) {
@@ -295,8 +299,9 @@ TEST_P(StaticBarriersSplit, RejectsStandaloneAndMismatchedTrapWaits) {
     for (const bool with_signal : {false, true}) {
       SCOPED_TRACE(with_signal);
       std::vector<uint32_t> words = {wait, kEnd};
-      if (with_signal)
+      if (with_signal) {
         words.insert(words.begin(), kSignal);
+      }
       expect_rejection(row, words, StaticBarrierErrorCode::UnsupportedForm, with_signal ? 4 : 0,
                        "trap-only");
     }

@@ -54,8 +54,9 @@ public:
 
   [[nodiscard]] amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
                                                       amdgpu::VmAccessKind access) const override {
-    if (address >= unmapped_base_)
+    if (address >= unmapped_base_) {
       return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    }
     return identity_.translate(address, size, access);
   }
 
@@ -69,8 +70,9 @@ private:
 class ScalarBufferHarness {
 public:
   ~ScalarBufferHarness() {
-    if (wf)
+    if (wf) {
       wf->halt();
+    }
   }
 
   void init(rocjitsu::IsaFamily arch, bool translated,
@@ -88,8 +90,9 @@ public:
     wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
     ASSERT_NE(wf, nullptr);
     if (translated) {
-      if (!translator)
+      if (!translator) {
         translator = std::make_shared<amdgpu::IdentityAddressSpaceTranslator>();
+      }
       const auto address_space = vm.register_address_space(
           0, std::move(translator), std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(mem));
       ASSERT_TRUE(address_space);
@@ -204,8 +207,9 @@ TEST_P(ScalarBufferInstructionTest, ScalarBufferLoadsZeroOnlyOutOfRangeDwords) {
     ScalarBufferHarness harness;
     ASSERT_NO_FATAL_FAILURE(harness.init(arch, translated));
     constexpr uint64_t base = 0x1000;
-    for (uint32_t i = 0; i < 32; ++i)
+    for (uint32_t i = 0; i < 32; ++i) {
       harness.mem.write32(base + 4 * i, 100 + i);
+    }
     for (uint32_t stride : {0u, 4u}) {
       const uint32_t records = stride ? 3 : 12;
       harness.write_sgpr(0, base);
@@ -220,8 +224,9 @@ TEST_P(ScalarBufferInstructionTest, ScalarBufferLoadsZeroOnlyOutOfRangeDwords) {
         harness.write_sgpr(3, 0);
       }
       for (uint32_t offset : {0u, 4u, 12u, 16u}) {
-        for (uint32_t i = 0; i < 4; ++i)
+        for (uint32_t i = 0; i < 4; ++i) {
           harness.write_sgpr(8 + i, 0xdeadbeef);
+        }
         // s_buffer_load_{dwordx4,b128} s[8:11], s[0:3], offset.
         const uint32_t null_offset =
             (arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2)
@@ -232,14 +237,16 @@ TEST_P(ScalarBufferInstructionTest, ScalarBufferLoadsZeroOnlyOutOfRangeDwords) {
                                                     : 0xf4280200u,
                                             offset | (gfx9() ? 0u : null_offset)};
         ASSERT_NO_FATAL_FAILURE(harness.execute(words));
-        for (uint32_t i = 0; i < 4; ++i)
+        for (uint32_t i = 0; i < 4; ++i) {
           EXPECT_EQ(harness.read_sgpr(8 + i), offset + i * 4 < 12 ? 100 + offset / 4 + i : 0)
               << "offset=" << offset << " stride=" << stride << " dword=" << i;
+        }
       }
     }
     // Fully out-of-bounds loads must not touch even an unmapped base address.
-    for (uint32_t i = 0; i < 4; ++i)
+    for (uint32_t i = 0; i < 4; ++i) {
       harness.write_sgpr(i, 0);
+    }
     const uint32_t null_offset =
         (arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2) ? 0xfa000000u
                                                                                    : 0xf8000000u;
@@ -248,16 +255,18 @@ TEST_P(ScalarBufferInstructionTest, ScalarBufferLoadsZeroOnlyOutOfRangeDwords) {
                                                 : 0xf4280200u,
                                         gfx9() ? 0u : null_offset};
     ASSERT_NO_FATAL_FAILURE(harness.execute(words));
-    for (uint32_t i = 0; i < 4; ++i)
+    for (uint32_t i = 0; i < 4; ++i) {
       EXPECT_EQ(harness.read_sgpr(8 + i), 0u);
+    }
   }
 }
 
 // Every case is a gfx90a hardware result: a DWORD only partly inside the buffer
 // reads zero.
 TEST_P(ScalarBufferInstructionTest, Gfx9LoadsZeroDwordsThatEndPastTheBuffer) {
-  if (!gfx9())
+  if (!gfx9()) {
     GTEST_SKIP() << "GFX9 scalar buffer bounds";
+  }
   struct Case {
     uint16_t opcode;
     uint32_t offset;
@@ -284,8 +293,9 @@ TEST_P(ScalarBufferInstructionTest, Gfx9LoadsZeroDwordsThatEndPastTheBuffer) {
     ScalarBufferHarness harness;
     ASSERT_NO_FATAL_FAILURE(harness.init(GetParam(), translated));
     constexpr uint64_t base = 0x1000;
-    for (uint32_t i = 0; i < 8; ++i)
+    for (uint32_t i = 0; i < 8; ++i) {
       harness.mem.write32(base + 4 * i, 100 + i);
+    }
     harness.write_sgpr(0, base);
     harness.write_sgpr(3, 0);
     for (const auto &test_case : cases) {
@@ -307,8 +317,9 @@ TEST_P(ScalarBufferInstructionTest, Gfx9LoadsZeroDwordsThatEndPastTheBuffer) {
 
 // A DWORD outside the buffer is not read, so it cannot fault on an unmapped page.
 TEST_P(ScalarBufferInstructionTest, Gfx9LoadSkipsOutOfRangeDwordOnUnmappedPage) {
-  if (!gfx9())
+  if (!gfx9()) {
     GTEST_SKIP() << "GFX9 scalar buffer bounds";
+  }
   constexpr uint64_t kUnmappedBase = 0x2000;
   ScalarBufferHarness harness;
   ASSERT_NO_FATAL_FAILURE(harness.init(GetParam(), /*translated=*/true,

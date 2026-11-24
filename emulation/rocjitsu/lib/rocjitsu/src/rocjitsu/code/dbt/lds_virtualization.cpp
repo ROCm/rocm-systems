@@ -27,8 +27,9 @@ bool supports_virtual_lds_sidecars(rocjitsu::IsaFamily guest_arch, rocjitsu::Isa
 bool source_instruction_uses_virtualizable_lds(const Instruction &inst,
                                                rocjitsu::IsaFamily guest_arch,
                                                rocjitsu::IsaFamily host_arch) {
-  if (is_cdna4_to_cdna3(guest_arch, host_arch))
+  if (is_cdna4_to_cdna3(guest_arch, host_arch)) {
     return cdna4_to_cdna3_source_instruction_uses_virtualizable_lds(inst);
+  }
   return false;
 }
 
@@ -44,16 +45,18 @@ reserve_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBlockScope
 
 bool append_virtual_lds_entry_prologue(KdTranslation &translation, rocjitsu::IsaFamily guest_arch,
                                        rocjitsu::IsaFamily host_arch) {
-  if (is_cdna4_to_cdna3(guest_arch, host_arch))
+  if (is_cdna4_to_cdna3(guest_arch, host_arch)) {
     return append_cdna4_to_cdna3_virtual_lds_entry_prologue(translation);
+  }
   return false;
 }
 
 ExpandResult lower_virtual_lds_instruction(const Instruction &inst, TranslationContext &context,
                                            rocjitsu::IsaFamily guest_arch,
                                            rocjitsu::IsaFamily host_arch) {
-  if (is_cdna4_to_cdna3(guest_arch, host_arch))
+  if (is_cdna4_to_cdna3(guest_arch, host_arch)) {
     return lower_cdna4_to_cdna3_virtual_lds_instruction(inst, context);
+  }
   return ExpandResult::not_handled();
 }
 

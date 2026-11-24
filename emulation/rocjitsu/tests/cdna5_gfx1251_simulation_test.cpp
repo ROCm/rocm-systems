@@ -59,8 +59,9 @@ public:
 
   void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &inst,
                                         amdgpu::Wavefront &) override {
-    if (inst.mnemonic() == expected_)
+    if (inst.mnemonic() == expected_) {
       count_.fetch_add(1, std::memory_order_relaxed);
+    }
   }
 
   uint32_t count() const { return count_.load(std::memory_order_relaxed); }
@@ -134,8 +135,9 @@ TEST_P(Gfx1251SimulatorInstructionTest, DispatchesCodeObjectAndVerifiesExactOutp
     // 19.0, so this end-to-end case does not depend on element placement.
     append_u64_pair(0, {0x4000000000000000ULL, 0x4000000000000000ULL});
     append_u64_pair(4, {0x4008000000000000ULL, 0x4008000000000000ULL});
-    for (uint8_t reg = 8; reg < 24; reg += 4)
+    for (uint8_t reg = 8; reg < 24; reg += 4) {
       append_u64_pair(reg, {0xc014000000000000ULL, 0xc014000000000000ULL});
+    }
     break;
   }
 
@@ -179,9 +181,11 @@ TEST_P(Gfx1251SimulatorInstructionTest, DispatchesCodeObjectAndVerifiesExactOutp
       << admission_diagnostic.message();
 
   code_object.load_to_memory(memory, kCodeObjectBase);
-  for (uint32_t lane = 0; lane < kWaveSize; ++lane)
-    for (uint32_t word = 0; word < test_case.expected_words.size(); ++word)
+  for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
+    for (uint32_t word = 0; word < test_case.expected_words.size(); ++word) {
       memory->write32(kOutputAddress + lane * 16 + word * sizeof(uint32_t), 0xDEADBEEFu);
+    }
+  }
   memory->write64(kCompletionSignal + kSignalValueOffset, 1);
 
   hsa_kernel_dispatch_packet_t packet{};
@@ -206,11 +210,13 @@ TEST_P(Gfx1251SimulatorInstructionTest, DispatchesCodeObjectAndVerifiesExactOutp
   EXPECT_EQ(memory->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 1u);
   EXPECT_EQ(memory->read64(kCompletionSignal + kSignalValueOffset), 0u);
   EXPECT_EQ(mnemonic_counter_ptr->count(), 1u);
-  for (uint32_t lane = 0; lane < kWaveSize; ++lane)
-    for (uint32_t word = 0; word < test_case.expected_words.size(); ++word)
+  for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
+    for (uint32_t word = 0; word < test_case.expected_words.size(); ++word) {
       EXPECT_EQ(memory->read32(kOutputAddress + lane * 16 + word * sizeof(uint32_t)),
                 test_case.expected_words[word])
           << "lane " << lane << ", word " << word;
+    }
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(AllNineInstructions, Gfx1251SimulatorInstructionTest,
@@ -360,9 +366,11 @@ TEST(Gfx1251SimulatorTest, DispatchesTargetSpecificSetregSemantics) {
       << admission_diagnostic.message();
 
   code_object.load_to_memory(memory, kCodeObjectBase);
-  for (uint32_t lane = 0; lane < kWaveSize; ++lane)
-    for (uint32_t word = 0; word < 3; ++word)
+  for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
+    for (uint32_t word = 0; word < 3; ++word) {
       memory->write32(kOutputAddress + lane * 16 + word * sizeof(uint32_t), 0xDEADBEEFu);
+    }
+  }
   memory->write64(kCompletionSignal + kSignalValueOffset, 1);
 
   hsa_kernel_dispatch_packet_t packet{};
@@ -387,11 +395,13 @@ TEST(Gfx1251SimulatorTest, DispatchesTargetSpecificSetregSemantics) {
   EXPECT_EQ(memory->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 1u);
   EXPECT_EQ(memory->read64(kCompletionSignal + kSignalValueOffset), 0u);
   constexpr std::array<uint32_t, 3> kExpected{0xA5u, 0xC3u, 0x05u};
-  for (uint32_t lane = 0; lane < kWaveSize; ++lane)
-    for (uint32_t word = 0; word < kExpected.size(); ++word)
+  for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
+    for (uint32_t word = 0; word < kExpected.size(); ++word) {
       EXPECT_EQ(memory->read32(kOutputAddress + lane * 16 + word * sizeof(uint32_t)),
                 kExpected[word])
           << "lane " << lane << ", word " << word;
+    }
+  }
 }
 
 } // namespace
