@@ -29,6 +29,9 @@
  * pinned host memory before each pass, so every pass writes a different tile. The tool replays it
  * with four passes, restoring from a list kept after the first. The application keeps the last
  * pass's memory, so exactly one element, the first of tile 3, may be nonzero.
+ *
+ * The kernel reads the pinned pointer from device memory, because the SDK runs a dispatch once
+ * without replay when one of its arguments points at host memory.
  */
 
 #include <hip/hip_runtime.h>
@@ -62,9 +65,9 @@ constexpr size_t   kTiles        = 8;
 constexpr size_t   kExpectedTile = 3;  // the last of the tool's four passes
 
 __global__ void
-write_selected_tile(float* data, const volatile int* tile)
+write_selected_tile(float* data, const volatile int* const* tile_slot)
 {
-    if(threadIdx.x == 0) data[static_cast<size_t>(*tile) * kTileFloats] = 1.0f;
+    if(threadIdx.x == 0) data[static_cast<size_t>(**tile_slot) * kTileFloats] = 1.0f;
 }
 
 using register_tile_fn = void (*)(int*);
@@ -86,11 +89,15 @@ main()
     *tile = 0;
     register_tile(tile);
 
+    int** tile_slot = nullptr;
+    HIP_CHECK(hipMalloc(&tile_slot, sizeof(int*)));
+    HIP_CHECK(hipMemcpy(tile_slot, &tile, sizeof(int*), hipMemcpyHostToDevice));
+
     const size_t n    = kTiles * kTileFloats;
     float*       data = nullptr;
     HIP_CHECK(hipMalloc(&data, n * sizeof(float)));
     HIP_CHECK(hipMemset(data, 0, n * sizeof(float)));
-    hipLaunchKernelGGL(write_selected_tile, dim3(1), dim3(kWriteBlockX), 0, 0, data, tile);
+    hipLaunchKernelGGL(write_selected_tile, dim3(1), dim3(kWriteBlockX), 0, 0, data, tile_slot);
     HIP_CHECK(hipDeviceSynchronize());
 
     auto host = std::vector<float>(n);
@@ -113,6 +120,7 @@ main()
     }
 
     HIP_CHECK(hipFree(data));
+    HIP_CHECK(hipFree(tile_slot));
     HIP_CHECK(hipHostFree(tile));
     if(wrong != 0)
     {
