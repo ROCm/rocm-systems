@@ -5,6 +5,7 @@
 #include "rocjitsu/code/consan/analysis/analyze.h"
 #include "rocjitsu/code/consan/encoding.h"
 #include "rocjitsu/code/consan/target.h"
+#include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
 
@@ -74,16 +75,16 @@ protected:
 
   FailureOr<std::vector<uint8_t>> encode() {
     CaptureEncoder encoder;
-    FailureOr<std::vector<uint8_t>> bytes = encoder.start(capture_.header, &error_);
+    FailureOr<std::vector<uint8_t>> bytes = encoder.start(capture_.header, error_.emitter());
     if (bytes.failed())
       return Result::failure();
     for (const CapturedExecution &execution : capture_.executions) {
-      const FailureOr<std::vector<uint8_t>> frame = encoder.append(execution, &error_);
+      const FailureOr<std::vector<uint8_t>> frame = encoder.append(execution, error_.emitter());
       if (frame.failed())
         return Result::failure();
       bytes.value().insert(bytes.value().end(), frame.value().begin(), frame.value().end());
     }
-    const FailureOr<std::vector<uint8_t>> end = encoder.finish(&error_);
+    const FailureOr<std::vector<uint8_t>> end = encoder.finish(error_.emitter());
     if (end.failed())
       return Result::failure();
     bytes.value().insert(bytes.value().end(), end.value().begin(), end.value().end());
@@ -94,10 +95,10 @@ protected:
     const FailureOr<std::vector<uint8_t>> bytes = encode();
     if (bytes.failed())
       return Result::failure();
-    const FailureOr<Capture> decoded = decode_capture(bytes.value(), &error_);
+    const FailureOr<Capture> decoded = decode_capture(bytes.value(), error_.emitter());
     if (decoded.failed())
       return Result::failure();
-    return analyze_capture(decoded.value(), options, &error_);
+    return analyze_capture(decoded.value(), options, error_.emitter());
   }
 
   void many_sites(uint32_t count) {
@@ -234,7 +235,7 @@ protected:
   }
 
   Capture capture_;
-  ContractError error_;
+  util::StringDiagnostic error_;
   uint32_t stride_ = 0;
 };
 
@@ -250,7 +251,7 @@ TEST_F(ConSanAnalysis, DecoderControlUnequalLoopFinalPhasesCannotConfirmAnUnorde
   wire::write_u32(report, row(1) + wire::kRowFinalPhase, 0);
   std::fill_n(report.begin() + completion(1), kSyncRecordBytes, 0);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().cross_wave_pairs, 0u);
   EXPECT_EQ(result.value().ordering_unresolved_pairs, 1u);
   EXPECT_EQ(result.value().executions[0].integrity_events, 0u);
@@ -278,7 +279,7 @@ TEST_F(ConSanAnalysis, DecoderControlLoopQuotaLossKeepsIndependentWitnessWithout
     }
   }
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   const LdsRaceExecutionResult &execution = result.value().executions[0];
   EXPECT_EQ(execution.ordered_pairs, 1u);
   EXPECT_EQ(execution.cross_wave_pairs, 0u);
@@ -321,7 +322,7 @@ TEST_F(ConSanAnalysis, SaturatedAccessPhasesAreCoverageLossWithoutInventingOrder
                       UINT32_MAX - kSyncCapacity + exhausted);
     }
     const FailureOr<LdsRaceResult> result = analyze();
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     const LdsRaceExecutionResult &execution = result.value().executions[0];
     EXPECT_EQ(execution.valid_observations, 2u);
     EXPECT_EQ(execution.integrity_events, 0u);
@@ -333,7 +334,7 @@ TEST_F(ConSanAnalysis, SaturatedAccessPhasesAreCoverageLossWithoutInventingOrder
   // Saturation does not excuse an access beyond its row's final phase.
   wire::write_u32(report, row(0) + wire::kRowFinalPhase, UINT32_MAX - 1);
   const FailureOr<LdsRaceResult> contradictory = analyze();
-  ASSERT_TRUE(contradictory.succeeded()) << error_.message;
+  ASSERT_TRUE(contradictory.succeeded()) << error_.message();
   const LdsRaceExecutionResult &invalid = contradictory.value().executions[0];
   // Only the access contradicts its own row; unequal wave-local final phases
   // independently leave ordering coverage incomplete.
@@ -393,7 +394,7 @@ TEST_F(ConSanAnalysis, SaturatedPhaseResidueIsUnknownOnlyAfterCounterExhaustion)
                       UINT32_MAX - kSyncCapacity + 3 * exhausted);
     }
     const FailureOr<LdsRaceResult> result = analyze();
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     const LdsRaceExecutionResult &execution = result.value().executions[0];
     EXPECT_EQ(execution.valid_observations, 2u);
     EXPECT_EQ(execution.integrity_events, exhausted ? 0u : 2u);
@@ -429,7 +430,7 @@ TEST_F(ConSanAnalysis, DecoderControlSeededCounterLimitsKeepCandidatesBoundedAnd
     wire::write_u32(report, completion(wave) + wire::kSyncSequence, 1);
   }
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   const LdsRaceExecutionResult &execution = result.value().executions[0];
   EXPECT_EQ(execution.valid_observations, 2u);
   EXPECT_EQ(execution.counter_exhausted_waves, 2u);
@@ -445,7 +446,7 @@ TEST_F(ConSanAnalysis, DecoderControlSeededCounterLimitsKeepCandidatesBoundedAnd
   // the independent exact-mask collision remains confirmed in both cases.
   wire::write_u32(report, completion(1) + wire::kSyncCommit, 0);
   const FailureOr<LdsRaceResult> missing = analyze();
-  ASSERT_TRUE(missing.succeeded()) << error_.message;
+  ASSERT_TRUE(missing.succeeded()) << error_.message();
   EXPECT_EQ(missing.value().cross_wave_pairs, 0u);
   EXPECT_EQ(missing.value().ordering_unresolved_pairs, 1u);
   EXPECT_EQ(missing.value().collision_groups, 1u);
@@ -455,7 +456,7 @@ TEST_F(ConSanAnalysis, OverlappingWriteReadProducesAttributedUnorderedCrossWaveF
   access(0, 0, 1);
   access(1, 1, 1);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_TRUE(result.value().coverage_complete);
   EXPECT_EQ(result.value().cross_wave_pairs, 1u);
   EXPECT_EQ(result.value().collision_groups, 0u);
@@ -490,7 +491,7 @@ TEST_F(ConSanAnalysis, UnequalStartMixedWidthRangesOverlapAndAdjacentRangesDoNot
         access(0, 0, 1, 0);
         access(1, 1, 1, offset);
         const FailureOr<LdsRaceResult> result = analyze();
-        ASSERT_TRUE(result.succeeded()) << error_.message;
+        ASSERT_TRUE(result.succeeded()) << error_.message();
         const bool conflict =
             offset == 4 && (wide_access == AccessKind::Write || narrow_access == AccessKind::Write);
         EXPECT_EQ(result.value().executions[0].valid_observations, 2u);
@@ -509,7 +510,7 @@ TEST_F(ConSanAnalysis, DecoderControlWideBoundsCannotWrapOrSilentlyBecomeB32) {
       access(0, 0, 1, offset, 3);
       access(1, 1, 1);
       const FailureOr<LdsRaceResult> result = analyze();
-      ASSERT_TRUE(result.succeeded()) << error_.message;
+      ASSERT_TRUE(result.succeeded()) << error_.message();
       EXPECT_EQ(result.value().executions[0].valid_observations, 1u);
       EXPECT_EQ(result.value().executions[0].rejected_records, 1u);
       EXPECT_EQ(result.value().cross_wave_pairs, 0u);
@@ -532,7 +533,7 @@ TEST_F(ConSanAnalysis, MixedWidthUnequalStartPairUsesTheQualifiedBarrierCertific
   access(1, 1, 1, 4);
   barrier();
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().executions[0].ordered_pairs, 1u);
   EXPECT_EQ(result.value().cross_wave_pairs, 0u);
 }
@@ -542,7 +543,7 @@ TEST_F(ConSanAnalysis, IdenticalOffsetsInDifferentWorkgroupsNeverFormLdsCandidat
   access(0, 0, 1);
   access(4, 1, 1);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().executions[0].valid_observations, 2u);
   EXPECT_EQ(result.value().cross_wave_pairs, 0u);
   EXPECT_TRUE(result.value().coverage_complete);
@@ -557,7 +558,7 @@ TEST_F(ConSanAnalysis, LocalConflictsAndReadReadExclusionApplyIndependentlyInEve
       access(3 * group + 1, 1, 1);
     }
     const FailureOr<LdsRaceResult> result = analyze();
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     EXPECT_EQ(result.value().cross_wave_pairs, read_read ? 0u : 4u);
     EXPECT_EQ(result.value().executions[0].valid_observations, 8u);
     EXPECT_TRUE(result.value().coverage_complete);
@@ -587,7 +588,7 @@ TEST_F(ConSanAnalysis, EveryTargetKeepsNoSyncConflictsAndReadReadExclusionLocalT
           access(3 * group + 2, 1, 1);
         }
         const FailureOr<LdsRaceResult> result = analyze();
-        ASSERT_TRUE(result.succeeded()) << error_.message;
+        ASSERT_TRUE(result.succeeded()) << error_.message();
         const LdsRaceExecutionResult &execution = result.value().executions.front();
         EXPECT_EQ(execution.workgroup_count, 4u);
         EXPECT_EQ(execution.waves_per_workgroup, 3u);
@@ -619,7 +620,7 @@ TEST_F(ConSanAnalysis, EveryTargetNeverJoinsIdenticalLdsOffsetsAcrossWorkgroups)
       for (uint32_t group = 1; group < 4; ++group)
         access(3 * group + 1, 1, 1);
       const FailureOr<LdsRaceResult> result = analyze();
-      ASSERT_TRUE(result.succeeded()) << error_.message;
+      ASSERT_TRUE(result.succeeded()) << error_.message();
       const LdsRaceExecutionResult &execution = result.value().executions.front();
       EXPECT_EQ(execution.valid_observations, 4u);
       EXPECT_EQ(execution.cross_wave_pairs, 0u);
@@ -641,7 +642,7 @@ TEST_F(ConSanAnalysis, Wave64WorkgroupsKeepHighLanesAndRejectOnlyInvalidPartialW
       access(3 * group + 2, 1, 1);
     }
     FailureOr<LdsRaceResult> result = analyze();
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     const LdsRaceExecutionResult &complete = result.value().executions.front();
     EXPECT_EQ(complete.valid_observations, 12u);
     EXPECT_EQ(complete.cross_wave_pairs, 8u);
@@ -658,7 +659,7 @@ TEST_F(ConSanAnalysis, Wave64WorkgroupsKeepHighLanesAndRejectOnlyInvalidPartialW
     // WG2/W2 contains only lane zero; rejecting lane one must preserve other groups.
     access(8, 1, 1, 0, 2);
     result = analyze();
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     const LdsRaceExecutionResult &damaged = result.value().executions.front();
     EXPECT_EQ(damaged.valid_observations, 11u);
     EXPECT_EQ(damaged.rejected_records, 1u);
@@ -689,7 +690,7 @@ TEST_F(ConSanAnalysis,
     capture_.executions[0].report = saved;
     wire::write_u32(capture_.executions[0].report, row(8) + field, 0);
     const FailureOr<LdsRaceResult> result = analyze();
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     const LdsRaceExecutionResult &execution = result.value().executions[0];
     EXPECT_EQ(execution.valid_observations, 8u);
     EXPECT_EQ(execution.ordered_pairs, 3u);
@@ -714,7 +715,7 @@ TEST_F(ConSanAnalysis, DecoderControlWrongWorkgroupRowIdentityDiscardsOnlyItsAcc
   }
   wire::write_u32(capture_.executions[0].report, row(3) + wire::kRowWorkgroupX, 0);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().executions[0].valid_observations, 7u);
   EXPECT_EQ(result.value().cross_wave_pairs, 3u);
   EXPECT_FALSE(result.value().coverage_complete);
@@ -726,7 +727,7 @@ TEST_F(ConSanAnalysis, MultiWorkgroupReusedStorageNeverJoinsDifferentDispatches)
   access(9, 0, 1, 0, 1, 0, 0);
   access(10, 1, 1, 0, 1, 0, 1);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().executions.size(), 2u);
   EXPECT_EQ(result.value().cross_wave_pairs, 0u);
   EXPECT_EQ(result.value().executions[0].valid_observations, 1u);
@@ -742,7 +743,7 @@ TEST_F(ConSanAnalysis, FixedBarrierCertificateOrdersRetainedPairAndSurvivesUnrel
     if (unrelated_gap)
       wire::write_u32(capture_.executions[0].report, record(0, 1) + wire::kRecordCommit, 7);
     const FailureOr<LdsRaceResult> result = analyze();
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     const LdsRaceExecutionResult &execution = result.value().executions.front();
     EXPECT_EQ(execution.valid_observations, 2u);
     EXPECT_EQ(execution.ordered_pairs, 1u);
@@ -777,7 +778,7 @@ TEST_F(ConSanAnalysis,
     wire::write_u32(capture_.executions[0].report, completion(1) + corruption.first,
                     corruption.second);
     const FailureOr<LdsRaceResult> result = analyze();
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     const LdsRaceExecutionResult &execution = result.value().executions.front();
     EXPECT_EQ(execution.ordered_pairs, 0u);
     EXPECT_EQ(execution.cross_wave_pairs, 0u);
@@ -797,7 +798,7 @@ TEST_F(ConSanAnalysis, FixedBarrierDoesNotEraseIndependentSameInstructionCollisi
   access(1, 1, 1);
   barrier();
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   const LdsRaceExecutionResult &execution = result.value().executions.front();
   EXPECT_EQ(execution.ordered_pairs, 1u);
   EXPECT_EQ(execution.cross_wave_pairs, 0u);
@@ -817,7 +818,7 @@ TEST_F(ConSanAnalysis, OrderedPairSummaryAccumulatesAcrossExecutionsWithoutExamp
     wire::write_u64(second, row(wave) + wire::kRowSerial, 2);
 
   const FailureOr<LdsRaceResult> result = analyze({0});
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   ASSERT_TRUE(result.value().coverage_complete);
   ASSERT_EQ(result.value().executions.size(), 2u);
   EXPECT_EQ(result.value().ordered_pairs, 2u);
@@ -841,7 +842,7 @@ TEST_F(ConSanAnalysis, FixedBarrierReadReadAndDisjointKeepObservationsWithoutCan
     access(1, 1, 1, read_read ? 0 : 4);
     barrier();
     const FailureOr<LdsRaceResult> result = analyze();
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     const LdsRaceExecutionResult &execution = result.value().executions.front();
     EXPECT_EQ(execution.valid_observations, 2u);
     EXPECT_EQ(execution.ordered_pairs, 0u);
@@ -858,7 +859,7 @@ TEST_F(ConSanAnalysis, DecoderControlCompletionSequenceMustBracketTheActualEndpo
   // This otherwise valid completion wrongly places the consumer before wait.
   wire::write_u32(capture_.executions[0].report, completion(1) + wire::kSyncSequence, 1);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   const LdsRaceExecutionResult &execution = result.value().executions.front();
   EXPECT_EQ(execution.completed_barrier_waves, 1u);
   EXPECT_FALSE(execution.coverage_complete);
@@ -876,7 +877,7 @@ TEST_F(ConSanAnalysis, DecoderControlEmptyAccessWaveStillMustCompleteTheSameBarr
   for (const uint32_t wave : {0u, 1u})
     wire::write_u32(capture_.executions[0].report, completion(wave) + wire::kSyncParticipants, 3);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   const LdsRaceExecutionResult &execution = result.value().executions.front();
   EXPECT_EQ(execution.valid_observations, 2u);
   EXPECT_EQ(execution.required_barrier_waves, 3u);
@@ -895,7 +896,7 @@ TEST_F(ConSanAnalysis, SamePhaseRequiresCompleteJournalWithoutUnexpectedTail) {
   access(1, 1, 1);
   std::vector<uint8_t> &report = capture_.executions[0].report;
   const FailureOr<LdsRaceResult> baseline = analyze();
-  ASSERT_TRUE(baseline.succeeded()) << error_.message;
+  ASSERT_TRUE(baseline.succeeded()) << error_.message();
   ASSERT_TRUE(baseline.value().coverage_complete);
   ASSERT_EQ(baseline.value().cross_wave_pairs, 1u);
   ASSERT_EQ(baseline.value().ordering_unresolved_pairs, 0u);
@@ -909,7 +910,7 @@ TEST_F(ConSanAnalysis, SamePhaseRequiresCompleteJournalWithoutUnexpectedTail) {
     else
       wire::write_u32(report, completion(1) + wire::kSyncCommit, 0);
     const FailureOr<LdsRaceResult> result = analyze();
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     const LdsRaceExecutionResult &execution = result.value().executions.front();
     EXPECT_EQ(execution.valid_observations, 2u);
     EXPECT_FALSE(execution.coverage_complete);
@@ -931,7 +932,7 @@ TEST_F(ConSanAnalysis, SamePhaseRequiresCompleteJournalWithoutUnexpectedTail) {
     EXPECT_NE(json.find("\"unresolved_examples\":[{\"kind\":\"cross_wave\""), std::string::npos);
     EXPECT_NE(json.find("\"ordering\":\"ordering_unresolved\""), std::string::npos);
     const FailureOr<LdsRaceResult> hidden = analyze({.examples = 0});
-    ASSERT_TRUE(hidden.succeeded()) << error_.message;
+    ASSERT_TRUE(hidden.succeeded()) << error_.message();
     LdsRaceResult expected = result.value();
     expected.executions.front().unresolved_examples.clear();
     // Compare the real analyzer/renderer output: hiding examples must preserve
@@ -946,7 +947,7 @@ TEST_F(ConSanAnalysis, StaticAccessPhaseCannotBeReplacedByAConsistentDynamicBoun
   access(0, 0, 1);
   access(1, 1, 1);
   const FailureOr<LdsRaceResult> baseline = analyze();
-  ASSERT_TRUE(baseline.succeeded()) << error_.message;
+  ASSERT_TRUE(baseline.succeeded()) << error_.message();
   ASSERT_TRUE(baseline.value().coverage_complete);
   ASSERT_EQ(baseline.value().cross_wave_pairs, 1u);
 
@@ -956,7 +957,7 @@ TEST_F(ConSanAnalysis, StaticAccessPhaseCannotBeReplacedByAConsistentDynamicBoun
   wire::write_u32(report, record(0, 0) + wire::kRecordPhase, 0);
   wire::write_u32(report, completion(0) + wire::kSyncSequence, 1);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   const LdsRaceExecutionResult &execution = result.value().executions.front();
   EXPECT_EQ(execution.valid_observations, 2u);
   EXPECT_GT(execution.integrity_events, 0u);
@@ -995,7 +996,7 @@ TEST_F(ConSanAnalysis, DecoderControlBoundaryContradictionKeepsIndependentEndpoi
     wire::write_u32(report, completion(wave, 1) + wire::kSyncSequence, wave == 0 ? 2 : 0);
   }
   const FailureOr<LdsRaceResult> baseline = analyze();
-  ASSERT_TRUE(baseline.succeeded()) << error_.message;
+  ASSERT_TRUE(baseline.succeeded()) << error_.message();
   ASSERT_TRUE(baseline.value().coverage_complete);
   ASSERT_EQ(baseline.value().executions[0].ordered_pairs, 2u);
   ASSERT_EQ(baseline.value().collision_groups, 1u);
@@ -1004,7 +1005,7 @@ TEST_F(ConSanAnalysis, DecoderControlBoundaryContradictionKeepsIndependentEndpoi
   // B1 witness, and the exact store mask needs no cross-wave ordering proof.
   wire::write_u32(report, completion(0) + wire::kSyncSequence, 1);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   const LdsRaceExecutionResult &execution = result.value().executions[0];
   EXPECT_FALSE(execution.coverage_complete);
   EXPECT_EQ(execution.integrity_events, 1u);
@@ -1061,7 +1062,7 @@ TEST_F(ConSanAnalysis, DecoderControlContradictionIsLocalToOccurrenceAndWorkgrou
     }
   }
   const FailureOr<LdsRaceResult> baseline = analyze();
-  ASSERT_TRUE(baseline.succeeded()) << error_.message;
+  ASSERT_TRUE(baseline.succeeded()) << error_.message();
   ASSERT_TRUE(baseline.value().coverage_complete);
   ASSERT_EQ(baseline.value().executions[0].ordered_pairs, 4u);
 
@@ -1069,7 +1070,7 @@ TEST_F(ConSanAnalysis, DecoderControlContradictionIsLocalToOccurrenceAndWorkgrou
   // The first operation at that static site and both WG1 operations stay valid.
   wire::write_u32(report, completion(0, 2) + wire::kSyncSequence, 2);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   const LdsRaceExecutionResult &execution = result.value().executions[0];
   EXPECT_FALSE(execution.coverage_complete);
   EXPECT_EQ(execution.integrity_events, 1u);
@@ -1121,7 +1122,7 @@ TEST_F(ConSanAnalysis, MultipleEpochsUseIndependentGroupWitnesses) {
     if (missing)
       wire::write_u32(report, completion(1, missing - 1) + wire::kSyncCommit, 0);
     const FailureOr<LdsRaceResult> result = analyze();
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     const LdsRaceExecutionResult &execution = result.value().executions[0];
     EXPECT_EQ(execution.ordered_pairs, missing < 2 ? 1u : 0u);
     EXPECT_EQ(execution.cross_wave_pairs, 0u);
@@ -1135,7 +1136,7 @@ TEST_F(ConSanAnalysis, AdjacentEffectiveByteRangesAreDisjointWithNonemptyObserva
   access(0, 0, 1, 0);
   access(1, 1, 1, 4);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().cross_wave_pairs, 0u);
   EXPECT_EQ(result.value().executions.front().valid_observations, 2u);
   EXPECT_TRUE(result.value().coverage_complete);
@@ -1146,7 +1147,7 @@ TEST_F(ConSanAnalysis, OverlappingReadReadGroupsAreNotConflictCandidates) {
   access(0, 0, 1, 0, 3);
   access(1, 1, 1, 0, UINT32_MAX);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().cross_wave_pairs, 0u);
   EXPECT_EQ(result.value().collision_groups, 0u);
   EXPECT_EQ(result.value().executions.front().valid_observations, 2u);
@@ -1156,7 +1157,7 @@ TEST_F(ConSanAnalysis, DifferentInstructionsInOneWaveDoNotBecomeCrossWavePairs) 
   access(0, 0, 1);
   access(0, 1, 2);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().cross_wave_pairs, 0u);
   EXPECT_EQ(result.value().collision_groups, 0u);
   EXPECT_TRUE(result.value().coverage_complete);
@@ -1167,7 +1168,7 @@ TEST_F(ConSanAnalysis, ReusedStorageAcrossDispatchesCannotJoinOtherwiseOverlappi
   access(0, 0, 1, 0, 1, 0, 0);
   access(1, 1, 1, 0, 1, 0, 1);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   ASSERT_EQ(result.value().executions.size(), 2u);
   EXPECT_EQ(result.value().cross_wave_pairs, 0u);
   EXPECT_EQ(result.value().executions[0].valid_observations, 1u);
@@ -1178,7 +1179,7 @@ TEST_F(ConSanAnalysis, ReusedStorageAcrossDispatchesCannotJoinOtherwiseOverlappi
 TEST_F(ConSanAnalysis, ExactOrdinaryWriteMaskReportsFullParticipatingLanesAndPairCount) {
   access(0, 0, 1, 0, 0x80000005u);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().collision_groups, 1u);
   const LdsRaceExecutionResult &execution = result.value().executions.front();
   EXPECT_EQ(execution.collision_lane_pairs, 3u);
@@ -1193,7 +1194,7 @@ TEST_F(ConSanAnalysis, SingleLaneWriteAndMultiLaneReadNeverInventInstructionColl
   access(0, 0, 1, 0, 0x80000000u);
   access(0, 1, 2, 0, UINT32_MAX);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().collision_groups, 0u);
   EXPECT_EQ(result.value().executions.front().valid_observations, 2u);
 }
@@ -1202,7 +1203,7 @@ TEST_F(ConSanAnalysis, BothChecksConsumeTheSameWriteObservation) {
   access(0, 0, 1, 0, 3);
   access(1, 1, 1);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   const LdsRaceExecutionResult &execution = result.value().executions.front();
   EXPECT_EQ(execution.valid_observations, 2u);
   EXPECT_EQ(execution.cross_wave_pairs, 1u);
@@ -1220,7 +1221,7 @@ TEST_F(ConSanAnalysis, ExampleLimitsNeverChangeCompleteGroupOrLanePairCounts) {
   }
   for (const uint32_t limit : {0, 1, 3, 8}) {
     const FailureOr<LdsRaceResult> result = analyze({limit});
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     const LdsRaceExecutionResult &execution = result.value().executions.front();
     EXPECT_EQ(execution.cross_wave_pairs, 4u);
     EXPECT_EQ(execution.cross_wave_lane_pairs, 16u);
@@ -1236,7 +1237,7 @@ TEST_F(ConSanAnalysis, MalformedRowDoesNotEraseAnotherWavesIndependentCollision)
   access(1, 1, 1);
   wire::write_u32(capture_.executions[0].report, row(1) + wire::kRowStatus, UINT32_MAX);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_FALSE(result.value().coverage_complete);
   EXPECT_EQ(result.value().collision_groups, 1u);
   EXPECT_EQ(result.value().cross_wave_pairs, 0u);
@@ -1265,14 +1266,14 @@ TEST_F(ConSanAnalysis, NoSynchronizationKeepsConflictsDespiteUnrelatedRowDamage)
     access((damage.wave + 1) % 3, 0, 1);
     access((damage.wave + 2) % 3, 1, 1);
     const FailureOr<LdsRaceResult> baseline = analyze();
-    ASSERT_TRUE(baseline.succeeded()) << error_.message;
+    ASSERT_TRUE(baseline.succeeded()) << error_.message();
     ASSERT_EQ(baseline.value().cross_wave_pairs, 1u);
     ASSERT_TRUE(baseline.value().coverage_complete);
     // The missing/malformed row has no endpoint and cannot introduce
     // synchronization into the statically qualified no-sync profile.
     wire::write_u32(capture_.executions[0].report, row(damage.wave) + damage.field, damage.value);
     const FailureOr<LdsRaceResult> result = analyze();
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     const LdsRaceExecutionResult &execution = result.value().executions[0];
     EXPECT_EQ(execution.valid_observations, 2u);
     EXPECT_EQ(execution.cross_wave_pairs, 1u);
@@ -1298,7 +1299,7 @@ TEST_F(ConSanAnalysis, NoSynchronizationStillRejectsDamagedEndpointRows) {
     report = original;
     wire::write_u32(report, row(damaged_wave) + wire::kRowStatus, 0);
     const auto result = analyze();
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     EXPECT_EQ(result.value().executions[0].valid_observations, 1u);
     EXPECT_EQ(result.value().cross_wave_pairs, 0u);
     EXPECT_EQ(result.value().ordering_unresolved_pairs, 0u);
@@ -1316,7 +1317,7 @@ TEST_F(ConSanAnalysis, NoSynchronizationStillRejectsContradictoryEndpointPhases)
     report = original;
     wire::write_u32(report, record(damaged_wave, damaged_wave) + wire::kRecordPhase, 1);
     const auto result = analyze();
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     EXPECT_EQ(result.value().executions[0].valid_observations, 2u);
     EXPECT_GT(result.value().executions[0].integrity_events, 0u);
     EXPECT_EQ(result.value().cross_wave_pairs, 0u);
@@ -1334,12 +1335,12 @@ TEST_F(ConSanAnalysis, BarrierProfileStillRequiresAnEmptyAccessParticipant) {
   for (uint32_t wave = 0; wave < 3; ++wave)
     wire::write_u32(report, completion(wave) + wire::kSyncSequence, wave < 2 ? 1 : 0);
   const auto baseline = analyze();
-  ASSERT_TRUE(baseline.succeeded()) << error_.message;
+  ASSERT_TRUE(baseline.succeeded()) << error_.message();
   ASSERT_EQ(baseline.value().cross_wave_pairs, 1u);
   ASSERT_TRUE(baseline.value().coverage_complete);
   wire::write_u32(report, row(2) + wire::kRowStatus, 0);
   const auto result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().executions[0].valid_observations, 2u);
   EXPECT_EQ(result.value().executions[0].required_barrier_waves, 3u);
   EXPECT_EQ(result.value().cross_wave_pairs, 0u);
@@ -1354,7 +1355,7 @@ TEST_F(ConSanAnalysis, MalformedLocalRecordPreservesAnIndependentCrossWavePair) 
   access(1, 1, 1);
   wire::write_u32(capture_.executions[0].report, record(0, 1) + wire::kRecordCommit, 1);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_FALSE(result.value().coverage_complete);
   EXPECT_EQ(result.value().cross_wave_pairs, 1u);
   EXPECT_EQ(result.value().executions.front().rejected_records, 1u);
@@ -1382,7 +1383,7 @@ TEST_F(ConSanAnalysis, InvalidRecordIdentityMaskAndBoundsAreGapsBeyondTheContain
     wire::write_u32(report, record(1, 1) + field, value);
     // Production encoder makes a valid whole container and frame checksum.
     const FailureOr<LdsRaceResult> result = analyze();
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     EXPECT_FALSE(result.value().coverage_complete) << field;
     EXPECT_EQ(result.value().cross_wave_pairs, 0u) << field;
     EXPECT_EQ(result.value().collision_groups, 1u) << field;
@@ -1392,41 +1393,40 @@ TEST_F(ConSanAnalysis, InvalidRecordIdentityMaskAndBoundsAreGapsBeyondTheContain
 TEST_F(ConSanAnalysis, MissingStaticMappingIsAnInputErrorNotInstructionZero) {
   access(0, 0, 1);
   capture_.header.manifest.sites[0].original_size = 0;
-  EXPECT_TRUE(analyze_capture(capture_, {}, &error_).failed());
-  EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+  EXPECT_TRUE(analyze_capture(capture_, {}, error_.emitter()).failed());
+  EXPECT_EQ(error_.message(), "invalid site identity, mapping or address group");
 }
 
 TEST_F(ConSanAnalysis, UnmodeledScopeCannotBeTreatedAsConfirmedUnorderedAccesses) {
   access(0, 0, 1);
   access(1, 1, 1);
   capture_.header.manifest.scope = static_cast<ScopeKind>(99);
-  EXPECT_TRUE(analyze_capture(capture_, {}, &error_).failed());
-  EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
-  EXPECT_EQ(error_.message, "empty image or unsupported target, ABI, scope or options");
+  EXPECT_TRUE(analyze_capture(capture_, {}, error_.emitter()).failed());
+  EXPECT_EQ(error_.message(), "empty image or unsupported target, ABI, scope or options");
 }
 
 TEST_F(ConSanAnalysis, TypedHeaderConditionsAndIdentityCannotBypassFileValidation) {
   const CaptureHeader saved = capture_.header;
   for (const uint32_t unsupported : {0u, 14u, 13u, 11u, 7u, 31u}) {
     capture_.header.execution_conditions = unsupported;
-    EXPECT_TRUE(analyze_capture(capture_, {}, &error_).failed());
-    EXPECT_EQ(error_.message, "unsupported capture execution conditions");
+    EXPECT_TRUE(analyze_capture(capture_, {}, error_.emitter()).failed());
+    EXPECT_EQ(error_.message(), "unsupported capture execution conditions");
   }
   capture_.header = saved;
   capture_.header.run_identity = {};
-  EXPECT_TRUE(analyze_capture(capture_, {}, &error_).failed());
-  EXPECT_EQ(error_.message, "missing capture run identity");
+  EXPECT_TRUE(analyze_capture(capture_, {}, error_.emitter()).failed());
+  EXPECT_EQ(error_.message(), "missing capture run identity");
   capture_.header = saved;
   EXPECT_TRUE(analyze_capture(capture_).succeeded());
 }
 
 TEST_F(ConSanAnalysis, TypedAnalysisBudgetsRetainTheirIndependentLimits) {
   EXPECT_TRUE(analyze_capture(capture_, {kMaxFindingExamples}).succeeded());
-  EXPECT_TRUE(analyze_capture(capture_, {kMaxFindingExamples + 1}, &error_).failed());
-  EXPECT_EQ(error_.message, "finding example budget exceeded");
+  EXPECT_TRUE(analyze_capture(capture_, {kMaxFindingExamples + 1}, error_.emitter()).failed());
+  EXPECT_EQ(error_.message(), "finding example budget exceeded");
   capture_.executions.resize(CaptureLimits{}.executions + 1);
-  EXPECT_TRUE(analyze_capture(capture_, {}, &error_).failed());
-  EXPECT_EQ(error_.message, "capture execution budget exceeded");
+  EXPECT_TRUE(analyze_capture(capture_, {}, error_.emitter()).failed());
+  EXPECT_EQ(error_.message(), "capture execution budget exceeded");
 }
 
 TEST_F(ConSanAnalysis, InvalidReportParentPreservesFindingsFromAnotherExecution) {
@@ -1435,7 +1435,7 @@ TEST_F(ConSanAnalysis, InvalidReportParentPreservesFindingsFromAnotherExecution)
   access(1, 1, 1, 0, 1, 0, 1);
   wire::write_u32(capture_.executions[0].report, wire::kReportRowStride, UINT32_MAX);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_FALSE(result.value().coverage_complete);
   EXPECT_EQ(result.value().cross_wave_pairs, 1u);
   EXPECT_EQ(result.value().executions[0].valid_observations, 0u);
@@ -1459,7 +1459,7 @@ TEST_F(ConSanAnalysis, RowIdentityPublicationAndFinalSequenceMustMatchTheirExecu
     report = saved;
     wire::write_u32(report, row(1) + field, value);
     const FailureOr<LdsRaceResult> result = analyze();
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     EXPECT_FALSE(result.value().coverage_complete);
     EXPECT_EQ(result.value().cross_wave_pairs, 0u);
     EXPECT_EQ(result.value().collision_groups, 1u);
@@ -1471,15 +1471,15 @@ TEST_F(ConSanAnalysis, InvertedSiteOccurrenceOrderCannotBeAValidForwardOnlyExecu
   access(0, 1, 1);
   access(1, 1, 1);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_FALSE(result.value().coverage_complete);
   EXPECT_EQ(result.value().cross_wave_pairs, 0u);
 }
 
 TEST_F(ConSanAnalysis, ShortTypedReportCannotEscapeTheCoreBoundsCheck) {
   capture_.executions[0].report.resize(1);
-  const FailureOr<LdsRaceResult> result = analyze_capture(capture_, {}, &error_);
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  const FailureOr<LdsRaceResult> result = analyze_capture(capture_, {}, error_.emitter());
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_FALSE(result.value().coverage_complete);
   EXPECT_EQ(result.value().executions.front().valid_observations, 0u);
 }
@@ -1489,7 +1489,7 @@ TEST_F(ConSanAnalysis, DuplicateOccurrencesAndOverlappingMasksCannotInflateFindi
   access(0, 1, 1);
   access(1, 1, 1);
   FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_FALSE(result.value().coverage_complete);
   EXPECT_EQ(result.value().cross_wave_pairs, 0u);
   EXPECT_EQ(result.value().executions[0].rejected_records, 2u);
@@ -1498,7 +1498,7 @@ TEST_F(ConSanAnalysis, DuplicateOccurrencesAndOverlappingMasksCannotInflateFindi
       std::span(capture_.executions[0].report).subspan(record(0, 1), kAccessRecordBytes), 0);
   access(0, 0, 1, 4, 1, 1);
   result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().cross_wave_pairs, 0u);
   EXPECT_FALSE(result.value().coverage_complete);
 }
@@ -1511,7 +1511,7 @@ TEST_F(ConSanAnalysis, ReservationLossRetainsValidFindingsButMakesCoverageIncomp
   wire::write_u32(capture_.executions[0].report, row(0) + wire::kRowStatus,
                   wire::kRowEntered | wire::kRowExited | wire::kRowExhausted);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_FALSE(result.value().coverage_complete);
   EXPECT_EQ(result.value().cross_wave_pairs, 1u);
   EXPECT_EQ(result.value().executions.front().lost_occurrences, 1u);
@@ -1522,7 +1522,7 @@ TEST_F(ConSanAnalysis, UnalignedOperandsNeedAlignmentModeEvidenceAndCannotProduc
   access(0, 0, 1, 1, 3);
   access(1, 1, 1);
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_FALSE(result.value().coverage_complete);
   EXPECT_EQ(result.value().cross_wave_pairs, 0u);
   EXPECT_EQ(result.value().collision_groups, 0u);
@@ -1556,7 +1556,7 @@ TEST_F(ConSanAnalysis, AcceptedUtf8EntryNamesRetainTheirBytesInJson) {
   const std::string name = "lds_producer_consum\xc3\xa9_\xe6\xa0\xb8_\xf0\x9f\x98\x80";
   capture_.header.manifest.entry.name = name + "\"\\\n\t";
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().entry, capture_.header.manifest.entry.name);
   EXPECT_NE(
       render_analysis(result.value()).find("\"entry\":\"" + name + "\\\"\\\\\\u000a\\u0009\""),
@@ -1572,14 +1572,13 @@ TEST_F(ConSanAnalysis, InvalidUtf8EntryNamesAreAnalysisInputErrorsAfterBinaryRou
     // Binary capture remains byte preserving; only JSON-producing analysis
     // requires text. Re-encode each case so checksums cannot hide this check.
     const FailureOr<std::vector<uint8_t>> bytes = encode();
-    ASSERT_TRUE(bytes.succeeded()) << error_.message;
-    const FailureOr<Capture> decoded = decode_capture(bytes.value(), &error_);
-    ASSERT_TRUE(decoded.succeeded()) << error_.message;
+    ASSERT_TRUE(bytes.succeeded()) << error_.message();
+    const FailureOr<Capture> decoded = decode_capture(bytes.value(), error_.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error_.message();
     EXPECT_EQ(decoded.value().header.manifest.entry.name, capture_.header.manifest.entry.name);
-    const FailureOr<LdsRaceResult> result = analyze_capture(decoded.value(), {}, &error_);
+    const FailureOr<LdsRaceResult> result = analyze_capture(decoded.value(), {}, error_.emitter());
     EXPECT_TRUE(result.failed());
-    EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
-    EXPECT_EQ(error_.message, "entry name is not valid UTF-8 for JSON output");
+    EXPECT_EQ(error_.message(), "entry name is not valid UTF-8 for JSON output");
   }
 }
 
@@ -1588,20 +1587,20 @@ TEST_F(ConSanAnalysis, Utf8ScalarBoundariesRetainTheirBytesInJson) {
                            "\xee\x80\x80\xef\xbf\xbf\xf0\x90\x80\x80\xf4\x8f\xbf\xbf";
   capture_.header.manifest.entry.name = name;
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_NE(render_analysis(result.value()).find("\"entry\":\"" + name + "\""), std::string::npos);
 }
 
 TEST_F(ConSanAnalysis, EmptyValidObservationsAndNoExecutionsNeverClaimRaceFreedom) {
   FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().cross_wave_pairs, 0u);
   EXPECT_EQ(result.value().executions.front().valid_observations, 0u);
   EXPECT_NE(render_analysis(result.value()).find("no_observed_findings"), std::string::npos);
   EXPECT_EQ(render_analysis(result.value()).find("race_free"), std::string::npos);
   capture_.executions.clear();
   result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_FALSE(result.value().coverage_complete);
 }
 
@@ -1612,7 +1611,7 @@ TEST_F(ConSanAnalysis, LargeCandidateCountsRemainCompleteWithOneExample) {
     for (uint32_t site = 0; site < sites; ++site)
       access(wave, site, site + 1, 0, 3);
   const FailureOr<LdsRaceResult> result = analyze({1});
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   const LdsRaceExecutionResult &execution = result.value().executions.front();
   EXPECT_TRUE(execution.coverage_complete);
   EXPECT_EQ(execution.cross_wave_pairs, uint64_t{sites} * sites);
@@ -1637,7 +1636,7 @@ TEST_F(ConSanAnalysis, LargeBarrierCountsRetainAllPairsWithBoundedExamples) {
         SCOPED_TRACE(missing);
         SCOPED_TRACE(examples);
         const FailureOr<LdsRaceResult> result = analyze({examples});
-        ASSERT_TRUE(result.succeeded()) << error_.message;
+        ASSERT_TRUE(result.succeeded()) << error_.message();
         const LdsRaceExecutionResult &execution = result.value().executions.front();
         const uint64_t separated = 2 * uint64_t{split} * (sites - split);
         const uint64_t ordered = missing ? 0 : separated;
@@ -1720,7 +1719,7 @@ TEST_F(ConSanAnalysis, BarrierCountsAndExampleOrderMatchExhaustiveCandidatePairs
               }
             }
       const FailureOr<LdsRaceResult> result = analyze({examples});
-      ASSERT_TRUE(result.succeeded()) << error_.message;
+      ASSERT_TRUE(result.succeeded()) << error_.message();
       const LdsRaceExecutionResult &execution = result.value().executions.front();
       EXPECT_EQ(execution.ordered_pairs, ordered_count);
       EXPECT_EQ(execution.cross_wave_pairs, retained_count);
@@ -1743,7 +1742,7 @@ TEST_F(ConSanAnalysis, CorruptRecordDiagnosticsAreBoundedWithoutLosingIntegrityC
     }
   }
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   const LdsRaceExecutionResult &execution = result.value().executions.front();
   EXPECT_FALSE(execution.coverage_complete);
   EXPECT_EQ(execution.rejected_records, 2 * sites);
@@ -1760,7 +1759,7 @@ TEST_F(ConSanAnalysis, Wave64HighLanesAndFullMasksRetainExactLanePairCounts) {
   access(0, 0, 1, 0, uint64_t{3} << 62);
   access(1, 1, 1, 0, uint64_t{1} << 63);
   FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_TRUE(result.value().coverage_complete);
   const LdsRaceExecutionResult &execution = result.value().executions.front();
   EXPECT_EQ(execution.cross_wave_pairs, 1u);
@@ -1785,7 +1784,7 @@ TEST_F(ConSanAnalysis, MoreThanTwoWavesShareCandidatesAndPartialWaveGapsStayLoca
   access(2, 1, 1);
   access(3, 1, 1, 0, 2); // Only lane zero exists in the final wave.
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   const LdsRaceExecutionResult &execution = result.value().executions.front();
   EXPECT_EQ(execution.valid_observations, 3u);
   EXPECT_EQ(execution.rejected_records, 1u);
@@ -1809,11 +1808,11 @@ TEST_F(ConSanAnalysis, DecoderControlDisjointBoundaryContradictionIsAnIntegrityI
   access(1, 1, 1, 4);
   barrier();
   const auto baseline = analyze();
-  ASSERT_TRUE(baseline.succeeded()) << error_.message;
+  ASSERT_TRUE(baseline.succeeded()) << error_.message();
   ASSERT_TRUE(baseline.value().coverage_complete);
   wire::write_u32(capture_.executions[0].report, completion(1) + wire::kSyncSequence, 1);
   const auto result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   const auto &execution = result.value().executions[0];
   EXPECT_FALSE(result.value().coverage_complete);
   EXPECT_GT(execution.integrity_events, 0u);
@@ -1828,11 +1827,11 @@ TEST_F(ConSanAnalysis, DecoderControlReadReadBoundaryContradictionIsAnIntegrityI
   access(1, 1, 1, 0);
   barrier();
   const auto baseline = analyze();
-  ASSERT_TRUE(baseline.succeeded()) << error_.message;
+  ASSERT_TRUE(baseline.succeeded()) << error_.message();
   ASSERT_TRUE(baseline.value().coverage_complete);
   wire::write_u32(capture_.executions[0].report, completion(1) + wire::kSyncSequence, 1);
   const auto result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   const auto &execution = result.value().executions[0];
   EXPECT_FALSE(result.value().coverage_complete);
   EXPECT_GT(execution.integrity_events, 0u);
@@ -1864,7 +1863,7 @@ TEST_F(ConSanAnalysis, DecoderControlRepeatedStaticPhaseContradictionMustNotConf
     wire::write_u32(report, completion(wave, 1) + wire::kSyncSequence, 1);
   }
   const FailureOr<LdsRaceResult> baseline = analyze();
-  ASSERT_TRUE(baseline.succeeded()) << error_.message;
+  ASSERT_TRUE(baseline.succeeded()) << error_.message();
   ASSERT_EQ(baseline.value().executions[0].ordered_pairs, 1u);
   ASSERT_TRUE(baseline.value().coverage_complete);
   const std::vector<uint8_t> original = report;
@@ -1882,7 +1881,7 @@ TEST_F(ConSanAnalysis, DecoderControlRepeatedStaticPhaseContradictionMustNotConf
       wire::write_u32(report, completion(1) + wire::kSyncSequence, phase == 0 ? 1 : 0);
       wire::write_u32(report, completion(1, 1) + wire::kSyncSequence, phase == 0 ? 1 : 0);
       const FailureOr<LdsRaceResult> result = analyze();
-      ASSERT_TRUE(result.succeeded()) << error_.message;
+      ASSERT_TRUE(result.succeeded()) << error_.message();
       EXPECT_EQ(result.value().cross_wave_pairs, 0u);
       EXPECT_EQ(result.value().ordering_unresolved_pairs, mode == 0 ? 1u : 0u);
       EXPECT_GT(result.value().executions[0].integrity_events, 0u);
@@ -1901,7 +1900,7 @@ TEST_F(ConSanAnalysis, DecoderControlLaterJournalLossKeepsEarlierUnorderedPair) 
     wire::write_u32(report, completion(wave) + wire::kSyncSequence, 1);
   }
   const FailureOr<LdsRaceResult> baseline = analyze();
-  ASSERT_TRUE(baseline.succeeded()) << error_.message;
+  ASSERT_TRUE(baseline.succeeded()) << error_.message();
   ASSERT_EQ(baseline.value().cross_wave_pairs, 1u);
   for (uint32_t wave = 0; wave < 2; ++wave) {
     wire::write_u32(report, row(wave) + wire::kRowFinalPhase, kSyncCapacity + 1);
@@ -1915,7 +1914,7 @@ TEST_F(ConSanAnalysis, DecoderControlLaterJournalLossKeepsEarlierUnorderedPair) 
     }
   }
   const FailureOr<LdsRaceResult> result = analyze();
-  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().cross_wave_pairs, 1u);
   EXPECT_EQ(result.value().ordering_unresolved_pairs, 0u);
   EXPECT_FALSE(result.value().coverage_complete);
@@ -1949,7 +1948,7 @@ TEST_F(ConSanAnalysis, DecoderControlUnorderedIntervalNeedsBothAdjacentOccurrenc
     if (missing_slot < kSyncCapacity)
       wire::write_u32(report, completion(1, missing_slot) + wire::kSyncCommit, 0);
     const FailureOr<LdsRaceResult> result = analyze();
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     EXPECT_EQ(result.value().cross_wave_pairs, missing_slot < 2 ? 0u : 1u);
     EXPECT_EQ(result.value().ordering_unresolved_pairs, missing_slot < 2 ? 1u : 0u);
     EXPECT_FALSE(result.value().coverage_complete);
@@ -1971,7 +1970,7 @@ TEST_F(ConSanAnalysis, DecoderControlRepeatedCycleEdgesRespectFinalPhaseAndZeroT
     wire::write_u32(report, record(wave, wave) + wire::kRecordPhase, wave == 0 ? 1 : 0);
     wire::write_u32(report, completion(wave) + wire::kSyncSequence, wave == 0 ? 0 : 1);
     const FailureOr<LdsRaceResult> result = analyze();
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     EXPECT_EQ(result.value().cross_wave_pairs, 0u);
     EXPECT_EQ(result.value().ordering_unresolved_pairs, 1u);
     EXPECT_GT(result.value().executions[0].integrity_events, 0u);
@@ -1985,7 +1984,7 @@ TEST_F(ConSanAnalysis, DecoderControlRepeatedCycleEdgesRespectFinalPhaseAndZeroT
     std::fill_n(report.begin() + completion(wave), kSyncRecordBytes, 0);
   }
   const FailureOr<LdsRaceResult> zero = analyze();
-  ASSERT_TRUE(zero.succeeded()) << error_.message;
+  ASSERT_TRUE(zero.succeeded()) << error_.message();
   EXPECT_EQ(zero.value().cross_wave_pairs, 1u);
   EXPECT_EQ(zero.value().ordering_unresolved_pairs, 0u);
   EXPECT_TRUE(zero.value().coverage_complete);
@@ -2011,12 +2010,12 @@ TEST_F(ConSanAnalysis, DecoderControlUnorderedIntervalRequiresTheEmptyAccessWave
     }
   }
   const FailureOr<LdsRaceResult> complete = analyze();
-  ASSERT_TRUE(complete.succeeded()) << error_.message;
+  ASSERT_TRUE(complete.succeeded()) << error_.message();
   EXPECT_EQ(complete.value().cross_wave_pairs, 1u);
   EXPECT_EQ(complete.value().ordering_unresolved_pairs, 0u);
   wire::write_u32(report, completion(2) + wire::kSyncCommit, 0);
   const FailureOr<LdsRaceResult> missing = analyze();
-  ASSERT_TRUE(missing.succeeded()) << error_.message;
+  ASSERT_TRUE(missing.succeeded()) << error_.message();
   EXPECT_EQ(missing.value().cross_wave_pairs, 0u);
   EXPECT_EQ(missing.value().ordering_unresolved_pairs, 1u);
   EXPECT_FALSE(missing.value().coverage_complete);
@@ -2044,7 +2043,7 @@ TEST_F(ConSanAnalysis, LargeTruncatedLoopCountsKeepDistinctLatePhasesAggregated)
   }
   for (const uint32_t examples : {0u, 1u, 7u}) {
     const FailureOr<LdsRaceResult> result = analyze({examples});
-    ASSERT_TRUE(result.succeeded()) << error_.message;
+    ASSERT_TRUE(result.succeeded()) << error_.message();
     const LdsRaceExecutionResult &execution = result.value().executions[0];
     EXPECT_EQ(execution.valid_observations, 2 * sites);
     EXPECT_EQ(execution.integrity_events, 0u);
