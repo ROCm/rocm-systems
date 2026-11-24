@@ -38,12 +38,6 @@ Read **[Adding or Changing Command-Line Options](CONTRIBUTING.md#adding-or-chang
 in `CONTRIBUTING.md` before working on any command-line option, whether adding
 one, changing one, reviewing one, or answering questions about one.
 
-## Metric Library
-
-Read the **[metric library README](src/rocprof_compute_soc/metric_library/README.md)**
-before adding or changing a metric under `src/rocprof_compute_soc/metric_library/`,
-including its [description rules](src/rocprof_compute_soc/metric_library/README.md#descriptions).
-
 ## Tooling
 
 Scripts under `tools/` generate committed artifacts that must never be
