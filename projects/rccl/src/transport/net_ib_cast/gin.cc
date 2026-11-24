@@ -6,6 +6,7 @@
  *************************************************************************/
 
 #include <atomic>
+#include <unordered_map>
 
 #include "common_cast.h"
 #include "connect_cast.h"
@@ -58,6 +59,12 @@ static ncclResult_t IbCastGinIbGdrGpuSupport(bool gdaki) {
 
 NCCL_PARAM(CastGinType, "GIN_TYPE", -1);
 NCCL_PARAM(CastGinIbTc, "GIN_IB_TC", -1);
+// Number of signal counter slots for AINIC RDMA WRITE-based signaling.
+// Each slot is 8 bytes. Default 1024 slots = 8KB per send comm.
+// Tunable via RCCL_AINIC_SIGNAL_SLOTS env var.
+RCCL_PARAM(AinicSignalSlots, "AINIC_SIGNAL_SLOTS", 1024);
+// Signal tracking method for AINIC: 0 = array-based (default, faster), 1 = map-based (for comparison)
+RCCL_PARAM(AinicSignalMethod, "AINIC_SIGNAL_METHOD", 0);
 extern int64_t ncclParamIbCastTc();
 
 #ifdef RCCL_NET_IB_CAST_ENABLE_GDAKI
@@ -794,19 +801,81 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
   uint32_t signalRkey = signalMrHandle->rkeys[rank];
 
   // SIGNAL
-  wr[1].opcode = IBV_WR_ATOMIC_FETCH_AND_ADD;
-  wr[1].send_flags = IBV_SEND_SIGNALED;
-  wr[1].wr_id = req - comm->base.reqs;  // used for matching completions with request
-  wr[1].next = NULL;
-  wr[1].wr.atomic.remote_addr = (uint64_t)signalPtr;
-  wr[1].wr.atomic.compare_add = signalOp == NCCL_NET_SIGNAL_OP_INC ? 1 : signalValue;
-  wr[1].wr.atomic.rkey = signalRkey;
-  wr[1].sg_list = &signalSge;
-  wr[1].num_sge = 1;
+  // On AINIC (MetaRoCE), RDMA atomics are not supported. Use RDMA WRITE instead.
+  // Two methods available via RCCL_AINIC_SIGNAL_METHOD for benchmarking:
+  //   0 = array-based (default, O(1) indexing)
+  //   1 = map-based (hash table)
+  if (IbCastAinicRoce) {
+    uint64_t increment = signalOp == NCCL_NET_SIGNAL_OP_INC ? 1 : signalValue;
+    uint64_t cumulativeValue;
 
-  signalSge.addr = (uintptr_t)&comm->putSignalScratchpad;
-  signalSge.length = sizeof(comm->putSignalScratchpad);
-  signalSge.lkey = comm->devs[devIndex].putSignalScratchpadMr->lkey;
+    if (rcclParamAinicSignalMethod() == 0) {
+      // Method 0: Array-based (default, faster)
+      if (comm->ainicSignalCounters == nullptr) {
+        size_t slots = rcclParamAinicSignalSlots();
+        comm->ainicSignalCountersSize = slots;
+        comm->ainicSignalCounters = (uint64_t*)calloc(slots, sizeof(uint64_t));
+        if (comm->ainicSignalCounters == nullptr) {
+          WARN("Failed to allocate AINIC signal counter array (%zu slots)", slots);
+          return ncclSystemError;
+        }
+      }
+
+      uint64_t signalIndex = signalOff / sizeof(uint64_t);
+      if (signalIndex >= comm->ainicSignalCountersSize) {
+        WARN("AINIC signal index %lu exceeds allocated slots %zu. Increase RCCL_AINIC_SIGNAL_SLOTS.",
+             signalIndex, comm->ainicSignalCountersSize);
+        return ncclInvalidArgument;
+      }
+
+      comm->ainicSignalCounters[signalIndex] += increment;
+      cumulativeValue = comm->ainicSignalCounters[signalIndex];
+    } else {
+      // Method 1: Map-based (for comparison benchmarking)
+      if (comm->ainicSignalMap == nullptr) {
+        comm->ainicSignalMap = new std::unordered_map<uint64_t, uint64_t>();
+      }
+
+      uint64_t signalAddr = (uint64_t)signalPtr;
+      auto& signalMap = *comm->ainicSignalMap;
+      signalMap[signalAddr] += increment;
+      cumulativeValue = signalMap[signalAddr];
+    }
+
+    comm->putSignalScratchpad = cumulativeValue;
+
+    wr[1].opcode = IBV_WR_RDMA_WRITE;
+    wr[1].send_flags = IBV_SEND_SIGNALED;
+    // For strong signals with data, use fence to ensure data lands before signal
+    if (isStrongSignal && postData) {
+      wr[1].send_flags |= IBV_SEND_FENCE;
+    }
+    wr[1].wr_id = req - comm->base.reqs;
+    wr[1].next = NULL;
+    wr[1].wr.rdma.remote_addr = (uint64_t)signalPtr;
+    wr[1].wr.rdma.rkey = signalRkey;
+    wr[1].sg_list = &signalSge;
+    wr[1].num_sge = 1;
+
+    signalSge.addr = (uintptr_t)&comm->putSignalScratchpad;
+    signalSge.length = sizeof(comm->putSignalScratchpad);
+    signalSge.lkey = comm->devs[devIndex].putSignalScratchpadMr->lkey;
+  } else {
+    // Standard RDMA atomic-based signaling
+    wr[1].opcode = IBV_WR_ATOMIC_FETCH_AND_ADD;
+    wr[1].send_flags = IBV_SEND_SIGNALED;
+    wr[1].wr_id = req - comm->base.reqs;  // used for matching completions with request
+    wr[1].next = NULL;
+    wr[1].wr.atomic.remote_addr = (uint64_t)signalPtr;
+    wr[1].wr.atomic.compare_add = signalOp == NCCL_NET_SIGNAL_OP_INC ? 1 : signalValue;
+    wr[1].wr.atomic.rkey = signalRkey;
+    wr[1].sg_list = &signalSge;
+    wr[1].num_sge = 1;
+
+    signalSge.addr = (uintptr_t)&comm->putSignalScratchpad;
+    signalSge.length = sizeof(comm->putSignalScratchpad);
+    signalSge.lkey = comm->devs[devIndex].putSignalScratchpadMr->lkey;
+  }
 
   if (postData) {
     NCCLCHECK(IbCastPostDataChunks(qp->qp, &wr[0], lkey, (uintptr_t)srcPtr, (uint64_t)dstPtr, size,

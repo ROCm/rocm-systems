@@ -2800,6 +2800,16 @@ ncclResult_t IbCastCloseSend(void* sendComm) {
     if (comm->base.resiliency) {
       NCCLCHECK(IbCastResiliencyDestroy(&comm->base.resiliency));
     }
+    // Clean up AINIC signal tracking (array or map)
+    if (comm->ainicSignalCounters) {
+      free(comm->ainicSignalCounters);
+      comm->ainicSignalCounters = nullptr;
+      comm->ainicSignalCountersSize = 0;
+    }
+    if (comm->ainicSignalMap) {
+      delete comm->ainicSignalMap;
+      comm->ainicSignalMap = nullptr;
+    }
     free(comm);
   }
   TIME_PRINT("IB");

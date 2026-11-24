@@ -28,6 +28,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <mutex>
+#include <unordered_map>
 #define ENABLE_TIMER 0
 #include "timer.h"
 
@@ -759,6 +760,13 @@ struct ncclIbSendComm {
   // Same reasoning as ncclIbQp::telQpStats: avoid re-resolving per completion.
   RcclChannelStats* telChStats;
   uint16_t remCommId;           // receiver's commId for imm_data encoding (QP sharing)
+  // AINIC signal value tracking: cumulative signal values to emulate RDMA atomic ADD
+  // with RDMA WRITE on AINIC (MetaRoCE). Two methods available via RCCL_AINIC_SIGNAL_METHOD:
+  //   0 = array-based (default, O(1) indexing, size controlled by RCCL_AINIC_SIGNAL_SLOTS)
+  //   1 = map-based (hash table, for comparison/benchmarking)
+  uint64_t* ainicSignalCounters;
+  size_t ainicSignalCountersSize;
+  std::unordered_map<uint64_t, uint64_t>* ainicSignalMap;
 };
 // The SendFifo needs to be 32-byte aligned and each element needs
 // to be a 32-byte multiple, so that an entry does not get split and

@@ -115,6 +115,9 @@ ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm) {
 
 ncclResult_t IbCastSendCommInit(struct ncclIbSendComm* sendComm) {
   NCCLCHECK(IbCastBaseCommInit(&sendComm->base, true));
+  sendComm->ainicSignalCounters = nullptr;
+  sendComm->ainicSignalCountersSize = 0;
+  sendComm->ainicSignalMap = nullptr;
   return ncclSuccess;
 }
 
