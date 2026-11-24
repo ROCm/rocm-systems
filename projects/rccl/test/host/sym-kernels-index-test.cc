@@ -235,18 +235,9 @@ const std::vector<ExpectedKernelCase>& ValidCases() {
       {"ReduceScatter_HierLsaLDST_sum_f32", ncclSymkKernelId_ReduceScatter_HierLsaLDST, ncclDevSum, ncclFloat32,
        (void*)ncclSymkDevKernel_ReduceScatter_HierLsaLDST_sum_f32,
        (void*)ncclSymkDevKernel_ReduceScatter_HierLsaLDST_sum_f32_profile},
-      {"ReduceScatter_HierLsaLDST_sum_f16", ncclSymkKernelId_ReduceScatter_HierLsaLDST, ncclDevSum, ncclFloat16,
-       (void*)ncclSymkDevKernel_ReduceScatter_HierLsaLDST_sum_f16,
-       (void*)ncclSymkDevKernel_ReduceScatter_HierLsaLDST_sum_f16_profile},
       {"ReduceScatter_HierLsaLDST_sum_bf16", ncclSymkKernelId_ReduceScatter_HierLsaLDST, ncclDevSum, ncclBfloat16,
        (void*)ncclSymkDevKernel_ReduceScatter_HierLsaLDST_sum_bf16,
        (void*)ncclSymkDevKernel_ReduceScatter_HierLsaLDST_sum_bf16_profile},
-      {"ReduceScatter_HierLsaLDST_sum_f8e4m3", ncclSymkKernelId_ReduceScatter_HierLsaLDST, ncclDevSum, ncclFloat8e4m3,
-       (void*)ncclSymkDevKernel_ReduceScatter_HierLsaLDST_sum_f8e4m3,
-       (void*)ncclSymkDevKernel_ReduceScatter_HierLsaLDST_sum_f8e4m3_profile},
-      {"ReduceScatter_HierLsaLDST_sum_f8e5m2", ncclSymkKernelId_ReduceScatter_HierLsaLDST, ncclDevSum, ncclFloat8e5m2,
-       (void*)ncclSymkDevKernel_ReduceScatter_HierLsaLDST_sum_f8e5m2,
-       (void*)ncclSymkDevKernel_ReduceScatter_HierLsaLDST_sum_f8e5m2_profile},
   };
   static const std::vector<ExpectedKernelCase> kAll = [] {
     std::vector<ExpectedKernelCase> all = kCases;

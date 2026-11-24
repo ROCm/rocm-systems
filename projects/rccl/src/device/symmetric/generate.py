@@ -135,8 +135,8 @@ def enumerate_kernels():
           continue
         yield Rec(coll="AllReduce", algo=algo, red=red, ty=ty)
       for algo in rs_algos:
-        # Sum only for HierLsaLDST: its cross-package partials are stored as T, so avg could overflow.
-        if algo == "HierLsaLDST" and red == "avg":
+        # HierLsaLDST stores its cross-package partials as T, so sum only, for the types with fp32's range.
+        if algo == "HierLsaLDST" and (red == "avg" or ty not in ("f32", "bf16")):
           continue
         yield Rec(coll="ReduceScatter", algo=algo, red=red, ty=ty)
 

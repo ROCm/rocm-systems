@@ -828,6 +828,24 @@ inline float ldPatternSum(int nRanks, size_t globalIdx)
            + static_cast<float>(nRanks) * static_cast<float>(globalIdx % kLdPatternPeriod);
 }
 
+// Value a rank writes at a global index for bf16: 1 to 4 times a power of two that cycles with the index (period 61,
+// prime), so any sum over up to 63 ranks stays exact in bf16's 8-bit significand.
+inline float bf16PatternValue(int rank, size_t globalIdx)
+{
+    return static_cast<float>(rank % 4 + 1) * std::ldexp(1.0f, static_cast<int>(globalIdx % 61) - 30);
+}
+
+// Sum of bf16PatternValue over all ranks at one global index.
+inline float bf16PatternSum(int nRanks, size_t globalIdx)
+{
+    int mult = 0;
+    for(int r = 0; r < nRanks; r++)
+    {
+        mult += r % 4 + 1;
+    }
+    return static_cast<float>(mult) * std::ldexp(1.0f, static_cast<int>(globalIdx % 61) - 30);
+}
+
 } // namespace
 
 // gfx950 gates the deep path on a floor instead of trimming to a whole wave.
@@ -1236,7 +1254,7 @@ TEST_F(SymmetricKernelCorruptionTest, AllGatherHierLsaTmaST_PositionDependentDat
     runHierAllGatherDataTest("AllGather_HierLsaTmaST");
 }
 
-// ReduceScatter_HierLsaLDST (sum only) on gfx1250 partition mode.
+// ReduceScatter_HierLsaLDST (sum only, fp32 and bf16) on gfx1250 partition mode.
 TEST_F(SymmetricKernelCorruptionTest, ReduceScatterHierLsaLDST_PositionDependentData)
 {
     // Partition mode can put more than 8 ranks on a node, and each package needs two or more.
@@ -1292,59 +1310,72 @@ TEST_F(SymmetricKernelCorruptionTest, ReduceScatterHierLsaLDST_PositionDependent
         GTEST_SKIP() << "Symmetric kernels unavailable (symmetricSupport off, e.g. cuMem/VMM unavailable)";
     }
 
+    // Every count, in place and out of place, in the element type of zero, with valueOf's data and sumOf's sums.
     bool first = true;
-    for(size_t recvCount : counts)
-    {
-        // In place only where every rank's block stays 16-byte aligned, as the deep path needs.
-        for(bool inPlace : {false, true})
+    auto runAll = [&](auto zero, auto valueOf, auto sumOf, double tolerance) {
+        using T = decltype(zero);
+        for(size_t recvCount : counts)
         {
-            if(inPlace && (recvCount * sizeof(float)) % 16 != 0)
+            // In place only where every rank's block stays 16-byte aligned, as the deep path needs.
+            for(bool inPlace : {false, true})
             {
-                continue;
-            }
-            const size_t base = static_cast<size_t>(rank) * recvCount;
-            float*       send = static_cast<float*>(sendSym.ptr);
-            float*       recv = inPlace ? send + base : static_cast<float*>(recvSym.ptr);
+                if(inPlace && (recvCount * sizeof(T)) % 16 != 0)
+                {
+                    continue;
+                }
+                const size_t base = static_cast<size_t>(rank) * recvCount;
+                T*           send = static_cast<T*>(sendSym.ptr);
+                T*           recv = inPlace ? send + base : static_cast<T*>(recvSym.ptr);
 
-            ASSERT_MPI_EQ(hipSuccess,
-                          initializeBufferWithPattern<float>(send, recvCount * static_cast<size_t>(nRanks),
-                                                             [rank](size_t i) { return ldPatternValue(rank, i); }));
-            if(!inPlace)
-            {
-                ASSERT_MPI_EQ(hipSuccess, zeroInitializeBuffer<float>(recv, recvCount));
-            }
+                ASSERT_MPI_EQ(hipSuccess,
+                              initializeBufferWithPattern<T>(send, recvCount * static_cast<size_t>(nRanks),
+                                                             [&](size_t i) { return T(valueOf(rank, i)); }));
+                if(!inPlace)
+                {
+                    ASSERT_MPI_EQ(hipSuccess, zeroInitializeBuffer<T>(recv, recvCount));
+                }
 
-            // Only the first call may skip on ncclInvalidUsage; agree collectively so diverging verdicts cannot hang.
-            ncclResult_t res = ncclReduceScatter(send, recv, recvCount, ncclFloat, ncclSum, getActiveCommunicator(),
-                                                 getActiveStream());
-            // Drain before the vote so a skip never leaves a kernel reading a window that ~SymBuf deregisters.
-            hipError_t syncErr = (res == ncclSuccess) ? hipStreamSynchronize(getActiveStream()) : hipSuccess;
-            const std::string ineligible
-                = mpiCoordinatedSkipReason(res == ncclInvalidUsage && first,
-                                           "ReduceScatter_HierLsaLDST symmetric kernel not eligible on this topology");
-            if(!ineligible.empty())
-            {
-                GTEST_SKIP() << ineligible;
-            }
-            first = false;
-            ASSERT_MPI_EQ(ncclSuccess, res);
-            ASSERT_MPI_EQ(hipSuccess, syncErr);
+                // Only the first call may skip on ncclInvalidUsage; agree collectively so diverging verdicts
+                // cannot hang.
+                ncclResult_t res = ncclReduceScatter(send, recv, recvCount, NcclTypeTraits<T>::value, ncclSum,
+                                                     getActiveCommunicator(), getActiveStream());
+                // Drain before the vote so a skip never leaves a kernel reading a window that ~SymBuf deregisters.
+                hipError_t syncErr = (res == ncclSuccess) ? hipStreamSynchronize(getActiveStream()) : hipSuccess;
+                const std::string ineligible = mpiCoordinatedSkipReason(
+                    res == ncclInvalidUsage && first,
+                    "ReduceScatter_HierLsaLDST symmetric kernel not eligible on this topology");
+                if(!ineligible.empty())
+                {
+                    GTEST_SKIP() << ineligible;
+                }
+                first = false;
+                ASSERT_MPI_EQ(ncclSuccess, res);
+                ASSERT_MPI_EQ(hipSuccess, syncErr);
 
-            size_t errIdx{};
-            float  expVal{}, actVal{};
-            bool   ok = verifyBufferData<float>(
-                recv, recvCount, [nRanks, base](size_t j) { return ldPatternSum(nRanks, base + j); }, 0, 1e-5,
-                &errIdx, &expVal, &actVal);
-            if(!ok)
-            {
-                ADD_FAILURE() << "ReduceScatter_HierLsaLDST mismatch, " << (inPlace ? "in-place" : "out-of-place")
-                              << ", recvCount=" << recvCount << " index=" << errIdx << " expected=" << expVal
-                              << " got=" << actVal;
+                size_t errIdx{};
+                T      expVal{}, actVal{};
+                bool   ok = verifyBufferData<T>(
+                    recv, recvCount, [&](size_t j) { return T(sumOf(nRanks, base + j)); }, 0, tolerance, &errIdx,
+                    &expVal, &actVal);
+                if(!ok)
+                {
+                    ADD_FAILURE() << "ReduceScatter_HierLsaLDST mismatch, " << NcclTypeTraits<T>::name << ", "
+                                  << (inPlace ? "in-place" : "out-of-place") << ", recvCount=" << recvCount
+                                  << " index=" << errIdx << " expected=" << static_cast<float>(expVal)
+                                  << " got=" << static_cast<float>(actVal);
+                }
+                // Collective so a rank-local mismatch stops every rank instead of leaving peers in the next kernel.
+                ASSERT_MPI_TRUE(ok);
             }
-            // Collective so a rank-local mismatch stops every rank instead of leaving peers in the next kernel.
-            ASSERT_MPI_TRUE(ok);
         }
+    };
+    runAll(float{}, ldPatternValue, ldPatternSum, 1e-5);
+    if(HasFatalFailure() || IsSkipped())
+    {
+        return;
     }
+    // bf16 data whose every partial sum is exact in bf16, so the comparison is exact too.
+    runAll(hip_bfloat16{}, bf16PatternValue, bf16PatternSum, 0.0);
 }
 
 #endif // MPI_TESTS_ENABLED
