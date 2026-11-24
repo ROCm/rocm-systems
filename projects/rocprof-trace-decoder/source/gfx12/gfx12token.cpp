@@ -58,6 +58,7 @@ gfx10::Token TokenGenerator::next()
         if (bIsExt && header.WSM != 3) // Handle wave_start_ext
         {
             bits_toread = 8; // WG is 40 bits, but VGPR and LDS ext are 48 bits
+            bIsExt = false;
             continue;
         }
 
@@ -86,7 +87,7 @@ gfx10::Token TokenGenerator::next()
         auto token = Token{globaltime, current, type};
 
         // Read last 8 bits of INST_PC
-        if (bits_toread == 72 && bufferPadded())
+        if (bits_toread == 72 && bit_ptr + 8 <= 8 * BUFFER_SIZE)
         {
             advance4Bit(getBuffer());
             advance4Bit(getBuffer());
@@ -104,6 +105,7 @@ gfx10::Token TokenGenerator::next()
         if (bIsExt && header.WSM != 3) // Handle wave_start_ext
         {
             bits_toread = 8; // WG is 40 bits, but VGPR and LDS ext are 48 bits
+            bIsExt = false;
             continue;
         }
 
@@ -125,20 +127,18 @@ gfx10::Token TokenGenerator::next()
 
         if (type == RdnaType::TIMESTAMP || type == RdnaType::TIME)
         {
+            // Must match the padded loop above: merge duplicate realtime stamps and
+            // hand the token to the parser.
             if (real != 0)
-            {
-                rocprofiler_thread_trace_decoder_realtime_t rt{};
-                rt.shader_clock = globaltime;
-                rt.realtime_clock = real;
-                realtime.emplace_back(rt);
-            }
-            continue;
+                addRealtime(real);
+            else
+                continue;
         }
 
         auto token = Token{globaltime, current, type};
 
         // Read last 8 bits of INST_PC
-        if (bits_toread == 72 && bufferPadded())
+        if (bits_toread == 72 && bit_ptr + 8 <= 8 * BUFFER_SIZE)
         {
             advance4Bit(getBuffer());
             advance4Bit(getBuffer());

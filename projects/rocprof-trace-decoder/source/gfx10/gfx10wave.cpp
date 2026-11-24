@@ -330,7 +330,7 @@ void wave_t::apply_immediate(int64_t token_time)
     int64_t time = token_time;
     if (instructions.size()) time = std::min(time, instructions.back().time + instructions.back().duration);
 
-    int stall = token_time - time;
+    int64_t stall = token_time - time;
     this->instructions.push_back({time, WaveInstCategory::IMMED, stall + 1, stall});
     update_state(WaveslotState::WS_WAIT, time);
     update_state(WaveslotState::WS_EXEC, token_time + 1);

@@ -68,13 +68,28 @@ namespace
 using quick_scan::QuickToken;
 using StatusToken = gfx9::build_standalone::StatusToken;
 
+// Per-thread token buffer. A thread's thread_locals are destroyed before static destructors run,
+// and the API can still be called from one. `gone` (trivially destructible, so always readable)
+// tells such a call to use a temporary buffer instead.
+struct ScratchTokens
+{
+    explicit ScratchTokens(size_t count) : tokens(count) {}
+    ~ScratchTokens() { gone = true; }
+
+    std::vector<QuickToken> tokens;
+    static thread_local bool gone;
+};
+thread_local bool ScratchTokens::gone = false;
+
 size_t scan_none(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap) { return 0; };
 
 #if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
 // Scans `buf` with the scanner for `gfxip`, growing `raw` until every token
 // fits. gfx12 and mi400 resume right after the last captured token; gfx9
 // rescans from the start with the larger buffer.
-size_t scan_into(int gfxip, const uint8_t* buf, size_t size, std::vector<QuickToken>& raw)
+size_t scan_into(
+    int gfxip, const uint8_t* buf, size_t size, std::vector<QuickToken>& raw, quick_scan::ScanState* end = nullptr
+)
 {
     if (gfxip == 12 || gfxip == 1250)
     {
@@ -86,6 +101,7 @@ size_t scan_into(int gfxip, const uint8_t* buf, size_t size, std::vector<QuickTo
             raw.resize(std::max<size_t>(raw.size() * 2, 1024));
             ntokens += scanner(buf, size, raw.data() + ntokens, raw.size() - ntokens, &state);
         }
+        if (end) *end = state;
         return ntokens;
     }
 
@@ -154,7 +170,7 @@ inline void emit_rdna_codeobj_field(std::vector<StatusToken>& out, uint32_t mark
 std::vector<StatusToken> build_rdna_status_tokens(const CSRegisterHandler& reg)
 {
     std::vector<StatusToken> out;
-    out.reserve(32 + 6 + 1 + reg.active_codeobjs.read().size() * 14);
+    out.reserve(32 + 48 + 1 + reg.active_codeobjs.read().size() * 14);
 
     for (uint8_t me = 0; me < 2; ++me)
     {
@@ -165,6 +181,12 @@ std::vector<StatusToken> build_rdna_status_tokens(const CSRegisterHandler& reg)
             {
                 out.push_back(encode_rdna_reg(me, pipe, COMPUTE_PGM_LO, static_cast<uint32_t>(pgm), true));
                 out.push_back(encode_rdna_reg(me, pipe, COMPUTE_PGM_HI, static_cast<uint32_t>(pgm >> 32), true));
+                out.push_back(encode_rdna_reg(me, pipe, COMPUTE_NUM_THREAD_X, reg.num_thread_x.at(me).at(pipe), true));
+                out.push_back(encode_rdna_reg(me, pipe, COMPUTE_NUM_THREAD_Y, reg.num_thread_y.at(me).at(pipe), true));
+                out.push_back(encode_rdna_reg(me, pipe, COMPUTE_NUM_THREAD_Z, reg.num_thread_z.at(me).at(pipe), true));
+                out.push_back(encode_rdna_reg(me, pipe, COMPUTE_PGM_RSRC1, reg.rsrc1.at(me).at(pipe), true));
+                out.push_back(encode_rdna_reg(me, pipe, COMPUTE_PGM_RSRC2, reg.rsrc2.at(me).at(pipe), true));
+                out.push_back(encode_rdna_reg(me, pipe, COMPUTE_PGM_RSRC3, reg.rsrc3.at(me).at(pipe), true));
             }
             uint64_t dpkt = reg.dispatch_pkt_addr.at(me).at(pipe);
             if (dpkt != 0)
@@ -176,13 +198,6 @@ std::vector<StatusToken> build_rdna_status_tokens(const CSRegisterHandler& reg)
             }
         }
     }
-
-    out.push_back(encode_rdna_reg(0, 0, COMPUTE_NUM_THREAD_X, reg.num_thread_x, true));
-    out.push_back(encode_rdna_reg(0, 0, COMPUTE_NUM_THREAD_Y, reg.num_thread_y, true));
-    out.push_back(encode_rdna_reg(0, 0, COMPUTE_NUM_THREAD_Z, reg.num_thread_z, true));
-    out.push_back(encode_rdna_reg(0, 0, COMPUTE_PGM_RSRC1, reg.rsrc1, true));
-    out.push_back(encode_rdna_reg(0, 0, COMPUTE_PGM_RSRC2, reg.rsrc2, true));
-    out.push_back(encode_rdna_reg(0, 0, COMPUTE_PGM_RSRC3, reg.rsrc3, true));
 
     if (reg.bIsROCMFormat)
     {
@@ -429,7 +444,9 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     void* userdata
 )
 {
-    thread_local std::vector<quick_scan::QuickToken> raw{1u << 18};
+    thread_local ScratchTokens scratch{1u << 18};
+    std::vector<QuickToken> late(ScratchTokens::gone ? 1u << 18 : 0);
+    auto& raw = ScratchTokens::gone ? late : scratch.tokens;
 
     if (!quick_scan::avx512_available()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 
@@ -456,7 +473,10 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     {
         uint64_t header_word = load_header_word(data);
         gfxip = extract_gfxip(header_word);
-        if (gfxip > 9) local.tt_version = mi400::header_type{.raw = header_word}.version;
+        if (gfxip > 9)
+            local.tt_version = mi400::header_type{.raw = header_word}.version;
+        else if (gfxip == 9)
+            local.tt_version = rocprof_trace_decoder_gfx9_header_t{.raw = header_word}.gfx9_version2 >= 6 ? 1 : 0;
 
         auto decoder = HandleData::get_write_handle(handle);
         if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
@@ -546,15 +566,14 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 
     TIMING(t4);
 
-    std::condition_variable_any* cv = nullptr;
     {
         auto decoder = HandleData::get_write_handle(handle);
         if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
         decoder->pipestate.put(chunk_index + 1, std::move(local));
-        cv = &decoder->cv;
+        // Notify while the handle is still locked: it may be destroyed once the lock is released.
+        decoder->cv.notify_all();
     }
-    cv->notify_all();
 
     TIMING(t5);
 
@@ -621,11 +640,14 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     // copy taken above. EmitEvents=false: this is a state-advance pass,
     // no callback is invoked.
 
-    thread_local std::vector<quick_scan::QuickToken> raw{1u << 16};
+    thread_local ScratchTokens scratch{1u << 16};
+    std::vector<QuickToken> late(ScratchTokens::gone ? 1u << 16 : 0);
+    auto& raw = ScratchTokens::gone ? late : scratch.tokens;
 
     if (!quick_scan::avx512_available()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 
     size_t ntokens = 0;
+    bool odd_cut = false;
     const uint64_t header_offset = (gfxip == 9 && chunk_index == 0) ? sizeof(uint64_t) : 0;
 #if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
     if (header_offset != 0)
@@ -635,7 +657,18 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
         offset_begin = (offset_begin > header_offset) ? offset_begin - header_offset : 0;
     }
 
-    ntokens = scan_into(gfxip, buf, offset_begin, raw);
+    quick_scan::ScanState prefix_end{};
+    ntokens = scan_into(gfxip, buf, offset_begin, raw, &prefix_end);
+
+    // gfx12 tokens are nibble-packed, so the token before the cut can end in the low nibble of
+    // the first cut byte. If the scan stopped at such a token, read it again with that byte.
+    if (gfxip == 12 && prefix_end.pos < 2 * offset_begin)
+    {
+        if (ntokens == raw.size()) raw.resize(ntokens + 1);
+        prefix_end.done = false;
+        ntokens += quick_scan::scan_gfx12(buf, offset_begin + 1, raw.data() + ntokens, 1, &prefix_end);
+    }
+    odd_cut = gfxip == 12 && prefix_end.pos == 2 * offset_begin + 1;
 #else
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 #endif
@@ -671,6 +704,8 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     size_t used = header_bytes;
     used += write_status_tokens(buf_out + used, status_tokens);
     std::memcpy(buf_out + used, buf + offset_begin, data_slice_bytes);
+    // That low nibble belongs to the previous token: turn it into a NOP.
+    if (odd_cut) buf_out[used] &= 0xF0;
     used += data_slice_bytes;
 
     *size_out = used;

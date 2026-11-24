@@ -54,12 +54,11 @@ inline bool is_elaborate_match(int wave, InstCategory line)
 {
     if (is_trivial_match(wave, line)) return true;
 
+    // A branch line matches either a taken (JUMP) or a not-taken (NEXT) token.
     if (line == InstCategory::BRANCH)
-        return wave == WaveInstCategory::JUMP;
+        return wave == WaveInstCategory::JUMP || wave == WaveInstCategory::NEXT;
     else if (wave == WaveInstCategory::IMMED)
         return skippable(line);
-    else if (line == InstCategory::BRANCH)
-        return wave == WaveInstCategory::NEXT;
 
     return false;
 }

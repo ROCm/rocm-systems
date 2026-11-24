@@ -321,7 +321,6 @@ static instruction_table_t& table_map_to_common_type =
     {(int) EINST::async_store_5,          {WaveInstCategory::VMEM, 5}           },
     {(int) EINST::valu_no_exec,           {WaveInstCategory::VALU, 1}           },
     {(int) EINST::tdm,                    {WaveInstCategory::VMEM, 1}           },
-    {(int) EINST::tdm_other_simd,         {WaveInstCategory::NONE, 0}           },
     {(int) EINST::lds_async_barrier,      {WaveInstCategory::LDS, 1}            },
     {(int) EINST::vmpref,                 {WaveInstCategory::VMEM, 1}           },
     {(int) EINST::cluster_barrier_signal, {WaveInstCategory::MSG, 1}            },

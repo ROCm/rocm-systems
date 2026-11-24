@@ -63,6 +63,7 @@ gfx10::Token TokenGenerator::next()
         if (bIsExt && header.WSM != 3) // Handle wave_start_ext
         {
             bits_toread = 8; // LDS is 48 bits, WG is 40 bits
+            bIsExt = false;
             continue;
         }
 
@@ -124,6 +125,7 @@ gfx10::Token TokenGenerator::next()
         if (bIsExt && header.WSM != 3) // Handle wave_start_ext
         {
             bits_toread = 8; // LDS is 48 bits, WG is 40 bits
+            bIsExt = false;
             continue;
         }
 
@@ -147,8 +149,12 @@ gfx10::Token TokenGenerator::next()
 
         if (type == RdnaType::TIMESTAMP || type == RdnaType::TIME)
         {
-            if (real != 0) addRealtime(real);
-            if (!packetlost) continue;
+            // Must match the padded loop above: a realtime stamp is handed to the
+            // parser. This loop additionally surfaces a pending packet loss.
+            if (real != 0)
+                addRealtime(real);
+            else if (!packetlost)
+                continue;
         }
 
         auto token = Token{globaltime, current, type};

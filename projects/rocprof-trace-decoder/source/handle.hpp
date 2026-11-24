@@ -83,10 +83,12 @@ public:
         return value.get();
     }
 
-    std::shared_lock<std::shared_mutex> lk;
-
 private:
+    // Declared before lk so the lock is released before the last reference can free the mutex.
     std::shared_ptr<const T> value;
+
+public:
+    std::shared_lock<std::shared_mutex> lk;
 };
 
 template <typename T> class WriteLock
@@ -101,10 +103,12 @@ public:
         return value.get();
     }
 
-    std::unique_lock<std::shared_mutex> lk;
-
 private:
+    // Declared before lk so the lock is released before the last reference can free the mutex.
     std::shared_ptr<T> value;
+
+public:
+    std::unique_lock<std::shared_mutex> lk;
 };
 
 class HandleData
@@ -141,25 +145,29 @@ public:
         return *map;
     }
 
-    static ReadLock<HandleData> get_read_handle(rocprof_trace_decoder_handle_t handle)
+    // The map mutex only guards the lookup. The handle lock is taken after releasing it, so a
+    // long parse on one handle does not block calls on other handles.
+    static std::shared_ptr<HandleData> find(rocprof_trace_decoder_handle_t handle)
     {
-        static std::shared_mutex dummy_mut{};
-
         std::lock_guard<std::mutex> lock(get_map_mutex());
         auto& map = get_map();
         auto it = map.find(handle.handle);
-        if (it != map.end()) return ReadLock<HandleData>{it->second, it->second->mtx};
+        return it != map.end() ? it->second : nullptr;
+    }
+
+    static ReadLock<HandleData> get_read_handle(rocprof_trace_decoder_handle_t handle)
+    {
+        static std::shared_mutex dummy_mut{};
+        auto hd = find(handle);
+        if (hd) return ReadLock<HandleData>{hd, hd->mtx};
         return {nullptr, dummy_mut};
     }
 
     static WriteLock<HandleData> get_write_handle(rocprof_trace_decoder_handle_t handle)
     {
         static std::shared_mutex dummy_mut{};
-
-        std::lock_guard<std::mutex> lock(get_map_mutex());
-        auto& map = get_map();
-        auto it = map.find(handle.handle);
-        if (it != map.end()) return WriteLock<HandleData>{it->second, it->second->mtx};
+        auto hd = find(handle);
+        if (hd) return WriteLock<HandleData>{hd, hd->mtx};
         return {nullptr, dummy_mut};
     }
 

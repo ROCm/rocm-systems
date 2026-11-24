@@ -938,6 +938,38 @@ TEST_F(Gfx9ApplyInstTest, SmemRdReplay)
     EXPECT_FALSE(found_replay_cat);
 }
 
+// A replay erases its own slot. Instructions issued after it must still complete in order.
+TEST_F(Gfx9ApplyInstTest, ReplayWithLaterIssuePendingKeepsIndicesValid)
+{
+    auto w = make_wave();  // already has the original SMEM_RD issued at 100
+    w.apply_issue(2, 104); // its replay
+    w.apply_issue(2, 108); // a later instruction, still pending when the replay completes
+
+    int64_t phase = 15;
+    auto complete = [&](int inst_type, int64_t time)
+    {
+        Token tok(TOKEN_INST, 0);
+        tok.type = TOKEN_INST;
+        tok.time = time;
+        tok.fields.inst.inst_type = inst_type;
+        tok.fields.inst.simd = 0;
+        tok.fields.inst.wave = 0;
+        w.apply_inst(tok, phase);
+    };
+
+    complete(0, 112);  // SMEM_RD
+    complete(19, 300); // SMEM_RD_REPLAY
+
+    // The replay directly follows its original, which is extended up to the replay.
+    ASSERT_EQ(w.instructions.size(), 2u);
+    EXPECT_EQ(w.instructions[0].time + w.instructions[0].duration, 304);
+
+    EXPECT_NO_THROW(complete(1, 304)); // SALU_32
+    ASSERT_EQ(w.instructions.size(), 2u);
+    EXPECT_EQ(w.instructions[0].category, WaveInstCategory::SMEM);
+    EXPECT_EQ(w.instructions[1].category, WaveInstCategory::SALU);
+}
+
 // Tests for convertPerfEventsTs
 TEST(Gfx9PerfEventsTest, InsertsGapEvents)
 {

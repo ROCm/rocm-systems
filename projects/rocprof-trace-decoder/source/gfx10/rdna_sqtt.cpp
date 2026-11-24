@@ -196,6 +196,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     target_sa_wgp = get_sa_wgp(header.DSA, header.DWGP);
                     target_simd = header.DSIMD;
                     derate = header.trans2;
+                    exclude_barrier_wait = header.exbarw;
                     bIsTrackingExec = header.exec;
                     double_buffer = header.dbl;
                 }
@@ -516,7 +517,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
 
                     // TODO: Move to arch specific
                     constexpr uint64_t WR_EXEC_SALU = 114;
-                    constexpr uint64_t WR_EXEC_END = 117;
+                    constexpr uint64_t WR_EXEC_END = 116;
                     if (bIsTrackingExec && inst.inst >= WR_EXEC_SALU && inst.inst <= WR_EXEC_END)
                     {
                         auto popcnt = rocprofiler_thread_trace_decoder_exec_popcnt_t{};

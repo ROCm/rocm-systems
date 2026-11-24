@@ -1179,6 +1179,94 @@ TEST(BuildStandaloneApiTest, ReplaysDispatchContextFromCutGfx12Trace)
     expect_gfx12_dispatch_payload(sink.dispatches.front());
 }
 
+// gfx12 tokens are nibble-packed. Here the dispatch starts in the high nibble of its byte, and
+// the register write before it ends in the low nibble of that same byte.
+TEST(BuildStandaloneApiTest, ReplaysDispatchContextFromOddNibbleCutGfx12Trace)
+{
+    if (!quick_scan::avx512_available()) GTEST_SKIP() << "quick_scan requires AVX-512";
+
+    BitStreamBuilder builder;
+    append_gfx12_header(builder);
+    builder.writeBits(0, 4); // one NOP nibble shifts everything after it
+    append_dispatch_registers(builder);
+    append_reg(builder, COMPUTE_PGM_LO, 0xF0123456u); // top nibble lands in the cut byte
+    append_dispatch(builder);
+    const auto data = builder.finish(16);
+
+    HandleGuard full_handle;
+    ASSERT_EQ(rocprof_trace_decoder_create_handle(&full_handle.value), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
+    RecordSink full;
+    ASSERT_EQ(
+        rocprof_trace_decoder_quick_scan(full_handle.value, 0, data.data(), data.size(), collect_records, &full),
+        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+    );
+    ASSERT_EQ(full.dispatches.size(), 1u);
+    const uint64_t cut_offset = full.dispatches.front().byte_offset;
+
+    HandleGuard builder_handle;
+    ASSERT_EQ(
+        rocprof_trace_decoder_create_handle(&builder_handle.value), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+    );
+    std::vector<uint8_t> standalone(data.size() + 4096);
+    uint64_t standalone_size = standalone.size();
+    ASSERT_EQ(
+        rocprof_trace_decoder_build_standalone(
+            builder_handle.value, 0, data.data(), data.size(), cut_offset, data.size(), standalone.data(),
+            &standalone_size
+        ),
+        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+    );
+    standalone.resize(standalone_size);
+
+    HandleGuard scan_handle;
+    ASSERT_EQ(rocprof_trace_decoder_create_handle(&scan_handle.value), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
+    RecordSink cut;
+    ASSERT_EQ(
+        rocprof_trace_decoder_quick_scan(
+            scan_handle.value, 0, standalone.data(), standalone.size(), collect_records, &cut
+        ),
+        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+    );
+
+    ASSERT_EQ(cut.dispatches.size(), 1u);
+    EXPECT_EQ(cut.dispatches.front().entry_point.address, full.dispatches.front().entry_point.address);
+    EXPECT_EQ(cut.dispatches.front().entry_point.code_object_id, full.dispatches.front().entry_point.code_object_id);
+}
+
+// Dispatch setup registers are tracked per pipe: another pipe's writes must not leak into this
+// pipe's dispatch record.
+TEST(QuickScanApiTest, DispatchUsesItsOwnPipesSetupRegisters)
+{
+    if (!quick_scan::avx512_available()) GTEST_SKIP() << "quick_scan requires AVX-512";
+
+    BitStreamBuilder builder;
+    append_gfx12_header(builder);
+    append_dispatch_registers(builder);
+
+    gfx10::reg_write_type other{};
+    other.header = 0b1001;
+    other.pipe = kPipe ^ 1;
+    other.me = kMe;
+    other.CS = 1;
+    other.regaddr = COMPUTE_NUM_THREAD_X;
+    other.regdata = 7;
+    builder.writeBits(other.raw, 64);
+
+    append_dispatch(builder);
+    const auto data = builder.finish(16);
+
+    HandleGuard handle;
+    ASSERT_EQ(rocprof_trace_decoder_create_handle(&handle.value), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
+    RecordSink sink;
+    ASSERT_EQ(
+        rocprof_trace_decoder_quick_scan(handle.value, 0, data.data(), data.size(), collect_records, &sink),
+        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+    );
+
+    ASSERT_EQ(sink.dispatches.size(), 1u);
+    expect_gfx12_dispatch_payload(sink.dispatches.front());
+}
+
 TEST(BuildStandaloneApiTest, ReplaysRdnaCodeObjectContextFromCutTrace)
 {
     if (!quick_scan::avx512_available()) GTEST_SKIP() << "quick_scan requires AVX-512";
