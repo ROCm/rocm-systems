@@ -209,7 +209,14 @@ ph_ctx_create_files_cached(ph_ctx_t*          ctx,
         }
         else if(future->try_attach())
         {
-            created->load_async(future->shared_from_this());
+            try
+            {
+                created->load_async(future->shared_from_this());
+            } catch(...)
+            {
+                future->finish(PH_FUTURE_ERROR, PH_RESULT_CONTEXT_ALLOCATION_FAILED);
+                return PH_RESULT_CONTEXT_ALLOCATION_FAILED;
+            }
         }
         else
         {
