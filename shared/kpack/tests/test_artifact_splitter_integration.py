@@ -947,6 +947,63 @@ class TestArtifactSplitterIntegration:
             "run gfx1250"
         )
 
+    def test_libhipcxx_amdclang_files_go_to_their_arch(self, toolchain, tmp_path):
+        parent_dir = tmp_path / "shard"
+        input_dir = parent_dir / "libhipcxx_test_gfx1100-gfx1101"
+        input_dir.mkdir(parents=True)
+        prefix = "math-libs/libhipcxx_tests/stage"
+        write_artifact_manifest(input_dir, [prefix])
+
+        test_dir = (
+            input_dir / prefix / "bin/libhipcxx/lit-amdclang/test/cuda/float/Output"
+        )
+        test_dir.mkdir(parents=True)
+        # The compile command is recorded for every target of the build.
+        for arch in ("gfx1100", "gfx1101"):
+            (test_dir / f"half.pass.cpp.{arch}.compile_cmd").write_text(f"cmd {arch}")
+        # A test gfx1101 does not support leaves a marker for that target.
+        (test_dir / "only1100.pass.cpp.gfx1100.compile_cmd").write_text("cmd")
+        (test_dir / "only1100.pass.cpp.gfx1101.unsupported").write_text("pre\n")
+        # The executable and the files without an arch are not split by name.
+        (test_dir / "half.pass.cpp.exe").write_bytes(b"not a fat binary")
+        (test_dir / "half.pass.cpp.compile_cmd").write_text("plain")
+
+        output_dir = tmp_path / "output"
+        args = Namespace(
+            input_dir=parent_dir,
+            output_dir=output_dir,
+            split_databases=["libhipcxx"],
+            verbose=False,
+            tmp_dir=tmp_path / "tmp",
+            gpu_targets=["gfx1100", "gfx1101"],
+        )
+        batch_split(args, toolchain)
+
+        relative_test = Path("bin/libhipcxx/lit-amdclang/test/cuda/float/Output")
+
+        def files(artifact):
+            directory = output_dir / artifact / prefix / relative_test
+            if not directory.exists():
+                return set()
+            return {p.name for p in directory.iterdir()}
+
+        assert files("libhipcxx_test_gfx1100") == {
+            "half.pass.cpp.gfx1100.compile_cmd",
+            "only1100.pass.cpp.gfx1100.compile_cmd",
+        }
+        assert files("libhipcxx_test_gfx1101") == {
+            "half.pass.cpp.gfx1101.compile_cmd",
+            "only1100.pass.cpp.gfx1101.unsupported",
+        }
+        assert files("libhipcxx_test_generic") == {
+            "half.pass.cpp.exe",
+            "half.pass.cpp.compile_cmd",
+        }
+        gfx1101_test = output_dir / "libhipcxx_test_gfx1101" / prefix / relative_test
+        assert (gfx1101_test / "half.pass.cpp.gfx1101.compile_cmd").read_text() == (
+            "cmd gfx1101"
+        )
+
     def test_libhipcxx_hiprtc_files_of_other_targets_are_dropped(
         self, toolchain, tmp_path
     ):

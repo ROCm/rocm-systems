@@ -13,7 +13,7 @@ from rocm_kpack.database_handlers import (
     ComposableKernelHandler,
     HipKernelProviderArchContentHandler,
     HotswapCacheHandler,
-    LibhipcxxHiprtcHandler,
+    LibhipcxxTestHandler,
     WHEEL_TYPE_PRESETS,
     get_database_handlers,
     list_available_handlers,
@@ -1205,12 +1205,13 @@ class TestHipKernelProviderArchContentHandler:
             handler.detect(file_path, prefix_root)
 
 
-class TestLibhipcxxHiprtcHandler:
+class TestLibhipcxxTestHandler:
     TEST_DIR = "bin/libhipcxx/lit-hiprtc/test/cuda/float/Output"
+    AMDCLANG_TEST_DIR = "bin/libhipcxx/lit-amdclang/test/cuda/float/Output"
 
     @pytest.fixture
     def handler(self):
-        return LibhipcxxHiprtcHandler()
+        return LibhipcxxTestHandler()
 
     @pytest.fixture
     def prefix_root(self, tmp_path):
@@ -1246,6 +1247,18 @@ class TestLibhipcxxHiprtcHandler:
         assert handler.detect(file_path, prefix_root) == expected
 
     @pytest.mark.parametrize(
+        "file_name, expected",
+        [
+            ("half_common_type.pass.cpp.gfx942.compile_cmd", "gfx942"),
+            ("half_common_type.pass.cpp.gfx1250-strict.compile_cmd", "gfx1250-strict"),
+            ("half_common_type.pass.cpp.gfx942.unsupported", "gfx942"),
+        ],
+    )
+    def test_detect_amdclang_files(self, handler, prefix_root, file_name, expected):
+        file_path = self._touch(prefix_root, f"{self.AMDCLANG_TEST_DIR}/{file_name}")
+        assert handler.detect(file_path, prefix_root) == expected
+
+    @pytest.mark.parametrize(
         "relative_path",
         [
             f"{TEST_DIR}/half_common_type.pass.cpp.exe",
@@ -1254,7 +1267,10 @@ class TestLibhipcxxHiprtcHandler:
             f"{TEST_DIR}/half_common_type.pass.cpp.compile_cmd",
             f"{TEST_DIR}/half_common_type.pass.cpp.unsupported",
             f"{TEST_DIR}/half_common_type.pass.cpp.gpu",
-            "bin/libhipcxx/lit-amdclang/test/x.gfx942.gpu",
+            f"{AMDCLANG_TEST_DIR}/half_common_type.pass.cpp.exe",
+            f"{AMDCLANG_TEST_DIR}/half_common_type.pass.cpp.compile_cmd",
+            f"{AMDCLANG_TEST_DIR}/half_common_type.pass.cpp.unsupported",
+            "bin/libhipcxx/lit-other/test/x.gfx942.compile_cmd",
             f"{TEST_DIR}/half_common_type.pass.cpp.gfx942.o",
         ],
     )
