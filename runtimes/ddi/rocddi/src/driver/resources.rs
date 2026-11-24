@@ -730,6 +730,17 @@ pub(crate) enum QueueState {
 }
 
 impl QueueState {
+    pub(crate) fn diagnose_incomplete_cache_wait(&self) {
+        match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
+            Self::LinuxKfd(queue) => queue.diagnose_incomplete_cache_wait(),
+            #[cfg(test)]
+            Self::Test(queue) => queue.diagnose_incomplete_cache_wait(),
+        }
+    }
+
     pub(crate) fn info(&self) -> QueueTransport {
         match self {
             #[cfg(not(target_os = "linux"))]
@@ -1015,7 +1026,11 @@ impl GpuDriverRef<'_> {
     /// # Safety
     /// Every GPU address in the request remains backed through queue teardown.
     #[allow(unsafe_code)]
-    pub(crate) unsafe fn create_queue(&self, desc: QueueRequest) -> Result<QueueState, Error> {
+    pub(crate) unsafe fn create_queue(
+        &self,
+        desc: QueueRequest,
+        code_cache: bool,
+    ) -> Result<QueueState, Error> {
         let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
@@ -1023,7 +1038,7 @@ impl GpuDriverRef<'_> {
             #[cfg(target_os = "linux")]
             Self::LinuxKfd { driver, state } => {
                 // SAFETY: The caller preserves every request address.
-                let inner = unsafe { driver.create_user_queue(state, desc) }?;
+                let inner = unsafe { driver.create_user_queue(state, desc, code_cache) }?;
                 Ok(QueueState::LinuxKfd(DriverQueue::new(
                     (*driver).clone(),
                     inner,

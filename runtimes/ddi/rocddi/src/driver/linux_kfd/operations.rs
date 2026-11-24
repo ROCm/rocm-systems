@@ -144,8 +144,15 @@ impl GpuUserQueueOperations for LinuxKfdDriver {
         &self,
         device: &DeviceState,
         desc: QueueRequest,
+        code_cache: bool,
     ) -> Result<Owned<KfdQueue>, Error> {
-        queue::create(device.vm.clone(), &device.native, desc, self.lifetime)
+        queue::create(
+            device.vm.clone(),
+            &device.native,
+            desc,
+            self.lifetime,
+            code_cache,
+        )
     }
 
     fn allocate_queue_scratch(
@@ -978,6 +985,10 @@ impl UserQueueResource for KfdQueue {
 
     fn inactivate(&mut self) -> Result<(), Error> {
         KfdQueue::inactivate(self)
+    }
+
+    fn diagnose_incomplete_cache_wait(&self) {
+        KfdQueue::diagnose_incomplete_cache_wait(self);
     }
 
     fn set_priority(&mut self, priority: QueuePriority) -> Result<(), Error> {

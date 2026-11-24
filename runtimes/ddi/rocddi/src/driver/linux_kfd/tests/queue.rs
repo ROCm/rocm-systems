@@ -9,6 +9,10 @@
 
 use super::super::memory;
 use super::*;
+#[path = "backing_ranges.rs"]
+mod backing_ranges;
+#[path = "cache_activation.rs"]
+mod cache_activation;
 #[path = "queue_context.rs"]
 mod context;
 use crate::session::DriverContextLifetime;
@@ -373,6 +377,20 @@ enum RingBacking {
 
 #[derive(Default)]
 struct State {
+    /// Number of native exception queries, including production health checks.
+    native_waits: usize,
+    /// First four event IDs and queue-update counts, without hook allocations.
+    wait_update_boundaries: [(u32, usize); 4],
+    /// Number of populated entries in the bounded observation record.
+    wait_update_count: usize,
+    /// Remaining DRM responses at the last backing MAP before CREATE.
+    fault_queries_remaining_at_last_map: Option<usize>,
+    /// Remaining DRM responses when SVM context registration was entered.
+    fault_queries_remaining_at_svm: Option<usize>,
+    /// Remaining DRM responses when the native CREATE dispatcher was entered.
+    fault_queries_remaining_at_create: Option<usize>,
+    /// Resets at the native event boundary, independently of passive reads.
+    native_resets: usize,
     next_handle: u64,
     next_offset: u64,
     buffers: BTreeMap<u64, uapi::AllocMemory>,
@@ -412,6 +430,16 @@ struct State {
     cu_masks: Vec<(uapi::SetCuMask, Vec<u32>)>,
 }
 
+impl State {
+    fn record_wait(&mut self, event_id: u32) {
+        self.native_waits += 1;
+        if let Some(entry) = self.wait_update_boundaries.get_mut(self.wait_update_count) {
+            *entry = (event_id, self.updates.len());
+            self.wait_update_count += 1;
+        }
+    }
+}
+
 struct Fixture {
     state: Arc<Mutex<State>>,
     contents: File,
@@ -442,6 +470,7 @@ impl Fixture {
                 let mut state = observed.lock().unwrap();
                 match call {
                     connection::Call::Wait(args, event) if event.event_id == 19 => {
+                        state.record_wait(event.event_id);
                         if state.lost {
                             event.payload[0] = 42;
                             event.payload[1] = 1;
@@ -451,9 +480,11 @@ impl Fixture {
                         }
                     }
                     connection::Call::Wait(args, event) if event.event_id == 20 => {
+                        state.record_wait(event.event_id);
                         args.result = uapi::WAIT_TIMEOUT;
                     }
                     connection::Call::ResetEvent(args) if args.event_id == 19 => {
+                        state.native_resets += 1;
                         state.lost = false;
                     }
                     connection::Call::DestroyEvent(_) => {}
@@ -483,6 +514,8 @@ impl Fixture {
                         state.buffers.insert(args.handle, **args);
                     }
                     connection::Call::Map(args, devices) => {
+                        state.fault_queries_remaining_at_last_map =
+                            super::super::drm::remaining_test_calls();
                         let doorbell = state
                             .buffers
                             .get(&args.handle)
@@ -537,6 +570,8 @@ impl Fixture {
                         assert!(state.buffers.remove(&args.handle).is_some());
                     }
                     connection::Call::Svm(args, attributes) => {
+                        state.fault_queries_remaining_at_svm =
+                            super::super::drm::remaining_test_calls();
                         let page = os_memory::page_size().unwrap() as u64;
                         let flags = uapi::SVM_FLAG_HOST_ACCESS
                             | uapi::SVM_FLAG_GPU_EXECUTE
@@ -581,6 +616,8 @@ impl Fixture {
                         state.svm_context = Some((args.start_address, args.size));
                     }
                     connection::Call::CreateQueue(args) => {
+                        state.fault_queries_remaining_at_create =
+                            super::super::drm::remaining_test_calls();
                         let page = os_memory::page_size().unwrap() as u64;
                         state.creates += 1;
                         let expected_scratch = state.expected_scratch;
@@ -952,6 +989,15 @@ impl Fixture {
         desc: QueueRequest,
         lifetime: DriverContextLifetime,
     ) -> Result<Owned<KfdQueue>, Error> {
+        self.create_for_purpose(desc, lifetime, false)
+    }
+
+    fn create_for_purpose(
+        &self,
+        desc: QueueRequest,
+        lifetime: DriverContextLifetime,
+        code_cache: bool,
+    ) -> Result<Owned<KfdQueue>, Error> {
         let mut state = self.state.lock().unwrap();
         state.expected_ring_backing = match desc.parameters {
             QueueParameters::Aql {
@@ -996,7 +1042,7 @@ impl Fixture {
         }
         drop(state);
         let request = Request::validate(&native_node(), desc)?;
-        KfdQueue::create(self.vm.clone(), &request, lifetime)
+        KfdQueue::create(self.vm.clone(), &request, lifetime, code_cache)
     }
 
     fn peer(&self) -> Shared<DeviceVm> {
@@ -1099,7 +1145,8 @@ fn concurrent_queue_creation_enables_runtime_once_before_acquisition() {
                             vm,
                             &native,
                             descriptor(QueueParameters::Sdma),
-                            DriverContextLifetime::Process
+                            DriverContextLifetime::Process,
+                            false,
                         )
                         .err()
                         .unwrap()
@@ -1145,6 +1192,7 @@ fn runtime_enable_failure_prevents_queue_backing_acquisition() {
             &native_node(),
             descriptor(QueueParameters::Sdma),
             DriverContextLifetime::Process,
+            false,
         )
         .err()
         .unwrap()

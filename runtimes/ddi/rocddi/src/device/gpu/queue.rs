@@ -144,6 +144,10 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
         self.inner.progress()
     }
 
+    pub(crate) fn diagnose_incomplete_cache_wait(&self) {
+        self.inner.diagnose_incomplete_cache_wait();
+    }
+
     pub(crate) fn inactivate(&mut self) -> Result<(), Error> {
         self.inner.inactivate()
     }
@@ -266,6 +270,10 @@ impl<D, Q> RetainedQueue<D, Q> {
 }
 
 impl<D> RetainedQueue<D> {
+    pub(super) fn diagnose_incomplete_cache_wait(&self) {
+        self.queue.inner.diagnose_incomplete_cache_wait();
+    }
+
     /// Copies the native transport facts while this owner is live.
     #[must_use]
     pub fn info(&self) -> QueueTransport {
@@ -635,8 +643,31 @@ impl GpuDevice<'_> {
         // SAFETY: The caller retains every raw address in the request, even
         // when native creation has an ambiguous result.
         Ok(Queue {
-            inner: unsafe { self.driver.create_queue(desc)? },
+            inner: unsafe { self.driver.create_queue(desc, false)? },
         })
+    }
+
+    /// Retains publication operands while identifying only the private cache queue.
+    ///
+    /// # Safety
+    /// The caller owns all request addresses through native queue retirement.
+    #[allow(unsafe_code)]
+    pub(super) unsafe fn create_code_cache_queue_with_dependencies<D: 'static>(
+        &self,
+        desc: QueueRequest,
+        dependencies: D,
+    ) -> Result<RetainedQueue<D>, Error> {
+        // SAFETY: The caller retains every external GPU address, including on
+        // an ambiguous native result, through this same dependency contract.
+        let (queue, dependencies) = retain_create_dependencies(
+            || {
+                Ok(Queue {
+                    inner: unsafe { self.driver.create_queue(desc, true)? },
+                })
+            },
+            dependencies,
+        )?;
+        Ok(RetainedQueue::new(queue, dependencies))
     }
 
     /// Creates a queue while carrying every frontend-owned signal and scratch

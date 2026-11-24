@@ -377,6 +377,7 @@ impl Fixture {
             })
             .unwrap(),
             render: Some(render),
+            fresh_render_fault: None,
             system_dma_buf_import: false,
             gpu_id: 42,
             render_minor: 128,
@@ -413,6 +414,7 @@ impl Fixture {
         shared(DeviceVm {
             loss: self.vm.loss.clone(),
             render: Some(File::open("/dev/null").unwrap()),
+            fresh_render_fault: None,
             system_dma_buf_import: false,
             gpu_id,
             render_minor: 129,
@@ -1468,6 +1470,7 @@ fn incompatible_vm_apertures_fail_before_native_allocation() {
         limit: 0x4ffff,
         loss: fixture.vm.loss.clone(),
         render: Some(File::open("/dev/null").unwrap()),
+        fresh_render_fault: None,
         system_dma_buf_import: false,
         gpu_id: 64,
         render_minor: 130,
@@ -2807,6 +2810,9 @@ fn initialization_endpoint(acquisitions: Arc<AtomicUsize>, busy: bool) -> Shared
                 }
                 connection::Call::Wait(args, _) => args.result = uapi::WAIT_TIMEOUT,
                 connection::Call::AcquireVm(args) => {
+                    if let Some(remaining) = drm::remaining_test_calls() {
+                        assert_eq!(remaining, 0, "fresh-render capture must precede ACQUIRE_VM");
+                    }
                     assert!(matches!(args.gpu_id, 42 | 43));
                     acquisitions.fetch_add(1, Ordering::Relaxed);
                     if busy {
@@ -3028,4 +3034,88 @@ fn instance_shutdown_quarantines_ambiguous_event_destroy_without_replaying_id() 
     );
     assert!(bindings.bindings.get_mut().unwrap().loss.is_some());
     assert_eq!(destroys.load(Ordering::Relaxed), 2);
+}
+
+#[test]
+fn fresh_render_fault_capture_is_opt_in_once_and_survives_retained_vm_reactivation() {
+    const CHILD: &str = "ROCDDI_FRESH_RENDER_CAPTURE_CHILD";
+    let Ok(mode) = std::env::var(CHILD) else {
+        for mode in ["unset", "0", "true", "1"] {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child.args(["--exact", "driver::linux_kfd::memory::tests::fresh_render_fault_capture_is_opt_in_once_and_survives_retained_vm_reactivation", "--nocapture"]);
+            child.env(CHILD, mode);
+            if mode == "unset" {
+                child.env_remove("ROCDDI_CODE_CACHE_DIAGNOSTICS");
+            } else {
+                child.env("ROCDDI_CODE_CACHE_DIAGNOSTICS", mode);
+            }
+            let output = child.output().unwrap();
+            assert!(
+                output.status.success(),
+                "mode {mode}: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+        }
+        return;
+    };
+    for reply in [
+        Ok(drm::GpuVmFault::default()),
+        Ok(drm::GpuVmFault {
+            address: 0x1234_5000,
+            status: 0x0030_0a31,
+            vmhub: 0,
+        }),
+        Err(25),
+    ] {
+        let mut bindings = VmBindings::new();
+        let acquisitions = Arc::new(AtomicUsize::new(0));
+        let mut kfd = initialization_endpoint(acquisitions.clone(), false);
+        let render = File::open("/dev/null").unwrap();
+        let fd = render.as_raw_fd();
+        let mut script = Vec::new();
+        if mode == "1" {
+            script.push(drm::TestCall::QueryGpuVmFault(fd, reply));
+        }
+        script.push(drm::TestCall::ProbeSystemDmaBufImportUnsupported(fd));
+        let vm = drm::with_script(script, || {
+            bindings
+                .device_with_render(&kfd, &node(), None, None, |_| Ok(render))
+                .unwrap()
+        });
+        assert_eq!(vm.render().unwrap().as_raw_fd(), fd);
+        let mut output = Vec::new();
+        drm::with_script([], || vm.write_fresh_render_fault(&mut output).unwrap());
+        let output = String::from_utf8(output).unwrap();
+        if mode == "1" {
+            match reply {
+                Ok(fault) => assert!(output.contains(&format!(
+                    "raw(address={:#x}, status={:#x}, vmhub={:#x})",
+                    fault.address, fault.status, fault.vmhub
+                ))),
+                Err(code) => assert!(output.contains(&format!("query_failed(errno=Some({code})"))),
+            }
+        } else {
+            assert!(output.contains("unavailable(not_captured_at_render_open)"));
+        }
+        assert!(output.contains("untimestamped_may_be_stale_or_incomplete"));
+        // The render baseline belongs to this retained VM, not an activation.
+        let reused = drm::with_script([], || {
+            bindings
+                .device_with_render(&kfd, &node(), None, None, |_| {
+                    panic!("reopened retained render")
+                })
+                .unwrap()
+        });
+        assert!(Shared::ptr_eq(&vm, &reused));
+        assert_eq!(acquisitions.load(Ordering::Relaxed), 1);
+        let mut repeated = Vec::new();
+        reused.write_fresh_render_fault(&mut repeated).unwrap();
+        assert_eq!(output.as_bytes(), repeated);
+        drop(reused);
+        drop(vm);
+        bindings.shutdown().unwrap();
+        Shared::get_mut(&mut kfd).unwrap().close().unwrap();
+    }
 }

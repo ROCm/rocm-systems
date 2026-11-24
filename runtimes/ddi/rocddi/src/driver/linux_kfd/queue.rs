@@ -7,6 +7,7 @@
 //! and context-save storage; the process/device VM retains its doorbell slice.
 
 mod compute_storage;
+mod diagnostics;
 
 use compute_storage::{ComputeStorage, compute_storage};
 
@@ -1395,12 +1396,13 @@ pub(super) fn create(
     native: &sysfs::KfdNode,
     desc: QueueRequest,
     lifetime: DriverContextLifetime,
+    code_cache: bool,
 ) -> Result<Owned<KfdQueue>, Error> {
     let request = Request::validate(native, desc)?;
     vm.kfd()
         .enable_runtime()
         .map_err(|source| native_error("AMDKFD_IOC_RUNTIME_ENABLE", source))?;
-    KfdQueue::create(vm, &request, lifetime)
+    KfdQueue::create(vm, &request, lifetime, code_cache)
 }
 
 /// Queue context backing, either registered SVM or an owned native allocation.
@@ -1570,6 +1572,8 @@ pub(crate) struct KfdQueue {
     uncertain: bool,
     /// Cached transport addresses and queue properties.
     info: QueueTransport,
+    /// Opt-in activation evidence for the private code-cache queue only.
+    cache_activation: Option<diagnostics::CacheQueueActivation>,
 }
 
 impl KfdQueue {
@@ -1581,6 +1585,7 @@ impl KfdQueue {
         vm: Shared<DeviceVm>,
         request: &Request,
         lifetime: DriverContextLifetime,
+        code_cache: bool,
     ) -> Result<Owned<Self>, Error> {
         vm.check()?;
         if vm.version.major != 1 || vm.version.minor < 17 {
@@ -1810,8 +1815,21 @@ impl KfdQueue {
             retirement_callback: RetirementCallbackState::Pending,
             uncertain: false,
             info,
+            cache_activation: None,
         })?;
+        if code_cache {
+            queue.cache_activation = diagnostics::CacheQueueActivation::capture(&queue.vm, args);
+        }
         let result = queue.vm.kfd().create_queue(&mut args);
+        if result.is_ok()
+            && queue.cache_activation.is_some()
+            && queue.vm.cache_diagnostics_enabled()
+        {
+            let fault = queue.vm.passive_fault_cache();
+            if let Some(activation) = &mut queue.cache_activation {
+                activation.after_create = Some(fault);
+            }
+        }
         if result.is_ok() {
             // Zero is a valid native queue ID. Only successful CREATE transfers
             // the returned ID; a copy fault may conceal an entirely different ID.
@@ -1823,6 +1841,7 @@ impl KfdQueue {
                 .is_some_and(|source| source.raw_os_error() == Some(errno::EFAULT));
         }
         if let Err(source) = result {
+            queue.diagnose_cache_activation("CREATE_QUEUE-error");
             return Err(if queue.uncertain {
                 Error::QueueBackingMayBeLive {
                     operation: "AMDKFD_IOC_CREATE_QUEUE outcome is uncertain",
@@ -2203,7 +2222,12 @@ impl KfdQueue {
                 percentage: 0,
                 priority: self.priority,
             })
-            .map_err(|source| native_error("AMDKFD_IOC_UPDATE_QUEUE", source))?;
+            .map_err(|source| {
+                self.diagnose_cache_activation("UPDATE_QUEUE-error");
+                self.vm.diagnose_queue_update_failure(id, &source);
+                self.diagnose_backing_ranges(id);
+                native_error("AMDKFD_IOC_UPDATE_QUEUE", source)
+            })?;
         self.active = false;
         Ok(())
     }

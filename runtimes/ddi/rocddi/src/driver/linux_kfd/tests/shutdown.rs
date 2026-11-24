@@ -39,6 +39,7 @@ fn scripted_driver() -> LinuxKfdDriver {
     let vm = Shared::new(DeviceVm {
         loss: loss.clone(),
         render: Some(File::open("/dev/null").unwrap()),
+        fresh_render_fault: None,
         system_dma_buf_import: false,
         gpu_id: 42,
         render_minor: 128,

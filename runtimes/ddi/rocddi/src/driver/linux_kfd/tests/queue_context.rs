@@ -189,7 +189,7 @@ fn submitted_context(node: sysfs::KfdNode, reject_svm: bool) -> SubmittedContext
     ));
     let vm = memory::queue_fixture(kfd, render, node);
     let request = Request::validate(&node, descriptor(aql(QueueProducerMode::Single))).unwrap();
-    let failure = KfdQueue::create(vm, &request, DriverContextLifetime::Process)
+    let failure = KfdQueue::create(vm, &request, DriverContextLifetime::Process, false)
         .err()
         .unwrap();
     assert_eq!(

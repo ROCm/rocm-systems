@@ -395,6 +395,9 @@ pub(crate) trait UserQueueResource: CachedInfo<Info = QueueTransport> {
     fn check(&self) -> Result<(), Error>;
     /// Samples the native read and write positions without retiring work.
     fn progress(&self) -> Result<(u64, u64), Error>;
+    /// Captures opt-in, passive evidence before cleanup of an incomplete
+    /// private code-cache wait. It never changes queue or exception state.
+    fn diagnose_incomplete_cache_wait(&self) {}
     /// Stops native execution while retaining the queue's backing.
     fn inactivate(&mut self) -> Result<(), Error>;
     /// Changes the native scheduling priority when supported.
@@ -528,6 +531,7 @@ pub(crate) trait GpuUserQueueOperations: AllocationOperations {
     /// Reports whether this driver can use expert scheduling on the device.
     fn supports_expert_scheduling(&self, device: &Self::DeviceState) -> Result<bool, Error>;
     /// Creates a directly published GPU queue and retains its native backing.
+    /// `code_cache` identifies the private publication caller for passive diagnostics.
     ///
     /// # Safety
     /// The caller retains all raw signal and scratch addresses that the GPU
@@ -537,6 +541,7 @@ pub(crate) trait GpuUserQueueOperations: AllocationOperations {
         &self,
         device: &Self::DeviceState,
         desc: QueueRequest,
+        code_cache: bool,
     ) -> Result<Owned<Self::UserQueue>, Error>;
     /// Allocates GPU queue scratch with the normal allocation cleanup contract.
     fn allocate_queue_scratch(

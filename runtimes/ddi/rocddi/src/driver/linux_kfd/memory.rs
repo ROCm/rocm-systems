@@ -24,6 +24,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
+pub(super) mod diagnostics;
 mod host_alias;
 mod scratch;
 pub(super) use host_alias::KfdHostAlias;
@@ -240,6 +241,7 @@ impl VmBindings {
             .ok_or_else(|| error(ErrorKind::Unsupported, "KFD device has no render endpoint"))?;
         let render = open_render(render_minor)
             .map_err(|source| native_error("KFD render node open", source))?;
+        let fresh_render_fault = diagnostics::fresh_render_fault(kfd, &render);
         let system_dma_buf_import = drm::supports_system_dma_buf_import(&render);
         if bindings.loss.is_none() {
             bindings.loss = Some(LossEvent::create(kfd.clone())?);
@@ -260,6 +262,7 @@ impl VmBindings {
         let vm = Shared::new(DeviceVm {
             loss,
             render: Some(render),
+            fresh_render_fault,
             system_dma_buf_import,
             gpu_id: node.gpu_id,
             render_minor,
@@ -300,6 +303,8 @@ pub(crate) struct DeviceVm {
     loss: Shared<LossEvent>,
     /// Exact render descriptor acquired for this KFD VM.
     render: Option<File>,
+    /// Opt-in raw cache baseline captured once before this render's `ACQUIRE_VM`.
+    fresh_render_fault: Option<Result<drm::GpuVmFault, diagnostics::FaultCacheUnavailable>>,
     /// Whether the render VM can import system-memory DMA-BUFs.
     pub(super) system_dma_buf_import: bool,
     /// Native GPU identifier for KFD requests.
@@ -2637,6 +2642,7 @@ pub(super) fn queue_fixture_with_range(
     Shared::new(DeviceVm {
         loss,
         render: Some(render),
+        fresh_render_fault: None,
         system_dma_buf_import: false,
         gpu_id: node.gpu_id,
         render_minor: node.render_minor.unwrap(),
