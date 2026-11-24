@@ -26,20 +26,6 @@
   * Env vars renamed: `ROCSHMEM_TDM_TILE_BYTES`/`ROCSHMEM_TDM_PUT_THRESHOLD`/
     `ROCSHMEM_TDM_GET_THRESHOLD` -> `ROCSHMEM_LDS_STAGE_TILE_BYTES`/
     `ROCSHMEM_LDS_STAGE_PUT_THRESHOLD`/`ROCSHMEM_LDS_STAGE_GET_THRESHOLD`.
-* Type Support:
-    * `half`, `bfloat16`, `int8`, `int16`, `int32`, `int64`,
-      `uint8`, `uint16`, `uint32`, `uint64`, `size_t`, `ptrdiff_t`:
-        * RMA:
-             * `rocshmem_{ctx_}<TYPE>_{put,get,p,g}{_nbi}{_wave}{_wg}`
-        * RMA with signal:
-             * `rocshmem_{ctx_}<TYPE>_put_signal{_nbi}{_wave}{_wg}`
-        * Point-to-point synchronization:
-             * `rocshmem_{ctx_}<TYPE>_{wait_until,test}{_all,_any,_some}{_vector}`
-        * Collectives:
-             * `rocshmem_{ctx_}<TYPE>_{broadcast,fcollect,alltoall}{_wave}{_wg}`
-             * `rocshmem_{ctx_}<TYPE>_alltoallv_wg`
-             * `rocshmem_{ctx_}<TYPE>_{and,or,xor,min,max,sum,prod}_reduce{_scatter}{_wave}{_wg}`
-                * Note: `rocshmem_{ctx_}bfloat16_{and,or,xor,min,max,sum,prod}_reduce{_scatter}{_wave}{_wg}` are unsupported on ROCm versions 10.0, 10.1, and 10.2
 
 ### Resolved issues
 * Fixed `rocshmem_fence` on the RO backend taking a host proxy round trip from every calling thread.
@@ -96,19 +82,6 @@
     * `rocshmem_signal_add` and `rocshmem_ctx_signal_add`
     * `rocshmem_signal_set` and `rocshmem_ctx_signal_set`
     * `rocshmem_signal_wait_until`
-* Type Support:
-    * `half`, `bfloat16`, `int8`, `int16`, `int32`, `int64`,
-      `uint8`, `uint16`, `uint32`, `uint64`, `size_t`, `ptrdiff_t`:
-        * RMA:
-             * `rocshmem_{ctx_}<TYPE>_{put,get,p,g}{_nbi}{_wave}{_wg}`
-        * RMA with signal:
-             * `rocshmem_{ctx_}<TYPE>_put_signal{_nbi}{_wave}{_wg}`
-        * Point-to-point synchronization:
-             * `rocshmem_{ctx_}<TYPE>_{wait_until,test}{_all,_any,_some}{_vector}`
-        * Collectives:
-             * `rocshmem_{ctx_}<TYPE>_{broadcast,fcollect,alltoall}{_wave}{_wg}`
-             * `rocshmem_{ctx_}<TYPE>_alltoallv_wg`
-             * `rocshmem_{ctx_}<TYPE>_{and,or,xor,min,max,sum,prod}_reduce{_scatter}{_wave}{_wg}`
 
 ### Deprecated
 * Deprecated `rocshmem_signal_fetch_wg` and `rocshmem_signal_fetch_wave`.
