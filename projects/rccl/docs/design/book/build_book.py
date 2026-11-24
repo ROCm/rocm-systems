@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Build the multi-segment design notes as a Slate-style (rocm-docs-core) book and PDF.
+"""Build the multi-segment design book and the code walkthrough book (Slate style, rocm-docs-core) and PDFs.
 
     python -m pip install -r requirements.txt && python -m playwright install chromium
-    python build_book.py
+    python build_book.py [--book design|walkthrough|both]
 
-Everything is written under _build/: the generated Sphinx project (src/), the site (html/),
+Each book is written under _build/<book>/: the generated Sphinx project (src/), the site (html/),
 the one-page build that is printed (single/), the PDF, its readability report, and a zip.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import shutil
@@ -23,34 +24,51 @@ import mermaid_svg as M
 
 HERE = Path(__file__).resolve().parent
 DESIGN = HERE.parent
-BUILD = HERE / "_build"
-SRC, HTML, SINGLE = BUILD / "src", BUILD / "html", BUILD / "single"
-TITLE = "RCCL Multi-Segment DMA-BUF Design"
 REPO_URL = "https://github.com/ROCm/rocm-systems"
+# Code links and links between the two books point here; both need the branch to be on GitHub.
 CODE_URL = f"{REPO_URL}/blob/users/atulkulk/netib-mseg/04-rma-gin-multiseg/projects/rccl/"
+DOCS_URL = f"{REPO_URL}/blob/develop/projects/rccl/docs/design/"
 
-PARTS: list[tuple[str, list[tuple[str, str]]]] = [
-    ("Part I — Overview", [
-        ("multi_segment_overview.md", "Overview (start here)"),
-        ("multi_segment_current.md", "Current behavior and invariants"),
-        ("multi_segment_fork_plugin.md", "IB-MSEG plugin and the fork stack"),
-        ("multi_segment_review_feedback.md", "Review feedback and status"),
-    ]),
-    ("Part II — Design per transport layer", [
-        ("multi_segment_gin_rma.md", "GIN / RMA (core and IB-MSEG)"),
-        ("multi_segment_netib_wire.md", "IB-MSEG NET/IB P2P"),
-        ("multi_segment_netib_cast.md", "IB-CAST NET/IB P2P (fork 6 design)"),
-        ("multi_segment_netib_cast_gin.md", "IB-CAST GIN / RMA (fork 6 design)"),
-    ]),
-    ("Part III — Testing and related designs", [
-        ("multi_segment_testing.md", "Testing and validation"),
-        ("multi_segment_validation_plan.md", "Validation plan"),
-        ("multi_segment_gin_rocshmem_gda_and_anvil_sdma.md", "rocSHMEM GDA and Anvil SDMA (proposed)"),
-    ]),
-    ("Part IV — Reference", [
-        ("multi_segment_code_map.md", "Code map"),
-    ]),
-]
+BOOKS: dict[str, dict] = {
+    "design": dict(
+        title="RCCL Multi-Segment DMA-BUF Design",
+        folder=DESIGN,
+        intro="Design notes for registering one DMA-BUF memory region per physical segment on every "
+              "InfiniBand path in RCCL. The code paths are in the separate code walkthrough book.",
+        parts=[
+            ("Part I — Overview", [
+                ("multi_segment_overview.md", "Overview (start here)"),
+                ("multi_segment_current.md", "Current contract"),
+            ]),
+            ("Part II — Design", [
+                ("multi_segment_fork_plugin.md", "IB-MSEG plugin and the fork stack"),
+                ("multi_segment_gin_rma.md", "GIN / RMA (core and IB-MSEG)"),
+                ("multi_segment_netib_wire.md", "IB-MSEG NET/IB P2P"),
+                ("multi_segment_netib_cast.md", "IB-CAST NET/IB P2P (fork 6 design)"),
+                ("multi_segment_netib_cast_gin.md", "IB-CAST GIN / RMA (fork 6 design)"),
+                ("multi_segment_gin_rocshmem_gda_and_anvil_sdma.md", "rocSHMEM GDA and Anvil SDMA (proposed)"),
+            ]),
+            ("Part III — Testing", [
+                ("multi_segment_testing.md", "Testing"),
+                ("multi_segment_validation_plan.md", "Validation plan"),
+            ]),
+            ("Part IV — Reference", [
+                ("multi_segment_code_map.md", "Code map"),
+                ("multi_segment_review_feedback.md", "Review feedback"),
+            ]),
+        ]),
+    "walkthrough": dict(
+        title="RCCL Multi-Segment DMA-BUF Code Walkthrough",
+        folder=DESIGN / "walkthrough",
+        intro="Code walkthroughs of the IB-MSEG fork stack, one part per fork, each following the code in "
+              "execution order. The design rationale is in the separate design book.",
+        parts=[
+            ("Part I — Fork 1: core gate", [("multi_segment_walkthrough_fork1_core.md", "Fork 1")]),
+            ("Part II — Fork 2: net_ib copy", [("multi_segment_walkthrough_fork2_copy.md", "Fork 2")]),
+            ("Part III — Fork 3: registration and P2P", [("multi_segment_walkthrough_fork3_p2p.md", "Fork 3")]),
+            ("Part IV — Fork 4: RMA and GIN", [("multi_segment_walkthrough_fork4_gin_rma.md", "Fork 4")]),
+        ]),
+}
 
 
 def git(*args: str) -> str:
@@ -72,6 +90,16 @@ def alerts_to_admonitions(text: str) -> str:
     return ALERT.sub(sub, text)
 
 
+def book_links(text: str, folder: Path, in_book: set[Path]) -> str:
+    """Links to a doc of the other book point at its GitHub copy; Sphinx sees only this book."""
+    def sub(m):
+        target = (folder / m.group(2)).resolve()
+        if target in in_book or not target.is_relative_to(DESIGN):
+            return m.group(0)
+        return f"[{m.group(1)}]({DOCS_URL}{target.relative_to(DESIGN).as_posix()}{m.group(3) or ''})"
+    return re.sub(r"\[([^\]]+)\]\(([^)\s#:]+\.md)(#[^)\s]*)?\)", sub, text)
+
+
 def code_links(text: str) -> str:
     """Repo-relative source links point at the pushed wire branch on GitHub."""
     def sub(m):
@@ -80,24 +108,34 @@ def code_links(text: str) -> str:
     return re.sub(r"\[([^\]]+)\]\(((?:\.\./)+(?:src|test|tools|cmake)[^)\s]*)\)", sub, text)
 
 
-def main() -> int:
+def build(book: str) -> int:
+    cfg = BOOKS[book]
+    title, folder, parts = cfg["title"], cfg["folder"], cfg["parts"]
+    build_dir = HERE / "_build" / book
+    src, html, single = build_dir / "src", build_dir / "html", build_dir / "single"
     rev = docs_rev()
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
     stamp = datetime.now().strftime("%Y%m%d-%H%M")
-    if SRC.exists():
-        shutil.rmtree(SRC)
-    (SRC / "_diagrams").mkdir(parents=True)
-    (SRC / "_static").mkdir()
+    if src.exists():
+        shutil.rmtree(src)
+    (src / "_diagrams").mkdir(parents=True)
+    (src / "_static").mkdir()
 
-    files = [DESIGN / f for _, docs in PARTS for f, _ in docs]
-    problems = [f"design doc not in book: {p.name}" for p in sorted(DESIGN.glob("*.md")) if p not in files]
+    listed = [folder / f for _, docs in parts for f, _ in docs]
+    problems = [f"{book}: doc in {folder.name}/ not in the book: {p.name}"
+                for p in sorted(folder.glob("*.md")) if p not in listed and p.name != "README.md"]
+    problems += [f"{book}: missing doc {p.name}" for p in listed if not p.exists()]
+    files = [p for p in listed if p.exists()]
+    parts = [(part, [(f, n) for f, n in docs if (folder / f).exists()]) for part, docs in parts]
+    parts = [(part, docs) for part, docs in parts if docs]
+    in_book = {p.resolve() for p in files}
     all_diagrams: list[M.Diagram] = []
     for fname in files:
         stem = fname.stem.replace("multi_segment_", "")
         for d in M.find_diagrams(stem, fname.read_text()):
             all_diagrams.append(M.Diagram(d.key, A.recolor(d.src), d.caption))
-    sizes = M.render(all_diagrams, A.CFG, SRC / "_diagrams", A.FONT_CSS)
-    (SRC / "_diagrams" / "_render.html").unlink()
+    sizes = M.render(all_diagrams, A.CFG, src / "_diagrams", A.FONT_CSS)
+    (src / "_diagrams" / "_render.html").unlink()
 
     placements = {}
     for d in all_diagrams:
@@ -121,60 +159,69 @@ def main() -> int:
             return f"```{{figure}} _diagrams/{key}.svg\n:name: fig-{key}\n:alt: {cap}\n:figclass: {cls}\n\n{cap}\n```"
 
         text = M.FENCE.sub(fig, fname.read_text())
-        text = code_links(alerts_to_admonitions(text))
+        text = book_links(code_links(alerts_to_admonitions(text)), folder, in_book)
         for (lf, ls), (df, ds) in A.CLASS_MAP.items():
             text = text.replace(f"`{ls}` | `{lf}`", f"`{ds}` | `{df}`")
-        (SRC / fname.name).write_text(text)
+        (src / fname.name).write_text(text)
 
     toc = ["defaults:\n  numbered: true\n  maxdepth: 2\nroot: index\nsubtrees:"]
-    for part, docs in PARTS:
+    for part, docs in parts:
         toc.append(f"- caption: \"{part}\"\n  entries:")
         toc += [f"  - file: {Path(f).stem}" for f, _ in docs]
-    (SRC / ".sphinx").mkdir()
-    (SRC / ".sphinx" / "_toc.yml.in").write_text("\n".join(toc) + "\n")
-    (SRC / "index.md").write_text(
-        f"# {TITLE}\n\nDesign notes for registering one DMA-BUF memory region per physical segment on every "
-        f"InfiniBand path in RCCL. Built from docs commit `{rev}` on {stamp[:8]}.\n\n"
-        "Start with the overview. Each part can be read on its own; figures are numbered per chapter.\n")
-    shutil.copy(HERE / "mseg_slate.css", SRC / "_static" / "mseg_slate.css")
-    (SRC / "conf.py").write_text(CONF.format(title=TITLE, rev=rev, repo=REPO_URL, branch=branch))
+    (src / ".sphinx").mkdir()
+    (src / ".sphinx" / "_toc.yml.in").write_text("\n".join(toc) + "\n")
+    (src / "index.md").write_text(
+        f"# {title}\n\n{cfg['intro']} Built from docs commit `{rev}` on {stamp[:8]}.\n\n"
+        "Each part can be read on its own; figures are numbered per chapter.\n")
+    shutil.copy(HERE / "mseg_slate.css", src / "_static" / "mseg_slate.css")
+    (src / "conf.py").write_text(CONF.format(title=title, rev=rev, repo=REPO_URL, branch=branch))
 
-    for builder, out in (("html", HTML), ("singlehtml", SINGLE)):
-        log = BUILD / f"sphinx_{builder}.log"
+    for builder, out in (("html", html), ("singlehtml", single)):
+        log = build_dir / f"sphinx_{builder}.log"
         with log.open("w") as fh:
-            r = subprocess.run([sys.executable, "-m", "sphinx", "-b", builder, "-q", "-E", str(SRC), str(out)],
+            r = subprocess.run([sys.executable, "-m", "sphinx", "-b", builder, "-q", "-E", str(src), str(out)],
                                stdout=fh, stderr=subprocess.STDOUT)
         warns = [l for l in log.read_text().splitlines() if ("WARNING" in l or "ERROR" in l)
                  and "Not in a Git Directory" not in l and "failed to reach any of the inventories" not in l]
-        print(f"sphinx {builder}: rc={r.returncode} warnings={len(warns)} log={log}")
-        problems += [f"{builder}: {w}" for w in warns[:20]]
+        print(f"{book} sphinx {builder}: rc={r.returncode} warnings={len(warns)} log={log}")
+        problems += [f"{book} {builder}: {w}" for w in warns[:20]]
         if r.returncode:
             return r.returncode
 
-    pdf = BUILD / f"rccl_multiseg_book_slate_{rev}_{stamp}.pdf"
-    rc = subprocess.run([sys.executable, str(HERE / "make_pdf.py"), str(SINGLE / "index.html"), str(pdf),
-                         "--title", TITLE, "--rev", f"docs {rev}", "--pages-dir", str(BUILD / "pdf_pages"),
+    name = f"rccl_multiseg_{book}_{rev}_{stamp}"
+    pdf = build_dir / f"{name}.pdf"
+    part_counts = json.dumps([[part, len(docs)] for part, docs in parts])
+    rc = subprocess.run([sys.executable, str(HERE / "make_pdf.py"), str(single / "index.html"), str(pdf),
+                         "--title", title, "--rev", f"docs {rev}", "--parts", part_counts,
+                         "--pages-dir", str(build_dir / "pdf_pages"),
                          "--fig-selector", "figure.slate-diagram img"]).returncode
     if rc:
-        problems.append("PDF readability check failed; see " + str(pdf.with_suffix(".check.json")))
+        problems.append(f"{book}: PDF check failed; see " + str(pdf.with_suffix(".check.json")))
 
-    zpath = BUILD / f"rccl_multiseg_book_slate_{rev}_{stamp}.zip"
+    zpath = build_dir / f"{name}.zip"
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
-        for p in sorted(HTML.rglob("*")):
+        for p in sorted(html.rglob("*")):
             if p.is_file():
-                z.write(p, f"html/{p.relative_to(HTML)}")
+                z.write(p, f"html/{p.relative_to(html)}")
         if pdf.exists():
             z.write(pdf, pdf.name)
-        z.writestr("README.txt", f"{TITLE} (Slate style)\nDocs commit {rev}, built {stamp}\n\n"
+        z.writestr("README.txt", f"{title} (Slate style)\nDocs commit {rev}, built {stamp}\n\n"
                    "Open html/index.html, or read the PDF.\n")
-    (BUILD / "placements.json").write_text(json.dumps(placements, indent=1))
-    print("html:", HTML / "index.html")
-    print("pdf:", pdf)
-    print("zip:", zpath, zpath.stat().st_size, "bytes")
-    print(f"problems: {len(problems)}")
+    (build_dir / "placements.json").write_text(json.dumps(placements, indent=1))
+    print(f"{book} html:", html / "index.html")
+    print(f"{book} pdf:", pdf)
+    print(f"{book} zip:", zpath, zpath.stat().st_size, "bytes")
+    print(f"{book} problems: {len(problems)}")
     for p in problems:
         print("  -", p)
     return 1 if problems else 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--book", choices=["design", "walkthrough", "both"], default="both")
+    books = ["design", "walkthrough"] if ap.parse_args().book == "both" else [ap.parse_args().book]
+    return max(build(b) for b in books)
 
 
 CONF = '''import rocm_docs.util

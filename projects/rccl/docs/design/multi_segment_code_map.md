@@ -1,10 +1,10 @@
 # Multi-segment registration: code map
 
-This doc lists the code the IB-MSEG fork stack adds or changes, one table per area, with the fork that owns each symbol. Use it to find where a behavior lives and which fork introduces it. The design docs stay concise and link here instead of naming every function. The forks and their scope are described in [the fork plugin](multi_segment_fork_plugin.md#forks).
+This doc lists the code the IB-MSEG fork stack adds or changes, one table per area, with the fork that owns each symbol. Use it to find where a behavior lives and which fork introduces it. The design docs stay concise and link here instead of naming every function. The forks and their scope are described in [the fork plugin](multi_segment_fork_plugin.md#forks), and the code paths in execution order are in the code walkthrough book.
 
 ## How to read
 
-Each row names a file and a symbol at the tip of fork 4 (branch `users/atulkulk/netib-mseg/04-rma-gin-multiseg`); search the file for the symbol to find its definition. Paths are relative to `projects/rccl/src/` unless they start with `test/` or `tools/`.
+Each row names a file and a symbol as of fork 4; search the file for the symbol to find its definition. Paths are relative to `projects/rccl/src/` unless they start with `test/` or `tools/`.
 
 The Fork column is the fork (1 to 4) whose commit introduces the symbol or, for a develop symbol, adds the multi-segment hook to it; "1, 4" means both forks change it. Kind is "new" when the stack adds the symbol and "changed" when it edits a develop symbol, usually through a short `// RCCL:` hook. Inside `transport/net_ib_multiseg/`, "changed" means changed against fork 2's copy of `net_ib`; symbols there carry the `IbMseg` prefix from `rename_map.txt`. `transport/net_ib/` and `transport/net_ib_cast/` are not touched by the stack. Develop already has the NET segment count from the merged registration-range work (`rcclNetRegSegmentCount` in `rccl_wrap.cc`) and the switch `NCCL_MULTI_SEGMENT_REGISTER` (in `transport/generic.cc`); they are not listed below. Abbreviations are defined in the [overview terms](multi_segment_overview.md#terms).
 
@@ -34,14 +34,14 @@ flowchart TD
  class netreg,mreg,p2p netib
 ```
 
-| Fork | Branch (`users/atulkulk/netib-mseg/...`) | Tables |
-|---|---|---|
-| 1 | `01-core-backend-multiseg-gate` | [Core: device runtime](#core-device-runtime-and-symmetric-windows), [GIN and RMA proxies](#core-gin-and-rma-proxies), [shared limits](#core-shared-limits), most of [NET proxy](#core-comm-flags-and-the-net-proxy) |
-| 2 | `02-net-ib-multiseg-copy` | [Core: plugin selection](#core-plugin-selection), [the copy](#ib-mseg-the-copy) |
-| 3 | `03-registration-p2p-multiseg` | [Fork-local files](#ib-mseg-fork-local-files) (P2P and registration), [hooks](#ib-mseg-hooks-in-the-copied-files) |
-| 4 | `04-rma-gin-multiseg` | [Fork-local files](#ib-mseg-fork-local-files) (RMA), [hooks](#ib-mseg-hooks-in-the-copied-files) in `gin.cc` and `connect.cc`, `include/alloc.h` |
+| Fork | Tables |
+|---|---|
+| 1 | [Core: device runtime](#core-device-runtime-and-symmetric-windows), [GIN and RMA proxies](#core-gin-and-rma-proxies), [shared limits](#core-shared-limits), most of [NET proxy](#core-comm-flags-and-the-net-proxy) |
+| 2 | [Core: plugin selection](#core-plugin-selection), [the copy](#ib-mseg-the-copy) |
+| 3 | [Fork-local files](#ib-mseg-fork-local-files) (P2P and registration), [hooks](#ib-mseg-hooks-in-the-copied-files) |
+| 4 | [Fork-local files](#ib-mseg-fork-local-files) (RMA), [hooks](#ib-mseg-hooks-in-the-copied-files) in `gin.cc` and `connect.cc`, `include/alloc.h` |
 
-Forks 5 and 6 (IB-CAST base and IB-CAST multi-segment) have no branch yet and no code in this map.
+Forks 5 and 6 (IB-CAST base and IB-CAST multi-segment) are planned and have no code in this map.
 
 ## Core: device runtime and symmetric windows
 
@@ -52,11 +52,11 @@ Design: [GIN and RMA](multi_segment_gin_rma.md).
 | `dev_runtime.cc` | `symLsaMessage` | 1 | changed | adds `hostExportable`: 1 when this rank holds the creating POSIX fd for the segment |
 | `dev_runtime.cc` | `symMemoryEnsureHostOwnerFds` | 1 | new | lazily makes the per-segment owner-fd table, every entry -1 |
 | `dev_runtime.cc` | `symMemoryGetHostOwnerFd` | 1 | new | fetches the one exporter's fd, since an imported host handle cannot export a DMA-BUF |
-| `dev_runtime.cc` | `symMemoryPublishHostOwnerFds` | 1 | new | publishes the owner fds by VA so per-segment registration can find them |
+| `dev_runtime.cc` | `symMemoryPublishHostOwnerFds` | 1 | new | publishes the owner fds by VA so window registration can look them up |
 | `dev_runtime.cc` | `symMemoryCloseHostOwnerFds` | 1 | new | unpublishes each owner fd before closing it |
 | `dev_runtime.cc` | `symMemoryMapLsa` | 1 | changed | exports the local host fd; borrows a peer's fd only when exactly one rank can export; the ROCM-29810 TODO is removed |
-| `dev_runtime.cc` | `symMemoryRegisterGin` | 1 | changed | fails closed on a multi-segment device window unless `rcclDevrGinRegistersMultiSegment`; marks owner-fd segments as host |
-| `dev_runtime.cc` | `symMemoryRegisterRma` | 1 | changed | registers a multi-segment window when `rcclDevrRmaRegistersMultiSegment`; otherwise every rank skips together |
+| `dev_runtime.cc` | `symMemoryRegisterGin` | 1 | changed | registers a multi-segment device window with GIN only when `rcclDevrGinRegistersMultiSegment` holds; otherwise fails a `NCCL_WIN_GIN_ONLY` window with `ncclInvalidUsage` and leaves any other unregistered with GIN; marks owner-fd segments as host |
+| `dev_runtime.cc` | `symMemoryRegisterRma` | 1 | changed | registers a multi-segment window through `rcclRmaProxyRegisterMultiSeg` when `rcclDevrRmaRegistersMultiSegment`; otherwise every rank skips together |
 | `dev_runtime.cc` | `symMemoryUnregister` | 1 | changed | deregisters the RMA window whatever its segment count |
 | `dev_runtime.cc` | `symMemoryObtain` | 1 | changed | gathers `minGlobalNumSegments`; all ranks agree on the owner-fd status; publishes owner fds |
 | `dev_runtime.cc` | `symMemoryDestroy` | 1 | changed | closes the owner fds published for the window |
@@ -79,12 +79,14 @@ Design: [GIN and RMA](multi_segment_gin_rma.md).
 |---|---|---|---|---|
 | `gin/gin_host.cc` | `ginDevCommSetupWithBackend` | 4 | changed | passes `comm->rcclMultiSegRma` to the GIN proxy before it creates a context |
 | `gin/gin_host.cc` | `ncclGinRegister` | 1 | changed | registers a host segment with its owner fd through `regMrSymDmaBuf` |
+| `gin/gin_host.cc` | `rcclGinRegisterMultiSeg` | 1 | new | registers a device-only multi-segment window; with `comm->rcclMultiSegRma` a GIN proxy backend gets fd -1 |
 | `gin/gin_host_proxy.cc` | `rmaMultiSeg` | 1 | new | the comm's RMA flag, set by `rcclGinProxySetMultiSeg` |
-| `gin/gin_host_proxy.cc` | `ncclGinProxyRegMrSymDmaBuf` | 1 | new | registers with a caller-supplied DMA-BUF fd; falls back to `regMrSym` |
+| `gin/gin_host_proxy.cc` | `ncclGinProxyRegMrSymDmaBuf` | 1 | new | registers with a caller-supplied DMA-BUF fd, or fd -1 for a per-segment backend; without DMA-BUF, fd -1 goes to the backend's `regMrSym` and a real fd to `ncclGinProxyRegMrSym` |
 | `gin/gin_host_proxy.cc` | `ncclGinProxyCreateContext` | 1 | changed | caps `NCCL_GIN_PROXY_QUEUE_SIZE` for multi-segment chains |
 | `gin/gin_host_proxy.cc` | `ncclGinProxy` | 1 | changed | fills the `regMrSymDmaBuf` slot |
 | `gin/gin_host_proxy.cc` | `rcclGinProxySetMultiSeg` | 1 | new | setter, declared in `include/gin/gin_host_proxy.h` |
 | `rma/rma_proxy.cc` | `ncclRmaProxyCtxAlloc` | 1 | changed | caps requests in flight per peer for multi-segment chains |
+| `rma/rma_proxy.cc` | `rcclRmaProxyRegisterMultiSeg` | 1 | new | registers a multi-segment window with fd -1 (or `regMrSym` without DMA-BUF), exporting no whole-range fd |
 | `rma/rma_proxy_launch.cc` | `ncclRmaProxyPutBuildOp` | 1 | changed | fails a put on a window whose RMA registration was skipped |
 | `ce_coll.cc` | `ncclHierCeAvailable` | 1 | changed | skips hierarchical CE when a window has no RMA registration |
 
@@ -249,9 +251,9 @@ These are edits to fork 2's copy of `net_ib` inside `transport/net_ib_multiseg/`
 
 | File | Symbol | Fork | Kind | Role |
 |---|---|---|---|---|
-| `connect.cc` | `IbMsegResolveUseMultiSeg` | 3 | new | this side's `useMultiSeg` |
-| `connect.cc` | `IbMsegCheckPeerUseMultiSeg` | 3 | new | fails the connect with `ncclInvalidUsage` when the two ends differ |
-| `connect.cc` | `IbMsegSendCommAllocCts`, `IbMsegSendCommFreeCts` | 3 | new | the combined CTS slot block |
+| `connect.cc` | `IbMsegResolveUseMultiSeg` | 3 | new | this side's `useMultiSeg`, logged at TRACE |
+| `connect.cc` | `IbMsegCheckPeerUseMultiSeg` | 3 | new | on a mismatch the accepting side WARNs, closes the socket and returns `ncclInvalidUsage`; the connecting side re-checks a reply |
+| `connect.cc` | `IbMsegSendCommAllocCts`, `IbMsegSendCommFreeCts` | 3 | new | the sender's CTS block: the combined slots with the send cursor and layout cache, or the legacy FIFO; free also releases a cursor allocated later |
 | `connect.cc` | `rcclIbSendQpWrs` | 4 | new | send-queue depth by role: `RCCL_RMA_SEND_QP_WRS` on a multi-segment RMA comm, the base depth otherwise |
 | `connect.cc` | `IbMsegHandle` | 3 | changed | adds `isGin` |
 | `connect.cc` | `rcclIbMarkGinListen` | 3 | new | marks GIN and RMA listens so their comms skip the layout |
@@ -259,7 +261,7 @@ These are edits to fork 2's copy of `net_ib` inside `transport/net_ib_multiseg/`
 | `connect.cc` | `IbMsegSenderQpsToRts`, `IbMsegReceiverQpsCreateToRts` | 4 | changed | bound the peer's device index |
 | `connect.cc` | `IbMsegConnectImpl` | 3, 4 | changed | exchanges and checks `useMultiSeg` (fork 3); sets `isRma` (fork 4) |
 | `connect.cc` | `IbMsegCreateFlushQp` | 4 | changed | sets the loopback flush QP's device indices |
-| `connect.cc` | `IbMsegAcceptImpl`, `IbMsegCloseSend`, `IbMsegCloseRecv` | 3 | changed | check `useMultiSeg`, allocate and free the CTS slots |
+| `connect.cc` | `IbMsegAcceptImpl`, `IbMsegCloseSend`, `IbMsegCloseRecv` | 3 | changed | check `useMultiSeg`, allocate and free the receiver's CTS slots or legacy FIFO shadow (also on accept failure), free the layout cache |
 | `connect_mseg.h` | `IbMsegConnectionMetadata` | 3 | changed | adds `useMultiSeg` |
 
 ### `common_mseg.h`, `gin_mseg.h`, `init.cc`
@@ -273,8 +275,9 @@ These are edits to fork 2's copy of `net_ib` inside `transport/net_ib_multiseg/`
 | `common_mseg.h` | `IbMsegMrHandle` | 3 | changed | adds `seg`, the per-segment MR set |
 | `common_mseg.h` | `IbMsegNetCommBase` | 4 | changed | adds `isRma` |
 | `common_mseg.h` | `rcclIbMrAdmit` (declaration) | 3 | new | defined in `reg.cc` |
-| `common_mseg.h` | `IbMsegSendComm` | 3 | changed | adds `ctsSlots`, `useMultiSeg`, `sendCursor` and `layoutCache` |
+| `common_mseg.h` | `IbMsegSendComm` | 3 | changed | adds `ctsSlots`, `useMultiSeg`, and the `sendCursor` and `layoutCache` pointers; `ctsFifo` becomes a pointer |
 | `common_mseg.h` | `IbMsegRecvComm` | 3 | changed | adds `ctsSlots`, `ctsSlotStride` and `useMultiSeg` |
+| `common_mseg.h` | `IbMsegRemCtsFifo` | 3 | changed | `elems` becomes a pointer, allocated only for a legacy-CTS receiver |
 | `common_mseg.h` | `IbMsegListenComm` | 3 | changed | adds `isGin` |
 | `gin_mseg.h` | `IbMsegGinIbCollComm` | 4 | changed | adds `regRecords` |
 | `init.cc` | `IbMsegInitDevices` | 3 | changed | records `devAttr.max_mr` |
@@ -283,7 +286,7 @@ These are edits to fork 2's copy of `net_ib` inside `transport/net_ib_multiseg/`
 
 | Symbol | Fork | Kind | Role |
 |---|---|---|---|
-| `rcclIbMrAdmit` | 3 | new | admits a registration only if one MR per segment fits under `max_mr` |
+| `rcclIbMrAdmit` | 3 | new | admits a registration only if `nSeg` more MRs fit under `max_mr` on every rail |
 | `IbMsegRegMrDmaBufInternal` | 3, 4 | changed | a real fd stays one MR (fork 3); unwinds MRs on earlier devices when a later device fails (fork 4) |
 | `rcclIbCountRangeSegments`, `rcclIbRegMrDmaBufFromRange` | 3 | new | fd -1: count the range's segments and register each |
 | `IbMsegRegMrDmaBuf` | 3 | changed | routes fd -1 to the range path |
@@ -298,7 +301,7 @@ These are edits to fork 2's copy of `net_ib` inside `transport/net_ib_multiseg/`
 | Symbol | Fork | Kind | Role |
 |---|---|---|---|
 | `rcclIbSendHoldSlice` | 3 | new | holds one more event per request until a slice's signaled write completes |
-| `IbMsegMultiSend` | 3 | changed | segmented send through `rcclIbFillSendWrs`; uses the validated `nreqs` |
+| `IbMsegMultiSend` | 3 | changed | segmented send through `rcclIbFillSendWrs`; uses the validated `nreqs`; allocates the cursor on a legacy-CTS comm's first segmented send |
 | `rcclIbSendResume`, `rcclIbSendProgress` | 3 | new | resume a partly posted segmented send |
 | `IbMsegIsend` | 3 | changed | strips the layout bit; waits for layouts |
 | `IbMsegPostFifo`, `IbMsegIrecv` | 3 | changed | the one-write CTS with the layout prefix |
@@ -316,7 +319,8 @@ These are edits to fork 2's copy of `net_ib` inside `transport/net_ib_multiseg/`
 | `IbMsegRmaIbProxyListen` | 3 | new | RMA listen that marks per-peer comms as GIN |
 | `IbMsegRmaIbProxyConnect` | 4 | changed | calls `rcclRmaIbProxyConnectFinish` |
 | `IbMsegRmaIbProxyCtx` | 4 | changed | adds `pending`, the per-peer round queues |
-| `IbMsegRmaIbProxyPostBatch`, `IbMsegRmaIbProxyDestroyContext` | 4 | changed | pump and free the round queues |
+| `IbMsegRmaIbProxyPostBatch`, `IbMsegRmaIbProxyDestroyContext` | 4 | changed | pump and free the round queues; a failed doorbell calls `rcclRmaIbProxyFailBatch` |
+| `rcclRmaIbProxyFailBatch` | 4 | new | marks FAILED every request with a WR in a batch whose doorbell failed, including aggregated requests already returned |
 | `IbMsegRmaIbProxyCreateContext` | 3, 4 | changed | marks the per-peer listen (fork 3); allocates the round queues (fork 4) |
 | `rcclRmaIbProxySegMrHandle`, `rcclRmaIbProxyMrSegmentCount` | 4 | new | the multi-segment MR handle and its count |
 | `rcclRmaRemoteRkey`, `rcclRmaRankOff`, `rcclRmaSegOf`, `rcclRmaRangeOk` | 4 | new | per-rank segment lookups and the range check |
@@ -326,53 +330,23 @@ These are edits to fork 2's copy of `net_ib` inside `transport/net_ib_multiseg/`
 | `rcclRmaIbProxyQueueOf`, `rcclRmaIbProxyPeerBusy`, `rcclRmaIbProxyPostChain`, `rcclRmaIbProxyEnqueue`, `rcclRmaIbProxySubmit` | 4 | new | per-peer ordering: post now or queue behind earlier rounds |
 | `rcclRmaDeregOneSegment`, `rcclRmaIbProxySegMrHandleFree`, `rcclRmaSegRegCtx`, `rcclRmaRegOneSegment`, `rcclRmaRegAllGather` | 4 | new | per-segment register, unwind and the consensus all-gather |
 | `rcclRmaIbProxyConnectFinish` | 4 | new | allocates the per-rank registration records |
-| `rcclRmaIbProxyRegMrSymDmaBuf`, `rcclRmaIbProxyDeregMrSym`, `rcclRmaIbProxyRegMrSym` | 4 | new | register a window one MR per physical segment after consensus |
+| `rcclRmaIbProxyRegMrSymDmaBuf`, `rcclRmaIbProxyDeregMrSym`, `rcclRmaIbProxyRegMrSym` | 4 | new | the one registration path for GIN and RMA windows (the GIN proxy calls these): one MR per physical segment, then consensus |
 | `rcclRmaIbProxyUseSingle` | 4 | new | one-segment handles take the copied single-MR op bodies |
 | `rcclRmaIbProxyIPut`, `rcclRmaIbProxyIGet`, `rcclRmaIbProxyIPutSignal`, `rcclRmaIbProxyIFlush`, `rcclRmaIbProxyTestFailed` | 4 | new | multi-segment data ops |
 | `IbMsegRmaIbProxy` | 3 | changed | uses `IbMsegRmaIbProxyListen` |
 
 ## Tests
 
-Design: [Testing](multi_segment_testing.md). Counts are test definitions at fork 4; "new" files are created by the stack.
+The suites each fork adds, with their files and jobs, are in the [validation plan](multi_segment_validation_plan.md#coverage-by-area), and the runner jobs per config are in its [job and config matrix](multi_segment_validation_plan.md#runner-jobs-and-configs). The test infrastructure the stack adds:
 
-| File | Suites | Fork | Covers |
-|---|---|---|---|
-| `test/host/dev-runtime-test.cc` | `SymMemoryMapLsaTest`, `SymMemoryObtainRegisterTest`, `SymMemoryRegisterGinTest`, `SymMemoryRegisterGinElasticTest`, `SymMemoryRegisterRmaTest`, `RmaProxyInflightCapTest` | 1 | owner fds, GIN and RMA window gates, the in-flight cap |
-| `test/host/gin/gin-host-test.cc`, `gin-host-proxy-test.cc` | `GinHostRegisterMicrotest`, `GinHostProxyRegMrMicrotest`, `GinHostProxyContextMicrotest` (fork 1); `GinHostDevCommSetupMicrotest` (fork 4) | 1, 4 | owner-fd registration, the queue cap, the RMA flag handoff |
-| `test/host/transport/net-test.cc` | `NetProxyRegBufferMicrotest`, `NetProxyRegBufferCuMemMicrotest` (fork 1); `NetProxySetupMicrotest`, `NetRecvProxyConnectMicrotest`, `NetRecvProgressMicrotest` (fork 2) | 1, 2 | fd -1 or stage; GDR flush flag on IB-MSEG |
-| `test/host/ce-coll-test.cc`, `proxy-test.cc`, `rma/rma-proxy-test.cc`, `rma/rma-proxy-launch-test.cc` | `HierCeAvailableMicrotest`, `ProxyServiceFixture`, `RmaProxyAllocGraphTest`, `RmaProxyDescriptorTest` | 1 | skipped RMA registration and the copied net flag |
-| `test/host/fakes/rccl_mseg_fakes.*` | fakes | 1 | the `rccl_dev_runtime.cc` gates for host tests |
-| `test/host/init-test.cc`, `plugin/plugin-net-test.cc`, `plugin/rma-plugin-init-test.cc`, `ras/ras-diagnostics-common-test.cc` | `InitMicrotest`, `PluginNetMicrotest`, `RmaPluginListTest`, `RasDiagnosticsCommonMicrotest` | 2 (`InitMicrotest` also 3, 4) | plugin selection, comm flags, RAS list |
-| `test/transport/NetIbMPI/GeneralTests.cpp` and the other `NetIbMPI` files | `NetPluginSelection` (6), `NetIbMPITest`; `NetIbMsegInspect.hpp` (new) | 2 | selection and the `*_mseg` reruns of the `net_ib` MPI suites |
-| `test/NetIbMultiSegmentUnitTests.cpp` (new) | `NetIbMultiSeg` (8), `NetIbCtsLayout` (10), `NetIbLayoutBlob` (2) | 3 | connect decision, segment selection, CTS layout and blob checks |
-| `test/transport/NetIb/NetIbSegmentedSendPrefixTests.cpp` (new) | `NetIbSegmentedSendPrefix` (30), `NetIbSegmentedFlushPrefix` (8), `NetIbSegmentedHooks` (19) | 3 | slice posts, resume, the one-read flush and the P2P hooks |
-| `test/transport/NetIbMPI/NetIbMultiSegmentMPITests.cpp` (new) | `NetIbMultiSegmentMPITest` (18) | 3, 4 | P2P across segments: layouts, flush, GDR flush flag, switch off |
-| `test/RegistrationMPITests.cpp` | `UBR_MultiSegment` (18: 13 from develop, 1 added in fork 3, 4 in fork 4) | 3, 4 | end-to-end registration, GIN and LSA windows, hybrid windows |
-| `test/common/IbFakePostSend.hpp`, `MultiSegmentVmmHelpers.hpp`, `TestChecks.hpp` (new) | helpers | 3, 4 | fake post-send and multi-segment VMM allocation (`AllocSegmentedVmm`) |
-| `test/host/transport/net_ib_multiseg/connect-test.cc` | `NetIbMsegConnectMicrotest`, `NetIbMsegConnectMultiSegMicrotest`, `NetIbMsegConnectUseMultiSeg` | 3, 4 | connect mismatch check, CTS slots, QP depth by role |
-| `test/host/transport/net_ib_multiseg/reg-test.cc` | `NetIbMsegRegMicrotest`, `NetIbMsegRegRangeMicrotest` | 3, 4 | per-segment registration, MR budget, unwinding |
-| `test/host/transport/net_ib_multiseg/net-ib-p2p-test.cc` | `NetIbMsegP2pMicrotest` | 3 | P2P post and flush paths |
-| `test/host/transport/net_ib_multiseg/gin-test.cc` | `NetIbMsegGinMicrotest`, `NetIbMsegGinRmaSeqId` | 3, 4 | RMA registration, consensus, rounds and the post path |
-| `test/RmaSegmentMathTests.cpp` (new) | `RmaSegmentMathTest` (27: 3 in fork 1, 24 in fork 4), `RmaRoundTest` (6) | 1, 4 | table fit, in-flight cap, WR counting, keep-or-free rules and rounds |
-| `test/transport/RmaMPI/RmaMultiSegmentMPITests.cpp` (new) | `RmaMultiSegmentMPITest` (32), `RmaMultiSegmentPostMPITest` (13) | 4 | put, get, signal and flush across segments; DeepEP and hybrid windows; WR batching, the cap, rejected ops |
-| `test/common/HybridVmmHelpers.hpp`, `MultiSegmentTestSupport.hpp` (new) | helpers | 4 | hybrid host and device VMM windows, freed collectively; `AllocHybridVmm` builds on `AllocSegmentedVmm` from `MultiSegmentVmmHelpers.hpp` |
-| `test/host/alloc-test.cc` | `AllocMicrotest` | 4 | `ncclCuMemGetAddressRange` now releases the retained handle when the properties read fails (AICOMRCCL-3043) |
-| `test/host/transport/derived_transport_tests.cmake`, `derived_transport_tests*.h`, `derived_transport_tests_check.cc` (new) | `NetIbMsegBaseTestExclusions` (3 self-checks) | 4 | compile-twice: build `net_ib`'s host tests against the fork through `rename_map.txt` |
-| `test/host/transport/net_ib_multiseg/host_tests.cmake`, `shim/` (new) | build | 4 | the four IB-MSEG host-test binaries; the seam shims for `connect.cc`, `gin.cc`, `p2p.cc` |
+| File | Fork | Role |
+|---|---|---|
+| `test/host/fakes/rccl_mseg_fakes.*` | 1 | fakes for the `rccl_dev_runtime.cc` gates in host tests |
+| `test/host/fakes/net_ib_mseg_params*.cc` (new) | 3 | `net_ib` parameter definitions, hand-copied because the fork binaries link no `net_ib` unit; `NetIbMsegParamCopies` fails when they drift |
+| `test/transport/NetIbMPI/NetIbMsegInspect.hpp` (new) | 2 | inspection helpers for the `*_mseg` reruns of the `net_ib` MPI suites |
+| `test/common/IbFakePostSend.hpp`, `MultiSegmentVmmHelpers.hpp`, `TestChecks.hpp` (new) | 3, 4 | fake post-send and multi-segment VMM allocation (`AllocSegmentedVmm`) |
+| `test/common/HybridVmmHelpers.hpp`, `MultiSegmentTestSupport.hpp` (new) | 4 | hybrid host and device VMM windows, freed collectively; `AllocHybridVmm` builds on `AllocSegmentedVmm` |
+| `test/host/transport/derived_transport_tests.cmake`, `derived_transport_tests*.h`, `derived_transport_tests_check.cc` (new) | 4 | compile-twice: build `net_ib`'s host tests against the fork through `rename_map.txt`; `NetIbMsegBaseTestExclusions` self-checks |
+| `test/host/transport/net_ib_multiseg/host_tests.cmake`, `shim/` (new) | 4 | the four IB-MSEG host-test binaries; the seam shims for `connect.cc`, `gin.cc`, `p2p.cc` |
 
-The compile-twice commit replaced the fork's copied `net_ib` host tests and `transport_net_ib_mseg_*` fakes with the derived build, so the `net_ib_multiseg/*-test.cc` files now hold only the fork's own tests on top of the included `net_ib` tests. The design is in [compile-twice host tests](multi_segment_fork_plugin.md#compile-twice-host-tests).
-
-## Runner configs
-
-`tools/scripts/test_runner/configs/`: jobs added per fork. No fork removes a job. Fork 1 adds none.
-
-| Config | Fork 2 | Fork 3 | Fork 4 | Note |
-|---|---|---|---|---|
-| `mi300x_mellanox_ib.json` | 7 | 8 | 5 | the two `ubr_multisegment_*` jobs were already on develop |
-| `mi300_mellanox_ib_func.json` | 7 | 8 | 7 | |
-| `mi355x_thor2_roce.json` | 7 | 8 | 7 | |
-| `mi355x_thor2_roce_func.json` | 7 | 8 | 7 | |
-| `net_ib_transport.json` | 10 | 5 | 5 | |
-| `mi455_ainic_roce.json`, `mi455_ainic_roce_func.json` | 0 | 0 | 0 | AINIC entries come with fork 5 |
-
-Fork 2 adds the `*_mseg` reruns of the `net_ib` suites, fork 3 the `net_ib_multisegment*` and `multisegment_*` P2P jobs, and fork 4 the `net_ib_rma_multisegment*`, `multisegment_rma_segment_math` and `ubr_multisegment_*` jobs.
+The `net_ib_multiseg/*-test.cc` files hold only the fork's own tests on top of the included `net_ib` tests; see [compile-twice host tests](multi_segment_fork_plugin.md#compile-twice-host-tests).

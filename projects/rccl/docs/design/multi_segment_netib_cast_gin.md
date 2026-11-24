@@ -1,7 +1,7 @@
 # IB-CAST GIN/RMA on IB-MSEG: fork 6 design
 
 > [!NOTE]
-> Planned, fork 6 ("IB-CAST on IB-MSEG"), no branch yet. The old-stack IB-CAST GIN/RMA layer that edited `net_ib_cast` in place is superseded by forks 5 and 6. See [the fork plugin](multi_segment_fork_plugin.md#fork-6-ib-cast-multi-segment-planned).
+> Planned, fork 6 ("IB-CAST on IB-MSEG"). See [the fork plugin](multi_segment_fork_plugin.md#fork-6-ib-cast-multi-segment-planned).
 
 IB-CAST RMA multi-segment is not added to develop's `IbCastRmaIbProxy` again. IB-MSEG first takes develop's `net_ib` to `net_ib_cast` differences in [fork 5](multi_segment_fork_plugin.md#fork-5-ib-cast-base-planned), which brings CAST's RMA proxy behavior (per-peer QPs, the per-WR cap `IbCastMaxPostSendBytes` with develop's `IbCastPostDataChunks`, AINIC recovery) into the fork. Fork 6 then adds only what is specific to IB-CAST on top of the fork's RMA path from [fork 4](multi_segment_fork_plugin.md#fork-4-rma-and-gin): one MR per segment, the shared consensus exchange, the shared segment cursor and RMA rounds. Read [GIN/RMA](multi_segment_gin_rma.md) first for that shared design. This doc states what fork 6 must add: a versioned registration record with physical device numbers, rkey lookup by physical device, the per-WR cap over rounds, error-owner propagation in CAST's CQ poll, the AINIC recovery hook, and CAST's queue depths.
 
@@ -69,20 +69,20 @@ Operations go through fork 4's rounds. Fork 6 must keep fork 4's round hooks and
 
 ## Queues
 
-The CAST RMA sender data QP must be the larger of develop's `IbCastDataSendQueueDepth(IbCastMaxPostSendBytes)` and `RCCL_RMA_SEND_QP_WRS` (2080, the 32 in-flight requests of 65 WRs). Because a dead QP flushes every queued WR as a CQE, the RMA sender CQ must hold at least as many entries with the switch on, still clamped to the device `maxCqe` as develop's CQ creation does. The 2080-entry send queue fits Thor2's `max_qp_wr` of 4351; Mellanox is not checked, and only a `static_assert` guards the size. With the switch off, CAST RMA keeps develop's depths.
+The CAST RMA sender data QP must be the larger of develop's `IbCastDataSendQueueDepth(IbCastMaxPostSendBytes)` and `RCCL_RMA_SEND_QP_WRS` (2080, the 32 in-flight requests of 65 WRs). Because a dead QP flushes every queued WR as a CQE, the RMA sender CQ must hold at least as many entries with the switch on, still clamped to the device `maxCqe` as develop's CQ creation does. The `max_qp_wr` check is in [QP depths](multi_segment_current.md#qp-depths). With the switch off, CAST RMA keeps develop's depths.
 
 ## Error completions
 
 Any caller's CQ poll can retire any request on that CQ. Fork 4's `IbMsegRmaIbProxyTest` returns `ncclRemoteError` on the first error completion; fork 6's CAST CQ poll must instead route each error to the request that owns it:
 
 - Log one WARN per error completion with the GID of the peer's device and mark the owner `NCCL_NET_IB_REQ_FAILED`. After a QP error every flushed WQE completes with the owner's `wr_id`; only the first owns the event.
-- A posted prefix keeps the request for `Test()` to drain, marked FAILED because the rejected signaled tail never produces a CQE; nothing posted frees the slot.
+- A failed post that accepted any WR keeps the request (its WRs reference the slot) marked FAILED, and `Test()` returns `ncclRemoteError` without draining; the error is fatal for the context. Nothing posted frees the slot.
 - `Test()` on a FAILED request returns `done = 1` with an error through `rcclRmaIbProxyTestFailed`, even when another request's poll drained its CQE.
 - **AINIC port recovery.** Develop's `IbCastPortRecoveryQpsRestoreAinic`, brought in by fork 5, must first abandon the device's RMA requests on a comm with the switch on: every in-use request with events on that device has its events zeroed and is marked FAILED. The rebuilt QPs go through the same create helpers as connect (`IbCastBuildDataQpCreateAttr` in develop), so they get the same depths.
 
 ## Tests
 
-Planned with fork 6. `RmaMultiSegmentMPITest` and `RmaMultiSegmentPostMPITest` (`test/transport/RmaMPI/RmaMultiSegmentMPITests.cpp`) read the segment count through the handle tag, so they run on the CAST-featured fork unchanged. Fork 6 must add host tests against fake verbs for the record exchange and its rollback, the physical-device rkey and flush lookup, the per-WR cap over rounds, an error completion drained by another request, and AINIC restore with the switch on and off, plus runner jobs on the AINIC configs. See [IB-MSEG fork tests](multi_segment_testing.md#ib-mseg-fork-tests).
+Planned with fork 6. `RmaMultiSegmentMPITest` and `RmaMultiSegmentPostMPITest` (`test/transport/RmaMPI/RmaMultiSegmentMPITests.cpp`) read the segment count through the handle tag, so they run on the CAST-featured fork unchanged. Fork 6 must add host tests against fake verbs for the record exchange and its rollback, the physical-device rkey and flush lookup, the per-WR cap over rounds, an error completion drained by another request, and AINIC restore with the switch on and off, plus runner jobs on the AINIC configs. See [forks 5 and 6 in the validation plan](multi_segment_validation_plan.md#forks-5-and-6-planned).
 
 ## Review checklist
 

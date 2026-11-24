@@ -1,7 +1,7 @@
 # IB-CAST P2P on IB-MSEG: fork 6 design
 
 > [!NOTE]
-> Planned, fork 6 ("IB-CAST on IB-MSEG"), no branch yet. The old-stack IB-CAST layer that edited `net_ib_cast` in place is superseded by forks 5 and 6. See [the fork plugin](multi_segment_fork_plugin.md#fork-6-ib-cast-multi-segment-planned) for where fork 6 sits in the stack.
+> Planned, fork 6 ("IB-CAST on IB-MSEG"). See [the fork plugin](multi_segment_fork_plugin.md#fork-6-ib-cast-multi-segment-planned) for where fork 6 sits in the stack.
 
 Multi-segment support for IB-CAST is not added to `net_ib_cast` again. IB-MSEG first takes develop's `net_ib` to `net_ib_cast` differences in [fork 5](multi_segment_fork_plugin.md#fork-5-ib-cast-base-planned) (multiplane, QP sharing, CTS offload, the `ionicdv` helpers, AINIC recovery, BY_INDEX and BY_ORDER matching, and the per-WR cap `IbCastMaxPostSendBytes`). Fork 6 then adds only what is specific to IB-CAST on top of the fork's shared send, receive and flush paths from [fork 3](multi_segment_fork_plugin.md#fork-3-registration-and-p2p). This doc states what fork 6 must do for P2P: the multi-segment scope, one segmented group at a time under the CAST scheduler, the BY_INDEX completion flag, the per-WR cap over segmented chains, and the requirements carried from review. IB-CAST GIN/RMA has no CTS and is covered in [IB-CAST GIN/RMA](multi_segment_netib_cast_gin.md).
 
@@ -81,11 +81,11 @@ Fork 6 must keep the fork's send failure rules under the CAST scheduler:
 - **Test.** An error completion marks the connection fatal and the request `NCCL_NET_IB_REQ_FAILED`, so later `Test()` calls drain its completions.
 - **Close.** The layout cache's MRs are freed before their PDs (`rcclIbSendLayoutCacheFree`), also when fork 5's AINIC recovery has rebuilt the QPs.
 
-Dependency: fork 5 should include the standalone connect and teardown fix `users/atulkulk/fix/ibcast-failed-pd-ref` (PD reference only after a successful `ibv_alloc_pd`, AICOMRCCL-3085) if it lands on develop first.
+Dependency: fork 5 should include the standalone connect and teardown fix for AICOMRCCL-3085 (PD reference only after a successful `ibv_alloc_pd`) if it lands on develop first.
 
 ## Requirements carried from review
 
-The local Argus pass of 2026-11-14 found three IB-CAST problems that were not fixed on the old stack either. They are fork 6 requirements, together with the scope rules above; see [review feedback](multi_segment_review_feedback.md#summary).
+Internal review of the superseded IB-CAST layer found three problems that were not fixed there either. They are fork 6 requirements, together with the scope rules above; see [review feedback](multi_segment_review_feedback.md#summary).
 
 ### Open items
 
@@ -93,4 +93,4 @@ The local Argus pass of 2026-11-14 found three IB-CAST problems that were not fi
 2. **Size the receiver's CTS slots from the peer's raw value.** The receiver must choose its combined CTS slots and the remote stride from the sender's own decision as received at connect, not from a copy masked by the receiver's scope. Fork 3 already does this (`useMultiSeg` from the connect metadata, then `ctsSlotStride` in `connect.cc`); fork 6 must not add a receiver-side mask when it adds the CAST scope, or a sender whose scope passes would write at the combined stride to a receiver that does not use it.
 3. **Bound the resumed `nreqs`.** Every path that resumes a send must use a count bounded to 1 to `NCCL_NET_IB_MAX_RECVS` (8), as the first post does, never a fresh read of the peer-written CTS row. In the fork, `IbMsegMultiSend` and `rcclIbSendResume` read `reqs[0]->nreqs`, the count `IbMsegIsend` validated; develop's `IbCastIsend` and `IbCastMultiSend` re-read `ctsFifoNreqs`, so fork 6 must keep the fork's rule when it merges CAST's send loop.
 
-Tests for fork 6 are planned: CAST's develop host tests run against the fork through the compile-twice second base from fork 5, and the CAST-specific multi-segment tests come with fork 6. See [IB-MSEG fork tests](multi_segment_testing.md#ib-mseg-fork-tests).
+Tests for fork 6 are planned: CAST's develop host tests run against the fork through the compile-twice second base from fork 5, and the CAST-specific multi-segment tests come with fork 6. See [forks 5 and 6 in the validation plan](multi_segment_validation_plan.md#forks-5-and-6-planned).

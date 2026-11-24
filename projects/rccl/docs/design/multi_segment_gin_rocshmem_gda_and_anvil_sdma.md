@@ -1,7 +1,7 @@
 # Proposal: multi-segment windows on rocSHMEM GDA and Anvil SDMA
 
 > [!NOTE]
-> Status: proposal, not implemented; checked against fork 4 on 2026-11-23.
+> Status: proposal, not implemented; checked against fork 4.
 
 The host-proxy GIN type registers per physical segment through its RMA backend ([GIN/RMA](multi_segment_gin_rma.md)). The two AMD device-initiated GIN backends are rocSHMEM GDA (`NCCL_GIN_TYPE=6`) and Anvil SDMA (`NCCL_GIN_TYPE=7`); both plugins compile only with `ENABLE_ROCSHMEM_GIN`. This doc records what develop and the fork stack do with multi-segment windows on those two backends, what is missing, and the proposed changes. The fork stack does not change either backend plugin; it changes only the core gate in front of them. Tickets: AIRUNTIME-2351, AICOMRCCL-1526 follow-on.
 
@@ -37,7 +37,7 @@ On the device, `ncclDevrAllocAndPopulateSegmentWindows` publishes `ginMultiSegme
 
 ## What the fork stack adds
 
-Fork 1 (`users/atulkulk/netib-mseg/01-core-backend-multiseg-gate`) adds the gate in `symMemoryRegisterGin` (`dev_runtime.cc`, AMD builds only). A window with more than one segment on some rank and no host segment on any rank fails with `ncclInvalidUsage` unless `rcclDevrGinRegistersMultiSegment` (`rccl_dev_runtime.cc`, declared in `include/rccl_common.h`) holds. The gate runs before `ncclDevrVerifySegmentLayouts`. As of fork 4 the predicate requires all of the following:
+Fork 1 adds the gate in `symMemoryRegisterGin` (`dev_runtime.cc`, AMD builds only). A window with more than one segment on some rank and no host segment on any rank fails with `ncclInvalidUsage` unless `rcclDevrGinRegistersMultiSegment` (`rccl_dev_runtime.cc`, declared in `include/rccl_common.h`) holds. The gate runs before `ncclDevrVerifySegmentLayouts`. As of fork 4 the predicate requires all of the following:
 
 - `comm->rcclMultiSegRma` is set. `init.cc` sets it through `rcclMultiSegOn` only when `NCCL_MULTI_SEGMENT_REGISTER=1`, `NCCL_DMABUF_ENABLE=1` and the RMA backend is IB-MSEG's `IbMsegRmaIbProxy`; a child comm copies its parent's flag.
 - Every rank has the same segment count, and `rcclRmaSegTableFits` holds: 1 to `RCCL_IB_REG_SEG_DEFAULT` (`transport/rccl_mseg.h`) segments, and ranks times segments at most `RCCL_RMA_SEG_TABLE_MAX_ENTRIES` (2^20, `transport/rccl_mseg_rma.h`).

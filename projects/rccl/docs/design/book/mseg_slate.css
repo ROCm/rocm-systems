@@ -36,4 +36,16 @@ figure.slate-diagram figcaption .caption-number { font-weight: 600; color: var(-
   tr { break-inside: avoid; }
   a { color: #0051c6 !important; text-decoration: none; }
   .admonition { break-inside: avoid; }
+  /* Contents written by make_pdf.py: Parts, chapters and sections with dot leaders. */
+  #jb-print-docs-body > h1 { font-size: 24pt; line-height: 1.15; }
+  .mseg-toc-title { font-size: 14pt; font-weight: 600; margin: 0 0 6pt; }
+  .mseg-toc { columns: 2; column-gap: 0.3in; font-size: 8.5pt; line-height: 1.25; }
+  .mseg-toc-part { font-weight: 700; margin: 6pt 0 2pt; break-after: avoid; break-inside: avoid; }
+  .mseg-toc-part:first-child { margin-top: 0; }
+  a.mseg-toc-row { display: flex; align-items: baseline; color: inherit !important; break-inside: avoid; }
+  .mseg-toc-chapter { font-weight: 600; margin-top: 2pt; }
+  .mseg-toc-section { padding-left: 1.4em; }
+  .mseg-toc-t { flex: 0 1 auto; }
+  .mseg-toc-dots { flex: 1 0 1em; border-bottom: 1px dotted #9d9fa2; margin: 0 3px 2.5pt; min-width: 1em; }
+  .mseg-toc-p { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 }

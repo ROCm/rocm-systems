@@ -1,7 +1,7 @@
 # GIN/RMA: per-segment registration and RMA rounds
 
 > [!NOTE]
-> Core part in fork 1 (`users/atulkulk/netib-mseg/01-core-backend-multiseg-gate`), plugin part in fork 4 (`users/atulkulk/netib-mseg/04-rma-gin-multiseg`), checked against fork 4. Fork 1 carries the comm-level multi-segment flag, the window gates, the in-flight cap and the host owner DMA-BUF rule; fork 4 carries the RMA backend of the IB-MSEG plugin (`src/transport/net_ib_multiseg/gin.cc`). The old-stack GIN/RMA layer that edited `net_ib` in place is superseded by forks 1 and 4. See [the fork plugin](multi_segment_fork_plugin.md#fork-4-rma-and-gin).
+> The core part is in fork 1 (the comm-level flag fields, the window gates, the in-flight cap and the host owner DMA-BUF rule) and the plugin part in fork 4 (the RMA backend of the IB-MSEG plugin, `src/transport/net_ib_multiseg/gin.cc`, plus the core lines that set the RMA flag and pass it to the GIN proxy). The code paths are in the walkthroughs for [fork 1](walkthrough/multi_segment_walkthrough_fork1_core.md) and [fork 4](walkthrough/multi_segment_walkthrough_fork4_gin_rma.md).
 
 GIN on the host-proxy type posts every put, get, signal and flush through an RMA backend, so multi-segment support for GIN is a host-side change in that backend. This doc covers the IB-MSEG backend `IbMsegRmaIbProxy` and the device-runtime pieces that DeepEP windows need: the window gates, the in-flight cap and the host owner DMA-BUF path. IB-CAST's multi-segment GIN/RMA is the fork 6 design in [IB-CAST GIN/RMA](multi_segment_netib_cast_gin.md).
 
@@ -55,19 +55,11 @@ flowchart TD
 
 ## Comm-level flag
 
-`rcclMultiSegOn(pluginRegistersPerSegment)` (`rccl_dev_runtime.cc`, fork 1) holds when the plugin registers per segment, `NCCL_MULTI_SEGMENT_REGISTER=1` and `NCCL_DMABUF_ENABLE=1`. `init.cc` evaluates it once per comm: `comm->rcclMultiSegRma` is set only when the RMA backend is `IbMsegRmaIbProxy`, and a child comm takes its parent's value. The plugin reads the same switch through `rcclRmaMultiSegEnabled()` (`seg_rma_mseg.h`), so the plugin and the core agree on every rank.
+`comm->rcclMultiSegRma` is set only when the RMA backend is `IbMsegRmaIbProxy` and `rcclMultiSegOn` holds; see [the switch](multi_segment_overview.md#the-switch). Fork 1 adds the field and the gates that read it; fork 4 adds the assignment in `commAlloc` (`init.cc`) and the `rcclGinProxySetMultiSeg` call in `gin_host.cc` that hands it to the GIN proxy. The plugin reads the same switch through `rcclRmaMultiSegEnabled()` (`seg_rma_mseg.h`), so the plugin and the core agree on every rank.
 
 ## Code layout and dispatch
 
-With the switch on, `IbMsegRmaIbProxyInit` installs the multi-segment entries once per process (`rcclRmaIbProxyInstallMultiSeg`): every MR and data operation takes the `rcclRmaIbProxy*` body, because the multi-segment handle has its own layout. A one-segment handle runs develop's single-MR body through the handle's embedded `single` MR (`rcclRmaIbProxyUseSingle`).
-
-| Develop function, fork name (`net_ib_multiseg/gin.cc`) | Multi-segment body |
-|---|---|
-| `IbMsegRmaIbProxyConnect` | `rcclRmaIbProxyConnectFinish`, which allocates `regRecords` |
-| `IbMsegRmaIbProxyRegMrSymDmaBuf`, `IbMsegRmaIbProxyRegMrSym`, `IbMsegRmaIbProxyDeregMrSym` | `rcclRmaIbProxyRegMrSymDmaBuf`, `rcclRmaIbProxyRegMrSym`, `rcclRmaIbProxyDeregMrSym` |
-| `IbMsegRmaIbProxyIPut`, `IbMsegRmaIbProxyIGet`, `IbMsegRmaIbProxyIPutSignal`, `IbMsegRmaIbProxyIFlush` | `rcclRmaIbProxyIPut`, `rcclRmaIbProxyIGet`, `rcclRmaIbProxyIPutSignal`, `rcclRmaIbProxyIFlush` |
-| `IbMsegRmaIbProxyTest` | `rcclRmaIbProxyTestFailed`, for a request marked `NCCL_NET_IB_REQ_FAILED` |
-| `IbMsegGinIbCloseColl` | `free(cComm->regRecords)` |
+With the switch on, `IbMsegRmaIbProxyInit` installs the multi-segment entries once per process (`rcclRmaIbProxyInstallMultiSeg`): every MR and data operation takes the `rcclRmaIbProxy*` body, because the multi-segment handle has its own layout. A one-segment handle runs develop's single-MR body through the handle's embedded `single` MR. GIN has no registration body of its own: the GIN proxy's `regMrSym` and `regMrSymDmaBuf` call the RMA backend's entries, so GIN and RMA windows share one registration path. The dispatch per entry point is in the [fork 4 walkthrough](walkthrough/multi_segment_walkthrough_fork4_gin_rma.md).
 
 The shared multi-segment logic lives in `net_ib_multiseg/seg_*` files written without plugin-specific symbols, plus two core headers the device runtime also includes:
 
@@ -102,6 +94,7 @@ Tests read the segment count through `rcclRmaMrSegmentCount` (or the plugin's `r
 ## Registration
 
 ```text
+size == 0: local failure, still exchanged
 count segments: ncclCuMemGetAddressRange -> nSeg
 nSeg outside rcclIbSegCountSupported, table too big (rcclRmaSegTableFits), or past max_mr (rcclIbMrAdmit): local failure, still exchanged
 nSeg == 1: reuse the caller's fd
@@ -154,7 +147,7 @@ sequenceDiagram
 
 ## Rounds
 
-An operation wider than one round does not fail. `seg_rma_round_mseg.h` posts at most `RCCL_RMA_MAX_DATA_WRS` (64) data WRs per round, and the next round once the plugin reports the previous one done. Operations queue per peer in request order (`rcclRmaRoundQueue`), so a later operation never passes an earlier one; behind a queued operation every operation queues, including single-MR ones. The plugin supplies the hooks (`rcclRmaIbRoundBuild`, `rcclRmaIbRoundOutstanding`, `rcclRmaIbRoundPost`, `rcclRmaIbRoundRetire`, `rcclRmaIbRoundFailed`).
+An operation wider than one round does not fail. `seg_rma_round_mseg.h` posts at most `RCCL_RMA_MAX_DATA_WRS` (64) data WRs per round, and the next round once the plugin reports the previous one done. Puts, gets and signals queue per peer in request order (`rcclRmaRoundQueue`), so a later one never passes an earlier one; behind a queued operation every such operation queues, including single-MR ones. A flush does not queue: it posts at once on the receive comm with its own sequence, even when sends are queued. The plugin supplies the hooks (`rcclRmaIbRoundBuild`, `rcclRmaIbRoundOutstanding`, `rcclRmaIbRoundPost`, `rcclRmaIbRoundRetire`, `rcclRmaIbRoundFailed`).
 
 ```mermaid
 %% caption: RMA rounds: one op posted in rounds of at most 64 data WRs
@@ -180,31 +173,25 @@ A chain with nothing queued ahead posts at once (`rcclRmaIbProxyPostChain`): dat
 
 ## Send-queue depth by role
 
-| QP | Depth | Where |
-|---|---|---|
-| RMA send QP (`isRma`, switch on) | `RCCL_RMA_SEND_QP_WRS` = 32 × 65 = 2080 | `rcclIbSendQpWrs(isRma)` in `connect.cc` |
-| P2P send QP | `2 * NET_IB_MAX_REQUESTS` (512), as on develop | same |
-| P2P flush QP | `2 * NET_IB_MAX_REQUESTS` (512), as on develop | `connect.cc` |
-
-Every in-flight RMA request may have one full round posted (`RCCL_RMA_MAX_SIGNAL_WRS` = 65), which sets the 2080. A `static_assert` keeps it at least the base depth and `RCCL_RMA_MAX_REQUESTS` equal to `NET_IB_MAX_REQUESTS`. 2080 fits Thor2's `max_qp_wr` of 4351; Mellanox has not been checked, and only the `static_assert` guards the size. P2P depths are in [IB-MSEG NET/IB P2P](multi_segment_netib_wire.md#queue-sizing).
+GIN and RMA proxy comms (`isRma`: the GIN collective ring and every per-peer context comm) with the switch on take the deeper send queue, `RCCL_RMA_SEND_QP_WRS` = 32 × 65 = 2080 (`rcclIbSendQpWrs(isRma)` in `connect.cc`): every in-flight RMA request may have one full round posted (`RCCL_RMA_MAX_SIGNAL_WRS` = 65). The ring never posts multi-segment chains, so for it the deeper queue costs memory only. A `static_assert` keeps it at least the base depth and `RCCL_RMA_MAX_REQUESTS` (256) equal to `NET_IB_MAX_REQUESTS`. P2P and flush QPs keep develop's depths. All depths and the `max_qp_wr` check are in [QP depths](multi_segment_current.md#qp-depths).
 
 ## Prefix post and completion
 
-If `ibv_post_send` accepts only a prefix of a round, the request is kept so `Test()` drains it. If the accepted prefix stops before the signaled tail, no completion will come, so the request is marked FAILED and `Test()` reports the error. Only a post that accepted nothing frees the slot and returns the error, and also returns the sequence id with `rcclRmaReleaseSeqId`. The rule is `rcclRmaCompletePostedRequest`, applied in `rcclRmaFinishPostedRequest`.
+`ibv_post_send` can fail after it accepted a prefix of the chain. A post that accepted nothing frees the slot, returns the sequence id with `rcclRmaReleaseSeqId` and returns the error; the caller gets no request. Any failed post that accepted at least one WR, including a batched doorbell failure after every WR was accepted, keeps the request but marks it FAILED, because the accepted WRs reference the slot. A queued round that fails or posts only a prefix also marks its request FAILED. A failed batch doorbell loses the batch's only signaled WR, so `rcclRmaIbProxyFailBatch` (called from `IbMsegRmaIbProxyPostBatch`, also with the switch off) marks FAILED the request of every WR in the batch, including requests posted earlier with `ncclRmaOptFlagsAggregateRequests` and already returned; otherwise a later completion on the same QP would hide their loss. `Test()` then returns `ncclRemoteError` at once without draining the accepted prefix; the error is fatal for the context, which must be torn down rather than reused. The rule is `rcclRmaCompletePostedRequest`, applied in `rcclRmaFinishPostedRequest`.
 
 ```mermaid
 %% caption: Prefix post: which requests are kept, failed, or freed
 flowchart TD
- p["ibv_post_send"] --> q{"any WR accepted?"}
+ p["ibv_post_send"] --> e{"error?"}
+ e -->|no| t["Test drains the completion"]
+ e -->|yes| q{"any WR accepted?"}
  q -->|no| f["free slot, return the error"]
- q -->|yes| k["keep the request"]
- k --> tail{"signaled tail accepted?"}
- tail -->|yes| t["Test drains the completion"]
- tail -->|no| fl["mark FAILED, Test reports the error"]
+ q -->|yes| fl["keep request, mark FAILED"]
+ fl --> r["Test returns ncclRemoteError, context is dead"]
  classDef okpath fill:#e8f8ec,stroke:#34c759,color:#1d1d1f
  classDef failpath fill:#ffeceb,stroke:#ff3b30,color:#1d1d1f
- class k,t okpath
- class f,fl failpath
+ class t okpath
+ class f,fl,r failpath
 ```
 
 ## Deregistration and rollback
@@ -215,8 +202,8 @@ flowchart TD
 
 `dev_runtime.cc` decides per window whether a multi-segment window reaches the backend (fork 1). The inputs are communicator-wide, so every rank takes the same branch.
 
-- `rcclDevrRmaRegistersMultiSegment` holds when `comm->rcclMultiSegRma` is set (switch on, `NCCL_DMABUF_ENABLE=1`, IB-MSEG RMA backend), every rank has the same segment count, and `rcclRmaSegTableFits(nRanks, count)` holds. `symMemoryRegisterRma` registers a single-segment window always, and a multi-segment window only under this gate and, if the window has host segments, only with `NCCL_SYM_REUSE_SYSMEM_HANDLES=1`; otherwise it skips RMA registration with an INFO line.
-- `rcclDevrGinRegistersMultiSegment` also requires every active GIN backend to be the proxy type. `symMemoryRegisterGin` fails a device-only multi-segment window with `ncclInvalidUsage` when it does not hold. A window that contains host segments keeps develop's per-segment GIN path.
+- `rcclDevrRmaRegistersMultiSegment` holds when `comm->rcclMultiSegRma` is set (switch on, `NCCL_DMABUF_ENABLE=1`, IB-MSEG RMA backend), every rank has the same segment count, and `rcclRmaSegTableFits(nRanks, count)` holds. `symMemoryRegisterRma` registers a single-segment window always, and a multi-segment window only under this gate and, if the window has host segments, only with `NCCL_SYM_REUSE_SYSMEM_HANDLES=1`; otherwise it skips RMA registration with an INFO line. An admitted multi-segment window registers through `rcclRmaProxyRegisterMultiSeg` (`rma_proxy.cc`), which exports no whole-range DMA-BUF and hands the backend fd -1 (or calls `regMrSym` without DMA-BUF), so the backend walks the segments.
+- `rcclDevrGinRegistersMultiSegment` also requires every active GIN backend to be the proxy type. When it does not hold, `symMemoryRegisterGin` fails a device-only multi-segment `NCCL_WIN_GIN_ONLY` window with `ncclInvalidUsage`; any other such window stays unregistered with GIN (INFO line) and remains usable for LSA. An admitted device-only window registers through `rcclGinRegisterMultiSeg` (`gin_host.cc`), which passes fd -1 to the GIN proxy; the proxy forwards it to the RMA backend and never replaces it with a whole-range export. A window that contains host segments keeps develop's per-segment GIN path.
 
 ```mermaid
 %% caption: Window gates: which multi-segment windows reach the RMA backend
@@ -225,14 +212,16 @@ flowchart TD
  sys -->|yes| dev["develop per-segment GIN path"]
  sys -->|no| g{"IB-MSEG RMA, equal counts, table fits?"}
  g -->|yes| mrs["per-segment MRs in the RMA backend"]
- g -->|no| inv["GIN fails, RMA skips"]
+ g -->|no| only{"NCCL_WIN_GIN_ONLY?"}
+ only -->|yes| inv["GIN fails, RMA skips"]
+ only -->|no| skip["no GIN or RMA registration, LSA only"]
  classDef gin fill:#e5f1ff,stroke:#007aff,color:#1d1d1f
  classDef okpath fill:#e8f8ec,stroke:#34c759,color:#1d1d1f
  classDef stagepath fill:#fff9e0,stroke:#ffcc00,color:#1d1d1f
  classDef failpath fill:#ffeceb,stroke:#ff3b30,color:#1d1d1f
- class w,sys,g gin
+ class w,sys,g,only gin
  class mrs okpath
- class dev stagepath
+ class dev,skip stagepath
  class inv failpath
 ```
 
@@ -243,25 +232,12 @@ A hybrid DeepEP window maps one private GPU segment plus one host segment per lo
 | Step | Where | What |
 |---|---|---|
 | Export | `symMemoryMapLsa` (`dev_runtime.cc`) | Each rank exports its own host segment before the intranode allgather; a successful export sets `hostExportable` in its message and keeps the fd. |
-| Keep or fetch | `symMemoryGetHostOwnerFd` | A rank that exported its own fd keeps it. Another rank borrows an fd only when exactly one LSA rank has `hostExportable` for that segment; with several exporters it borrows none, because an import could map a peer's pages. With no exporter there is no fallback, because that proxy would repeat the failed export and never reply. |
+| Keep or fetch | `symMemoryMapLsa`, `symMemoryGetHostOwnerFd` | A rank that exported its own fd keeps it in `symMemoryMapLsa`; `symMemoryGetHostOwnerFd` only fetches and does nothing when the owner is the caller. Another rank borrows an fd only when exactly one LSA rank has `hostExportable` for that segment; with several exporters it borrows none, because an import could map a peer's pages. With no exporter there is no fallback, because that proxy would repeat the failed export and never reply. |
 | Agree | `hostOwnerFdStatus`, gathered as `ownerFdStatus` in `symMemoryObtain` | A rank-local fetch or allocation failure is gathered before the collective GIN/RMA registration, so every rank fails together. |
 | Publish | `symMemoryPublishHostOwnerFds`, `rcclHostSegmentFdRegister` (`rccl_dev_runtime.cc`) | A mutex-protected process-wide table maps VA ranges to fds. |
-| Register | `rcclIbSegExportNext` (`seg_export_mseg.h`, fork 4) | `rcclHostSegmentFdLookup` runs before exporting. `symMemoryRegisterGin` records a segment with an owner fd as host memory. |
+| Register | `ncclGinRegister` (`gin_host.cc`), `ncclGinProxyRegMrSymDmaBuf`; in fork 4 also `rcclIbSegExportNext` (`seg_export_mseg.h`) | `symMemoryRegisterGin` records a segment with an owner fd as host memory. `ncclGinRegister` looks up the owner fd (`rcclHostSegmentFdLookup`) and calls the backend's `regMrSymDmaBuf` with it; the GIN proxy passes it to the RMA backend. In fork 4 the RMA backend also looks up each segment before exporting. |
 | Lifetime | `symMemoryCloseHostOwnerFds` | Fds live as long as the backing memory; they are closed in `symMemoryDestroy` and on obtain failure. |
 
 The decision counts exporters, not host-typed handles, because an imported handle can read as host or device depending on the ROCm version. rocSHMEM GDA and Anvil SDMA accept `regMrSymDmaBuf` but ignore the fd ([proposal](multi_segment_gin_rocshmem_gda_and_anvil_sdma.md)). NET/IB P2P never registers a buffer with host segments. The hybrid contract and its tests are in [testing](multi_segment_testing.md#hybrid-deepep-windows).
 
-## Symbol index
-
-| Concern | Symbols |
-|---|---|
-| Comm flag | `rcclMultiSegOn` (`rccl_dev_runtime.cc`); `comm->rcclMultiSegRma`, `comm->rcclMultiSegNet` (`include/comm.h`); `rcclRmaMultiSegEnabled` (`seg_rma_mseg.h`) |
-| Dispatch | `rcclRmaIbProxyInstallMultiSeg`, `rcclRmaIbProxyUseSingle`, `rcclRmaIbProxyTestFailed` (`gin.cc`) |
-| Handle and lookup | `rcclRmaIbProxySegMrHandle`, `rcclRmaSegOf`, `rcclRmaRankOff`, `rcclRmaRemoteRkey`, `rcclRmaRangeOk` (`gin.cc`); `rcclRmaSegMrTag`, `rcclRmaMrSegmentCount` (`seg_rma_mseg.h`) |
-| Registration | `rcclRmaIbProxyRegMrSymDmaBuf`, `rcclRmaRegOneSegment`, `rcclRmaSegRegCtx` (`gin.cc`); `rcclIbSegExportNext`, `rcclIbSegExportIsHost`, `rcclIbSegWalkAdvance` (`seg_export_mseg.h`); `rcclIbSegRegister`, `rcclIbSegDeregister` (`seg_reg_mseg.h`) |
-| Consensus | `rcclIbSegSymRecord`, `rcclIbSegSymExchange` (`seg_sym_mseg.h`); `regRecords` (`gin_mseg.h`); `rcclRmaIbProxyConnectFinish`, `rcclRmaRegAllGather` (`gin.cc`) |
-| Builder and rounds | `rcclRmaBuildSegmentedWrs`, `rcclRmaIbRound*`, `rcclRmaIbProxyStartRequest`, `rcclRmaIbProxyPostChain`, `rcclRmaIbProxyEnqueue`, `rcclRmaIbProxySubmit`, `rcclRmaIbProxyQueueWrs`, `rcclRmaFinishPostedRequest` (`gin.cc`); `rcclRmaRoundOp`, `rcclRmaRoundQueue`, `rcclRmaRoundHooks` (`seg_rma_round_mseg.h`) |
-| Limits | `RCCL_RMA_MAX_DATA_WRS` (64), `RCCL_RMA_MAX_SIGNAL_WRS` (65), `RCCL_RMA_MAX_REQUESTS` (256), `RCCL_RMA_SEND_QP_WRS` (2080) (`seg_rma_mseg.h`); `RCCL_RMA_MAX_INFLIGHT_REQUESTS` (32), `RCCL_RMA_SEG_TABLE_MAX_ENTRIES` (2^20) (`transport/rccl_mseg_rma.h`); `RCCL_IB_REG_SEG_DEFAULT` (`transport/rccl_mseg.h`) |
-| Window gates | `rcclDevrRmaRegistersMultiSegment`, `rcclDevrGinRegistersMultiSegment`, `rcclRmaProxyMaxInflightRequests` (`rccl_dev_runtime.cc`); `rcclGinProxySetMultiSeg` (`gin/gin_host_proxy.cc`) |
-| Host owner fd | `symMemoryGetHostOwnerFd`, `symMemoryPublishHostOwnerFds`, `symMemoryCloseHostOwnerFds` (`dev_runtime.cc`); `rcclHostSegmentFdRegister`, `rcclHostSegmentFdLookup` (`rccl_dev_runtime.cc`) |
-| Tests | `test/RmaSegmentMathTests.cpp`, `test/transport/RmaMPI/RmaMultiSegmentMPITests.cpp`, host suites under `test/host/transport/net_ib_multiseg/`, `test/host/gin/` and `test/host/rma/` |
+The symbols per file are in the [code map](multi_segment_code_map.md), and the tests in the [validation plan](multi_segment_validation_plan.md#fork-4-rma-and-gin).

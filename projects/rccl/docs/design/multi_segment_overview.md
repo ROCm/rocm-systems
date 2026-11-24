@@ -1,6 +1,6 @@
 # Multi-segment DMA-BUF registration: overview
 
-This is the entry point to the multi-segment design docs. It explains why RCCL registers one memory region per physical segment on ROCm, what the IB-MSEG fork stack implements on each path, and how it serves DeepEP-style workloads. It also defines the terms the other docs use, lists the fork branches, and maps each doc to its readers.
+This is the entry point to the multi-segment design docs. It explains why RCCL registers one memory region per physical segment on ROCm, what the IB-MSEG fork stack implements on each path, and how it serves DeepEP-style workloads. It also defines the terms the other docs use and maps each doc to its readers.
 
 ## Executive summary
 
@@ -10,9 +10,9 @@ This is the entry point to the multi-segment design docs. It explains why RCCL r
 
 **Why DeepEP needs it.** DeepEP-style workloads allocate elastic symmetric windows that mix GPU and host memory in one address range, for example `[GPU][CPU]` or `[GPU k][CPU 0]…[CPU N-1]` with one host segment per local rank. They use LSA for peers on the same node and GIN for peers on other nodes, through the RMA proxy, and they move bulk data with NET/IB P2P. Without per-segment registration those windows cannot be registered for GIN at all, and P2P buffers built from several allocations fall back to slow host staging. With it, a remote CPU segment can be read straight into a local GPU segment at independent offsets.
 
-**Status.** Layers 01 to 03 are merged into develop. Forks 1 to 4 are committed locally on develop and are not pushed; their pull requests are not opened yet. The last full hardware run, on fork 4 after the test reductions, passed 214 of 214 units on ROCm 7.0.2.1 build 55 and 10.3 on two MI355X Thor2 nodes with 0 gtest failures; the current fork 4 tip differs from that tree only in changelog text. No fork has run on the Mellanox IB configs. Host validation is clean on forks 2, 3 and 4 on both ROCm versions and the gate-off build; the results are in [the fork plugin](multi_segment_fork_plugin.md#validation). Review status is in [review feedback](multi_segment_review_feedback.md).
+**Status.** Layers 01 to 03 are in develop. Forks 1 to 4 implement the stack on develop; forks 5 and 6 are planned. Validation results are in [testing](multi_segment_testing.md#results) and review status is in [review feedback](multi_segment_review_feedback.md).
 
-**Where it is going.** Fork 5 (planned) replays develop's `net_ib` to `net_ib_cast` differences onto the fork (multiplane, QP sharing, CTS offload, ionicdv, AINIC recovery) and adds the AINIC runner entries. Fork 6 (planned) adds the IB-CAST-specific multi-segment pieces on top. See [the fork plugin](multi_segment_fork_plugin.md) for the forks, the compile-twice host tests and how the code can later move back into `net_ib`.
+**Where it is going.** Fork 5 replays develop's `net_ib` to `net_ib_cast` differences onto the fork and adds the AINIC data-path runner entries; fork 6 adds the IB-CAST-specific multi-segment pieces on top. See [the fork plugin](multi_segment_fork_plugin.md) for the forks, the compile-twice host tests and how the code can later move back into `net_ib`.
 
 ## Design at a glance
 
@@ -101,7 +101,7 @@ These terms are used the same way in every multi-segment doc.
 | `segOff` | A rank's table of segment start offsets within its window: `segOff[0] = 0` and `segOff[nSegments]` is the window size. |
 | CTS | Clear-to-send: the 64-byte FIFO entry a NET/IB receiver RDMA-writes to the sender to describe one receive buffer. Its size does not change. |
 | Layout prefix | The `IbMsegSegLayout` entries (192 bytes each) in front of a slot's CTS entries, written in the same RDMA write and marked by bit `NCCL_IB_CTS_NREQS_LAYOUT` of `nreqs`. Each carries up to four overlapping segments inline, or a reference to the registration's published layout. |
-| `useMultiSeg` | IB-MSEG has no capability bit. Each side decides at connect time whether the comm uses the multi-segment CTS layout and sends that decision as `useMultiSeg` in `IbMsegConnectionMetadata`; connect fails with `ncclInvalidUsage` when the two ends differ. |
+| `useMultiSeg` | IB-MSEG has no capability bit. Each side decides at connect time whether the comm uses the multi-segment CTS layout and sends that decision as `useMultiSeg` in `IbMsegConnectionMetadata`; when the two ends differ, the accepting side fails with `ncclInvalidUsage` and its peer sees the connection close. |
 | Segment cap | The fixed per-registration limit `RCCL_IB_REG_SEG_DEFAULT` (`transport/rccl_mseg.h`), checked by `rcclIbSegCountSupported`. |
 | RMA round | One post of at most 64 data WRs for an RMA operation; a wider operation posts several rounds in order. |
 | IB-MSEG | The multi-segment plugin `net_ib_multiseg` (net name `IB-MSEG`), a renamed copy of `net_ib`; see [the fork plugin](multi_segment_fork_plugin.md). |
@@ -112,53 +112,51 @@ These terms are used the same way in every multi-segment doc.
 | Classic, IB-CAST | The develop InfiniBand plugins, both unchanged by the stack: classic `net_ib` (`NCCL_NET=IB`) and RCCL's `net_ib_cast` (`NCCL_NET=IB-CAST`), which adds a QP scheduler, inline CTS on AINIC, and RCCL-specific recovery. IB-MSEG is the multi-segment plugin. |
 | Final-WR signaling | Only the last WR of a chain asks for a completion, so one completion retires the whole chain. |
 | Prefix post | `ibv_post_send` accepted the first part of a chain and rejected the rest. |
-| Switch on, switch off | `NCCL_MULTI_SEGMENT_REGISTER=1` or `=0`. Off restores the develop code path everywhere. See [the switch](#the-switch). |
+| Switch on, switch off | `NCCL_MULTI_SEGMENT_REGISTER=1` or `=0`. Off restores the develop code path except for a few switch-independent pieces, listed in [switch-off behavior](multi_segment_current.md#switch-off-behavior). See [the switch](#the-switch). |
 
 ## The switch
 
 `NCCL_MULTI_SEGMENT_REGISTER` (`ncclParamMultiSegmentRegister`, `transport/generic.cc`) gates every multi-segment path. It defaults to 0 on HIP and to 1 elsewhere, and it must have the same value on every rank.
 
-On HIP builds the switch selects the plugins. In `plugin/net.cc`, IB-MSEG (`ncclNetIbMseg`) takes the internal IB slot when the switch is on or `NCCL_NET=IB-MSEG`, unless IB-CAST is selected (`NCCL_NET=IB-CAST`, or AINIC with `NCCL_NET` unset), and with the switch on a comm that asks for `IB` gets IB-MSEG. In `plugin/rma.cc` the same condition picks `IbMsegRmaIbProxy` unless `NCCL_NET=IB-CAST`.
+On HIP builds the switch also selects IB-MSEG and its RMA backend `IbMsegRmaIbProxy`; the rules are in [the fork plugin](multi_segment_fork_plugin.md#selection).
 
 The core then reads the switch through `rcclMultiSegOn` (`rccl_dev_runtime.cc`), which is true only when the comm's plugin registers per segment, the switch is on and `NCCL_DMABUF_ENABLE=1`. `init.cc` stores the result per comm in `comm->rcclMultiSegNet` (the net is IB-MSEG) and `comm->rcclMultiSegRma` (the RMA backend is `IbMsegRmaIbProxy`). The first gates NET registration of multi-segment buffers in `transport/net.cc`; the second gates multi-segment GIN and RMA windows (`rcclDevrGinRegistersMultiSegment`, `rcclDevrRmaRegistersMultiSegment`) and the RMA in-flight cap. Inside IB-MSEG, `IbMsegResolveUseMultiSeg` (`connect.cc`) makes the per-comm P2P decision `useMultiSeg`, and `rcclRmaMultiSegEnabled` (`seg_rma_mseg.h`) gates the multi-segment RMA operations and the deeper RMA send queue. Both call `rcclMultiSegOn`, so `NCCL_NET=IB-MSEG` with the switch off behaves like develop's `net_ib`.
 
-With the switch off, IB-MSEG is not selected unless `NCCL_NET=IB-MSEG` asks for it, develop's QP depths and GIN/RMA bodies run, the RMA in-flight cap does not apply, multi-segment NET buffers stage, and a device-only multi-segment GIN window fails registration. The full list is in [the current contract](multi_segment_current.md#switch-off-behavior).
+With the switch off, the multi-segment paths run develop code. A few fork 1 pieces are not gated by the switch: the host owner fd path (with `NCCL_SYM_REUSE_SYSMEM_HANDLES=1`), the NULL-handle checks before an RMA put or hierarchical CE, and an INFO line when RMA registration is skipped. The full list is in [the current contract](multi_segment_current.md#switch-off-behavior).
 
 ## Stack and pull requests
 
-The stack is linear on develop, one fork branch per pull request on [ROCm/rocm-systems](https://github.com/ROCm/rocm-systems). Branch names share the prefix `users/atulkulk/netib-mseg/`. The fork pull requests are not opened yet, and nothing is pushed.
+The stack is linear on develop, one fork per pull request on [ROCm/rocm-systems](https://github.com/ROCm/rocm-systems). Each fork is described in [the fork plugin](multi_segment_fork_plugin.md#forks).
 
-| Fork | Branch | Scope | State |
-|---|---|---|---|
-| 1 | `01-core-backend-multiseg-gate` | comm-level plugin multi-segment flags in core, GIN/RMA window gates, RMA in-flight cap, host owner fd borrowed only when exactly one rank can export it; removes the ROCM-29810 TODO | committed locally: code, tests, owner-fd fix |
-| 2 | `02-net-ib-multiseg-copy` | byte-identical renamed copy of `net_ib` as IB-MSEG plus `rename_map.txt`; plugin selection, RMA backend choice, P2P policy, RAS list; `*_mseg` runner jobs | committed locally: copy, tests |
-| 3 | `03-registration-p2p-multiseg` | per-segment registration and multi-segment P2P in IB-MSEG: one-write CTS with the layout prefix, sliced send, one-read flush; connect-time `useMultiSeg` match | committed locally: code, tests |
-| 4 | `04-rma-gin-multiseg` | IB-MSEG GIN and RMA windows: one MR per physical segment, consensus, RMA rounds, RMA send-queue depth; compile-twice host tests | committed locally: code, tests, review fixes, compile-twice host tests |
-| 5 | none yet | develop's `net_ib` to `net_ib_cast` differences replayed onto the fork; AINIC runner entries | planned |
-| 6 | none yet | IB-CAST-specific multi-segment pieces: BY_INDEX immediate flag, one segmented group at a time, CAST CQ poll, IB-CAST RMA record with magic and version | planned |
-
-The copy in fork 2 was produced by a rename tool kept outside the stack; `rename_map.txt` stays in fork 2 and drives the compile-twice host tests. The forks are described in [the fork plugin](multi_segment_fork_plugin.md#forks).
+| Fork | Scope | State |
+|---|---|---|
+| 1: core gate | comm-level plugin multi-segment flags in core, GIN/RMA window gates, RMA in-flight cap, host owner fd borrowed only when exactly one rank can export it | implemented |
+| 2: net_ib copy | renamed copy of `net_ib` as IB-MSEG plus `rename_map.txt`; plugin selection, RMA backend choice, P2P policy, RAS list; `*_mseg` runner jobs | implemented |
+| 3: registration and P2P | per-segment registration and multi-segment P2P in IB-MSEG: one-write CTS with the layout prefix, sliced send, one-read flush; connect-time `useMultiSeg` match | implemented |
+| 4: RMA and GIN | IB-MSEG GIN and RMA windows: one MR per physical segment, consensus, RMA rounds, RMA send-queue depth; compile-twice host tests | implemented |
+| 5: IB-CAST base | develop's `net_ib` to `net_ib_cast` differences replayed onto the fork; AINIC data-path runner entries | planned |
+| 6: IB-CAST multi-segment | IB-CAST-specific pieces: BY_INDEX immediate flag, one segmented group at a time, CAST CQ poll, IB-CAST RMA record with magic and version | planned |
 
 Already in develop: layer 01 ([PR 10887](https://github.com/ROCm/rocm-systems/pull/10887), CE AllReduce receive-window offset and bounds fixes), layer 02 ([PR 10891](https://github.com/ROCm/rocm-systems/pull/10891), host VMM location type, mixed host window classification, probe-kind allgather) and layer 03 ([PR 10885](https://github.com/ROCm/rocm-systems/pull/10885), NET segment-count cache, last-page walk fix, graph NET segments).
 
-The old-stack pull requests for layers 05, 06, 07 and 08, the IB-CAST GIN/RMA "wire" layer and the coverage layer 09 are superseded by the fork pull requests.
+The older multi-segment pull requests (layers 05 to 09 and the IB-CAST GIN/RMA layer) are superseded by the fork pull requests; [review feedback](multi_segment_review_feedback.md) maps their review items to the forks.
 
 ## Reading guide
 
-| Doc | Covers | Read it if you |
-|---|---|---|
-| [Overview](multi_segment_overview.md) (this doc) | problem, design, terms, stack, color legend | are new to the feature |
-| [Review feedback](multi_segment_review_feedback.md) | every reviewer's items, what changed for each, what is open or superseded | answer a review thread or check what is still open |
-| [Fork plugin](multi_segment_fork_plugin.md) | the IB-MSEG plugin design, forks 1 to 6 and their status, compile-twice host tests, fold-back | work on IB-MSEG or plan forks 5 and 6 |
-| [Current contract](multi_segment_current.md) | invariants, switch-off behavior, limits, QP depths, version gates, code map, open items | review or change any multi-segment code |
-| [GIN/RMA on IB-MSEG and core](multi_segment_gin_rma.md) | per-segment registration, consensus, rounds, in-flight cap, flush, host owner DMA-BUF, window gates | work on GIN, RMA or DeepEP windows |
-| [IB-MSEG NET/IB P2P](multi_segment_netib_wire.md) | connect-time `useMultiSeg` match, one-write CTS with inline or referenced layouts, sliced send, one-read flush, rejected alternatives | work on IB-MSEG P2P |
-| [IB-CAST P2P, fork 6 design](multi_segment_netib_cast.md) | planned IB-CAST differences: scope, one group at a time, BY_INDEX flag, per-WR cap, open items | plan IB-CAST P2P multi-segment support |
-| [IB-CAST GIN/RMA, fork 6 design](multi_segment_netib_cast_gin.md) | planned IB-CAST RMA handle, record with magic and version, rounds, error propagation | plan IB-CAST GIN multi-segment support |
-| [Code map](multi_segment_code_map.md) | the symbols each fork adds or changes, per file | look for where a behavior lives or which fork owns it |
-| [Testing](multi_segment_testing.md) | test strategy, coverage, hybrid DeepEP tests, runner jobs, how to run, known failures | run, add or debug tests |
-| [Validation plan](multi_segment_validation_plan.md) | every test per fork and category, runner configs, gaps and proposed tests | plan a validation run or review test coverage |
-| [rocSHMEM GDA and Anvil SDMA](multi_segment_gin_rocshmem_gda_and_anvil_sdma.md) | proposed support in the device-initiated GIN backends | plan GIN types 6 or 7 |
+- [Overview](multi_segment_overview.md) (this doc): problem, design, terms, stack and color legend; start here.
+- [Current contract](multi_segment_current.md): invariants, limits, QP depths, switch-off behavior, version gates and open follow-ups; the checklist for any change.
+- [Fork plugin](multi_segment_fork_plugin.md): why IB-MSEG is a fork, plugin selection, what each fork changes, compile-twice host tests, phases and fold-back.
+- [GIN/RMA on IB-MSEG and core](multi_segment_gin_rma.md): per-segment window registration, consensus, rounds, in-flight cap, window gates and host owner DMA-BUF.
+- [IB-MSEG NET/IB P2P](multi_segment_netib_wire.md): connect-time `useMultiSeg` match, one-write CTS with layouts, sliced send, one-read flush and rejected alternatives.
+- [IB-CAST P2P, fork 6 design](multi_segment_netib_cast.md): planned IB-CAST P2P scope, scheduler, BY_INDEX flag, per-WR cap and requirements from review.
+- [IB-CAST GIN/RMA, fork 6 design](multi_segment_netib_cast_gin.md): planned IB-CAST RMA record, physical-device lookup, queues and error propagation.
+- [rocSHMEM GDA and Anvil SDMA](multi_segment_gin_rocshmem_gda_and_anvil_sdma.md): proposed support in the device-initiated GIN backends.
+- [Testing](multi_segment_testing.md): test strategy, coverage, hybrid DeepEP tests, runner jobs, how to run, results and known failures.
+- [Validation plan](multi_segment_validation_plan.md): per-fork test inventory, job and config matrix, and known gaps.
+- [Code map](multi_segment_code_map.md): the symbols each fork adds or changes, per file.
+- [Review feedback](multi_segment_review_feedback.md): every review item, what changed for it, and what is open.
+
+The code paths of each fork, in execution order, are in the separate code walkthrough book (`walkthrough/` next to these docs), one part per fork.
 
 ## Color legend
 
