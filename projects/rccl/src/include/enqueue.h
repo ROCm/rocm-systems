@@ -144,21 +144,17 @@ cleanupLaunchEnd:
 template <bool ProfilerEvents = true, typename LaunchFn>
 inline ncclResult_t rcclAddonLaunch(struct ncclInfo& info, LaunchFn&& launch) {
   ncclResult_t ret = ncclSuccess;
-  bool profilerPluginLoaded = false;
 
   // Only collectives should use rcclAddonLaunch.
   assert(info.coll != ncclFuncSendRecv && info.coll != ncclFuncSend && info.coll != ncclFuncRecv);
   assert(info.coll != ncclFuncPutSignal && info.coll != ncclFuncSignal && info.coll != ncclFuncWaitSignal);
 
   if constexpr (ProfilerEvents) {
-    profilerPluginLoaded = ncclProfilerPluginLoaded();
-    if (profilerPluginLoaded) {
-      // Ensure profilerGroupDepth updates correctly for implicit internal group.
-      if (ncclProfilerApiState.profilerGroupDepth > 0) {
-        ncclProfilerApiState.profilerGroupDepth++;
-      }
-      NCCLCHECK(ncclGroupStartInternal());
+    // Ensure profilerGroupDepth updates correctly for implicit internal group.
+    if (ncclProfilerApiState.profilerGroupDepth > 0) {
+      ncclProfilerApiState.profilerGroupDepth++;
     }
+    NCCLCHECK(ncclGroupStartInternal());
   }
 
   rcclLogCollInfo(info);
@@ -171,10 +167,8 @@ inline ncclResult_t rcclAddonLaunch(struct ncclInfo& info, LaunchFn&& launch) {
 
 fail:
   if constexpr (ProfilerEvents) {
-    if (profilerPluginLoaded) {
-      ncclGroupErrCheck(ret);
-      NCCLCHECK(ncclGroupEndInternal());
-    }
+    ncclGroupErrCheck(ret);
+    NCCLCHECK(ncclGroupEndInternal());
   }
 
   return ret;
