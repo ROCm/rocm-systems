@@ -84,6 +84,7 @@ class AsyncInstructionWindow;
 class MmaAdmissionCache;
 namespace mma_plan {
 class PlanCache;
+class PendingJobs;
 class Replay;
 } // namespace mma_plan
 struct AsyncInstructionWindowStorage;
@@ -393,6 +394,14 @@ public:
     } progress_batch{*this};
     // A request left by direct step() execution must not shorten this quantum.
     ++quantum_serial_;
+    struct QuantumScope {
+      ComputeUnitCore &cu;
+      explicit QuantumScope(ComputeUnitCore &c) : cu(c) { cu.in_quantum_ = true; }
+      ~QuantumScope() {
+        cu.drain_all_pending_mma(MmaDrain::Quantum);
+        cu.in_quantum_ = false;
+      }
+    } quantum_scope{*this};
     functional_yield_requested_ = false;
     gws_wait_yield_requested_ = false;
     FunctionalQuantumResult result;
@@ -1794,7 +1803,23 @@ protected:
   /// Lazily created on async CUs. Holds plans with retained decoded instructions.
   std::unique_ptr<mma_plan::PlanCache> mma_plans_;
   /// Helpers of the plan being replayed; joined before any fault or failure path.
-  mma_plan::Replay *active_replay_ = nullptr;
+  /// Why a wave's outstanding helper jobs were joined outside a block.
+  enum class MmaDrain : uint8_t { Gap, Mode, Fault, WaveEnd, Reject, Quantum };
+  /// Join the wave's outstanding helper jobs, reporting a helper failure like
+  /// ordinary issue would. No-op when nothing is pending.
+  void drain_pending_mma(Wavefront &wf, MmaDrain cause);
+  /// Join every wave's outstanding jobs: the CU is quiescent whenever control
+  /// returns to its caller (quantum end, or a step() outside a quantum), so
+  /// observers of register state never race a helper.
+  void drain_all_pending_mma(MmaDrain cause);
+  /// Before an instruction issued outside a plan executes: join the running
+  /// jobs whose registers it touches, by footprint. Inside a plan the entry
+  /// waits already cover the block's steps.
+  void join_pending_mma_for(Wavefront &wf, const Instruction &inst);
+  bool in_quantum_ = false;
+  bool in_replay_ = false;
+  bool mma_has_accvgprs_ = false;
+  void report_pending_mma_failure(Wavefront &wf, mma_plan::PendingJobs &jobs);
   /// Helpers this CU may claim, refreshed once per quantum by the async issue path.
   uint64_t quantum_serial_ = 0;
   uint64_t helper_budget_serial_ = ~uint64_t{0};

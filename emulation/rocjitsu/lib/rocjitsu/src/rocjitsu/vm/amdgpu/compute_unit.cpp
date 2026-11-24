@@ -495,8 +495,13 @@ static std::unique_ptr<ComputeUnitCore> create_functional_cu(std::string name,
       using Base::Base;
       MmaAdmissionCache admission;
       bool step() override {
-        return this->template step_impl<true>(&admission, Isa::ASYNC_MMA_WAVE_SIZE,
-                                              HasAccVgpr<Isa>);
+        const bool stepped = this->template step_impl<true>(&admission, Isa::ASYNC_MMA_WAVE_SIZE,
+                                                            HasAccVgpr<Isa>);
+        // A direct step is an observation point; inside a quantum the jobs
+        // run on across blocks until the quantum ends.
+        if (!this->in_quantum_)
+          this->drain_all_pending_mma(ComputeUnitCore::MmaDrain::Quantum);
+        return stepped;
       }
     };
     if (config.async_resources && config.async_resources->helpers() &&
@@ -725,6 +730,9 @@ size_t ComputeUnitCore::num_wfs() const {
 
 void ComputeUnitCore::free_wavefront_resources(Wavefront &wf) {
   std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
+  // Helper jobs write this wave's registers; they must finish before the
+  // registers are freed.
+  drain_pending_mma(wf, MmaDrain::WaveEnd);
   scalar_mem_pipeline_.cancel(wf);
   global_mem_pipeline_.cancel(wf);
   local_mem_pipeline_.cancel(wf);
@@ -2824,9 +2832,86 @@ void ComputeUnitCore::flush_mma_plans() {
     mma_plans_->flush();
 }
 
-// The caller has checked the wave-wide window preconditions: wave size, full
-// EXEC, no VGPR MSB or index mode, no debugger, single step or trap handler,
-// and plugins that permit asynchronous execution.
+void ComputeUnitCore::report_pending_mma_failure(Wavefront &wf, mma_plan::PendingJobs &jobs) {
+  const auto &failure = jobs.failure();
+  if (!failure)
+    return;
+  (void)jobs.drain();
+  const Instruction &inst = *failure->head->chain[failure->member];
+  const uint64_t pc =
+      failure->entry_pc + failure->plan->steps[failure->head->member_step[failure->member]].offset;
+  if (failure->error.error)
+    fail_wave_instruction(wf, std::format("asynchronous {}", inst.mnemonic()), pc,
+                          static_cast<InstructionExecutionError>(failure->error.error),
+                          failure->error.detail ? failure->error.detail : "");
+  jobs.clear_failure();
+}
+
+void ComputeUnitCore::drain_pending_mma(Wavefront &wf, MmaDrain cause) {
+  if (!mma_plans_) [[likely]]
+    return;
+  mma_plan::PendingJobs *jobs = mma_plans_->pending_if_any(wf.wf_id());
+  if (!jobs)
+    return;
+  auto &stats = mma_plans_->stats;
+  switch (cause) {
+  case MmaDrain::Gap:
+    ++stats.drains_gap;
+    break;
+  case MmaDrain::Mode:
+    ++stats.drains_mode;
+    break;
+  case MmaDrain::Fault:
+    ++stats.drains_fault;
+    break;
+  case MmaDrain::WaveEnd:
+    ++stats.drains_wave_end;
+    break;
+  case MmaDrain::Reject:
+    ++stats.drains_reject;
+    break;
+  case MmaDrain::Quantum:
+    ++stats.drains_quantum;
+    break;
+  }
+  if (!jobs->drain())
+    fail_wave_instruction(wf, "asynchronous MFMA", wf.pc,
+                          InstructionExecutionError::MissingExecutionBackend,
+                          "MMA helper unavailable after fork");
+  report_pending_mma_failure(wf, *jobs);
+}
+
+void ComputeUnitCore::join_pending_mma_for(Wavefront &wf, const Instruction &inst) {
+  mma_plan::PendingJobs *jobs = mma_plans_->pending_if_any(wf.wf_id());
+  if (!jobs)
+    return;
+  const auto footprint = async_execution::footprint(inst, wf.num_vgprs(), mma_has_accvgprs_);
+  // An unrepresentable footprint joins everything.
+  const uint32_t mask = footprint ? jobs->conflicting(*footprint) : jobs->active();
+  if (!mask) {
+    ++mma_plans_->stats.gap_passes;
+    return;
+  }
+  ++mma_plans_->stats.gap_joins;
+  if (!jobs->join(mask))
+    fail_wave_instruction(wf, "asynchronous MFMA", wf.pc,
+                          InstructionExecutionError::MissingExecutionBackend,
+                          "MMA helper unavailable after fork");
+  report_pending_mma_failure(wf, *jobs);
+}
+
+void ComputeUnitCore::drain_all_pending_mma(MmaDrain cause) {
+  if (!mma_plans_) [[likely]]
+    return;
+  for (const auto &wf : wfs_)
+    if (wf)
+      drain_pending_mma(*wf, cause);
+}
+
+// The caller has checked the wave-wide window preconditions: wave size, no
+// VGPR MSB or index mode, no debugger, single step or trap handler, and
+// plugins that permit asynchronous execution. EXEC may be partial: helpers
+// execute matrix instructions that ignore it, and inline steps apply it.
 bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, bool has_accvgprs) {
   static const bool enabled = [] {
     const char *value = std::getenv("RJ_MMA_PLAN");
@@ -2880,16 +2965,37 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
                                      vm_access ? vm_access->cache_namespace()
                                                : VmCacheNamespace{}};
   const mma_plan::Plan *plan = cache.lookup(*decoder_, inst_cache_, fetch_words, key, first);
+  auto &pool = async_pool();
+  const uint64_t entry_pc = active->pc;
+  mma_has_accvgprs_ = has_accvgprs;
+  struct ReplayScope {
+    bool &flag;
+    explicit ReplayScope(bool &f) : flag(f) { flag = true; }
+    ~ReplayScope() { flag = false; }
+  } replay_scope{in_replay_};
+  mma_plan::PendingJobs &replay = cache.pending(active->wf_id(), pool);
+  std::array<uint32_t, mma_plan::kMaxSteps> extra_wait{};
   if (!plan->accept) {
     // The planner found nothing that can run concurrently here, e.g. one
     // serial chain. A lookahead window would offload it anyway and only add
-    // handoffs, so issue the MFMA synchronously.
+    // handoffs, so issue the MFMA synchronously, after joining any running
+    // job whose registers it touches.
+    if (replay.pending()) {
+      bool filtered = false;
+      (void)replay.begin_block(*plan, entry_pc, helper_cap_, extra_wait, filtered);
+      if (extra_wait[0]) {
+        ++cache.stats.drains_reject;
+        (void)replay.join(extra_wait[0]);
+        report_pending_mma_failure(*active, replay);
+        if (active->is_halted())
+          return true;
+      }
+    }
     (void)issue_instruction_impl<false>(active);
     return true;
   }
   // An exhausted pool still replays: each chain that finds no helper runs on
   // the issuer, which keeps the saved fetch, decode and scoreboard work.
-  auto &pool = async_pool();
   const bool inline_only = mma_plan::inline_only();
 
   // Inline steps can touch new registers while helpers run. Allocate all lazy
@@ -2910,11 +3016,17 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
     }
   }
 
-  mma_plan::Replay replay(pool, helper_cap_);
-  struct ActiveScope {
-    mma_plan::Replay *&slot;
-    ~ActiveScope() { slot = nullptr; }
-  } scope{active_replay_ = &replay};
+  // Jobs of earlier blocks may still run; each step joins only the ones it
+  // depends on, found once here from the plan's first-touch index.
+  if (replay.pending()) {
+    ++cache.stats.pending_entries;
+    bool filtered = false;
+    (void)replay.begin_block(*plan, entry_pc, helper_cap_, extra_wait, filtered);
+    cache.stats.filtered_entries += filtered;
+  } else {
+    bool filtered = false;
+    (void)replay.begin_block(*plan, entry_pc, helper_cap_, extra_wait, filtered);
+  }
   ++cache.stats.replays;
   unsigned offloaded = 0;
   const uint32_t process = active->process_id();
@@ -2924,7 +3036,6 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
     active->pc += step.size;
     record_gws_instruction_progress(process);
   };
-  const uint64_t entry_pc = active->pc;
   const auto helpers_failed = [&](uint64_t pc, const Instruction &inst) {
     (void)replay.drain();
     fail_wave_instruction(*active, std::format("asynchronous {}", inst.mnemonic()), pc,
@@ -2934,16 +3045,9 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
   // Every helper is joined before the wave fails; the first failing member's
   // guest PC and error are reported, as if it had failed during ordinary issue.
   const auto helper_error = [&]() {
-    const auto &failure = replay.failure();
-    if (!failure)
+    if (!replay.failure())
       return false;
-    (void)replay.drain();
-    const Instruction &inst = *failure->head->chain[failure->member];
-    const uint64_t pc =
-        entry_pc + plan->steps[failure->head->member_step[failure->member]].offset;
-    fail_wave_instruction(*active, std::format("asynchronous {}", inst.mnemonic()), pc,
-                          static_cast<InstructionExecutionError>(failure->error.error),
-                          failure->error.detail ? failure->error.detail : "");
+    report_pending_mma_failure(*active, replay);
     return true;
   };
   // Retained steps are neither memory producers nor waits. Check their
@@ -2981,10 +3085,16 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
     }
     return false;
   };
-  for (const mma_plan::Step &step : plan->steps) {
-    if (step.wait && !replay.join(step.wait)) {
-      helpers_failed(active->pc, *plan->steps.front().inst);
-      return true;
+  for (unsigned k = 0; k != plan->steps.size(); ++k) {
+    const mma_plan::Step &step = plan->steps[k];
+    const uint32_t waits = replay.slots_of(step.wait) | extra_wait[k];
+    if (waits) {
+      if (extra_wait[k])
+        ++cache.stats.result_waits;
+      if (!replay.join(waits)) {
+        helpers_failed(active->pc, *plan->steps.front().inst);
+        return true;
+      }
     }
     if (helper_error())
       return true;
@@ -3004,7 +3114,9 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
       const auto fill = [&](matrix_coexecution::SnapshotBuffer &buffer) {
         size_t words = 0;
         for (unsigned i = 0; i != step.members; ++i)
-          words += size_t(step.snapshot[i].a_regs + step.snapshot[i].b_regs) * wave_size;
+          words += size_t(step.snapshot[i].a_regs + step.snapshot[i].b_regs +
+                          step.snapshot[i].sa_regs + step.snapshot[i].sb_regs) *
+                   wave_size;
         buffer.data.resize(words);
         uint32_t *out = buffer.data.data();
         const auto copy = [&](uint16_t base, uint8_t regs, MatrixInputSnapshot::Operand &operand) {
@@ -3019,7 +3131,11 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
           buffer.entries[i] = {};
           copy(spec.a_base, spec.a_regs, buffer.entries[i].a);
           copy(spec.b_base, spec.b_regs, buffer.entries[i].b);
-          buffer.pointers[i] = spec.a_regs || spec.b_regs ? &buffer.entries[i] : nullptr;
+          copy(spec.sa_base, spec.sa_regs, buffer.entries[i].scale_a);
+          copy(spec.sb_base, spec.sb_regs, buffer.entries[i].scale_b);
+          buffer.pointers[i] = spec.a_regs || spec.b_regs || spec.sa_regs || spec.sb_regs
+                                   ? &buffer.entries[i]
+                                   : nullptr;
         }
         ++cache.stats.snapshot_chains;
         cache.stats.snapshot_bytes += words * sizeof(uint32_t);
@@ -3060,9 +3176,9 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
       const uint64_t next = active->pc + step.size;
       (void)issue_instruction_impl<false>(active);
       if (active->pc != next || active->state() != WfState::RUNNING || active->is_halted()) {
-        // A stall, fault or redirect ends the block; no helper chain extends past it.
+        // A stall, fault or redirect ends the block. Jobs stay outstanding
+        // across a stall or redirect; a fault has already drained them.
         ++cache.stats.early_exit;
-        (void)replay.drain();
         if (!active->is_halted())
           (void)helper_error();
         return true;
@@ -3071,7 +3187,9 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
     }
     }
   }
-  if (!replay.drain())
+  // With cross-block execution the jobs keep running and whatever follows
+  // joins only what it depends on; otherwise the block drains here.
+  if (!mma_plan::cross_block_enabled() && !replay.drain())
     helpers_failed(active->pc, *plan->steps.front().inst);
   else
     (void)helper_error();
@@ -3094,6 +3212,8 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
                                     : inst_cache_.peek_word(pc, active->process_id(), word);
     if (resident) {
       if (!async_mma_policy::encoding_may_be_candidate(arch(), word)) {
+        // Between blocks, ordinary issue joins only the running jobs whose
+        // registers the instruction touches.
         issue_instruction(active);
         if (active->is_halted())
           {
@@ -3104,7 +3224,6 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
       }
     }
   }
-  const uint64_t full_exec = wave_size == 64 ? ~uint64_t{0} : uint64_t{0xFFFFFFFF};
   if (helper_budget_serial_ != quantum_serial_) {
     // Borrowed helpers exist only while engines and dispatch leave cores idle.
     // Summing the occupancy once per quantum keeps the hot path free of it.
@@ -3116,10 +3235,10 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
     issue_instruction(active);
     return;
   }
-  if (active->wf_size() != wave_size || active->exec() != full_exec ||
-      active->vgpr_msb_mode() != 0 || active->gpr_idx_en() || debug_active() ||
-      active->debug_single_step() || active->in_trap_handler() ||
+  if (active->wf_size() != wave_size || active->vgpr_msb_mode() != 0 || active->gpr_idx_en() ||
+      debug_active() || active->debug_single_step() || active->in_trap_handler() ||
       !plugin_group_->supports_async_instructions()) {
+    drain_pending_mma(*active, MmaDrain::Mode);
     issue_instruction_impl<true>(active);
     return;
   }
@@ -3128,6 +3247,8 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
       flush_mma_plans();
     return;
   }
+  // The lookahead window tracks only its own jobs.
+  drain_pending_mma(*active, MmaDrain::Gap);
   AsyncInstructionWindowStorage storage;
   storage.admission = admission;
   storage.has_accvgprs = has_accvgprs;
@@ -3167,8 +3288,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
         window->drain();
     }
     // Plan replay issues its memory steps here; helpers finish before fault handling.
-    if (active_replay_) [[unlikely]]
-      (void)active_replay_->drain();
+    drain_pending_mma(*active, MmaDrain::Fault);
   };
 
   // A completed FLAT exception interrupts between instructions. An enabled CDNA2
@@ -3363,14 +3483,15 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       decoded_inst_cache_.return_completed(instruction_pc, vmid, words, decoded);
     return outcome;
   };
+  if (mma_plans_ && !in_replay_) [[unlikely]]
+    join_pending_mma_for(*active, *inst);
   const std::string_view instruction_mnemonic = inst->mnemonic();
   const auto fail_current_instruction = [&]() {
     if constexpr (EnableAsync) {
       if (window)
         window->drain();
     }
-    if (active_replay_) [[unlikely]]
-      (void)active_replay_->drain();
+    drain_pending_mma(*active, MmaDrain::Fault);
     if (active->instruction_execution_error_detail())
       execution_failure_detail_ = active->instruction_execution_error_detail();
     active->pc = instruction_pc;

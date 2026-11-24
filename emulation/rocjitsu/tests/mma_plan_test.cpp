@@ -68,9 +68,10 @@ struct Program {
         out[i] = index + i < words.size() ? words[index + i] : 0;
       return true;
     };
-    plan::compile(result, *decoder, fetch, kPc, 256, true, decodes);
+    plan::compile(result, *decoder, fetch, kPc, 256, true, decodes, cross_block);
     return result;
   }
+  bool cross_block = false;
   const plan::Plan &build() { return compiled = compile(); }
 };
 
@@ -235,4 +236,84 @@ TEST(MmaPlanTest, SuccessorWhoseFactorIsLoadedLaterIsNotChained) {
   EXPECT_NE(result.steps[3].kind, plan::StepKind::Chained);
   EXPECT_NE(result.steps[4].kind, plan::StepKind::Chained);
 }
+TEST(MmaPlanTest, TailJobsSnapshotAllFactorsForTheNextBlock) {
+  // Eight independent accumulators, one MFMA each, then a long run of LDS reads so
+  // that only the last jobs fall inside the tail window.
+  Program p;
+  p.cross_block = true;
+  for (unsigned acc = 0; acc != 8; ++acc)
+    p.mfma(acc, 0, 16);
+  for (unsigned i = 0; i != 20; ++i)
+    p.ds_read_b128(40 + 4 * (i % 4));
+  const auto result = p.compile();
+  ASSERT_TRUE(result.accept);
+  // Steps 0..7 are the heads; the block has 28 steps, so heads at steps >= 12
+  // are tail jobs. None of these are, so no snapshot is flagged...
+  for (unsigned k = 0; k != 8; ++k)
+    EXPECT_FALSE(result.steps[k].snapshots) << k;
+  // ...whereas with the reads first, every head is in the tail.
+  Program q;
+  for (unsigned i = 0; i != 20; ++i)
+    q.ds_read_b128(40 + 4 * (i % 4));
+  for (unsigned acc = 0; acc != 8; ++acc)
+    q.mfma(acc, 0, 16);
+  // A plan starts at a candidate MMA, so the reads are not part of this block;
+  // place the MFMAs after a leading MFMA-free prefix is impossible here. Use a
+  // second independent block instead: MFMAs then a few reads, all in the tail.
+  Program r;
+  r.cross_block = true;
+  for (unsigned acc = 0; acc != 8; ++acc)
+    r.mfma(acc, 0, 16);
+  r.ds_read_b128(40);
+  const auto tail = r.compile();
+  ASSERT_TRUE(tail.accept);
+  for (unsigned k = 0; k != 8; ++k) {
+    EXPECT_TRUE(tail.steps[k].snapshots) << k;
+    EXPECT_EQ(tail.steps[k].snapshot[0].a_regs, 4u);
+    EXPECT_EQ(tail.steps[k].snapshot[0].b_regs, 4u);
+    // Snapshotted factors leave the job's read set; the result stays in its write set.
+    EXPECT_FALSE(tail.steps[k].job_access.reads.test(0));
+    EXPECT_TRUE(tail.steps[k].job_access.writes.test(64 + 4 * k));
+  }
+  // First-touch index: register 64 (acc0 result) is first touched at step 0,
+  // v40 is first written by the trailing read.
+  EXPECT_EQ(tail.first_access[64], 0u);
+  EXPECT_EQ(tail.first_write[40], 8u);
+  EXPECT_EQ(tail.first_write[64], 0u);
+  EXPECT_TRUE(tail.footprint.writes.test(64 + 28));
+}
+
+TEST(MmaPlanTest, ScalarOnlyEncodingsNeedNoRegisterCheck) {
+  EXPECT_TRUE(plan::scalar_only_encoding(cdna4::build_sopp(cdna4::kSBranchSopp, {.simm16 = 1})[0]));
+  EXPECT_TRUE(plan::scalar_only_encoding(cdna4::build_sopp(cdna4::kSWaitcntSopp, {.simm16 = 0})[0]));
+  EXPECT_TRUE(plan::scalar_only_encoding(
+      cdna4::build_sop2(cdna4::kSAddU32Sop2, {.ssrc0 = 4, .ssrc1 = 129, .sdst = 124})[0]));
+  EXPECT_TRUE(plan::scalar_only_encoding(
+      cdna4::build_sopk(cdna4::kSMovkI32Sopk, {.simm16 = 7, .sdst = 4})[0]));
+  EXPECT_FALSE(plan::scalar_only_encoding(
+      cdna4::build_ds(cdna4::kDsReadB128, {.addr = 200, .vdst = 40})[0]));
+  EXPECT_FALSE(plan::scalar_only_encoding(
+      cdna4::build_vop1(cdna4::kVExpF32Vop1, {.src0 = 256 + 3, .vdst = 5})[0]));
+  EXPECT_FALSE(plan::scalar_only_encoding(cdna4::build_mubuf(
+      cdna4::kBufferLoadDwordx4Mubuf, {.offen = 1, .vaddr = 201, .vdata = 40, .srsrc = 4})[0]));
+}
+
+TEST(MmaPlanTest, FirstTouchIndexUsesTheJobHeadForChainedMembers) {
+  // acc0 K1 (step 3) is bundled onto acc0's job at step 0 and reads v[32:35],
+  // which nothing else touches: a running job writing v32 must be joined at
+  // step 0, where the member actually executes, not at step 3.
+  Program p;
+  p.mfma(0, 0, 16);
+  p.mfma(1, 0, 16);
+  p.ds_read_b128(40);
+  p.mfma(0, 0, 32);
+  const auto result = p.compile();
+  ASSERT_TRUE(result.accept);
+  ASSERT_EQ(result.steps[3].kind, plan::StepKind::Chained);
+  EXPECT_EQ(result.first_access[32], 0u);
+  EXPECT_EQ(result.first_access[40], 2u);
+  EXPECT_EQ(result.first_write[40], 2u);
+  EXPECT_EQ(result.first_access[16], 0u);
+}
+
 } // namespace

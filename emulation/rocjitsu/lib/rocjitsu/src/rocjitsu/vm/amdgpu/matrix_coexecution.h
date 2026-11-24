@@ -47,9 +47,13 @@ inline unsigned spin_override() {
   }();
   return pauses;
 }
+inline int borrow_budget();
 inline unsigned idle_spin_count() {
   const unsigned pauses = spin_override();
-  return pauses ? pauses : 1u << 13;
+  if (pauses)
+    return pauses;
+  // A borrowed core belongs to dispatch the moment the helper is idle.
+  return borrow_budget() ? 1u << 10 : 1u << 13;
 }
 inline unsigned completion_spin_count() {
   const unsigned pauses = spin_override();
@@ -224,7 +228,10 @@ inline bool local_helpers_only() {
 /// @brief Persistent worker executing one published instruction at a time.
 class Helper {
 public:
-  Helper() : thread_([this] { work(); }) {}
+  /// `awake` counts helpers not blocked in the kernel; a spinning idle helper
+  /// still occupies a core, so the borrowing budget charges for it.
+  explicit Helper(std::atomic<int> *awake = nullptr)
+      : awake_(awake), thread_([this] { work(); }) {}
   ~Helper() {
     publish(-1);
     thread_.join();
@@ -294,10 +301,16 @@ private:
     }
     // There is one waiter per helper: the issuer during execution, or the
     // helper while idle. Atomic waiting rechecks the value before sleeping.
+    if (expected == 0 && awake_)
+      awake_->fetch_sub(1, std::memory_order_relaxed);
     state_.wait(expected, std::memory_order_acquire);
+    if (expected == 0 && awake_)
+      awake_->fetch_add(1, std::memory_order_relaxed);
   }
 
   void work() {
+    if (awake_)
+      awake_->fetch_add(1, std::memory_order_relaxed);
     for (;;) {
       int state = state_.load(std::memory_order_acquire);
       if (state == -1)
@@ -325,6 +338,7 @@ private:
     }
   }
 
+  std::atomic<int> *awake_ = nullptr;
   alignas(64) std::atomic<int> state_{0};
   alignas(64) std::array<Instruction *, kMaxChain> chain_{};
   std::array<const MatrixInputSnapshot *, kMaxChain> snapshots_{};
@@ -359,7 +373,7 @@ class SharedPool {
     Helper helper;
     unsigned index;
     SnapshotBuffer snapshot;
-    explicit Slot(unsigned i) : index(i) {}
+    Slot(unsigned i, std::atomic<int> *awake) : helper(awake), index(i) {}
   };
 
 public:
@@ -395,7 +409,11 @@ public:
     const int budget = borrow_budget();
     if (!budget)
       return kUnlimited;
-    const int room = budget - reserved_threads.load(std::memory_order_relaxed) - occupied_threads();
+    // Idle helpers that are still spinning hold cores too; the cap counts
+    // them so that claimed plus spinning never exceeds the free cores.
+    const int idle_awake = std::max(0, awake_.load(std::memory_order_relaxed) - int(claimed()));
+    const int room = budget - reserved_threads.load(std::memory_order_relaxed) -
+                     occupied_threads() - idle_awake;
     return room > 0 ? unsigned(room) : 0u;
   }
   unsigned claimed() const {
@@ -434,7 +452,7 @@ public:
       count = 0;
     slots_.reserve(count);
     for (unsigned i = 0; i != count; ++i)
-      slots_.push_back(std::make_unique<Slot>(i));
+      slots_.push_back(std::make_unique<Slot>(i, &awake_));
     for (unsigned word = 0; word != 2; ++word) {
       const unsigned bits = count > word * 64 ? std::min(64u, count - word * 64) : 0;
       free_[word].store(bits == 64 ? ~uint64_t{0} : (uint64_t{1} << bits) - 1,
@@ -525,6 +543,7 @@ private:
     free_[slot->index / 64].fetch_or(uint64_t{1} << (slot->index % 64), std::memory_order_release);
   }
   alignas(64) std::array<std::atomic<uint64_t>, 2> free_{};
+  alignas(64) std::atomic<int> awake_{0};
 
   CacheDomains domains_;
   std::vector<std::array<uint64_t, 2>> domain_masks_;

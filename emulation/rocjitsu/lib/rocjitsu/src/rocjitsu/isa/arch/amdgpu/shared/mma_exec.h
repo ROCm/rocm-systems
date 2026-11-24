@@ -28,6 +28,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/matrix_input_snapshot.h"
 #include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/result.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -2090,8 +2091,16 @@ inline uint8_t read_mfma_scale_e8m0(auto &cu, uint32_t vgpr_base, uint32_t selec
                                     uint32_t byte_index) {
   if (selector >= 240 && selector <= 248)
     return mfma_inline_scale_e8m0(selector);
+  const uint32_t reg = src_base(vgpr_base, selector);
+  // A helper reads a scale register the issuer may since have overwritten from
+  // the copy published with the job.
+  if (const MatrixInputSnapshot *snapshot = matrix_input_snapshot) [[unlikely]] {
+    for (const MatrixInputSnapshot::Operand *operand : {&snapshot->scale_a, &snapshot->scale_b})
+      if (operand->regs && operand->base == reg)
+        return static_cast<uint8_t>((operand->lanes[lane] >> (byte_index * 8)) & 0xffu);
+  }
   uint8_t byte_mask = static_cast<uint8_t>(1u << byte_index);
-  uint32_t raw = RegisterAccess(cu).read_vgpr(src_base(vgpr_base, selector), lane, byte_mask);
+  uint32_t raw = RegisterAccess(cu).read_vgpr(reg, lane, byte_mask);
   return static_cast<uint8_t>((raw >> (byte_index * 8)) & 0xffu);
 }
 
