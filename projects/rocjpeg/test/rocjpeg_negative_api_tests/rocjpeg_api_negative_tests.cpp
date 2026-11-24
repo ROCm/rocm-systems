@@ -648,7 +648,8 @@ std::vector<PlaneLayout> OutputPlaneLayouts(RocJpegOutputFormat output_format, R
  * @brief Counts the bytes of one plane of a crop that differ from the full decode, as described by PlaneLayout.
  *
  * Only width / x_subsampling columns and height / y_subsampling rows of samples are compared, which every output holds
- * whatever the parity of the crop size.
+ * whatever the parity of the crop size. Packed YUYV rows are compared over all width * 2 bytes instead: with an odd
+ * width they end with the Y and U of the last pixel, half a macropixel that whole-macropixel columns would leave out.
  *
  * @param layout The layout of the plane.
  * @param crop The plane of the crop.
@@ -664,11 +665,13 @@ uint32_t CountCropMismatches(const PlaneLayout &layout, const std::vector<uint8_
     const uint32_t top = crop_params.crop_rectangle.top;
     const uint32_t num_rows = (crop_params.crop_rectangle.bottom - top) / layout.y_subsampling;
     const uint32_t num_columns = (crop_params.crop_rectangle.right - left) / layout.x_subsampling;
+    const uint32_t num_row_bytes = layout.packed_yuyv ? (crop_params.crop_rectangle.right - left) * 2
+                                                      : num_columns * layout.bytes_per_sample;
     uint32_t num_mismatches = 0;
     for (uint32_t row = 0; row < num_rows; row++) {
         const size_t crop_row = static_cast<size_t>(row) * pitch;
         const size_t full_row = static_cast<size_t>(top / layout.y_subsampling + row) * pitch;
-        for (uint32_t byte = 0; byte < num_columns * layout.bytes_per_sample; byte++) {
+        for (uint32_t byte = 0; byte < num_row_bytes; byte++) {
             const uint32_t column = byte / layout.bytes_per_sample;
             const uint32_t byte_in_sample = byte % layout.bytes_per_sample;
             uint32_t full_byte = (left / layout.x_subsampling + column) * layout.bytes_per_sample + byte_in_sample;
