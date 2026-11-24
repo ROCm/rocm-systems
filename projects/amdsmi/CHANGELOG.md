@@ -8,6 +8,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added `amdsmi_is_gpu_apu()` to identify the integrated GPU of an APU**.  
+  - Available in C, Python, and Rust. It reports the amdgpu driver's own classification and returns `AMDSMI_STATUS_NOT_SUPPORTED`, including on WSL, rather than guessing. `amd-smi` now uses it to choose the memory pool it reports for an APU.
+
 - **Added ``amd-smi metric --nic --rdma [idx]`` and the Python ``amdsmi_get_nic_rdma_port_statistics()``**.  
   - Prints the RDMA hardware counters of each RDMA port of an AI-NIC. The Python function returns a dictionary of counter name to value.
 
@@ -162,6 +165,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The Python enum members ``AmdSmiDeviceType.BRCM_NIC_DEVICE``, ``AmdSmiDeviceType.BRCM_SWITCH_DEVICE``, ``AmdSmiProcessorType.AMD_BRCM_NIC`` and ``AmdSmiProcessorType.AMD_BRCM_SWITCH`` are removed, so code that still names them raises ``AttributeError``.
 
 ### Resolved Issues
+
+- **Fixed `amdsmi_get_processor_handles_by_type()` returning GPUs for unrelated processor types**.  
+  - `AMD_APU`, `NON_AMD_GPU`, and `NON_AMD_CPU` now return an empty list, and `UNKNOWN` returns `AMDSMI_STATUS_INVAL` instead of acting as a wildcard. To find APUs, request `AMD_GPU` and call `amdsmi_is_gpu_apu()` ([#8476](https://github.com/ROCm/rocm-systems/issues/8476)).
 
 - **Fixed `amd-smi reset --gpureset` resetting only the first GPU on UALink systems**.  
   - Each UALink GPU is now reset individually; GPUs in an XGMI hive are still reset once per hive.

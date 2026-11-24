@@ -44,6 +44,9 @@ ECC, partitions) return `AMDSMI_STATUS_NOT_SUPPORTED` on WSL. This is the same
 status the native path returns for unsupported hardware, so existing error
 handling continues to work.
 
+`amdsmi_is_gpu_apu()` also returns `AMDSMI_STATUS_NOT_SUPPORTED` on WSL because
+WDDM does not provide the native DRM fusion flag used for APU identification.
+
 ## Prerequisites
 
 - Windows 11 (or Windows 10 with WSL2) with a WSL-capable AMD GPU driver.
