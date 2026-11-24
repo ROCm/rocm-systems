@@ -17,5 +17,3 @@ fabric.hbm_bw:
     per second. It reflects peak single-direction (read-only) bandwidth, so write-heavy
     or mixed kernels fall below it.
   peak_empirical: $HBMBw_empirical_peak
-fabric.uncached_rd_traffic:
-  formula: 100 * SUM(TCC_EA_RD_UNCACHED_32B_sum) / SUM(TCC_EA_RDREQ_32B_sum + 2 * (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum))

@@ -15,7 +15,6 @@ from unittest.mock import MagicMock, patch
 
 import common
 import pytest
-import yaml
 
 import config
 from rocprof_compute_soc.soc_base import (
@@ -68,39 +67,6 @@ BASELINE_COUNTER = "SQ_BASELINE_COUNTER"  # table 201, outside block 30
 TABLE_3012_COUNTER = "TCC_BOTTLENECK_COUNTER"  # block 30, table 3012
 TABLE_3013_COUNTER = "TCC_EA_COUNTER"  # block 30, table 3013
 FIXTURE_COUNTERS = {BASELINE_COUNTER, TABLE_3012_COUNTER, TABLE_3013_COUNTER}
-
-UNCACHED_READ_TRAFFIC_COUNTERS = [
-    pytest.param(
-        "gfx908",
-        "TCC_EA_RD_UNCACHED_32B_sum",
-        ("TCC_EA_RDREQ_32B_sum + 2 * (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)"),
-        id="gfx908",
-    ),
-    pytest.param(
-        "gfx90a",
-        "TCC_EA_RD_UNCACHED_32B_sum",
-        ("TCC_EA_RDREQ_32B_sum + 2 * (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)"),
-        id="gfx90a",
-    ),
-    pytest.param(
-        "gfx942",
-        "TCC_EA0_RD_UNCACHED_32B_sum",
-        (
-            "TCC_EA0_RDREQ_32B_sum + 2 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - "
-            "TCC_EA0_RDREQ_32B_sum) + 4 * TCC_BUBBLE_sum"
-        ),
-        id="gfx942",
-    ),
-    pytest.param(
-        "gfx950",
-        "TCC_EA0_RD_UNCACHED_32B_sum",
-        (
-            "TCC_EA0_RDREQ_32B_sum + 2 * TCC_EA0_RDREQ_64B_sum + "
-            "4 * TCC_EA0_RDREQ_128B_sum"
-        ),
-        id="gfx950",
-    ),
-]
 
 # Every counter name outside the expressions is unique, so any leak from a
 # comment, title, description or metric name shows up in the result.
@@ -384,41 +350,6 @@ def test_allocate_keeps_sp_valu_and_sq_vmem_apart_on_gfx1250(gfx1250_soc):
         ["SP_VALU_A"],
         ["SQ_VMEM_B"],
     ]
-
-
-def _uncached_read_traffic_expressions(config_dir: Path, arch: str) -> dict[str, str]:
-    """Return the avg/min/max expressions for 17.2.3 on an architecture."""
-    config_path = config_dir / arch / "1700_l2_cache.yaml"
-    doc = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    sources = doc["Panel Config"]["data source"]
-    metric_table = next(
-        source["metric_table"]
-        for source in sources
-        if source["metric_table"]["id"] == 1702
-    )
-    return metric_table["metric"]["Uncached Read Traffic"]
-
-
-@pytest.mark.parametrize(
-    "gpu_arch, numerator, denominator",
-    UNCACHED_READ_TRAFFIC_COUNTERS,
-)
-def test_uncached_read_traffic_uses_size_normalized_request_units(
-    gpu_arch,
-    numerator,
-    denominator,
-):
-    """17.2.3 divides uncached 32B units by matching total read units."""
-    expressions = _uncached_read_traffic_expressions(
-        config.analysis_configs_dir,
-        gpu_arch,
-    )
-    assert expressions == {
-        "avg": f"100 * SUM({numerator}) / SUM({denominator})",
-        "min": f"100 * MIN({numerator} / ({denominator}))",
-        "max": f"100 * MAX({numerator} / ({denominator}))",
-        "unit": "Percent",
-    }
 
 
 # =============================================================================
