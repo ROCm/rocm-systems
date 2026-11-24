@@ -162,21 +162,6 @@ def gen_float_compare(ctx: ExecuteContext) -> str | None:
     result_writer = mask_result_writer(
         mnemonic, dst, result_writer, ctx.cmpx_writes_vcc
     )
-    if arch == 'rdna3_5':
-        api = 'rj_arith_' + mnemonic.lower() + '_gfx1150'
-        skip_inputs = str(constant).lower()
-        if constant:
-            skip_inputs = (
-                '!amdgpu::gfx1150_constant_compare_reads_inputs('
-                'wf.cu().arithmetic_flags(), wf.dx10_clamp())'
-            )
-        lines += [
-            f'  amdgpu::arith::execute_float_compare<{bits}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
-            '      wf.cu().arithmetic_flags() | (wf.dx10_clamp() ? 0 : RJ_ARITH_FP_DX10_CLAMP_OFF),',
-            f'      {modifiers}, {src[0]}, {src[1]}, {skip_inputs},',
-            f'      {result_writer}, exec_mask, /*observe_full_exec=*/false);',
-        ]
-        return '\n'.join(lines)
     # CDNA retains the inherited numerical model without claiming gfx12 FP status.
     api = (
         'rj_arith_'

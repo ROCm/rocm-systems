@@ -312,7 +312,7 @@ def test_tru_alias_is_cdna_only(prefix):
 
 
 @pytest.mark.parametrize('name', [n for n in FLOAT_COMPARISONS if '_TRU_' not in n])
-def test_gfx1150_comparison_bindings_own_signaling_policy(name):
+def test_gfx1150_comparison_bindings_reuse_rdna3(name):
     bits, constant = FLOAT_COMPARISONS[name]
     api = 'rj_arith_' + name.lower()
     for vop3 in (False, True):
@@ -326,11 +326,12 @@ def test_gfx1150_comparison_bindings_own_signaling_policy(name):
                 result_writer='commit_result' if vop3 else None,
             )
         )
-        assert f'{api}_w32_gfx1150, {api}_w64_gfx1150,' in body
+        assert f'{api}_w32, {api}_w64,' in body
         assert f'execute_float_compare<{bits}>' in body
-        assert 'RJ_ARITH_FP_DX10_CLAMP_OFF' in body
-        assert '/*observe_full_exec=*/false' in body
-        assert ('gfx1150_constant_compare_reads_inputs' in body) == constant
+        assert '_gfx1150' not in body
+        assert 'RJ_ARITH_FP_DX10_CLAMP_OFF' not in body
+        assert 'gfx1150_constant_compare_reads_inputs' not in body
+        assert f', {str(constant).lower()},' in body
         assert ('RJ_ARITH_ALU_HIGH_A' in body) == (bits == 16 and vop3)
         assert 'execute_compare_with_exceptions' not in body
         if name.startswith('V_CMPX_'):

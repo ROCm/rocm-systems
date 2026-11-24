@@ -23,8 +23,7 @@ void VInterpP10F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
   amdgpu::arith::execute_interp<false, false>(
-      wf, amdgpu::arith::gfx115_interp<false, false, false, uint32_t>,
-      amdgpu::arith::gfx115_interp<false, false, false, uint64_t>, wf.cu().arithmetic_flags(),
+      wf, rj_arith_v_interp_p10_f32_w32, rj_arith_v_interp_p10_f32_w64, wf.cu().arithmetic_flags(),
       modifiers, vdst, src0, src1, src2);
 }
 
@@ -33,8 +32,7 @@ void VInterpP2F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
   amdgpu::arith::execute_interp<true, false>(
-      wf, amdgpu::arith::gfx115_interp<true, false, false, uint32_t>,
-      amdgpu::arith::gfx115_interp<true, false, false, uint64_t>, wf.cu().arithmetic_flags(),
+      wf, rj_arith_v_interp_p2_f32_w32, rj_arith_v_interp_p2_f32_w64, wf.cu().arithmetic_flags(),
       modifiers, vdst, src0, src1, src2);
 }
 
@@ -45,9 +43,8 @@ void VInterpP10F16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.op_sel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
       ((inst_.op_sel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u);
   amdgpu::arith::execute_interp<false, true>(
-      wf, amdgpu::arith::gfx115_interp<false, true, false, uint32_t>,
-      amdgpu::arith::gfx115_interp<false, true, false, uint64_t>, wf.cu().arithmetic_flags(),
-      modifiers, vdst, src0, src1, src2);
+      wf, rj_arith_v_interp_p10_f16_f32_w32, rj_arith_v_interp_p10_f16_f32_w64,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2);
 }
 
 void VInterpP2F16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
@@ -57,9 +54,8 @@ void VInterpP2F16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.op_sel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
       ((inst_.op_sel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u);
   amdgpu::arith::execute_interp<true, true>(
-      wf, amdgpu::arith::gfx115_interp<true, true, false, uint32_t>,
-      amdgpu::arith::gfx115_interp<true, true, false, uint64_t>, wf.cu().arithmetic_flags(),
-      modifiers, vdst, src0, src1, src2);
+      wf, rj_arith_v_interp_p2_f16_f32_w32, rj_arith_v_interp_p2_f16_f32_w64,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2);
 }
 
 void VInterpP10RtzF16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
@@ -69,9 +65,8 @@ void VInterpP10RtzF16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.op_sel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
       ((inst_.op_sel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u);
   amdgpu::arith::execute_interp<false, true>(
-      wf, amdgpu::arith::gfx115_interp<false, true, true, uint32_t>,
-      amdgpu::arith::gfx115_interp<false, true, true, uint64_t>, wf.cu().arithmetic_flags(),
-      modifiers, vdst, src0, src1, src2);
+      wf, rj_arith_v_interp_p10_rtz_f16_f32_w32, rj_arith_v_interp_p10_rtz_f16_f32_w64,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2);
 }
 
 void VInterpP2RtzF16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
@@ -81,9 +76,8 @@ void VInterpP2RtzF16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.op_sel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
       ((inst_.op_sel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u);
   amdgpu::arith::execute_interp<true, true>(
-      wf, amdgpu::arith::gfx115_interp<true, true, true, uint32_t>,
-      amdgpu::arith::gfx115_interp<true, true, true, uint64_t>, wf.cu().arithmetic_flags(),
-      modifiers, vdst, src0, src1, src2);
+      wf, rj_arith_v_interp_p2_rtz_f16_f32_w32, rj_arith_v_interp_p2_rtz_f16_f32_w64,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2);
 }
 
 } // namespace rdna3_5

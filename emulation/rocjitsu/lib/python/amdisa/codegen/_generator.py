@@ -13701,8 +13701,7 @@ class CodeGenerator:
                         )
 
                         pred = FLOAT_COMPARISONS.get(inst.name)
-                        signaling_cmp = self.isa_spec.arch_name == 'rdna3_5'
-                        if signaling_cmp and pred and pred[1]:
+                        if self.isa_spec.arch_name == 'rdna3_5' and pred and pred[1]:
                             access_conditions.append(
                                 'modifiers.constant_float_compare = true;'
                             )
@@ -13712,7 +13711,7 @@ class CodeGenerator:
                         )
                         if (
                             pred
-                            and (signaling_cmp or extended_gfx10_cmp)
+                            and extended_gfx10_cmp
                             and enc.enc_name in ('ENC_VOP3', 'ENC_VOPC')
                             and self._supports_dpp_for_instruction(
                                 inst, inst_dpp_enc_name
@@ -16357,18 +16356,8 @@ class CodeGenerator:
                                 'vector_cmpx_class',
                             )
                         )
-                        from amdisa.codegen.execute.rj_arith_compare import (
-                            FLOAT_COMPARISONS,
-                        )
-
-                        _constant_float_predicate = FLOAT_COMPARISONS.get(inst.name)
-                        _clamped_constant = (
-                            self.isa_spec.arch_name == 'rdna3_5'
-                            and _constant_float_predicate is not None
-                            and _constant_float_predicate[1]
-                        )
                         _constant_compare = (
-                            self.isa_spec.arch_name in ('rdna3', 'rdna4')
+                            self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4')
                             and _is_compare
                             and sem.operation in ('f', 't')
                         )
@@ -16800,14 +16789,7 @@ class CodeGenerator:
                                         f'  amdgpu::dpp::apply_source_modifiers({source}, dpp_src{index}_, wf,\n'
                                         f'      {sign}ull, dpp_modifiers_, {index}{source_lanes});\n'
                                     )
-                            if _clamped_constant and _dpp_source_setup:
-                                _dpp_preamble += (
-                                    '  if (amdgpu::gfx1150_constant_compare_reads_inputs(wf.cu().arithmetic_flags(), wf.dx10_clamp())) {\n'
-                                    + textwrap.indent(_dpp_source_setup, '  ')
-                                    + '  }\n'
-                                )
-                            else:
-                                _dpp_preamble += _dpp_source_setup
+                            _dpp_preamble += _dpp_source_setup
                             if not _semantic_stages_src0:
                                 _dpp_preamble += (
                                     f'  ScopedOperandDelegate dpp_src0_binding_({_src0_name},\n'
@@ -19331,10 +19313,6 @@ class CodeGenerator:
                     tokens = (tokens,)
                 if any(token in impl_text for token in tokens):
                     result.append((include, system))
-            if 'amdgpu::gfx1150_constant_compare_reads_inputs(' in impl_text:
-                result.append(
-                    ('rocjitsu/isa/arch/amdgpu/shared/gfx1150_compare_input.h', False)
-                )
             scalar_header = ('rj_arith/detail/rj_arith_scalar.h', False)
             if (
                 'amdgpu::arith::execute_pseudo_scalar(' in impl_text

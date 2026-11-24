@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Gfx1150 floating comparisons retain DX10_CLAMP-gated INVALID, including
-// constant predicates, selected FP16 halves, sparse EXEC and CMPX's EXEC result.
+// Gfx1150 floating comparisons share RDNA 3's exact unsuffixed comparators,
+// including constant predicates, selected FP16 halves, sparse EXEC and CMPX.
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
@@ -39,7 +39,8 @@ TEST(Gfx1150ComparisonTest, MasksAndSignaling) {
   };
   for (int lanes : {32, 64}) {
     for (auto semantics :
-         {amdgpu::ArithmeticSemantics::Compatibility, amdgpu::ArithmeticSemantics::Loose}) {
+         {amdgpu::ArithmeticSemantics::Compatibility, amdgpu::ArithmeticSemantics::Loose,
+          amdgpu::ArithmeticSemantics::BitExactEmpiricalNoFpStatus}) {
       amdgpu::GpuMemory memory("gfx1150_compare");
       amdgpu::L2Cache l2("gfx1150_compare");
       amdgpu::ComputeUnitCore::Config config{};
@@ -96,9 +97,7 @@ TEST(Gfx1150ComparisonTest, MasksAndSignaling) {
                 EXPECT_EQ(wave->exec(), opcode == f.cmpx ? expected : exec_mask);
                 EXPECT_EQ(wave->vcc(), full_exec_mask);
                 EXPECT_TRUE(wave->read_scc());
-                const bool invalid = semantics == amdgpu::ArithmeticSemantics::Compatibility &&
-                                     !dx10 && ((exec_mask & 1) || (clamp && (exec_mask & 2)));
-                EXPECT_EQ(wave->trapsts(), invalid ? 0x101U : 0x100U);
+                EXPECT_EQ(wave->trapsts(), 0x100U);
               }
             }
           }

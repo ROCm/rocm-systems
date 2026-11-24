@@ -46,10 +46,6 @@ def gen_interp(ctx: ExecuteContext) -> str | None:
         ]
     controls = 'wf.cu().arithmetic_flags()'
     wave32, wave64 = wave_api(api, 32), wave_api(api, 64)
-    if arch == 'rdna3_5':
-        p2_half_rtz = ', '.join(str(b).lower() for b in (p2, half, '_RTZ_' in mnemonic))
-        kernel = f'amdgpu::arith::gfx115_interp<{p2_half_rtz}, '
-        wave32, wave64 = kernel + 'uint32_t>', kernel + 'uint64_t>'
     return '\n'.join(
         [
             '  const uint64_t modifiers = ' + ' | '.join(terms) + ';',

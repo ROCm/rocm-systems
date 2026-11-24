@@ -276,7 +276,6 @@ foreach(
         class
         float_equality
         float_ordered
-        float_gfx1150
         float_unordered
 )
     set(target "rj_arith_compare_${family}_test")

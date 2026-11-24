@@ -23,6 +23,7 @@ from rj_arith_headers import public_headers
 # imported from the generator so that changing its map fails these tests.
 CONVERSION_SUFFIX = {
     'rdna3': '',
+    'rdna3_5': '',
     'rdna4': '_gfx12',
     'cdna1': '_gfx942',
     'cdna2': '_gfx942',
@@ -31,7 +32,6 @@ CONVERSION_SUFFIX = {
     'cdna5': '_gfx1250',
     'rdna1': '_gfx942',
     'rdna2': '_gfx942',
-    'rdna3_5': '_gfx942',
 }
 
 # Byte and nibble conversions predate the per-architecture split: every architecture shares
@@ -2671,7 +2671,7 @@ def test_gfx1250_selection_owns_its_numeric_only_compatibility_policy(name):
     assert 'BinaryFpOperation' not in body
 
 
-@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2'])
 @pytest.mark.parametrize('accumulate', [False, True])
 def test_older_packed_fma_uses_inherited_policy(arch, accumulate):
     from amdisa.codegen.execute.rj_arith_float import gen_packed_fma16
@@ -2706,7 +2706,7 @@ def test_older_packed_fma_uses_inherited_policy(arch, accumulate):
         assert ('RJ_ARITH_ALU_OMOD_2' in body) == (accumulate and cdna)
 
 
-@pytest.mark.parametrize('arch', ['rdna1', 'rdna2', 'rdna3_5'])
+@pytest.mark.parametrize('arch', ['rdna1', 'rdna2'])
 @pytest.mark.parametrize(
     'name', ['V_FMA_MIX_F32', 'V_FMA_MIXLO_F16', 'V_FMA_MIXHI_F16']
 )
@@ -2788,7 +2788,7 @@ def test_mixed_fma_has_no_legacy_dispatch_for_any_registered_profile():
             assert body and 'arith::execute_mixed_' in body, (arch, name)
 
 
-@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2'])
 def test_older_native_half_fma_routes_and_qualification(arch):
     from amdisa.codegen.execute.rj_arith_float import gen_float_fma16
 
@@ -2995,7 +2995,7 @@ def test_gfx1150_bf16_inline_uses_upper_float_half():
         ('V_DOT2ACC_F32_F16', False, True),
     ],
 )
-def test_gfx1150_float_dot_rejects_unqualified_strict_replay(name, half, accumulate):
+def test_gfx1150_float_dot_accepts_strict_replay(name, half, accumulate):
     from amdisa.codegen.execute.rj_arith_float import gen_float_dot32, gen_half_dot
 
     body = (gen_half_dot if half else gen_float_dot32)(
@@ -3009,9 +3009,50 @@ def test_gfx1150_float_dot_rejects_unqualified_strict_replay(name, half, accumul
             opsel_exprs=('low', 'high'),
         )
     )
-    assert (
-        body.index('if (!wf.exec())')
-        < body.index('UnsupportedOperandValue')
-        < body.index('execute_dot2_')
+    assert 'execute_dot2_' in body
+    assert 'UnsupportedOperandValue' not in body
+    assert 'if (!wf.exec())' not in body
+
+
+def test_gfx1150_half_fma_and_mixed_match_rdna3_qualification():
+    from amdisa.codegen.execute.rj_arith_float import (
+        gen_float_fma16,
+        gen_mixed_fma,
+        gen_packed_fma16,
     )
-    assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body
+
+    for name in ('V_FMA_MIX_F32', 'V_FMA_MIXLO_F16', 'V_FMA_MIXHI_F16'):
+        body = gen_mixed_fma(
+            context(
+                'rdna3_5',
+                name,
+                ['d'],
+                ['a', 'b', 'c'],
+                enc_name='ENC_VOP3P',
+                opsel_exprs=('lo', 'hi'),
+                op_sel_hi_2_expr='hi_c',
+            )
+        )
+        assert 'UnsupportedOperandValue' not in body
+        assert 'true, false);' in body
+    for name, inputs, enc in (
+        ('V_PK_FMA_F16', ['a', 'b', 'c'], 'ENC_VOP3P'),
+        ('V_PK_FMAC_F16', ['a', 'b'], 'ENC_VOP2'),
+    ):
+        body = gen_packed_fma16(
+            context(
+                'rdna3_5',
+                name,
+                ['d'],
+                inputs,
+                enc_name=enc,
+                opsel_exprs=('lo', 'hi'),
+                op_sel_hi_2_expr='hi_c',
+            )
+        )
+        assert 'UnsupportedOperandValue' not in body
+        assert 'if (!wf.exec())' not in body
+    for name, inputs in (('V_FMA_F16', ['a', 'b', 'c']), ('V_FMAC_F16', ['a', 'b'])):
+        body = gen_float_fma16(context('rdna3_5', name, ['d'], inputs, is_vop3=True))
+        assert 'UnsupportedOperandValue' not in body
+        assert 'if (!wf.exec())' not in body

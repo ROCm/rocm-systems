@@ -335,11 +335,14 @@ TEST(ExecutionPluginTest, SignalingCompareReadsOnlySelectedInputs) {
     f.cu->write_vgpr(vb + 1, 0, 0x3c003c00);
     struct Case {
       uint32_t word, result, invalid, mask;
+      bool constant = false;
     };
-    const Case cases[] = {{eq, 0, 1, 3},
-                          {eq | 0x800, unsigned(gfx115), unsigned(!gfx115), gfx115 ? 12u : 3u},
-                          {never, 0, 1, 3},
-                          {always, 1, 1, 3}};
+    const Case cases[] = {
+        {eq, 0, unsigned(!gfx115), 3},
+        {eq | 0x800, unsigned(gfx115), unsigned(!gfx115), gfx115 ? 12u : 3u},
+        {never, 0, unsigned(!gfx115), 3, true},
+        {always, 1, unsigned(!gfx115), 3, true},
+    };
     for (bool scalar : {false, true}) {
       ForceScalarOverride execution_mode(scalar);
       for (auto c : cases) {
@@ -356,6 +359,10 @@ TEST(ExecutionPluginTest, SignalingCompareReadsOnlySelectedInputs) {
         EXPECT_EQ(wave->trapsts(), 0x40u | c.invalid);
         EXPECT_EQ(f.cu->read_sgpr(wave->sgpr_alloc().base + 10), c.result);
         const auto reads = vgpr_read_events(*plugin);
+        if (gfx115 && c.constant) {
+          EXPECT_TRUE(reads.empty());
+          continue;
+        }
         ASSERT_EQ(reads.size(), 2u);
         EXPECT_EQ(reads[0].physical_reg, vb);
         EXPECT_EQ(reads[0].lane_mask, 1u);
@@ -459,7 +466,7 @@ TEST(ExecutionPluginTest, Gfx115CompareUsesAllocatedSources) {
         observer->events.clear();
         ASSERT_TRUE(f.cu->execute_instruction(inst.value().get(), *wave).succeeded());
         EXPECT_EQ(wave->vcc(), 1u);
-        EXPECT_EQ(wave->trapsts() & 1u, 1u);
+        EXPECT_EQ(wave->trapsts() & 1u, 0u);
         const auto reads = vgpr_read_events(*observer);
         ASSERT_EQ(reads.size(), 2u);
         EXPECT_EQ(reads[0].physical_reg, base);
@@ -853,9 +860,8 @@ TEST(ExecutionPluginTest, Gfx115ConstantCompareAndDppAddObserveTheirPendingSourc
             const bool both_rows = words[1] == 0xff00e401u;
             EXPECT_EQ(f.cu->read_vgpr(base + 3, 16), both_rows ? 0x40400000u : 0xdeadbeefu);
           } else {
-            const bool reports = semantics == amdgpu::ArithmeticSemantics::Compatibility;
-            EXPECT_EQ(actual != 0, !fixed || (!clamp && reports));
-            EXPECT_EQ(wave->trapsts() & 1u, unsigned(!clamp && reports));
+            EXPECT_EQ(actual != 0, !fixed);
+            EXPECT_EQ(wave->trapsts() & 1u, 0u);
           }
           auto &state = wave->ensure_memory_wait_scoreboard();
           for (unsigned lane : {0u, 1u, 16u}) {
@@ -1047,7 +1053,7 @@ TEST(ExecutionPluginTest, UniformDppCompareSourceWaitsOnlyWhenALaneReadsIt) {
           std::array{0xd412006au, 0x000008fau, 0xff011103u | (uint32_t{bound} << 19)});
       ASSERT_TRUE(inst.succeeded());
       state.check_instruction(*inst.value(), *wave);
-      const bool reads_scalar = bound || arch == rocjitsu::IsaFamily::Rdna4;
+      const bool reads_scalar = true;
       EXPECT_EQ(hazards, uint32_t(reads_scalar));
       observer->events.clear();
       ASSERT_TRUE(f.cu->execute_instruction(inst.value().get(), *wave).succeeded());

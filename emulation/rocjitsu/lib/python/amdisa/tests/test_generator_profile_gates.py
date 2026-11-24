@@ -7014,15 +7014,12 @@ def test_generated_vop3_compare_dpp_masks_scalar_or_exec_destination(
         if 'void VCmpTF32Vop3::execute_impl' in vop3:
             cmp_true_body = _generated_method_body(vop3, 'VCmpTF32Vop3', 'VCmpFF64Vop3')
             assert cmp_true_body.count('commit_result') >= 2
-            if arch == 'rdna3':
+            if arch in ('rdna3', 'rdna3_5'):
                 assert 'arith::execute_float_compare<32>' in cmp_true_body
                 assert 'rj_arith_v_cmp_t_f32_w32,' in cmp_true_body
-            elif arch == 'rdna3_5':
-                assert 'arith::execute_float_compare<32>' in cmp_true_body
-                assert 'rj_arith_v_cmp_t_f32_w32_gfx1150,' in cmp_true_body
-                assert 'RJ_ARITH_FP_DX10_CLAMP_OFF' in cmp_true_body
+                assert '_gfx1150' not in cmp_true_body
+                assert 'RJ_ARITH_FP_DX10_CLAMP_OFF' not in cmp_true_body
                 assert 'execute_compare_with_exceptions' not in cmp_true_body
-                assert 'RJ_ARITH_ALU_CLAMP' in cmp_true_body
             else:
                 assert 'execute_v_cmp_t_f32_vop3' in cmp_true_body
 

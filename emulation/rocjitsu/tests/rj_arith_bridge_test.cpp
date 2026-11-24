@@ -2971,8 +2971,7 @@ TEST(ArithBridgeTest, HalfDotInlineReplicationAndRejectedPartialWrites) {
                                {.vdst = 2, .opsel = 8, .src0 = 242, .src1 = 257, .src2 = 258});
           auto instruction = fixture.decoder->decode_window(words);
           ASSERT_TRUE(instruction.succeeded());
-          const bool rejected =
-              policy_index == 2 || (policy_index == 1 && arch == rocjitsu::IsaFamily::Rdna3_5);
+          const bool rejected = policy_index == 2;
           EXPECT_EQ(
               fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed(),
               rejected);
@@ -3075,31 +3074,47 @@ TEST(ArithBridgeTest, Dot2HardwareBitsWaveWidthsAliasesAndStatePolicy) {
   check(rocjitsu::IsaFamily::Rdna4, true, kGfx12DotBF16Cases);
 }
 
-TEST(ArithBridgeTest, Gfx1150DotRejectsUnqualifiedStrictNumeric) {
+TEST(ArithBridgeTest, Gfx1150DotAcceptsStrictNumeric) {
+  struct Case {
+    std::array<uint32_t, 2> words;
+    uint32_t a, b, c, init_d, expected;
+  };
+  const std::array<Case, 5> cases = {{
+      {rdna3_5::build_vop3p(rdna3_5::kVDot2F32F16Vop3p,
+                            {.vdst = 4, .src0 = 256, .src1 = 257, .src2 = 258, .op_sel_hi = 3}),
+       0x3c003c00U, 0x3c003c00U, 0x3f800000U, 0x12345678U, 0x40400000U},
+      {rdna3_5::build_vop3p(rdna3_5::kVDot2F32Bf16Vop3p,
+                            {.vdst = 4, .src0 = 256, .src1 = 257, .src2 = 258, .op_sel_hi = 3}),
+       0x3f803f80U, 0x3f803f80U, 0x3f800000U, 0x12345678U, 0x40400000U},
+      {rdna3_5::build_vop3(rdna3_5::kVDot2F16F16Vop3,
+                           {.vdst = 4, .src0 = 256, .src1 = 257, .src2 = 258}),
+       0x3c003c00U, 0x3c003c00U, 0x00003c00U, 0x12345678U, 0x12344200U},
+      {rdna3_5::build_vop3(rdna3_5::kVDot2Bf16Bf16Vop3,
+                           {.vdst = 4, .src0 = 256, .src1 = 257, .src2 = 258}),
+       0x3f803f80U, 0x3f803f80U, 0x00003f80U, 0x12345678U, 0x12344040U},
+      {{rdna3_5::build_vop2(rdna3_5::kVDot2accF32F16Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 4})[0],
+        0},
+       0x3c003c00U,
+       0x3c003c00U,
+       0U,
+       0x3f800000U,
+       0x40400000U},
+  }};
   for (uint32_t lanes : {32U, 64U}) {
     BridgeFixture fixture(rocjitsu::IsaFamily::Rdna3_5, lanes,
                           {ArithmeticSemantics::BitExactEmpiricalNoFpStatus});
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     fixture.wave->set_exec(1);
-    const std::array words = {
-        rdna3_5::build_vop3p(rdna3_5::kVDot2F32F16Vop3p,
-                             {.vdst = 4, .src0 = 256, .src1 = 257, .src2 = 258, .op_sel_hi = 3}),
-        rdna3_5::build_vop3p(rdna3_5::kVDot2F32Bf16Vop3p,
-                             {.vdst = 4, .src0 = 256, .src1 = 257, .src2 = 258, .op_sel_hi = 3}),
-        rdna3_5::build_vop3(rdna3_5::kVDot2F16F16Vop3,
-                            {.vdst = 4, .src0 = 256, .src1 = 257, .src2 = 258}),
-        rdna3_5::build_vop3(rdna3_5::kVDot2Bf16Bf16Vop3,
-                            {.vdst = 4, .src0 = 256, .src1 = 257, .src2 = 258}),
-        std::array<uint32_t, 2>{rdna3_5::build_vop2(rdna3_5::kVDot2accF32F16Vop2,
-                                                    {.src0 = 256, .vsrc1 = 1, .vdst = 4})[0],
-                                0}};
-    for (const auto &encoding : words) {
-      fixture.cu->write_vgpr(fixture.base() + 4, 0, 0x12345678);
-      auto instruction = fixture.decoder->decode_window(encoding);
+    for (const auto &test : cases) {
+      fixture.cu->write_vgpr(fixture.base(), 0, test.a);
+      fixture.cu->write_vgpr(fixture.base() + 1, 0, test.b);
+      fixture.cu->write_vgpr(fixture.base() + 2, 0, test.c);
+      fixture.cu->write_vgpr(fixture.base() + 4, 0, test.init_d);
+      auto instruction = fixture.decoder->decode_window(test.words);
       ASSERT_TRUE(instruction.succeeded());
-      EXPECT_TRUE(
-          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed());
-      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 4, 0), 0x12345678U);
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 4, 0), test.expected);
     }
   }
 }

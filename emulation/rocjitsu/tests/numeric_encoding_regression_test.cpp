@@ -593,8 +593,9 @@ TEST_P(OlderPackedFma, StrictQualificationAndEmptyExec) {
         std::unique_ptr<Instruction> instruction(decode_valid(*decoder_, words.data()));
         ASSERT_NE(instruction, nullptr);
         const bool reject =
-            exec_mask && (semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus ||
-                          semantics == ArithmeticSemantics::BitExactEmpirical);
+            exec_mask && (semantics == ArithmeticSemantics::BitExactEmpirical ||
+                          (arch != rocjitsu::IsaFamily::Rdna3_5 &&
+                           semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus));
         EXPECT_EQ(cu_->execute_instruction(instruction.get(), *wave_).failed(), reject);
         EXPECT_EQ(cu_->read_vgpr_storage(wave_->vgpr_alloc().base + 4, 0),
                   exec_mask && !reject ? 0x42004200U : 0x3c003c00U);
@@ -655,14 +656,17 @@ TEST_P(OlderRadeonMixed, ArithmeticAndSourceFormats) {
                 initial);
         }
       }
-      // Half inputs survive even when MODE disables half denormals.
+      // Older gfx10 retains preserve_half_denormals=true; gfx1150 honors guest MODE like gfx1100.
+      const bool preserves_half_denorms = std::get<0>(GetParam()) != rocjitsu::IsaFamily::Rdna3_5;
       put(0, 1);
       put(1, 0x4b800000); // 2^24 times the smallest half gives one.
       put(2, 0);
-      check({opcode, 0x0c0a0300}, expected(0x3f800000, 0x3c00, 0xdeadbeef));
-      // FP32 output honors FP32 input flushing; half output preserves FP32 inputs too.
+      check({opcode, 0x0c0a0300}, preserves_half_denorms ? expected(0x3f800000, 0x3c00, 0xdeadbeef)
+                                                         : expected(0, 0, 0xdeadbeef));
+      // FP32 output honors FP32 input flushing; only gfx10 preserves FP32 inputs on half output.
       put(1, 0x7e800000); // 2^126 times the smallest FP32 gives half encoding 2.
-      check({opcode, 0x040a0300}, expected(0, 2, 0xdeadbeef));
+      check({opcode, 0x040a0300},
+            preserves_half_denorms ? expected(0, 2, 0xdeadbeef) : expected(0, 0, 0xdeadbeef));
       wave_->set_mode_raw(destination ? 4 : 1); // Destination-specific upward rounding.
       put(0, 0x3f800000);
       put(1, 0x3f800000);
@@ -679,6 +683,7 @@ TEST_P(OlderRadeonMixed, ArithmeticAndSourceFormats) {
 
 TEST_P(OlderRadeonMixed, StrictQualificationAndEmptyExec) {
   using amdgpu::ArithmeticSemantics;
+  const auto arch = std::get<0>(GetParam());
   for (auto semantics :
        {ArithmeticSemantics::Loose, ArithmeticSemantics::BitExactEmpiricalAllowLoose,
         ArithmeticSemantics::BitExactEmpiricalNoFpStatus, ArithmeticSemantics::BitExactEmpirical,
@@ -698,8 +703,9 @@ TEST_P(OlderRadeonMixed, StrictQualificationAndEmptyExec) {
       std::unique_ptr<Instruction> instruction(decode_valid(*decoder_, words.data()));
       ASSERT_NE(instruction, nullptr);
       const bool reject =
-          exec_mask && (semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus ||
-                        semantics == ArithmeticSemantics::BitExactEmpirical);
+          exec_mask && (semantics == ArithmeticSemantics::BitExactEmpirical ||
+                        (arch != rocjitsu::IsaFamily::Rdna3_5 &&
+                         semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus));
       EXPECT_EQ(cu_->execute_instruction(instruction.get(), *wave_).failed(), reject);
       EXPECT_EQ(cu_->read_vgpr_storage(wave_->vgpr_alloc().base + 4, 0),
                 exec_mask && !reject ? 0x40400000U : 0xdeadbeefU);
@@ -1166,8 +1172,9 @@ TEST_P(OlderHalfFma, QualificationAndInactiveExec) {
     put(0, 0x3c00);
     put(1, 0x3c00);
     put(2, 0x3c00);
-    const bool strict = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus ||
-                        semantics == ArithmeticSemantics::BitExactEmpirical;
+    const bool strict = semantics == ArithmeticSemantics::BitExactEmpirical ||
+                        (arch != rocjitsu::IsaFamily::Rdna3_5 &&
+                         semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus);
     for (bool suppressed : {false, true}) {
       if (cdna && suppressed) {
         continue; // These CDNA native VOP3 forms have no DPP encoding.

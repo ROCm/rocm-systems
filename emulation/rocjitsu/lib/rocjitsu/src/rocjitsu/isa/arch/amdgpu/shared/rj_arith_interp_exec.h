@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "rj_arith/detail/rj_arith_fp.h"
 #include "rj_arith/detail/rj_arith_graphics.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/isa_family.h"
@@ -14,43 +13,6 @@
 #include <cstdint>
 
 namespace rocjitsu::amdgpu::arith {
-
-// GFX11.5 interpolation is one mixed FMA with fixed quad broadcasts. Reuse
-// the GFX11 exact kernel for NaN priority, guest rounding, and packed writes.
-// VINTERP never raises FP exceptions, including under the strictest policy.
-template <bool P2, bool Half, bool Rtz, typename Mask>
-inline int gfx115_interp(uint64_t flags, Mask exec, uint64_t modifiers, uint32_t *const *dst,
-                         const uint32_t *const *coefficient_lanes,
-                         const uint32_t *const *coordinate, const uint32_t *const *addend_lanes) {
-  constexpr unsigned width = sizeof(Mask) * 8;
-  std::array<uint32_t, width> coefficient{}, addend{};
-  for (Mask active = exec; active; active &= active - 1) {
-    const unsigned lane = std::countr_zero(active);
-    const unsigned quad = lane & ~3u;
-    coefficient[lane] = coefficient_lanes[0][quad + (P2 ? 2 : 1)];
-    addend[lane] = addend_lanes[0][P2 ? lane : quad];
-  }
-  const uint32_t *coefficient_data = coefficient.data();
-  const uint32_t *addend_data = addend.data();
-  flags = (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
-  if constexpr (Rtz)
-    flags = (flags & ~RJ_ARITH_FP_ROUND_MASK) | RJ_ARITH_FP_ROUND_ZERO;
-  if constexpr (Half)
-    modifiers |= RJ_ARITH_MIX_F16_A | (P2 ? 0 : RJ_ARITH_MIX_F16_C);
-  const bool high = modifiers & RJ_ARITH_ALU_HIGH_D;
-  modifiers &= ~RJ_ARITH_ALU_HIGH_D;
-  if constexpr (width == 32) {
-    const auto fma = Half && P2
-                         ? (high ? rj_arith_v_fma_mixhi_f16_w32 : rj_arith_v_fma_mixlo_f16_w32)
-                         : rj_arith_v_fma_mix_f32_w32;
-    return fma(flags, exec, modifiers, dst, &coefficient_data, coordinate, &addend_data, nullptr);
-  } else {
-    const auto fma = Half && P2
-                         ? (high ? rj_arith_v_fma_mixhi_f16_w64 : rj_arith_v_fma_mixlo_f16_w64)
-                         : rj_arith_v_fma_mix_f32_w64;
-    return fma(flags, exec, modifiers, dst, &coefficient_data, coordinate, &addend_data, nullptr);
-  }
-}
 
 // Observe the quad-broadcast source lanes even when they are inactive in EXEC.
 // Acquire every input before writes, and preserve the other half for FP16 P2.

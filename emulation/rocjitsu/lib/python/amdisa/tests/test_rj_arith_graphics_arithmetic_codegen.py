@@ -67,10 +67,7 @@ def test_interp_operand_controls_and_policy(arch, name):
     body = gen_interp(
         context(arch, name, ['d'], ['a', 'b', 'c'], enc_name='ENC_VINTERP')
     )
-    if arch == 'rdna3_5':
-        assert 'amdgpu::arith::gfx115_interp<' in body and ', uint64_t>' in body
-    else:
-        assert 'rj_arith_' + name.lower() + '_w64' in body
+    assert 'rj_arith_' + name.lower() + '_w64' in body
     assert 'arithmetic_flags()' in body
     assert 'reports_state' not in body
     assert 'wait_exp' not in body

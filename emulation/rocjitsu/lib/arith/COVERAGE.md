@@ -134,11 +134,10 @@ VCC/EXEC writes and trap delivery. Ordinary Compatibility comparisons remain
 numeric-only; explicit reporting qualification is unchanged. Gfx10 signaling
 policy remains in the partially migrated RDNA2 adapter until that migration.
 
-Gfx1150 floating relational predicates use scalar/AVX2/AVX-512 numeric and
-classification kernels on both waves. Compatibility preserves the inherited
-DX10_CLAMP-gated INVALID policy (CLAMP: any NaN; otherwise signaling NaNs).
-Explicit numeric modes leave FP status unused; strict status mode is unsupported.
-No new empirical hardware qualification is claimed for this inherited model.
+Gfx1150 floating relational predicates share the unsuffixed RDNA 3 scalar/AVX2/
+AVX-512 comparison kernels on both waves, accepting strict bit-exact numeric mode
+(mode 2) on the basis of ISA identity with gfx1100 captures. Strict FP-status
+mode (mode 3) remains unsupported.
 
 ## Scalar floating point
 
@@ -151,13 +150,15 @@ architecture-specific library policies documented below.
 
 ## Older native FP16 FMA
 
-Gfx908/gfx90a native and legacy FMA and gfx908 fused MAC, plus gfx1010/gfx1030/
-gfx1150 FMA/FMAC and literal FMA, use the inherited gfx11 numeric model in
+Gfx908/gfx90a native and legacy FMA and gfx908 fused MAC, plus gfx1010/gfx1030
+FMA/FMAC and literal FMA, use the inherited gfx11 numeric model in
 Compatibility and the existing scalar/AVX2/AVX-512 paths. Source/destination
 half selection, partial EXEC, guest rounding/denormals, IEEE NaN quieting and
 round-before-OMOD remain profile-specific bindings. They do not gain new
 empirical qualification or FP-status reporting; active explicit strict decoded
-requests are rejected. Loose and allow-Loose remain supported.
+requests are rejected. Loose and allow-Loose remain supported. Gfx1150 instead
+shares the unsuffixed RDNA 3 exact-capable path (mode 2) on the basis of ISA
+identity with gfx1100 captures.
 
 Gfx90a separately rounded MAD/MAC uses its own rj-arith model, described below;
 it is not folded into native FMA. Packed/mixed half arithmetic is also migrated.
@@ -202,19 +203,12 @@ production users and are removed.
 
 ## gfx1150 floating dots
 
-FP16/BF16 DOT2 with FP32 or true16 output and the FP16 DOT2ACC use the
-existing gfx11 arithmetic in both waves. Compatibility retains rocjitsu's
-integer-grid accumulation, NaN and packed narrowing policies; Loose uses
-the existing scalar, AVX2 and AVX-512 arithmetic. Packed-output Compatibility
-retains the inherited scalar grid model. Guest rounding/denormal controls
-remain ignored; FP16 overflow, inline replication, modifiers, selected
-C/D halves and DPP continue through the shared adapters. This inherits the
-existing software model, not a new gfx1150 hardware qualification. Explicit
-strict decoded modes 2 and 3 reject active VOP2, VOP3 and VOP3P requests
-without changing D; Compatibility/Loose/allow-Loose support the inherited model.
-This qualification boundary does not cover VOPD: its FP16/BF16 dual DOT2ACC
-forms retain their existing execution policy and can write both destinations
-in modes 2 and 3.
+FP16/BF16 DOT2 with FP32 or true16 output and the FP16 DOT2ACC share the
+unsuffixed RDNA 3 arithmetic in both waves, accepting Loose, Compatibility, and
+strict bit-exact numeric mode (mode 2) on the basis of ISA identity with gfx1100
+captures. Guest rounding/denormal controls remain ignored; FP16 overflow, inline
+replication, modifiers, selected C/D halves and DPP continue through the shared
+adapters. Strict FP-status reporting (mode 3) remains unsupported.
 
 The old true16-dot emitter loses its last production users and is deleted.
 Its semantic classes now route directly to the shared library binding, along
@@ -230,9 +224,11 @@ claim is made for other counts. Scalar carriers replicate the appropriate
 U64 data or U32 count. Existing decoder and simulator coverage is retained.
 ## gfx1150 scalar floating point
 
-All 58 scalar FP forms used by Rocjitsu support Loose and Compatibility.
+All 58 scalar FP forms used by Rocjitsu support Loose, Compatibility, and strict
+bit-exact numeric mode (mode 2, `RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS`).
 Compatibility preserves the inherited software model, including guest rounding,
-IEEE-dependent NaNs and FP status. The 30 gfx1150-specific arithmetic, selection,
-rounding and conversion entry points do not advertise new empirical qualification;
-comparisons share the existing raw-bit predicates. Scalar operations have one
-SGPR value per operand, so there is no lane-vector SIMD backend to select.
+IEEE-dependent NaNs and FP status; strict FP-status mode (mode 3) remains
+unsupported on the 30 gfx1150-specific arithmetic, selection, rounding and
+conversion entry points, while comparisons share the existing raw-bit predicates.
+Scalar operations have one SGPR value per operand, so there is no lane-vector
+SIMD backend to select.

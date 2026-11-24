@@ -9,7 +9,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/branch_stack.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/gfx1150_compare_input.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
@@ -1338,8 +1337,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
         access({RegClass::VGPR, 0, 1}, accessed_lanes, bytes, false);
     }
   };
-  if (!modifiers.constant_float_compare ||
-      gfx1150_constant_compare_reads_inputs(wf.cu().arithmetic_flags(), wf.dx10_clamp())) {
+  if (!modifiers.constant_float_compare) {
     for (int i = 0; i < inst.num_src_operands(); ++i) {
       if (!inst.tracks_explicit_source(i))
         continue;

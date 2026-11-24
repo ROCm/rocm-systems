@@ -5192,13 +5192,13 @@ TEST(ValuFpModeHelpers, Gfx1150VectorExceptionsAreStickyAndMaskAware) {
       {{0xd5040000, 0x02020501}, 0x7f800000, 0x7f800000, 0x01}, // E64 SUB invalid
       {{0xd6130000, 0x02020501}, 0, 0x7f800000, 0x01},          // FMA 0 * infinity + 0
       {{0xc8d00501, 0x00020104}, 0x7f7fffff, 0x40000000, 0x28}, // dual MUL overflow
-      {{0xd412806a, 0x02020501}, 0x7fc00000, 0x3f800000, 0x01}, // signaling CMP
+      {{0xd412806a, 0x02020501}, 0x7fc00000, 0x3f800000, 0},    // signaling CMP (RDNA3 contract)
       {{0xd412006a, 0x02020501}, 0x7fc00000, 0x3f800000, 0},    // quiet CMP
-      {{0xd400806a, 0x02020501}, 0x7e00, 0x3c00, 0x01},         // Signaling CMP_F_F16
-      {{0xd40f806a, 0x02020501}, 0x7e00, 0x3c00, 0x01},         // Signaling CMP_T_F16
-      {{0xd412006a, 0x02020501}, 0x7fa00000, 0x3f800000, 0x01}, // Quiet CMP_EQ_F32, sNaN
-      {{0xd400006a, 0x02020501}, 0x7d00, 0x3c00, 0x01},         // Quiet constant CMP_F_F16, sNaN
-      {{0x7c040501}, 0x7d00, 0x3c00, 0x01},                     // VOPC CMP_EQ_F16, sNaN
+      {{0xd400806a, 0x02020501}, 0x7e00, 0x3c00, 0},            // signaling CMP_F_F16
+      {{0xd40f806a, 0x02020501}, 0x7e00, 0x3c00, 0},            // signaling CMP_T_F16
+      {{0xd412006a, 0x02020501}, 0x7fa00000, 0x3f800000, 0},    // quiet CMP_EQ_F32, sNaN
+      {{0xd400006a, 0x02020501}, 0x7d00, 0x3c00, 0},            // quiet constant CMP_F_F16, sNaN
+      {{0x7c040501}, 0x7d00, 0x3c00, 0},                        // VOPC CMP_EQ_F16, sNaN
   };
   amdgpu::GpuMemory memory("gfx1150_memory");
   amdgpu::L2Cache cache("gfx1150_cache");

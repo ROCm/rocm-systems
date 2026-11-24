@@ -102,16 +102,6 @@ void VPkMinU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VPkFmaF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  if (!wf.exec()) {
-    return;
-  }
-  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
-    wf.report_instruction_execution_error(
-        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-    return;
-  }
   const uint64_t modifiers = (inst_.clamp ? RJ_ARITH_PK_CLAMP : 0u) |
                              ((inst_.op_sel & 1) ? RJ_ARITH_PK_LO_A_HIGH : 0u) |
                              ((inst_.op_sel_hi & 1) ? 0u : RJ_ARITH_PK_HI_A_LOW) |
@@ -156,15 +146,6 @@ void VDot2F32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  if (!wf.exec())
-    return;
-  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
-    wf.report_instruction_execution_error(
-        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-    return;
-  }
   const uint64_t modifiers =
       ((inst_.neg & 4) ? RJ_ARITH_DOT_NEG_C : 0u) | ((inst_.neg_hi & 4) ? RJ_ARITH_DOT_ABS_C : 0u) |
       (inst_.clamp ? RJ_ARITH_DOT_CLAMP : 0u) | ((inst_.op_sel & 1) ? RJ_ARITH_DOT_LO_A_HIGH : 0u) |
@@ -200,15 +181,6 @@ RJ_NOINLINE void VDot2F32F16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf) 
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  if (!wf.exec())
-    return;
-  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
-    wf.report_instruction_execution_error(
-        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-    return;
-  }
   const uint64_t modifiers =
       ((inst_.neg & 4) ? RJ_ARITH_DOT_NEG_C : 0u) | ((inst_.neg_hi & 4) ? RJ_ARITH_DOT_ABS_C : 0u) |
       (inst_.clamp ? RJ_ARITH_DOT_CLAMP : 0u) | ((inst_.op_sel & 1) ? RJ_ARITH_DOT_LO_A_HIGH : 0u) |
@@ -278,15 +250,6 @@ void VDot2F32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  if (!wf.exec())
-    return;
-  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
-    wf.report_instruction_execution_error(
-        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-    return;
-  }
   const uint64_t modifiers =
       ((inst_.neg & 4) ? RJ_ARITH_DOT_NEG_C : 0u) | ((inst_.neg_hi & 4) ? RJ_ARITH_DOT_ABS_C : 0u) |
       (inst_.clamp ? RJ_ARITH_DOT_CLAMP : 0u) | ((inst_.op_sel & 1) ? RJ_ARITH_DOT_LO_A_HIGH : 0u) |
@@ -323,15 +286,6 @@ RJ_NOINLINE void VDot2F32Bf16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf)
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  if (!wf.exec())
-    return;
-  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
-    wf.report_instruction_execution_error(
-        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-    return;
-  }
   const uint64_t modifiers =
       ((inst_.neg & 4) ? RJ_ARITH_DOT_NEG_C : 0u) | ((inst_.neg_hi & 4) ? RJ_ARITH_DOT_ABS_C : 0u) |
       (inst_.clamp ? RJ_ARITH_DOT_CLAMP : 0u) | ((inst_.op_sel & 1) ? RJ_ARITH_DOT_LO_A_HIGH : 0u) |
@@ -358,16 +312,6 @@ void VFmaMixF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  if (!wf.exec()) {
-    return;
-  }
-  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
-    wf.report_instruction_execution_error(
-        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-    return;
-  }
   const uint64_t modifiers =
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((inst_.op_sel_hi & 1) ? RJ_ARITH_MIX_F16_A : 0u) |
       ((inst_.op_sel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
@@ -384,7 +328,7 @@ void VFmaMixF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       (inst_.op_sel_hi_2 && amdgpu::is_inline_float_src(inst_.src2) ? 4u : 0u);
   amdgpu::arith::execute_mixed_fma(wf, rj_arith_v_fma_mix_f32_w32, rj_arith_v_fma_mix_f32_w64,
                                    wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2,
-                                   narrow_sources, 0xF, true, true);
+                                   narrow_sources, 0xF, true, false);
 }
 
 RJ_NOINLINE void VFmaMixF32Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -403,16 +347,6 @@ RJ_NOINLINE void VFmaMixF32Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  if (!wf.exec()) {
-    return;
-  }
-  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
-    wf.report_instruction_execution_error(
-        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-    return;
-  }
   const uint64_t modifiers =
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((inst_.op_sel_hi & 1) ? RJ_ARITH_MIX_F16_A : 0u) |
       ((inst_.op_sel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
@@ -429,23 +363,13 @@ RJ_NOINLINE void VFmaMixF32Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf) {
       (inst_.op_sel_hi_2 && amdgpu::is_inline_float_src(inst_.src2) ? 4u : 0u);
   amdgpu::arith::execute_mixed_fma(wf, rj_arith_v_fma_mix_f32_w32, rj_arith_v_fma_mix_f32_w64,
                                    wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2,
-                                   narrow_sources, 0xF, true, true);
+                                   narrow_sources, 0xF, true, false);
   dpp_write_mask_scope_.restore();
 }
 
 void VFmaMixloF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     execute_modifier_impl(wf);
-    return;
-  }
-  if (!wf.exec()) {
-    return;
-  }
-  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
-    wf.report_instruction_execution_error(
-        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   const uint64_t modifiers =
@@ -464,7 +388,7 @@ void VFmaMixloF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       (inst_.op_sel_hi_2 && amdgpu::is_inline_float_src(inst_.src2) ? 4u : 0u);
   amdgpu::arith::execute_mixed_fma(wf, rj_arith_v_fma_mixlo_f16_w32, rj_arith_v_fma_mixlo_f16_w64,
                                    wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2,
-                                   narrow_sources, 0x3, true, true);
+                                   narrow_sources, 0x3, true, false);
 }
 
 RJ_NOINLINE void VFmaMixloF16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -483,16 +407,6 @@ RJ_NOINLINE void VFmaMixloF16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf)
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  if (!wf.exec()) {
-    return;
-  }
-  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
-    wf.report_instruction_execution_error(
-        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-    return;
-  }
   const uint64_t modifiers =
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((inst_.op_sel_hi & 1) ? RJ_ARITH_MIX_F16_A : 0u) |
       ((inst_.op_sel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
@@ -509,23 +423,13 @@ RJ_NOINLINE void VFmaMixloF16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf)
       (inst_.op_sel_hi_2 && amdgpu::is_inline_float_src(inst_.src2) ? 4u : 0u);
   amdgpu::arith::execute_mixed_fma(wf, rj_arith_v_fma_mixlo_f16_w32, rj_arith_v_fma_mixlo_f16_w64,
                                    wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2,
-                                   narrow_sources, 0x3, true, true);
+                                   narrow_sources, 0x3, true, false);
   dpp_write_mask_scope_.restore();
 }
 
 void VFmaMixhiF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     execute_modifier_impl(wf);
-    return;
-  }
-  if (!wf.exec()) {
-    return;
-  }
-  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
-    wf.report_instruction_execution_error(
-        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   const uint64_t modifiers =
@@ -544,7 +448,7 @@ void VFmaMixhiF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       (inst_.op_sel_hi_2 && amdgpu::is_inline_float_src(inst_.src2) ? 4u : 0u);
   amdgpu::arith::execute_mixed_fma(wf, rj_arith_v_fma_mixhi_f16_w32, rj_arith_v_fma_mixhi_f16_w64,
                                    wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2,
-                                   narrow_sources, 0xC, true, true);
+                                   narrow_sources, 0xC, true, false);
 }
 
 RJ_NOINLINE void VFmaMixhiF16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -563,16 +467,6 @@ RJ_NOINLINE void VFmaMixhiF16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf)
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  if (!wf.exec()) {
-    return;
-  }
-  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
-    wf.report_instruction_execution_error(
-        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-    return;
-  }
   const uint64_t modifiers =
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((inst_.op_sel_hi & 1) ? RJ_ARITH_MIX_F16_A : 0u) |
       ((inst_.op_sel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
@@ -589,7 +483,7 @@ RJ_NOINLINE void VFmaMixhiF16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf)
       (inst_.op_sel_hi_2 && amdgpu::is_inline_float_src(inst_.src2) ? 4u : 0u);
   amdgpu::arith::execute_mixed_fma(wf, rj_arith_v_fma_mixhi_f16_w32, rj_arith_v_fma_mixhi_f16_w64,
                                    wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2,
-                                   narrow_sources, 0xC, true, true);
+                                   narrow_sources, 0xC, true, false);
   dpp_write_mask_scope_.restore();
 }
 

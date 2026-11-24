@@ -17,13 +17,22 @@ using Unary = int (*)(uint64_t, uint64_t, uint32_t *, uint32_t, uint32_t *);
 using Ternary = int (*)(uint64_t, uint64_t, uint32_t *, uint32_t, uint32_t, uint32_t, uint32_t *);
 constexpr uint32_t kInitialFpStatus = 0x100;
 
-// All new inherited models reject unqualified strict semantics before touching outputs.
-template <typename Call> void check_rejections(Call call) {
-  for (uint64_t semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
-                             RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
-    uint32_t result = 0xdeadbeef, status = kInitialFpStatus;
-    EXPECT_EQ(call(semantics, &result, &status), RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
-    EXPECT_EQ(result, 0xdeadbeefU);
+// Strict FP-status reporting (mode 3) is rejected before touching outputs;
+// mode 2 (bit-exact without FP status) succeeds without altering status.
+template <typename Call>
+void check_rejections(Call call, uint32_t expected_result, uint32_t initial_result = 0xdeadbeef) {
+  {
+    uint32_t result = initial_result, status = kInitialFpStatus;
+    EXPECT_EQ(call(RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, &result, &status),
+              RJ_ARITH_SUCCESS);
+    EXPECT_EQ(result, expected_result);
+    EXPECT_EQ(status, kInitialFpStatus);
+  }
+  {
+    uint32_t result = initial_result, status = kInitialFpStatus;
+    EXPECT_EQ(call(RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, &result, &status),
+              RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
+    EXPECT_EQ(result, initial_result);
     EXPECT_EQ(status, kInitialFpStatus);
   }
 }
@@ -96,9 +105,13 @@ TEST(Gfx1150ScalarFp, Binary) {
                                         RJ_ARITH_SEMANTICS_LOOSE, /*atol=*/1e-7f,
                                         /*rtol=*/1e-6f);
     }
-    check_rejections([&](auto flags, auto result, auto status) {
-      return test.call(flags, 0, result, two, one, status);
-    });
+    const uint32_t expected_two_one = test.result == 1   ? one
+                                      : test.result == 2 ? two
+                                      : test.half        ? 0x4200
+                                                         : 0x40400000;
+    check_rejections([&](auto flags, auto result,
+                         auto status) { return test.call(flags, 0, result, two, one, status); },
+                     expected_two_one);
   }
 }
 
@@ -131,9 +144,9 @@ TEST(Gfx1150ScalarFp, Round) {
       EXPECT_EQ(result, snan | (ieee ? (test.half ? 0x200U : 0x400000U) : 0));
       EXPECT_EQ(status, kInitialFpStatus | RJ_ARITH_EXCEPTION_INVALID);
     }
-    check_rejections([&](auto flags, auto result, auto status) {
-      return test.call(flags, 0, result, input, status);
-    });
+    check_rejections([&](auto flags, auto result,
+                         auto status) { return test.call(flags, 0, result, input, status); },
+                     test.result == 1 ? one : two);
   }
 }
 
@@ -173,9 +186,11 @@ TEST(Gfx1150ScalarFp, Fma) {
       EXPECT_EQ(result, snan | (ieee ? (test.half ? 0x200U : 0x400000U) : 0));
       EXPECT_EQ(status, kInitialFpStatus | RJ_ARITH_EXCEPTION_INVALID);
     }
-    check_rejections([&](auto flags, auto result, auto status) {
-      return test.call(flags, 0, result, one, one, one, status);
-    });
+    check_rejections(
+        [&](auto flags, auto result, auto status) {
+          return test.call(flags, 0, result, one, one, one, status);
+        },
+        two, test.accumulator ? one : 0xdeadbeefU);
   }
 }
 
@@ -214,9 +229,9 @@ TEST(Gfx1150ScalarFp, Conversion) {
               RJ_ARITH_SUCCESS);
     EXPECT_EQ(result, test.result);
     EXPECT_EQ(status, kInitialFpStatus);
-    check_rejections([&](auto flags, auto output, auto causes) {
-      return test.call(flags, 0, output, test.input, causes);
-    });
+    check_rejections([&](auto flags, auto output,
+                         auto causes) { return test.call(flags, 0, output, test.input, causes); },
+                     test.result);
   }
   uint32_t result = 0, status = kInitialFpStatus;
   ASSERT_EQ(rj_arith_s_cvt_pk_rtz_f16_f32_gfx1150(RJ_ARITH_SEMANTICS_COMPATIBILITY, 0, &result,
@@ -224,8 +239,11 @@ TEST(Gfx1150ScalarFp, Conversion) {
             RJ_ARITH_SUCCESS);
   EXPECT_EQ(result, 0x40003c00U);
   EXPECT_EQ(status, kInitialFpStatus | RJ_ARITH_EXCEPTION_INEXACT);
-  check_rejections([&](auto flags, auto output, auto causes) {
-    return rj_arith_s_cvt_pk_rtz_f16_f32_gfx1150(flags, 0, output, 0x3f800001, 0x40000000, causes);
-  });
+  check_rejections(
+      [&](auto flags, auto output, auto causes) {
+        return rj_arith_s_cvt_pk_rtz_f16_f32_gfx1150(flags, 0, output, 0x3f800001, 0x40000000,
+                                                     causes);
+      },
+      0x40003c00U);
 }
 } // namespace

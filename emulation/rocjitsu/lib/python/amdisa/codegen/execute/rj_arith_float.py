@@ -59,12 +59,13 @@ NORMALIZED_NAMES = {
     'V_CVT_NORM_U16_F16',
 }
 
-# Architecture suffix of the shared conversion entry points. RDNA3 owns the unsuffixed
-# entries and RDNA4 the _gfx12 entries; both accept bit-exact semantics. CDNA and gfx1250
-# call loose-only entries until their captures are reviewed per instruction. RDNA1, RDNA2
-# and RDNA3.5 share the CDNA loose-only wrapper because none of them has a capture yet.
+# Architecture suffix of the shared conversion entry points. RDNA3 and RDNA3.5 own the
+# unsuffixed entries and RDNA4 the _gfx12 entries; all accept bit-exact semantics. CDNA
+# and gfx1250 call loose-only entries until their captures are reviewed per instruction.
+# RDNA1 and RDNA2 share the CDNA loose-only wrapper because neither has a capture yet.
 CONVERSION_ARCH_SUFFIX = {
     'rdna3': '',
+    'rdna3_5': '',
     'rdna4': '_gfx12',
     'cdna1': '_gfx942',
     'cdna2': '_gfx942',
@@ -73,7 +74,6 @@ CONVERSION_ARCH_SUFFIX = {
     'cdna5': '_gfx1250',
     'rdna1': '_gfx942',
     'rdna2': '_gfx942',
-    'rdna3_5': '_gfx942',
 }
 
 # Architecture suffix of the FP64 FMA entry points. RDNA2 has no capture yet, so it
@@ -1739,7 +1739,7 @@ def gen_mixed_fma(ctx: ExecuteContext) -> str | None:
     enc_name = ctx.enc_name
     opsel_exprs = ctx.opsel_exprs
     hi_c_expr = ctx.op_sel_hi_2_expr
-    older_radeon = arch in ('rdna1', 'rdna2', 'rdna3_5')
+    older_radeon = arch in ('rdna1', 'rdna2')
     bf16 = arch == 'cdna5' and mnemonic in MIXED_BF16_NAMES
     legacy_mad = arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4') and mnemonic in {
         'V_MAD_MIX_F32',
@@ -1750,7 +1750,7 @@ def gen_mixed_fma(ctx: ExecuteContext) -> str | None:
         not bf16
         and not legacy_mad
         and (
-            (not older_radeon and arch not in ('rdna3', 'rdna4', 'cdna5'))
+            (not older_radeon and arch not in ('rdna3', 'rdna3_5', 'rdna4', 'cdna5'))
             or mnemonic not in MIXED_FMA_NAMES
         )
     ):
@@ -1799,7 +1799,7 @@ def gen_mixed_fma(ctx: ExecuteContext) -> str | None:
         '  const unsigned narrow_sources = ' + ' | '.join(narrow) + ';',
         f'  amdgpu::arith::execute_mixed_fma(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         '      wf.cu().arithmetic_flags(), modifiers,',
-        f'      {dst[0]}, {", ".join(src)}, narrow_sources, {byte_mask}, {str(older_radeon or arch in ("rdna3", "cdna1", "cdna2", "cdna3", "cdna4")).lower()}, {str(older_radeon or arch == "cdna5").lower()}{", true" if arch == "cdna1" else ""});',
+        f'      {dst[0]}, {", ".join(src)}, narrow_sources, {byte_mask}, {str(older_radeon or arch in ("rdna3", "rdna3_5", "cdna1", "cdna2", "cdna3", "cdna4")).lower()}, {str(older_radeon or arch == "cdna5").lower()}{", true" if arch == "cdna1" else ""});',
     ]
     if older_radeon:
         lines = (
@@ -1812,7 +1812,7 @@ def gen_mixed_fma(ctx: ExecuteContext) -> str | None:
 
 def inherited_half_qualification_guard(arch: str) -> list[str]:
     """Reject strict requests when reuse does not establish target qualification."""
-    if not arch.startswith('cdna') and arch not in ('rdna1', 'rdna2', 'rdna3_5'):
+    if not arch.startswith('cdna') and arch not in ('rdna1', 'rdna2'):
         return []
     return unqualified_half_guard()
 
@@ -1850,13 +1850,14 @@ def gen_packed_fma16(ctx: ExecuteContext) -> str | None:
     enc_name = ctx.enc_name
     opsel_exprs = ctx.opsel_exprs
     hi_c_expr = ctx.op_sel_hi_2_expr
-    older = arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5')
+    older = arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2')
     selection = mnemonic in PACKED_TERNARY_SELECTION
     if selection:
         if arch not in ('cdna4', 'cdna5') or (arch == 'cdna4' and '_NUM_' in mnemonic):
             return None
     elif (
-        not older and arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+        not older
+        and arch not in ('rdna3', 'rdna3_5', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
     ) or mnemonic not in PACKED_FMA16_NAMES:
         return None
     accumulate = mnemonic == 'V_PK_FMAC_F16'
@@ -1948,7 +1949,7 @@ def gen_packed_fma16(ctx: ExecuteContext) -> str | None:
         f'      {wave_api(api, 32)},',
         f'      {wave_api(api, 64)},',
         '      wf.cu().arithmetic_flags(), modifiers,',
-        f'      {dst[0]}, {src[0]}, {src[1]}, {addend}, {str(older or arch in ("rdna3", "cdna3", "cdna4")).lower()},',
+        f'      {dst[0]}, {src[0]}, {src[1]}, {addend}, {str(older or arch in ("rdna3", "rdna3_5", "cdna3", "cdna4")).lower()},',
         '      narrow_sources, replicate_sources);',
     ]
     if older:
@@ -2119,14 +2120,8 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
         )
     )
     addend = dst[0] if accumulate else src[2]
-    guard = (
-        ['  if (!wf.exec()) return;'] + inherited_half_qualification_guard(arch)
-        if arch == 'rdna3_5'
-        else []
-    )
     return '\n'.join(
-        guard
-        + [
+        [
             '  const uint64_t modifiers = '
             + (' |\n      '.join(terms) if terms else '0')
             + ';',
@@ -2183,12 +2178,6 @@ def gen_half_dot(ctx: ExecuteContext) -> str | None:
         '      wf.cu().arithmetic_flags(), modifiers,',
         f'      {dst[0]}, {", ".join(src)}, {bf16}, narrow_sources, replicate_sources);',
     ]
-    if arch == 'rdna3_5':
-        lines = (
-            ['  if (!wf.exec()) return;']
-            + inherited_half_qualification_guard(arch)
-            + lines
-        )
     return '\n'.join(lines)
 
 
@@ -2363,7 +2352,7 @@ def gen_float_fma16(ctx: ExecuteContext) -> str | None:
         if arch == 'cdna2':
             api += '_gfx90a'
     modifiers = '0'
-    older = arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5')
+    older = arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2')
     lines = inherited_half_qualification_guard(arch) if not legacy_mad else []
     if older and not legacy_mad:
         # Empty decoded EXEC is a no-op; active requests retain qualification checks
