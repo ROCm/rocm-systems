@@ -6,6 +6,7 @@
 #include "common/float_formats.h"
 #include "common/internal.h"
 #include "mfma/backends.h"
+#include "mfma/gfx942_exact.h"
 #include "mfma/reduction.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_mfma.h"
@@ -14,7 +15,7 @@ namespace {
 
 // Evaluate a full MFMA wave after validating controls; errors do not access
 // operands.
-template <int M, int K, int Batch, bool Bf16>
+template <int M, int K, int Batch, bool Bf16, bool Gfx942 = false>
 int mfma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
          const uint32_t *const *b, const uint32_t *const *c) {
   using namespace rocjitsu::arith;
@@ -23,10 +24,21 @@ int mfma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
   }
+  // Only the captured gfx942 forms with default source controls are qualified.
+  // Compatibility retains the existing fast approximate implementation.
+  if constexpr (Gfx942) {
+    if (is_exact(flags) && !instruction_flags && !(flags & RJ_ARITH_FP16_OVFL)) {
+      mfma_gfx942_exact(Bf16 ? MfmaGfx942Format::Bf16 : MfmaGfx942Format::F16, M, K, Batch, d, a, b,
+                        c);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
   if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
-  const bool clamp_overflow = Bf16 && (flags & RJ_ARITH_FP16_OVFL);
+  // gfx942 carries this bit only to delimit exact qualification. Its inherited
+  // approximate policy ignores it; saturation belongs to the gfx950 variants.
+  const bool clamp_overflow = Bf16 && !Gfx942 && (flags & RJ_ARITH_FP16_OVFL);
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
     mfma_half_x86_64_v4<M, K, Batch, Bf16>(instruction_flags, clamp_overflow, d, a, b, c);
@@ -56,35 +68,35 @@ int mfma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
 int rj_arith_v_mfma_f32_32x32x4_2b_f16_w64(uint64_t flags, uint64_t instruction_flags,
                                            uint32_t *const *d, const uint32_t *const *a,
                                            const uint32_t *const *b, const uint32_t *const *c) {
-  return mfma<32, 4, 2, false>(flags, instruction_flags, d, a, b, c);
+  return mfma<32, 4, 2, false, true>(flags, instruction_flags, d, a, b, c);
 }
 
 // Evaluate 16x16x4 FP16 MFMA with 4 independent matrix block(s).
 int rj_arith_v_mfma_f32_16x16x4_4b_f16_w64(uint64_t flags, uint64_t instruction_flags,
                                            uint32_t *const *d, const uint32_t *const *a,
                                            const uint32_t *const *b, const uint32_t *const *c) {
-  return mfma<16, 4, 4, false>(flags, instruction_flags, d, a, b, c);
+  return mfma<16, 4, 4, false, true>(flags, instruction_flags, d, a, b, c);
 }
 
 // Evaluate 4x4x4 FP16 MFMA with 16 independent matrix block(s).
 int rj_arith_v_mfma_f32_4x4x4_16b_f16_w64(uint64_t flags, uint64_t instruction_flags,
                                           uint32_t *const *d, const uint32_t *const *a,
                                           const uint32_t *const *b, const uint32_t *const *c) {
-  return mfma<4, 4, 16, false>(flags, instruction_flags, d, a, b, c);
+  return mfma<4, 4, 16, false, true>(flags, instruction_flags, d, a, b, c);
 }
 
 // Evaluate 32x32x8 FP16 MFMA with 1 independent matrix block(s).
 int rj_arith_v_mfma_f32_32x32x8_f16_w64(uint64_t flags, uint64_t instruction_flags,
                                         uint32_t *const *d, const uint32_t *const *a,
                                         const uint32_t *const *b, const uint32_t *const *c) {
-  return mfma<32, 8, 1, false>(flags, instruction_flags, d, a, b, c);
+  return mfma<32, 8, 1, false, true>(flags, instruction_flags, d, a, b, c);
 }
 
 // Evaluate 16x16x16 FP16 MFMA with 1 independent matrix block(s).
 int rj_arith_v_mfma_f32_16x16x16_f16_w64(uint64_t flags, uint64_t instruction_flags,
                                          uint32_t *const *d, const uint32_t *const *a,
                                          const uint32_t *const *b, const uint32_t *const *c) {
-  return mfma<16, 16, 1, false>(flags, instruction_flags, d, a, b, c);
+  return mfma<16, 16, 1, false, true>(flags, instruction_flags, d, a, b, c);
 }
 
 // Evaluate 16x16x32 FP16 MFMA with 1 independent matrix block(s).
@@ -105,35 +117,35 @@ int rj_arith_v_mfma_f32_32x32x16_f16_w64(uint64_t flags, uint64_t instruction_fl
 int rj_arith_v_mfma_f32_32x32x4_2b_bf16_w64(uint64_t flags, uint64_t instruction_flags,
                                             uint32_t *const *d, const uint32_t *const *a,
                                             const uint32_t *const *b, const uint32_t *const *c) {
-  return mfma<32, 4, 2, true>(flags, instruction_flags, d, a, b, c);
+  return mfma<32, 4, 2, true, true>(flags, instruction_flags, d, a, b, c);
 }
 
 // Evaluate 16x16x4 BF16 MFMA with 4 independent matrix block(s).
 int rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64(uint64_t flags, uint64_t instruction_flags,
                                             uint32_t *const *d, const uint32_t *const *a,
                                             const uint32_t *const *b, const uint32_t *const *c) {
-  return mfma<16, 4, 4, true>(flags, instruction_flags, d, a, b, c);
+  return mfma<16, 4, 4, true, true>(flags, instruction_flags, d, a, b, c);
 }
 
 // Evaluate 4x4x4 BF16 MFMA with 16 independent matrix block(s).
 int rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64(uint64_t flags, uint64_t instruction_flags,
                                            uint32_t *const *d, const uint32_t *const *a,
                                            const uint32_t *const *b, const uint32_t *const *c) {
-  return mfma<4, 4, 16, true>(flags, instruction_flags, d, a, b, c);
+  return mfma<4, 4, 16, true, true>(flags, instruction_flags, d, a, b, c);
 }
 
 // Evaluate 32x32x8 BF16 MFMA with 1 independent matrix block(s).
 int rj_arith_v_mfma_f32_32x32x8_bf16_w64(uint64_t flags, uint64_t instruction_flags,
                                          uint32_t *const *d, const uint32_t *const *a,
                                          const uint32_t *const *b, const uint32_t *const *c) {
-  return mfma<32, 8, 1, true>(flags, instruction_flags, d, a, b, c);
+  return mfma<32, 8, 1, true, true>(flags, instruction_flags, d, a, b, c);
 }
 
 // Evaluate 16x16x16 BF16 MFMA with 1 independent matrix block(s).
 int rj_arith_v_mfma_f32_16x16x16_bf16_w64(uint64_t flags, uint64_t instruction_flags,
                                           uint32_t *const *d, const uint32_t *const *a,
                                           const uint32_t *const *b, const uint32_t *const *c) {
-  return mfma<16, 16, 1, true>(flags, instruction_flags, d, a, b, c);
+  return mfma<16, 16, 1, true, true>(flags, instruction_flags, d, a, b, c);
 }
 
 // Evaluate 16x16x32 BF16 MFMA with 1 independent matrix block(s).
@@ -148,4 +160,83 @@ int rj_arith_v_mfma_f32_32x32x16_bf16_w64(uint64_t flags, uint64_t instruction_f
                                           uint32_t *const *d, const uint32_t *const *a,
                                           const uint32_t *const *b, const uint32_t *const *c) {
   return mfma<32, 16, 1, true>(flags, instruction_flags, d, a, b, c);
+}
+
+// Evaluate the gfx950 form using the existing approximate model.
+int rj_arith_v_mfma_f32_32x32x4_2b_f16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                  uint32_t *const *d, const uint32_t *const *a,
+                                                  const uint32_t *const *b,
+                                                  const uint32_t *const *c) {
+  return mfma<32, 4, 2, false>(flags, instruction_flags, d, a, b, c);
+}
+
+// Evaluate the gfx950 form using the existing approximate model.
+int rj_arith_v_mfma_f32_16x16x4_4b_f16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                  uint32_t *const *d, const uint32_t *const *a,
+                                                  const uint32_t *const *b,
+                                                  const uint32_t *const *c) {
+  return mfma<16, 4, 4, false>(flags, instruction_flags, d, a, b, c);
+}
+
+// Evaluate the gfx950 form using the existing approximate model.
+int rj_arith_v_mfma_f32_4x4x4_16b_f16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *c) {
+  return mfma<4, 4, 16, false>(flags, instruction_flags, d, a, b, c);
+}
+
+// Evaluate the gfx950 form using the existing approximate model.
+int rj_arith_v_mfma_f32_32x32x8_f16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c) {
+  return mfma<32, 8, 1, false>(flags, instruction_flags, d, a, b, c);
+}
+
+// Evaluate the gfx950 form using the existing approximate model.
+int rj_arith_v_mfma_f32_16x16x16_f16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *c) {
+  return mfma<16, 16, 1, false>(flags, instruction_flags, d, a, b, c);
+}
+
+// Evaluate the gfx950 form using the existing approximate model.
+int rj_arith_v_mfma_f32_32x32x4_2b_bf16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                   uint32_t *const *d, const uint32_t *const *a,
+                                                   const uint32_t *const *b,
+                                                   const uint32_t *const *c) {
+  return mfma<32, 4, 2, true>(flags, instruction_flags, d, a, b, c);
+}
+
+// Evaluate the gfx950 form using the existing approximate model.
+int rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                   uint32_t *const *d, const uint32_t *const *a,
+                                                   const uint32_t *const *b,
+                                                   const uint32_t *const *c) {
+  return mfma<16, 4, 4, true>(flags, instruction_flags, d, a, b, c);
+}
+
+// Evaluate the gfx950 form using the existing approximate model.
+int rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                  uint32_t *const *d, const uint32_t *const *a,
+                                                  const uint32_t *const *b,
+                                                  const uint32_t *const *c) {
+  return mfma<4, 4, 16, true>(flags, instruction_flags, d, a, b, c);
+}
+
+// Evaluate the gfx950 form using the existing approximate model.
+int rj_arith_v_mfma_f32_32x32x8_bf16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *c) {
+  return mfma<32, 8, 1, true>(flags, instruction_flags, d, a, b, c);
+}
+
+// Evaluate the gfx950 form using the existing approximate model.
+int rj_arith_v_mfma_f32_16x16x16_bf16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *c) {
+  return mfma<16, 16, 1, true>(flags, instruction_flags, d, a, b, c);
 }

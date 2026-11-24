@@ -206,7 +206,7 @@ void run_words(const char *label, uint32_t w0, uint32_t w1, bool sanitize_finite
   // by the *SimdCorrectness* suites (in-process double-run + EXPECT_EQ). To
   // compare throughput, run the benchmark twice: `RJ_FORCE_SCALAR=1 ...`
   // (scalar) and unset (SIMD).
-  const char *mode = amdgpu::simd_force_scalar() ? "scalar" : "simd";
+  const char *mode = util::force_scalar() ? "scalar" : "simd";
   ModeStats s = time_mode(fx, inst, SEED, sanitize_finite);
 
   std::printf("\n  === %s (CDNA4, wave64) [%s] ===\n"

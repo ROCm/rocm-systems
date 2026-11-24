@@ -426,12 +426,11 @@ inline uint16_t fma_f32_to_bf16_nearest_environment(float multiplicand, float mu
 /// which is needed when the rounded F64 value lands on a BF16 boundary or midpoint.
 inline uint16_t fma_f32_to_bf16(float multiplicand, float multiplier, float addend,
                                 uint32_t round_mode, bool clamp, bool clamp_nan_to_zero) {
-  detail::ScopedFenv nearest_environment(0);
   return detail::fma_f32_to_bf16_nearest_environment(multiplicand, multiplier, addend, round_mode,
                                                      clamp, clamp_nan_to_zero);
 }
 
-/// @brief Isolate scalar or SIMD arithmetic from the caller's rounding and flush controls.
+/// @brief Guest rounding through the host rounding mode, for the legacy paths that still use it.
 using ScopedEnvironment = detail::ScopedFenv;
 
 enum class PackedF32Op { ADD, MUL, FMA };
@@ -469,7 +468,6 @@ inline uint16_t packed_binary_f16(PackedBinaryOp operation, uint16_t a_bits, uin
   if (operation == PackedBinaryOp::MAX)
     return packed_minmax_f16<false>(uint32_t(a_bits), uint32_t(b_bits), denorm_mode, clamp,
                                     clamp_nan_to_zero, arch, ieee_mode);
-  detail::ScopedFenv nearest_environment(0);
   a_bits = detail::flush_input_f16(a_bits, denorm_mode);
   b_bits = detail::flush_input_f16(b_bits, denorm_mode);
   const bool a_nan = (a_bits & 0x7fffu) > 0x7c00u;
@@ -529,7 +527,6 @@ inline uint16_t packed_select3_f16(PackedBinaryOp operation, uint16_t first, uin
 
 /// @brief Packed BF16 numeric min/max preserve denormals and order signed zeros explicitly.
 inline uint16_t packed_select_bf16(float first, float second, bool minimum) {
-  ScopedEnvironment environment(0);
   const float selected = first == second
                              ? (minimum ? (std::signbit(first) ? first : second)
                                         : (std::signbit(first) ? second : first))
@@ -580,6 +577,7 @@ inline float fma_f32(float a, float b, float c, rocjitsu::IsaFamily arch, bool i
       // Detect tininess after rounding the 24-bit significand, before packing
       // it into F32's exponent range. Subnormal F32 rounding has a wider step
       // and can otherwise promote a still-tiny intermediate to minimum normal.
+      // The caller's scope installed the guest rounding; the residual needs nearest-even.
       const int rounding = std::fegetround();
       detail::ScopedFenv environment(0);
       volatile double wide_left = left;
@@ -718,7 +716,6 @@ Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bi
     if ((old_input & ~kSign) == kExponent && (source_input & ~kSign) == kExponent &&
         ((old_input ^ source_input) & kSign))
       return kSign | kExponent | kQuiet;
-    detail::ScopedFenv nearest_environment(0);
     volatile Float old_value = std::bit_cast<Float>(old_input);
     volatile Float source_value = std::bit_cast<Float>(source_input);
     const Bits result = std::bit_cast<Bits>(static_cast<Float>(old_value + source_value));
@@ -766,7 +763,6 @@ Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bi
 /// caller supplies DS input/output denormal controls, or 3 for no flushing.
 inline uint32_t atomic_add_packed_16(uint32_t old_val, uint32_t src_val, bool bf16,
                                      uint32_t denorm_mode, bool source_nan_first = false) {
-  detail::ScopedFenv nearest_environment(0);
   const uint16_t exponent_mask = bf16 ? 0x7f80u : 0x7c00u;
   auto flush_denorm = [&](uint16_t bits) -> uint16_t {
     return (bits & exponent_mask) == 0 ? bits & 0x8000u : bits;
@@ -1010,28 +1006,17 @@ inline uint16_t finish_arithmetic_f16_unscoped(double value, uint32_t round_mode
   return finalize_omod_f16(result, omod);
 }
 
-/// @brief finish_arithmetic_f16_unscoped under its own nearest-even environment.
-/// @details Installs the environment and delegates, for callers that own no scope.
+/// @brief finish_arithmetic_f16_unscoped for callers that own no guest-rounding scope.
 inline uint16_t finish_arithmetic_f16(double value, uint32_t round_mode, uint32_t denorm_mode,
                                       bool fp16_ovfl, uint32_t omod = 0) {
-  detail::ScopedFenv environment(0);
   return finish_arithmetic_f16_unscoped(value, round_mode, denorm_mode, fp16_ovfl, omod);
 }
 
 /// @brief Whether a host SIMD arithmetic fast path implements the wave's FP policy.
-/// @details Requires nearest rounding and preserved host inputs/outputs.
+/// @details Requires nearest rounding and preserved inputs/outputs; the host is in its
+/// default FP environment (docs/arith-design.md).
 inline bool native_arithmetic_matches(uint32_t round_mode, uint32_t denorm_mode) {
-  if (denorm_mode != 3 || round_mode != 0 || std::fegetround() != FE_TONEAREST)
-    return false;
-#if RJ_HOST_ARCH_X86
-  // MXCSR rounding can differ from the x87 rounding reported by fegetround().
-  return (_mm_getcsr() & (_MM_ROUND_MASK | (1u << 6) | (1u << 15))) == 0;
-#elif RJ_HOST_ARCH_AARCH64
-  return (detail::read_fpcr() & ((uint64_t{1} << 0) | (uint64_t{1} << 19) | (uint64_t{1} << 24))) ==
-         0;
-#else
-  return false;
-#endif
+  return denorm_mode == 3 && round_mode == 0;
 }
 
 /// @brief Round an F16 FMA significand before testing tininess and packing the exponent.
@@ -1105,6 +1090,8 @@ inline uint16_t fma_f16(uint16_t src0, uint16_t src1, uint16_t src2, bool abs0, 
   const double multiplicand = static_cast<double>(util::f16_to_f32(src0));
   const double multiplier = static_cast<double>(util::f16_to_f32(src1));
   const double addend = static_cast<double>(util::f16_to_f32(src2));
+  // Back to nearest-even: the CDNA2 MAD scalar fallback calls this inside its
+  // guest-rounding scope.
   detail::ScopedFenv environment(0);
   // The product is exact in F64, but a tiny product added to a large F16
   // accumulator can still exceed F64's significand range.

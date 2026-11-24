@@ -225,10 +225,11 @@ public:
   ///   UNORDERED, since the ISA does not specify the timing of its LDS
   ///   accesses; passing TENSOR would skip conflicts with the wave's own
   ///   pending transfers.
-  void registerLdsRangeEvent(InstructionSnapshot instruction, MemoryEventType type,
-                             std::span<const LdsByteRange> ranges,
-                             std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                             MemoryOrderClass memoryOrder);
+  /// @returns The allocated event ID, or an invalid ID if no event was created.
+  EventId registerLdsRangeEvent(InstructionSnapshot instruction, MemoryEventType type,
+                                std::span<const LdsByteRange> ranges,
+                                std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                                MemoryOrderClass memoryOrder);
 
   /// @brief Register an event using the caller's finalized LDS intervals.
   /// @details Intervals must contain only accessed bytes within the LDS backing
@@ -258,9 +259,40 @@ public:
                             uint32_t lane);
 
   /// Forget which LDS DWORDs this wave has read as operands, so that its next
-  /// read of each is recorded again. Called when the wave signals a barrier:
-  /// reads recorded before the signal are released by it, later ones are not.
+  /// read of each is recorded again. Called when the wave signals a barrier or
+  /// arrives at an LDS barrier cell: reads recorded before that release are
+  /// released by it, later ones are not.
   void forgetLdsOperandReads() { directLdsReadWidths.clear(); }
+
+  /// Hand off, in the wave's handoff epoch `epoch` of `kind`, the wave's
+  /// in-flight LDS accesses that an arrival of `kind` at an LDS barrier cell is
+  /// ordered after, so they have executed in LDS when the arrival does (CDNA5
+  /// ISA 11.2.2):
+  /// - Ds: its DS operations, and the LDS lanes of its FLAT operations. The
+  ///   arrive "is ordered with other LDS operations", "LDS instructions are
+  ///   kept in order" (CDNA5 ISA 5.7.1.4), and "FLAT and LDS instructions
+  ///   issued from a single wave stay in order as they move through LDS"
+  ///   (CDNA5 ISA 5.7.1.3).
+  /// - Async: its async loads to LDS, and its earlier async arrives. The arrive
+  ///   executes "only when all previously issued asynchronous loads have
+  ///   completed" (CDNA5 ISA 15.15). Async stores are not included: they
+  ///   complete out of order with async loads (CDNA5 ISA 10.8).
+  /// - Tensor: its tensor transfers, which "complete in-order with other Tensor
+  ///   instructions from the same wave" (CDNA5 ISA 10.11.1). The arrival is
+  ///   sent when its own transfer completes (CDNA5 ISA 10.11.3), and the wave
+  ///   issues nothing between a transfer and its arrival.
+  /// Accesses of any other class stay in flight until the wave waits for them.
+  /// That includes a tensor transfer at an async arrive, where the ISA is not
+  /// consistent. The async arrive "follows previous async operations including
+  /// TDM" (CDNA5 ISA 11.2.2), and a transfer sends its own arrival "to keep
+  /// ordering of operations between descriptors of the same wave" (CDNA5 ISA
+  /// 10.11.3). But tensor instructions "are unordered with respect to other
+  /// types of memory instructions" (CDNA5 ISA 10.11.1), and the arrive waits
+  /// only for "all previously issued asynchronous loads" (CDNA5 ISA 15.15).
+  /// The detector takes the reading that hides no race: an async arrive does
+  /// not hand off a tensor transfer, and a transfer's arrival does not hand off
+  /// an async load.
+  void handOffPending(BarrierCellArrival kind, uint32_t epoch);
 
   /// Check a VGPR read by a set of lanes for races. Calls the RaceHandler on violation.
   void checkVgprReadLanes(int reg, uint64_t laneMask, uint8_t byteMask) const;

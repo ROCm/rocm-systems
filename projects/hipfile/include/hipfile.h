@@ -859,6 +859,21 @@ void hipFileBatchIODestroy(hipFileBatchHandle_t batch_idp);
  *
  * \max_io_size_note
  *
+ * @note A successful return means the read was queued on `stream`, not that it
+ *       finished. Synchronize `stream` before reading `bytes_read_p`, which then
+ *       holds the number of bytes read, or a negative value if the read failed.
+ *       Keep `size_p`, `file_offset_p`, `buffer_offset_p`, and `bytes_read_p`
+ *       valid until then. If the call returns an error, nothing was queued.
+ * @note `hipStreamPerThread` is synchronous too. Async I/O on any other
+ *       unregistered stream runs without registering it; registering a stream with
+ *       `hipFileStreamRegister()` is optional and only improves performance.
+ * @note hipFile reserves the device's greatest stream priority for its fallback
+ *       I/O. A stream created at that priority returns `hipFileAsyncNotSupported`,
+ *       unless the device has only one priority level.
+ * @note `buffer_base` must be device memory. A buffer registered from host
+ *       memory returns `hipFileAsyncNotSupported`; use `hipFileRead()` or
+ *       `hipFileWrite()` for host buffers.
+ *
  * @return \hipfile_error_return
  */
 HIPFILE_API
@@ -879,6 +894,21 @@ hipFileError_t hipFileReadAsync(hipFileHandle_t fh, void *buffer_base, size_t *s
  *
  * \max_io_size_note
  *
+ * @note A successful return means the write was queued on `stream`, not that it
+ *       finished. Synchronize `stream` before reading `bytes_written_p`, which then
+ *       holds the number of bytes written, or a negative value if the write failed.
+ *       Keep `size_p`, `file_offset_p`, `buffer_offset_p`, and `bytes_written_p`
+ *       valid until then. If the call returns an error, nothing was queued.
+ * @note `hipStreamPerThread` is synchronous too. Async I/O on any other
+ *       unregistered stream runs without registering it; registering a stream with
+ *       `hipFileStreamRegister()` is optional and only improves performance.
+ * @note hipFile reserves the device's greatest stream priority for its fallback
+ *       I/O. A stream created at that priority returns `hipFileAsyncNotSupported`,
+ *       unless the device has only one priority level.
+ * @note `buffer_base` must be device memory. A buffer registered from host
+ *       memory returns `hipFileAsyncNotSupported`; use `hipFileRead()` or
+ *       `hipFileWrite()` for host buffers.
+ *
  * @return \hipfile_error_return
  */
 HIPFILE_API
@@ -886,12 +916,20 @@ hipFileError_t hipFileWriteAsync(hipFileHandle_t fh, void *buffer_base, size_t *
                                  hoff_t *buffer_offset_p, ssize_t *bytes_written_p, hipStream_t stream);
 
 /*!
- * @brief Register a stream to be used by for asynchronous GPU IO
+ * @brief Register a stream to be used for asynchronous GPU IO
  * @ingroup async
  *
  * @param [in] stream \hipstream_param
  * @param [in] flags Flags that can optimize stream processing if parameters
  *                   are known/are aligned at time of request submission
+ *
+ * @note Registration is an optional optimization: asynchronous I/O on an
+ *       unregistered stream runs without registering it, on a slower path.
+ *       Registering the default stream (a NULL handle or `hipStreamPerThread`)
+ *       does nothing and returns success.
+ * @note hipFile reserves the device's greatest stream priority for its fallback
+ *       I/O. Registering a stream created at that priority returns
+ *       `hipFileInvalidValue`, unless the device has only one priority level.
  *
  * @return \hipfile_error_return
  */
@@ -903,6 +941,18 @@ hipFileError_t hipFileStreamRegister(hipStream_t stream, unsigned flags);
  * @ingroup async
  *
  * @param [in] stream \hipstream_param
+ *
+ * @note Deregister every stream you registered with `hipFileStreamRegister()`
+ *       before destroying it. Deregistering synchronizes the stream, so the call
+ *       waits for all work queued on it, including asynchronous I/O in flight.
+ *       If the stream processed any asynchronous I/O, deregistering it also frees
+ *       the stream's signal memory with `hipFree`, which synchronizes all streams
+ *       on the device. Don't deregister a registered stream that has processed I/O
+ *       while another stream on the same device is blocked, since the `hipFree`
+ *       call will hang until that stream unblocks.
+ *       Don't submit I/O to a stream while it is being deregistered. Deregistering
+ *       the default stream (a NULL handle or `hipStreamPerThread`) does nothing and
+ *       returns success.
  *
  * @return \hipfile_error_return
  */

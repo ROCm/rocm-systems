@@ -13,6 +13,7 @@
 #include "nccl_tuner.h"
 #include "sym_kernels.h"
 #include "ce_coll.h"
+#include "tuning_mask.h"
 
 #define NCCL_TUNING_SYM_KERNEL_ID_OFFSET (NCCL_NUM_ALGORITHMS * NCCL_NUM_PROTOCOLS)
 #define NCCL_TUNING_CE_METHOD_ID_OFFSET (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_Count)
@@ -28,12 +29,20 @@ static inline int ncclTuningFuncIndex(ncclFunc_t func) {
   return func == ncclFuncAlltoAll ? NCCL_NUM_FUNCTIONS : -1;
 }
 
-#define NCCL_TUNING_MASK_GENERAL_KERNELS ((1ULL << NCCL_TUNING_SYM_KERNEL_ID_OFFSET) - 1ULL)
+#define NCCL_TUNING_MASK_GENERAL_KERNELS rcclTuningMask::range(0, NCCL_TUNING_SYM_KERNEL_ID_OFFSET)
 #define NCCL_TUNING_MASK_SYM_KERNELS \
-  ((1ULL << NCCL_TUNING_CE_METHOD_ID_OFFSET) - 1ULL - NCCL_TUNING_MASK_GENERAL_KERNELS)
-#define NCCL_TUNING_MASK_CE ((1ULL << NCCL_TUNING_COUNT) - (1ULL << NCCL_TUNING_CE_METHOD_ID_OFFSET))
-#define NCCL_TUNING_MASK_ALL ((1ULL << NCCL_TUNING_COUNT) - 1ULL)
-static_assert(NCCL_TUNING_COUNT < 64, "Tuning masks cannot represent every tuning entry");
+  rcclTuningMask::range(NCCL_TUNING_SYM_KERNEL_ID_OFFSET, NCCL_TUNING_CE_METHOD_ID_OFFSET)
+#define NCCL_TUNING_MASK_CE rcclTuningMask::range(NCCL_TUNING_CE_METHOD_ID_OFFSET, NCCL_TUNING_COUNT)
+#define NCCL_TUNING_MASK_ALL rcclTuningMask::range(0, NCCL_TUNING_COUNT)
+static_assert(NCCL_TUNING_COUNT <= rcclTuningMask::kBits, "Tuning masks cannot represent every tuning entry");
+
+static inline constexpr rcclTuningMask rcclTuningMaskFromSymk(ncclSymkKernelMask kernels) {
+  return rcclTuningMask::fromWord(kernels, NCCL_TUNING_SYM_KERNEL_ID_OFFSET);
+}
+// Only the symmetric kernel ids of t: general and CE tuning ids are dropped.
+static inline constexpr ncclSymkKernelMask rcclSymkMaskFromTuning(rcclTuningMask t) {
+  return (t & NCCL_TUNING_MASK_SYM_KERNELS).word(NCCL_TUNING_SYM_KERNEL_ID_OFFSET);
+}
 
 #define NCCL_TUNING_ENTRY_INIT_VALUE -1
 #define NCCL_TUNING_RESULT_INIT \
@@ -69,7 +78,7 @@ struct ncclTuningResult_t {
 
 struct ncclTuningInput_t {
   struct ncclComm* comm;
-  uint64_t tuningMask;
+  rcclTuningMask tuningMask;
   ncclFunc_t func;
   ncclRedOp_t redOp;
   ncclDevRedOp_t devRedOp;

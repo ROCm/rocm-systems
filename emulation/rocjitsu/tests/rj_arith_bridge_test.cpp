@@ -19,6 +19,9 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
@@ -115,6 +118,7 @@
 #include <cmath>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <limits>
 #include <memory>
 #include <optional>
 
@@ -834,7 +838,7 @@ TEST(ArithBridgeTest, DppFloatReadsExecButWritesOnlyEnabledRows) {
 
 TEST(ArithBridgeTest, ExactMulStatusRespectsDppRows) {
   for (bool enabled : {false, true}) {
-    BridgeFixture fixture(false, 32, parse_arithmetic_policy("bit_exact_empirical"));
+    BridgeFixture fixture(false, 32, {ArithmeticSemantics::BitExactEmpirical});
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     fixture.wave->set_exec(1);
     fixture.wave->set_mode_raw(0x1f0);
@@ -922,9 +926,10 @@ TEST(ArithBridgeTest, CompatibilityMulDppStatusIncludesWriteSuppressedLanes) {
 
 TEST(ArithBridgeTest, Gfx12ExceptionalOperandsUpdateUserFlags) {
   for (const bool report : {true, false}) {
-    BridgeFixture fixture(
-        false, 32,
-        parse_arithmetic_policy(report ? "compatibility" : "bit_exact_empirical_no_fp_status"));
+    const util::FailureOr<ArithmeticPolicy> maybe_policy =
+        parse_arithmetic_policy(report ? "compatibility" : "bit_exact_empirical_no_fp_status");
+    ASSERT_TRUE(maybe_policy.succeeded());
+    BridgeFixture fixture(false, 32, maybe_policy.value());
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     fixture.wave->set_mode_raw(0xf0);
     auto check = [&](std::array<uint32_t, 2> words, uint32_t lhs, uint32_t rhs, uint32_t causes) {
@@ -1637,9 +1642,10 @@ TEST(ArithBridgeTest, HalfBinaryVop2InlineGuestRoundingAndRejection) {
         ASSERT_TRUE(instruction.succeeded());
         const auto status =
             fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave);
-        EXPECT_EQ(status.succeeded(), policy_index == 0);
+        // Strict exact numeric requests are accepted on both architectures; status is not.
+        EXPECT_EQ(status.succeeded(), policy_index != 2);
         EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 0),
-                  policy_index == 0 ? 0xdead3c01U : 0xdeadbeefU);
+                  policy_index != 2 ? 0xdead3c01U : 0xdeadbeefU);
         EXPECT_EQ(fixture.wave->trapsts(), 0x10U);
       }
 }
@@ -1851,7 +1857,10 @@ TEST(ArithBridgeTest, TrigEncodingsNanClampMasksAndOptionalState) {
 }
 
 TEST(ArithBridgeTest, TrigDppFilteredLanesDoNotReportExceptions) {
-  BridgeFixture fixture(false, 32, parse_arithmetic_policy("bit_exact_empirical"));
+  const util::FailureOr<ArithmeticPolicy> maybe_policy =
+      parse_arithmetic_policy("bit_exact_empirical");
+  ASSERT_TRUE(maybe_policy.succeeded());
+  BridgeFixture fixture(false, 32, maybe_policy.value());
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fixture.wave->set_exec((1u << 0) | (1u << 16) | (1u << 17));
   fixture.wave->set_mode_raw(0xf0);
@@ -4801,7 +4810,9 @@ TEST(ArithBridgeTest, ClassCompareUsesRawHalfClassesAndIndependentHalfSelectors)
 
 TEST(ArithBridgeTest, FloatCompareReportsRepeatedCausesAndPreservesUnrelatedState) {
   for (uint32_t lanes : {32u, 64u}) {
-    BridgeFixture fixture(false, lanes, parse_arithmetic_policy("bit_exact_empirical"));
+    util::FailureOr<ArithmeticPolicy> policy = parse_arithmetic_policy("bit_exact_empirical");
+    ASSERT_TRUE(policy.succeeded());
+    BridgeFixture fixture(false, lanes, policy.value());
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     fixture.wave->set_exec(5);
     fixture.wave->set_mode_raw(0xf0);
@@ -4831,8 +4842,10 @@ TEST(ArithBridgeTest, FloatCompareReportsRepeatedCausesAndPreservesUnrelatedStat
 TEST(ArithBridgeTest, FloatCompareHonorsGuestDenormalsAndExplicitLoosePolicy) {
   for (bool loose : {false, true})
     for (bool flush : {false, true}) {
-      BridgeFixture fixture(false, 32,
-                            parse_arithmetic_policy(loose ? "loose" : "bit_exact_empirical"));
+      util::FailureOr<ArithmeticPolicy> policy =
+          parse_arithmetic_policy(loose ? "loose" : "bit_exact_empirical");
+      ASSERT_TRUE(policy.succeeded());
+      BridgeFixture fixture(false, 32, policy.value());
       ASSERT_FALSE(::testing::Test::HasFatalFailure());
       fixture.wave->set_exec(1);
       fixture.wave->set_mode_raw(flush ? 0 : 0xf0);
@@ -4874,7 +4887,9 @@ TEST(ArithBridgeTest, FloatCompareHalfSelectorAndInlineFloatKeepTheirFormat) {
 }
 
 TEST(ArithBridgeTest, FloatCompareDppFilteredLanesCannotRaiseExceptions) {
-  BridgeFixture fixture(false, 32, parse_arithmetic_policy("bit_exact_empirical"));
+  util::FailureOr<ArithmeticPolicy> policy = parse_arithmetic_policy("bit_exact_empirical");
+  ASSERT_TRUE(policy.succeeded());
+  BridgeFixture fixture(false, 32, policy.value());
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fixture.wave->set_exec((1u << 0) | (1u << 16) | (1u << 17));
   fixture.wave->set_mode_raw(0xf0);
@@ -4907,7 +4922,9 @@ TEST(ArithBridgeTest, FloatCompareDppFilteredLanesCannotRaiseExceptions) {
 }
 
 TEST(ArithBridgeTest, RejectedFloatCompareDppDoesNotChangeExecOrExceptionState) {
-  BridgeFixture fixture(true, 32, parse_arithmetic_policy("bit_exact_empirical"));
+  util::FailureOr<ArithmeticPolicy> policy = parse_arithmetic_policy("bit_exact_empirical");
+  ASSERT_TRUE(policy.succeeded());
+  BridgeFixture fixture(true, 32, policy.value());
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint64_t old_exec = 0xa5a55a5affff005bULL;
   fixture.wave->set_exec_raw(old_exec);
@@ -6283,6 +6300,148 @@ TEST(ArithBridgeTest, Fp8NarrowPartialWritesModifiersAndSeeds) {
               }
 }
 
+// The shared conversion kernels accept strict exact requests only through the RDNA3 and RDNA4
+// entry points, whose results the gfx1100 and gfx1201 captures cover; the generated CDNA3 and
+// gfx1250 executors call loose-only entry points that still refuse mode 2 while Compatibility
+// executes the same numeric model on every architecture.
+TEST(ArithBridgeTest, ConversionStrictExactAcceptancePerArchitecture) {
+  const uint32_t inputs[] = {0u, 1u, 0xffffffffu, 0x7fffffffu};
+  const uint32_t expected[] = {0u, 0x3f800000u, 0xbf800000u, 0x4f000000u};
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna4,
+                    rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna5})
+    for (bool strict : {false, true}) {
+      ArithmeticPolicy policy{};
+      if (strict)
+        policy.semantics = ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+      const unsigned lanes = arch == rocjitsu::IsaFamily::Cdna3 ? 64 : 32;
+      BridgeFixture fixture(arch, lanes, policy);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
+      fixture.wave->set_exec(0xf);
+      for (unsigned lane = 0; lane < lanes; ++lane) {
+        fixture.cu->write_vgpr(fixture.base(), lane, inputs[lane % 4]);
+        fixture.cu->write_vgpr(fixture.base() + 1, lane, 0xdeadbeefu);
+      }
+      std::array<uint32_t, 1> words{};
+      switch (arch) {
+      case rocjitsu::IsaFamily::Rdna3:
+        words = rdna3::build_vop1(rdna3::kVCvtF32I32Vop1, {.src0 = 256, .vdst = 1});
+        break;
+      case rocjitsu::IsaFamily::Rdna4:
+        words = rdna4::build_vop1(rdna4::kVCvtF32I32Vop1, {.src0 = 256, .vdst = 1});
+        break;
+      case rocjitsu::IsaFamily::Cdna3:
+        words = cdna3::build_vop1(cdna3::kVCvtF32I32Vop1, {.src0 = 256, .vdst = 1});
+        break;
+      default:
+        words = cdna5::build_vop1(cdna5::kVCvtF32I32Vop1, {.src0 = 256, .vdst = 1});
+        break;
+      }
+      auto instruction = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      const bool rdna = arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna4;
+      const bool success =
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded();
+      SCOPED_TRACE(::testing::Message() << "arch " << int(arch) << " strict " << strict);
+      EXPECT_EQ(success, !strict || rdna);
+      for (unsigned lane = 0; lane < 4; ++lane)
+        EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 1, lane),
+                  success ? expected[lane] : 0xdeadbeefu);
+    }
+}
+
+// The shared FP16 ADD kernel accepts strict exact requests only through the RDNA3 and RDNA4
+// entry points, whose results the gfx1100 and gfx1201 captures cover; the generated RDNA2,
+// CDNA3 and gfx1250 executors call loose-only entry points that still refuse mode 2 while
+// Compatibility executes the same numeric model on every architecture.
+TEST(ArithBridgeTest, HalfAddStrictExactAcceptancePerArchitecture) {
+  for (auto arch :
+       {rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna4,
+        rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna5})
+    for (bool strict : {false, true}) {
+      ArithmeticPolicy policy{};
+      if (strict)
+        policy.semantics = ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+      const unsigned lanes = arch == rocjitsu::IsaFamily::Cdna3 ? 64 : 32;
+      BridgeFixture fixture(arch, lanes, policy);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
+      fixture.wave->set_exec(1);
+      // 1.5 * 2 = 3.0 is exact in FP16 under every model.
+      fixture.cu->write_vgpr(fixture.base(), 0, 0x3e00u);
+      fixture.cu->write_vgpr(fixture.base() + 1, 0, 0x3e00u);
+      fixture.cu->write_vgpr(fixture.base() + 2, 0, 0xdeadbeefu);
+      std::array<uint32_t, 2> words{};
+      switch (arch) {
+      case rocjitsu::IsaFamily::Rdna2:
+        words = rdna2::build_vop3(rdna2::kVAddF16Vop3, {.vdst = 2, .src0 = 256, .src1 = 257});
+        break;
+      case rocjitsu::IsaFamily::Rdna3:
+        words = rdna3::build_vop3(rdna3::kVAddF16Vop3, {.vdst = 2, .src0 = 256, .src1 = 257});
+        break;
+      case rocjitsu::IsaFamily::Rdna4:
+        words = rdna4::build_vop3(rdna4::kVAddF16Vop3, {.vdst = 2, .src0 = 256, .src1 = 257});
+        break;
+      case rocjitsu::IsaFamily::Cdna3:
+        words = cdna3::build_vop3(cdna3::kVAddF16Vop3, {.vdst = 2, .src0 = 256, .src1 = 257});
+        break;
+      default:
+        words = cdna5::build_vop3(cdna5::kVAddF16Vop3, {.vdst = 2, .src0 = 256, .src1 = 257});
+        break;
+      }
+      auto instruction = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      const bool rdna = arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna4;
+      const bool success =
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded();
+      SCOPED_TRACE(::testing::Message() << "arch " << int(arch) << " strict " << strict);
+      EXPECT_EQ(success, !strict || rdna);
+      const uint32_t result = fixture.cu->read_vgpr(fixture.base() + 2, 0);
+      if (success)
+        EXPECT_EQ(result & 0xffffu, 0x4200u);
+      else
+        EXPECT_EQ(result, 0xdeadbeefu);
+    }
+}
+
+// MULLIT accepts strict exact on RDNA3 and RDNA4; the generated gfx1250 executor calls a
+// loose-only entry point that still refuses mode 2 and runs the same model in Compatibility.
+TEST(ArithBridgeTest, MullitStrictExactAcceptancePerArchitecture) {
+  for (auto arch :
+       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5})
+    for (bool strict : {false, true}) {
+      ArithmeticPolicy policy{};
+      if (strict)
+        policy.semantics = ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+      BridgeFixture fixture(arch, 32, policy);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
+      fixture.wave->set_exec(1);
+      for (unsigned source = 0; source < 3; ++source)
+        fixture.cu->write_vgpr(fixture.base() + source, 0, 0x3f800000u);
+      fixture.cu->write_vgpr(fixture.base() + 3, 0, 0xdeadbeefu);
+      std::array<uint32_t, 2> words{};
+      switch (arch) {
+      case rocjitsu::IsaFamily::Rdna3:
+        words = rdna3::build_vop3(rdna3::kVMullitF32Vop3,
+                                  {.vdst = 3, .src0 = 256, .src1 = 257, .src2 = 258});
+        break;
+      case rocjitsu::IsaFamily::Rdna4:
+        words = rdna4::build_vop3(rdna4::kVMullitF32Vop3,
+                                  {.vdst = 3, .src0 = 256, .src1 = 257, .src2 = 258});
+        break;
+      default:
+        words = cdna5::build_vop3(cdna5::kVMullitF32Vop3,
+                                  {.vdst = 3, .src0 = 256, .src1 = 257, .src2 = 258});
+        break;
+      }
+      auto instruction = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      const bool success =
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded();
+      SCOPED_TRACE(::testing::Message() << "arch " << int(arch) << " strict " << strict);
+      EXPECT_EQ(success, !strict || arch != rocjitsu::IsaFamily::Cdna5);
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 3, 0), success ? 0x3f800000u : 0xdeadbeefu);
+    }
+}
+
 TEST(ArithBridgeTest, DoubleConversionsLayoutsModesAndPolicies) {
   const uint16_t opcodes[2][2][6] = {
       {{rdna3::kVCvtF64I32Vop1, rdna3::kVCvtF64U32Vop1, rdna3::kVCvtI32F64Vop1,
@@ -6383,7 +6542,7 @@ TEST(ArithBridgeTest, DoubleConversionsLayoutsModesAndPolicies) {
                   const bool success =
                       fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                           .succeeded();
-                  ASSERT_EQ(success, policy_kind < 2);
+                  ASSERT_EQ(success, policy_kind < 3);
                   uint64_t read_lanes[2] = {}, written[2] = {};
                   for (const auto &read : fixture.recorder->reads) {
                     ASSERT_GE(read.reg, 2u);
@@ -6517,7 +6676,7 @@ TEST(ArithBridgeTest, WordConversionsRoundingSaturationAndPolicies) {
                   const bool success =
                       fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                           .succeeded();
-                  ASSERT_EQ(success, policy_kind < 2);
+                  ASSERT_EQ(success, policy_kind < 3);
                   uint64_t read_lanes = 0, written = 0;
                   for (const auto &read : fixture.recorder->reads) {
                     EXPECT_EQ(read.reg, 0u);
@@ -6737,7 +6896,7 @@ TEST(ArithBridgeTest, PackedConversionsFixedRoundingModifiersAliasesAndPolicies)
                 ASSERT_TRUE(instruction.succeeded());
                 fixture.recorder->reads.clear();
                 fixture.recorder->writes.clear();
-                const bool success = policy_kind < 2;
+                const bool success = policy_kind < 3;
                 ASSERT_EQ(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                               .succeeded(),
                           success);
@@ -6868,7 +7027,7 @@ TEST(ArithBridgeTest, NormalizedConversionsLayoutsRoundingAndPolicies) {
                     ASSERT_TRUE(instruction.succeeded());
                     fixture.recorder->reads.clear();
                     fixture.recorder->writes.clear();
-                    const bool success = policy_kind < 2;
+                    const bool success = policy_kind < 3;
                     ASSERT_EQ(
                         fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                             .succeeded(),
@@ -6986,7 +7145,8 @@ TEST(ArithBridgeTest, BitPackingSelectorsAliasingAndPolicies) {
                 ASSERT_TRUE(instruction.succeeded());
                 fixture.recorder->reads.clear();
                 fixture.recorder->writes.clear();
-                const bool success = policy_kind < 2 || (policy_kind == 2 && half && !rdna3);
+                // Both architectures accept strict exact numeric requests; neither reports status.
+                const bool success = policy_kind < 3;
                 ASSERT_EQ(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                               .succeeded(),
                           success);
@@ -7103,7 +7263,8 @@ TEST(ArithBridgeTest, DoubleFmaPairAliasesModifiersAndPolicies) {
               ASSERT_TRUE(instruction.succeeded());
               fixture.recorder->reads.clear();
               fixture.recorder->writes.clear();
-              const bool rejected = policy_kind >= 2;
+              // Both architectures accept strict exact numeric requests; neither reports status.
+              const bool rejected = policy_kind == 3;
               EXPECT_EQ(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                             .failed(),
                         rejected);
@@ -7649,7 +7810,9 @@ TEST(ArithBridgeTest, CompatibilityUnaryStatusIncludesDppSuppressedLanes) {
   for (bool sqrt : {false, true}) {
     for (bool status_only : {false, true}) {
       for (const char *policy : {"compatibility", "loose"}) {
-        BridgeFixture fixture(false, 32, parse_arithmetic_policy(policy));
+        const util::FailureOr<ArithmeticPolicy> maybe_policy = parse_arithmetic_policy(policy);
+        ASSERT_TRUE(maybe_policy.succeeded());
+        BridgeFixture fixture(false, 32, maybe_policy.value());
         ASSERT_FALSE(::testing::Test::HasFatalFailure());
         fixture.wave->set_exec(status_only ? 1U : 1U | (1U << 16));
         fixture.wave->set_mode_raw(0xf0);
@@ -7749,9 +7912,7 @@ TEST(ArithBridgeTest, PseudoScalarIgnoresExecAndStagesScalarOutputs) {
             ASSERT_TRUE(instruction.succeeded());
             fixture.recorder->scalar_reads.clear();
             fixture.recorder->scalar_writes.clear();
-            const bool rejected = semantics == ArithmeticSemantics::BitExactEmpirical ||
-                                  (semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus &&
-                                   (op == 1 || op == 3));
+            const bool rejected = semantics == ArithmeticSemantics::BitExactEmpirical;
             EXPECT_EQ(
                 fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed(),
                 rejected);
@@ -7932,15 +8093,17 @@ TEST(ArithBridgeTest, MulReportingPolicyPreservesDirectedNumericalExecution) {
             auto instruction = fixture.decoder->decode_window(words);
             ASSERT_TRUE(instruction.succeeded());
             fixture.recorder->writes.clear();
-            // Only gfx12 nearest-even without CLAMP has qualified reporting.
-            // Compatibility retains the legacy classifier in every
-            // configuration.
+            // Only gfx12 nearest-even without CLAMP has qualified reporting. gfx12
+            // Compatibility reports the shared hardware classifier in every configuration,
+            // and gfx1201 raises nothing under CLAMP; RDNA3 keeps the inherited classifier,
+            // which reads the raw operands and so still reports under CLAMP.
             const bool reporting_supported = !rdna3 && !rounding && !clamp;
             const bool rejected = policy_kind == 2 && !reporting_supported;
             EXPECT_EQ(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                           .succeeded(),
                       !rejected);
-            const bool report = policy_kind == 0 || (reporting_supported && policy_kind == 2);
+            const bool report = (policy_kind == 0 && (rdna3 || !clamp)) ||
+                                (reporting_supported && policy_kind == 2);
             EXPECT_EQ(fixture.wave->trapsts(), 0x80000000u | (report ? 40u : 0u));
             const uint32_t expected = rejected                           ? 0x7f7fffffu
                                       : clamp                            ? 0x3f800000u
@@ -9431,20 +9594,15 @@ TEST(ArithBridgeTest, MullitPoliciesNanClampAndMaskedAlias) {
             auto instruction = fixture.decoder->decode_window(words);
             ASSERT_TRUE(instruction.succeeded());
             fixture.recorder->writes.clear();
+            // Every policy accepts MULLIT; strict exact shares the Compatibility model.
             const bool success =
                 fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                     .succeeded();
-            ASSERT_EQ(success, policy_kind != 2);
-            if (success) {
-              ASSERT_EQ(fixture.recorder->writes.size(), 1U);
-              EXPECT_EQ(fixture.recorder->writes[0].lanes, exec_mask);
-            } else {
-              EXPECT_TRUE(fixture.recorder->writes.empty());
-            }
+            ASSERT_TRUE(success);
+            ASSERT_EQ(fixture.recorder->writes.size(), 1U);
+            EXPECT_EQ(fixture.recorder->writes[0].lanes, exec_mask);
             const uint32_t result = fixture.cu->read_vgpr(fixture.base(), lanes - 1);
-            if (!success) {
-              EXPECT_EQ(result, 0x7fc12345U);
-            } else if (rdna3 && !dx10) {
+            if (rdna3 && !dx10) {
               EXPECT_GT(result & 0x7fffffffU, 0x7f800000U);
             } else {
               EXPECT_EQ(result, 0U);
@@ -10173,7 +10331,10 @@ TEST(ArithBridgeTest, InterpolationRtzOverridesGuestNearest) {
 
 TEST(ArithBridgeTest, DecodedClassCompareStrictStatusIsArchitectureSpecific) {
   for (bool gfx11 : {false, true}) {
-    BridgeFixture fixture(gfx11, 32, parse_arithmetic_policy("bit_exact_empirical"));
+    const util::FailureOr<ArithmeticPolicy> maybe_policy =
+        parse_arithmetic_policy("bit_exact_empirical");
+    ASSERT_TRUE(maybe_policy.succeeded());
+    BridgeFixture fixture(gfx11, 32, maybe_policy.value());
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     fixture.wave->set_exec(1);
     fixture.wave->set_vcc_mask(0x80);
@@ -10187,6 +10348,18 @@ TEST(ArithBridgeTest, DecodedClassCompareStrictStatusIsArchitectureSpecific) {
               gfx11);
     EXPECT_EQ(fixture.wave->vcc(), gfx11 ? 0x80U : 1U);
   }
+  // Even finite gfx90a CLASS requests reject unqualified strict FP status.
+  BridgeFixture fixture(rocjitsu::IsaFamily::Cdna2, 64, {ArithmeticSemantics::BitExactEmpirical});
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  fixture.wave->set_exec(1);
+  fixture.wave->set_vcc_mask(0x80);
+  fixture.cu->write_vgpr(fixture.base(), 0, 0x3f800000);
+  fixture.cu->write_vgpr(fixture.base() + 1, 0, 0x100);
+  auto words = cdna2::build_vopc(cdna2::kVCmpClassF32Vopc, {.src0 = 256, .vsrc1 = 1});
+  auto instruction = fixture.decoder->decode_window(words);
+  ASSERT_TRUE(instruction.succeeded());
+  EXPECT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed());
+  EXPECT_EQ(fixture.wave->vcc_mask(), 0x80U);
 }
 
 TEST(ArithBridgeTest, PseudoScalarReciprocalDistinguishesLooseAndEmpirical) {
@@ -11441,19 +11614,21 @@ TEST(ArithBridgeTest, CdnaFloatingMfmaUsesLibraryPolicyAndAccumulatorBank) {
         auto decoder = Decoder::create(config.arch);
         auto instruction = decoder->decode_window(words);
         ASSERT_TRUE(instruction.succeeded());
-        const bool exact = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+        const bool unsupported =
+            semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus && !(test.fp8 && !cdna4);
         recorder->writes.clear();
-        EXPECT_EQ(cu->execute_instruction(instruction.value().get(), *wave).succeeded(), !exact);
-        if (exact) {
+        EXPECT_EQ(cu->execute_instruction(instruction.value().get(), *wave).succeeded(),
+                  !unsupported);
+        if (unsupported) {
           EXPECT_TRUE(recorder->writes.empty());
         }
         for (uint32_t reg = 0; reg < 4; ++reg) {
           for (uint32_t lane = 0; lane < 64; ++lane) {
             EXPECT_EQ(cu->read_vgpr(dst + reg, lane),
-                      exact ? 0xdeadbeefU
-                            : std::bit_cast<uint32_t>(test.fp8 ? (cdna4 ? 128.0f : 32.0f)
-                                                               : (test.fp32 ? 1.0f : 4.0f) *
-                                                                     float(53 + reg)));
+                      unsupported ? 0xdeadbeefU
+                                  : std::bit_cast<uint32_t>(test.fp8 ? (cdna4 ? 128.0f : 32.0f)
+                                                                     : (test.fp32 ? 1.0f : 4.0f) *
+                                                                           float(53 + reg)));
           }
         }
         if (cdna4 && !acc_cd && semantics == ArithmeticSemantics::Loose) {
@@ -15418,23 +15593,22 @@ TEST(ArithBridgeTest, WideScaledNarrowLayoutsAndAliases) {
       {0, cdna5::kVCvtScalef32Pk8Bf8Bf16Vop3, 2, 4, false},
       {0, cdna5::kVCvtScalef32SrPk8Bf8Bf16Vop3, 2, 4, true},
   };
-  for (bool full_scale : {false, true}) {
+  for (bool gfx1250 : {false, true}) {
 
     for (auto form : forms) {
-      if (!full_scale && form.format >= 2)
+      if (!gfx1250 && form.format >= 2)
         continue;
       const int bits = form.format == 2 ? 4 : form.format >= 3 ? 8 : 6;
-      const int elements = full_scale ? (bits == 6 ? 16 : 8) : 32;
+      const int elements = gfx1250 ? (bits == 6 ? 16 : 8) : 32;
       const int output_words = elements * bits / 32;
       for (int lanes : {32, 64}) {
-        if (full_scale && lanes != 32)
+        if (gfx1250 && lanes != 32)
           continue;
         for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
           for (int aliasing : {50, 0, 28, 32, 48}) {
             ArithmeticPolicy policy{};
             policy.semantics = semantics;
-            BridgeFixture fixture(full_scale ? rocjitsu::IsaFamily::Cdna5
-                                             : rocjitsu::IsaFamily::Cdna4,
+            BridgeFixture fixture(gfx1250 ? rocjitsu::IsaFamily::Cdna5 : rocjitsu::IsaFamily::Cdna4,
                                   lanes, policy);
             if (aliasing == 28) {
               fixture.cu->set_plugin_group(nullptr);
@@ -15460,20 +15634,19 @@ TEST(ArithBridgeTest, WideScaledNarrowLayoutsAndAliases) {
                 fixture.cu->write_vgpr(fixture.base() + reg, lane, raw);
               }
             }
-            bool ternary = form.stochastic || (!full_scale && form.source == 0);
-            auto words =
-                full_scale
-                    ? cdna5::build_vop3(form.gfx1250_opcode,
-                                        {.vdst = uint8_t(aliasing),
-                                         .abs = 7,
-                                         .opsel = 15,
-                                         .clamp = 1,
-                                         .src0 = 256,
-                                         .src1 = uint16_t(256 + (ternary ? 32 : 48)),
-                                         .src2 = 304,
-                                         .omod = 3,
-                                         .neg = 7})
-                    : cdna4::build_vop3(form.opcode, {.vdst = uint8_t(aliasing),
+            bool ternary = form.stochastic || (!gfx1250 && form.source == 0);
+            auto words = gfx1250 ? cdna5::build_vop3(form.gfx1250_opcode,
+                                                     {.vdst = uint8_t(aliasing),
+                                                      .abs = 7,
+                                                      .opsel = 15,
+                                                      .clamp = 1,
+                                                      .src0 = 256,
+                                                      .src1 = uint16_t(256 + (ternary ? 32 : 48)),
+                                                      .src2 = 304,
+                                                      .omod = 3,
+                                                      .neg = 7})
+                                 : cdna4::build_vop3(form.opcode,
+                                                     {.vdst = uint8_t(aliasing),
                                                       .abs = 7,
                                                       .op_sel = 15,
                                                       .clamp = 1,
@@ -15490,16 +15663,16 @@ TEST(ArithBridgeTest, WideScaledNarrowLayoutsAndAliases) {
             }
             ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                             .succeeded());
-            // Scale-255 lanes do not observe source data. Check before verification
+            // gfx950 scale-255 lanes do not observe source data. Check before verification
             // reads themselves notify the recorder.
             if (fixture.recorder) {
               ASSERT_EQ(fixture.recorder->writes.size(), unsigned(output_words));
               for (auto write : fixture.recorder->writes) {
-                EXPECT_EQ(write.lanes, full_scale ? exec_mask : exec_mask & ~0x8888888888888888ULL);
+                EXPECT_EQ(write.lanes, gfx1250 ? exec_mask : exec_mask & ~0x8888888888888888ULL);
                 EXPECT_EQ(write.bytes, 15);
               }
               for (const auto &read : fixture.recorder->reads) {
-                if (!full_scale && read.reg != 48) {
+                if (!gfx1250 && read.reg != 48) {
                   EXPECT_EQ(read.lanes & 0x8888888888888888ULL, 0U);
                 }
               }
@@ -15509,20 +15682,20 @@ TEST(ArithBridgeTest, WideScaledNarrowLayoutsAndAliases) {
               for (int word = 0; word < output_words; ++word)
                 expected[word] = input[aliasing + word][lane];
               int exponent = (input[48][lane] >> 23) & 255;
-              if (((exec_mask >> lane) & 1) && (full_scale || exponent != 255)) {
+              if (((exec_mask >> lane) & 1) && (gfx1250 || exponent != 255)) {
                 uint8_t codes[32];
                 uint32_t seed = input[32][lane];
                 for (int element = 0; element < elements; ++element) {
                   uint32_t raw = form.source == 0
-                                     ? input[(form.stochastic || full_scale)
+                                     ? input[(form.stochastic || gfx1250)
                                                  ? element
                                                  : (element % 2 ? 32 : 0) + element / 2][lane]
                                      : input[element / 2][lane] >> ((element % 2) * 16);
                   float value = form.source == 0   ? std::bit_cast<float>(raw)
                                 : form.source == 1 ? util::f16_to_f32(uint16_t(raw))
                                                    : util::bf16_to_f32(uint16_t(raw));
-                  value = full_scale ? value / std::bit_cast<float>(input[48][lane])
-                                     : float(double(value) / std::ldexp(1.0, exponent - 127));
+                  value = exponent == 255 ? std::numeric_limits<float>::quiet_NaN()
+                                          : float(double(value) / std::ldexp(1.0, exponent - 127));
                   switch (form.format) {
                   case 0:
                     codes[element] = form.stochastic ? util::f32_to_fp6_e2m3_sr(value, seed)
@@ -15932,6 +16105,81 @@ TEST(ArithBridgeTest, Gfx1250DualMulRejectsUnqualifiedStatus) {
     EXPECT_EQ(f.cu->read_vgpr(f.base() + 9, 0), 0x3c003c00U);
     EXPECT_EQ(f.wave->trapsts(), 0x10U);
     EXPECT_EQ(f.wave->pending_alu_causes(), 0U);
+  }
+}
+
+TEST(ArithBridgeTest, Gfx942MfmaExactUsesGroupedRounding) {
+  for (auto semantics :
+       {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose,
+        ArithmeticSemantics::BitExactEmpiricalAllowLoose,
+        ArithmeticSemantics::BitExactEmpiricalNoFpStatus, ArithmeticSemantics::BitExactEmpirical}) {
+    BridgeFixture fixture(rocjitsu::IsaFamily::Cdna3, 64, {semantics}, 32);
+    ASSERT_NE(fixture.wave, nullptr);
+    fixture.wave->set_exec(0); // MFMA participates as a whole wave, independent of EXEC.
+    const auto base = fixture.base();
+    for (uint32_t reg = 0; reg < 24; ++reg) {
+      for (uint32_t lane = 0; lane < 64; ++lane) {
+        fixture.cu->write_vgpr(base + reg, lane, 0);
+      }
+    }
+    // Truncation drops -1.5*2^-25 before adding it to 1. Sequential FMA does not.
+    fixture.cu->write_vgpr(base, 0, 0x3c00U | uint32_t(util::f32_to_f16(0x1.8p-13f)) << 16);
+    fixture.cu->write_vgpr(base + 4, 0, 0x3c00U | uint32_t(util::f32_to_f16(-0x1p-12f)) << 16);
+    auto words = cdna3::build_vop3p_mfma(cdna3::kVMfmaF324x4x416bF16Vop3pMfma,
+                                         {.vdst = 16, .src0 = 256, .src1 = 260, .src2 = 128});
+    auto decoded = fixture.decoder->decode_window(words);
+    ASSERT_TRUE(decoded.succeeded());
+    ASSERT_TRUE(fixture.cu->execute_instruction(decoded.value().get(), *fixture.wave).succeeded());
+    const bool approximate =
+        semantics == ArithmeticSemantics::Compatibility || semantics == ArithmeticSemantics::Loose;
+    EXPECT_EQ(fixture.cu->read_vgpr(base + 16, 0), approximate ? 0x3f7fffffU : 0x3f800000U);
+  }
+}
+
+TEST(ArithBridgeTest, Gfx942MfmaFp16OvflRestrictsOnlyExactQualification) {
+  for (bool bf16 : {false, true}) {
+    for (bool overflow : {false, true}) {
+      for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose,
+                             ArithmeticSemantics::BitExactEmpiricalAllowLoose,
+                             ArithmeticSemantics::BitExactEmpiricalNoFpStatus,
+                             ArithmeticSemantics::BitExactEmpirical}) {
+        BridgeFixture fixture(rocjitsu::IsaFamily::Cdna3, 64, {semantics}, 32);
+        ASSERT_NE(fixture.wave, nullptr);
+        fixture.wave->set_mode_raw(overflow ? Wavefront::FP16_OVFL_BIT : 0);
+        const auto base = fixture.base();
+        for (uint32_t lane = 0; lane < 64; ++lane) {
+          for (uint32_t reg = 0; reg < 2; ++reg) {
+            fixture.cu->write_vgpr(base + reg, lane, bf16 ? 0x7f7f7f7fU : 0x3c003c00U);
+            fixture.cu->write_vgpr(base + 4 + reg, lane, 0x40004000U);
+          }
+          for (uint32_t reg = 0; reg < 4; ++reg) {
+            fixture.cu->write_vgpr(base + 16 + reg, lane, 0xdeadbeefU);
+          }
+        }
+        auto words = cdna3::build_vop3p_mfma(bf16 ? cdna3::kVMfmaF324x4x416bBf16Vop3pMfma
+                                                  : cdna3::kVMfmaF324x4x416bF16Vop3pMfma,
+                                             {.vdst = 16, .src0 = 256, .src1 = 260, .src2 = 128});
+        auto decoded = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(decoded.succeeded());
+        const bool rejected =
+            overflow && (semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus ||
+                         semantics == ArithmeticSemantics::BitExactEmpirical);
+        fixture.recorder->writes.clear();
+        EXPECT_EQ(fixture.cu->execute_instruction(decoded.value().get(), *fixture.wave).succeeded(),
+                  !rejected);
+        if (rejected) {
+          EXPECT_TRUE(fixture.recorder->writes.empty());
+        }
+        // FP16_OVFL must not turn the inherited gfx942 BF16 infinity into saturated finite output.
+        for (uint32_t reg = 0; reg < 4; ++reg) {
+          for (uint32_t lane = 0; lane < 64; ++lane) {
+            EXPECT_EQ(fixture.cu->read_vgpr(base + 16 + reg, lane), rejected ? 0xdeadbeefU
+                                                                    : bf16   ? 0x7f800000U
+                                                                             : 0x41000000U);
+          }
+        }
+      }
+    }
   }
 }
 
