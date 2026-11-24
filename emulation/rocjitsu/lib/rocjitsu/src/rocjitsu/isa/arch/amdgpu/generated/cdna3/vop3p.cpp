@@ -49,8 +49,9 @@ namespace detail {
 DecodeResult decodeVPkMadI16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_mad_i16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkMadI16Vop3p>(opcode);
 }
 } // namespace detail
@@ -77,8 +78,9 @@ DecodeResult decodeVPkMulLoU16Vop3p(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_mul_lo_u16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkMulLoU16Vop3p>(opcode);
 }
 } // namespace detail
@@ -104,8 +106,9 @@ namespace detail {
 DecodeResult decodeVPkAddI16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_add_i16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkAddI16Vop3p>(opcode);
 }
 } // namespace detail
@@ -131,8 +134,9 @@ namespace detail {
 DecodeResult decodeVPkSubI16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_sub_i16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkSubI16Vop3p>(opcode);
 }
 } // namespace detail
@@ -159,8 +163,9 @@ DecodeResult decodeVPkLshlrevB16Vop3p(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_lshlrev_b16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkLshlrevB16Vop3p>(opcode);
 }
 } // namespace detail
@@ -187,8 +192,9 @@ DecodeResult decodeVPkLshrrevB16Vop3p(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_lshrrev_b16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkLshrrevB16Vop3p>(opcode);
 }
 } // namespace detail
@@ -215,8 +221,9 @@ DecodeResult decodeVPkAshrrevI16Vop3p(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_ashrrev_i16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkAshrrevI16Vop3p>(opcode);
 }
 } // namespace detail
@@ -242,8 +249,9 @@ namespace detail {
 DecodeResult decodeVPkMaxI16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_max_i16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkMaxI16Vop3p>(opcode);
 }
 } // namespace detail
@@ -269,8 +277,9 @@ namespace detail {
 DecodeResult decodeVPkMinI16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_min_i16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkMinI16Vop3p>(opcode);
 }
 } // namespace detail
@@ -299,8 +308,9 @@ namespace detail {
 DecodeResult decodeVPkMadU16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_mad_u16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkMadU16Vop3p>(opcode);
 }
 } // namespace detail
@@ -326,8 +336,9 @@ namespace detail {
 DecodeResult decodeVPkAddU16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_add_u16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkAddU16Vop3p>(opcode);
 }
 } // namespace detail
@@ -353,8 +364,9 @@ namespace detail {
 DecodeResult decodeVPkSubU16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_sub_u16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkSubU16Vop3p>(opcode);
 }
 } // namespace detail
@@ -380,8 +392,9 @@ namespace detail {
 DecodeResult decodeVPkMaxU16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_max_u16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkMaxU16Vop3p>(opcode);
 }
 } // namespace detail
@@ -407,8 +420,9 @@ namespace detail {
 DecodeResult decodeVPkMinU16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_min_u16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkMinU16Vop3p>(opcode);
 }
 } // namespace detail
@@ -437,8 +451,9 @@ namespace detail {
 DecodeResult decodeVPkFmaF16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_fma_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkFmaF16Vop3p>(opcode);
 }
 } // namespace detail
@@ -464,8 +479,9 @@ namespace detail {
 DecodeResult decodeVPkAddF16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_add_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkAddF16Vop3p>(opcode);
 }
 } // namespace detail
@@ -491,8 +507,9 @@ namespace detail {
 DecodeResult decodeVPkMulF16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_mul_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkMulF16Vop3p>(opcode);
 }
 } // namespace detail
@@ -518,8 +535,9 @@ namespace detail {
 DecodeResult decodeVPkMinF16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_min_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkMinF16Vop3p>(opcode);
 }
 } // namespace detail
@@ -545,8 +563,9 @@ namespace detail {
 DecodeResult decodeVPkMaxF16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_max_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkMaxF16Vop3p>(opcode);
 }
 } // namespace detail
@@ -582,8 +601,9 @@ DecodeResult decodeVMadMixF32Vop3p(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_mad_mix_f32", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMadMixF32Vop3p>(opcode);
 }
 } // namespace detail
@@ -621,16 +641,18 @@ DecodeResult decodeVMadMixloF16Vop3p(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_mad_mixlo_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMadMixloF16Vop3p>(opcode);
 }
 } // namespace detail
 
 void VMadMixloF16Vop3p::implicit_uses(RegisterSet &uses) const {
   Vop3p::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 VMadMixhiF16Vop3p::VMadMixhiF16Vop3p(const MachineInst *inst)
@@ -666,16 +688,18 @@ DecodeResult decodeVMadMixhiF16Vop3p(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_mad_mixhi_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMadMixhiF16Vop3p>(opcode);
 }
 } // namespace detail
 
 void VMadMixhiF16Vop3p::implicit_uses(RegisterSet &uses) const {
   Vop3p::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 VDot2F32F16Vop3p::VDot2F32F16Vop3p(const MachineInst *inst)
@@ -703,8 +727,9 @@ DecodeResult decodeVDot2F32F16Vop3p(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_dot2_f32_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VDot2F32F16Vop3p>(opcode);
 }
 } // namespace detail
@@ -734,8 +759,9 @@ DecodeResult decodeVDot2I32I16Vop3p(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_dot2_i32_i16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VDot2I32I16Vop3p>(opcode);
 }
 } // namespace detail
@@ -765,8 +791,9 @@ DecodeResult decodeVDot2U32U16Vop3p(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_dot2_u32_u16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VDot2U32U16Vop3p>(opcode);
 }
 } // namespace detail
@@ -796,8 +823,9 @@ DecodeResult decodeVDot4I32I8Vop3p(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_dot4_i32_i8", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VDot4I32I8Vop3p>(opcode);
 }
 } // namespace detail
@@ -827,8 +855,9 @@ DecodeResult decodeVDot4U32U8Vop3p(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_dot4_u32_u8", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VDot4U32U8Vop3p>(opcode);
 }
 } // namespace detail
@@ -858,8 +887,9 @@ DecodeResult decodeVDot8I32I4Vop3p(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_dot8_i32_i4", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VDot8I32I4Vop3p>(opcode);
 }
 } // namespace detail
@@ -889,8 +919,9 @@ DecodeResult decodeVDot8U32U4Vop3p(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_dot8_u32_u4", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VDot8U32U4Vop3p>(opcode);
 }
 } // namespace detail
@@ -919,8 +950,9 @@ namespace detail {
 DecodeResult decodeVPkFmaF32Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_fma_f32", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkFmaF32Vop3p>(opcode);
 }
 } // namespace detail
@@ -946,8 +978,9 @@ namespace detail {
 DecodeResult decodeVPkMulF32Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_mul_f32", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkMulF32Vop3p>(opcode);
 }
 } // namespace detail
@@ -973,8 +1006,9 @@ namespace detail {
 DecodeResult decodeVPkAddF32Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_add_f32", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkAddF32Vop3p>(opcode);
 }
 } // namespace detail
@@ -1000,8 +1034,9 @@ namespace detail {
 DecodeResult decodeVPkMovB32Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_pk_mov_b32", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VPkMovB32Vop3p>(opcode);
 }
 } // namespace detail
@@ -1029,8 +1064,9 @@ DecodeResult decodeVAccvgprReadVop3p(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_accvgpr_read", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VAccvgprReadVop3p>(opcode);
 }
 } // namespace detail
@@ -1055,8 +1091,9 @@ DecodeResult decodeVAccvgprWriteVop3p(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vop3p::validate_encoding(
       "v_accvgpr_write", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VAccvgprWriteVop3p>(opcode);
 }
 } // namespace detail
@@ -1095,8 +1132,9 @@ VMfmaF3216x16x8Xf32Vop3pMfma::VMfmaF3216x16x8Xf32Vop3pMfma(const MachineInst *in
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_16X16X8_XF32);
@@ -1109,8 +1147,9 @@ DecodeResult decodeVMfmaF3216x16x8Xf32Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_16x16x8_xf32", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3216x16x8Xf32Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -1149,8 +1188,9 @@ VMfmaF3232x32x4Xf32Vop3pMfma::VMfmaF3232x32x4Xf32Vop3pMfma(const MachineInst *in
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_32X32X4_XF32);
@@ -1163,8 +1203,9 @@ DecodeResult decodeVMfmaF3232x32x4Xf32Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_32x32x4_xf32", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3232x32x4Xf32Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -1203,8 +1244,9 @@ VMfmaF3232x32x12bF32Vop3pMfma::VMfmaF3232x32x12bF32Vop3pMfma(const MachineInst *
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 2u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 2u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_32X32X1_2B_F32);
@@ -1217,8 +1259,9 @@ DecodeResult decodeVMfmaF3232x32x12bF32Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_32x32x1_2b_f32", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3232x32x12bF32Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -1257,8 +1300,9 @@ VMfmaF3216x16x14bF32Vop3pMfma::VMfmaF3216x16x14bF32Vop3pMfma(const MachineInst *
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 4u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 4u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_16X16X1_4B_F32);
@@ -1271,8 +1315,9 @@ DecodeResult decodeVMfmaF3216x16x14bF32Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_16x16x1_4b_f32", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3216x16x14bF32Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -1311,8 +1356,9 @@ VMfmaF324x4x116bF32Vop3pMfma::VMfmaF324x4x116bF32Vop3pMfma(const MachineInst *in
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 16u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 16u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_4X4X1_16B_F32);
@@ -1325,8 +1371,9 @@ DecodeResult decodeVMfmaF324x4x116bF32Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_4x4x1_16b_f32", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF324x4x116bF32Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -1365,8 +1412,9 @@ VMfmaF3232x32x2F32Vop3pMfma::VMfmaF3232x32x2F32Vop3pMfma(const MachineInst *inst
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_32X32X2_F32);
@@ -1379,8 +1427,9 @@ DecodeResult decodeVMfmaF3232x32x2F32Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_32x32x2_f32", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3232x32x2F32Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -1419,8 +1468,9 @@ VMfmaF3216x16x4F32Vop3pMfma::VMfmaF3216x16x4F32Vop3pMfma(const MachineInst *inst
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_16X16X4_F32);
@@ -1433,8 +1483,9 @@ DecodeResult decodeVMfmaF3216x16x4F32Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_16x16x4_f32", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3216x16x4F32Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -1473,8 +1524,9 @@ VMfmaF3232x32x42bF16Vop3pMfma::VMfmaF3232x32x42bF16Vop3pMfma(const MachineInst *
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 2u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 2u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_32X32X4_2B_F16);
@@ -1487,8 +1539,9 @@ DecodeResult decodeVMfmaF3232x32x42bF16Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_32x32x4_2b_f16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3232x32x42bF16Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -1527,8 +1580,9 @@ VMfmaF3216x16x44bF16Vop3pMfma::VMfmaF3216x16x44bF16Vop3pMfma(const MachineInst *
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 4u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 4u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_16X16X4_4B_F16);
@@ -1541,8 +1595,9 @@ DecodeResult decodeVMfmaF3216x16x44bF16Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_16x16x4_4b_f16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3216x16x44bF16Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -1581,8 +1636,9 @@ VMfmaF324x4x416bF16Vop3pMfma::VMfmaF324x4x416bF16Vop3pMfma(const MachineInst *in
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 16u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 16u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_4X4X4_16B_F16);
@@ -1595,8 +1651,9 @@ DecodeResult decodeVMfmaF324x4x416bF16Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_4x4x4_16b_f16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF324x4x416bF16Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -1635,8 +1692,9 @@ VMfmaF3232x32x8F16Vop3pMfma::VMfmaF3232x32x8F16Vop3pMfma(const MachineInst *inst
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_32X32X8_F16);
@@ -1649,8 +1707,9 @@ DecodeResult decodeVMfmaF3232x32x8F16Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_32x32x8_f16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3232x32x8F16Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -1689,8 +1748,9 @@ VMfmaF3216x16x16F16Vop3pMfma::VMfmaF3216x16x16F16Vop3pMfma(const MachineInst *in
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_16X16X16_F16);
@@ -1703,8 +1763,9 @@ DecodeResult decodeVMfmaF3216x16x16F16Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_16x16x16_f16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3216x16x16F16Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -1743,8 +1804,9 @@ VMfmaI3232x32x42bI8Vop3pMfma::VMfmaI3232x32x42bI8Vop3pMfma(const MachineInst *in
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 2u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 2u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_I32_32X32X4_2B_I8);
@@ -1757,8 +1819,9 @@ DecodeResult decodeVMfmaI3232x32x42bI8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_i32_32x32x4_2b_i8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaI3232x32x42bI8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -1797,8 +1860,9 @@ VMfmaI3216x16x44bI8Vop3pMfma::VMfmaI3216x16x44bI8Vop3pMfma(const MachineInst *in
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 4u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 4u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_I32_16X16X4_4B_I8);
@@ -1811,8 +1875,9 @@ DecodeResult decodeVMfmaI3216x16x44bI8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_i32_16x16x4_4b_i8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaI3216x16x44bI8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -1851,8 +1916,9 @@ VMfmaI324x4x416bI8Vop3pMfma::VMfmaI324x4x416bI8Vop3pMfma(const MachineInst *inst
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 16u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 16u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_I32_4X4X4_16B_I8);
@@ -1865,8 +1931,9 @@ DecodeResult decodeVMfmaI324x4x416bI8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_i32_4x4x4_16b_i8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaI324x4x416bI8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -1905,8 +1972,9 @@ VMfmaI3232x32x16I8Vop3pMfma::VMfmaI3232x32x16I8Vop3pMfma(const MachineInst *inst
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_I32_32X32X16_I8);
@@ -1919,8 +1987,9 @@ DecodeResult decodeVMfmaI3232x32x16I8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_i32_32x32x16_i8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaI3232x32x16I8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -1959,8 +2028,9 @@ VMfmaI3216x16x32I8Vop3pMfma::VMfmaI3216x16x32I8Vop3pMfma(const MachineInst *inst
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_I32_16X16X32_I8);
@@ -1973,8 +2043,9 @@ DecodeResult decodeVMfmaI3216x16x32I8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_i32_16x16x32_i8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaI3216x16x32I8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -2013,8 +2084,9 @@ VMfmaF3232x32x42bBf16Vop3pMfma::VMfmaF3232x32x42bBf16Vop3pMfma(const MachineInst
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 2u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 2u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_32X32X4_2B_BF16);
@@ -2027,8 +2099,9 @@ DecodeResult decodeVMfmaF3232x32x42bBf16Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_32x32x4_2b_bf16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3232x32x42bBf16Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -2067,8 +2140,9 @@ VMfmaF3216x16x44bBf16Vop3pMfma::VMfmaF3216x16x44bBf16Vop3pMfma(const MachineInst
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 4u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 4u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_16X16X4_4B_BF16);
@@ -2081,8 +2155,9 @@ DecodeResult decodeVMfmaF3216x16x44bBf16Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_16x16x4_4b_bf16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3216x16x44bBf16Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -2121,8 +2196,9 @@ VMfmaF324x4x416bBf16Vop3pMfma::VMfmaF324x4x416bBf16Vop3pMfma(const MachineInst *
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 16u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 16u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_4X4X4_16B_BF16);
@@ -2135,8 +2211,9 @@ DecodeResult decodeVMfmaF324x4x416bBf16Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_4x4x4_16b_bf16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF324x4x416bBf16Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -2175,8 +2252,9 @@ VMfmaF3232x32x8Bf16Vop3pMfma::VMfmaF3232x32x8Bf16Vop3pMfma(const MachineInst *in
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_32X32X8_BF16);
@@ -2189,8 +2267,9 @@ DecodeResult decodeVMfmaF3232x32x8Bf16Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_32x32x8_bf16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3232x32x8Bf16Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -2229,8 +2308,9 @@ VMfmaF3216x16x16Bf16Vop3pMfma::VMfmaF3216x16x16Bf16Vop3pMfma(const MachineInst *
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_16X16X16_BF16);
@@ -2243,8 +2323,9 @@ DecodeResult decodeVMfmaF3216x16x16Bf16Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_16x16x16_bf16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3216x16x16Bf16Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -2294,8 +2375,9 @@ DecodeResult decodeVSmfmacF3216x16x32F16Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_smfmac_f32_16x16x32_f16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VSmfmacF3216x16x32F16Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -2345,8 +2427,9 @@ DecodeResult decodeVSmfmacF3232x32x16F16Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_smfmac_f32_32x32x16_f16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VSmfmacF3232x32x16F16Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -2396,8 +2479,9 @@ DecodeResult decodeVSmfmacF3216x16x32Bf16Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_smfmac_f32_16x16x32_bf16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VSmfmacF3216x16x32Bf16Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -2447,8 +2531,9 @@ DecodeResult decodeVSmfmacF3232x32x16Bf16Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_smfmac_f32_32x32x16_bf16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VSmfmacF3232x32x16Bf16Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -2498,8 +2583,9 @@ DecodeResult decodeVSmfmacI3216x16x64I8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_smfmac_i32_16x16x64_i8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VSmfmacI3216x16x64I8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -2549,8 +2635,9 @@ DecodeResult decodeVSmfmacI3232x32x32I8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_smfmac_i32_32x32x32_i8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VSmfmacI3232x32x32I8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -2601,8 +2688,9 @@ DecodeResult decodeVMfmaF6416x16x4F64Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f64_16x16x4_f64", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF6416x16x4F64Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -2653,8 +2741,9 @@ DecodeResult decodeVMfmaF644x4x44bF64Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f64_4x4x4_4b_f64", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF644x4x44bF64Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -2693,8 +2782,9 @@ VMfmaF3216x16x32Bf8Bf8Vop3pMfma::VMfmaF3216x16x32Bf8Bf8Vop3pMfma(const MachineIn
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_16X16X32_BF8_BF8);
@@ -2707,8 +2797,9 @@ DecodeResult decodeVMfmaF3216x16x32Bf8Bf8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_16x16x32_bf8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3216x16x32Bf8Bf8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -2747,8 +2838,9 @@ VMfmaF3216x16x32Bf8Fp8Vop3pMfma::VMfmaF3216x16x32Bf8Fp8Vop3pMfma(const MachineIn
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_16X16X32_BF8_FP8);
@@ -2761,8 +2853,9 @@ DecodeResult decodeVMfmaF3216x16x32Bf8Fp8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_16x16x32_bf8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3216x16x32Bf8Fp8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -2801,8 +2894,9 @@ VMfmaF3216x16x32Fp8Bf8Vop3pMfma::VMfmaF3216x16x32Fp8Bf8Vop3pMfma(const MachineIn
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_16X16X32_FP8_BF8);
@@ -2815,8 +2909,9 @@ DecodeResult decodeVMfmaF3216x16x32Fp8Bf8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_16x16x32_fp8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3216x16x32Fp8Bf8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -2855,8 +2950,9 @@ VMfmaF3216x16x32Fp8Fp8Vop3pMfma::VMfmaF3216x16x32Fp8Fp8Vop3pMfma(const MachineIn
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_16X16X32_FP8_FP8);
@@ -2869,8 +2965,9 @@ DecodeResult decodeVMfmaF3216x16x32Fp8Fp8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_16x16x32_fp8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3216x16x32Fp8Fp8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -2909,8 +3006,9 @@ VMfmaF3232x32x16Bf8Bf8Vop3pMfma::VMfmaF3232x32x16Bf8Bf8Vop3pMfma(const MachineIn
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_32X32X16_BF8_BF8);
@@ -2923,8 +3021,9 @@ DecodeResult decodeVMfmaF3232x32x16Bf8Bf8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_32x32x16_bf8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3232x32x16Bf8Bf8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -2963,8 +3062,9 @@ VMfmaF3232x32x16Bf8Fp8Vop3pMfma::VMfmaF3232x32x16Bf8Fp8Vop3pMfma(const MachineIn
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_32X32X16_BF8_FP8);
@@ -2977,8 +3077,9 @@ DecodeResult decodeVMfmaF3232x32x16Bf8Fp8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_32x32x16_bf8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3232x32x16Bf8Fp8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -3017,8 +3118,9 @@ VMfmaF3232x32x16Fp8Bf8Vop3pMfma::VMfmaF3232x32x16Fp8Bf8Vop3pMfma(const MachineIn
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_32X32X16_FP8_BF8);
@@ -3031,8 +3133,9 @@ DecodeResult decodeVMfmaF3232x32x16Fp8Bf8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_32x32x16_fp8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3232x32x16Fp8Bf8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -3071,8 +3174,9 @@ VMfmaF3232x32x16Fp8Fp8Vop3pMfma::VMfmaF3232x32x16Fp8Fp8Vop3pMfma(const MachineIn
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) {
     flags_ |= INVALID_MFMA_BROADCAST;
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
   set_amdgpu_operation(amdgpu::Operation::V_MFMA_F32_32X32X16_FP8_FP8);
@@ -3085,8 +3189,9 @@ DecodeResult decodeVMfmaF3232x32x16Fp8Fp8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_mfma_f32_32x32x16_fp8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VMfmaF3232x32x16Fp8Fp8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -3136,8 +3241,9 @@ DecodeResult decodeVSmfmacF3216x16x64Bf8Bf8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_smfmac_f32_16x16x64_bf8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VSmfmacF3216x16x64Bf8Bf8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -3187,8 +3293,9 @@ DecodeResult decodeVSmfmacF3216x16x64Bf8Fp8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_smfmac_f32_16x16x64_bf8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VSmfmacF3216x16x64Bf8Fp8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -3238,8 +3345,9 @@ DecodeResult decodeVSmfmacF3216x16x64Fp8Bf8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_smfmac_f32_16x16x64_fp8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VSmfmacF3216x16x64Fp8Bf8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -3289,8 +3397,9 @@ DecodeResult decodeVSmfmacF3216x16x64Fp8Fp8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_smfmac_f32_16x16x64_fp8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VSmfmacF3216x16x64Fp8Fp8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -3340,8 +3449,9 @@ DecodeResult decodeVSmfmacF3232x32x32Bf8Bf8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_smfmac_f32_32x32x32_bf8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VSmfmacF3232x32x32Bf8Bf8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -3391,8 +3501,9 @@ DecodeResult decodeVSmfmacF3232x32x32Bf8Fp8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_smfmac_f32_32x32x32_bf8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VSmfmacF3232x32x32Bf8Fp8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -3442,8 +3553,9 @@ DecodeResult decodeVSmfmacF3232x32x32Fp8Bf8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_smfmac_f32_32x32x32_fp8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VSmfmacF3232x32x32Fp8Bf8Vop3pMfma>(opcode);
 }
 } // namespace detail
@@ -3493,8 +3605,9 @@ DecodeResult decodeVSmfmacF3232x32x32Fp8Fp8Vop3pMfma(const MachineInst *opcode,
   Result validation = Vop3pMfma::validate_encoding(
       "v_smfmac_f32_32x32x32_fp8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
       emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VSmfmacF3232x32x32Fp8Fp8Vop3pMfma>(opcode);
 }
 } // namespace detail

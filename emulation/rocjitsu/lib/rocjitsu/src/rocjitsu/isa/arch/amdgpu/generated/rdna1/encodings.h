@@ -422,12 +422,15 @@ public:
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
-    if (inst->soffset != OPR_SMEM_OFFSET_NULL && inst->soffset != 0x7f && inst->offset)
+    if (inst->soffset != OPR_SMEM_OFFSET_NULL && inst->soffset != 0x7f && inst->offset) {
       out += " offset:" + std::to_string(inst->offset);
-    if (inst->glc)
+    }
+    if (inst->glc) {
       out += " glc";
-    if (inst->dlc)
+    }
+    if (inst->dlc) {
       out += " dlc";
+    }
   }
   using OpEncoding = SmemMachineInst;
   const OpEncoding inst_;
@@ -487,16 +490,19 @@ public:
     Instruction::append_src_operand(out, operand_index);
   }
   void build_modifiers(std::string &out) const override {
-    if (inst_.src0 == amdgpu::SRC_SDWA)
+    if (inst_.src0 == amdgpu::SRC_SDWA) {
       amdgpu::sdwa::append_destination_attributes(out, sdwa_clamp_, sdwa_omod_, sdwa_dst_sel_,
                                                   sdwa_dst_unused_, sdwa_src0_sel_,
                                                   sdwa_src1_operand_, sdwa_src1_sel_);
-    if (has_encoded_dpp())
+    }
+    if (has_encoded_dpp()) {
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,
                                             amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
-    if (has_encoded_dpp8())
+    }
+    if (has_encoded_dpp8()) {
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+    }
   }
   bool default_encoding();
   bool has_lit();
@@ -560,9 +566,10 @@ public:
     Instruction::append_src_operand(out, operand_index);
   }
   void build_modifiers(std::string &out) const override {
-    if (inst_.src0 == amdgpu::SRC_SDWA)
+    if (inst_.src0 == amdgpu::SRC_SDWA) {
       amdgpu::sdwa::append_source_attributes(out, sdwa_src0_sel_, sdwa_src1_operand_,
                                              sdwa_src1_sel_);
+    }
   }
   bool default_encoding();
   bool has_lit();
@@ -646,16 +653,19 @@ public:
     Instruction::append_src_operand(out, operand_index);
   }
   void build_modifiers(std::string &out) const override {
-    if (inst_.src0 == amdgpu::SRC_SDWA)
+    if (inst_.src0 == amdgpu::SRC_SDWA) {
       amdgpu::sdwa::append_destination_attributes(out, sdwa_clamp_, sdwa_omod_, sdwa_dst_sel_,
                                                   sdwa_dst_unused_, sdwa_src0_sel_,
                                                   sdwa_src1_operand_, sdwa_src1_sel_);
-    if (has_encoded_dpp())
+    }
+    if (has_encoded_dpp()) {
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,
                                             amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
-    if (has_encoded_dpp8())
+    }
+    if (has_encoded_dpp8()) {
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+    }
   }
   bool default_encoding();
   bool has_lit();
@@ -784,17 +794,21 @@ public:
     auto *inst = &inst_;
     (void)inst;
     if (uses_split_ds_offsets()) {
-      if (inst->offset0)
+      if (inst->offset0) {
         out += " offset0:" + std::to_string(inst->offset0);
-      if (inst->offset1)
+      }
+      if (inst->offset1) {
         out += " offset1:" + std::to_string(inst->offset1);
+      }
     } else {
       const uint32_t offset = inst->offset0 | (inst->offset1 << 8);
-      if (offset)
+      if (offset) {
         out += " offset:" + std::to_string(offset);
+      }
     }
-    if (inst->gds)
+    if (inst->gds) {
       out += " gds";
+    }
   }
   using OpEncoding = DsMachineInst;
   const OpEncoding inst_;
@@ -808,31 +822,41 @@ public:
                                   const util::DiagnosticEmitter &emit_error) {
     const auto &inst_ = *inst;
     if (inst_.lds && !(!inst_.opm && (inst_.op == 0 || (inst_.op >= 8 && inst_.op <= 12))))
-        [[unlikely]]
+        [[unlikely]] {
       return emit_error.emit() << mnemonic << " does not support LDS";
-    if (inst_.lds && inst_.tfe) [[unlikely]]
+    }
+    if (inst_.lds && inst_.tfe) [[unlikely]] {
       return emit_error.emit() << mnemonic << " cannot return TFE status to LDS";
+    }
     return Result::success();
   }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
-    if (inst->offen)
+    if (inst->offen) {
       out += " offen";
-    if (inst->idxen)
+    }
+    if (inst->idxen) {
       out += " idxen";
-    if (inst->offset)
+    }
+    if (inst->offset) {
       out += " offset:" + std::to_string(inst->offset);
-    if (inst->glc)
+    }
+    if (inst->glc) {
       out += " glc";
-    if (inst->dlc)
+    }
+    if (inst->dlc) {
       out += " dlc";
-    if (inst->slc)
+    }
+    if (inst->slc) {
       out += " slc";
-    if (inst->lds)
+    }
+    if (inst->lds) {
       out += " lds";
-    if (inst->tfe && (flags_ & CONDITIONAL_LAST_VGPR_DEF))
+    }
+    if (inst->tfe && (flags_ & CONDITIONAL_LAST_VGPR_DEF)) {
       out += " tfe";
+    }
   }
   using OpEncoding = MubufMachineInst;
   const OpEncoding inst_;
@@ -844,18 +868,24 @@ public:
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
-    if (inst->offen)
+    if (inst->offen) {
       out += " offen";
-    if (inst->offset)
+    }
+    if (inst->offset) {
       out += " offset:" + std::to_string(inst->offset);
-    if (inst->glc)
+    }
+    if (inst->glc) {
       out += " glc";
-    if (inst->dlc)
+    }
+    if (inst->dlc) {
       out += " dlc";
-    if (inst->slc)
+    }
+    if (inst->slc) {
       out += " slc";
-    if (inst->tfe && (flags_ & CONDITIONAL_LAST_VGPR_DEF))
+    }
+    if (inst->tfe && (flags_ & CONDITIONAL_LAST_VGPR_DEF)) {
       out += " tfe";
+    }
   }
   using OpEncoding = MtbufMachineInst;
   const OpEncoding inst_;
@@ -903,26 +933,35 @@ public:
       out += dims[inst->dim & 7u];
     }
     if (true) {
-      if (inst->unorm)
+      if (inst->unorm) {
         out += " unorm";
-      if (inst->glc)
+      }
+      if (inst->glc) {
         out += " glc";
-      if (inst->slc)
+      }
+      if (inst->slc) {
         out += " slc";
-      if (inst->dlc)
+      }
+      if (inst->dlc) {
         out += " dlc";
-      if (inst->r128)
+      }
+      if (inst->r128) {
         out += " r128";
+      }
     }
-    if (inst->a16)
+    if (inst->a16) {
       out += " a16";
+    }
     if (true) {
-      if (inst->tfe)
+      if (inst->tfe) {
         out += " tfe";
-      if (inst->lwe)
+      }
+      if (inst->lwe) {
         out += " lwe";
-      if (inst->d16)
+      }
+      if (inst->d16) {
         out += " d16";
+      }
     }
   }
   bool has_nsa_1();
@@ -954,21 +993,26 @@ public:
         0, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 5, 5, 5, 5, 0, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-    if (!(segment_masks[inst_.op] & (1u << inst_.seg))) [[unlikely]]
+    if (!(segment_masks[inst_.op] & (1u << inst_.seg))) [[unlikely]] {
       return emit_error.emit() << mnemonic << " has an invalid segment";
+    }
     return Result::success();
   }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
-    if (inst->offset)
+    if (inst->offset) {
       out += " offset:" + std::to_string(inst->offset);
-    if (inst->glc)
+    }
+    if (inst->glc) {
       out += " glc";
-    if (inst->dlc)
+    }
+    if (inst->dlc) {
       out += " dlc";
-    if (inst->slc)
+    }
+    if (inst->slc) {
       out += " slc";
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   using OpEncoding = FlatMachineInst;
