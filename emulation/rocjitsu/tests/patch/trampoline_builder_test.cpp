@@ -1178,6 +1178,27 @@ TrampolinePlan make_probe_plan(rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::C
   return plan;
 }
 
+TEST(TrampolineBuilderEmit, AnchorSgprReadsTheGuestScalarWithoutEntryStorage) {
+  TrampolinePlan plan = make_probe_plan(rocjitsu::IsaFamily::Cdna5);
+  plan.probe_args = {probe_arg_sgpr(4)};
+  std::string diagnostic;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), {}, {}, &diagnostic))
+      << diagnostic;
+  const auto bytes = TrampolineBuilder::emit_probe_call(plan, &diagnostic);
+  ASSERT_TRUE(bytes.has_value()) << diagnostic;
+  const auto move = build_v_mov_b32_src(0, 4, plan.arch);
+  ASSERT_TRUE(move.succeeded());
+  EXPECT_EQ(std::ranges::count(bytes->trampoline_words, move.value()), 1);
+  EXPECT_TRUE(plan.entry_register_captures.empty());
+
+  plan.entry_storage_base = 4;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), {}, {}, &diagnostic));
+  plan.entry_storage_base.reset();
+  plan.probe_args = {probe_arg_sgpr(127)};
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), {}, {}, &diagnostic));
+  EXPECT_NE(diagnostic.find("ordinary SGPR allocation"), std::string::npos);
+}
+
 TEST(TrampolineBuilderEmit, OmittedOriginalProbePreservesReplacementAfterRestoredEnvelope) {
   constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Rdna4;
   const util::FailureOr<uint32_t> move = build_s_mov_b32(8, 128, kArch);
