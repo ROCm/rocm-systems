@@ -228,10 +228,13 @@ inline bool local_helpers_only() {
 /// @brief Persistent worker executing one published instruction at a time.
 class Helper {
 public:
-  /// `awake` counts helpers not blocked in the kernel; a spinning idle helper
-  /// still occupies a core, so the borrowing budget charges for it.
-  explicit Helper(std::atomic<int> *awake = nullptr)
-      : awake_(awake), thread_([this] { work(); }) {}
+  /// `awake` counts helpers not blocked in the kernel; `awake_word`/`awake_bit`
+  /// publish this helper's bit so borrowers reuse warm spinning helpers before
+  /// waking sleeping ones.
+  explicit Helper(std::atomic<int> *awake = nullptr,
+                  std::atomic<uint64_t> *awake_word = nullptr, uint64_t awake_bit = 0)
+      : awake_(awake), awake_word_(awake_word), awake_bit_(awake_bit),
+        thread_([this] { work(); }) {}
   ~Helper() {
     publish(-1);
     thread_.join();
@@ -292,6 +295,21 @@ private:
     state_.notify_one();
   }
 
+  void mark_awake() {
+    if (awake_) {
+      awake_->fetch_add(1, std::memory_order_relaxed);
+      if (awake_word_)
+        awake_word_->fetch_or(awake_bit_, std::memory_order_relaxed);
+    }
+  }
+  void mark_asleep() {
+    if (awake_) {
+      if (awake_word_)
+        awake_word_->fetch_and(~awake_bit_, std::memory_order_relaxed);
+      awake_->fetch_sub(1, std::memory_order_relaxed);
+    }
+  }
+
   void wait_while(int expected) {
     const unsigned spins = expected == 0 ? idle_spin_count() : completion_spin_count();
     for (unsigned i = 0; i != spins; ++i) {
@@ -301,20 +319,21 @@ private:
     }
     // There is one waiter per helper: the issuer during execution, or the
     // helper while idle. Atomic waiting rechecks the value before sleeping.
-    if (expected == 0 && awake_)
-      awake_->fetch_sub(1, std::memory_order_relaxed);
+    if (expected == 0)
+      mark_asleep();
     state_.wait(expected, std::memory_order_acquire);
-    if (expected == 0 && awake_)
-      awake_->fetch_add(1, std::memory_order_relaxed);
+    if (expected == 0)
+      mark_awake();
   }
 
   void work() {
-    if (awake_)
-      awake_->fetch_add(1, std::memory_order_relaxed);
+    mark_awake();
     for (;;) {
       int state = state_.load(std::memory_order_acquire);
-      if (state == -1)
+      if (state == -1) {
+        mark_asleep();
         return;
+      }
       if (state == 0) {
         wait_while(0);
         continue;
@@ -339,6 +358,8 @@ private:
   }
 
   std::atomic<int> *awake_ = nullptr;
+  std::atomic<uint64_t> *awake_word_ = nullptr;
+  uint64_t awake_bit_ = 0;
   alignas(64) std::atomic<int> state_{0};
   alignas(64) std::array<Instruction *, kMaxChain> chain_{};
   std::array<const MatrixInputSnapshot *, kMaxChain> snapshots_{};
@@ -373,7 +394,8 @@ class SharedPool {
     Helper helper;
     unsigned index;
     SnapshotBuffer snapshot;
-    Slot(unsigned i, std::atomic<int> *awake) : helper(awake), index(i) {}
+    Slot(unsigned i, std::atomic<int> *awake, std::atomic<uint64_t> *awake_word)
+        : helper(awake, awake_word, uint64_t{1} << (i % 64)), index(i) {}
   };
 
 public:
@@ -404,17 +426,19 @@ public:
   static constexpr unsigned kUnlimited = ~0u;
   /// Helpers this issuer may hold right now: unlimited without a budget,
   /// otherwise the budget minus reserved and occupied threads (zero when the
-  /// host is saturated, so the caller issues synchronously).
-  unsigned borrow_cap() const {
-    const int budget = borrow_budget();
+  /// host is saturated, so the caller issues synchronously). Warm spinning
+  /// helpers are reused via awake_mask_ without shrinking the cap.
+  unsigned borrow_cap() const { return borrow_cap_for(borrow_budget()); }
+  unsigned borrow_cap_for(int budget) const {
     if (!budget)
       return kUnlimited;
-    // Idle helpers that are still spinning hold cores too; the cap counts
-    // them so that claimed plus spinning never exceeds the free cores.
-    const int idle_awake = std::max(0, awake_.load(std::memory_order_relaxed) - int(claimed()));
-    const int room = budget - reserved_threads.load(std::memory_order_relaxed) -
-                     occupied_threads() - idle_awake;
+    const int room =
+        budget - reserved_threads.load(std::memory_order_relaxed) - occupied_threads();
     return room > 0 ? unsigned(room) : 0u;
+  }
+  unsigned awake() const {
+    const int n = awake_.load(std::memory_order_relaxed);
+    return n > 0 ? unsigned(n) : 0u;
   }
   unsigned claimed() const {
     unsigned claimed = unsigned(slots_.size());
@@ -452,7 +476,7 @@ public:
       count = 0;
     slots_.reserve(count);
     for (unsigned i = 0; i != count; ++i)
-      slots_.push_back(std::make_unique<Slot>(i, &awake_));
+      slots_.push_back(std::make_unique<Slot>(i, &awake_, &awake_mask_[i / 64]));
     for (unsigned word = 0; word != 2; ++word) {
       const unsigned bits = count > word * 64 ? std::min(64u, count - word * 64) : 0;
       free_[word].store(bits == 64 ? ~uint64_t{0} : (uint64_t{1} << bits) - 1,
@@ -532,10 +556,26 @@ private:
         static_cast<uint32_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
     const unsigned start = preferred_helper_start(issuer_hash, slots_.size());
     const auto local = local_mask();
-    if (local[0] | local[1])
+    const bool has_local = (local[0] | local[1]) != 0;
+    if (cap != kUnlimited) {
+      // Reuse an already-awake idle helper first so claiming adds zero host
+      // threads, even when another CU's hash originally woke it.
+      const std::array<uint64_t, 2> warm = {awake_mask_[0].load(std::memory_order_relaxed),
+                                            awake_mask_[1].load(std::memory_order_relaxed)};
+      if (has_local && ((local[0] & warm[0]) | (local[1] & warm[1])))
+        if (Slot *slot = claim_from({local[0] & warm[0], local[1] & warm[1]}, start))
+          return slot;
+      if (!(has_local && local_helpers_only()) && (warm[0] | warm[1]))
+        if (Slot *slot = claim_from(warm, start))
+          return slot;
+      // Waking a sleeping helper adds an active thread; stay within cap.
+      if (awake_.load(std::memory_order_relaxed) >= int(cap))
+        return nullptr;
+    }
+    if (has_local)
       if (Slot *slot = claim_from(local, start))
         return slot;
-    if ((local[0] | local[1]) && local_helpers_only())
+    if (has_local && local_helpers_only())
       return nullptr;
     return claim_from({~uint64_t{0}, ~uint64_t{0}}, start);
   }
@@ -544,6 +584,7 @@ private:
   }
   alignas(64) std::array<std::atomic<uint64_t>, 2> free_{};
   alignas(64) std::atomic<int> awake_{0};
+  alignas(64) std::array<std::atomic<uint64_t>, 2> awake_mask_{};
 
   CacheDomains domains_;
   std::vector<std::array<uint64_t, 2>> domain_masks_;

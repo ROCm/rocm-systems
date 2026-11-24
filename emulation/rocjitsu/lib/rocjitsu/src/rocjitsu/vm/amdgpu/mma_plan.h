@@ -78,9 +78,6 @@ struct Step {
   bool snapshots = false;
   std::array<SnapshotSpec, kMaxChain> snapshot{};
   std::array<uint8_t, kMaxChain> member_step{}; ///< Program position of each member.
-  /// Registers the job reads (snapshotted factors excluded) and writes, for
-  /// conflicts with blocks that start while it runs. Offload steps only.
-  async_execution::Access job_access;
 };
 
 /// @brief Matrix instructions a helper may execute: register-only operands.
@@ -154,6 +151,26 @@ inline bool snapshot_enabled() {
 inline bool cross_block_enabled() {
   static const bool enabled = [] {
     const char *value = std::getenv("RJ_MMA_CROSS_BLOCK");
+    return value && *value && *value != '0';
+  }();
+  return enabled;
+}
+/// RJ_MMA_TAIL_SNAPSHOT=1 copies all factors of jobs in the last kTailSteps of
+/// a block so a single-wave successor need not wait on overwrites. Off by
+/// default: on multi-wave CUs sibling waves reap finished jobs before the
+/// wave returns, making unconditional tail copies wasted bandwidth.
+inline bool tail_snapshot_enabled() {
+  static const bool enabled = [] {
+    const char *value = std::getenv("RJ_MMA_TAIL_SNAPSHOT");
+    return value && *value && *value != '0';
+  }();
+  return enabled;
+}
+/// RJ_MMA_BOUNDED_WAIT=1 waits on the wave's oldest running job instead of
+/// falling back inline when no helper is free or ready. Off by default.
+inline bool bounded_wait_enabled() {
+  static const bool enabled = [] {
+    const char *value = std::getenv("RJ_MMA_BOUNDED_WAIT");
     return value && *value && *value != '0';
   }();
   return enabled;
@@ -289,6 +306,8 @@ struct Plan {
   static constexpr uint8_t kNoStep = 0xff;
   Access footprint;
   std::array<uint8_t, 2 * Access::kRegistersPerBank> first_access{}, first_write{};
+  /// Per-job register accesses (snapshotted factors excluded), indexed by Step::job.
+  std::vector<Access> job_accesses;
 
   Plan() = default;
   Plan(Plan &&) = default;
@@ -298,6 +317,7 @@ struct Plan {
     footprint = other.footprint;
     first_access = other.first_access;
     first_write = other.first_write;
+    job_accesses = std::move(other.job_accesses);
     epoch = other.epoch;
     length = other.length;
     first = other.first;
@@ -328,7 +348,8 @@ struct Plan {
 /// chain early just to free a helper. A post-pass then groups them into jobs.
 template <typename Fetch>
 void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uint32_t num_vgprs,
-             bool has_accvgprs, uint64_t &decodes, bool cross_block = cross_block_enabled()) {
+             bool has_accvgprs, uint64_t &decodes,
+             bool tail_snapshot = cross_block_enabled() && tail_snapshot_enabled()) {
   Instruction::ScopedHeapAllocation heap;
   // A logical chain: one helper job if offloaded. `joined` is the first step
   // that must wait for it; the block end if none does.
@@ -585,9 +606,9 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
       if (job_of[j] != kIssuer)
         step.wait |= uint32_t{1} << job_of[j];
   }
-  // Jobs submitted near the block end may outlive it; copy all of their
-  // factors so the next block's loads never wait for them.
-  for (unsigned j = 0; cross_block && j != job_host.size(); ++j) {
+  // Jobs submitted near the block end may outlive it; optionally copy all of
+  // their factors so the next block's loads never wait for them.
+  for (unsigned j = 0; tail_snapshot && snapshot_enabled() && j != job_host.size(); ++j) {
     if (chains[job_host[j]].head + kTailSteps < steps)
       continue;
     for (int c : job_chains[j]) {
@@ -598,11 +619,12 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
   }
   // Fill each job's member list in program order of its host chain, then of
   // the chains appended to it.
+  plan.job_accesses.assign(job_host.size(), {});
   for (unsigned j = 0; j != job_host.size(); ++j) {
     auto &head = plan.steps[chains[job_host[j]].head];
     for (int c : job_chains[j]) {
-      head.job_access.reads |= chains[c].access.reads;
-      head.job_access.writes |= chains[c].access.writes;
+      plan.job_accesses[j].reads |= chains[c].access.reads;
+      plan.job_accesses[j].writes |= chains[c].access.writes;
       for (unsigned i = 0; i != chains[c].count; ++i) {
         const auto &member = chains[c].members[i];
         const unsigned at = member.step;
@@ -672,10 +694,14 @@ public:
     (void)drain();
     pool_ = other.pool_;
     active_ = std::exchange(other.active_, 0);
+    inherited_ = std::exchange(other.inherited_, 0);
+    track_access_ = other.track_access_;
+    next_seq_ = other.next_seq_;
     tickets_ = other.tickets_;
     heads_ = other.heads_;
     plans_ = other.plans_;
     entry_pc_ = other.entry_pc_;
+    seq_ = other.seq_;
     access_ = other.access_;
     failure_ = std::move(other.failure_);
     return *this;
@@ -683,37 +709,42 @@ public:
   void bind(matrix_coexecution::SharedPool &pool) { pool_ = &pool; }
 
   /// Begin a block: map its job ids to free slots as they are submitted, and
-  /// compute which running jobs each step must join. Returns false when the
-  /// block cannot run alongside the outstanding jobs (slot exhaustion); the
-  /// caller then drains.
+  /// compute which inherited jobs each step must join (split into result RAW/WAW
+  /// waits and factor WAR waits). Returns true only when entry waits were
+  /// populated, so callers can skip reading the wait arrays in the common case.
   bool begin_block(const Plan &plan, uint64_t entry_pc, unsigned cap,
-                   std::array<uint32_t, kMaxSteps> &extra_wait, bool &filtered) {
+                   std::array<uint32_t, kMaxSteps> &result_wait,
+                   std::array<uint32_t, kMaxSteps> &factor_wait, bool &filtered,
+                   bool track_access = true) {
     plan_ = &plan;
     block_pc_ = entry_pc;
     cap_ = cap;
+    track_access_ = track_access;
     slot_of_job_.fill(kNoSlot);
-    extra_wait.fill(0);
+    inherited_ = active_;
     filtered = false;
     if (!active_)
-      return true;
+      return false;
     // Fast filter: nothing in this block touches a running job's registers.
     const Access &fp = plan.footprint;
     if (!(fp.writes & (access_.reads | access_.writes)).any() && !(fp.reads & access_.writes).any())
-      return true;
+      return false;
     filtered = true;
+    result_wait.fill(0);
+    factor_wait.fill(0);
     for (uint32_t m = active_; m; m &= m - 1) {
       const unsigned slot = std::countr_zero(m);
-      const Access &job = heads_[slot]->job_access;
+      const Access &job = job_access(slot);
       // A result the block reads or overwrites: join at the first touch. A
       // factor the block overwrites: join at the first write (snapshotted
       // factors are not in `reads`).
       for_each_register(job.writes, [&](unsigned r) {
         if (plan.first_access[r] != Plan::kNoStep)
-          extra_wait[plan.first_access[r]] |= uint32_t{1} << slot;
+          result_wait[plan.first_access[r]] |= uint32_t{1} << slot;
       });
-      for_each_register(job.reads, [&](unsigned r) {
+      for_each_register(job.reads & ~job.writes, [&](unsigned r) {
         if (plan.first_write[r] != Plan::kNoStep)
-          extra_wait[plan.first_write[r]] |= uint32_t{1} << slot;
+          factor_wait[plan.first_write[r]] |= uint32_t{1} << slot;
       });
     }
     return true;
@@ -730,19 +761,45 @@ public:
     return slots;
   }
 
+  /// Join all jobs of this wave whose helper has finished. Returns true if any
+  /// slot was freed. Sets `ok` to false if a helper was unavailable after fork.
+  bool join_ready(bool *ok = nullptr) {
+    uint32_t ready = 0;
+    for (uint32_t m = active_; m; m &= m - 1) {
+      const unsigned slot = std::countr_zero(m);
+      if (matrix_coexecution::SharedPool::ready(tickets_[slot]))
+        ready |= uint32_t{1} << slot;
+    }
+    if (!ready)
+      return false;
+    const bool joined = join(ready);
+    if (ok)
+      *ok = joined;
+    return true;
+  }
+
   /// Claims a helper first; `fill` copies snapshot factors into that helper's
-  /// own buffer only after the claim succeeded. When the pool has no free
-  /// helper, one of this wave's own finished jobs is joined and its helper
-  /// reused. Returns false when the job must run on the issuer.
-  template <typename Fill> bool submit(unsigned plan_job, const Step &step, void *wave, Fill &&fill) {
+  /// own buffer only after the claim succeeded. On pool exhaustion, reclaims
+  /// finished jobs of this wave, then sibling waves via `reap`, and optionally
+  /// waits on this wave's oldest job. Returns false when the job must run inline.
+  template <typename Fill, typename Reap>
+  bool submit(unsigned plan_job, const Step &step, void *wave, Fill &&fill, Reap &&reap,
+              bool bounded_wait = bounded_wait_enabled()) {
     if (active_ == ~uint32_t{0} && !join_one_finished())
       return false;
     matrix_coexecution::SharedPool::Ticket ticket = pool_->claim(cap_);
-    for (uint32_t done = active_; done && !ticket; done &= done - 1) {
-      const unsigned finished = std::countr_zero(done);
-      if (!matrix_coexecution::SharedPool::ready(tickets_[finished]))
-        continue;
-      if (!join(uint32_t{1} << finished))
+    if (!ticket && active_) {
+      bool ok = true;
+      if (join_ready(&ok)) {
+        if (!ok)
+          return false;
+        ticket = pool_->claim(cap_);
+      }
+    }
+    if (!ticket && reap())
+      ticket = pool_->claim(cap_);
+    if (!ticket && bounded_wait && active_) {
+      if (!join(uint32_t{1} << oldest_slot()))
         return false;
       ticket = pool_->claim(cap_);
     }
@@ -757,83 +814,117 @@ public:
     heads_[slot] = &step;
     plans_[slot] = plan_;
     entry_pc_[slot] = block_pc_;
+    seq_[slot] = next_seq_++;
     slot_of_job_[plan_job] = uint8_t(slot);
     active_ |= uint32_t{1} << slot;
-    access_.reads |= step.job_access.reads;
-    access_.writes |= step.job_access.writes;
+    if (track_access_) {
+      const Access &job = job_access(slot);
+      access_.reads |= job.reads;
+      access_.writes |= job.writes;
+    }
     return true;
+  }
+  template <typename Fill> bool submit(unsigned plan_job, const Step &step, void *wave, Fill &&fill) {
+    return submit(plan_job, step, wave, std::forward<Fill>(fill), [] { return false; });
   }
   /// Join physical slots. Returns false if a helper was unavailable (after fork).
   bool join(uint32_t mask) {
     bool ok = true;
     mask &= active_;
+    if (!mask)
+      return true;
     while (mask) {
       const unsigned slot = std::countr_zero(mask);
       HelperErrorSink error;
       unsigned member = 0;
       ok &= pool_->finish(tickets_[slot], &error, &member).succeeded();
-      if (error.error && !failure_)
-        failure_ = Failure{heads_[slot], plans_[slot], entry_pc_[slot], member, error};
+      if (error.error && !failure_) {
+        const Instruction &inst = *heads_[slot]->chain[member];
+        const uint64_t pc =
+            entry_pc_[slot] + plans_[slot]->steps[heads_[slot]->member_step[member]].offset;
+        failure_ = Failure{std::string(inst.mnemonic()), pc, error};
+      }
       active_ &= ~(uint32_t{1} << slot);
+      inherited_ &= ~(uint32_t{1} << slot);
       mask &= mask - 1;
     }
-    // Recompute the union of outstanding registers.
-    access_ = {};
-    for (uint32_t m = active_; m; m &= m - 1) {
-      const Access &job = heads_[std::countr_zero(m)]->job_access;
-      access_.reads |= job.reads;
-      access_.writes |= job.writes;
+    if (track_access_) {
+      access_ = {};
+      for (uint32_t m = active_; m; m &= m - 1) {
+        const Access &job = job_access(std::countr_zero(m));
+        access_.reads |= job.reads;
+        access_.writes |= job.writes;
+      }
     }
     return ok;
   }
   /// The first instruction a helper failed, kept until the issuer reports it.
   struct Failure {
-    const Step *head;
-    const Plan *plan;
-    uint64_t entry_pc;
-    unsigned member;
+    std::string mnemonic;
+    uint64_t pc = 0;
     HelperErrorSink error;
   };
   const std::optional<Failure> &failure() const { return failure_; }
   void clear_failure() { failure_.reset(); }
   bool drain() { return active_ ? join(active_) : true; }
   bool pending() const { return active_ != 0; }
+  /// True when jobs are still running OR a reaped job left an unreported error.
+  bool has_work() const { return active_ != 0 || failure_.has_value(); }
   uint32_t active() const { return active_; }
+  /// Physical slots inherited from earlier blocks that are still live.
+  uint32_t inherited() const { return inherited_; }
   const Access &access() const { return access_; }
   /// Slots whose job conflicts with an instruction about to execute on the issuer.
   uint32_t conflicting(const Access &next) const {
     uint32_t mask = 0;
     for (uint32_t m = active_; m; m &= m - 1) {
       const unsigned slot = std::countr_zero(m);
-      if (overlaps(heads_[slot]->job_access, next))
+      if (overlaps(job_access(slot), next))
         mask |= uint32_t{1} << slot;
     }
     return mask;
   }
-  /// Join any job whose helper has finished; true if one was joined.
+  /// Join any job whose helper has finished; otherwise join the oldest job.
   bool join_one_finished() {
     for (uint32_t m = active_; m; m &= m - 1) {
       const unsigned slot = std::countr_zero(m);
       if (matrix_coexecution::SharedPool::ready(tickets_[slot]))
         return join(uint32_t{1} << slot);
     }
-    return join(uint32_t{1} << std::countr_zero(active_));
+    return join(uint32_t{1} << oldest_slot());
   }
 
 private:
+  const Access &job_access(unsigned slot) const {
+    return plans_[slot]->job_accesses[heads_[slot]->job];
+  }
+  unsigned oldest_slot() const {
+    uint32_t m = active_;
+    unsigned oldest = std::countr_zero(m);
+    for (m &= m - 1; m; m &= m - 1) {
+      const unsigned slot = std::countr_zero(m);
+      if (seq_[slot] < seq_[oldest])
+        oldest = slot;
+    }
+    return oldest;
+  }
   static constexpr uint8_t kNoSlot = 0xff;
   matrix_coexecution::SharedPool *pool_ = nullptr;
   const Plan *plan_ = nullptr;
   uint64_t block_pc_ = 0;
   unsigned cap_ = ~0u;
+  bool track_access_ = false;
+  uint64_t next_seq_ = 0;
   std::array<uint8_t, kMaxJobs> slot_of_job_{};
   std::array<matrix_coexecution::SharedPool::Ticket, kMaxJobs> tickets_{};
   std::array<const Step *, kMaxJobs> heads_{};
   std::array<const Plan *, kMaxJobs> plans_{};
   std::array<uint64_t, kMaxJobs> entry_pc_{};
+  std::array<uint64_t, kMaxJobs> seq_{};
   Access access_;
   std::optional<Failure> failure_;
   uint32_t active_ = 0;
+  uint32_t inherited_ = 0;
 };
 
 /// @brief Per-CU plans keyed like MmaAdmissionCache, retaining decoded instructions.
@@ -930,8 +1021,16 @@ public:
     return pending_[wave_slot];
   }
   PendingJobs *pending_if_any(uint32_t wave_slot) {
-    return wave_slot < pending_.size() && pending_[wave_slot].pending() ? &pending_[wave_slot]
-                                                                        : nullptr;
+    return wave_slot < pending_.size() && pending_[wave_slot].has_work() ? &pending_[wave_slot]
+                                                                         : nullptr;
+  }
+  /// Free helpers held by other waves of this CU whose jobs already finished.
+  bool reap_finished_except(uint32_t wave_slot) {
+    bool freed = false;
+    for (uint32_t w = 0; w != pending_.size(); ++w)
+      if (w != wave_slot && pending_[w].pending())
+        freed |= pending_[w].join_ready();
+    return freed;
   }
   void drain_all(uint64_t &counter) {
     for (auto &jobs : pending_)

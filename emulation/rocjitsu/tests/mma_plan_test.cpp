@@ -11,7 +11,10 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -272,8 +275,8 @@ TEST(MmaPlanTest, TailJobsSnapshotAllFactorsForTheNextBlock) {
     EXPECT_EQ(tail.steps[k].snapshot[0].a_regs, 4u);
     EXPECT_EQ(tail.steps[k].snapshot[0].b_regs, 4u);
     // Snapshotted factors leave the job's read set; the result stays in its write set.
-    EXPECT_FALSE(tail.steps[k].job_access.reads.test(0));
-    EXPECT_TRUE(tail.steps[k].job_access.writes.test(64 + 4 * k));
+    EXPECT_FALSE(tail.job_accesses[tail.steps[k].job].reads.test(0));
+    EXPECT_TRUE(tail.job_accesses[tail.steps[k].job].writes.test(64 + 4 * k));
   }
   // First-touch index: register 64 (acc0 result) is first touched at step 0,
   // v40 is first written by the trailing read.
@@ -314,6 +317,241 @@ TEST(MmaPlanTest, FirstTouchIndexUsesTheJobHeadForChainedMembers) {
   EXPECT_EQ(result.first_access[40], 2u);
   EXPECT_EQ(result.first_write[40], 2u);
   EXPECT_EQ(result.first_access[16], 0u);
+}
+
+struct MockJobInstruction : Instruction {
+  explicit MockJobInstruction(const char *name, ExecuteFn fn) : Instruction(name, fn) {}
+};
+
+plan::Plan make_synthetic_job_plan(unsigned read_reg, unsigned write_reg, Instruction *inst) {
+  plan::Plan p;
+  p.accept = true;
+  p.first_access.fill(plan::Plan::kNoStep);
+  p.first_write.fill(plan::Plan::kNoStep);
+  plan::Step step;
+  step.kind = plan::StepKind::Offload;
+  step.job = 0;
+  step.offset = 8;
+  step.members = 1;
+  step.inst = inst;
+  step.chain[0] = inst;
+  step.member_step[0] = 0;
+  p.steps.push_back(step);
+  plan::Access access;
+  access.reads.set(read_reg);
+  access.writes.set(write_reg);
+  p.job_accesses.push_back(access);
+  p.footprint = access;
+  p.first_access[read_reg] = 0;
+  p.first_access[write_reg] = 0;
+  p.first_write[write_reg] = 0;
+  return p;
+}
+
+TEST(MmaPlanTest, ReapFinishedExceptFreesSiblingHelpersAndPreservesFailure) {
+  matrix_coexecution::SharedPool pool(1);
+  plan::PlanCache cache;
+  std::atomic<bool> wave0_done{false};
+  std::atomic<bool> wave1_done{false};
+  MockJobInstruction fail_inst("mock_fail_mfma", [](Instruction &, void *ctx) {
+    if (helper_error_sink)
+      *helper_error_sink = {1u, "synthetic failure"};
+    static_cast<std::atomic<bool> *>(ctx)->store(true, std::memory_order_release);
+  });
+  MockJobInstruction ok_inst("mock_ok_mfma", [](Instruction &, void *ctx) {
+    static_cast<std::atomic<bool> *>(ctx)->store(true, std::memory_order_release);
+  });
+  const plan::Plan p0 = make_synthetic_job_plan(0, 64, &fail_inst);
+  const plan::Plan p1 = make_synthetic_job_plan(16, 68, &ok_inst);
+  std::array<uint32_t, plan::kMaxSteps> rwait, fwait;
+  bool filtered = false;
+
+  auto &w0 = cache.pending(0, pool);
+  (void)w0.begin_block(p0, kPc, matrix_coexecution::SharedPool::kUnlimited, rwait, fwait, filtered);
+  const auto no_fill = [](matrix_coexecution::SnapshotBuffer &) { return nullptr; };
+  ASSERT_TRUE(w0.submit(0, p0.steps[0], &wave0_done, no_fill));
+
+  // Wait for wave 0's helper to finish while wave 0 still holds the slot.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (!wave0_done.load(std::memory_order_acquire) &&
+         std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  ASSERT_TRUE(wave0_done.load(std::memory_order_acquire));
+
+  // Creating wave 1 may reallocate cache.pending_; re-fetch wave 0 via pending_if_any below.
+  auto &w1 = cache.pending(1, pool);
+  (void)w1.begin_block(p1, kPc + 0x100, matrix_coexecution::SharedPool::kUnlimited, rwait, fwait,
+                       filtered);
+  bool submitted = false;
+  while (!submitted && std::chrono::steady_clock::now() < deadline) {
+    submitted =
+        w1.submit(0, p1.steps[0], &wave1_done, no_fill, [&] { return cache.reap_finished_except(1); },
+                  /*bounded_wait=*/false);
+    if (!submitted)
+      std::this_thread::yield();
+  }
+  ASSERT_TRUE(submitted);
+  ASSERT_TRUE(w1.drain());
+  EXPECT_TRUE(wave1_done.load(std::memory_order_acquire));
+
+  // Wave 0 has no active jobs left, yet pending_if_any(0) must still surface its stored error.
+  auto *w0_after = cache.pending_if_any(0);
+  ASSERT_NE(w0_after, nullptr);
+  EXPECT_FALSE(w0_after->pending());
+  ASSERT_TRUE(w0_after->failure().has_value());
+  EXPECT_EQ(w0_after->failure()->mnemonic, "mock_fail_mfma");
+  EXPECT_EQ(w0_after->failure()->pc, kPc + 8);
+}
+
+TEST(MmaPlanTest, ReusedSlotDropsOutOfInheritedMask) {
+  matrix_coexecution::SharedPool pool(1);
+  std::atomic<bool> done{false};
+  MockJobInstruction inst("mock_mfma", [](Instruction &, void *ctx) {
+    static_cast<std::atomic<bool> *>(ctx)->store(true, std::memory_order_release);
+  });
+  const plan::Plan prev = make_synthetic_job_plan(0, 64, &inst);
+
+  // Next block has step 0 touching v68 (acc1) and step 2 touching v64 (acc0).
+  plan::Plan next = make_synthetic_job_plan(16, 68, &inst);
+  next.footprint.reads.set(64);
+  next.footprint.writes.set(64);
+  next.first_access[64] = 2;
+  next.first_write[64] = 2;
+
+  plan::PendingJobs jobs(&pool);
+  std::array<uint32_t, plan::kMaxSteps> rwait, fwait;
+  bool filtered = false;
+  const auto no_fill = [](matrix_coexecution::SnapshotBuffer &) { return nullptr; };
+  (void)jobs.begin_block(prev, kPc, matrix_coexecution::SharedPool::kUnlimited, rwait, fwait,
+                         filtered);
+  ASSERT_TRUE(jobs.submit(0, prev.steps[0], &done, no_fill));
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (!done.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  ASSERT_TRUE(done.load(std::memory_order_acquire));
+
+  // Enter next block: slot 0 is inherited and recorded in result_wait[2].
+  ASSERT_TRUE(jobs.begin_block(next, kPc + 0x40, matrix_coexecution::SharedPool::kUnlimited, rwait,
+                               fwait, filtered));
+  EXPECT_EQ(jobs.inherited(), 1u);
+  EXPECT_EQ(rwait[2], 1u);
+
+  // Reclaiming slot 0 and reusing it for a new job must drop slot 0 from inherited().
+  done.store(false, std::memory_order_relaxed);
+  bool submitted = false;
+  while (!submitted && std::chrono::steady_clock::now() < deadline) {
+    submitted = jobs.submit(0, next.steps[0], &done, no_fill, [] { return false; },
+                            /*bounded_wait=*/false);
+    if (!submitted)
+      std::this_thread::yield();
+  }
+  ASSERT_TRUE(submitted);
+  EXPECT_EQ(jobs.active(), 1u);
+  EXPECT_EQ(jobs.inherited(), 0u);
+  EXPECT_EQ(rwait[2] & jobs.inherited(), 0u);
+  EXPECT_TRUE(jobs.drain());
+}
+
+TEST(MmaPlanTest, BeginBlockSplitsResultAndFactorWaits) {
+  matrix_coexecution::SharedPool pool(1);
+  MockJobInstruction inst("mock_mfma", [](Instruction &, void *) {});
+  const plan::Plan prev = make_synthetic_job_plan(0, 64, &inst);
+
+  // Next block reads/writes v64 at step 1 (result wait) and overwrites v0 at step 3 (factor wait).
+  plan::Plan next;
+  next.accept = true;
+  next.first_access.fill(plan::Plan::kNoStep);
+  next.first_write.fill(plan::Plan::kNoStep);
+  next.footprint.reads.set(64);
+  next.footprint.writes.set(64);
+  next.footprint.writes.set(0);
+  next.first_access[64] = 1;
+  next.first_write[64] = 1;
+  next.first_access[0] = 3;
+  next.first_write[0] = 3;
+
+  plan::PendingJobs jobs(&pool);
+  std::array<uint32_t, plan::kMaxSteps> rwait, fwait;
+  bool filtered = false;
+  const auto no_fill = [](matrix_coexecution::SnapshotBuffer &) { return nullptr; };
+  (void)jobs.begin_block(prev, kPc, matrix_coexecution::SharedPool::kUnlimited, rwait, fwait,
+                         filtered);
+  ASSERT_TRUE(jobs.submit(0, prev.steps[0], nullptr, no_fill));
+
+  ASSERT_TRUE(jobs.begin_block(next, kPc + 0x40, matrix_coexecution::SharedPool::kUnlimited, rwait,
+                               fwait, filtered));
+  EXPECT_TRUE(filtered);
+  EXPECT_EQ(rwait[1], 1u);
+  EXPECT_EQ(fwait[1], 0u);
+  EXPECT_EQ(rwait[3], 0u);
+  EXPECT_EQ(fwait[3], 1u);
+  EXPECT_TRUE(jobs.drain());
+}
+
+TEST(MmaPlanTest, BorrowCapDoesNotSubtractWarmSpinningHelpers) {
+  const int saved_reserved =
+      matrix_coexecution::reserved_threads.exchange(9, std::memory_order_relaxed);
+  struct Restore {
+    int value;
+    ~Restore() { matrix_coexecution::reserved_threads.store(value, std::memory_order_relaxed); }
+  } restore{saved_reserved};
+
+  matrix_coexecution::SharedPool pool(7);
+  // Claim and release all 7 helpers so they are awake and spinning with claimed() == 0.
+  MockJobInstruction inst("mock_mfma", [](Instruction &, void *) {});
+  std::array<matrix_coexecution::SharedPool::Ticket, 7> tickets{};
+  for (unsigned i = 0; i != 7; ++i)
+    tickets[i] = pool.submit(inst, nullptr);
+  for (auto t : tickets)
+    ASSERT_TRUE(pool.finish(t).succeeded());
+
+  // 16-core budget minus 9 reserved (8 engines + host) must leave 7 claimable helpers,
+  // even while all 7 are awake and spinning idle.
+  EXPECT_EQ(pool.claimed(), 0u);
+  EXPECT_EQ(pool.borrow_cap_for(16), 7u);
+  EXPECT_EQ(pool.borrow_cap_for(9), 0u);
+}
+
+TEST(MmaPlanTest, BorrowClaimReusesWarmHelperBeforeWakingSleeper) {
+  matrix_coexecution::SharedPool pool(4);
+  // Let all 4 helpers settle into futex sleep first.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (pool.awake() != 0 && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  if (pool.awake() != 0)
+    GTEST_SKIP() << "Helpers did not enter sleep within timeout.";
+
+  MockJobInstruction inst("mock_mfma", [](Instruction &, void *) {});
+  // A different thread (different issuer hash) already running claims immediately
+  // after finish(t1) while that helper is warm, and must not wake a second helper.
+  std::atomic<bool> go{false};
+  std::atomic<bool> ready{false};
+  unsigned max_awake = 0;
+  std::thread other([&] {
+    ready.store(true, std::memory_order_release);
+    while (!go.load(std::memory_order_acquire))
+      std::this_thread::yield();
+    auto t2 = pool.claim(1);
+    ASSERT_TRUE(t2);
+    max_awake = pool.awake();
+    Instruction *p = &inst;
+    matrix_coexecution::SharedPool::start(t2, &p, 1, nullptr);
+    ASSERT_TRUE(pool.finish(t2).succeeded());
+    max_awake = std::max(max_awake, pool.awake());
+  });
+  while (!ready.load(std::memory_order_acquire))
+    std::this_thread::yield();
+
+  // Wake exactly one helper under cap=1, then immediately hand off to `other`.
+  auto t1 = pool.claim(1);
+  ASSERT_TRUE(t1);
+  Instruction *ptr = &inst;
+  matrix_coexecution::SharedPool::start(t1, &ptr, 1, nullptr);
+  ASSERT_TRUE(pool.finish(t1).succeeded());
+  EXPECT_LE(pool.awake(), 1u);
+  go.store(true, std::memory_order_release);
+  other.join();
+  EXPECT_LE(max_awake, 1u);
 }
 
 } // namespace

@@ -2833,18 +2833,15 @@ void ComputeUnitCore::flush_mma_plans() {
 }
 
 void ComputeUnitCore::report_pending_mma_failure(Wavefront &wf, mma_plan::PendingJobs &jobs) {
-  const auto &failure = jobs.failure();
-  if (!failure)
+  if (!jobs.failure())
     return;
   (void)jobs.drain();
-  const Instruction &inst = *failure->head->chain[failure->member];
-  const uint64_t pc =
-      failure->entry_pc + failure->plan->steps[failure->head->member_step[failure->member]].offset;
-  if (failure->error.error)
-    fail_wave_instruction(wf, std::format("asynchronous {}", inst.mnemonic()), pc,
-                          static_cast<InstructionExecutionError>(failure->error.error),
-                          failure->error.detail ? failure->error.detail : "");
+  const mma_plan::PendingJobs::Failure failure = *jobs.failure();
   jobs.clear_failure();
+  if (failure.error.error)
+    fail_wave_instruction(wf, std::format("asynchronous {}", failure.mnemonic), failure.pc,
+                          static_cast<InstructionExecutionError>(failure.error.error),
+                          failure.error.detail ? failure.error.detail : "");
 }
 
 void ComputeUnitCore::drain_pending_mma(Wavefront &wf, MmaDrain cause) {
@@ -2853,31 +2850,33 @@ void ComputeUnitCore::drain_pending_mma(Wavefront &wf, MmaDrain cause) {
   mma_plan::PendingJobs *jobs = mma_plans_->pending_if_any(wf.wf_id());
   if (!jobs)
     return;
-  auto &stats = mma_plans_->stats;
-  switch (cause) {
-  case MmaDrain::Gap:
-    ++stats.drains_gap;
-    break;
-  case MmaDrain::Mode:
-    ++stats.drains_mode;
-    break;
-  case MmaDrain::Fault:
-    ++stats.drains_fault;
-    break;
-  case MmaDrain::WaveEnd:
-    ++stats.drains_wave_end;
-    break;
-  case MmaDrain::Reject:
-    ++stats.drains_reject;
-    break;
-  case MmaDrain::Quantum:
-    ++stats.drains_quantum;
-    break;
+  if (jobs->pending()) {
+    auto &stats = mma_plans_->stats;
+    switch (cause) {
+    case MmaDrain::Gap:
+      ++stats.drains_gap;
+      break;
+    case MmaDrain::Mode:
+      ++stats.drains_mode;
+      break;
+    case MmaDrain::Fault:
+      ++stats.drains_fault;
+      break;
+    case MmaDrain::WaveEnd:
+      ++stats.drains_wave_end;
+      break;
+    case MmaDrain::Reject:
+      ++stats.drains_reject;
+      break;
+    case MmaDrain::Quantum:
+      ++stats.drains_quantum;
+      break;
+    }
+    if (!jobs->drain())
+      fail_wave_instruction(wf, "asynchronous MFMA", wf.pc,
+                            InstructionExecutionError::MissingExecutionBackend,
+                            "MMA helper unavailable after fork");
   }
-  if (!jobs->drain())
-    fail_wave_instruction(wf, "asynchronous MFMA", wf.pc,
-                          InstructionExecutionError::MissingExecutionBackend,
-                          "MMA helper unavailable after fork");
   report_pending_mma_failure(wf, *jobs);
 }
 
@@ -2885,6 +2884,11 @@ void ComputeUnitCore::join_pending_mma_for(Wavefront &wf, const Instruction &ins
   mma_plan::PendingJobs *jobs = mma_plans_->pending_if_any(wf.wf_id());
   if (!jobs)
     return;
+  if (jobs->failure()) {
+    report_pending_mma_failure(wf, *jobs);
+    if (wf.is_halted() || !jobs->pending())
+      return;
+  }
   const auto footprint = async_execution::footprint(inst, wf.num_vgprs(), mma_has_accvgprs_);
   // An unrepresentable footprint joins everything.
   const uint32_t mask = footprint ? jobs->conflicting(*footprint) : jobs->active();
@@ -2965,6 +2969,13 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
                                      vm_access ? vm_access->cache_namespace()
                                                : VmCacheNamespace{}};
   const mma_plan::Plan *plan = cache.lookup(*decoder_, inst_cache_, fetch_words, key, first);
+  if (!plan->accept) {
+    // The planner found nothing that can run concurrently here, e.g. one
+    // serial chain. Issue synchronously through ordinary issue so any
+    // conflicting cross-block job is joined by footprint.
+    (void)issue_instruction_impl<false>(active);
+    return true;
+  }
   auto &pool = async_pool();
   const uint64_t entry_pc = active->pc;
   mma_has_accvgprs_ = has_accvgprs;
@@ -2974,29 +2985,15 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
     ~ReplayScope() { flag = false; }
   } replay_scope{in_replay_};
   mma_plan::PendingJobs &replay = cache.pending(active->wf_id(), pool);
-  std::array<uint32_t, mma_plan::kMaxSteps> extra_wait{};
-  if (!plan->accept) {
-    // The planner found nothing that can run concurrently here, e.g. one
-    // serial chain. A lookahead window would offload it anyway and only add
-    // handoffs, so issue the MFMA synchronously, after joining any running
-    // job whose registers it touches.
-    if (replay.pending()) {
-      bool filtered = false;
-      (void)replay.begin_block(*plan, entry_pc, helper_cap_, extra_wait, filtered);
-      if (extra_wait[0]) {
-        ++cache.stats.drains_reject;
-        (void)replay.join(extra_wait[0]);
-        report_pending_mma_failure(*active, replay);
-        if (active->is_halted())
-          return true;
-      }
-    }
-    (void)issue_instruction_impl<false>(active);
-    return true;
+  if (replay.failure()) {
+    report_pending_mma_failure(*active, replay);
+    if (active->is_halted())
+      return true;
   }
   // An exhausted pool still replays: each chain that finds no helper runs on
   // the issuer, which keeps the saved fetch, decode and scoreboard work.
   const bool inline_only = mma_plan::inline_only();
+  const bool cross_block = mma_plan::cross_block_enabled();
 
   // Inline steps can touch new registers while helpers run. Allocate all lazy
   // chunks before the first job can race with that allocation. Chunks stay
@@ -3018,14 +3015,15 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
 
   // Jobs of earlier blocks may still run; each step joins only the ones it
   // depends on, found once here from the plan's first-touch index.
-  if (replay.pending()) {
+  std::array<uint32_t, mma_plan::kMaxSteps> result_wait;
+  std::array<uint32_t, mma_plan::kMaxSteps> factor_wait;
+  const bool had_pending = replay.pending();
+  bool filtered = false;
+  const bool has_entry_waits = replay.begin_block(*plan, entry_pc, helper_cap_, result_wait,
+                                                  factor_wait, filtered, cross_block);
+  if (had_pending) {
     ++cache.stats.pending_entries;
-    bool filtered = false;
-    (void)replay.begin_block(*plan, entry_pc, helper_cap_, extra_wait, filtered);
     cache.stats.filtered_entries += filtered;
-  } else {
-    bool filtered = false;
-    (void)replay.begin_block(*plan, entry_pc, helper_cap_, extra_wait, filtered);
   }
   ++cache.stats.replays;
   unsigned offloaded = 0;
@@ -3087,10 +3085,18 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
   };
   for (unsigned k = 0; k != plan->steps.size(); ++k) {
     const mma_plan::Step &step = plan->steps[k];
-    const uint32_t waits = replay.slots_of(step.wait) | extra_wait[k];
-    if (waits) {
-      if (extra_wait[k])
+    uint32_t waits = replay.slots_of(step.wait);
+    if (has_entry_waits) {
+      const uint32_t inherited = replay.inherited();
+      const uint32_t rwait = result_wait[k] & inherited;
+      const uint32_t fwait = factor_wait[k] & inherited;
+      if (rwait)
         ++cache.stats.result_waits;
+      if (fwait)
+        ++cache.stats.factor_waits;
+      waits |= rwait | fwait;
+    }
+    if (waits) {
       if (!replay.join(waits)) {
         helpers_failed(active->pc, *plan->steps.front().inst);
         return true;
@@ -3141,7 +3147,8 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
         cache.stats.snapshot_bytes += words * sizeof(uint32_t);
         return static_cast<const MatrixInputSnapshot *const *>(buffer.pointers.data());
       };
-      if (!inline_only && replay.submit(step.job, step, active, fill)) {
+      const auto reap = [&] { return cache.reap_finished_except(active->wf_id()); };
+      if (!inline_only && replay.submit(step.job, step, active, fill, reap)) {
         ++cache.stats.offloads;
         cache.stats.chained += step.members - 1u;
         // A replay is one asynchronous window; every accepted job is joined.
@@ -3176,9 +3183,11 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
       const uint64_t next = active->pc + step.size;
       (void)issue_instruction_impl<false>(active);
       if (active->pc != next || active->state() != WfState::RUNNING || active->is_halted()) {
-        // A stall, fault or redirect ends the block. Jobs stay outstanding
-        // across a stall or redirect; a fault has already drained them.
+        // A stall, fault or redirect ends the block. With cross-block off,
+        // drain here so ordinary issue never needs the gap footprint check.
         ++cache.stats.early_exit;
+        if (!cross_block)
+          (void)replay.drain();
         if (!active->is_halted())
           (void)helper_error();
         return true;
@@ -3189,7 +3198,7 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
   }
   // With cross-block execution the jobs keep running and whatever follows
   // joins only what it depends on; otherwise the block drains here.
-  if (!mma_plan::cross_block_enabled() && !replay.drain())
+  if (!cross_block && !replay.drain())
     helpers_failed(active->pc, *plan->steps.front().inst);
   else
     (void)helper_error();
@@ -3483,8 +3492,15 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       decoded_inst_cache_.return_completed(instruction_pc, vmid, words, decoded);
     return outcome;
   };
-  if (mma_plans_ && !in_replay_) [[unlikely]]
-    join_pending_mma_for(*active, *inst);
+  if (mma_plans_ && !in_replay_ && mma_plan::cross_block_enabled()) [[unlikely]] {
+    if (config_.arch != IsaFamily::Cdna4 || !mma_plan::scalar_only_encoding(words[0])) {
+      join_pending_mma_for(*active, *inst);
+    } else if (auto *jobs = mma_plans_->pending_if_any(active->wf_id()); jobs && jobs->failure()) {
+      report_pending_mma_failure(*active, *jobs);
+    }
+    if (active->is_halted())
+      return finish_issue(IssueOutcome::NotIssued);
+  }
   const std::string_view instruction_mnemonic = inst->mnemonic();
   const auto fail_current_instruction = [&]() {
     if constexpr (EnableAsync) {
@@ -4244,6 +4260,8 @@ ComputeUnitCore::step_impl(MmaAdmissionCache *admission, uint32_t async_wave_siz
       if (single_step) {
         // A single-step wave must report the result of this attempt, including
         // clause admission stalls where the wave remains runnable at the same PC.
+        // Drain any cross-block helpers before the debugger can observe registers.
+        drain_pending_mma(*wf, MmaDrain::Mode);
         retired = issue_instruction(wf.get()) == IssueOutcome::Issued;
       } else if constexpr (EnableAsync) {
         issue_async_instruction(wf.get(), admission, async_wave_size, has_accvgprs);
