@@ -54,7 +54,6 @@ Panel Config:
           max: 100 * MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum) / TCC_EA0_RDREQ_sum)
           unit: Percent
         Uncached Read Traffic:
-          # Size-normalized denominator: 32B=1, 64B=2, 128B=4 units.
           avg: 100 * SUM(TCC_EA0_RD_UNCACHED_32B_sum) / SUM(TCC_EA0_RDREQ_32B_sum + 2 * TCC_EA0_RDREQ_64B_sum + 4 * TCC_EA0_RDREQ_128B_sum)
           min: 100 * MIN(TCC_EA0_RD_UNCACHED_32B_sum / (TCC_EA0_RDREQ_32B_sum + 2 * TCC_EA0_RDREQ_64B_sum + 4 * TCC_EA0_RDREQ_128B_sum))
           max: 100 * MAX(TCC_EA0_RD_UNCACHED_32B_sum / (TCC_EA0_RDREQ_32B_sum + 2 * TCC_EA0_RDREQ_64B_sum + 4 * TCC_EA0_RDREQ_128B_sum))

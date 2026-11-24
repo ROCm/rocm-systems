@@ -160,7 +160,6 @@ fabric.remote_wr_atomic_traffic:
     allocations.
 fabric.uncached_rd_traffic:
   name: L2-Fabric Uncached Read Traffic
-  # Size-normalized denominator: 32B=1, 64B=2 units.
   formula: 100 * SUM(TCC_EA_RD_UNCACHED_32B_sum) / SUM(TCC_EA_RDREQ_32B_sum + 2 * (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum))
   unit: Percent
   description: Percentage of L2-Fabric read bytes that come from uncached memory allocations.

@@ -59,7 +59,6 @@ fabric.remote_wr_atomic:
 fabric.remote_wr_atomic_traffic:
   formula: 100 * SUM(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum) / SUM(TCC_EA0_WRREQ_sum)
 fabric.uncached_rd_traffic:
-  # Size-normalized denominator: 32B=1, 64B=2, 128B=4 units.
   formula: 100 * SUM(TCC_EA0_RD_UNCACHED_32B_sum) / SUM(TCC_EA0_RDREQ_32B_sum + 2 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) + 4 * TCC_BUBBLE_sum)
 fabric.uncached_wr_atomic_traffic:
   formula: 100 * SUM(TCC_EA0_WR_UNCACHED_32B_sum) / SUM(TCC_EA0_WRREQ_sum)
