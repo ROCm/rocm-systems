@@ -54,10 +54,12 @@ inline InstCategory classify_mnemonic(std::string_view mn) {
   if (mn.starts_with("s_load") || mn.starts_with("s_store") || mn.starts_with("s_buffer") ||
       mn.starts_with("s_atomic") || mn.starts_with("buffer_") || mn.starts_with("tbuffer_") ||
       mn.starts_with("flat_") || mn.starts_with("global_") || mn.starts_with("scratch_") ||
-      mn.starts_with("ds_") || mn.starts_with("image_"))
+      mn.starts_with("ds_") || mn.starts_with("image_")) {
     return InstCategory::MEMORY;
-  if (mn.starts_with("v_"))
+  }
+  if (mn.starts_with("v_")) {
     return InstCategory::VECTOR_ALU;
+  }
   return InstCategory::SCALAR_ALU;
 }
 
@@ -83,8 +85,9 @@ std::vector<CorpusEntry> build_corpus(const Encoding *encodings, size_t num_enco
 
   for (size_t i = 0; i < num_encodings; ++i) {
     const auto &te = encodings[i];
-    if (should_skip(te.mnemonic))
+    if (should_skip(te.mnemonic)) {
       continue;
+    }
 
     auto cat = classify_mnemonic(te.mnemonic);
 
@@ -163,9 +166,11 @@ void run_benchmark(rocjitsu::IsaFamily arch, std::string_view arch_name, const E
 
   // Filter to non-memory for execute benchmark (memory ops crash on zeroed).
   std::vector<const CorpusEntry *> executable;
-  for (const auto &e : corpus)
-    if (e.category != InstCategory::MEMORY)
+  for (const auto &e : corpus) {
+    if (e.category != InstCategory::MEMORY) {
       executable.push_back(&e);
+    }
+  }
 
   const size_t exec_total = executable.size() * ITERATIONS;
 

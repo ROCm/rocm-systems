@@ -29,35 +29,40 @@ util::FailureOr<uint64_t> focused_work_units(FuzzTarget target, std::span<const 
     const util::FailureOr<std::unique_ptr<Decoder>> decoder =
         decode_fuzz::create_decoder("gfx1250");
     EXPECT_TRUE(decoder.succeeded());
-    if (decoder.failed())
+    if (decoder.failed()) {
       return util::Result::failure();
+    }
     const util::FailureOr<decode_fuzz::DecodeRecord> record =
         decode_fuzz::decode_window(*decoder.value(), payload);
     EXPECT_TRUE(record.succeeded());
-    if (record.failed())
+    if (record.failed()) {
       return util::Result::failure();
+    }
     return record.value().valid;
   }
   case FuzzTarget::Execution: {
     const util::FailureOr<std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>>
         maybe_resources = execution_fuzz::make_async_execution_resources(1);
     EXPECT_TRUE(maybe_resources.succeeded());
-    if (maybe_resources.failed())
+    if (maybe_resources.failed()) {
       return util::Result::failure();
+    }
     const auto resources = maybe_resources.value();
     const util::FailureOr<execution_fuzz::RunStats> maybe_stats =
         execution_fuzz::run_input(payload, std::nullopt, resources);
     EXPECT_TRUE(maybe_stats.succeeded());
-    if (maybe_stats.failed())
+    if (maybe_stats.failed()) {
       return util::Result::failure();
+    }
     const execution_fuzz::RunStats stats = maybe_stats.value();
     return stats.executed;
   }
   case FuzzTarget::CodeObject: {
     const util::FailureOr<code_object_fuzz::RunStats> result = code_object_fuzz::run_input(payload);
     EXPECT_TRUE(result.succeeded());
-    if (result.failed())
+    if (result.failed()) {
       return util::Result::failure();
+    }
     const code_object_fuzz::RunStats &stats = result.value();
     return stats.code_objects_valid + stats.executables_valid;
   }
@@ -90,10 +95,11 @@ TEST(MultiplexerFuzzTest, SelectorIdsRemainStableAsTargetsAreAdded) {
   uint64_t unassigned = 0;
   for (unsigned selector = 0; selector <= std::numeric_limits<uint8_t>::max(); ++selector) {
     const std::optional<FuzzTarget> target = selected_target(static_cast<uint8_t>(selector));
-    if (target)
+    if (target) {
       ++selections[static_cast<std::size_t>(*target)];
-    else
+    } else {
       ++unassigned;
+    }
   }
 
   EXPECT_EQ(selections[0], 1u);
@@ -172,16 +178,18 @@ TEST(MultiplexerFuzzTest, PreservesFocusedPayloadSizeContracts) {
   for (const std::size_t payload_size : {15u, 16u, 17u}) {
     std::vector<uint8_t> input(payload_size + 1, 0);
     input.front() = static_cast<uint8_t>(FuzzTarget::Decode);
-    for (unsigned byte = 0; byte < sizeof(kSNop); ++byte)
+    for (unsigned byte = 0; byte < sizeof(kSNop); ++byte) {
       input[1 + byte] = static_cast<uint8_t>(kSNop >> (8 * byte));
+    }
     const util::FailureOr<std::optional<DispatchResult>> maybe_result = run_input(input);
     ASSERT_TRUE(maybe_result.succeeded());
     const std::optional<DispatchResult> result = maybe_result.value();
     ASSERT_TRUE(result);
-    if (payload_size == decode_fuzz::kWindowSize)
+    if (payload_size == decode_fuzz::kWindowSize) {
       EXPECT_GT(result->work_units, 0u);
-    else
+    } else {
       EXPECT_EQ(result->work_units, 0u);
+    }
   }
 
   const util::FailureOr<std::optional<DispatchResult>> maybe_empty_execution =
@@ -217,9 +225,11 @@ TEST(MultiplexerFuzzTest, PreservesFocusedPayloadSizeContracts) {
   maximum_concurrent.front() = static_cast<uint8_t>(FuzzTarget::ConcurrentDispatch);
   maximum_concurrent[1] = static_cast<uint8_t>(execution_fuzz::FuzzTarget::Gfx908);
   for (std::size_t offset = 1 + concurrent_dispatch_fuzz::kHeaderSize;
-       offset < maximum_concurrent.size(); offset += sizeof(kSNop))
-    for (unsigned byte = 0; byte < sizeof(kSNop); ++byte)
+       offset < maximum_concurrent.size(); offset += sizeof(kSNop)) {
+    for (unsigned byte = 0; byte < sizeof(kSNop); ++byte) {
       maximum_concurrent[offset + byte] = static_cast<uint8_t>(kSNop >> (8 * byte));
+    }
+  }
   const util::FailureOr<std::optional<DispatchResult>> maybe_maximum_concurrent_result =
       run_input(maximum_concurrent);
   ASSERT_TRUE(maybe_maximum_concurrent_result.succeeded());

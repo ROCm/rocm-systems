@@ -37,8 +37,9 @@ assemble_virtual_machine_topology(config::LoadedConfig &loaded, simdojo::Topolog
   config::SystemPeerRouteProjection peer_routes;
   if (!loaded.system_graph.nodes.empty()) {
     auto projection = loaded.system_graph.local_peer_routes(emit_error, loaded.local_node_id);
-    if (projection.failed())
+    if (projection.failed()) {
       return util::Result::failure();
+    }
     peer_routes = std::move(projection.value());
   }
   if (loaded.num_gpus > 1 && !loaded.extra_gpu_builds.empty()) {
@@ -85,8 +86,9 @@ assemble_virtual_machine_topology(config::LoadedConfig &loaded, simdojo::Topolog
         return util::Result::failure();
       }
       auto *extra_soc = machine_ptr->soc(static_cast<uint32_t>(gpu_index + 1));
-      if (extra_soc)
+      if (extra_soc) {
         extra_soc->wire_backing(topology);
+      }
     }
     return machine_ptr;
   }

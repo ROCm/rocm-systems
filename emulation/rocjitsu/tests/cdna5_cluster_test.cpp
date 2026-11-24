@@ -27,8 +27,9 @@ public:
 
 protected:
   amdgpu::VmAccessOutcome initiate_access(Instruction &, amdgpu::Wavefront &) override {
-    if (std::exchange(unavailable_once, false))
+    if (std::exchange(unavailable_once, false)) {
       return amdgpu::VmAccessOutcome::Unavailable;
+    }
     return amdgpu::VmAccessOutcome::Complete;
   }
 };
@@ -51,8 +52,9 @@ std::string make_single_se_gfx1250_config(uint32_t num_cus) {
   std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
   std::string links;
   for (uint32_t i = 0; i < num_cus; ++i) {
-    if (i > 0)
+    if (i > 0) {
       links += ",";
+    }
     links += R"({"src":"xcd0.cp.req_)" + std::to_string(i) + R"(","dst":"xcd0.se0.cu)" +
              std::to_string(i) + R"(.cpl","latency":1,"weight":2})";
     links += R"(,{"src":"xcd0.se0.cu)" + std::to_string(i) + R"(.req","dst":"xcd0.l2.cpl_)" +
@@ -119,10 +121,11 @@ TEST(Gfx1250ExecutionTest, ClusterLoadsDecodeAndPopulateVectorMemState) {
   };
 
   for (const LoadCase &tc : load_cases) {
-    if (tc.scale_offset)
+    if (tc.scale_offset) {
       write_vgpr_lane_indices(0);
-    else
+    } else {
       write_vgpr_lane_offsets(tc.words[2] & 0xffu, 16);
+    }
 
     auto inst = decode_gfx1250(tc.words, tc.mnemonic);
     ASSERT_NE(inst, nullptr);
@@ -590,13 +593,15 @@ TEST(Gfx1250ExecutionTest, DecodedAsyncLdsLoadsHonorEveryAccessWidthAtAllocation
       cu->write_vgpr(vgpr_base + 1, 0, relative_addr);
       auto inst = decode_gfx1250(words, tc.mnemonic);
       EXPECT_NE(inst, nullptr);
-      if (!inst)
+      if (!inst) {
         return amdgpu::kInvalidLdsAddress;
+      }
       inst->execute(*inst, wf);
       auto *state = inst->data_as<amdgpu::VectorMemState>();
       EXPECT_NE(state, nullptr);
-      if (!state)
+      if (!state) {
         return amdgpu::kInvalidLdsAddress;
+      }
       EXPECT_EQ(state->elem_size * state->num_elems, tc.access_size);
       return state->per_lane_lds_addr[0];
     };
@@ -1162,7 +1167,7 @@ TEST(Gfx1250ExecutionTest, LdsWritebackRejectsMalformedFirstLaneWithoutCompletio
       wf->clear_instruction_execution_error();
       uint32_t faults = 0;
       pipeline.set_fault_handler({});
-      if (with_fault_handler)
+      if (with_fault_handler) {
         pipeline.set_fault_handler(
             [&](amdgpu::Wavefront &failed_wave, amdgpu::VmAccessOutcome outcome, uint64_t) {
               EXPECT_EQ(&failed_wave, wf);
@@ -1170,6 +1175,7 @@ TEST(Gfx1250ExecutionTest, LdsWritebackRejectsMalformedFirstLaneWithoutCompletio
               EXPECT_EQ(failed_wave.state(), amdgpu::WfState::RUNNING);
               ++faults;
             });
+      }
       pipeline.unavailable_once = true;
       EXPECT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(make_state()), *wf),
                 amdgpu::VmAccessOutcome::Complete);
@@ -1606,8 +1612,9 @@ TEST(Gfx1250SimulationTest, ClusterLdsDoesNotRemapIntoNonParticipatingPeerLdsBas
     auto targets = sim.cp()->cluster_lds_targets(/*dispatch_id=*/1, wg_id,
                                                  /*mcast_mask=*/(1u << cluster_size) - 1);
     for (const auto &target : targets) {
-      if (target.wg_id == wg_id)
+      if (target.wg_id == wg_id) {
         continue;
+      }
       if (target.cu == source[0].cu && target.lds_base != source[0].lds_base) {
         remap_case = RemapCase{source[0], target};
         break;
@@ -1716,8 +1723,9 @@ TEST(Gfx1250SimulationTest, ClusterLoadAsyncToLdsDoesNotWriteMaskExcludedPartici
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
-  for (uint32_t byte = 0; byte < 256; ++byte)
+  for (uint32_t byte = 0; byte < 256; ++byte) {
     sim.memory->write8(input_addr + byte, static_cast<uint8_t>(0x40u + byte));
+  }
 
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
@@ -1737,9 +1745,10 @@ TEST(Gfx1250SimulationTest, ClusterLoadAsyncToLdsDoesNotWriteMaskExcludedPartici
 
   auto read_unaligned_input = [&](uint32_t byte_offset) {
     uint32_t value = 0;
-    for (uint32_t byte = 0; byte < 4; ++byte)
+    for (uint32_t byte = 0; byte < 4; ++byte) {
       value |= static_cast<uint32_t>(sim.memory->read8(input_addr + byte_offset + byte))
                << (byte * 8);
+    }
     return value;
   };
 
@@ -1771,8 +1780,9 @@ TEST(Gfx1250SimulationTest, ClusterLoadAsyncToLdsWritesEachIssuingParticipant) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
-  for (uint32_t byte = 0; byte < 256; ++byte)
+  for (uint32_t byte = 0; byte < 256; ++byte) {
     sim.memory->write8(input_addr + byte, static_cast<uint8_t>(0x80u + byte));
+  }
 
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
@@ -1788,9 +1798,10 @@ TEST(Gfx1250SimulationTest, ClusterLoadAsyncToLdsWritesEachIssuingParticipant) {
 
   auto read_unaligned_input = [&](uint32_t byte_offset) {
     uint32_t value = 0;
-    for (uint32_t byte = 0; byte < 4; ++byte)
+    for (uint32_t byte = 0; byte < 4; ++byte) {
       value |= static_cast<uint32_t>(sim.memory->read8(input_addr + byte_offset + byte))
                << (byte * 8);
+    }
     return value;
   };
 
@@ -1922,11 +1933,13 @@ TEST(Gfx1250SimulationTest, ClusterLoadAsyncToLdsDropsNetNegativeDestination) {
   auto targets = sim.cp()->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0,
                                                /*mcast_mask=*/0x3);
   ASSERT_EQ(targets.size(), 2u);
-  for (const auto &target : targets)
+  for (const auto &target : targets) {
     target.cu->lds().write32(target.lds_base, kSentinel);
+  }
   EXPECT_NO_THROW(sim.engine->run());
-  for (const auto &target : targets)
+  for (const auto &target : targets) {
     EXPECT_EQ(target.cu->lds().read32(target.lds_base), kSentinel);
+  }
 }
 
 TEST(Gfx1250SimulationTest, ClusterLoadAsyncToLdsAppliesIoffsetToGlobalAndLds) {
@@ -1949,8 +1962,9 @@ TEST(Gfx1250SimulationTest, ClusterLoadAsyncToLdsAppliesIoffsetToGlobalAndLds) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
-  for (uint32_t byte = 0; byte < 256; ++byte)
+  for (uint32_t byte = 0; byte < 256; ++byte) {
     sim.memory->write8(input_addr + byte, static_cast<uint8_t>(0xc0u + byte));
+  }
 
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
@@ -1967,9 +1981,10 @@ TEST(Gfx1250SimulationTest, ClusterLoadAsyncToLdsAppliesIoffsetToGlobalAndLds) {
 
   auto read_unaligned_input = [&](uint32_t byte_offset) {
     uint32_t value = 0;
-    for (uint32_t byte = 0; byte < 4; ++byte)
+    for (uint32_t byte = 0; byte < 4; ++byte) {
       value |= static_cast<uint32_t>(sim.memory->read8(input_addr + byte_offset + byte))
                << (byte * 8);
+    }
     return value;
   };
 
@@ -2021,11 +2036,13 @@ TEST(Gfx1250SimulationTest, Ttmp7ClusterGridYDoesNotBleedIntoZAt16BitBoundary) {
           break;
         }
       }
-      if (target)
+      if (target) {
         break;
+      }
     }
-    if (target)
+    if (target) {
       break;
+    }
   }
 
   ASSERT_NE(target, nullptr);
@@ -2120,9 +2137,10 @@ TEST(Gfx1250SimulationTest, DynamicClusterLaunchStateMatchesCompilerAbiWithAlign
     uint32_t cluster_id;
   };
   std::vector<LaunchState> states;
-  for (const auto &wf : sim.snapshot->snapshots())
+  for (const auto &wf : sim.snapshot->snapshots()) {
     states.push_back({wf.wg_id, wf.ttmp(6), wf.ttmp(7), wf.ttmp(9), wf.sgpr(2), wf.sgpr(3),
                       wf.sgpr(6), wf.sgpr(10), wf.sgpr(13)});
+  }
   std::ranges::sort(states, [](const LaunchState &lhs, const LaunchState &rhs) {
     return lhs.workgroup_id < rhs.workgroup_id;
   });

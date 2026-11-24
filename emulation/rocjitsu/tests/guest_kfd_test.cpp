@@ -70,16 +70,18 @@ constexpr uint64_t kAllocSize = 4096;
 // type spells that out: callers cannot be asked to handle an absence that cannot occur.
 std::filesystem::path config_handoff_dir() {
   std::vector<std::filesystem::path> tiers;
-  if (const char *inv = std::getenv("ROCJITSU_INVOCATION_DIR"); inv && *inv)
+  if (const char *inv = std::getenv("ROCJITSU_INVOCATION_DIR"); inv && *inv) {
     tiers.emplace_back(inv);
+  }
   const std::filesystem::path base(rocjitsu::rpc_default_runtime_dir());
   tiers.push_back(base / std::to_string(getpid()));
   tiers.push_back(base);
 
   std::error_code ec;
   for (const auto &tier : tiers) {
-    if (std::filesystem::exists(tier / "config_path", ec))
+    if (std::filesystem::exists(tier / "config_path", ec)) {
       return tier;
+    }
   }
   // No handoff exists yet: install into the highest-priority tier the reader probes.
   return tiers.front();
@@ -90,12 +92,14 @@ std::optional<std::string> read_active_config_json() {
 
   std::ifstream active_config(dir / "config_path");
   std::string configured_path;
-  if (!std::getline(active_config, configured_path) || configured_path.empty())
+  if (!std::getline(active_config, configured_path) || configured_path.empty()) {
     return std::nullopt;
+  }
 
   std::ifstream config(std::filesystem::absolute(configured_path).lexically_normal());
-  if (!config)
+  if (!config) {
     return std::nullopt;
+  }
   return std::string(std::istreambuf_iterator<char>(config), std::istreambuf_iterator<char>());
 }
 
@@ -108,8 +112,9 @@ bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
     const std::filesystem::path config_path = runtime / "inline_dbt_failure_config.json";
 
     const size_t insert_pos = simulator_json.find('{');
-    if (insert_pos == std::string::npos)
+    if (insert_pos == std::string::npos) {
       return false;
+    }
     std::ostringstream dbt_guest;
     dbt_guest << R"(
   "dbt_guest": {
@@ -118,10 +123,11 @@ bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
     "host_isa": ")"
               << host_isa << R"(",
     "execution_backend": "simulator",)";
-    if (!external_host_config.empty())
+    if (!external_host_config.empty()) {
       dbt_guest << R"(
     "simulator_config": ")"
                 << external_host_config << R"(",)";
+    }
     dbt_guest << R"(
     "guest_device": {
       "gpu_id": 38144,
@@ -141,19 +147,23 @@ bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
     simulator_json.insert(insert_pos + 1, dbt_guest.str());
 
     std::ofstream config(config_path);
-    if (!config)
+    if (!config) {
       return false;
+    }
     config << simulator_json;
     config.close();
-    if (!config)
+    if (!config) {
       return false;
+    }
 
     std::ofstream active_config(runtime / "config_path");
-    if (!active_config)
+    if (!active_config) {
       return false;
+    }
     active_config << config_path.string() << '\n';
-    if (include_resolved_gpu_id)
+    if (include_resolved_gpu_id) {
       active_config << "50148\n";
+    }
     return active_config.good();
   } catch (const std::filesystem::filesystem_error &) {
     return false;
@@ -179,27 +189,31 @@ LongPathHandoff relocate_active_config_to_long_path() {
   // Checked before the config is read so the skip-half test, which installs nothing, reaches
   // the environmental verdict instead of failing on the missing config below.
   if (LongPathHandoff supported = rocjitsu::test::long_path_handoff_supported(dir);
-      supported.status() != LongPathHandoff::Status::kOk)
+      supported.status() != LongPathHandoff::Status::kOk) {
     return supported;
+  }
 
   // The caller asserts the config is installed before calling, so an unreadable
   // one here is a defect in the run rather than a property of the environment.
   const auto json = read_active_config_json();
-  if (!json)
+  if (!json) {
     return LongPathHandoff::fail("no active config JSON to relocate");
+  }
   return rocjitsu::test::install_oversized_handoff(dir, *json);
 }
 
 bool read_gpu_id(const std::string &path, uint32_t *gpu_id) {
   FILE *file = fopen(path.c_str(), "r");
-  if (!file)
+  if (!file) {
     return false;
+  }
 
   unsigned parsed = 0;
   const int scanned = fscanf(file, "%u", &parsed);
   fclose(file);
-  if (scanned != 1)
+  if (scanned != 1) {
     return false;
+  }
 
   *gpu_id = static_cast<uint32_t>(parsed);
   return true;
@@ -207,25 +221,29 @@ bool read_gpu_id(const std::string &path, uint32_t *gpu_id) {
 
 std::string topology_nodes_path() {
   for (const char *path : kTopologyNodesPaths) {
-    if (access(path, R_OK | X_OK) == 0)
+    if (access(path, R_OK | X_OK) == 0) {
       return path;
+    }
   }
   return {};
 }
 
 bool guest_gpu_is_visible() {
   std::string nodes_path = topology_nodes_path();
-  if (nodes_path.empty())
+  if (nodes_path.empty()) {
     return false;
+  }
 
   DIR *dir = opendir(nodes_path.c_str());
-  if (!dir)
+  if (!dir) {
     return false;
+  }
 
   bool found = false;
   while (auto *entry = readdir(dir)) {
-    if (std::strcmp(entry->d_name, ".") == 0 || std::strcmp(entry->d_name, "..") == 0)
+    if (std::strcmp(entry->d_name, ".") == 0 || std::strcmp(entry->d_name, "..") == 0) {
       continue;
+    }
 
     uint32_t gpu_id = 0;
     std::string gpu_id_path = nodes_path + "/" + entry->d_name + "/gpu_id";
@@ -241,8 +259,9 @@ bool guest_gpu_is_visible() {
 
 bool read_process_aperture_count(int fd, uint32_t *count) {
   kfd_ioctl_get_process_apertures_new_args args{};
-  if (ioctl(fd, AMDKFD_IOC_GET_PROCESS_APERTURES_NEW, &args) != 0)
+  if (ioctl(fd, AMDKFD_IOC_GET_PROCESS_APERTURES_NEW, &args) != 0) {
     return false;
+  }
 
   *count = args.num_of_nodes;
   return true;
@@ -257,8 +276,9 @@ int child_process() {
     close(fd);
     return 2; // opened a GPU endpoint before exec.
   }
-  if (errno != ENODEV)
+  if (errno != ENODEV) {
     return 3; // refused, but not with the documented error.
+  }
   return 0;
 }
 
@@ -277,8 +297,9 @@ int child_reset_process(int inherited_fd, uint32_t expected_reopened_count) {
 }
 
 TEST(GuestKfdMultiprocessTest, ForkedChildrenRefuseGpuAndLeaveParentOverlayIntact) {
-  if (access(kKfdPath, R_OK | W_OK) != 0)
+  if (access(kKfdPath, R_OK | W_OK) != 0) {
     GTEST_SKIP() << kKfdPath << " is not available: " << std::strerror(errno);
+  }
 
   int parent_fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
   ASSERT_GE(parent_fd, 0);
@@ -293,8 +314,9 @@ TEST(GuestKfdMultiprocessTest, ForkedChildrenRefuseGpuAndLeaveParentOverlayIntac
     pid_t pid = fork();
     ASSERT_GE(pid, 0) << "fork failed: " << std::strerror(errno);
 
-    if (pid == 0)
+    if (pid == 0) {
       _exit(child_process());
+    }
 
     children.push_back(pid);
   }
@@ -312,8 +334,9 @@ TEST(GuestKfdMultiprocessTest, ForkedChildrenRefuseGpuAndLeaveParentOverlayIntac
 }
 
 TEST(GuestKfdMultiprocessTest, ForkedChildCannotUseInheritedGuestDriver) {
-  if (access(kKfdPath, R_OK | W_OK) != 0)
+  if (access(kKfdPath, R_OK | W_OK) != 0) {
     GTEST_SKIP() << kKfdPath << " is not available: " << std::strerror(errno);
+  }
 
   int parent_fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
   ASSERT_GE(parent_fd, 0);
@@ -327,8 +350,9 @@ TEST(GuestKfdMultiprocessTest, ForkedChildCannotUseInheritedGuestDriver) {
 
   pid_t pid = fork();
   ASSERT_GE(pid, 0) << "fork failed: " << std::strerror(errno);
-  if (pid == 0)
+  if (pid == 0) {
     _exit(child_reset_process(parent_fd, parent_count_before));
+  }
 
   int status = 0;
   ASSERT_EQ(waitpid(pid, &status, 0), pid);
@@ -344,8 +368,9 @@ TEST(GuestKfdMultiprocessTest, ForkedChildCannotUseInheritedGuestDriver) {
 }
 
 TEST(GuestKfdConcurrencyTest, ConcurrentOpenIoctlAndSysfsRedirect) {
-  if (access(kKfdPath, R_OK | W_OK) != 0)
+  if (access(kKfdPath, R_OK | W_OK) != 0) {
     GTEST_SKIP() << kKfdPath << " is not available: " << std::strerror(errno);
+  }
 
   int probe_fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
   ASSERT_GE(probe_fd, 0);
@@ -370,25 +395,29 @@ TEST(GuestKfdConcurrencyTest, ConcurrentOpenIoctlAndSysfsRedirect) {
         }
 
         kfd_ioctl_get_version_args version{};
-        if (ioctl(fd, AMDKFD_IOC_GET_VERSION, &version) != 0)
+        if (ioctl(fd, AMDKFD_IOC_GET_VERSION, &version) != 0) {
           ioctl_failures.fetch_add(1, std::memory_order_relaxed);
-        if (!guest_gpu_is_visible())
+        }
+        if (!guest_gpu_is_visible()) {
           sysfs_failures.fetch_add(1, std::memory_order_relaxed);
+        }
         close(fd);
       }
     });
   }
 
-  for (auto &thread : threads)
+  for (auto &thread : threads) {
     thread.join();
+  }
   EXPECT_EQ(open_failures.load(std::memory_order_relaxed), 0);
   EXPECT_EQ(ioctl_failures.load(std::memory_order_relaxed), 0);
   EXPECT_EQ(sysfs_failures.load(std::memory_order_relaxed), 0);
 }
 
 TEST(GuestKfdLifecycleTest, ReopensAfterLastClose) {
-  if (access(kKfdPath, R_OK | W_OK) != 0)
+  if (access(kKfdPath, R_OK | W_OK) != 0) {
     GTEST_SKIP() << kKfdPath << " is not available: " << std::strerror(errno);
+  }
 
   for (int attempt = 0; attempt < 2; ++attempt) {
     int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
@@ -402,8 +431,9 @@ TEST(GuestKfdLifecycleTest, ReopensAfterLastClose) {
 }
 
 TEST(GuestKfdMemoryTest, GuestAllocationMmapOffsetIsRejected) {
-  if (access(kKfdPath, R_OK | W_OK) != 0)
+  if (access(kKfdPath, R_OK | W_OK) != 0) {
     GTEST_SKIP() << kKfdPath << " is not available: " << std::strerror(errno);
+  }
 
   int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
   ASSERT_GE(fd, 0);
@@ -446,8 +476,9 @@ TEST(GuestKfdFailureTest, NonexistentSimulatorConfigFailsCleanly) {
   const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
   EXPECT_EQ(fd, -1);
   EXPECT_EQ(errno, ENODEV);
-  if (fd >= 0)
+  if (fd >= 0) {
     close(fd);
+  }
 }
 
 TEST(GuestKfdFailureTest, SimulatorHostIsaMismatchFailsCleanly) {
@@ -459,8 +490,9 @@ TEST(GuestKfdFailureTest, SimulatorHostIsaMismatchFailsCleanly) {
   const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
   EXPECT_EQ(fd, -1);
   EXPECT_EQ(errno, ENODEV);
-  if (fd >= 0)
+  if (fd >= 0) {
     close(fd);
+  }
 }
 
 TEST(GuestKfdFailureTest, SimulatorOversizedLdsFailsCleanly) {
@@ -472,8 +504,9 @@ TEST(GuestKfdFailureTest, SimulatorOversizedLdsFailsCleanly) {
   const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
   EXPECT_EQ(fd, -1);
   EXPECT_EQ(errno, ENODEV);
-  if (fd >= 0)
+  if (fd >= 0) {
     close(fd);
+  }
 }
 
 TEST(GuestKfdFailureTest, PathOnlyAutomaticDbtHandoffFailsClosed) {
@@ -485,8 +518,9 @@ TEST(GuestKfdFailureTest, PathOnlyAutomaticDbtHandoffFailsClosed) {
   const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
   EXPECT_EQ(fd, -1);
   EXPECT_EQ(errno, ENODEV);
-  if (fd >= 0)
+  if (fd >= 0) {
     close(fd);
+  }
 }
 
 // The KFD half of a pair. ConfigLoaderTest.ReadsRuntimeHandoffLargerThan4095Bytes drives the
@@ -499,8 +533,9 @@ TEST(GuestKfdConfigTest, ReadsRuntimeHandoffLargerThan4095Bytes) {
   // writes, so checking only at relocation time would surface that environmental limit
   // as a red install and the skip would never be reached.
   if (const LongPathHandoff supported = long_path_handoff_supported();
-      supported.status() == LongPathHandoff::Status::kSkip)
+      supported.status() == LongPathHandoff::Status::kSkip) {
     GTEST_SKIP() << "cannot build the oversized handoff here: " << supported.reason();
+  }
 
   const auto simulator_json = read_active_config_json();
   ASSERT_TRUE(simulator_json.has_value());
@@ -509,8 +544,9 @@ TEST(GuestKfdConfigTest, ReadsRuntimeHandoffLargerThan4095Bytes) {
   // A second skip site rather than a redundant one: the relocation can still find the
   // filesystem itself unable to hold the path, which the gate above cannot predict.
   const LongPathHandoff handoff = relocate_active_config_to_long_path();
-  if (handoff.status() == LongPathHandoff::Status::kSkip)
+  if (handoff.status() == LongPathHandoff::Status::kSkip) {
     GTEST_SKIP() << "cannot build the oversized handoff here: " << handoff.reason();
+  }
   ASSERT_TRUE(handoff.status() == LongPathHandoff::Status::kOk) << handoff.reason();
 
   // The overlay only comes up once GuestKfd::ensure_ready_locked() has found a topology GPU
@@ -538,8 +574,9 @@ TEST(GuestKfdConfigTest, LongPathHandoffSkipsWhenRuntimeDirIsTooDeep) {
   // 4082 bytes: one past the 4081-byte parent the helper targets, and still short
   // enough that the kernel would accept it as a path.
   std::string too_deep;
-  for (int i = 0; i < 20; ++i)
+  for (int i = 0; i < 20; ++i) {
     too_deep += "/" + std::string(200, 'd');
+  }
   too_deep += "/" + std::string(61, 'd');
   ASSERT_EQ(too_deep.size(), 4082u);
 
@@ -564,8 +601,9 @@ TEST(GuestKfdConfigTest, LongPathHandoffSkipsWhenRuntimeDirIsTooDeep) {
 // overwritten; the invariant under test is that KFD routing stays correct
 // regardless of which number that was.
 TEST(GuestKfdFdReuseTest, OverwritingHiddenRealFdKeepsRoutingCorrect) {
-  if (access(kKfdPath, R_OK | W_OK) != 0)
+  if (access(kKfdPath, R_OK | W_OK) != 0) {
     GTEST_SKIP() << kKfdPath << " is not available: " << std::strerror(errno);
+  }
 
   auto version_ok = [](int f) {
     kfd_ioctl_get_version_args version{};
@@ -593,13 +631,15 @@ TEST(GuestKfdFdReuseTest, OverwritingHiddenRealFdKeepsRoutingCorrect) {
   // driving invalidate_primary_fd() on that backend.
   constexpr int kMaxProbeFd = 64;
   for (int target = 3; target < kMaxProbeFd; ++target) {
-    if (target == app_fd || target == keeper || target == pipefd[0] || target == pipefd[1])
+    if (target == app_fd || target == keeper || target == pipefd[0] || target == pipefd[1]) {
       continue;
+    }
     // dup2 onto an unopened number just creates a new dup of the pipe read end;
     // onto an open number it atomically closes the old one first. Either way the
     // target now names the pipe, not KFD.
-    if (dup2(pipefd[0], target) != target)
+    if (dup2(pipefd[0], target) != target) {
       continue;
+    }
     // The overwritten number must never route KFD ioctls.
     EXPECT_FALSE(version_ok(target)) << "fd " << target << " still routed KFD after dup2 overwrite";
     close(target);

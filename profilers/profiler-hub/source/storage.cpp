@@ -36,4 +36,10 @@ storage_t::get_writer_schema_version() const
     return m_impl->get_writer_schema_version();
 }
 
+profiler_hub::version_t
+storage_t::get_trace_schema_version() const
+{
+    return m_impl->get_trace_schema_version();
+}
+
 }  // namespace profiler_hub

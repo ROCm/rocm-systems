@@ -51,8 +51,9 @@ public:
     modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   bool should_print_src_operand(uint8_t operand_index) const override;
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
@@ -91,8 +92,9 @@ public:
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     modifiers.image_prefix_words = 0 + 2 * amdgpu::image_derivative_component_count(inst_.dim);
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   bool should_print_src_operand(uint8_t operand_index) const override;
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
@@ -130,8 +132,9 @@ public:
     modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   bool should_print_src_operand(uint8_t operand_index) const override;
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
@@ -181,8 +184,9 @@ public:
     modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16)
+    if (inst_.d16) {
       modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
+    }
   }
   bool should_print_src_operand(uint8_t operand_index) const override;
   void append_src_operand(std::string &out, uint8_t operand_index) const override;

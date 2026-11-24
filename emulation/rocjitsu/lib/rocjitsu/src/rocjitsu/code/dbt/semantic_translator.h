@@ -86,8 +86,9 @@ public:
   /// payload bits.
   [[nodiscard]] bool has_expand_rule(const Instruction &inst) const;
   [[nodiscard]] bool has_expand_rule(uint16_t encoding_id, uint16_t opcode) const {
-    if (!has_expand_rule_encoding(encoding_id))
+    if (!has_expand_rule_encoding(encoding_id)) {
       return false;
+    }
     return std::ranges::binary_search(expand_rule_keys_, packed_rule_key(encoding_id, opcode));
   }
 

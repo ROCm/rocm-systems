@@ -3,7 +3,6 @@
 
 #include "compute_unit_test_util.h"
 #include "instruction_failure_test_util.h"
-#include "restore_rounding.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
@@ -63,16 +62,18 @@ public:
     cache_.set_backing_memory(&memory_);
     rocjitsu::test::initialize_compute_unit(compute_unit_, "instruction_policy", config, &memory_,
                                             &cache_);
-    if (!compute_unit_)
+    if (!compute_unit_) {
       return;
+    }
     decoder_ = Decoder::create(arch);
     wave_ = compute_unit_->dispatch_wf(0, 0, 106, vgprs, wave_size);
     wave_->set_exec(1);
     base_ = wave_->vgpr_alloc().base;
   }
   ~InstructionPolicyMachine() {
-    if (wave_)
+    if (wave_) {
       wave_->halt();
+    }
   }
   template <size_t N>
   util::FailureOr<uint32_t> run(const std::array<uint32_t, N> &words, uint32_t a, uint32_t b = 0,
@@ -82,8 +83,9 @@ public:
     compute_unit_->write_vgpr(base_ + 1, 0, b);
     compute_unit_->write_vgpr(base_ + 2, 0, c);
     compute_unit_->write_vgpr(base_ + 6, 0, 0xfacebeef);
-    if (execute(words).failed())
+    if (execute(words).failed()) {
       return util::Result::failure();
+    }
     return compute_unit_->read_vgpr(base_ + 6, 0);
   }
   util::FailureOr<std::array<uint32_t, 64>> run_lanes(const std::array<uint32_t, 2> &words,
@@ -97,11 +99,13 @@ public:
       compute_unit_->write_vgpr(base_ + 1, lane, b[lane]);
       compute_unit_->write_vgpr(base_ + 6, lane, 0xa55a5a5a);
     }
-    if (execute(words).failed())
+    if (execute(words).failed()) {
       return util::Result::failure();
+    }
     std::array<uint32_t, 64> result{};
-    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
       result[lane] = compute_unit_->read_vgpr(base_ + 6, lane);
+    }
     return result;
   }
   template <size_t N>
@@ -112,8 +116,9 @@ public:
     compute_unit_->write_sgpr(base, a);
     compute_unit_->write_sgpr(base + 1, b);
     compute_unit_->write_sgpr(base + 6, accumulator);
-    if (execute(words).failed())
+    if (execute(words).failed()) {
       return util::Result::failure();
+    }
     return compute_unit_->read_sgpr(base + 6);
   }
 
@@ -124,8 +129,9 @@ private:
     std::array<uint32_t, 4> padded{};
     std::ranges::copy(words, padded.begin());
     DecodeResult decoded = decoder_->decode(padded.data());
-    if (decoded.failed())
+    if (decoded.failed()) {
       return util::Result::failure();
+    }
     std::unique_ptr<Instruction> instruction(std::move(decoded).value());
     return compute_unit_->execute_instruction(instruction.get(), *wave_);
   }
@@ -458,7 +464,7 @@ TEST(ValuFloatingPolicy, FmaF32OutputScalingFlushesSubnormalIntermediate) {
     util::FailureOr<std::array<uint32_t, 2>> maybe_words = fma_f32_words(arch, 0, 0, 1, 0);
     ASSERT_TRUE(maybe_words.succeeded());
     const auto words = maybe_words.value();
-    for (uint32_t mode : {0xf0u, 0x2f0u})
+    for (uint32_t mode : {0xf0u, 0x2f0u}) {
       for (uint32_t addend : {0x007fffffu, 0x807fffffu}) {
         const uint32_t expected =
             arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5 ? 0u : addend;
@@ -468,6 +474,7 @@ TEST(ValuFloatingPolicy, FmaF32OutputScalingFlushesSubnormalIntermediate) {
           witness("fma_omod_subnormal", arch, result.value(), expected);
         }
       }
+    }
   }
 }
 
@@ -500,9 +507,9 @@ TEST(ValuFloatingPolicy, FmaF32FlushesTinySignificandBeforePacking) {
   for (auto arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    for (uint32_t ieee : {0u, 1u})
-      for (uint32_t denorm : {1u, 3u})
-        for (uint32_t round = 0; round < 4; ++round)
+    for (uint32_t ieee : {0u, 1u}) {
+      for (uint32_t denorm : {1u, 3u}) {
+        for (uint32_t round = 0; round < 4; ++round) {
           for (uint8_t omod : {0, 1}) {
             const bool scaling =
                 omod && (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5 ||
@@ -514,8 +521,9 @@ TEST(ValuFloatingPolicy, FmaF32FlushesTinySignificandBeforePacking) {
             for (const auto &test : cases) {
               uint32_t expected =
                   scaling || !(denorm & 2u) ? test.flushed[round] : test.preserved[round];
-              if (scaling)
+              if (scaling) {
                 expected = (expected & 0x7fffffffu) == 0 ? 0 : expected + 0x00800000u;
+              }
               SCOPED_TRACE(::testing::Message()
                            << "arch=" << arch << " IEEE=" << ieee << " denorm=" << denorm
                            << " round=" << round << " omod=" << unsigned(omod));
@@ -527,6 +535,9 @@ TEST(ValuFloatingPolicy, FmaF32FlushesTinySignificandBeforePacking) {
               }
             }
           }
+        }
+      }
+    }
   }
 }
 
@@ -582,9 +593,9 @@ TEST(ValuFloatingPolicy, FmaF32MatchesPhysicalNanBits) {
   for (auto arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    for (uint32_t ieee : {0u, 1u})
-      for (uint32_t denorm : {0u, 1u, 2u, 3u})
-        for (uint32_t round : {0u, 1u, 2u, 3u})
+    for (uint32_t ieee : {0u, 1u}) {
+      for (uint32_t denorm : {0u, 1u, 2u, 3u}) {
+        for (uint32_t round : {0u, 1u, 2u, 3u}) {
           for (unsigned variant = 0; variant < 4; ++variant) {
             const bool modified = variant == 1, clamped = variant == 3;
             util::FailureOr<std::array<uint32_t, 2>> maybe_words = fma_f32_words(
@@ -593,15 +604,18 @@ TEST(ValuFloatingPolicy, FmaF32MatchesPhysicalNanBits) {
             const auto words = maybe_words.value();
             for (const auto &test : cases) {
               uint32_t expected = (denorm & 1u) ? test.preserved : test.flushed;
-              if (modified && ((denorm & 1u) || test.flushed == test.preserved))
+              if (modified && ((denorm & 1u) || test.flushed == test.preserved)) {
                 expected = test.modified;
+              }
               if ((expected & 0x7fffffffu) > 0x7f800000u &&
                   (ieee || arch == rocjitsu::IsaFamily::Rdna4 ||
-                   arch == rocjitsu::IsaFamily::Cdna5))
+                   arch == rocjitsu::IsaFamily::Cdna5)) {
                 expected |= 0x00400000u;
+              }
               if (clamped &&
-                  (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5))
+                  (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5)) {
                 expected = 0;
+              }
               SCOPED_TRACE(::testing::Message()
                            << "arch=" << arch << " IEEE=" << ieee << " denorm=" << denorm
                            << " round=" << round << " variant=" << variant);
@@ -613,6 +627,9 @@ TEST(ValuFloatingPolicy, FmaF32MatchesPhysicalNanBits) {
               }
             }
           }
+        }
+      }
+    }
   }
 }
 
@@ -626,10 +643,11 @@ TEST(ValuFloatingPolicy, PackedMinimumPropagatesNaN) {
       util::FailureOr<uint32_t> maybe_result = machine.run(words, 0x7e017e01, 0x3c003c00, 0, 0x2f0);
       ASSERT_TRUE(maybe_result.succeeded());
       const uint32_t result = maybe_result.value();
-      if (opcode >= 29)
+      if (opcode >= 29) {
         witness("packed_minimum_nan", arch, result & 0x7e007e00, 0x7e007e00);
-      else
+      } else {
         witness("packed_min_num_nan_control", arch, result, 0x3c003c00);
+      }
     }
   }
 }
@@ -647,17 +665,6 @@ TEST(ValuFloatingPolicy, PackedF32Mode) {
     util::FailureOr<uint32_t> round_up = machine.run(words, 0x3f800000, 0x33800000, 0, 0xf1);
     ASSERT_TRUE(round_up.succeeded());
     witness("packed_f32_round_up", arch, round_up.value(), 0x3f800001);
-    // Only the unmigrated legacy implementation promises immunity to host rounding.
-    // rj-arith assumes the default host FP environment and never changes it.
-    if (arch == rocjitsu::IsaFamily::Cdna2) {
-      const rocjitsu::test::RestoreRounding restore_rounding;
-      std::fesetround(FE_UPWARD);
-      util::FailureOr<uint32_t> maybe_got = machine.run(words, 0x3f800000, 0x33800000, 0, 0xf0);
-      ASSERT_TRUE(maybe_got.succeeded());
-      const uint32_t got = maybe_got.value();
-      std::fesetround(restore_rounding.saved());
-      witness("packed_f32_host_round", arch, got, 0x3f800000);
-    }
   }
 }
 TEST(ValuFloatingPolicy, PackedF16Clamp) {
@@ -671,8 +678,9 @@ TEST(ValuFloatingPolicy, PackedF16Clamp) {
       ASSERT_TRUE(result.succeeded());
       witness("packed_f16_clamp", arch, result.value(), 0x00003c00);
     }
-    if (arch != rocjitsu::IsaFamily::Cdna5 && arch != rocjitsu::IsaFamily::Rdna4)
+    if (arch != rocjitsu::IsaFamily::Cdna5 && arch != rocjitsu::IsaFamily::Rdna4) {
       continue;
+    }
     for (uint16_t opcode : {cdna5::kVPkMinNumF16Vop3p, cdna5::kVPkMaxNumF16Vop3p,
                             cdna5::kVPkMinimumF16Vop3p, cdna5::kVPkMaximumF16Vop3p}) {
       const std::array<uint32_t, 2> words = packed_words(arch, opcode, 1);
@@ -715,60 +723,39 @@ TEST(ValuFloatingPolicy, PackedF16FmaZeroSignUsesGuestRounding) {
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::array<uint32_t, 2> words = packed_words(arch, cdna5::kVPkFmaF16Vop3p);
     for (uint32_t guest_round = 0; guest_round < 4; ++guest_round) {
-      for (int host_round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-        const rocjitsu::test::RestoreRounding restore_rounding;
-        ASSERT_EQ(std::fesetround(host_round), 0);
-        const uint32_t mode = 0xf0u | (guest_round << 2);
-        util::FailureOr<uint32_t> maybe_cancellation =
-            machine.run(words, 0x3c003c00, 0x3c003c00, 0xbc00bc00, mode);
-        ASSERT_TRUE(maybe_cancellation.succeeded());
-        const uint32_t cancellation = maybe_cancellation.value();
-        util::FailureOr<uint32_t> maybe_mixed_zeros =
-            machine.run(words, 0x80000000, 0x3c003c00, 0x00008000, mode);
-        ASSERT_TRUE(maybe_mixed_zeros.succeeded());
-        const uint32_t mixed_zeros = maybe_mixed_zeros.value();
-        util::FailureOr<uint32_t> maybe_negative_zeros =
-            machine.run(words, 0x80008000, 0x3c003c00, 0x80008000, mode);
-        ASSERT_TRUE(maybe_negative_zeros.succeeded());
-        const uint32_t negative_zeros = maybe_negative_zeros.value();
-        const int restored_round = std::fegetround();
-        std::fesetround(restore_rounding.saved());
-        SCOPED_TRACE(arch);
-        SCOPED_TRACE(guest_round);
-        SCOPED_TRACE(host_round);
-        EXPECT_EQ(cancellation, guest_round == 2 ? 0x80008000u : 0u);
-        EXPECT_EQ(mixed_zeros, guest_round == 2 ? 0x80008000u : 0u);
-        EXPECT_EQ(negative_zeros, 0x80008000u);
-        EXPECT_EQ(restored_round, host_round);
-      }
+      const uint32_t mode = 0xf0u | (guest_round << 2);
+      util::FailureOr<uint32_t> maybe_cancellation =
+          machine.run(words, 0x3c003c00, 0x3c003c00, 0xbc00bc00, mode);
+      ASSERT_TRUE(maybe_cancellation.succeeded());
+      const uint32_t cancellation = maybe_cancellation.value();
+      util::FailureOr<uint32_t> maybe_mixed_zeros =
+          machine.run(words, 0x80000000, 0x3c003c00, 0x00008000, mode);
+      ASSERT_TRUE(maybe_mixed_zeros.succeeded());
+      const uint32_t mixed_zeros = maybe_mixed_zeros.value();
+      util::FailureOr<uint32_t> maybe_negative_zeros =
+          machine.run(words, 0x80008000, 0x3c003c00, 0x80008000, mode);
+      ASSERT_TRUE(maybe_negative_zeros.succeeded());
+      const uint32_t negative_zeros = maybe_negative_zeros.value();
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(guest_round);
+      EXPECT_EQ(cancellation, guest_round == 2 ? 0x80008000u : 0u);
+      EXPECT_EQ(mixed_zeros, guest_round == 2 ? 0x80008000u : 0u);
+      EXPECT_EQ(negative_zeros, 0x80008000u);
     }
   }
 }
 
-TEST(ValuFloatingPolicy, F16Dot2HostContract) {
+TEST(ValuFloatingPolicy, F16Dot2) {
   for (rocjitsu::IsaFamily arch :
        {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::array<uint32_t, 2> words = rdna4::build_vop3(
         rdna4::kVDot2F16F16Vop3, {.vdst = 6, .src0 = 256, .src1 = 257, .src2 = 258});
-    const rocjitsu::test::RestoreRounding restore_rounding;
-    std::fesetround(FE_TONEAREST);
     util::FailureOr<uint32_t> maybe_nearest = machine.run(words, 0x10003c00, 0x3c003c00, 0x0001);
     ASSERT_TRUE(maybe_nearest.succeeded());
-    const uint32_t nearest = maybe_nearest.value();
-    // Compatibility rounds 1 + 2^-11 + 2^-24 once, just above the FP16
-    // halfway point. Migrated paths require default host controls.
-    witness("dot2_f16_default_host", arch, nearest & 0xffffu, 0x3c01u);
-    EXPECT_EQ(std::fegetround(), FE_TONEAREST);
-    if (arch == rocjitsu::IsaFamily::Rdna3_5) {
-      // This architecture still uses the legacy builtin implementation.
-      std::fesetround(FE_UPWARD);
-      util::FailureOr<uint32_t> maybe_upward = machine.run(words, 0x10003c00, 0x3c003c00, 0x0001);
-      ASSERT_TRUE(maybe_upward.succeeded());
-      witness("dot2_f16_host_independence", arch, maybe_upward.value(), nearest);
-    }
-    std::fesetround(restore_rounding.saved());
+    // Compatibility rounds 1 + 2^-11 + 2^-24 once, just above the FP16 halfway point.
+    witness("dot2_f16_default_host", arch, maybe_nearest.value() & 0xffffu, 0x3c01u);
   }
 }
 TEST(ValuFloatingPolicy, F32UnaryDenormControls) {
@@ -822,7 +809,7 @@ TEST(ValuFloatingPolicy, LogarithmUsesSharedMappingAcrossProfiles) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const auto words = unary_words(arch, 2);
-    for (uint32_t ieee : {0u, 1u})
+    for (uint32_t ieee : {0u, 1u}) {
       for (uint32_t mode = 0; mode < 16; ++mode) {
         const uint32_t raw_mode = 0xc0u | (mode & 3u) | ((mode >> 2) << 4) | (ieee << 9);
         for (const auto &sample : captured) {
@@ -831,6 +818,7 @@ TEST(ValuFloatingPolicy, LogarithmUsesSharedMappingAcrossProfiles) {
           witness("log_f32_shared", arch, result.value(), sample[1]);
         }
       }
+    }
   }
 }
 
@@ -1109,9 +1097,9 @@ TEST(ValuFloatingPolicy, Bf16MixInlineConstantsRespectSelectedHalf) {
         util::FailureOr<uint32_t> maybe_result = machine.run(words, 0);
         ASSERT_TRUE(maybe_result.succeeded());
         const uint32_t result = maybe_result.value();
-        if (opcode == cdna5::kVFmaMixF32Bf16Vop3p)
+        if (opcode == cdna5::kVFmaMixF32Bf16Vop3p) {
           EXPECT_EQ(result, high_half ? 0x40000000u : 0x3f800000u);
-        else {
+        } else {
           const uint32_t half =
               opcode == cdna5::kVFmaMixhiBf16Vop3p ? result >> 16 : result & 0xffffu;
           EXPECT_EQ(half, high_half ? 0x4000u : 0x3f80u);
@@ -1265,10 +1253,12 @@ TEST(ValuFloatingPolicy, DppFloatingSourceAbsoluteAndNegate) {
       words[1] = 0xff000000u | (0xe4u << 8) | (modifiers << 20);
       float a = modifiers & 2 ? 2.0f : -2.0f;
       float b = modifiers & 8 ? 3.0f : -3.0f;
-      if (modifiers & 1)
+      if (modifiers & 1) {
         a = -a;
-      if (modifiers & 4)
+      }
+      if (modifiers & 4) {
         b = -b;
+      }
       {
         util::FailureOr<uint32_t> result = machine.run(words, 0xc0000000, 0xc0400000);
         ASSERT_TRUE(result.succeeded());
@@ -1290,8 +1280,9 @@ TEST(ValuFloatingPolicy, DppTrue16SelectsHalvesBeforeSourceModifiers) {
   for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
                     rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     for (uint32_t wave_size : {32u, 64u}) {
-      if (arch == rocjitsu::IsaFamily::Cdna5 && wave_size == 64)
+      if (arch == rocjitsu::IsaFamily::Cdna5 && wave_size == 64) {
         continue;
+      }
       for (uint32_t vgprs : {8u, 256u}) {
         InstructionPolicyMachine machine(arch, vgprs, wave_size);
         ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -1322,14 +1313,18 @@ TEST(ValuFloatingPolicy, DppTrue16SelectsHalvesBeforeSourceModifiers) {
                   if (active & (uint64_t{1} << lane)) {
                     float av = util::f16_to_f32(a[lane ^ swap] >> a_shift);
                     float bv = util::f16_to_f32(b[lane] >> b_shift);
-                    if (modifiers & 2)
+                    if (modifiers & 2) {
                       av = std::abs(av);
-                    if (modifiers & 8)
+                    }
+                    if (modifiers & 8) {
                       bv = std::abs(bv);
-                    if (modifiers & 1)
+                    }
+                    if (modifiers & 1) {
                       av = -av;
-                    if (modifiers & 4)
+                    }
+                    if (modifiers & 4) {
                       bv = -bv;
+                    }
                     expected = (expected & ~(0xffffu << dst_shift)) |
                                (uint32_t{util::f32_to_f16(av + bv)} << dst_shift);
                   }

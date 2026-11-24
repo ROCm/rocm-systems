@@ -85,13 +85,16 @@ bool decodes_mnemonic_within(Decoder &decoder, std::span<const uint8_t> text, ui
         std::min<size_t>(word_buf.size() * sizeof(rj_code_binary_inst_t), text.size() - cur);
     std::memcpy(word_buf.data(), text.data() + cur, avail);
     FailureOr<std::unique_ptr<Instruction>> decoded = decoder.decode(word_buf.data());
-    if (decoded.failed())
+    if (decoded.failed()) {
       return false;
+    }
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
-    if (inst->size() <= 0 || static_cast<size_t>(inst->size()) > avail)
+    if (inst->size() <= 0 || static_cast<size_t>(inst->size()) > avail) {
       return false;
-    if (inst->mnemonic() == mnemonic)
+    }
+    if (inst->mnemonic() == mnemonic) {
       return true;
+    }
     cur += static_cast<uint64_t>(inst->size());
   }
   return false;

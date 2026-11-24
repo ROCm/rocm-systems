@@ -120,7 +120,7 @@ int run_policy(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t 
   }
   int error = run<Half, false, false, Gfx1150>(flags, uint32_t(mode), d, a, b, c);
   if (!error && compatibility) {
-    *status |= rocjitsu::arith::scalar_fma_causes<Half>(flags, a, b, c, *d);
+    *status |= rocjitsu::arith::scalar_fma_causes<Half, Gfx1150>(flags, a, b, c, *d);
   }
   return error;
 }

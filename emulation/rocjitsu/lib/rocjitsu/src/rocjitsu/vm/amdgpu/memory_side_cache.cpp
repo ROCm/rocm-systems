@@ -34,10 +34,12 @@ MemorySideCache::~MemorySideCache() { coherence_->unregister_memory_side_cache(t
 
 util::Result MemorySideCache::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence,
                                                    util::DiagnosticEmitter emit_error) {
-  if (!coherence)
+  if (!coherence) {
     return emit_error.emit() << "memory-side cache requires a coherence domain";
-  if (coherence == coherence_)
+  }
+  if (coherence == coherence_) {
     return util::Result::success();
+  }
   coherence_->unregister_memory_side_cache(this);
   {
     std::unique_lock access_lock(access_gate_);
@@ -57,8 +59,9 @@ void WriterPreferredAccessGate::lock_shared() {
 
 bool WriterPreferredAccessGate::try_lock_shared() {
   std::lock_guard lock(mutex_);
-  if (writer_active_ || waiting_writers_ != 0)
+  if (writer_active_ || waiting_writers_ != 0) {
     return false;
+  }
   ++active_readers_;
   return true;
 }
@@ -71,8 +74,9 @@ void WriterPreferredAccessGate::unlock_shared() {
     --active_readers_;
     notify_writer = active_readers_ == 0 && waiting_writers_ != 0;
   }
-  if (notify_writer)
+  if (notify_writer) {
     cv_.notify_all();
+  }
 }
 
 void WriterPreferredAccessGate::lock() {
@@ -85,8 +89,9 @@ void WriterPreferredAccessGate::lock() {
 
 bool WriterPreferredAccessGate::try_lock() {
   std::lock_guard lock(mutex_);
-  if (writer_active_ || active_readers_ != 0 || waiting_writers_ != 0)
+  if (writer_active_ || active_readers_ != 0 || waiting_writers_ != 0) {
     return false;
+  }
   writer_active_ = true;
   return true;
 }
@@ -134,11 +139,13 @@ VmAccessOutcome MemorySideCache::send_backing(uint64_t addr, uint8_t *data, uint
                                               simdojo::MessageOp op, uint32_t vmid) {
   GpuVm *const vm = cache_vm();
   if (op == simdojo::MessageOp::WRITE && vm != nullptr &&
-      vm->controlled_cache_backing_overlaps(vmid, addr, size))
+      vm->controlled_cache_backing_overlaps(vmid, addr, size)) {
     return VmAccessOutcome::Unavailable;
+  }
   assert(req_ != nullptr && "MemorySideCache: req_ not set");
-  if (req_->link() == nullptr || req_->link()->exec_mode() != simdojo::ExecMode::FUNCTIONAL)
+  if (req_->link() == nullptr || req_->link()->exec_mode() != simdojo::ExecMode::FUNCTIONAL) {
     return VmAccessOutcome::Malformed;
+  }
   auto message = std::make_unique<simdojo::Message>();
   simdojo::MessageHeader &header = message->header();
   simdojo::MessageStatus completion_status = simdojo::MessageStatus::Complete;
@@ -156,8 +163,9 @@ VmAccessOutcome MemorySideCache::send_atomic_backing(uint64_t addr, uint32_t siz
                                                      const simdojo::MemoryAtomicMutation &mutation,
                                                      uint32_t vmid) {
   assert(req_ != nullptr && "MemorySideCache: req_ not set");
-  if (req_->link() == nullptr || req_->link()->exec_mode() != simdojo::ExecMode::FUNCTIONAL)
+  if (req_->link() == nullptr || req_->link()->exec_mode() != simdojo::ExecMode::FUNCTIONAL) {
     return VmAccessOutcome::Malformed;
+  }
   auto message = std::make_unique<simdojo::Message>();
   simdojo::MessageHeader &header = message->header();
   simdojo::MessageStatus completion_status = simdojo::MessageStatus::Complete;
@@ -175,8 +183,9 @@ VmAccessOutcome MemorySideCache::send_atomic_backing(uint64_t addr, uint32_t siz
 VmAccessAdmission MemorySideCache::admit_access(uint64_t addr, uint32_t size, uint32_t vmid,
                                                 VmAccessKind access, bool report_fault) const {
   GpuVm *vm = cache_vm();
-  if (vmid == 0 || vm == nullptr)
+  if (vmid == 0 || vm == nullptr) {
     return {};
+  }
   const std::optional<GpuVmAccess> vm_access = vm->snapshot_vmid(vmid);
   return vm_access ? vm_access->admit_access(addr, size, access, report_fault)
                    : VmAccessAdmission{.outcome = VmAccessOutcome::Faulted};
@@ -187,20 +196,24 @@ bool MemorySideCache::try_read_peer_cached(uint64_t addr, std::span<uint8_t> dst
   const uint32_t offset = CacheStore::line_offset(addr);
   if (dst.empty() || dst.size() > LINE_SIZE - offset ||
       (vmid == 0 ? (admission_generation != 0 || cache_identity != 0)
-                 : (admission_generation == 0 || cache_identity == 0)))
+                 : (admission_generation == 0 || cache_identity == 0))) {
     return false;
+  }
 
   std::shared_lock access_lock(access_gate_, std::try_to_lock);
-  if (!access_lock.owns_lock())
+  if (!access_lock.owns_lock()) {
     return false;
+  }
   std::unique_lock stripe_lock(stripes_[stripe_index(addr)], std::try_to_lock);
-  if (!stripe_lock.owns_lock())
+  if (!stripe_lock.owns_lock()) {
     return false;
+  }
   const simdojo::CacheTag *tag = cache_.peek(addr, vmid);
   if (tag == nullptr || tag->admission_generation != admission_generation ||
       tag->cache_identity != cache_identity ||
-      !CacheStore::bytes_valid(*tag, offset, static_cast<uint32_t>(dst.size())))
+      !CacheStore::bytes_valid(*tag, offset, static_cast<uint32_t>(dst.size()))) {
     return false;
+  }
   cache_.read_line(addr, dst.data(), offset, static_cast<uint32_t>(dst.size()), vmid);
   return true;
 }
@@ -211,18 +224,22 @@ bool MemorySideCache::try_fill_peer_cached(uint64_t addr, std::span<const uint8_
   const uint32_t offset = CacheStore::line_offset(addr);
   if (src.empty() || src.size() > LINE_SIZE - offset ||
       (vmid == 0 ? (admission_generation != 0 || cache_identity != 0)
-                 : (admission_generation == 0 || cache_identity == 0)))
+                 : (admission_generation == 0 || cache_identity == 0))) {
     return false;
+  }
 
   std::shared_lock access_lock(access_gate_, std::try_to_lock);
-  if (!access_lock.owns_lock())
+  if (!access_lock.owns_lock()) {
     return false;
+  }
   std::unique_lock stripe_lock(stripes_[stripe_index(addr)], std::try_to_lock);
-  if (!stripe_lock.owns_lock())
+  if (!stripe_lock.owns_lock()) {
     return false;
+  }
   const simdojo::CacheTag *resident = cache_.peek(addr, vmid);
-  if (resident != nullptr && resident->dirty)
+  if (resident != nullptr && resident->dirty) {
     return false;
+  }
   if (resident != nullptr && (resident->admission_generation != admission_generation ||
                               resident->cache_identity != cache_identity)) {
     cache_.invalidate(addr, vmid);
@@ -230,8 +247,9 @@ bool MemorySideCache::try_fill_peer_cached(uint64_t addr, std::span<const uint8_
   }
   if (resident == nullptr) {
     const CacheStore::Allocation allocated = cache_.allocate_clean_victim_with_data(addr, vmid);
-    if (allocated.tag == nullptr)
+    if (allocated.tag == nullptr) {
       return false;
+    }
     allocated.tag->admission_generation = admission_generation;
     allocated.tag->cache_identity = cache_identity;
     allocated.tag->coherence = simdojo::CoherenceState::EXCLUSIVE;
@@ -244,28 +262,34 @@ bool MemorySideCache::try_fill_peer_cached(uint64_t addr, std::span<const uint8_
 bool MemorySideCache::guarded_dirty_allocation_victim(uint64_t replacement_addr) const {
   const simdojo::CacheTag *victim = cache_.full_set_victim(replacement_addr);
   GpuVm *const vm = cache_vm();
-  if (victim == nullptr || !victim->dirty || vm == nullptr)
+  if (victim == nullptr || !victim->dirty || vm == nullptr) {
     return false;
+  }
   static constexpr uint32_t SET_INDEX_BITS = std::bit_width(NUM_SETS - 1);
   const uint64_t victim_addr =
       (victim->tag << (LINE_SIZE_BITS + SET_INDEX_BITS)) |
       (static_cast<uint64_t>(CacheStore::set_index(replacement_addr)) << LINE_SIZE_BITS);
   const std::optional<GpuVmAccess> access = vm->snapshot_vmid(victim->vmid);
-  if (!access || victim->cache_identity == 0 || victim->cache_identity != access->cache_identity())
+  if (!access || victim->cache_identity == 0 ||
+      victim->cache_identity != access->cache_identity()) {
     return false;
+  }
   const VmAccessAdmission admission = access->query_cache_write_grant(victim_addr, LINE_SIZE);
-  if (!admission || !admission.cacheable || admission.generation != victim->admission_generation)
+  if (!admission || !admission.cacheable || admission.generation != victim->admission_generation) {
     return false;
+  }
   return vm->controlled_cache_backing_overlaps(victim->vmid, victim_addr, LINE_SIZE);
 }
 
 VmAccessOutcome MemorySideCache::ensure_line(uint64_t addr, uint32_t vmid,
                                              uint64_t admission_generation,
                                              const GpuVmAccess *access, bool fetch_on_miss) {
-  if (vmid != 0 && access == nullptr)
+  if (vmid != 0 && access == nullptr) {
     return VmAccessOutcome::Unavailable;
-  if (access != nullptr && !access->is_current())
+  }
+  if (access != nullptr && !access->is_current()) {
     return VmAccessOutcome::Revoked;
+  }
   const uint64_t cache_identity = access != nullptr ? access->cache_identity() : 0;
   const uint64_t current_epoch = coherence_->current_epoch();
   simdojo::CacheTag *resident = nullptr;
@@ -273,8 +297,9 @@ VmAccessOutcome MemorySideCache::ensure_line(uint64_t addr, uint32_t vmid,
     if (resident->coherence_epoch == current_epoch &&
         resident->admission_generation == admission_generation &&
         resident->cache_identity == cache_identity &&
-        (!fetch_on_miss || CacheStore::bytes_valid(*resident, 0, LINE_SIZE)))
+        (!fetch_on_miss || CacheStore::bytes_valid(*resident, 0, LINE_SIZE))) {
       return VmAccessOutcome::Complete;
+    }
     if (resident->coherence_epoch != current_epoch ||
         resident->admission_generation != admission_generation ||
         resident->cache_identity != cache_identity) {
@@ -286,8 +311,9 @@ VmAccessOutcome MemorySideCache::ensure_line(uint64_t addr, uint32_t vmid,
       uint8_t line_buf[LINE_SIZE];
       const VmAccessOutcome outcome = send_backing(CacheStore::line_address(addr), line_buf,
                                                    LINE_SIZE, simdojo::MessageOp::READ, vmid);
-      if (outcome != VmAccessOutcome::Complete)
+      if (outcome != VmAccessOutcome::Complete) {
         return outcome;
+      }
       if (access && !access->is_current()) {
         cache_.invalidate(addr, vmid);
         return VmAccessOutcome::Revoked;
@@ -297,8 +323,9 @@ VmAccessOutcome MemorySideCache::ensure_line(uint64_t addr, uint32_t vmid,
     }
   }
 
-  if (guarded_dirty_allocation_victim(addr))
+  if (guarded_dirty_allocation_victim(addr)) {
     return VmAccessOutcome::Unavailable;
+  }
   uint64_t line_addr = CacheStore::line_address(addr);
   simdojo::CacheTag evicted;
   uint8_t evicted_data[LINE_SIZE];
@@ -351,10 +378,12 @@ VmAccessOutcome MemorySideCache::cache_partial_bytes(uint64_t addr, const uint8_
                                                      uint32_t size, uint32_t vmid,
                                                      uint64_t admission_generation,
                                                      const GpuVmAccess *access) {
-  if (vmid != 0 && access == nullptr)
+  if (vmid != 0 && access == nullptr) {
     return VmAccessOutcome::Unavailable;
-  if (access != nullptr && !access->is_current())
+  }
+  if (access != nullptr && !access->is_current()) {
     return VmAccessOutcome::Revoked;
+  }
   const uint64_t cache_identity = access != nullptr ? access->cache_identity() : 0;
   const uint64_t current_epoch = coherence_->current_epoch();
   simdojo::CacheTag *tag = nullptr;
@@ -367,8 +396,9 @@ VmAccessOutcome MemorySideCache::cache_partial_bytes(uint64_t addr, const uint8_
     tag = nullptr;
   }
   if (tag == nullptr) {
-    if (guarded_dirty_allocation_victim(addr))
+    if (guarded_dirty_allocation_victim(addr)) {
       return VmAccessOutcome::Unavailable;
+    }
     simdojo::CacheTag evicted;
     uint8_t evicted_data[LINE_SIZE];
     CacheStore::Allocation allocated =
@@ -407,11 +437,13 @@ VmAccessOutcome MemorySideCache::cache_partial_bytes(uint64_t addr, const uint8_
 }
 
 VmAccessOutcome MemorySideCache::read(uint64_t addr, uint8_t *dst, uint32_t size, uint32_t vmid) {
-  if (size == 0)
+  if (size == 0) {
     return VmAccessOutcome::Complete;
+  }
   const VmAccessAdmission admission = admit_access(addr, size, vmid, VmAccessKind::Read);
-  if (!admission)
+  if (!admission) {
     return admission.outcome;
+  }
   std::shared_lock access_lock(access_gate_);
   GpuVm *const vm = cache_vm();
   uint32_t copied = 0;
@@ -421,12 +453,14 @@ VmAccessOutcome MemorySideCache::read(uint64_t addr, uint8_t *dst, uint32_t size
     const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
     const std::optional<GpuVmAccess> access =
         vmid != 0 && vm != nullptr ? vm->snapshot_vmid(vmid) : std::nullopt;
-    if (vmid != 0 && vm != nullptr && !access)
+    if (vmid != 0 && vm != nullptr && !access) {
       return VmAccessOutcome::Faulted;
+    }
     const VmAccessAdmission chunk_admission =
         access ? access->admit_access(ea, chunk, VmAccessKind::Read) : VmAccessAdmission{};
-    if (!chunk_admission)
+    if (!chunk_admission) {
       return chunk_admission.outcome;
+    }
     const VmAccessAdmission line_admission =
         access ? access->admit_access(CacheStore::line_address(ea), LINE_SIZE, VmAccessKind::Read,
                                       /*report_fault=*/false)
@@ -440,14 +474,16 @@ VmAccessOutcome MemorySideCache::read(uint64_t addr, uint8_t *dst, uint32_t size
     if (!cache_line) {
       simdojo::CacheTag *tag = nullptr;
       if (cache_.lookup(ea, &tag, vmid)) {
-        if (tag->dirty)
+        if (tag->dirty) {
           return VmAccessOutcome::Faulted;
+        }
         cache_.invalidate(ea, vmid);
       }
       const VmAccessOutcome outcome =
           send_backing(ea, dst + copied, chunk, simdojo::MessageOp::READ, vmid);
-      if (outcome != VmAccessOutcome::Complete)
+      if (outcome != VmAccessOutcome::Complete) {
         return outcome;
+      }
       copied += chunk;
       continue;
     }
@@ -465,19 +501,22 @@ VmAccessOutcome MemorySideCache::read(uint64_t addr, uint8_t *dst, uint32_t size
                                        VmAccessKind::Read) != VmAccessOutcome::Complete) {
       const VmAccessOutcome outcome =
           send_backing(ea, dst + copied, chunk, simdojo::MessageOp::READ, vmid);
-      if (outcome != VmAccessOutcome::Complete)
+      if (outcome != VmAccessOutcome::Complete) {
         return outcome;
+      }
       const VmAccessOutcome cache_outcome = cache_partial_bytes(
           ea, dst + copied, chunk, vmid, chunk_admission.generation, access ? &*access : nullptr);
-      if (cache_outcome != VmAccessOutcome::Complete)
+      if (cache_outcome != VmAccessOutcome::Complete) {
         return cache_outcome;
+      }
       copied += chunk;
       continue;
     }
     const VmAccessOutcome outcome =
         ensure_line(ea, vmid, chunk_admission.generation, access ? &*access : nullptr);
-    if (outcome != VmAccessOutcome::Complete)
+    if (outcome != VmAccessOutcome::Complete) {
       return outcome;
+    }
     cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
     copied += chunk;
   }
@@ -486,14 +525,17 @@ VmAccessOutcome MemorySideCache::read(uint64_t addr, uint8_t *dst, uint32_t size
 
 VmAccessOutcome MemorySideCache::write(uint64_t addr, const uint8_t *src, uint32_t size,
                                        uint32_t vmid) {
-  if (size == 0)
+  if (size == 0) {
     return VmAccessOutcome::Complete;
+  }
   const VmAccessAdmission admission = admit_access(addr, size, vmid, VmAccessKind::Write);
-  if (!admission)
+  if (!admission) {
     return admission.outcome;
+  }
   GpuVm *const vm = cache_vm();
-  if (vm != nullptr && vm->controlled_cache_backing_overlaps(vmid, addr, size))
+  if (vm != nullptr && vm->controlled_cache_backing_overlaps(vmid, addr, size)) {
     return VmAccessOutcome::Unavailable;
+  }
   std::shared_lock access_lock(access_gate_);
   uint32_t copied = 0;
   while (copied < size) {
@@ -502,12 +544,14 @@ VmAccessOutcome MemorySideCache::write(uint64_t addr, const uint8_t *src, uint32
     const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
     const std::optional<GpuVmAccess> access =
         vmid != 0 && vm != nullptr ? vm->snapshot_vmid(vmid) : std::nullopt;
-    if (vmid != 0 && vm != nullptr && !access)
+    if (vmid != 0 && vm != nullptr && !access) {
       return VmAccessOutcome::Faulted;
+    }
     const VmAccessAdmission chunk_admission =
         access ? access->admit_access(ea, chunk, VmAccessKind::Write) : VmAccessAdmission{};
-    if (!chunk_admission)
+    if (!chunk_admission) {
       return chunk_admission.outcome;
+    }
     const VmAccessAdmission line_admission =
         access ? access->admit_access(CacheStore::line_address(ea), LINE_SIZE, VmAccessKind::Write,
                                       /*report_fault=*/false)
@@ -520,27 +564,31 @@ VmAccessOutcome MemorySideCache::write(uint64_t addr, const uint8_t *src, uint32
     if (!cache_line) {
       simdojo::CacheTag *tag = nullptr;
       if (cache_.lookup(ea, &tag, vmid)) {
-        if (tag->dirty)
+        if (tag->dirty) {
           return VmAccessOutcome::Faulted;
+        }
         cache_.invalidate(ea, vmid);
       }
       const VmAccessOutcome outcome = send_backing(ea, const_cast<uint8_t *>(src + copied), chunk,
                                                    simdojo::MessageOp::WRITE, vmid);
-      if (outcome != VmAccessOutcome::Complete)
+      if (outcome != VmAccessOutcome::Complete) {
         return outcome;
+      }
       copied += chunk;
       continue;
     }
     const VmAccessOutcome fill_outcome =
         ensure_line(ea, vmid, chunk_admission.generation, access ? &*access : nullptr,
                     /*fetch_on_miss=*/false);
-    if (fill_outcome != VmAccessOutcome::Complete)
+    if (fill_outcome != VmAccessOutcome::Complete) {
       return fill_outcome;
+    }
 
     const VmAccessOutcome write_outcome = send_backing(ea, const_cast<uint8_t *>(src + copied),
                                                        chunk, simdojo::MessageOp::WRITE, vmid);
-    if (write_outcome != VmAccessOutcome::Complete)
+    if (write_outcome != VmAccessOutcome::Complete) {
       return write_outcome;
+    }
     if (access && !access->is_current()) {
       cache_.invalidate(ea, vmid);
       return VmAccessOutcome::Revoked;
@@ -561,11 +609,13 @@ VmAccessOutcome MemorySideCache::write(uint64_t addr, const uint8_t *src, uint32
 VmAccessOutcome MemorySideCache::atomic_modify(uint64_t addr, uint32_t size,
                                                const simdojo::MemoryAtomicMutation &mutation,
                                                uint32_t vmid) {
-  if (size == 0 || CacheStore::line_offset(addr) + size > LINE_SIZE)
+  if (size == 0 || CacheStore::line_offset(addr) + size > LINE_SIZE) {
     return VmAccessOutcome::Malformed;
+  }
   const VmAccessAdmission admission = admit_access(addr, size, vmid, VmAccessKind::Atomic);
-  if (!admission)
+  if (!admission) {
     return admission.outcome;
+  }
   std::unique_lock access_lock(access_gate_);
   return send_atomic_backing(addr, size, mutation, vmid);
 }
@@ -576,8 +626,9 @@ VmAccessOutcome MemorySideCache::flush_all() {
   // flush waits, the gate blocks new shared entrants so the flush makes progress.
   std::unique_lock access_lock(access_gate_);
   const VmAccessOutcome outcome = flush_dirty_locked();
-  if (outcome != VmAccessOutcome::Complete)
+  if (outcome != VmAccessOutcome::Complete) {
     return outcome;
+  }
   cache_.invalidate_all();
   may_have_dirty_lines_.store(false, std::memory_order_relaxed);
   return VmAccessOutcome::Complete;
@@ -600,23 +651,28 @@ VmAccessOutcome MemorySideCache::publish_dirty_line(uint64_t line_addr,
   }
 
   GpuVm *vm = legacy_maintenance ? legacy_maintenance_vm_ : cache_vm();
-  if (vm == nullptr)
+  if (vm == nullptr) {
     return VmAccessOutcome::Unavailable;
+  }
   const std::optional<GpuVmAccess> access = vm->snapshot_vmid(tag.vmid);
   // Numeric VMIDs can be reused with the same translator admission generation.
   // A dirty line may only publish through the exact backing generation that
   // filled it; an old line belongs to a retired address space and is dropped.
-  if (!access || tag.cache_identity == 0 || tag.cache_identity != access->cache_identity())
+  if (!access || tag.cache_identity == 0 || tag.cache_identity != access->cache_identity()) {
     return VmAccessOutcome::Complete;
+  }
 
   const VmAccessAdmission admission = access->query_cache_write_grant(line_addr, LINE_SIZE);
-  if (admission.outcome == VmAccessOutcome::Unavailable)
+  if (admission.outcome == VmAccessOutcome::Unavailable) {
     return admission.outcome;
-  if (!admission || !admission.cacheable || admission.generation != tag.admission_generation)
+  }
+  if (!admission || !admission.cacheable || admission.generation != tag.admission_generation) {
     return VmAccessOutcome::Complete;
+  }
 
-  if (vm->controlled_cache_backing_overlaps(tag.vmid, line_addr, LINE_SIZE))
+  if (vm->controlled_cache_backing_overlaps(tag.vmid, line_addr, LINE_SIZE)) {
     return VmAccessOutcome::Unavailable;
+  }
 
   // The same snapshot checks admission and performs the effect. Its access
   // state holds the revocation lock through write, so a concurrent rebind
@@ -642,25 +698,29 @@ void MemorySideCache::visit_resident_lines_in_range(uint64_t addr, uint32_t size
     for (uint64_t i = 0; i < line_count; ++i) {
       const uint64_t line_addr = line_start + i * LINE_SIZE;
       simdojo::CacheTag *tag = nullptr;
-      if (!cache_.lookup(line_addr, &tag, vmid))
+      if (!cache_.lookup(line_addr, &tag, vmid)) {
         continue;
+      }
       const uint8_t *data = cache_.line_data_for_read(line_addr, vmid);
-      if (!visitor(line_addr, *tag, data))
+      if (!visitor(line_addr, *tag, data)) {
         return;
+      }
     }
     return;
   }
 
   bool visit_more = true;
   cache_.for_each_valid_line([&](simdojo::CacheTag &tag, uint64_t line_addr, uint8_t *data) {
-    if (visit_more && tag.vmid == vmid && line_addr >= line_start && line_addr <= line_end)
+    if (visit_more && tag.vmid == vmid && line_addr >= line_start && line_addr <= line_end) {
       visit_more = visitor(line_addr, tag, data);
+    }
   });
 }
 
 VmAccessOutcome MemorySideCache::flush_range(uint64_t addr, uint32_t size, uint32_t vmid) {
-  if (size == 0)
+  if (size == 0) {
     return VmAccessOutcome::Complete;
+  }
 
   // Range maintenance runs before an external writer changes backing bytes.
   // The whole dirty line is still authoritative at this point, including the
@@ -673,8 +733,9 @@ VmAccessOutcome MemorySideCache::flush_range(uint64_t addr, uint32_t size, uint3
       [this, vmid, &outcome](uint64_t line_addr, simdojo::CacheTag &tag, const uint8_t *data) {
         if (tag.dirty) {
           outcome = publish_dirty_line(line_addr, tag, const_cast<uint8_t *>(data));
-          if (outcome != VmAccessOutcome::Complete)
+          if (outcome != VmAccessOutcome::Complete) {
             return false;
+          }
         }
         cache_.invalidate(line_addr, vmid);
         return true;
@@ -684,10 +745,12 @@ VmAccessOutcome MemorySideCache::flush_range(uint64_t addr, uint32_t size, uint3
 
 VmAccessOutcome MemorySideCache::flush_range(uint64_t addr, uint32_t size, uint32_t vmid,
                                              const PreparedCanonicalWriteback &prepared) {
-  if (size == 0)
+  if (size == 0) {
     return VmAccessOutcome::Complete;
-  if (prepared.outcome() != VmAccessOutcome::Complete)
+  }
+  if (prepared.outcome() != VmAccessOutcome::Complete) {
     return prepared.outcome();
+  }
 
   std::unique_lock access_lock(access_gate_);
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
@@ -710,8 +773,9 @@ VmAccessOutcome MemorySideCache::flush_range(uint64_t addr, uint32_t size, uint3
           const std::span<const uint8_t> line(data, LINE_SIZE);
           outcome = prepared.write(line_addr, std::as_bytes(line), tag.vmid, tag.cache_identity,
                                    tag.admission_generation);
-          if (outcome != VmAccessOutcome::Complete)
+          if (outcome != VmAccessOutcome::Complete) {
             return false;
+          }
           // Gate entry has ended before the cache metadata is changed.
           tag.dirty = false;
         }
@@ -723,8 +787,9 @@ VmAccessOutcome MemorySideCache::flush_range(uint64_t addr, uint32_t size, uint3
 
 void MemorySideCache::invalidate_range_after_external_write(uint64_t addr, uint32_t size,
                                                             uint32_t vmid) {
-  if (size == 0)
+  if (size == 0) {
     return;
+  }
 
   std::unique_lock access_lock(access_gate_);
   visit_resident_lines_in_range(
@@ -743,22 +808,26 @@ VmAccessOutcome MemorySideCache::flush_dirty_locked() {
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
   cache_.for_each_dirty(
       [this, &outcome](simdojo::CacheTag &tag, uint64_t line_addr, uint8_t *data) {
-        if (outcome != VmAccessOutcome::Complete)
+        if (outcome != VmAccessOutcome::Complete) {
           return;
+        }
         outcome = publish_dirty_line(line_addr, tag, data);
-        if (outcome == VmAccessOutcome::Complete)
+        if (outcome == VmAccessOutcome::Complete) {
           tag.dirty = false;
+        }
       });
-  if (outcome == VmAccessOutcome::Complete)
+  if (outcome == VmAccessOutcome::Complete) {
     may_have_dirty_lines_.store(false, std::memory_order_relaxed);
+  }
   return outcome;
 }
 
 void MemorySideCache::invalidate_clean_locked() { cache_.invalidate_clean(); }
 
 VmAccessOutcome MemorySideCache::flush_dirty_to_legacy_backing_locked() {
-  if (legacy_maintenance_memory_ == nullptr || legacy_maintenance_vm_ == nullptr)
+  if (legacy_maintenance_memory_ == nullptr || legacy_maintenance_vm_ == nullptr) {
     throw util::ConfigError("memory-side cache has no legacy maintenance backing");
+  }
   if (!may_have_dirty_lines_.load(std::memory_order_relaxed)) {
     ++skipped_clean_scans_;
     return VmAccessOutcome::Complete;
@@ -767,16 +836,19 @@ VmAccessOutcome MemorySideCache::flush_dirty_to_legacy_backing_locked() {
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
   cache_.for_each_dirty(
       [this, &outcome](simdojo::CacheTag &tag, uint64_t line_addr, uint8_t *data) {
-        if (outcome != VmAccessOutcome::Complete)
+        if (outcome != VmAccessOutcome::Complete) {
           return;
+        }
         outcome = publish_dirty_line(line_addr, tag, data, /*legacy_maintenance=*/true);
         // The MSC tracks dirtiness per line rather than per byte. Retaining the
         // whole line makes a later retry idempotently republish authoritative bytes.
-        if (outcome == VmAccessOutcome::Complete)
+        if (outcome == VmAccessOutcome::Complete) {
           tag.dirty = false;
+        }
       });
-  if (outcome == VmAccessOutcome::Complete)
+  if (outcome == VmAccessOutcome::Complete) {
     may_have_dirty_lines_.store(false, std::memory_order_relaxed);
+  }
   return outcome;
 }
 
