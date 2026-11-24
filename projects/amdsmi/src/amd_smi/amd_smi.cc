@@ -530,7 +530,7 @@ amdsmi_status_t amdsmi_get_processor_handles(amdsmi_socket_handle socket_handle,
       amd::smi::AMDSmiSystem::getInstance().handle_to_socket(socket_handle, &socket);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
-  std::vector<amd::smi::AMDSmiProcessor*>& processors = socket->get_processors();
+  const auto& processors = socket->get_processors();
   uint32_t processor_size = static_cast<uint32_t>(processors.size());
   // Get the processor count only
   if (processor_handles == nullptr) {
@@ -564,8 +564,7 @@ amdsmi_status_t amdsmi_get_nic_processor_handles(amdsmi_socket_handle socket_han
       amd::smi::AMDSmiSystem::getInstance().handle_to_socket(socket_handle, &socket);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
-  std::vector<amd::smi::AMDSmiProcessor*>& processors =
-      socket->get_processors(AMDSMI_PROCESSOR_TYPE_AMD_NIC);
+  const auto& processors = socket->get_processors(AMDSMI_PROCESSOR_TYPE_AMD_NIC);
   uint32_t processor_size = static_cast<uint32_t>(processors.size());
   // Get the processor count only
   if (processor_handles == nullptr) {
@@ -761,8 +760,11 @@ amdsmi_status_t amdsmi_get_processor_handles_by_type(amdsmi_socket_handle socket
   amdsmi_status_t r =
       amd::smi::AMDSmiSystem::getInstance().handle_to_socket(socket_handle, &socket);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
-  std::vector<amd::smi::AMDSmiProcessor*>& processors = socket->get_processors(processor_type);
-  uint32_t processor_size = static_cast<uint32_t>(processors.size());
+  uint32_t ignored_count = 0;
+  r = socket->get_processor_count(processor_type, &ignored_count);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  const auto& processors = socket->get_processors(processor_type);
+  const auto processor_size = static_cast<uint32_t>(processors.size());
   // Get the processor count only
   if (processor_handles == nullptr) {
     *processor_count = processor_size;

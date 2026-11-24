@@ -37,8 +37,8 @@ class AMDSmiSocket {
         break;
     }
   }
-  std::vector<AMDSmiProcessor*>& get_processors() { return processors_; }
-  std::vector<AMDSmiProcessor*>& get_processors(amdsmi_processor_type_t type) {
+  const std::vector<AMDSmiProcessor*>& get_processors() const { return processors_; }
+  const std::vector<AMDSmiProcessor*>& get_processors(amdsmi_processor_type_t type) const {
     switch (type) {
       case AMDSMI_PROCESSOR_TYPE_AMD_GPU:
         return processors_;
@@ -48,11 +48,8 @@ class AMDSmiSocket {
         return cpu_core_processors_;
       case AMDSMI_PROCESSOR_TYPE_AMD_NIC:
         return ainic_processors_;
-      case AMDSMI_PROCESSOR_TYPE_BRCM_NIC:
-      case AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH:
-        return deprecated_type_processors_;
       default:
-        return processors_;
+        return unenumerated_type_processors_;
     }
   }
   amdsmi_status_t get_processor_count(uint32_t* processor_count) const;
@@ -60,14 +57,14 @@ class AMDSmiSocket {
                                       uint32_t* processor_count) const;
 
  private:
-  uint32_t sindex_;
+  uint32_t sindex_{UINT32_MAX};
   std::string socket_identifier_;
   std::vector<AMDSmiProcessor*> processors_;
   std::vector<AMDSmiProcessor*> cpu_processors_;
   std::vector<AMDSmiProcessor*> cpu_core_processors_;
   std::vector<AMDSmiProcessor*> ainic_processors_;
-  // Always empty: the deprecated Broadcom types must not fall through to the GPU list.
-  std::vector<AMDSmiProcessor*> deprecated_type_processors_;
+  // Always empty: a type the socket does not enumerate must not fall through to the GPU list.
+  std::vector<AMDSmiProcessor*> unenumerated_type_processors_;
 };
 
 }  // namespace amd::smi

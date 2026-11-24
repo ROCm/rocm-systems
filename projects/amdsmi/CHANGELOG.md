@@ -166,6 +166,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed `amdsmi_get_processor_handles_by_type()` returning GPUs for unrelated processor types**.  
+  - `AMD_APU`, `NON_AMD_GPU`, and `NON_AMD_CPU` now return an empty list, and `UNKNOWN` returns `AMDSMI_STATUS_INVAL` instead of acting as a wildcard. To find APUs, request `AMD_GPU` and call `amdsmi_is_gpu_apu()` ([#8476](https://github.com/ROCm/rocm-systems/issues/8476)).
+
 - **Fixed `amd-smi reset --gpureset` resetting only the first GPU on UALink systems**.  
   - Each UALink GPU is now reset individually; GPUs in an XGMI hive are still reset once per hive.
 
