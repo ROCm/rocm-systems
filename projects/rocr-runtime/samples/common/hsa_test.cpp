@@ -158,9 +158,8 @@ HsaTest::Kernel::~Kernel() { Cleanup(); }
 
 uint64_t HsaTest::Kernel::GetCodeHandle(const char* kernel_name) {
   kernel_symbol_ = {0};
-  if (HSA_STATUS_SUCCESS != hsa_executable_get_symbol(executable_, NULL,
-                                                      kernel_name, agent_, 0,
-                                                      &kernel_symbol_)) {
+  if (HSA_STATUS_SUCCESS != hsa_executable_get_symbol_by_name(executable_, kernel_name,
+                                                              &agent_, &kernel_symbol_)) {
     return 0;
   }
 

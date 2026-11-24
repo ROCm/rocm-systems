@@ -120,7 +120,7 @@ bool HSA_UTIL::HsaInit()
 	check("Error in freezing executable object", err);
 
 	// Get symbol handle.
-	err = hsa_executable_get_symbol(hsaExecutable, NULL,  hsa_kernel_name, device, 0, &kernelSymbol);
+	err = hsa_executable_get_symbol_by_name(hsaExecutable, hsa_kernel_name, &device, &kernelSymbol);
 	check("get symbol handle", err);
 
 	// Get code handle.
