@@ -47,9 +47,6 @@ or applying any change; don't value the simplest fix the highest.
 ### Orchestration
 
 **Always-on subagents:** `amdsmi-review-build` and `amdsmi-review-style` run in every review mode (comprehensive, focused, fast) in addition to the requested subagents.
-When handed off by the Planning agent, in fast and focused modes, run
-`amdsmi-review-build` as if `no-build` was given (the code was just built). Only
-a full comprehensive review or a build review builds and installs.
 
 **Skip rules:**
 

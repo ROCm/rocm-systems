@@ -89,10 +89,11 @@ if any suite failed.
 
 ## Root-Only Tests
 
-Never run tests with `sudo` or as root. Under **Run as root (user)**, list the
-root-only tests that cover the change (C++ `*ReadWrite*` cases, Python tests that
-call `amdsmi_set_*`/`amdsmi_reset_*`) with the exact `sudo` command for each (only
-tests that need root, e.g. `sudo ./amdsmitst --gtest_filter='*FanReadWrite*'`).
+Set/reset tests (C++ `*ReadWrite*` cases, Python tests that call
+`amdsmi_set_*`/`amdsmi_reset_*`) need root and change GPU state. Ask the user
+before running them with `sudo`, and run only the tests that need root (e.g.
+`sudo ./amdsmitst --gtest_filter='*FanReadWrite*'`). If the user declines, list
+them under **Run as root (user)** with the exact `sudo` command for each.
 
 ## Output
 

@@ -36,8 +36,6 @@ Parse output: any `[  FAILED  ]` → ❌ BLOCKING.
 
 **Python:** See `amdsmi-python-style-guide` skill for Python testing rules. Tests must work with both system-installed and pip-installed amdsmi. CLI tests in `amdsmi_cli/`.
 
-**Root-only tests:** Never run tests with `sudo` or as root. Report the root-only tests that cover the change (C++ `*ReadWrite*` cases, Python tests that call `amdsmi_set_*`/`amdsmi_reset_*`) as one ⚠️ finding titled **Run as root (user)**, with the exact `sudo` command for each (only tests that need root, e.g. `sudo ./amdsmitst --gtest_filter='*FanReadWrite*'`).
-
 ## Project Layout
 
 Project structure and test directories are in `.claude/rules/project-layout.md`. Read it before reviewing.
@@ -50,7 +48,7 @@ Project structure and test directories are in `.claude/rules/project-layout.md`.
 4. Check test patterns match project conventions
 5. Run tests when possible and report results
 6. If CI evidence is provided, check for test failures and flaky tests
-7. **Construct edge-case inputs yourself** — don't just check if tests exist. When you find a coverage gap, craft a concrete test input (edge-case device handle, boundary value, malformed input, empty collection) and try it. Report what you tried, the output you observed, and suggest a test to lock in the behavior. Only try inputs with read-only calls or unit tests; never run set/reset commands on the real GPU.
+7. **Construct edge-case inputs yourself** — don't just check if tests exist. When you find a coverage gap, craft a concrete test input (edge-case device handle, boundary value, malformed input, empty collection) and try it. Report what you tried, the output you observed, and suggest a test to lock in the behavior.
 8. **Evaluate testability as a design property** — hard-to-test code is a design smell. When code is difficult to test (hidden dependencies, global state, monolithic functions), flag it and suggest a more testable structure (pure functions, explicit inputs, narrow interfaces).
 9. **Challenge redundant tests** — excessive or duplicated tests that test implementation details rather than behavior should be flagged for consolidation. Tests should specify behavior, not mirror the implementation.
 

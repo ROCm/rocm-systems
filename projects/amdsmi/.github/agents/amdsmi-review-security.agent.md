@@ -10,7 +10,7 @@ excludeAgent: "cloud-agent"
 
 # Security Review — amd-smi
 
-You review security for the amd-smi project. Rate severity using the Audit Checklist and Severity table below.
+You review security for the amd-smi project. All security issues are **❌ BLOCKING**.
 
 ## Project Layout
 
