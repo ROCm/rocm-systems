@@ -16,7 +16,6 @@
 #include "util/unique_handle.h"
 
 #include <algorithm>
-#include <array>
 #include <atomic>
 #include <cerrno>
 #include <cstddef>
@@ -50,7 +49,7 @@ struct rj_daemon_t {
   rj_vm_t *vm = nullptr;
   bool trace_fabric_effects = false;
   int listen_fd = -1;
-  std::array<char, sizeof(sockaddr_un::sun_path)> socket_path{};
+  std::string socket_path;
   dev_t socket_device = 0;
   ino_t socket_inode = 0;
   std::mutex clients_mutex;
@@ -824,9 +823,9 @@ void accept_clients(rj_daemon_t *daemon, std::stop_token stop) {
 
 void remove_owned_socket(const rj_daemon_t *daemon) {
   struct stat current {};
-  if (::lstat(daemon->socket_path.data(), &current) == 0 &&
+  if (::lstat(daemon->socket_path.c_str(), &current) == 0 &&
       current.st_dev == daemon->socket_device && current.st_ino == daemon->socket_inode) {
-    ::unlink(daemon->socket_path.data());
+    ::unlink(daemon->socket_path.c_str());
   }
 }
 
@@ -896,7 +895,7 @@ rj_status_t teardown(rj_daemon_t *daemon) {
 bool remove_stale_socket(const rj_daemon_t *daemon, const sockaddr_un &address,
                          socklen_t address_length) {
   struct stat before {};
-  if (::lstat(daemon->socket_path.data(), &before) != 0 || !S_ISSOCK(before.st_mode))
+  if (::lstat(daemon->socket_path.c_str(), &before) != 0 || !S_ISSOCK(before.st_mode))
     return false;
 
   util::UniqueHandle probe(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0));
@@ -908,25 +907,25 @@ bool remove_stale_socket(const rj_daemon_t *daemon, const sockaddr_un &address,
     return false;
 
   struct stat current {};
-  if (::lstat(daemon->socket_path.data(), &current) != 0)
+  if (::lstat(daemon->socket_path.c_str(), &current) != 0)
     return errno == ENOENT;
   if (!S_ISSOCK(current.st_mode) || current.st_dev != before.st_dev ||
       current.st_ino != before.st_ino) {
     return false;
   }
-  return ::unlink(daemon->socket_path.data()) == 0 || errno == ENOENT;
+  return ::unlink(daemon->socket_path.c_str()) == 0 || errno == ENOENT;
 }
 
 rj_status_t bind_socket(rj_daemon_t *daemon) {
-  if (daemon->socket_path[0] == '\0')
+  if (daemon->socket_path.empty())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
   sockaddr_un address{};
-  const size_t path_length = std::strlen(daemon->socket_path.data());
+  const auto path_length = daemon->socket_path.size();
   if (path_length >= sizeof(address.sun_path))
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  std::filesystem::path path(daemon->socket_path.data());
+  std::filesystem::path path(daemon->socket_path);
   if (const auto parent = path.parent_path(); !parent.empty()) {
     std::error_code error;
     std::filesystem::create_directories(parent, error);
@@ -950,7 +949,7 @@ rj_status_t bind_socket(rj_daemon_t *daemon) {
   }
 
   struct stat socket_stat {};
-  if (::lstat(daemon->socket_path.data(), &socket_stat) != 0 || !S_ISSOCK(socket_stat.st_mode)) {
+  if (::lstat(daemon->socket_path.c_str(), &socket_stat) != 0 || !S_ISSOCK(socket_stat.st_mode)) {
     return ROCJITSU_STATUS_ERROR;
   }
   daemon->socket_device = socket_stat.st_dev;
@@ -980,10 +979,8 @@ rj_status_t rj_daemon_start_with_options(const char *json, const char *socket_pa
   if (socket_path_length == 0 || socket_path_length >= sizeof(sockaddr_un::sun_path))
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  std::unique_ptr<rj_daemon_t> created(new (std::nothrow) rj_daemon_t());
-  if (!created)
-    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
-  std::memcpy(created->socket_path.data(), socket_path, socket_path_length + 1);
+  auto created = std::make_unique<rj_daemon_t>();
+  created->socket_path = socket_path;
 
   rj_status_t status = rj_vm_create_from_string(json, RJ_VM_MODE_DAEMON, &created->vm);
   if (status != ROCJITSU_STATUS_SUCCESS)

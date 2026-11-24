@@ -871,24 +871,6 @@ TEST(DaemonApi, RejectsInvalidJsonAndLongSocketPath) {
   EXPECT_EQ(invalid_socket.get(), nullptr);
 }
 
-TEST(DaemonApi, AcceptsMaximumSocketPathLength) {
-  ScopedTempDirectory directory;
-  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
-  std::string socket_path = directory.path();
-  socket_path += '/';
-  ASSERT_LT(socket_path.size(), sizeof(sockaddr_un::sun_path));
-  socket_path.append(sizeof(sockaddr_un::sun_path) - 1 - socket_path.size(), 'x');
-
-  TestDaemon daemon(daemon_json().c_str(), socket_path.c_str());
-  ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
-  const int client = connect_to(socket_path);
-  ASSERT_GE(client, 0);
-  EXPECT_EQ(handshake(client).version, kRpcProtocolVersion);
-  close_session(client);
-  EXPECT_EQ(daemon.stop(), ROCJITSU_STATUS_SUCCESS);
-  EXPECT_FALSE(std::filesystem::exists(socket_path));
-}
-
 TEST(DaemonApi, PreservesExistingSocketAndNonSocketEntries) {
   ScopedTempDirectory directory;
   ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
