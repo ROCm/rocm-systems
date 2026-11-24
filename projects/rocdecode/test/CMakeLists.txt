@@ -303,6 +303,8 @@ if(NOT WIN32)
               --test-command "rocdecodeemptyvaprofiletest"
   )
   set_test_env(rocDecode_Empty_VA_Profile_Test)
+  # Info-level logging records which VA driver libva tried to open, so a failure shows whether the stub was used.
+  set_property(TEST rocDecode_Empty_VA_Profile_Test APPEND PROPERTY ENVIRONMENT "ROCDEC_LOG_LEVEL=3")
 endif()
 
 if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)

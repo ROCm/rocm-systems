@@ -29,10 +29,15 @@ THE SOFTWARE.
 // list for the video post-processing entrypoint -- and checks every codec, plus a repeated call, against it.
 
 #include <dlfcn.h>
+#include <link.h>
+#include <sys/auxv.h>
+#include <unistd.h>
 
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include "rocdecode/rocdecode.h"
 
@@ -55,6 +60,19 @@ std::string LoadedLibraryPath() {
         return "<unknown>";
     }
     return info.dli_fname;
+}
+
+// Lists the VA drivers (*_drv_video.so) mapped into the process, which shows whether libva opened the stub or a real
+// driver.
+std::vector<std::string> LoadedVaDrivers() {
+    std::vector<std::string> drivers;
+    dl_iterate_phdr([](struct dl_phdr_info *info, size_t, void *data) {
+        if (info->dlpi_name != nullptr && std::strstr(info->dlpi_name, "_drv_video.so") != nullptr) {
+            static_cast<std::vector<std::string> *>(data)->push_back(info->dlpi_name);
+        }
+        return 0;
+    }, &drivers);
+    return drivers;
 }
 
 }  // namespace
@@ -92,6 +110,19 @@ int main() {
             Check(decode_caps.is_supported == 0, "is_supported is cleared" + tag);
         }
     }
+
+    // libva reads LIBVA_DRIVER_NAME and LIBVA_DRIVERS_PATH with secure_getenv and honors the driver name only when
+    // euid == uid, so in a secure-execution process it silently loads the real driver instead. Every check above would
+    // then fail for a reason unrelated to rocDecode; say so directly.
+    bool stub_loaded = false;
+    std::string loaded_drivers;
+    for (const auto &driver : LoadedVaDrivers()) {
+        stub_loaded = stub_loaded || driver.find(STUB_DRIVER_NAME "_drv_video.so") != std::string::npos;
+        loaded_drivers += (loaded_drivers.empty() ? "" : ", ") + driver;
+    }
+    Check(stub_loaded, "libva loaded the stub driver (loaded VA drivers: " +
+          (loaded_drivers.empty() ? std::string("none") : loaded_drivers) + "; uid=" + std::to_string(getuid()) +
+          " euid=" + std::to_string(geteuid()) + " AT_SECURE=" + std::to_string(getauxval(AT_SECURE)) + ")");
 
     if (failures) {
         std::cerr << failures << " check(s) failed; librocdecode loaded from " << LoadedLibraryPath() << std::endl;
