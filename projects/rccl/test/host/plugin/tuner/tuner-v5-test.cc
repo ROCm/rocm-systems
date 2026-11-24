@@ -136,9 +136,10 @@ TEST_F(TunerV5, InitFailureIsReturnedAndFinalizeStillWorks) {
   g = Rec{};
   g.initResult = ncclInternalError;
   EXPECT_EQ(Init(), ncclInternalError);
-  EXPECT_EQ(context, nullptr);
+  EXPECT_NE(context, nullptr);
   EXPECT_EQ(tuner->finalize(context), ncclSuccess);
-  EXPECT_EQ(g.finalizeContext, nullptr);
+  // As with a v7 plugin, finalize() gets the context init() stored before it failed.
+  EXPECT_EQ(g.finalizeContext, &g_pluginContext);
 }
 
 }  // namespace

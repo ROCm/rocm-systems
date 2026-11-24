@@ -32,7 +32,7 @@ static ncclResult_t ncclTuner_getCollInfo(void* context, ncclFunc_t collType, si
 
 static ncclResult_t ncclTuner_finalize(void* context) {
   ncclTunerContext_v5* ctx = (ncclTunerContext_v5*)context;
-  if (ctx == nullptr) return ncclTuner_v5->finalize(nullptr); // init() failed or never ran
+  if (ctx == nullptr) return ncclTuner_v5->finalize(nullptr); // init() never ran
   ncclResult_t ret = ncclTuner_v5->finalize(ctx->pluginContext);
   free(ctx);
   return ret;
@@ -44,14 +44,11 @@ static ncclResult_t ncclTuner_init(void** context, uint64_t commId, size_t nRank
   ncclTunerContext_v5* ctx = (ncclTunerContext_v5*)calloc(1, sizeof(*ctx));
   if (ctx == nullptr) return ncclSystemError;
   ncclTunerConstants_v7_to_v5(&ctx->constants, constants);
-  ncclResult_t ret =
-    ncclTuner_v5->init(&ctx->pluginContext, commId, nRanks, nNodes, logfn, nvlDomainInfo, &ctx->constants);
-  if (ret != ncclSuccess) {
-    free(ctx);
-    return ret;
-  }
-  ncclTunerConstants_v5_to_v7(constants, &ctx->constants);
+  // Set even when init() fails, so finalize() gets back whatever context the plugin stored.
   *context = ctx;
+  NCCLCHECK(
+    ncclTuner_v5->init(&ctx->pluginContext, commId, nRanks, nNodes, logfn, nvlDomainInfo, &ctx->constants));
+  ncclTunerConstants_v5_to_v7(constants, &ctx->constants);
   return ncclSuccess;
 }
 

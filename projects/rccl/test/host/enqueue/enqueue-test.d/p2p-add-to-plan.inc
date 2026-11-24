@@ -587,34 +587,32 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94EmptyLlThreshold_Widens) {
   ExpectGfx94RecvProtoLL(940, 16 << 10, 1);
 }
 
-// Navi (gfx1200/gfx1201 = cudaArch 1200) over PCIe: 4 channels make the fit fallback's cap
-// 16 KiB, so on gfx942 8 KiB/peer turns LL through it. gfx12 has no fit fallback, so only the
-// per-channel 4 KiB rule picks LL, as before the 2.32.6 sync.
-Gfx94P2pLlOpts Gfx12P2pLlOpts() {
+// Over PCIe, 4 channels make the fit fallback's cap 16 KiB, so where it applies 8 KiB/peer turns
+// LL through it. Navi (gfx11, gfx12) has no fit fallback, so only the per-channel 4 KiB rule
+// picks LL, as before the 2.32.6 sync.
+Gfx94P2pLlOpts PcieP2pLlOpts(int cudaArch, const char* gcn) {
   Gfx94P2pLlOpts opts;
-  opts.cudaArch = 1200;
-  opts.gcn = "gfx1201";
+  opts.cudaArch = cudaArch;
+  opts.gcn = gcn;
   opts.isAllNvlink = 0;
   opts.nChannels = 4;
   return opts;
 }
 
-Gfx94P2pLlOpts Gfx942PcieP2pLlOpts() {
-  Gfx94P2pLlOpts opts;
-  opts.cudaArch = 942;
-  opts.isAllNvlink = 0;
-  opts.nChannels = 4;
-  return opts;
-}
-
-TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx12_StaysSimpleAboveThePerChannelCutoff) {
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Navi_StaysSimpleAboveThePerChannelCutoff) {
   PinP2pLlThreshold(/*userSet=*/false);
-  ExpectGfx94RecvProtoLL(Gfx12P2pLlOpts(), 4 << 10, 1);
-  ExpectGfx94RecvProtoLL(Gfx12P2pLlOpts(), 8 << 10, 0);
-  ExpectGfx94RecvProtoLL(Gfx12P2pLlOpts(), 16 << 10, 0);
-  // Control: the same scene on gfx942 reaches the fit fallback.
-  ExpectGfx94RecvProtoLL(Gfx942PcieP2pLlOpts(), 8 << 10, 1);
-  ExpectGfx94RecvProtoLL(Gfx942PcieP2pLlOpts(), 16 << 10, 1);
+  for (auto [cudaArch, gcn] : {std::pair{1100, "gfx1100"}, std::pair{1150, "gfx1151"}, std::pair{1200, "gfx1201"}}) {
+    SCOPED_TRACE(gcn);
+    ExpectGfx94RecvProtoLL(PcieP2pLlOpts(cudaArch, gcn), 4 << 10, 1);
+    ExpectGfx94RecvProtoLL(PcieP2pLlOpts(cudaArch, gcn), 8 << 10, 0);
+    ExpectGfx94RecvProtoLL(PcieP2pLlOpts(cudaArch, gcn), 16 << 10, 0);
+  }
+  // Controls: the same scene on gfx942 and gfx1250 reaches the fit fallback.
+  for (auto [cudaArch, gcn] : {std::pair{940, "gfx942"}, std::pair{1250, "gfx1250"}}) {
+    SCOPED_TRACE(gcn);
+    ExpectGfx94RecvProtoLL(PcieP2pLlOpts(cudaArch, gcn), 8 << 10, 1);
+    ExpectGfx94RecvProtoLL(PcieP2pLlOpts(cudaArch, gcn), 16 << 10, 1);
+  }
 }
 
 // 32 KiB is inside the widen (stock cutoff is 4 KiB). Each gate that is off must

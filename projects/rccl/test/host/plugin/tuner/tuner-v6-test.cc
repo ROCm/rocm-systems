@@ -9,6 +9,7 @@
 // plugin may keep the pointer it was given until finalize().
 
 #include <gtest/gtest.h>
+
 #include <dlfcn.h>
 
 #include <cstring>
@@ -161,9 +162,10 @@ TEST_F(TunerV6, InitFailureIsReturnedAndFinalizeStillWorks) {
   Load();
   g.initResult = ncclInternalError;
   EXPECT_EQ(Init(), ncclInternalError);
-  EXPECT_EQ(context, nullptr);
+  EXPECT_NE(context, nullptr);
   EXPECT_EQ(tuner->finalize(context), ncclSuccess);
-  EXPECT_EQ(g.finalizeContext, nullptr);
+  // As with a v7 plugin, finalize() gets the context init() stored before it failed.
+  EXPECT_EQ(g.finalizeContext, &g_pluginContext);
 }
 
 }  // namespace
