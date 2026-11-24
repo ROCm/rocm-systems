@@ -345,27 +345,33 @@ inline uint32_t amdgpu_rsq_normalized_bits(uint32_t index) {
   const uint32_t end = last;
   while (first < last) {
     const uint32_t middle = first + (last - first) / 2;
-    if ((kAmdgpuRsqCorrections[middle] & 0x7fffu) < key)
+    if ((kAmdgpuRsqCorrections[middle] & 0x7fffu) < key) {
       first = middle + 1;
-    else
+    } else {
       last = middle;
+    }
   }
-  if (first != end && (kAmdgpuRsqCorrections[first] & 0x7fffu) == key)
+  if (first != end && (kAmdgpuRsqCorrections[first] & 0x7fffu) == key) {
     result = (kAmdgpuRsqCorrections[first] & 0x8000u) ? result + 1 : result - 1;
+  }
   return result;
 }
 
 inline uint32_t amdgpu_rsq_bits(uint32_t input, bool quiet_snan = true) {
   const uint32_t magnitude = input & 0x7fffffffu;
   const uint32_t sign = input & 0x80000000u;
-  if (magnitude > 0x7f800000u)
+  if (magnitude > 0x7f800000u) {
     return input | (quiet_snan ? 0x00400000u : 0u);
-  if (magnitude < 0x00800000u)
+  }
+  if (magnitude < 0x00800000u) {
     return sign | 0x7f800000u;
-  if (sign != 0)
+  }
+  if (sign != 0) {
     return 0xffc00000u;
-  if (magnitude == 0x7f800000u)
+  }
+  if (magnitude == 0x7f800000u) {
     return 0;
+  }
 
   const int exponent = static_cast<int>(magnitude >> 23) - 127;
   const unsigned parity = exponent & 1;

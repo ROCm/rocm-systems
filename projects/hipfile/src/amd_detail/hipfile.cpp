@@ -765,13 +765,21 @@ hipFileGetStatsL1(hipFileStatsLevel1_t *stats)
         if (stats->write_ops.ok > 0) {
             stats->write_lat_avg_us = stats->write_lat_sum_us / stats->write_ops.ok;
         }
-        if (stats->read_lat_sum_us > 0) {
-            stats->read_bw_bytes_per_sec = static_cast<uint64_t>(
-                static_cast<double>(stats->read_bytes) * 1e6 / static_cast<double>(stats->read_lat_sum_us));
+        // Bandwidth divides by wall-clock busy time (union of overlapping IO
+        // intervals), not summed per-IO latency, so concurrent IO is not
+        // understated. Latency (above) keeps using the summed durations.
+        const BusyWindow *readBusy{s->busyByType(IoType::Read)};
+        const BusyWindow *writeBusy{s->busyByType(IoType::Write)};
+        uint64_t          nowUs{StatsIoTracker::nowUs()};
+        uint64_t          readBusyUs{readBusy ? readBusy->sample(nowUs) : 0};
+        uint64_t          writeBusyUs{writeBusy ? writeBusy->sample(nowUs) : 0};
+        if (readBusyUs > 0) {
+            stats->read_bw_bytes_per_sec = static_cast<uint64_t>(static_cast<double>(stats->read_bytes) *
+                                                                 1e6 / static_cast<double>(readBusyUs));
         }
-        if (stats->write_lat_sum_us > 0) {
-            stats->write_bw_bytes_per_sec = static_cast<uint64_t>(
-                static_cast<double>(stats->write_bytes) * 1e6 / static_cast<double>(stats->write_lat_sum_us));
+        if (writeBusyUs > 0) {
+            stats->write_bw_bytes_per_sec = static_cast<uint64_t>(static_cast<double>(stats->write_bytes) *
+                                                                  1e6 / static_cast<double>(writeBusyUs));
         }
 
         return {hipFileSuccess, hipSuccess};
@@ -818,6 +826,7 @@ hipFileGetStatsL3(hipFileStatsLevel3_t *stats)
         uint64_t globalBufRegs{s->getBufferRegistrations().load()};
 
         uint32_t numGpus{};
+        uint64_t gpuNowUs{StatsIoTracker::nowUs()};
         for (size_t gpuId{}; gpuId < Stats::MaxGpus; ++gpuId) {
             if (!s->gpuInUse(gpuId)) {
                 continue;
@@ -877,13 +886,20 @@ hipFileGetStatsL3(hipFileStatsLevel3_t *stats)
                 }
             }
 
-            if (g.read_duration_us > 0) {
+            // Per-GPU bandwidth divides by this GPU's wall-clock busy time (union
+            // over both backends), not summed per-IO latency, so concurrent IO is
+            // not understated. read_duration_us/write_duration_us keep the sums.
+            const BusyWindow *readBusy{s->busyByGpuType(gpuId, IoType::Read)};
+            const BusyWindow *writeBusy{s->busyByGpuType(gpuId, IoType::Write)};
+            uint64_t          readBusyUs{readBusy ? readBusy->sample(gpuNowUs) : 0};
+            uint64_t          writeBusyUs{writeBusy ? writeBusy->sample(gpuNowUs) : 0};
+            if (readBusyUs > 0) {
                 g.read_bw_bytes_per_sec = static_cast<uint64_t>(static_cast<double>(g.read_bytes) * 1e6 /
-                                                                static_cast<double>(g.read_duration_us));
+                                                                static_cast<double>(readBusyUs));
             }
-            if (g.write_duration_us > 0) {
+            if (writeBusyUs > 0) {
                 g.write_bw_bytes_per_sec = static_cast<uint64_t>(static_cast<double>(g.write_bytes) * 1e6 /
-                                                                 static_cast<double>(g.write_duration_us));
+                                                                 static_cast<double>(writeBusyUs));
             }
 
             // Buffer registrations are a global counter; report it on each active GPU

@@ -32,13 +32,15 @@ std::optional<uint32_t> GwsDevice::ordered_count(uint32_t process_id, uint32_t q
                                                  uint32_t value, bool exchange, bool release) {
   std::lock_guard lock(mutex_);
   auto &ring = ordered_rings_[process_id][queue_id];
-  if (logical_wave != ring.oldest)
+  if (logical_wave != ring.oldest) {
     return std::nullopt;
+  }
   auto &gds = gds_.try_emplace(process_id, kGfx10GdsSizeKiB).first->second;
   const uint32_t previous = gds.read32(address);
   gds.write32(address, exchange ? value : previous + value);
-  if (release)
+  if (release) {
     ring.oldest = (ring.oldest + 1) % ring.id_count;
+  }
   return previous;
 }
 
@@ -46,8 +48,9 @@ void GwsDevice::reset_ordered_ids(uint32_t process_id, uint32_t queue_id) {
   std::lock_guard lock(mutex_);
   if (auto it = ordered_rings_.find(process_id); it != ordered_rings_.end()) {
     it->second.erase(queue_id);
-    if (it->second.empty())
+    if (it->second.empty()) {
       ordered_rings_.erase(it);
+    }
   }
 }
 
@@ -68,9 +71,9 @@ bool GwsDevice::prepare_register_access(Wavefront &wf, VectorMemState &d, uint8_
   const uint64_t exec = ordered || wf.vgpr_alloc().contains(dst, words) ? wf.exec() : 0;
   // An empty ordered wave sends ADD(0) regardless of the encoded operation.
   // Preserve release/done and the walker step, without requiring a WRAP ring.
-  if (ordered && !exec)
+  if (ordered && !exec) {
     offset1 &= ~0x30u;
-  else if (ordered && op == 3) {
+  } else if (ordered && op == 3) {
     wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
     return false;
   }
@@ -115,8 +118,9 @@ void GwsDevice::retire_ordered_dispatch(uint32_t process_id, uint32_t queue_id,
                                         uint32_t dispatch_id) {
   std::lock_guard lock(mutex_);
   const auto share = data_shares_.find(process_id);
-  if (share != data_shares_.end())
+  if (share != data_shares_.end()) {
     share->second.ordered_walkers.erase((uint64_t{queue_id} << 32) | dispatch_id);
+  }
 }
 
 size_t GwsDevice::tracked_process_count() {
@@ -128,8 +132,9 @@ bool GwsDevice::has_gds_checkpoint_state() {
   std::lock_guard lock(mutex_);
   if (!ordered_rings_.empty() || std::ranges::any_of(gds_, [](const auto &entry) {
         return entry.second.materialized_size_bytes() != 0;
-      }))
+      })) {
     return true;
+  }
   return std::ranges::any_of(data_shares_, [](const auto &entry) {
     const auto &share = entry.second;
     return share.memory.materialized_size_bytes() != 0 ||
@@ -141,8 +146,9 @@ bool GwsDevice::has_gds_checkpoint_state() {
 
 void GwsDevice::release_sema_waiter(Resource &res, uint64_t seq) {
   auto it = std::find(res.sema_wait_seqs.begin(), res.sema_wait_seqs.end(), seq);
-  if (it != res.sema_wait_seqs.end())
+  if (it != res.sema_wait_seqs.end()) {
     res.sema_wait_seqs.erase(it);
+  }
 }
 
 void GwsDevice::park_wave(Wavefront &wf, uint32_t rid, bool is_barrier, uint64_t generation) {
@@ -177,20 +183,23 @@ void GwsDevice::wake_wave(ComputeUnitCore &cu, Wavefront &wf) {
   // reserved credit).
   if (!was_barrier && rid < kResourceCount) {
     auto rit = resources_.find(process_id);
-    if (rit != resources_.end())
+    if (rit != resources_.end()) {
       release_sema_waiter(rit->second[rid], seq);
+    }
   }
   auto it = parked_.find(process_id);
-  if (it != parked_.end() && it->second > 0 && --it->second == 0)
+  if (it != parked_.end() && it->second > 0 && --it->second == 0) {
     parked_.erase(it);
+  }
   parked_total_.fetch_sub(1, std::memory_order_release);
 }
 
 uint32_t GwsDevice::poll_local_waiters(ComputeUnitCore &cu) {
   uint32_t woken_count = 0;
   for (auto &slot : cu.wfs_) {
-    if (!slot || slot->state() != WfState::GWS_WAIT)
+    if (!slot || slot->state() != WfState::GWS_WAIT) {
       continue;
+    }
     Wavefront &wf = *slot;
     Resource &res = resources_[wf.process_id()][wf.gws_wait_rid_];
     // A barrier release or a semaphore release_all bumps the generation, waking
@@ -208,9 +217,11 @@ uint32_t GwsDevice::poll_local_waiters(ComputeUnitCore &cu) {
     // earlier waiter parked on another CU (see the entitlement note in the class doc).
     if (!wf.gws_wait_is_barrier_ && res.counter > 0) {
       uint32_t older_waiter_count = 0;
-      for (uint64_t queued_seq : res.sema_wait_seqs)
-        if (queued_seq < wf.gws_wait_seq_)
+      for (uint64_t queued_seq : res.sema_wait_seqs) {
+        if (queued_seq < wf.gws_wait_seq_) {
           ++older_waiter_count;
+        }
+      }
       if (older_waiter_count < res.counter) {
         --res.counter;
         wake_wave(cu, wf); // Removes this wave's stamp from sema_wait_seqs.
@@ -222,8 +233,9 @@ uint32_t GwsDevice::poll_local_waiters(ComputeUnitCore &cu) {
 }
 
 void GwsDevice::init(Wavefront &wf, uint32_t rid, uint32_t count) {
-  if (rid >= kResourceCount)
+  if (rid >= kResourceCount) {
     return;
+  }
   std::lock_guard<std::mutex> lock(mutex_);
   Resource &res = resources_[wf.process_id()][rid];
   // Barrier: (participants - 1) is the programmed counter value. Semaphore reuses
@@ -233,12 +245,14 @@ void GwsDevice::init(Wavefront &wf, uint32_t rid, uint32_t count) {
 }
 
 bool GwsDevice::barrier_arrive(ComputeUnitCore &cu, Wavefront &wf, uint32_t rid, uint32_t count) {
-  if (rid >= kResourceCount)
+  if (rid >= kResourceCount) {
     return true;
+  }
   std::lock_guard<std::mutex> lock(mutex_);
   Resource &res = resources_[wf.process_id()][rid];
-  if (!res.armed)
+  if (!res.armed) {
     return false;
+  }
   if (res.counter == 0) {
     // This arrival observes zero: it is the releasing arrival. Bump the release
     // generation so queued arrivals on any CU wake, and reload the counter from
@@ -255,8 +269,9 @@ bool GwsDevice::barrier_arrive(ComputeUnitCore &cu, Wavefront &wf, uint32_t rid,
 }
 
 void GwsDevice::sema_v(ComputeUnitCore &cu, Wavefront &wf, uint32_t rid) {
-  if (rid >= kResourceCount)
+  if (rid >= kResourceCount) {
     return;
+  }
   std::lock_guard<std::mutex> lock(mutex_);
   Resource &res = resources_[wf.process_id()][rid];
   ++res.counter;
@@ -266,8 +281,9 @@ void GwsDevice::sema_v(ComputeUnitCore &cu, Wavefront &wf, uint32_t rid) {
 }
 
 void GwsDevice::sema_p(ComputeUnitCore &cu, Wavefront &wf, uint32_t rid) {
-  if (rid >= kResourceCount)
+  if (rid >= kResourceCount) {
     return;
+  }
   std::lock_guard<std::mutex> lock(mutex_);
   (void)cu;
   Resource &res = resources_[wf.process_id()][rid];
@@ -286,8 +302,9 @@ void GwsDevice::sema_p(ComputeUnitCore &cu, Wavefront &wf, uint32_t rid) {
 }
 
 void GwsDevice::sema_br(ComputeUnitCore &cu, Wavefront &wf, uint32_t rid, uint32_t count) {
-  if (rid >= kResourceCount || count == 0)
+  if (rid >= kResourceCount || count == 0) {
     return;
+  }
   std::lock_guard<std::mutex> lock(mutex_);
   Resource &res = resources_[wf.process_id()][rid];
   res.counter += count;
@@ -295,15 +312,17 @@ void GwsDevice::sema_br(ComputeUnitCore &cu, Wavefront &wf, uint32_t rid, uint32
 }
 
 void GwsDevice::sema_release_all(ComputeUnitCore &cu, Wavefront &wf, uint32_t rid) {
-  if (rid >= kResourceCount)
+  if (rid >= kResourceCount) {
     return;
+  }
   std::lock_guard<std::mutex> lock(mutex_);
   Resource &res = resources_[wf.process_id()][rid];
   // The generation wakes every queued P waiter without consuming a credit.
   // GFX11 keeps any banked credits for future arrivals. Other targets clear them.
   ++res.release_gen;
-  if (cu.arch() != rocjitsu::IsaFamily::Rdna3 && cu.arch() != rocjitsu::IsaFamily::Rdna3_5)
+  if (cu.arch() != rocjitsu::IsaFamily::Rdna3 && cu.arch() != rocjitsu::IsaFamily::Rdna3_5) {
     res.counter = 0;
+  }
   // Retire the released waiters' credit reservations now. The generation bump above
   // wakes every currently queued P-waiter regardless of credits, so their arrival
   // stamps no longer entitle them to a credit; leaving the stamps queued would let a
@@ -319,16 +338,19 @@ void GwsDevice::sema_release_all(ComputeUnitCore &cu, Wavefront &wf, uint32_t ri
 void GwsDevice::notify_parked_wave_gone(const Wavefront &wf) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto it = parked_.find(wf.process_id());
-  if (it == parked_.end() || it->second == 0)
+  if (it == parked_.end() || it->second == 0) {
     return; // Not accounted as parked (defensive): nothing to reconcile.
-  if (--it->second == 0)
+  }
+  if (--it->second == 0) {
     parked_.erase(it);
+  }
   parked_total_.fetch_sub(1, std::memory_order_release);
   // A gone semaphore waiter drops its queued arrival stamp (see park_wave).
   if (!wf.gws_wait_is_barrier_ && wf.gws_wait_rid_ < kResourceCount) {
     auto rit = resources_.find(wf.process_id());
-    if (rit != resources_.end())
+    if (rit != resources_.end()) {
       release_sema_waiter(rit->second[wf.gws_wait_rid_], wf.gws_wait_seq_);
+    }
   }
 }
 
@@ -336,13 +358,15 @@ void GwsDevice::poll_waits(ComputeUnitCore &cu) {
   // The caller holds this CU's wave lock. CUs with no local waiter need no store lock.
   if (!any_parked() || !std::ranges::any_of(cu.wfs_, [](const auto &wave) {
         return wave && wave->state() == WfState::GWS_WAIT;
-      }))
+      })) {
     return;
+  }
   std::lock_guard<std::mutex> lock(mutex_);
   poll_local_waiters(cu);
   for (const auto &wave : cu.wfs_) {
-    if (!wave || wave->state() != WfState::GWS_WAIT)
+    if (!wave || wave->state() != WfState::GWS_WAIT) {
       continue;
+    }
     const auto progress = instruction_progress_[wave->process_id()];
     if (wave->gws_wait_progress_ != progress) {
       wave->gws_wait_progress_ = progress;
@@ -352,11 +376,13 @@ void GwsDevice::poll_waits(ComputeUnitCore &cu) {
 }
 
 void GwsDevice::note_instruction_progress(uint32_t process_id) {
-  if (!any_parked())
+  if (!any_parked()) {
     return;
+  }
   std::lock_guard<std::mutex> lock(mutex_);
-  if (parked_.contains(process_id))
+  if (parked_.contains(process_id)) {
     ++instruction_progress_[process_id];
+  }
 }
 
 } // namespace amdgpu

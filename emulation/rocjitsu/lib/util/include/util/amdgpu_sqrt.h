@@ -110,13 +110,15 @@ inline uint32_t amdgpu_sqrt_correct(uint32_t index, uint32_t result) {
   const uint32_t end = last;
   while (first < last) {
     const uint32_t middle = first + (last - first) / 2;
-    if ((sqrt::corrections[middle] & ~1u) < key)
+    if ((sqrt::corrections[middle] & ~1u) < key) {
       first = middle + 1;
-    else
+    } else {
       last = middle;
+    }
   }
-  if (first != end && (sqrt::corrections[first] & ~1u) == key)
+  if (first != end && (sqrt::corrections[first] & ~1u) == key) {
     result = (sqrt::corrections[first] & 1u) ? result + 1 : result - 1;
+  }
   return result;
 }
 
@@ -143,22 +145,27 @@ inline uint32_t amdgpu_sqrt_normalized_bits(uint32_t index) {
   const uint32_t result = 0x3f800000u + static_cast<uint32_t>(mantissa);
   // Exhaustive normalized captures bound every residual to within 1/2048
   // ULP of a rounding midpoint. Other inputs need no correction-table lookup.
-  if (remainder < midpoint - 8192 || remainder > midpoint + 8192)
+  if (remainder < midpoint - 8192 || remainder > midpoint + 8192) {
     return result;
+  }
   return amdgpu_sqrt_correct(index, result);
 }
 
 inline uint32_t amdgpu_sqrt_bits(uint32_t input, bool quiet_snan = true) {
   const uint32_t magnitude = input & 0x7fffffffu;
   const uint32_t sign = input & 0x80000000u;
-  if (magnitude > 0x7f800000u)
+  if (magnitude > 0x7f800000u) {
     return input | (quiet_snan ? 0x00400000u : 0u);
-  if (magnitude < 0x00800000u)
+  }
+  if (magnitude < 0x00800000u) {
     return sign;
-  if (sign != 0)
+  }
+  if (sign != 0) {
     return 0xffc00000u;
-  if (magnitude == 0x7f800000u)
+  }
+  if (magnitude == 0x7f800000u) {
     return input;
+  }
 
   const int exponent = static_cast<int>(magnitude >> 23) - 127;
   const unsigned parity = exponent & 1;

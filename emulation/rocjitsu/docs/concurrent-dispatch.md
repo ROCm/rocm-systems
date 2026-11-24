@@ -42,15 +42,13 @@ unused budget between entries. The default budget is CPU affinity and the
 target table sets the allocation ceiling. `cpu_thread_budget` overrides the
 budget; explicit knob settings take priority.
 
-Desktop, MI210 and CDNA3 tables stop at an engine/dispatch cost of 24.
-The single-GPU gfx950 and gfx1250 presets use eight engines and up to 24 and
-40 shared CU dispatch workers respectively, for totals of 32 and 48 threads. See
+The single-GPU gfx942 and gfx950 presets use up to 48 execution threads.
+gfx1250 uses up to 64. Each uses eight engines at its highest granule. See
 [the allocation table](configuration.md#thread-accounting-and-preferred-allocations)
 and [async MMA policy](async-instructions.md#thread-policy).
 
-The historical study below includes wider synchronous allocations. Subsequent
-IREE, Gluon and Tensile measurements favor lower defaults to limit CPU use;
-custom tables and explicit overrides remain available for wider workloads.
+The historical study below used synchronous allocations and different kernels.
+Current defaults use the results of CI workload and ML smoke measurements.
 
 The initial entries were screened in the previous study, then checked on this
 standalone branch with the synchronous kernels. The final tables below report
@@ -79,8 +77,7 @@ below. Multi-GPU presets default to E=1/D=1 for RCCL. Explicit D=0 opts into
 granules that divide each budget's remaining slots among the per-GPU pools;
 positive D overrides also remain available. Mirage uses the same defaults and
 derives the multi-GPU granules from single-GPU tables embedded in the rocjitsu
-backend. gfx950 derives from a total budget of 32 and gfx1250 from 48, while desktop
-and CDNA3 use 24. The hardware agent model contains no host tuning. Clocked
+backend. The hardware agent model contains no host tuning. Clocked
 engines and legacy table-free dispatch overrides retain their automatic
 32-thread cap. Explicit overrides remain available.
 
