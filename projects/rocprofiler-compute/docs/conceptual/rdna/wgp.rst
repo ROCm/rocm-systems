@@ -22,7 +22,7 @@ The sections below list WGP metric descriptions for RDNA3.5 (gfx115x) and RDNA4 
 Roofline
 ========
 
-Profile mode runs the roofline benchmark unless you pass ``--no-roof``. Set
+Profile mode runs the roofline benchmark unless you select blocks with ``-b`` or ``--set`` that do not include block 4. Set
 ``STABLE_STD`` first and use the same performance state for every run you
 compare. See :ref:`profiling power-gating requirements <profile-rdna-power-gating>`. The benchmark measures the roofs in the
 performance state that is active, and ``STABLE_STD`` fixes lower clocks than

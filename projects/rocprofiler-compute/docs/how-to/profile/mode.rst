@@ -739,7 +739,7 @@ that contains both ``roofline.csv`` and application performance counters
    .. code-block:: bash
 
       HIP_VISIBLE_DEVICES=0 rocprof-compute --experimental profile --name vcopy-gfx1201 \
-          -b sol memchart --no-roof -- ./vcopy -n 1048576 -b 256
+          -b sol memchart -- ./vcopy -n 1048576 -b 256
 
    ``HIP_VISIBLE_DEVICES`` selects the GPU used by the HIP application. List the
    block aliases with
