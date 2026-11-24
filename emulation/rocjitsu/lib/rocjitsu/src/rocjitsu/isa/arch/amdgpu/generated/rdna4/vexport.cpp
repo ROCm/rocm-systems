@@ -33,6 +33,7 @@ ExportVexport::ExportVexport(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::EXPORT);
 }
 
 namespace detail {

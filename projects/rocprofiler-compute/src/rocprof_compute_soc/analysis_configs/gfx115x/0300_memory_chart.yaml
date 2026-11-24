@@ -24,7 +24,6 @@ Panel Config:
   - metric_table:
       id: 301
       title: "Instruction Cache"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value
@@ -46,7 +45,6 @@ Panel Config:
   - metric_table:
       id: 302
       title: "Scalar Data Cache"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value
@@ -68,7 +66,6 @@ Panel Config:
   - metric_table:
       id: 303
       title: "TCP Cache (GL0 Vector Cache)"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value
@@ -94,7 +91,6 @@ Panel Config:
   - metric_table:
       id: 304
       title: "LDS (Local Data Share)"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value
@@ -119,7 +115,6 @@ Panel Config:
   - metric_table:
       id: 305
       title: "TCP-GL1 Interface"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value
@@ -138,7 +133,6 @@ Panel Config:
   - metric_table:
       id: 306
       title: "GL1 Cache (L1)"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value
@@ -160,7 +154,6 @@ Panel Config:
   - metric_table:
       id: 307
       title: "GL1-GL2 Interface"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value
@@ -179,7 +172,6 @@ Panel Config:
   - metric_table:
       id: 308
       title: "GL2 Cache (L2)"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value
@@ -204,7 +196,6 @@ Panel Config:
   - metric_table:
       id: 309
       title: "Graphics Core Efficiency Arbiter (GCEA) to System Memory"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value
@@ -229,7 +220,6 @@ Panel Config:
   - metric_table:
       id: 310
       title: "Workgroup Processors (WGPs)"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value

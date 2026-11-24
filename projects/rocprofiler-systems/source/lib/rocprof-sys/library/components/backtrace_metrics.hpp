@@ -66,7 +66,6 @@ struct backtrace_metrics : comp::empty_base
 
     static void configure(bool, std::int64_t _tid = threading::get_id());
     static void init_cache(std::int64_t _tid, valid_array_t);
-    static std::vector<std::string> get_hw_counter_labels(std::int64_t);
 
     template <typename Tp>
     static bool get_valid(Tp, valid_array_t);

@@ -25,8 +25,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 mod host_alias;
+mod registered_svm;
 mod scratch;
 pub(super) use host_alias::KfdHostAlias;
+pub(super) use registered_svm::KfdRegisteredHost;
 use scratch::ScratchPool;
 
 /// Process-local set of activated device VMs and their shared loss events.
@@ -449,6 +451,8 @@ struct LossEvent {
     observed: Mutex<ObservedEvents>,
     /// Live BO-backed CPU mappings available for safe registration reuse.
     host_aliases: Mutex<Vec<Shared<host_alias::HostAliasRecord>>>,
+    /// Page/GPU grants shared by process-context SVM host registrations.
+    svm_registrations: Mutex<registered_svm::Registry>,
     /// Sticky terminal connection-loss flag.
     lost: AtomicBool,
 }
@@ -700,6 +704,7 @@ impl LossEvent {
             memory_destroy_uncertain: AtomicBool::new(false),
             observed: Mutex::new(observed),
             host_aliases: Mutex::new(Vec::new()),
+            svm_registrations: Mutex::new(registered_svm::Registry::default()),
             lost: AtomicBool::new(false),
         })?;
         let mut args = uapi::CreateEvent::default();
@@ -983,6 +988,13 @@ struct PeerVm {
     vm: Shared<DeviceVm>,
 }
 
+/// Definite USERPTR/SVM collision before KFD created any native object.
+/// The original host lease is returned only after the speculative VA owner
+/// has completed cleanup, so another registration mechanism can take it.
+pub(super) struct RejectedUserptr {
+    pub(super) backing: Option<HostBackingLease>,
+}
+
 /// Complete ownership record for a KFD allocation and all of its mappings.
 ///
 /// Optional fields encode teardown progress. Successful cleanup clears each
@@ -1084,6 +1096,34 @@ impl KfdAllocation {
         permissions: DeviceAccess,
         backing: Option<HostBackingLease>,
     ) -> Result<Owned<Self>, Error> {
+        let mut rejected = None;
+        Self::create_with_peers_recover_userptr(
+            vm,
+            peers,
+            desc,
+            kind,
+            permissions,
+            backing,
+            &mut rejected,
+        )
+    }
+
+    /// Returns host ownership separately only for a clean no-object USERPTR
+    /// collision. Generic allocation, mapping, and copyout errors never qualify.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "native ownership and definitive rejection form one transaction"
+    )]
+    pub(super) fn create_with_peers_recover_userptr(
+        vm: Shared<DeviceVm>,
+        peers: impl ExactSizeIterator<Item = Shared<DeviceVm>>,
+        desc: AllocationDesc,
+        kind: BufferKind,
+        permissions: DeviceAccess,
+        backing: Option<HostBackingLease>,
+        rejected: &mut Option<RejectedUserptr>,
+    ) -> Result<Owned<Self>, Error> {
+        *rejected = None;
         if !permissions.contains(DeviceAccess::READ) {
             return Err(error(
                 ErrorKind::Unsupported,
@@ -1279,6 +1319,23 @@ impl KfdAllocation {
             .as_ref()
             .err()
             .is_some_and(|source| source.raw_os_error() == Some(errno::EFAULT));
+        if matches!(kind, BufferKind::Userptr(_))
+            && allocation.handle.is_none()
+            && result
+                .as_ref()
+                .err()
+                .is_some_and(|source| source.raw_os_error() == Some(libc::EADDRINUSE))
+        {
+            // kfd_ioctl_alloc_memory_of_gpu rejects overlap with its SVM
+            // interval tree before allocating the BO. A changed handle would
+            // contradict that proof and must follow ordinary error cleanup.
+            let backing = allocation.backing.take();
+            if let Err(error) = allocation.free() {
+                allocation.backing = backing;
+                return Err(error);
+            }
+            *rejected = Some(RejectedUserptr { backing });
+        }
         result.map_err(|source| native_error("AMDKFD_IOC_ALLOC_MEMORY_OF_GPU", source))?;
         if allocation.handle.is_none() {
             allocation.uncertain = true;
@@ -1941,6 +1998,37 @@ impl KfdAllocation {
 
     pub(crate) fn metadata(&self) -> &[u8] {
         self.metadata.as_slice()
+    }
+
+    #[allow(unsafe_code)]
+    pub(super) fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        self.vm
+            .kfd()
+            .check_process()
+            .map_err(|source| native_error("diagnostic allocation", source))?;
+        if self.freeing
+            || self.uncertain
+            || !matches!(self.mapping, GpuMapping::Mapped)
+            || self.native_flags & (uapi::DOORBELL | uapi::MMIO_REMAP) != 0
+        {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "allocation has no retained diagnostic backing",
+            ));
+        }
+        let info = self.cached_info();
+        // SAFETY: Native cleanup is excluded by this borrow. Registered callers
+        // retain their pages by the allocation's original lifetime contract.
+        unsafe {
+            crate::device::gpu::diagnostic::DiagnosticMemory::borrow(
+                self,
+                info.device_address,
+                info.host_address,
+                info.size,
+            )
+        }
     }
 
     pub(crate) fn check(&self) -> Result<(), Error> {
@@ -2631,6 +2719,7 @@ pub(super) fn queue_fixture_with_range(
         memory_destroy_uncertain: AtomicBool::new(false),
         observed: Mutex::new(ObservedEvents::new().unwrap()),
         host_aliases: Mutex::new(Vec::new()),
+        svm_registrations: Mutex::new(registered_svm::Registry::default()),
         lost: AtomicBool::new(false),
     })
     .unwrap();

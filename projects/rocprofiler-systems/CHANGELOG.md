@@ -14,6 +14,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   agent's personal skills folder.
 - `rocprof-sys-attach` re-attaches now use the output format selected for that attach (`-F`),
   so a process can be profiled to rocpd in one session and to Perfetto in the next.
+- `rocprof-sys-attach` can attach to multiple processes in one invocation
+  (`-p 101,102` or `-p 101 -p 102`) and detach from each of them individually, or
+  from all of them at once, through an interactive session prompt.
 
 ### Changed
 

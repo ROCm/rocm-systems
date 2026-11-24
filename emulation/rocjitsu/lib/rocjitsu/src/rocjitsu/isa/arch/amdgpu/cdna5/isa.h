@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "util/bitfield.h"
 
@@ -77,7 +78,7 @@ struct Isa : amdgpu::RdnaIsaBase {
   // independently by the documented VGPR-MSB fields.
   static constexpr bool MODE_HAS_GPR_IDX_EN = false;
   static constexpr uint32_t MAX_ADDRESSABLE_VGPRS_PER_WF =
-      isa_properties(ROCJITSU_CODE_ARCH_CDNA5).max_addressable_vgprs_per_wf;
+      isa_properties(rocjitsu::IsaFamily::Cdna5).max_addressable_vgprs_per_wf;
 
   static std::optional<uint32_t> resolved_vgpr_offset(OperandType opr_type, int ev);
   static std::optional<uint32_t> resolved_vgpr_offset(const amdgpu::Wavefront &wf,
@@ -90,7 +91,7 @@ struct Isa : amdgpu::RdnaIsaBase {
 
 namespace rocjitsu {
 
-template <> struct IsaTrait<ROCJITSU_CODE_ARCH_CDNA5> {
+template <> struct IsaTrait<rocjitsu::IsaFamily::Cdna5> {
   using type = cdna5::Isa;
 };
 

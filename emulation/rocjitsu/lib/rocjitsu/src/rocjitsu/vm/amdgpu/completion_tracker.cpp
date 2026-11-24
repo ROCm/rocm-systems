@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/completion_tracker.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 
@@ -467,7 +468,7 @@ VmAccessOutcome CompletionTracker::advance_signal_publication(DispatchEntry &ent
     case CompletionPublicationPhase::CaptureAccess: {
       if (!state.signal_access)
         return VmAccessOutcome::Faulted;
-      const auto arch = cus_.empty() ? ROCJITSU_CODE_ARCH_INVALID : cus_.front()->arch();
+      const auto arch = cus_.empty() ? rocjitsu::IsaFamily::Invalid : cus_.front()->arch();
       state.start_timestamp = entry.profiling_start_timestamp;
       if (state.start_timestamp == 0)
         state.start_timestamp = gpu_timestamp(arch);

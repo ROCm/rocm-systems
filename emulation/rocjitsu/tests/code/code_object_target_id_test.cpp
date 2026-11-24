@@ -9,8 +9,7 @@
 ///        basic_block_list_create) accepts each target by exercising the
 ///        provider-selected target registry in rj_code.cpp.
 ///
-/// Covers the only currently supported targets (gfx90a, gfx942, gfx950, gfx1100,
-/// gfx1200, gfx1201, gfx1250, gfx1251) plus an unknown-machine-flag case to
+/// Covers the registered AMDGPU targets plus an unknown-machine-flag case to
 /// guard the INVALID sentinel and prevent a future edit from silently aliasing
 /// one target onto another.
 
@@ -20,6 +19,7 @@
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "scoped_temp.h"
 
 #include <gtest/gtest.h>
@@ -151,7 +151,7 @@ void expect_c_api_accepts_target(uint32_t mach_flag, rj_code_target_id_t target)
   // The returned code-object handle must keep its executable storage alive.
   rj_code_executable_destroy(exec);
 
-  auto pooled_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  auto pooled_decoder = Decoder::create(rocjitsu::IsaFamily::Cdna3);
   ASSERT_NE(pooled_decoder, nullptr);
   pooled_decoder->enable_pool();
 
@@ -307,6 +307,20 @@ TEST(GfxCodeObjectTargets, LoadsGfx1100FromMachineFlags) {
   expect_machine_flag_maps_to_target(EF_AMDGPU_MACH_AMDGCN_GFX1100, ROCJITSU_CODE_TARGET_GFX1100);
 }
 
+TEST(GfxCodeObjectTargets, AddedConcreteTargetsSupportCodeObjectApis) {
+  constexpr std::array targets{
+      std::pair{EF_AMDGPU_MACH_AMDGCN_GFX908, ROCJITSU_CODE_TARGET_GFX908},
+      std::pair{EF_AMDGPU_MACH_AMDGCN_GFX1010, ROCJITSU_CODE_TARGET_GFX1010},
+      std::pair{EF_AMDGPU_MACH_AMDGCN_GFX1030, ROCJITSU_CODE_TARGET_GFX1030},
+      std::pair{EF_AMDGPU_MACH_AMDGCN_GFX1150, ROCJITSU_CODE_TARGET_GFX1150},
+  };
+  for (const auto &[machine, target] : targets) {
+    SCOPED_TRACE(machine);
+    expect_machine_flag_maps_to_target(machine, target);
+    expect_c_api_accepts_target(machine, target);
+  }
+}
+
 TEST(GfxCodeObjectTargets, LoadsGfx1100FromHipFatbinMetadata) {
   const std::vector<uint8_t> image = make_minimal_amdgpu_elf(EF_AMDGPU_MACH_AMDGCN_GFX1100);
   const AmdGpuCodeObject object(image.data(), image.size(), "hip", "gfx1100");
@@ -390,15 +404,14 @@ TEST(GfxCodeObjectTargets, CApiAcceptsGfx1251ForBasicBlockList) {
   expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX1251, ROCJITSU_CODE_TARGET_GFX1251);
 }
 
-TEST(GfxCodeObjectTargets, CApiDecoderCacheKeepsGfx1250AndGfx1251Distinct) {
+TEST(GfxCodeObjectTargets, CApiListDecodingKeepsGfx1250AndGfx1251Distinct) {
   constexpr std::array<uint32_t, 2> kGfx1251PackedAdd = {
       0xCC4B4004u,
       0x1A021908u,
   };
 
-  // Populate the thread-local cache with gfx1251 first. A cache keyed only by
-  // the shared CDNA5 descriptor would then incorrectly accept this encoding
-  // for gfx1250.
+  // Concrete target features must remain distinct even though both targets
+  // use the same CDNA5 decoder implementation.
   rj_status_t status{};
   ASSERT_TRUE(c_api_instruction_list_status(status, EF_AMDGPU_MACH_AMDGCN_GFX1251,
                                             ROCJITSU_CODE_TARGET_GFX1251, kGfx1251PackedAdd));
@@ -433,6 +446,12 @@ TEST(GfxCodeObjectTargets, CApiRejectsConcreteTargetMismatchForBothListBuilders)
                                   ROCJITSU_CODE_TARGET_GFX1250));
   EXPECT_EQ(legacy_fallback.instructions, ROCJITSU_STATUS_SUCCESS);
   EXPECT_EQ(legacy_fallback.basic_blocks, ROCJITSU_STATUS_SUCCESS);
+
+  CApiListStatuses non_gpu{};
+  ASSERT_TRUE(c_api_list_statuses(non_gpu, /*mach_flag=*/0x1234, ROCJITSU_CODE_TARGET_INVALID,
+                                  ROCJITSU_CODE_TARGET_RV64I));
+  EXPECT_EQ(non_gpu.instructions, ROCJITSU_STATUS_INVALID_ARGUMENT);
+  EXPECT_EQ(non_gpu.basic_blocks, ROCJITSU_STATUS_INVALID_ARGUMENT);
 }
 
 TEST(GfxCodeObjectTargets, CApiContainsInvalidInstructionFromListBuilders) {

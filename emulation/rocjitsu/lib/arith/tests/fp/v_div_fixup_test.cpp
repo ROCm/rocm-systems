@@ -4,6 +4,7 @@
 // Tests for division fixup, exceptional operands, and FP-status expectations.
 
 #include "fp/div_fixup_test.h"
+#include "fp/div_omod_gfx11_test.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 
 #include <gtest/gtest.h>
@@ -192,8 +193,8 @@ TEST(FpDivFixupGfx11, UnsupportedStatusBeforeOperandAccess) {
   }
 }
 
-// Active RDNA3 FP16 OMOD resolves Compatibility to loose; strict rejection is transactional,
-// including empty EXEC. IEEE clear keeps the selected sNaN under OMOD.
+// Active RDNA3 FP16 OMOD runs the shared model in Compatibility and strict exact; mode 3 rejection
+// is transactional, including empty EXEC. IEEE clear keeps the selected sNaN under OMOD.
 TEST(FpDivFixupF16, Rdna3OmodQualification) {
   using namespace rocjitsu::arith::test;
   for (uint64_t cpu : supported_cpu_levels()) {
@@ -207,8 +208,6 @@ TEST(FpDivFixupF16, Rdna3OmodQualification) {
       const uint64_t flags = cpu | semantics | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
       const int expected = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
                                ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
-                           : semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
-                               ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS
                                : RJ_ARITH_SUCCESS;
       uint32_t status = 0x40;
       for (bool wide : {false, true}) {
@@ -348,4 +347,110 @@ TEST(FpDivFixupF16Gfx11, CapturedOverflowOmodAndNan) {
       }
     }
   }
+}
+
+namespace {
+
+using rocjitsu::arith::test::DivOmodGfx11;
+
+// W7900 (gfx1100, ROCm 7.2) wave32 lanes captured on 2026-11-18 with the omod3 probe, the
+// hardware MODE word written per lane (F16 rounding in bits 3:2, F16 denormals in 7:6, DX10_CLAMP
+// bit 8, IEEE bit 9, FP16_OVFL bit 23). OMOD is active only with output denormals flushed and IEEE
+// clear. The result sign is B^C, not P's. FP16_OVFL saturates the fixed-up value before OMOD, and
+// an OMOD overflow follows the guest rounding; a denormal quotient becomes +0 before the scale,
+// the smallest normal halved keeps its sign; the selected sNaN passes through; CLAMP applies last.
+const DivOmodGfx11 omod_lanes_f16[] = {
+    {"mul2 overflow nearest", 0x100, 0x7bff, 0x3c00, 0x3c00, 0x7c00, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 overflow round up", 0x104, 0x7bff, 0x3c00, 0x3c00, 0x7c00, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 overflow round down", 0x108, 0x7bff, 0x3c00, 0x3c00, 0x7bff, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 overflow toward zero", 0x10c, 0x7bff, 0x3c00, 0x3c00, 0x7bff, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 overflow saturates with FP16_OVFL", 0x800100, 0x7bff, 0x3c00, 0x3c00, 0x7bff,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 overflow saturates with FP16_OVFL round up", 0x800104, 0x7bff, 0x3c00, 0x3c00, 0x7bff,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 overflow takes the sign of B^C", 0x100, 0xfbff, 0x3c00, 0x3c00, 0x7c00,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 with input denormals allowed", 0x140, 0x7bff, 0x3c00, 0x3c00, 0x7c00,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 ignored with output denormals", 0x180, 0x7bff, 0x3c00, 0x3c00, 0x7bff,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 ignored with IEEE", 0x300, 0x7bff, 0x3c00, 0x3c00, 0x7bff, RJ_ARITH_ALU_OMOD_2},
+    {"mul4 overflow nearest", 0x100, 0x7800, 0x3c00, 0x3c00, 0x7c00, RJ_ARITH_ALU_OMOD_4},
+    {"mul4 overflow toward zero", 0x10c, 0x7800, 0x3c00, 0x3c00, 0x7bff, RJ_ARITH_ALU_OMOD_4},
+    {"mul4 negative overflow nearest", 0x100, 0x7bff, 0xbc00, 0x3c00, 0xfc00, RJ_ARITH_ALU_OMOD_4},
+    {"mul4 negative ignored with output denormals", 0x180, 0x7bff, 0xbc00, 0x3c00, 0xfbff,
+     RJ_ARITH_ALU_OMOD_4},
+    {"div2 flushes the smallest normal", 0x100, 0x0400, 0x3c00, 0x3c00, 0x0000,
+     RJ_ARITH_ALU_OMOD_HALF},
+    {"div2 keeps the flushed sign of B^C", 0x100, 0x0400, 0xbc00, 0x3c00, 0x8000,
+     RJ_ARITH_ALU_OMOD_HALF},
+    {"mul2 of a negative normal", 0x100, 0x0401, 0xbc00, 0x3c00, 0x8801, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 of a denormal quotient is +0", 0x140, 0x0001, 0x3c00, 0x3c00, 0x0000,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 of the largest denormal quotient is +0", 0x140, 0x03ff, 0x3c00, 0x3c00, 0x0000,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 of the recovered overflow nearest", 0x100, 0x7c00, 0x3c00, 0x3c00, 0x7c00,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 of the recovered overflow with FP16_OVFL", 0x800100, 0x7c00, 0x3c00, 0x3c00, 0x7bff,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 of the recovered overflow toward zero", 0x10c, 0x7c00, 0x3c00, 0x3c00, 0x7bff,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 keeps the selected signaling NaN", 0x100, 0x3c00, 0x7c01, 0x3c00, 0x7c01,
+     RJ_ARITH_ALU_OMOD_2},
+    {"IEEE quiets the selected NaN and ignores mul2", 0x300, 0x3c00, 0x7c01, 0x3c00, 0x7e01,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 of a division by zero", 0x100, 0x3c00, 0x0000, 0x3c00, 0x7c00, RJ_ARITH_ALU_OMOD_2},
+    {"div2 of a zero numerator", 0x100, 0x3c00, 0x3c00, 0x0000, 0x0000, RJ_ARITH_ALU_OMOD_HALF},
+    {"mul2 of flushed denormal operands is NaN", 0x100, 0x0001, 0x0001, 0x0001, 0xfe00,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 with denormal operands kept", 0x140, 0x0400, 0x0001, 0x0001, 0x0800,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 clamp after overflow", 0x100, 0x7bff, 0x3c00, 0x3c00, 0x3c00,
+     RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP},
+    {"mul2 clamp of a negative overflow", 0x100, 0x7bff, 0xbc00, 0x3c00, 0x0000,
+     RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP},
+    {"mul2 clamp of a NaN with DX10_CLAMP", 0x100, 0x3c00, 0x7c01, 0x3c00, 0x0000,
+     RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP},
+    {"mul2 clamp keeps a NaN without DX10_CLAMP", 0x000, 0x3c00, 0x7c01, 0x3c00, 0x7c01,
+     RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP},
+};
+
+} // namespace
+
+// Active RDNA3 OMOD is accepted in strict exact and reproduces the W7900 lanes at every CPU level.
+TEST(FpDivFixupF16Gfx11, CapturedOutputModifiers) {
+  using rocjitsu::arith::test::check_div_fixup_f16_omod_gfx11;
+  check_div_fixup_f16_omod_gfx11<32>(rj_arith_v_div_fixup_f16_w32, omod_lanes_f16);
+  check_div_fixup_f16_omod_gfx11<64>(rj_arith_v_div_fixup_f16_w64, omod_lanes_f16);
+}
+
+// W7900 wave32 capture at MODE 0x10c (toward zero, flushed): lane 19 alone holds the largest finite
+// quotient, which mul:2 overflows to max-finite while every other lane doubles 1.0.
+template <int Lanes, typename Call> static void check_omod_overflow_lane(Call call) {
+  using namespace rocjitsu::arith::test;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics :
+         {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
+      Registers<4, Lanes> r;
+      for (int lane = 0; lane < Lanes; ++lane) {
+        r.v[0][lane] = lane % 32 == 19 ? 0x7bffU : 0x3c00U;
+        r.v[1][lane] = r.v[2][lane] = 0x3c00U;
+        r.v[3][lane] = 0xa5a5a5a5U;
+      }
+      ASSERT_EQ(call(cpu | semantics | RJ_ARITH_FP_ROUND_ZERO | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                         RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                     ~WaveMask<Lanes>(0), RJ_ARITH_ALU_OMOD_2, r.v + 3, r.v, r.v + 1, r.v + 2,
+                     nullptr),
+                RJ_ARITH_SUCCESS);
+      for (int lane = 0; lane < Lanes; ++lane) {
+        EXPECT_EQ(r.v[3][lane], lane % 32 == 19 ? 0xa5a57bffU : 0xa5a54000U)
+            << std::hex << cpu << '/' << semantics << " lane " << std::dec << lane;
+      }
+    }
+  }
+}
+
+TEST(FpDivFixupF16Gfx11, OmodOverflowLaneKeepsItsOperands) {
+  check_omod_overflow_lane<32>(rj_arith_v_div_fixup_f16_w32);
+  check_omod_overflow_lane<64>(rj_arith_v_div_fixup_f16_w64);
 }

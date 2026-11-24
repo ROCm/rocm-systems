@@ -25,11 +25,11 @@ using Digest = std::array<uint8_t, 32>;
 // and internal API changes alone do not require a new token; no negotiation is
 // performed between producers and consumers.
 inline constexpr std::array<uint8_t, 16> kProducerContract = {
-    0x96, 0x2b, 0x01, 0xa7, 0x49, 0xe2, 0x47, 0x1e, 0x84, 0xef, 0x49, 0xea, 0xa0, 0x0c, 0xf1, 0x83};
+    0x97, 0x2b, 0x01, 0xa7, 0x49, 0xe2, 0x47, 0x1e, 0x84, 0xef, 0x49, 0xea, 0xa0, 0x0c, 0xf1, 0x83};
 // Canonical hash input for the manifest's options identity. Changing any byte
 // changes the identity required by artifact and capture admission.
 inline constexpr std::string_view kMvpOptions =
-    "native-lds-widths=2,4,8,16;gfx1250-epoch-workgroup-barriers;single-block-loop;"
+    "native-lds-widths=2,4,8,16;native-lds-epoch-workgroup-barriers;single-block-loop;"
     "loop-lane-bank=ctz-mod4;sync-"
     "quota=16;workgroup-id=entry-scalar;workgroups-1d=1..16;mask64;address-groups-per-"
     "site=4;collision=on";
@@ -217,8 +217,9 @@ public:
   bool operator==(const EntryFacts &) const = default;
 };
 
-/// @brief A qualified gfx1250 wave32 workgroup barrier with implicit identity -1.
-/// @details The original drain precedes signal; signal/wait share a block without
+/// @brief A qualified full-workgroup barrier with an implicit identity.
+/// @details Legacy barriers use the same signal/wait position; split barriers use identity -1.
+/// The original drain precedes signal; signal/wait share a block without
 /// intervening memory operations or barriers. Acyclic groups dominate every exit and execute once
 /// per wave. Loop groups execute once per iteration of the qualified block, which may be bypassed.
 /// Completion follows the unchanged scalar wait, independently of EXEC; access positions refer to

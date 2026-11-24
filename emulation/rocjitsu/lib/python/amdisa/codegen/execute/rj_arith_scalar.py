@@ -224,8 +224,30 @@ SCALAR_NAMES = (
 
 
 # Integer and FP families are enabled independently by architecture.
-CDNA_INTEGER_NAMES = (
-    SCALAR.keys() | COMPARISONS.keys() | IMMEDIATE.keys() | BITSET.keys()
+INTEGER_NAMES = SCALAR.keys() | COMPARISONS.keys() | IMMEDIATE.keys() | BITSET.keys()
+
+
+# Operations confined to one 32-bit SGPR per operand and result.
+WORD_INTEGER_NAMES = (
+    {
+        name
+        for name, shape in SCALAR.items()
+        if shape.result_bits == 32 and max(shape.input_bits) <= 32
+    }
+    | {name for name, bits in COMPARISONS.items() if max(bits) <= 32}
+    | IMMEDIATE.keys()
+    | {name for name, bits in BITSET.items() if bits == 32}
+)
+
+# Paired SGPR inputs/results, including 32-bit counts of 64-bit operands.
+WIDE_INTEGER_NAMES = (
+    {
+        name
+        for name, shape in SCALAR.items()
+        if shape.result_bits == 64 or max(shape.input_bits) == 64
+    }
+    | {name for name, bits in COMPARISONS.items() if max(bits) == 64}
+    | {name for name, bits in BITSET.items() if bits == 64}
 )
 
 
@@ -247,9 +269,11 @@ GFX1250_CONVERSION_NAMES = {
 def supports_scalar(arch: str, mnemonic: str) -> bool:
     if arch in ('rdna3', 'rdna4'):
         return mnemonic in SCALAR_NAMES
+    if arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'):
+        return mnemonic in WORD_INTEGER_NAMES or mnemonic in WIDE_INTEGER_NAMES
     if arch not in ('cdna3', 'cdna4', 'cdna5'):
         return False
-    if mnemonic in CDNA_INTEGER_NAMES | MOVES | RELATIVE_MOVES | EXEC_UPDATES:
+    if mnemonic in INTEGER_NAMES | MOVES | RELATIVE_MOVES | EXEC_UPDATES:
         return True
     if arch == 'cdna5':
         return (

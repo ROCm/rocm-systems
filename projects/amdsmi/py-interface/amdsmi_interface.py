@@ -828,6 +828,28 @@ class AmdSmiPowerCapType(IntEnum):
     PPT1 = amdsmi_wrapper.AMDSMI_POWER_CAP_TYPE_PPT1
 
 
+class AmdSmiHawkInsertionPriority(IntEnum):
+    OPPORTUNISTIC = amdsmi_wrapper.AMDSMI_HAWK_INSERTION_PRIORITY_OPPORTUNISTIC
+    GUARANTEED = amdsmi_wrapper.AMDSMI_HAWK_INSERTION_PRIORITY_GUARANTEED
+    DYNAMIC = amdsmi_wrapper.AMDSMI_HAWK_INSERTION_PRIORITY_DYNAMIC
+
+
+class AmdSmiPowerStabilizationParamId(IntEnum):
+    ENABLE = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_ENABLE
+    POWER_FLOOR = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_POWER_FLOOR
+    DELAY = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_DELAY
+    INSERTION_PRIORITY = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_INSERTION_PRIORITY
+    RAMP_ENABLE = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_ENABLE
+    RAMP_MAX_RAMP_UP_RATE = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE
+    RAMP_MAX_RAMP_DOWN_RATE = (
+        amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE
+    )
+    RAMP_MIN_TIME_AT_POWER_FLOOR = (
+        amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MIN_TIME_AT_POWER_FLOOR
+    )
+    RAMP_STOP_DELAY = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY
+
+
 class AmdSmiNpmBalancingMode(IntEnum):
     INVALID = amdsmi_wrapper.AMDSMI_NPM_BALANCING_MODE_INVALID
     POWER_BALANCING = amdsmi_wrapper.AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING
@@ -4888,6 +4910,48 @@ def amdsmi_topo_get_link_type(
     return {"hops": hops_64.value, "type": type_32.value}
 
 
+def amdsmi_get_gpu_cpu_links(processor_handle: processor_handle_t):
+    """Return this GPU's directly-connected CPU link(s), of any link type, via KFD io_link only.
+
+    An empty list is a normal, successful result on GPUs that have no CPU
+    io_link at all -- it means "no such links exist", not a failure.
+
+    Returns:
+        list[dict]: one entry per connected CPU, each
+        ``{"package_id": int, "link_type": int}`` where
+        ``package_id`` is the real physical socket id of the connected CPU
+        (not a NUMA node id -- a package can expose multiple NUMA nodes) and
+        ``link_type`` is a value of :class:`amdsmi_link_type_t` (e.g. XGMI,
+        PCIE). Callers that only care about one link type should filter the
+        returned list by ``link_type`` themselves.
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    num_cpu_links = ctypes.c_uint32(0)
+    null_ptr = ctypes.POINTER(amdsmi_wrapper.amdsmi_cpu_link_t)()
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_gpu_cpu_links")(
+            processor_handle, ctypes.byref(num_cpu_links), null_ptr
+        )
+    )
+
+    cpu_links = (amdsmi_wrapper.amdsmi_cpu_link_t * num_cpu_links.value)()
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_gpu_cpu_links")(
+            processor_handle, ctypes.byref(num_cpu_links), cpu_links
+        )
+    )
+
+    links = []
+    # num_cpu_links.value may have grown since the first call (live topology,
+    # not a snapshot), past the capacity cpu_links was allocated with.
+    for i in range(min(num_cpu_links.value, len(cpu_links))):
+        links.append({"package_id": cpu_links[i].package_id, "link_type": cpu_links[i].link_type})
+
+    return links
+
+
 def amdsmi_get_link_topology(
     processor_handle_src: processor_handle_t, processor_handle_dst: processor_handle_t
 ):
@@ -8059,3 +8123,85 @@ def amdsmi_reset_ttm_pages_limit():
         AmdSmiException: If the function fails
     """
     _check_res(amdsmi_wrapper.amdsmi_reset_ttm_pages_limit())
+
+
+def amdsmi_get_power_stabilization_info(processor_handle: processor_handle_t) -> Dict[str, Any]:
+    """
+    Get Power Stabilization (HAWK dummy-compute insertion plus Ramp Management) info.
+
+    Args:
+        processor_handle: GPU processor handle
+
+    Returns:
+        dict: Dictionary with keys matching amdsmi_power_stabilization_info_t
+        fields: host_control_enabled, enabled, power_floor, delay,
+        insertion_priority (AmdSmiHawkInsertionPriority), ramp_enabled,
+        ramp_max_ramp_up_rate, ramp_max_ramp_down_rate,
+        ramp_min_time_at_power_floor, ramp_stop_delay
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is invalid
+        AmdSmiException: If the function fails
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    info = amdsmi_wrapper.amdsmi_power_stabilization_info_t()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_power_stabilization_info(processor_handle, ctypes.byref(info))
+    )
+
+    return {
+        "host_control_enabled": info.host_control_enabled,
+        "enabled": info.enabled,
+        "power_floor": info.power_floor,
+        "delay": info.delay,
+        "insertion_priority": AmdSmiHawkInsertionPriority(info.insertion_priority),
+        "ramp_enabled": info.ramp_enabled,
+        "ramp_max_ramp_up_rate": info.ramp_max_ramp_up_rate,
+        "ramp_max_ramp_down_rate": info.ramp_max_ramp_down_rate,
+        "ramp_min_time_at_power_floor": info.ramp_min_time_at_power_floor,
+        "ramp_stop_delay": info.ramp_stop_delay,
+    }
+
+
+def amdsmi_set_power_stabilization_param(
+    processor_handle: processor_handle_t, param_id: AmdSmiPowerStabilizationParamId, value: int
+) -> None:
+    """
+    Set a single Power Stabilization parameter.
+
+    Args:
+        processor_handle: GPU processor handle
+        param_id: Parameter to set
+        value: New value, written as a signed 64-bit integer -- every
+        param_id, including the two ramp rates despite being a %PL/sec
+        rate, is an int64_t (this parameter's sysfs node cannot accept
+        floating-point values).
+
+    Raises:
+        AmdSmiParameterException: If processor_handle, param_id, or value is
+        invalid, including an int64 value out of signed 64-bit range
+        AmdSmiException: If the function fails (AMDSMI_STATUS_NOT_SUPPORTED,
+        AMDSMI_STATUS_NO_PERM, AMDSMI_STATUS_INVAL, or AMDSMI_STATUS_FILE_ERROR)
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    if not isinstance(param_id, AmdSmiPowerStabilizationParamId):
+        raise AmdSmiParameterException(param_id, AmdSmiPowerStabilizationParamId)
+
+    if isinstance(value, bool) or not isinstance(value, int):
+        # bool is a subclass of int; reject it explicitly rather than
+        # silently writing 0/1 (same idiom as amdsmi_configure_ampp_profile's
+        # field_value check).
+        raise AmdSmiParameterException(value, int)
+
+    if not -(2**63) <= value < 2**63:
+        raise AmdSmiParameterException(
+            value, ctypes.c_int64, msg=f"value {value!r} does not fit in a signed 64-bit integer"
+        )
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_power_stabilization_param(processor_handle, param_id, value)
+    )

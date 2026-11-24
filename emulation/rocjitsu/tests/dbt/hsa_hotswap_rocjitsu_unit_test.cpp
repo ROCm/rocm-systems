@@ -5,10 +5,12 @@
 
 #include "hsa/hsa_api_trace.h"
 #include "rocjitsu/code/amdgpu_elf.h"
-#include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
+#include "rocjitsu/code/dbt/gfx1250_b0_to_a0_library.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "scoped_temp.h"
+#include "shell_quote.h"
 #include "support/gfx1250_test_code_object.h"
 
 #include <array>
@@ -40,7 +42,7 @@ extern "C" void rj_test_clear_retained_storage();
 extern "C" void rj_test_log_translation(uint64_t source_id, size_t changed);
 extern "C" void
 rj_test_log_translation_diagnostic(uint64_t source_id,
-                                   const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic);
+                                   const rocjitsu::Gfx1250B0ToA0DiagnosticView *diagnostic);
 extern "C" uint64_t rj_test_translation_count();
 extern "C" uint64_t rj_test_translation_memo_bytes();
 extern "C" void rj_test_set_translation_memo_capacity(uint64_t bytes);
@@ -248,29 +250,7 @@ std::vector<uint8_t> make_invalid_gfx1250_elf() {
   return image;
 }
 
-/// @brief A directory that exists for one test case.
-class ScopedTempDirectory {
-public:
-  ScopedTempDirectory() {
-    char pattern[] = "/tmp/rocjitsu-hotswap-dump-XXXXXX";
-    const char *created = mkdtemp(pattern);
-    if (created != nullptr)
-      path_ = created;
-  }
-  ScopedTempDirectory(const ScopedTempDirectory &) = delete;
-  ScopedTempDirectory &operator=(const ScopedTempDirectory &) = delete;
-  ~ScopedTempDirectory() {
-    if (path_.empty())
-      return;
-    std::error_code error;
-    std::filesystem::remove_all(path_, error);
-  }
-
-  const std::string &path() const { return path_; }
-
-private:
-  std::string path_;
-};
+using rocjitsu::test::ScopedTempDirectory;
 
 size_t count_occurrences(const std::string &text, std::string_view needle) {
   size_t count = 0;
@@ -290,7 +270,7 @@ std::vector<uint8_t> make_invalid_gfx1250_elf(uint8_t salt) {
 void expect_failure_dump(const std::string &log_text, const std::vector<uint8_t> &source) {
   std::smatch match;
   const std::regex path_pattern(
-      R"(path=([^;\s]+); please file a bug report and attach this code object)");
+      R"(path=([^\n]+); please file a bug report and attach this code object)");
   ASSERT_TRUE(std::regex_search(log_text, match, path_pattern)) << log_text;
   const std::string path = match[1].str();
   std::ifstream input(path, std::ios::binary);
@@ -378,8 +358,8 @@ protected:
 
   // Every case runs with these cleared and gets whatever the process had back,
   // so one case cannot decide what a later one observes.
-  static constexpr std::array<const char *, 4> kIsolatedEnvironment = {
-      "HSA_HOTSWAP_VERBOSE", "HSA_HOTSWAP_DUMP_SOURCE", "HSA_HOTSWAP_DUMP_DIR", "TMPDIR"};
+  static constexpr std::array<const char *, 3> kIsolatedEnvironment = {
+      "HSA_HOTSWAP_VERBOSE", "HSA_HOTSWAP_DUMP_SOURCE", "HSA_HOTSWAP_DUMP_DIR"};
 
   FakeApi api;
   std::vector<std::pair<const char *, std::optional<std::string>>> saved_environment_;
@@ -535,7 +515,7 @@ TEST_F(HsaHotswapHookTest, TranslationFailureDoesNotLoadOrRetain) {
       api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
       HSA_STATUS_SUCCESS);
   ScopedTempDirectory capture_directory;
-  ASSERT_FALSE(capture_directory.path().empty());
+  ASSERT_TRUE(capture_directory.initialize("rj-hotswap-dump-"));
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
   testing::internal::CaptureStderr();
@@ -573,7 +553,7 @@ TEST_F(HsaHotswapHookTest, RendersTranslatorDiagnosticsAndDumpsFailedSource) {
       HSA_STATUS_SUCCESS);
 
   ScopedTempDirectory capture_directory;
-  ASSERT_FALSE(capture_directory.path().empty());
+  ASSERT_TRUE(capture_directory.initialize("rj-hotswap-dump-"));
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
   testing::internal::CaptureStderr();
@@ -598,7 +578,7 @@ TEST_F(HsaHotswapHookTest, RendersTranslatorDiagnosticsAndDumpsFailedSource) {
 }
 
 TEST_F(HsaHotswapHookTest, DiagnosticPrefixMatchesWarningSeverity) {
-  const rj_gfx1250_b0_to_a0_diagnostic_t diagnostic{
+  const rocjitsu::Gfx1250B0ToA0DiagnosticView diagnostic{
       "warning", "translator-data-only", 0, 0, "", "test warning", 0,
   };
   testing::internal::CaptureStderr();
@@ -612,7 +592,7 @@ TEST_F(HsaHotswapHookTest, DiagnosticPrefixMatchesWarningSeverity) {
 }
 
 TEST_F(HsaHotswapHookTest, RendersRequiredWorkDiagnostic) {
-  const rj_gfx1250_b0_to_a0_diagnostic_t diagnostic{
+  const rocjitsu::Gfx1250B0ToA0DiagnosticView diagnostic{
       "error", "translator-expand-missing", 1, 8, "v_test", "required step", 1,
   };
   testing::internal::CaptureStderr();
@@ -662,7 +642,7 @@ TEST_F(HsaHotswapHookTest, CapturedSourceHonorsTheConfiguredDirectory) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
   ScopedTempDirectory directory;
-  ASSERT_FALSE(directory.path().empty());
+  ASSERT_TRUE(directory.initialize("rj-hotswap-dump-"));
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", directory.path().c_str(), 1), 0);
 
@@ -678,7 +658,7 @@ TEST_F(HsaHotswapHookTest, CapturedSourceHonorsTheConfiguredDirectory) {
 
   std::smatch match;
   const std::regex path_pattern(
-      R"(path=([^;\s]+); please file a bug report and attach this code object)");
+      R"(path=([^\n]+); please file a bug report and attach this code object)");
   ASSERT_TRUE(std::regex_search(log_text, match, path_pattern)) << log_text;
   EXPECT_EQ(match[1].str().rfind(directory.path() + "/", 0), 0u) << match[1].str();
   expect_failure_dump(log_text, source);
@@ -688,7 +668,7 @@ TEST_F(HsaHotswapHookTest, RepeatedEnvironmentalFailuresCaptureOneArtifact) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
   ScopedTempDirectory capture_directory;
-  ASSERT_FALSE(capture_directory.path().empty());
+  ASSERT_TRUE(capture_directory.initialize("rj-hotswap-dump-"));
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
   constexpr size_t kLoads = 8;
@@ -717,7 +697,7 @@ TEST_F(HsaHotswapHookTest, AnOutOfResourcesFailureCapturesNothing) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
   ScopedTempDirectory capture_directory;
-  ASSERT_FALSE(capture_directory.path().empty());
+  ASSERT_TRUE(capture_directory.initialize("rj-hotswap-dump-"));
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
   rj_test_force_next_translation_status(3 /* ROCJITSU_STATUS_OUT_OF_RESOURCES */);
@@ -759,7 +739,7 @@ TEST_F(HsaHotswapHookTest, EnablingCaptureAfterAHintStillProducesTheArtifact) {
   ASSERT_EQ(rj_test_dump_path_count(), 0u);
 
   ScopedTempDirectory capture_directory;
-  ASSERT_FALSE(capture_directory.path().empty());
+  ASSERT_TRUE(capture_directory.initialize("rj-hotswap-dump-"));
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
   rj_test_force_next_translation_status(1 /* ROCJITSU_STATUS_ERROR */);
@@ -794,7 +774,7 @@ TEST_F(HsaHotswapHookTest, CorrectingTheCaptureDirectoryRetriesTheArtifact) {
   // A capture that could not be written must not spend the source's slot: the
   // operator fixes the destination and the next failure produces the artifact.
   ScopedTempDirectory directory;
-  ASSERT_FALSE(directory.path().empty());
+  ASSERT_TRUE(directory.initialize("rj-hotswap-dump-"));
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", directory.path().c_str(), 1), 0);
   rj_test_force_next_translation_status(1 /* ROCJITSU_STATUS_ERROR */);
   testing::internal::CaptureStderr();
@@ -809,11 +789,11 @@ TEST_F(HsaHotswapHookTest, CaptureFallsBackToTmpdirWhenNoDirectoryIsNamed) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
   ScopedTempDirectory directory;
-  ASSERT_FALSE(directory.path().empty());
+  ASSERT_TRUE(directory.initialize("rj-hotswap-dump-"));
   // HSA_HOTSWAP_DUMP_DIR stays unset: TMPDIR is the next choice, and /tmp only
   // after that.
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
-  ASSERT_EQ(setenv("TMPDIR", directory.path().c_str(), 1), 0);
+  const rocjitsu::test::ScopedEnvironmentVariable tmpdir("TMPDIR", directory.path());
 
   testing::internal::CaptureStderr();
   EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
@@ -821,7 +801,7 @@ TEST_F(HsaHotswapHookTest, CaptureFallsBackToTmpdirWhenNoDirectoryIsNamed) {
 
   std::smatch match;
   const std::regex path_pattern(
-      R"(path=([^;\s]+); please file a bug report and attach this code object)");
+      R"(path=([^\n]+); please file a bug report and attach this code object)");
   ASSERT_TRUE(std::regex_search(log_text, match, path_pattern)) << log_text;
   EXPECT_EQ(match[1].str().rfind(directory.path() + "/", 0), 0u) << match[1].str();
   expect_failure_dump(log_text, source);
@@ -830,7 +810,7 @@ TEST_F(HsaHotswapHookTest, CaptureFallsBackToTmpdirWhenNoDirectoryIsNamed) {
 TEST_F(HsaHotswapHookTest, CaptureStopsAtTheSourceCapAndSaysWhy) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   ScopedTempDirectory capture_directory;
-  ASSERT_FALSE(capture_directory.path().empty());
+  ASSERT_TRUE(capture_directory.initialize("rj-hotswap-dump-"));
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
   // kMaxCapturedSources in the hook. One more source than the registry holds.
@@ -1714,50 +1694,22 @@ TEST_F(HsaHotswapMemoTest, ReuseIsReportedAgainstTheSameSourceObject) {
 #endif
 
 #if defined(GFX1250_B0_TO_A0_FIXTURE) && defined(RJ_PRETRANSLATE_TOOL)
-/// @brief A private pre-translated tier for one test.
-///
-/// @details A failed mkdtemp points the store at a path that cannot exist rather
-/// than passing nullptr, which would restore the REAL install tier: on a machine
-/// where someone had pre-translated, a test could then pass without ever touching
-/// its own directory.
-class ScopedPretranslationRoot {
-public:
-  static constexpr const char *kUnusableRoot = "/dev/null/rj-fixture-has-no-root";
-
-  ScopedPretranslationRoot() {
-    std::strcpy(path_, "/tmp/rj-hotswap-aot-XXXXXX");
-    if (mkdtemp(path_) == nullptr)
-      path_[0] = '\0';
-    rj_test_set_pretranslation_root(path_[0] == '\0' ? kUnusableRoot : path_);
-  }
-  ~ScopedPretranslationRoot() {
-    rj_test_set_pretranslation_root(nullptr);
-    if (path_[0] != '\0')
-      std::filesystem::remove_all(path_);
-  }
-  ScopedPretranslationRoot(const ScopedPretranslationRoot &) = delete;
-  ScopedPretranslationRoot &operator=(const ScopedPretranslationRoot &) = delete;
-
-  [[nodiscard]] bool has_root() const { return path_[0] != '\0'; }
-  [[nodiscard]] const char *path() const { return path_; }
-
-  /// @brief Re-run the tier's checks after filling its directory.
-  /// @details It opens once and holds the descriptor, so a tier populated after
-  /// the first lookup would otherwise stay closed.
-  void reopen() const { rj_test_set_pretranslation_root(path_); }
-
-private:
-  char path_[64] = {};
-};
-
 class HsaHotswapPretranslationTest : public HsaHotswapHookTest {
 protected:
   void SetUp() override {
     HsaHotswapHookTest::SetUp();
-    ASSERT_TRUE(store_root.has_root()) << "fixture could not create its private store root";
+    // TranslationStore requires a path without symlink components.
+    const auto parent = std::filesystem::canonical(std::filesystem::temp_directory_path());
+    ASSERT_TRUE(store_root.initialize("rj-hotswap-aot-", parent));
+    rj_test_set_pretranslation_root(store_root.path().c_str());
     ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
     source = read_translation_fixture();
     ASSERT_FALSE(source.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+  }
+
+  void TearDown() override {
+    HsaHotswapHookTest::TearDown();
+    rj_test_set_pretranslation_root(nullptr);
   }
 
   /// @brief Run one A0 load of @p bytes and return what reached the loader.
@@ -1783,14 +1735,17 @@ protected:
                 static_cast<std::streamsize>(bytes.size()));
       ASSERT_TRUE(out.good());
     }
-    const std::string command = std::string(RJ_PRETRANSLATE_TOOL) + " --store-root '" +
-                                store_root.path() + "' '" + input.string() + "' > /dev/null 2>&1";
+    using rocjitsu::test::shell_quote;
+    const std::string command = shell_quote(RJ_PRETRANSLATE_TOOL) + " --store-root " +
+                                shell_quote(store_root.path()) + " " + shell_quote(input.string()) +
+                                " > /dev/null 2>&1";
     ASSERT_EQ(std::system(command.c_str()), 0) << command;
     std::filesystem::remove(input);
-    store_root.reopen();
+    // Reopen the tier after populating it, since it keeps the first descriptor.
+    rj_test_set_pretranslation_root(store_root.path().c_str());
   }
 
-  ScopedPretranslationRoot store_root;
+  ScopedTempDirectory store_root;
   std::vector<uint8_t> source;
 };
 

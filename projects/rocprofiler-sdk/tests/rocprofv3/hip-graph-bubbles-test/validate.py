@@ -22,15 +22,17 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import os
 import sys
 import pytest
 
-# WSL/DXG does not expose /dev/kfd, so kernel dispatches are scheduled through the
-# host /dev/dxg path. The resulting inter-dispatch gaps reflect host scheduler
-# delays (hundreds of microseconds to tens of milliseconds), not a profiler
-# regression, so the bubble-timing check below is only meaningful on real KFD HW.
-KFD_AVAILABLE = os.path.exists("/dev/kfd")
+from bubble_gaps import (
+    KFD_AVAILABLE,
+    OUTLIER_THRESHOLD_NS,
+    group_by_launch,
+    launch_gaps,
+    outlier_gaps,
+    select_graph_kernels,
+)
 
 
 def test_kernel_trace_row_count(
@@ -124,15 +126,8 @@ def test_kernel_trace_no_bubbles(
             "reflect host scheduler delays (/dev/dxg), not a profiler regression."
         )
 
-    from collections import defaultdict
-
     # Filter to only simpleKernel dispatches (exclude BLIT kernels, etc.)
-    simple_kernel_data = [
-        row
-        for row in kernel_input_data
-        if "simpleKernel" in row.get("Kernel_Name", "")
-        or "emptyKernel" in row.get("Kernel_Name", "")
-    ]
+    simple_kernel_data = select_graph_kernels(kernel_input_data)
 
     assert len(simple_kernel_data) > 0, (
         "No simpleKernel or emptyKernel dispatches found in kernel trace data. "
@@ -140,14 +135,7 @@ def test_kernel_trace_no_bubbles(
     )
 
     # Group dispatches by Correlation_Id (each ID = one hipGraphLaunch)
-    iterations = defaultdict(list)
-
-    for row in simple_kernel_data:
-        try:
-            corr_id = int(row["Correlation_Id"])
-            iterations[corr_id].append(row)
-        except (KeyError, ValueError) as e:
-            raise ValueError(f"Failed to parse Correlation_Id from row: {row}") from e
+    iterations = group_by_launch(simple_kernel_data)
 
     # Verify we have a reasonable number of graph launches
     # Note: The profiler may batch multiple hipGraphLaunch calls under the same
@@ -166,41 +154,14 @@ def test_kernel_trace_no_bubbles(
     )
 
     # For each graph launch, check for bubbles within that execution
-    all_gaps = []
-
-    for corr_id, dispatches in iterations.items():
-        # Sort by start timestamp within this graph launch
-        sorted_dispatches = sorted(dispatches, key=lambda r: int(r["Start_Timestamp"]))
-
-        # Note: Correlation IDs may span multiple or partial graph launches,
-        # so we don't assert on the exact count per correlation ID
-
-        # Calculate gaps between consecutive dispatches within this graph launch
-        for i in range(len(sorted_dispatches) - 1):
-            try:
-                curr_end = int(sorted_dispatches[i]["End_Timestamp"])
-                next_start = int(sorted_dispatches[i + 1]["Start_Timestamp"])
-                gap = next_start - curr_end
-                all_gaps.append(gap)
-            except (KeyError, ValueError) as e:
-                raise ValueError(
-                    f"Correlation ID {corr_id}, dispatch pair {i},{i + 1}: "
-                    f"failed to parse timestamps from {sorted_dispatches[i]} and {sorted_dispatches[i + 1]}"
-                ) from e
+    all_gaps = launch_gaps(iterations)
 
     # Analyze gaps
     if not all_gaps:
         # No gaps means each iteration had only 1 kernel, which is fine
         return
 
-    all_gaps_sorted = sorted(all_gaps)
-    max_gap = max(all_gaps)
-    p99_9_gap = all_gaps_sorted[int(len(all_gaps) * 0.999)]
-
-    # Check for batching patterns (most gaps are small, but some are very large)
-    # This detects scenarios where kernels are grouped into batches with large
-    # gaps between batches, indicating a profiler regression
-    OUTLIER_THRESHOLD_NS = 50_000  # 50 microseconds
+    p99_9_gap, max_gap = outlier_gaps(all_gaps)
 
     if p99_9_gap > OUTLIER_THRESHOLD_NS:
         raise AssertionError(

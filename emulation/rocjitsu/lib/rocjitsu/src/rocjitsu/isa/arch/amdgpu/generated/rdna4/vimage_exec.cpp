@@ -22,7 +22,8 @@ namespace rocjitsu {
 namespace rdna4 {
 
 void ImageLoadVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
@@ -45,7 +46,8 @@ void ImageLoadVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageLoadMipVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
@@ -68,7 +70,8 @@ void ImageLoadMipVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageLoadPckVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
@@ -92,7 +95,8 @@ void ImageLoadPckVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageLoadPckSgnVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
@@ -117,7 +121,8 @@ void ImageLoadPckSgnVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageLoadMipPckVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
@@ -141,7 +146,8 @@ void ImageLoadMipPckVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageLoadMipPckSgnVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
@@ -166,7 +172,8 @@ void ImageLoadMipPckSgnVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageStoreVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
@@ -189,7 +196,8 @@ void ImageStoreVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageStoreMipVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
@@ -212,7 +220,8 @@ void ImageStoreMipVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageStorePckVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
@@ -236,7 +245,8 @@ void ImageStorePckVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageStoreMipPckVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
@@ -260,7 +270,8 @@ void ImageStoreMipPckVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicSwapVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->atomic_op = amdgpu::AtomicOp::SWAP;
@@ -284,7 +295,8 @@ void ImageAtomicSwapVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicCmpswapVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
@@ -308,7 +320,8 @@ void ImageAtomicCmpswapVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicAddUintVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->atomic_op = amdgpu::AtomicOp::ADD;
@@ -332,7 +345,8 @@ void ImageAtomicAddUintVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicSubUintVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->atomic_op = amdgpu::AtomicOp::SUB;
@@ -356,7 +370,8 @@ void ImageAtomicSubUintVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicMinIntVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->atomic_op = amdgpu::AtomicOp::SMIN;
@@ -380,7 +395,8 @@ void ImageAtomicMinIntVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicMinUintVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->atomic_op = amdgpu::AtomicOp::UMIN;
@@ -404,7 +420,8 @@ void ImageAtomicMinUintVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicMaxIntVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->atomic_op = amdgpu::AtomicOp::SMAX;
@@ -428,7 +445,8 @@ void ImageAtomicMaxIntVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicMaxUintVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->atomic_op = amdgpu::AtomicOp::UMAX;
@@ -452,7 +470,8 @@ void ImageAtomicMaxUintVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicAndVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->atomic_op = amdgpu::AtomicOp::AND;
@@ -476,7 +495,8 @@ void ImageAtomicAndVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicOrVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->atomic_op = amdgpu::AtomicOp::OR;
@@ -500,7 +520,8 @@ void ImageAtomicOrVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicXorVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->atomic_op = amdgpu::AtomicOp::XOR;
@@ -524,7 +545,8 @@ void ImageAtomicXorVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicIncUintVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->atomic_op = amdgpu::AtomicOp::INC;
@@ -548,7 +570,8 @@ void ImageAtomicIncUintVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicDecUintVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->atomic_op = amdgpu::AtomicOp::DEC;
@@ -598,7 +621,8 @@ void ImageBvh8IntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicAddFltVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->atomic_op = amdgpu::AtomicOp::FADD;
@@ -626,7 +650,8 @@ void ImageAtomicAddFltVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicMinFltVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->atomic_op = amdgpu::AtomicOp::FMIN;
@@ -653,7 +678,8 @@ void ImageAtomicMinFltVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicMaxFltVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->atomic_op = amdgpu::AtomicOp::FMAX;
@@ -680,7 +706,8 @@ void ImageAtomicMaxFltVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicPkAddF16Vimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->atomic_op = amdgpu::AtomicOp::PK_ADD_F16;
@@ -705,7 +732,8 @@ void ImageAtomicPkAddF16Vimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicPkAddBf16Vimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->atomic_op = amdgpu::AtomicOp::PK_ADD_BF16;

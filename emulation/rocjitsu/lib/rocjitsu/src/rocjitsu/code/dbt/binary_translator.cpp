@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/dbt/binary_translator.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -98,28 +99,29 @@ private:
   std::unique_ptr<Decoder> decoder_;
 };
 
-EncodingTranslateFn select_encoding_translator(rj_code_arch_t guest, rj_code_arch_t host) {
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
+EncodingTranslateFn select_encoding_translator(rocjitsu::IsaFamily guest,
+                                               rocjitsu::IsaFamily host) {
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Rdna4)
     return cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4;
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3)
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Cdna3)
     return cdna4_to_cdna3::translate_encoding_cdna4_to_cdna3;
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3)
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Rdna3)
     return cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3;
   return nullptr;
 }
 
-LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t host) {
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4) {
+LegalizationLookupFn select_legalization(rocjitsu::IsaFamily guest, rocjitsu::IsaFamily host) {
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Rdna4) {
     return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
       return lookup(kLegalization_cdna4_to_rdna4, enc_id, opcode);
     };
   }
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3) {
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Cdna3) {
     return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
       return lookup(kLegalization_cdna4_to_cdna3, enc_id, opcode);
     };
   }
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3) {
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Rdna3) {
     return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
       return lookup(kLegalization_cdna4_to_rdna3, enc_id, opcode);
     };
@@ -151,7 +153,7 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
 /// same site differently and wrap a consumer this pass deliberately left dynamic, re-growing the
 /// body it had just kept flat. Treat the padding as part of the run.
 [[nodiscard]] bool builder_runs_into_consumer(std::span<const uint8_t> text, uint64_t recovery_end,
-                                              uint64_t call_offset, rj_code_arch_t arch) {
+                                              uint64_t call_offset, rocjitsu::IsaFamily arch) {
   if (recovery_end > call_offset || (call_offset - recovery_end) % sizeof(uint32_t) != 0)
     return false;
   util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch);
@@ -280,11 +282,18 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
       uint16_t base_lo = 0;
       uint16_t base_width = 0;
       const bool loads_through_kernarg =
-          inst.mnemonic().starts_with("s_load_b") && inst.num_src_operands() >= 1 &&
-          pair_operand(inst.src_operand(0), base_lo, base_width) && state.pointer.contains(base_lo);
+          (inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B32 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B64 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B96 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B128 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B256 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B512) &&
+          inst.num_src_operands() >= 1 && pair_operand(inst.src_operand(0), base_lo, base_width) &&
+          state.pointer.contains(base_lo);
       uint16_t copy_lo = 0;
       uint16_t copy_width = 0;
-      const bool copies_pointer = inst.mnemonic() == "s_mov_b64" && inst.num_src_operands() == 1 &&
+      const bool copies_pointer = inst.amdgpu_operation() == amdgpu::Operation::S_MOV_B64 &&
+                                  inst.num_src_operands() == 1 &&
                                   pair_operand(inst.src_operand(0), copy_lo, copy_width) &&
                                   copy_width == 2 && state.pointer.contains(copy_lo);
 
@@ -296,7 +305,7 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
       kill_defs(inst, state);
 
       // A call clobbers everything the ABI does not preserve, direct or indirect alike.
-      if ((flags & INDIRECT_CALL) != 0 || inst.mnemonic().starts_with("s_call")) {
+      if ((flags & INDIRECT_CALL) != 0) {
         std::erase_if(state.pointer, [](uint16_t lo) { return !is_callee_saved_sgpr(lo); });
         std::erase_if(state.loaded, [](uint16_t lo) { return !is_callee_saved_sgpr(lo); });
       }
@@ -383,7 +392,7 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
 }
 
 [[nodiscard]] std::unordered_set<uint64_t>
-generated_branch_island_pool_offsets(std::span<const uint8_t> text, rj_code_arch_t arch) {
+generated_branch_island_pool_offsets(std::span<const uint8_t> text, rocjitsu::IsaFamily arch) {
   std::unordered_set<uint64_t> offsets;
   auto decoder = Decoder::create(arch);
   if (!decoder)
@@ -424,7 +433,8 @@ generated_branch_island_pool_offsets(std::span<const uint8_t> text, rj_code_arch
       if (decoded.succeeded()) {
         const std::unique_ptr<Instruction> &slot_inst = decoded.value();
         if (slot_inst->size() == static_cast<int>(sizeof(uint32_t)) &&
-            slot_inst->mnemonic() == "s_branch" && slot_inst->branch_offset_bytes()) {
+            slot_inst->amdgpu_operation() == amdgpu::Operation::S_BRANCH &&
+            slot_inst->branch_offset_bytes()) {
           continue;
         }
       }
@@ -507,9 +517,9 @@ void append_diagnostics(std::vector<TranslationDiagnostic> &dst,
 /// The decoder check stays with the caller because it gates constructing the decoder that the
 /// rest of translation needs.
 [[nodiscard]] std::optional<TranslationDiagnostic>
-translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
-                    rj_code_arch_t host_arch, uint32_t target_mach,
-                    const BinaryTranslatorOptions &options) {
+translation_refusal(const CodeObjectPatcher &patcher, rocjitsu::IsaFamily guest_arch,
+                    rocjitsu::IsaFamily host_arch, uint32_t target_mach,
+                    const BinaryTranslatorOptions &options, rj_code_target_id_t guest_target) {
   const auto error = [](DiagnosticKind kind, std::string message) {
     return TranslationDiagnostic{.severity = DiagnosticSeverity::Error,
                                  .kind = kind,
@@ -545,14 +555,16 @@ translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
 
   const uint32_t target_machine = target_mach & EF_AMDGPU_MACH;
   const IsaTargetRegistry &registry = default_isa_target_registry();
+  const IsaTargetBinding *guest_binding = registry.find_target(guest_target);
+  const uint32_t guest_machine = guest_binding ? guest_binding->elf_machine : source_mach;
   const auto is_concrete_cdna5_target = [&](uint32_t machine) {
-    const IsaGpuTargetDescription *target = registry.find_gpu_target_by_elf_machine(machine);
+    const IsaTargetBinding *target = registry.find_target_by_elf_machine(machine);
     const IsaTargetDescriptor *descriptor =
         target != nullptr ? registry.find(target->public_id) : nullptr;
-    return descriptor != nullptr && descriptor->architecture_id == ROCJITSU_CODE_ARCH_CDNA5;
+    return descriptor != nullptr && descriptor->family == rocjitsu::IsaFamily::Cdna5;
   };
-  if (guest_arch == ROCJITSU_CODE_ARCH_CDNA5 && host_arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-      source_mach != target_machine && is_concrete_cdna5_target(source_mach) &&
+  if (guest_arch == rocjitsu::IsaFamily::Cdna5 && host_arch == rocjitsu::IsaFamily::Cdna5 &&
+      guest_machine != target_machine && is_concrete_cdna5_target(guest_machine) &&
       is_concrete_cdna5_target(target_machine)) {
     // Same-architecture translation otherwise copies raw encodings. Different concrete CDNA5
     // targets may have different instruction legality, and no cross-target legalization contract
@@ -619,7 +631,7 @@ translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
   return os.str();
 }
 
-[[nodiscard]] uint32_t max_descriptor_sgpr_allocation_for_long_branch(rj_code_arch_t arch) {
+[[nodiscard]] uint32_t max_descriptor_sgpr_allocation_for_long_branch(rocjitsu::IsaFamily arch) {
   // Long direct branches consume their scratch pair at the final
   // s_setpc_b64/s_swappc_b64 transfer, so DBT may only use a pair that can be
   // made descriptor-backed for the destination kernel.
@@ -628,7 +640,7 @@ translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
 
 /// @brief Find the next even SGPR pair that can be descriptor-backed for a branch thunk.
 [[nodiscard]] std::optional<uint16_t> next_long_branch_sgpr_pair(const TranslationContext &context,
-                                                                 rj_code_arch_t arch) {
+                                                                 rocjitsu::IsaFamily arch) {
   const uint32_t current = std::max(context.num_sgprs, context.required_sgpr_count);
   const uint32_t base = (current + 1u) & ~1u;
   if (base > 126)
@@ -891,8 +903,8 @@ checkpoint_scope_descriptors(std::span<const KdTranslation> translations,
 }
 
 [[nodiscard]] bool scope_uses_virtualizable_lds(const KernelTranslationScope &scope,
-                                                rj_code_arch_t guest_arch,
-                                                rj_code_arch_t host_arch) {
+                                                rocjitsu::IsaFamily guest_arch,
+                                                rocjitsu::IsaFamily host_arch) {
   if (scope.translation == nullptr)
     return false;
   if (scope.translation->target_lds_size != 0)
@@ -1219,8 +1231,10 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
         continue;
       const Instruction *term = block->terminator();
       if (term != nullptr && term->size() == sizeof(uint32_t)) {
-        const std::string_view mnemonic = term->mnemonic();
-        if (mnemonic == "s_setpc_b64" || mnemonic == "s_set_pc_i64")
+
+        const amdgpu::Operation operation = term->amdgpu_operation();
+        if (operation == amdgpu::Operation::S_SETPC_B64 ||
+            operation == amdgpu::Operation::S_SET_PC_I64)
           candidates.emplace_back(
               block, static_cast<uint16_t>(text_word_at(text, term->src_loc()) & 0xffu));
       }
@@ -1273,25 +1287,28 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
         while (cursor > 0) {
           --cursor;
           const Instruction &inst = *ordered[cursor];
-          const std::string_view lane_mnemonic = inst.mnemonic();
+
+          const amdgpu::Operation lane_operation = inst.amdgpu_operation();
           // The lane identity here is a low selector only. Anything that moves the VGPR bank makes
           // that selector name a different physical register, so the comparison below stops meaning
           // what it says and the proof has to give up.
-          if (lane_mnemonic == "s_set_vgpr_msb" || lane_mnemonic == "s_setreg_b32" ||
-              lane_mnemonic == "s_setreg_imm32_b32")
+          if (lane_operation == amdgpu::Operation::S_SET_VGPR_MSB ||
+              lane_operation == amdgpu::Operation::S_SETREG_B32 ||
+              lane_operation == amdgpu::Operation::S_SETREG_IMM32_B32)
             return false;
           // A call only endangers the stash if the callee is allowed to write the lane's register.
           // The ABI keeps callee-saved VGPRs across a call, which is exactly what makes the
           // non-leaf save/call/restore shape legitimate, so those survive; a caller-saved register
           // may be overwritten inside the callee and fails closed.
           const bool is_call = (inst.flags() & INDIRECT_CALL) != 0 ||
-                               lane_mnemonic == "s_call_i64" || lane_mnemonic == "s_swap_pc_i64" ||
-                               lane_mnemonic == "s_swappc_b64";
+                               lane_operation == amdgpu::Operation::S_CALL_I64 ||
+                               lane_operation == amdgpu::Operation::S_SWAP_PC_I64 ||
+                               lane_operation == amdgpu::Operation::S_SWAPPC_B64;
           if (is_call && !is_callee_saved_vgpr(vgpr))
             return false;
           const Operand *vdst = inst.dst_operand(0);
-          const bool writes_lane =
-              lane_mnemonic == "v_writelane_b32" && vdst != nullptr && vdst->encoding_value() >= 0;
+          const bool writes_lane = lane_operation == amdgpu::Operation::V_WRITELANE_B32 &&
+                                   vdst != nullptr && vdst->encoding_value() >= 0;
           if (writes_lane && static_cast<uint16_t>(vdst->encoding_value()) == vgpr) {
             const Operand *ssrc = inst.src_operand(0);
             const Operand *written_lane = inst.src_operand(1);
@@ -1363,9 +1380,11 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
       // has no callee-saved SGPRs that a translated body may rely on here, so any call between the
       // definition and the use invalidates the value. The call instruction's own destination list
       // does not mention it, which is why this is checked before the operand walk.
-      const std::string_view sgpr_mnemonic = inst.mnemonic();
-      if ((inst.flags() & INDIRECT_CALL) != 0 || sgpr_mnemonic == "s_call_i64" ||
-          sgpr_mnemonic == "s_swap_pc_i64" || sgpr_mnemonic == "s_swappc_b64")
+
+      const amdgpu::Operation sgpr_operation = inst.amdgpu_operation();
+      if ((inst.flags() & INDIRECT_CALL) != 0 || sgpr_operation == amdgpu::Operation::S_CALL_I64 ||
+          sgpr_operation == amdgpu::Operation::S_SWAP_PC_I64 ||
+          sgpr_operation == amdgpu::Operation::S_SWAPPC_B64)
         return Effect::kRedefines;
       bool defines = false;
       for (int i = 0; i < inst.num_dst_operands(); ++i) {
@@ -1389,7 +1408,7 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
         return Effect::kNone;
       // The nested provenance query runs with this off: a lane restore is exactly what it is
       // trying to justify, so letting it count one would be circular.
-      if (!allow_lane_restore || inst.mnemonic() != "v_readlane_b32")
+      if (!allow_lane_restore || inst.amdgpu_operation() != amdgpu::Operation::V_READLANE_B32)
         return Effect::kRedefines;
       // Only a read of the exact lane this body saved the same register into restores the caller's
       // value. Reading some other lane, or another register's lane, produces a value this analysis
@@ -1488,8 +1507,8 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     std::span<const TextOffsetRelocation> text_relocations,
     std::span<const PcRelativeDataRelocation> data_relocations,
     std::span<const PcRelativeTextRelocation> code_relocations,
-    std::span<const KdTranslation> translations, rj_code_arch_t host_arch, uint32_t target_mach,
-    bool require_every_text_symbol_mapped,
+    std::span<const KdTranslation> translations, rocjitsu::IsaFamily host_arch,
+    uint32_t target_mach, bool require_every_text_symbol_mapped,
     const std::unordered_map<uint64_t, uint64_t> &canonical_code_pointer_placement,
     std::vector<TranslationDiagnostic> &diagnostics) {
   auto record_builder_error = [&](std::string_view message) {
@@ -2018,7 +2037,28 @@ bool scope_roots_are_entry_state(std::span<BasicBlock *const> blocks,
 
 BinaryTranslator::~BinaryTranslator() = default;
 
-BinaryTranslator::BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
+BinaryTranslator::BinaryTranslator(rj_code_target_id_t guest_target,
+                                   rj_code_target_id_t host_target, BinaryTranslatorOptions options)
+    : BinaryTranslator(
+          [&] {
+            const IsaTargetDescriptor *descriptor =
+                default_isa_target_registry().find(guest_target);
+            return descriptor ? descriptor->family : IsaFamily::Invalid;
+          }(),
+          [&] {
+            const IsaTargetDescriptor *descriptor = default_isa_target_registry().find(host_target);
+            return descriptor ? descriptor->family : IsaFamily::Invalid;
+          }(),
+          [&] {
+            const IsaTargetBinding *binding =
+                default_isa_target_registry().find_target(host_target);
+            return binding ? binding->elf_machine : 0;
+          }(),
+          options) {
+  guest_target_ = guest_target;
+}
+
+BinaryTranslator::BinaryTranslator(rocjitsu::IsaFamily guest_arch, rocjitsu::IsaFamily host_arch,
                                    uint32_t target_mach, BinaryTranslatorOptions options)
     : guest_arch_(guest_arch), host_arch_(host_arch),
       target_mach_(target_mach ? target_mach : elf_mach_for_arch(host_arch)), options_(options),
@@ -2028,7 +2068,7 @@ BinaryTranslator::BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t hos
           guest_arch, host_arch, options.input_revision, options.output_revision)) {}
 
 bool BinaryTranslator::is_gfx1250_b0_to_a0() const {
-  return guest_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 &&
+  return guest_arch_ == rocjitsu::IsaFamily::Cdna5 && host_arch_ == rocjitsu::IsaFamily::Cdna5 &&
          (target_mach_ & EF_AMDGPU_MACH) == EF_AMDGPU_MACH_AMDGCN_GFX1250 &&
          options_.input_revision == ProcessorRevision::Gfx1250B0 &&
          options_.output_revision == ProcessorRevision::Gfx1250A0;
@@ -2079,8 +2119,8 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
     return;
   }
 
-  const IsaGpuTargetDescription *host_target =
-      default_isa_target_registry().find_gpu_target_by_elf_machine(target_mach_ & EF_AMDGPU_MACH);
+  const IsaTargetBinding *host_target =
+      default_isa_target_registry().find_target_by_elf_machine(target_mach_ & EF_AMDGPU_MACH);
   auto decoder = host_target == nullptr
                      ? Decoder::create(host_arch_)
                      : Decoder::create(default_isa_target_registry(), host_target->public_id);
@@ -2157,7 +2197,7 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
 
     uint32_t first_word = 0;
     std::memcpy(&first_word, text_bytes.data() + instruction_offset, sizeof(first_word));
-    if (host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && first_word == 0) {
+    if (host_arch_ == rocjitsu::IsaFamily::Cdna5 && first_word == 0) {
       ++instruction_word_index;
       instruction_offset += sizeof(uint32_t);
       continue;
@@ -2306,15 +2346,20 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   const auto &registry = default_isa_target_registry();
   const IsaTargetDescriptor *object_target = registry.find(obj.target_id());
   rj_code_target_id_t effective_guest_target = ROCJITSU_CODE_TARGET_INVALID;
-  if (object_target != nullptr && object_target->architecture_id == guest_arch_) {
+  if (guest_target_ != ROCJITSU_CODE_TARGET_INVALID) {
+    if (obj.target_id() != ROCJITSU_CODE_TARGET_INVALID && obj.target_id() != guest_target_) {
+      append_error(result.diagnostics, DiagnosticKind::Legalization,
+                   "source code-object target does not match the selected guest target");
+      return leave_unchanged();
+    }
+    effective_guest_target = guest_target_;
+  } else if (object_target != nullptr && object_target->family == guest_arch_) {
     effective_guest_target = obj.target_id();
   } else if (const IsaTargetDescriptor *guest_descriptor = registry.find(guest_arch_)) {
-    if (const IsaGpuTargetDescription *default_target =
-            registry.find_default_gpu_target(*guest_descriptor))
+    if (const IsaTargetBinding *default_target = registry.find_default_target(*guest_descriptor))
       effective_guest_target = default_target->public_id;
   }
-  const IsaGpuTargetDescription *effective_guest_gpu_target =
-      registry.find_gpu_target(effective_guest_target);
+  const IsaTargetBinding *effective_guest_gpu_target = registry.find_target(effective_guest_target);
   const bool effective_setreg_vgpr_msb_fixup =
       effective_guest_gpu_target != nullptr &&
       effective_guest_gpu_target->capabilities.setreg_vgpr_msb_fixup;
@@ -2322,7 +2367,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   // A same-target gfx1250 translation is direction-specific: A0 and B0 share
   // an ELF machine ID, so both revisions must be given. Do not apply this
   // revision contract to other concrete CDNA5 targets.
-  if (guest_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 &&
+  if (guest_arch_ == rocjitsu::IsaFamily::Cdna5 && host_arch_ == rocjitsu::IsaFamily::Cdna5 &&
       effective_guest_target == ROCJITSU_CODE_TARGET_GFX1250 &&
       (target_mach_ & EF_AMDGPU_MACH) == EF_AMDGPU_MACH_AMDGCN_GFX1250) {
     if (options_.input_revision == ProcessorRevision::Unspecified ||
@@ -2368,8 +2413,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   }
 
   auto text = patcher.text_bytes();
-  if (auto refusal =
-          translation_refusal(patcher, guest_arch_, host_arch_, target_mach_, options_)) {
+  if (auto refusal = translation_refusal(patcher, guest_arch_, host_arch_, target_mach_, options_,
+                                         effective_guest_target)) {
     result.diagnostics.push_back(std::move(*refusal));
     return leave_unchanged();
   }
@@ -2459,7 +2504,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
 
   if (descriptor_translations.empty()) {
     const bool descriptorless_gfx1250_b0_to_a0 =
-        guest_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 &&
+        guest_arch_ == rocjitsu::IsaFamily::Cdna5 && host_arch_ == rocjitsu::IsaFamily::Cdna5 &&
         options_.input_revision == ProcessorRevision::Gfx1250B0 &&
         options_.output_revision == ProcessorRevision::Gfx1250A0;
     if (!descriptorless_gfx1250_b0_to_a0) {
@@ -3493,7 +3538,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           }
         }
         const bool reachable_skip_over_pool =
-            preceding_terminator != nullptr && preceding_terminator->mnemonic() == "s_branch" &&
+            preceding_terminator != nullptr &&
+            preceding_terminator->amdgpu_operation() == amdgpu::Operation::S_BRANCH &&
             source_instruction_by_offset.contains(pool_end) && preceding_branch_target >= 0 &&
             static_cast<uint64_t>(preceding_branch_target) == pool_end;
         if (!reachable_header && !reachable_slot && !reachable_skip_over_pool)
@@ -4161,8 +4207,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         // all_reduce run emitted 104,831 identical lines, burying the
         // diagnostics that do name a specific instruction. The record is
         // per-translation, so each code object still reports its own gaps.
-        if (leg == nullptr && is_gfx1250_b0_to_a0() &&
-            gfx1250_b0_to_a0_is_deferred_family(inst.mnemonic()) &&
+        if (leg == nullptr && is_gfx1250_b0_to_a0() && gfx1250_b0_to_a0_is_deferred_family(inst) &&
             reported_deferred_families_.emplace(inst.mnemonic()).second) {
           append_warning(result.diagnostics, DiagnosticKind::Legalization,
                          "gfx1250 translation passes through '" + std::string(inst.mnemonic()) +

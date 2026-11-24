@@ -16,6 +16,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -40,7 +41,7 @@ TEST(ScalarF16CompatibilityTest, Rdna35MinFormatsNumericInlineFloats) {
   amdgpu::GpuMemory memory{"rdna35_scalar_f16"};
   amdgpu::L2Cache cache{"rdna35_scalar_f16_cache"};
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_RDNA3_5;
+  config.arch = rocjitsu::IsaFamily::Rdna3_5;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 16;
@@ -69,7 +70,7 @@ TEST(Rdna35ScalarFp, WaveModesAndExceptionsWithEmptyExec) {
   amdgpu::GpuMemory memory{"scalar_fp_memory"};
   amdgpu::L2Cache l2{"scalar_fp_l2"};
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_RDNA3_5;
+  config.arch = rocjitsu::IsaFamily::Rdna3_5;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 16;
@@ -124,7 +125,7 @@ TEST(Rdna35ScalarFp, WaveModesAndExceptionsWithEmptyExec) {
 }
 
 struct ScalarF16Target {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   const char *name;
 };
 
@@ -165,8 +166,8 @@ protected:
   }
 
   uint16_t opcode(const ScalarOperation &operation) const {
-    return GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4 ? operation.rdna4_opcode
-                                                       : operation.cdna5_opcode;
+    return GetParam().arch == rocjitsu::IsaFamily::Rdna4 ? operation.rdna4_opcode
+                                                         : operation.cdna5_opcode;
   }
 
   void write_sgpr(uint32_t reg, uint32_t value) {
@@ -211,7 +212,7 @@ protected:
                      std::optional<uint32_t> literal = std::nullopt,
                      std::optional<uint32_t> raw_carrier = std::nullopt) {
     const std::array<uint32_t, 2> encoded =
-        GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4
+        GetParam().arch == rocjitsu::IsaFamily::Rdna4
             ? rdna4::build_vop3(opcode(operation), {.vdst = kDestination,
                                                     .src0 = source,
                                                     .src1 = scalar_positive_inline_u32(0),
@@ -222,9 +223,9 @@ protected:
                                                     .src2 = scalar_positive_inline_u32(0)});
     const std::array<uint32_t, 3> words{encoded[0], encoded[1], literal.value_or(0)};
     if (raw_carrier) {
-      ScopedIsaExecutionBackend execution_backend_scope{GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4
-                                                            ? &rdna4::execution_backend()
-                                                            : &cdna5::execution_backend()};
+      ScopedIsaExecutionBackend execution_backend_scope{
+          GetParam().arch == rocjitsu::IsaFamily::Rdna4 ? &rdna4::execution_backend()
+                                                        : &cdna5::execution_backend()};
       std::unique_ptr<Instruction> instruction(decode_valid(*decoder_, words.data()));
       ASSERT_NE(instruction, nullptr);
       const Operand *operand = instruction->src_operand(0);
@@ -251,8 +252,8 @@ protected:
 };
 
 INSTANTIATE_TEST_SUITE_P(Gfx12Targets, ScalarF16ConstantTest,
-                         ::testing::Values(ScalarF16Target{ROCJITSU_CODE_ARCH_RDNA4, "Gfx1201"},
-                                           ScalarF16Target{ROCJITSU_CODE_ARCH_CDNA5, "Gfx1250"}),
+                         ::testing::Values(ScalarF16Target{rocjitsu::IsaFamily::Rdna4, "Gfx1201"},
+                                           ScalarF16Target{rocjitsu::IsaFamily::Cdna5, "Gfx1250"}),
                          [](const ::testing::TestParamInfo<ScalarF16Target> &info) {
                            return std::string(info.param.name);
                          });
@@ -308,7 +309,7 @@ TEST_P(ScalarF16ConstantTest, ConversionsPreserveRegisterAndLiteralHalfSelection
 }
 
 TEST_P(ScalarF16ConstantTest, DelegationUsesTheEffectiveRegisterSource) {
-  ScopedIsaExecutionBackend execution_backend_scope{GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4
+  ScopedIsaExecutionBackend execution_backend_scope{GetParam().arch == rocjitsu::IsaFamily::Rdna4
                                                         ? &rdna4::execution_backend()
                                                         : &cdna5::execution_backend()};
   util::FailureOr<uint32_t> encoding =
@@ -318,7 +319,7 @@ TEST_P(ScalarF16ConstantTest, DelegationUsesTheEffectiveRegisterSource) {
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder_, words.data()));
   ASSERT_NE(instruction, nullptr);
   std::unique_ptr<Operand> replacement;
-  if (GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4) {
+  if (GetParam().arch == rocjitsu::IsaFamily::Rdna4) {
     replacement = std::make_unique<rdna4::Operand>(16, rdna4::OperandType::OPR_SSRC, 0);
   } else {
     replacement = std::make_unique<cdna5::Operand>(16, cdna5::OperandType::OPR_SSRC, 0);
@@ -355,7 +356,7 @@ TEST_P(ScalarF16ConstantTest, PseudoScalarF16WritesOnlyOneZeroPaddedScalarWord) 
 }
 
 TEST_P(ScalarF16ConstantTest, PseudoScalarF16InlineFloatsRetainTheirRawCarrier) {
-  if (GetParam().arch != ROCJITSU_CODE_ARCH_CDNA5) {
+  if (GetParam().arch != rocjitsu::IsaFamily::Cdna5) {
     GTEST_SKIP() << "RDNA4 currently rejects these inline selectors";
   }
   struct PseudoCase {

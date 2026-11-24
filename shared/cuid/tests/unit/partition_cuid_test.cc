@@ -125,6 +125,7 @@ class UnpublishedPartitions {
     WriteFile(pci + "/vendor", "0x1002");
     WriteFile(pci + "/device", "0x73a3");
     WriteFile(pci + "/revision", "0x00");
+    WriteFile(pci + "/current_compute_partition", "DPX");
     WriteFile(pci + "/xcp/cuid_unit_id", "2");
     const std::string xcp = root_ + "/platform/amdgpu_xcp_1";
     MakeDirs(xcp + "/drm/renderD129");
@@ -258,8 +259,10 @@ TEST(cuidtst, StockPartitionsTakeTheirUnitIdFromKfd) {
     EXPECT_EQ(Uuid(derived), Expected(static_cast<uint16_t>(c.second)));
   }
 
-  // One KFD node for the GPU is SPX: no partition, so no UnitID of its own.
+  // Back in SPX, with one KFD node: no partition, so no UnitID of its own.
   unlink((root + "/kfd/2/properties").c_str());
+  rmdir((root + "/kfd/2").c_str());
+  WriteFile(root + "/pci/fffe:63:00.0/current_compute_partition", "SPX");
   CuidPartitionParent parent;
   ASSERT_EQ(CuidGpu::partition_parent(root + "/pci/fffe:63:00.0/xcp", root + "/pci", root + "/kfd",
                                       parent),
@@ -307,20 +310,27 @@ TEST(cuidtst, KfdUnitIdVectors) {
   }
   struct Case {
     const char* name;
+    const char* mode;
     std::vector<int> locations;  // node i renders minor 128 + i
     int target;                  // index into locations
     bool ok;
     uint16_t unit_id;
   };
   const Case cases[] = {
-      {"K-SPX", {0xf500}, 0, true, 0},
-      {"K-QPX", {0xf500, 0xf501, 0xf502, 0xf503}, 2, true, 9},
-      {"K-CPX", {0xf500, 0xf501, 0xf502, 0xf503, 0xf504, 0xf505, 0xf506, 0xf507}, 7, true, 36},
-      {"K-GAP", {0xf500, 0xf501, 0xf503}, 1, false, 0},
-      {"K-DUP", {0xf500, 0xf500}, 1, false, 0},
+      {"K-SPX", "SPX", {0xf500}, 0, true, 0},
+      {"K-QPX", "QPX", {0xf500, 0xf501, 0xf502, 0xf503}, 2, true, 9},
+      {"K-CPX",
+       "CPX",
+       {0xf500, 0xf501, 0xf502, 0xf503, 0xf504, 0xf505, 0xf506, 0xf507},
+       7,
+       true,
+       36},
+      {"K-GAP", "CPX", {0xf500, 0xf501, 0xf503}, 1, false, 0},
+      {"K-DUP", "DPX", {0xf500, 0xf500}, 1, false, 0},
   };
   for (const auto& c : cases) {
     SCOPED_TRACE(c.name);
+    WriteFile(pci + "/current_compute_partition", c.mode);
     const std::string kfd = root + "/kfd-" + c.name;
     for (size_t i = 0; i < c.locations.size(); ++i) {
       MakeDirs(kfd + "/" + std::to_string(i + 1));
@@ -367,6 +377,88 @@ TEST(cuidtst, KfdUnitIdSurvivesAnUnsignedUniqueId) {
     ASSERT_EQ(CuidGpu::partition_parent(c.first, root + "/pci", root + "/kfd", parent),
               AMDCUID_STATUS_SUCCESS);
     EXPECT_EQ(parent.bdf, "fffe:63:00.0");
+    EXPECT_EQ(parent.kfd_unit_id, c.second);
+  }
+}
+
+// KFD hides a node outside the caller's device cgroup: its properties read
+// back nothing. In CPX the count comes from KFD, so with a node hidden a
+// container given CPX partitions 0-3 would count four and give them the QPX
+// UnitIDs 7-10. With a node unreadable no CPX partition gets a UnitID.
+TEST(cuidtst, KfdNodeHiddenByTheDeviceCgroupGivesNoCpxUnitId) {
+  UnpublishedPartitions fake;
+  const std::string& root = fake.root();
+  unlink((root + "/pci/fffe:63:00.0/xcp/cuid_unit_id").c_str());
+  unlink((root + "/platform/amdgpu_xcp_1/xcp/cuid_unit_id").c_str());
+  WriteFile(root + "/pci/fffe:63:00.0/current_compute_partition", "CPX");
+  MakeDirs(root + "/kfd/3");
+  std::ofstream(root + "/kfd/3/properties", std::ios::trunc);
+  CuidPartitionParent parent;
+  ASSERT_EQ(CuidGpu::partition_parent(root + "/pci/fffe:63:00.0/xcp", root + "/pci", root + "/kfd",
+                                      parent),
+            AMDCUID_STATUS_SUCCESS);
+  EXPECT_EQ(parent.kfd_unit_id, 0);
+}
+
+// DPX, TPX and QPX fix the count, so a node hidden elsewhere, such as another
+// GPU's outside the container, does not cost these partitions their UnitIDs.
+TEST(cuidtst, KfdNodeHiddenElsewhereKeepsAFixedModesUnitIds) {
+  UnpublishedPartitions fake;
+  const std::string& root = fake.root();
+  unlink((root + "/pci/fffe:63:00.0/xcp/cuid_unit_id").c_str());
+  unlink((root + "/platform/amdgpu_xcp_1/xcp/cuid_unit_id").c_str());
+  MakeDirs(root + "/kfd/3");
+  std::ofstream(root + "/kfd/3/properties", std::ios::trunc);
+  for (const auto& c : {std::make_pair(root + "/pci/fffe:63:00.0/xcp", 2),
+                        std::make_pair(root + "/platform/amdgpu_xcp_1/xcp", 3)}) {
+    SCOPED_TRACE(c.first);
+    CuidPartitionParent parent;
+    ASSERT_EQ(CuidGpu::partition_parent(c.first, root + "/pci", root + "/kfd", parent),
+              AMDCUID_STATUS_SUCCESS);
+    EXPECT_EQ(parent.kfd_unit_id, c.second);
+  }
+}
+
+// A hidden node elsewhere allows fewer visible partitions than the mode
+// fixes, never more: four nodes under one DPX parent are not a partial view.
+TEST(cuidtst, KfdNodeHiddenElsewhereDoesNotExcuseTooManyPartitions) {
+  UnpublishedPartitions fake;
+  const std::string& root = fake.root();
+  unlink((root + "/pci/fffe:63:00.0/xcp/cuid_unit_id").c_str());
+  unlink((root + "/platform/amdgpu_xcp_1/xcp/cuid_unit_id").c_str());
+  for (int i = 3; i <= 4; ++i) {
+    MakeDirs(root + "/kfd/" + std::to_string(i));
+    WriteFile(root + "/kfd/" + std::to_string(i) + "/properties",
+              "drm_render_minor " + std::to_string(127 + i) + "\ndomain 65534\nlocation_id " +
+                  std::to_string(25343 + i));
+  }
+  MakeDirs(root + "/kfd/5");
+  std::ofstream(root + "/kfd/5/properties", std::ios::trunc);
+  for (const std::string& node :
+       {root + "/pci/fffe:63:00.0/xcp", root + "/platform/amdgpu_xcp_1/xcp"}) {
+    SCOPED_TRACE(node);
+    CuidPartitionParent parent;
+    if (CuidGpu::partition_parent(node, root + "/pci", root + "/kfd", parent) ==
+        AMDCUID_STATUS_SUCCESS)
+      EXPECT_EQ(parent.kfd_unit_id, 0);
+  }
+}
+
+// KFD's partition count must be the one amdgpu's mode fixes. A mode amdgpu
+// cannot report, as during a reset, leaves the count to KFD.
+TEST(cuidtst, KfdCountMustAgreeWithTheMode) {
+  UnpublishedPartitions fake;
+  const std::string& root = fake.root();
+  unlink((root + "/pci/fffe:63:00.0/xcp/cuid_unit_id").c_str());
+  unlink((root + "/platform/amdgpu_xcp_1/xcp/cuid_unit_id").c_str());
+  for (const auto& c : {std::make_pair("QPX", 0), std::make_pair("SPX", 0), std::make_pair("", 2),
+                        std::make_pair("UNKNOWN", 2)}) {
+    SCOPED_TRACE(c.first);
+    WriteFile(root + "/pci/fffe:63:00.0/current_compute_partition", c.first);
+    CuidPartitionParent parent;
+    ASSERT_EQ(CuidGpu::partition_parent(root + "/pci/fffe:63:00.0/xcp", root + "/pci",
+                                        root + "/kfd", parent),
+              AMDCUID_STATUS_SUCCESS);
     EXPECT_EQ(parent.kfd_unit_id, c.second);
   }
 }

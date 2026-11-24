@@ -450,11 +450,13 @@ jobs:
             -DRJ_ENABLE_UBSAN=${{ matrix.enable_ubsan }} \
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
             -DRJ_ENABLE_EXPENSIVE_CHECKS=${{ matrix.enable_expensive_checks }} \
+            -DROCJITSU_ENABLE_INTERPOSER=ON -DRJ_ENABLE_HOST_FAULT_RECOVERY=ON \
             -DROCJITSU_ENABLE_PERFSIM_PLUGIN=ON \
             -DRJ_SANITIZER_RUNTIME=${{ matrix.sanitizer_runtime }}
 
           # Let Ninja and CTest choose their default CPU parallelism.
           cmake --build "${ROCJITSU_BUILD_DIR}" -j
+          echo "built=true" >> "${GITHUB_OUTPUT}"
 
           if [[ "${{ matrix.name }}" == release ]]; then
             VFIO_DISCOVERY="$(ctest --test-dir "${ROCJITSU_BUILD_DIR}" -N -R '^Vfio(TargetGrants|DeviceHost)')"
@@ -633,7 +635,7 @@ jobs:
         if: matrix.name == 'release'
         working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
         run: |
-          uv pip install -e lib/python
+          uv pip install -e "lib/python[test]"
           python -m pytest lib/python/amdisa/tests
 
       - name: Run corpus tests
@@ -995,3 +997,22 @@ jobs:
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 7
+
+      # All consumers of the interposed build finish before its mode changes.
+      # The explicit build can reuse the tree even if a default test failed.
+      - name: Test explicit library embedding
+        if: ${{ !cancelled() && steps.build_rocjitsu.outputs.built == 'true' }}
+        shell: bash
+        run: |
+          ROCM_PATH="$(rocm-sdk path --root)" \
+            cmake -S "${ROCJITSU_SOURCE_DIR}" -B "${ROCJITSU_BUILD_DIR}" \
+            -DROCJITSU_ENABLE_INTERPOSER=OFF -DRJ_ENABLE_HOST_FAULT_RECOVERY=OFF
+          cmake --build "${ROCJITSU_BUILD_DIR}" \
+            --target vm_embedding_api_test libc_passthrough_test host_access_guard_test -j
+          ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
+            -R '^VmEmbeddingApi(DeathTest)?\.' --no-tests=error --output-on-failure --timeout 60 -j4
+          ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
+            -R '^LibcPassthrough\.' --no-tests=error --output-on-failure --timeout 60 -j4
+          ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
+            -R '^HostAccessGuardDeathTest\.DisabledRecoveryDeliversRealFaultsToTheHost$' \
+            --no-tests=error --output-on-failure --timeout 60 -j4

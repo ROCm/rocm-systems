@@ -43,7 +43,7 @@ pub unsafe extern "C" fn hsa_amd_pointer_info(
                 Some(runtime) => runtime,
                 None => return NOT_INITIALIZED,
             };
-            pointer_description(runtime, pointer as usize)
+            pointer_info_description(runtime, pointer as usize)
         };
         // SAFETY: The caller supplies input_size writable bytes at info.
         unsafe { write_pointer_info(info, input_size, description.as_ref()) };

@@ -22,6 +22,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed MI200 profiling collecting the L2-Fabric write counters twice under two names, which took one extra profiling pass.
+
 * Fixed the percent of peak of *L2 Cache BW* in the System Speed of Light panel on MI200 (gfx90a). It was twice the real value.
 
 * The Memory Chart no longer rounds values to whole numbers before showing them, for example *L2 Hit* shows 33.6% instead of 34.0%. `--decimal` sets the decimals of the tables, not of the chart.

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_status.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 

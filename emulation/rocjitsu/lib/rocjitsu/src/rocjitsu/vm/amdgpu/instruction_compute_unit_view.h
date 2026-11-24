@@ -8,6 +8,7 @@
 #define ROCJITSU_VM_AMDGPU_INSTRUCTION_COMPUTE_UNIT_VIEW_H_
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "simdojo/sim/sim_types.h"
 #include "util/result.h"
 
@@ -80,7 +81,7 @@ public:
   /// Whether register accesses have a diagnostic or plugin consumer.
   bool observes_register_access() const;
   bool debug_active() const;
-  rj_code_arch_t arch() const;
+  rocjitsu::IsaFamily arch() const;
   uint64_t arithmetic_flags() const;
   uint64_t shader_cycles() const;
   ImageAddressConfig image_address_config() const;

@@ -3,12 +3,15 @@
 
 #pragma once
 
+#include "rj_arith/detail/rj_arith_conversion.h"
+#include "rj_arith/detail/rj_arith_fp.h"
+#include "rj_arith/detail/rj_arith_math.h"
 #include "rj_arith/internal/compatibility.h"
-#include "rj_arith/rj_arith.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/conversion.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -338,11 +341,12 @@ inline void execute_float_conversion(Wavefront &wave, FloatUnary32Function wave3
 // legacy RCP_IFLAG/SQRT status from all EXEC lanes, including suppressed writes.
 // Rejected calls commit neither results nor state.
 // Exponent extraction returns an integer and ignores guest arithmetic rounding.
-inline void execute_float_unary32(Wavefront &wave, FloatUnary32Function wave32,
-                                  FloatUnary64Function wave64, uint64_t flags, uint64_t modifiers,
-                                  const Operand &destination, const Operand &source, bool rdna3,
-                                  bool guest_rounding = false,
-                                  bool compatibility_all_exec = false) {
+template <typename Write>
+inline void execute_float_unary32_with_writer(Wavefront &wave, FloatUnary32Function wave32,
+                                              FloatUnary64Function wave64, uint64_t flags,
+                                              uint64_t modifiers, const Operand &source, bool rdna3,
+                                              bool guest_rounding, bool compatibility_all_exec,
+                                              Write write) {
   const bool all_exec = compatibility_all_exec &&
                         (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
   const uint64_t exec_mask = all_exec ? wave.exec() : wave.exec() & wave.vgpr_write_mask();
@@ -354,19 +358,33 @@ inline void execute_float_unary32(Wavefront &wave, FloatUnary32Function wave32,
   RegisterAccess registers(wave);
   VectorInput32 a(registers, wave, source, wave.exec());
   uint32_t causes = 0;
-  const bool success = write_vector32_result(
-      wave, registers, destination, exec_mask,
-      [&](uint32_t *const *d, uint64_t write_mask) {
+  const bool success =
+      !wave.instruction_execution_failed() &&
+      write(exec_mask, [&](uint32_t *const *d, uint64_t write_mask) {
         uint32_t *state = &causes;
         return wave.wf_size() == 32
                    ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, state)
                    : wave64(flags, write_mask, modifiers, d, &a.data, state);
-      },
-      /*allow_direct=*/(exec_mask & ~wave.vgpr_write_mask()) == 0);
+      });
   if (success) {
     wave.set_trapsts(wave.trapsts() | causes);
     wave.raise_alu_causes(causes);
   }
+}
+
+// Publish FP32 unary results, staging when DPP suppresses destination writes.
+inline void execute_float_unary32(Wavefront &wave, FloatUnary32Function wave32,
+                                  FloatUnary64Function wave64, uint64_t flags, uint64_t modifiers,
+                                  const Operand &destination, const Operand &source, bool rdna3,
+                                  bool guest_rounding = false,
+                                  bool compatibility_all_exec = false) {
+  execute_float_unary32_with_writer(
+      wave, wave32, wave64, flags, modifiers, source, rdna3, guest_rounding, compatibility_all_exec,
+      [&](uint64_t exec_mask, auto invoke) {
+        RegisterAccess registers(wave);
+        return write_vector32_result(wave, registers, destination, exec_mask, invoke,
+                                     (exec_mask & ~wave.vgpr_write_mask()) == 0);
+      });
 }
 
 // Execute FP64 unary operations on low/high VGPR pairs. Integral operations
@@ -496,10 +514,12 @@ inline void execute_float_pack(Wavefront &wave, FloatBinary32Function wave32,
 // Execute binary arithmetic and let the library compute optional FP causes.
 // DPP can suppress vector stores without suppressing Compatibility MUL status;
 // stage only that differing-mask case, preserving the ordinary direct SIMD call.
-inline void execute_float_binary32(Wavefront &wave, FloatBinary32Function wave32,
-                                   FloatBinary64Function wave64, uint64_t flags, uint64_t modifiers,
-                                   const Operand &destination, const Operand &lhs,
-                                   const Operand &rhs, bool rdna3, bool compatibility_mul = false) {
+template <typename Write>
+inline void execute_float_binary32_with_writer(Wavefront &wave, FloatBinary32Function wave32,
+                                               FloatBinary64Function wave64, uint64_t flags,
+                                               uint64_t modifiers, const Operand &lhs,
+                                               const Operand &rhs, bool rdna3,
+                                               bool compatibility_mul, Write write) {
   if (!wave.exec()) {
     return;
   }
@@ -525,19 +545,19 @@ inline void execute_float_binary32(Wavefront &wave, FloatBinary32Function wave32
     uint32_t *output = results;
     if (::rocjitsu::arith::mul_f32_compatibility_staged(
             flags, wave.exec(), write_mask, wave.wf_size(), rdna3, uint32_t(modifiers), &output,
-            &a.data, &b.data, &causes) != RJ_ARITH_SUCCESS) {
+            &a.data, &b.data, &causes,
+            wave.cu().arch() == rocjitsu::IsaFamily::Cdna5) != RJ_ARITH_SUCCESS) {
       wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
       return;
     }
-    success = write_vector32_result(wave, registers, destination, write_mask,
-                                    [&](uint32_t *const *d, uint64_t mask) {
-                                      for (unsigned lane = 0; lane < wave.wf_size(); ++lane) {
-                                        if (mask & (1ULL << lane)) {
-                                          d[0][lane] = results[lane];
-                                        }
-                                      }
-                                      return RJ_ARITH_SUCCESS;
-                                    });
+    success = write([&](uint32_t *const *d, uint64_t mask) {
+      for (unsigned lane = 0; lane < wave.wf_size(); ++lane) {
+        if (mask & (1ULL << lane)) {
+          d[0][lane] = results[lane];
+        }
+      }
+      return RJ_ARITH_SUCCESS;
+    });
   } else if (!write_mask) {
     // Active EXEC still requires semantics validation even when DPP writes nothing.
     success = invoke(nullptr, 0) == RJ_ARITH_SUCCESS;
@@ -545,12 +565,25 @@ inline void execute_float_binary32(Wavefront &wave, FloatBinary32Function wave32
       wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
     }
   } else {
-    success = write_vector32_result(wave, registers, destination, write_mask, invoke);
+    success = write(invoke);
   }
   if (success) {
     wave.set_trapsts(wave.trapsts() | causes);
     wave.raise_alu_causes(causes);
   }
+}
+
+// Publish ordinary results directly; SDWA supplies its own destination transform.
+inline void execute_float_binary32(Wavefront &wave, FloatBinary32Function wave32,
+                                   FloatBinary64Function wave64, uint64_t flags, uint64_t modifiers,
+                                   const Operand &destination, const Operand &lhs,
+                                   const Operand &rhs, bool rdna3, bool compatibility_mul = false) {
+  execute_float_binary32_with_writer(
+      wave, wave32, wave64, flags, modifiers, lhs, rhs, rdna3, compatibility_mul, [&](auto invoke) {
+        RegisterAccess registers(wave);
+        return write_vector32_result(wave, registers, destination,
+                                     wave.exec() & wave.vgpr_write_mask(), invoke);
+      });
 }
 
 // Evaluate A * B + C, including explicit accumulator/literal operands. Rejected

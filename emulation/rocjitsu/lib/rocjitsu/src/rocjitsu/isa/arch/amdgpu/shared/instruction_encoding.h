@@ -8,7 +8,8 @@
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_INSTRUCTION_ENCODING_H_
 
 #include "rocjitsu/base/api.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address_types.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <algorithm>
 #include <array>
@@ -23,10 +24,11 @@ class Operand;
 namespace amdgpu {
 
 /// Add an M0-relative VGPR offset after resolving the encoded register bank.
-inline std::optional<uint32_t> relative_vgpr_index(std::optional<uint32_t> base, uint32_t offset,
-                                                   uint32_t width, uint32_t allocation_size,
-                                                   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5) {
-  const uint32_t max_offset = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 1023 : 255;
+inline std::optional<uint32_t>
+relative_vgpr_index(std::optional<uint32_t> base, uint32_t offset, uint32_t width,
+                    uint32_t allocation_size,
+                    rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna5) {
+  const uint32_t max_offset = arch == rocjitsu::IsaFamily::Cdna5 ? 1023 : 255;
   if (!base || offset > max_offset || uint64_t{*base} + offset + width > allocation_size)
     return std::nullopt;
   return *base + offset;
@@ -83,9 +85,9 @@ constexpr bool valid_lds_direct_operand(uint32_t m0) {
 
 enum class DsPermutation : uint8_t { None, Permute, Bpermute, BpermuteFi, Swizzle };
 
-constexpr unsigned ds_permute_group_width(rj_code_arch_t arch, unsigned wave_size) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
-      arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+constexpr unsigned ds_permute_group_width(rocjitsu::IsaFamily arch, unsigned wave_size) {
+  if (arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2 ||
+      arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5)
     return 32;
   return wave_size;
 }
@@ -297,9 +299,9 @@ struct CvtScaleSelection {
   }
 };
 
-constexpr bool has_gfx11_plus_image_operands(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA4;
+constexpr bool has_gfx11_plus_image_operands(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+         arch == rocjitsu::IsaFamily::Rdna4;
 }
 
 /// @brief Decoded register-access modifiers.

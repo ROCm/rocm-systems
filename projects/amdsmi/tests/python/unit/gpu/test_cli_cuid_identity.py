@@ -287,7 +287,7 @@ class TestCliCuidIdentity(unittest.TestCase):
                 self.assertEqual(result["hip_uuid"], LEGACY_UUID)
                 self.assertEqual(result["cuid"], CUID)
 
-    def test_human_list_reports_kind_without_private_diagnostics(self):
+    def test_human_list_reports_cuid_without_private_diagnostics(self):
         with self.case() as cli:
 
             def list_gpu():
@@ -298,19 +298,20 @@ class TestCliCuidIdentity(unittest.TestCase):
                 command.list_gpu(argparse.Namespace(gpu=[1], enumeration=False))
 
             output = capture_stdout(list_gpu)
-            self.assertIn(f"UUID: {CUID}", output)
-            self.assertIn("IDENTIFIER_KIND: cuid", output)
+            self.assertIn(f"UUID: {LEGACY_UUID}", output)
+            self.assertIn(f"CUID: {CUID}", output)
+            self.assertNotIn("IDENTIFIER_KIND", output)
             self.assertNotIn("SEED", output)
             self.assertNotIn("FINGERPRINT", output)
             self.assertNotIn("PRIMARY", output)
 
-    def test_list_alias_compatibility(self):
-        for fmt, kind in itertools.product(["json", "csv"], ["cuid", "legacy_uuid", "unknown"]):
-            with self.case(fmt=fmt, kind=kind) as cli:
-                if kind != "cuid":
+    def test_list_uuid_is_always_the_legacy_uuid(self):
+        for fmt, cuid, legacy in itertools.product(["json", "csv"], [True, False], [True, False]):
+            with self.case(fmt=fmt, cuid=cuid, legacy=legacy) as cli:
+                if not cuid:
                     cli.api.amdsmi_get_gpu_cuid_info.side_effect = LibraryError(2)
                     cli.api.amdsmi_get_gpu_device_cuid.side_effect = LibraryError(2)
-                if kind == "unknown":
+                if not legacy:
                     cli.api.amdsmi_get_gpu_device_uuid.side_effect = LibraryError(2)
                 result = run_list(cli, fmt)
                 alias = "gpu_uuid" if fmt == "csv" else "uuid"
@@ -319,15 +320,11 @@ class TestCliCuidIdentity(unittest.TestCase):
                 )
                 old_keys += ["kfd_id", "node_id", "partition_id"]
                 self.assertEqual(list(result)[:6], old_keys)
+                self.assertEqual(result[alias], LEGACY_UUID if legacy else "N/A")
+                self.assertEqual(result["cuid"], CUID if cuid else "N/A")
+                self.assertNotIn("identifier_kind", result)
                 self.assertEqual(
-                    result[alias],
-                    {"cuid": CUID, "legacy_uuid": LEGACY_UUID, "unknown": "N/A"}[kind],
-                )
-                self.assertEqual(result["cuid"], CUID if kind == "cuid" else "N/A")
-                self.assertEqual(result["identifier_kind"], kind)
-                self.assertEqual(
-                    result["cuid_metadata_status"],
-                    "available" if kind == "cuid" else "not_supported",
+                    result["cuid_metadata_status"], "available" if cuid else "not_supported"
                 )
                 self.assertNotIn("effective_seed", result)
                 self.assertNotIn("primary_cuid", result)
@@ -339,8 +336,8 @@ class TestCliCuidIdentity(unittest.TestCase):
             with self.case(fmt=fmt, code=code) as cli:
                 cli.api.amdsmi_get_gpu_cuid_info.side_effect = LibraryError(code)
                 result = run_list(cli, fmt)
-                self.assertEqual(result["identifier_kind"], "cuid")
                 self.assertEqual(result["cuid"], CUID)
+                self.assertEqual(result["gpu_uuid" if fmt == "csv" else "uuid"], LEGACY_UUID)
                 if code == 2:
                     self.assertEqual(result["source"], "N/A")
                     self.assertEqual(result["auxiliary"], "N/A")
@@ -349,7 +346,6 @@ class TestCliCuidIdentity(unittest.TestCase):
                     self.assertEqual(result["source"], "UNKNOWN")
                     self.assertEqual(result["auxiliary"], "unknown")
                     self.assertEqual(result["cuid_metadata_status"], f"amdsmi_error_{code}")
-                cli.api.amdsmi_get_gpu_device_uuid.assert_not_called()
                 cli.api.amdsmi_get_gpu_enumeration_info.assert_not_called()
 
     def test_a_handle_without_a_cuid_reads_as_not_available(self):

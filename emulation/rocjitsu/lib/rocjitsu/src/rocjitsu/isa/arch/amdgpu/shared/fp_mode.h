@@ -15,6 +15,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/data_types.h"
 #include "util/host_target.h"
 
@@ -241,24 +242,25 @@ inline uint16_t round_exact_to_bf16(ExactF64Sum sum, uint32_t round_mode) {
 } // namespace detail
 
 /// @brief Legacy NaN priority, MODE.IEEE handling and qualified median zero ordering.
-inline minmax::LegacyPolicy legacy_minmax_policy(rj_code_arch_t arch, bool ieee_mode) noexcept {
+inline minmax::LegacyPolicy legacy_minmax_policy(rocjitsu::IsaFamily arch,
+                                                 bool ieee_mode) noexcept {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return {.prefer_first_nan = true, .ieee = ieee_mode, .ordered_zero_median = true};
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     // CDNA follows the ISA rules for two-NaN priority and median zero ties.
     return {.ieee = ieee_mode};
-  case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_CDNA5:
-  case ROCJITSU_CODE_ARCH_RV32I:
-  case ROCJITSU_CODE_ARCH_RV64I:
-  case ROCJITSU_CODE_ARCH_INVALID:
+  case rocjitsu::IsaFamily::Rdna4:
+  case rocjitsu::IsaFamily::Cdna5:
+  case rocjitsu::IsaFamily::Rv32i:
+  case rocjitsu::IsaFamily::Rv64i:
+  case rocjitsu::IsaFamily::Invalid:
     break;
   }
   assert(false && "legacy min/max policy requires a legacy AMDGPU architecture");
@@ -266,14 +268,14 @@ inline minmax::LegacyPolicy legacy_minmax_policy(rj_code_arch_t arch, bool ieee_
 }
 
 /// @brief Whether floating operations with exception support quiet signaling NaNs.
-inline bool quiets_nan(rj_code_arch_t arch, bool ieee_mode) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5 || ieee_mode;
+inline bool quiets_nan(rocjitsu::IsaFamily arch, bool ieee_mode) {
+  return arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5 || ieee_mode;
 }
 
 /// @brief Apply V_CVT_F32_F16 policy to an already decoded and modified half.
 /// @details Raw half decoding preserves signaling NaNs. The caller flushes the
 /// half under MODE before widening it; this applies target-specific NaN quieting.
-inline uint32_t cvt_f32_f16(float source, rj_code_arch_t arch, bool ieee_mode) {
+inline uint32_t cvt_f32_f16(float source, rocjitsu::IsaFamily arch, bool ieee_mode) {
   uint32_t bits = std::bit_cast<uint32_t>(source);
   const uint32_t magnitude = bits & 0x7fffffffu;
   if (quiets_nan(arch, ieee_mode) && magnitude > 0x7f800000u)
@@ -307,11 +309,11 @@ inline uint16_t cvt_sr_pk_bf16_f32(uint32_t bits, uint16_t addend, bool fp16_ovf
 }
 
 /// @brief Return the OMOD value supported by an ordinary floating-point result.
-inline uint32_t effective_omod(rj_code_arch_t arch, uint32_t denorm_mode, bool ieee_mode,
+inline uint32_t effective_omod(rocjitsu::IsaFamily arch, uint32_t denorm_mode, bool ieee_mode,
                                uint32_t omod) {
   if (omod == 0)
     return 0;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5)
+  if (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5)
     return omod;
   return (denorm_mode & 2u) == 0 && !ieee_mode ? omod : 0;
 }
@@ -321,12 +323,13 @@ inline uint32_t effective_omod(rj_code_arch_t arch, uint32_t denorm_mode, bool i
 /// OMOD on the promoted VOP3 form of V_PK_FMAC_F16, subject to their ordinary
 /// output-denormal and MODE.IEEE restrictions. GFX12 and gfx1250 allow OMOD on
 /// non-packed F16 results regardless of output-denormal mode.
-inline uint32_t effective_f16_omod(rj_code_arch_t arch, uint32_t denorm_mode, bool ieee_mode,
+inline uint32_t effective_f16_omod(rocjitsu::IsaFamily arch, uint32_t denorm_mode, bool ieee_mode,
                                    bool packed_result, uint32_t omod) {
   if (omod == 0)
     return 0;
-  if (packed_result && (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-                        arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5))
+  if (packed_result &&
+      (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+       arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5))
     return 0;
   return effective_omod(arch, denorm_mode, ieee_mode, omod);
 }
@@ -440,10 +443,10 @@ enum class PackedBinaryOp { ADD, MUL, MIN, MAX, MINIMUM, MAXIMUM };
 /// selected denormals even when MODE disables output denormals.
 template <bool Minimum, typename V>
 inline V packed_minmax_f16(V a_bits, V b_bits, uint32_t denorm_mode, bool clamp,
-                           bool clamp_nan_to_zero, rj_code_arch_t arch, bool ieee_mode) {
+                           bool clamp_nan_to_zero, rocjitsu::IsaFamily arch, bool ieee_mode) {
   const auto input_policy = input_denormal::Policy::make(denorm_mode);
   V result;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) {
+  if (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5) {
     using Selection = std::conditional_t<Minimum, minmax::MinNum, minmax::MaxNum>;
     result = minmax::evaluate<fp_format::F16, Selection>(input_policy, a_bits, b_bits);
   } else {
@@ -458,7 +461,7 @@ inline V packed_minmax_f16(V a_bits, V b_bits, uint32_t denorm_mode, bool clamp,
 /// @brief Packed F16 binary arithmetic uses the FP16/64 MODE controls.
 inline uint16_t packed_binary_f16(PackedBinaryOp operation, uint16_t a_bits, uint16_t b_bits,
                                   uint32_t round_mode, uint32_t denorm_mode, bool clamp,
-                                  bool fp16_ovfl, bool clamp_nan_to_zero, rj_code_arch_t arch,
+                                  bool fp16_ovfl, bool clamp_nan_to_zero, rocjitsu::IsaFamily arch,
                                   bool ieee_mode) {
   if (operation == PackedBinaryOp::MIN)
     return packed_minmax_f16<true>(uint32_t(a_bits), uint32_t(b_bits), denorm_mode, clamp,
@@ -516,7 +519,8 @@ inline uint16_t packed_binary_f16(PackedBinaryOp operation, uint16_t a_bits, uin
 /// @brief Select three packed F16 operands, applying output controls only to the final result.
 inline uint16_t packed_select3_f16(PackedBinaryOp operation, uint16_t first, uint16_t second,
                                    uint16_t third, uint32_t denorm_mode, bool clamp,
-                                   bool clamp_nan_to_zero, rj_code_arch_t arch, bool ieee_mode) {
+                                   bool clamp_nan_to_zero, rocjitsu::IsaFamily arch,
+                                   bool ieee_mode) {
   const uint16_t pair = packed_binary_f16(operation, first, second, 0, denorm_mode | 2u, false,
                                           false, false, arch, ieee_mode);
   return packed_binary_f16(operation, pair, third, 0, denorm_mode, clamp, false, clamp_nan_to_zero,
@@ -546,7 +550,7 @@ inline uint16_t clamp_bf16(uint16_t value, bool clamp, bool clamp_nan_to_zero) {
 }
 
 /// @brief F32 FMA with architectural NaN selection in the active FP environment.
-inline float fma_f32(float a, float b, float c, rj_code_arch_t arch, bool ieee_mode,
+inline float fma_f32(float a, float b, float c, rocjitsu::IsaFamily arch, bool ieee_mode,
                      uint32_t denorm_mode, bool force_output_flush = false) {
 #if defined(__clang__)
 #pragma STDC FENV_ACCESS ON
@@ -609,7 +613,7 @@ inline float fma_f32(float a, float b, float c, rj_code_arch_t arch, bool ieee_m
 /// @brief Packed F32 operations use FP32 MODE, independently of the host environment.
 inline uint32_t packed_f32(float first, float second, float third, PackedF32Op operation,
                            uint32_t round_mode, uint32_t denorm_mode, bool clamp,
-                           bool clamp_nan_to_zero, rj_code_arch_t arch, bool ieee_mode) {
+                           bool clamp_nan_to_zero, rocjitsu::IsaFamily arch, bool ieee_mode) {
   detail::ScopedFenv environment(round_mode);
   auto flush = [](float value) {
     const uint32_t bits = std::bit_cast<uint32_t>(value);
@@ -909,7 +913,7 @@ inline Float arithmetic(Float lhs, Float rhs, Float addend, uint32_t round_mode,
 /// @brief F32 arithmetic combines MODE with architectural NaN and tininess policies.
 template <Arithmetic operation>
 inline float arithmetic(float lhs, float rhs, float addend, uint32_t round_mode,
-                        uint32_t denorm_mode, rj_code_arch_t arch, bool ieee_mode,
+                        uint32_t denorm_mode, rocjitsu::IsaFamily arch, bool ieee_mode,
                         bool force_output_flush = false) {
   static_assert(operation == Arithmetic::ADD || operation == Arithmetic::MUL ||
                 operation == Arithmetic::FMA || operation == Arithmetic::FMA_DX9_ZERO);
@@ -950,7 +954,7 @@ inline float arithmetic(float lhs, float rhs, float addend, uint32_t round_mode,
 /// Measured on gfx1201 and gfx1100 (IEEE=0 and 1); other targets with
 /// V_MULLIT_F32 inherit these rules without measurement.
 inline uint32_t mullit_f32(uint32_t s0, uint32_t s1, uint32_t s2, uint32_t round_mode,
-                           uint32_t denorm_mode, rj_code_arch_t arch, bool ieee_mode,
+                           uint32_t denorm_mode, rocjitsu::IsaFamily arch, bool ieee_mode,
                            bool force_output_flush) {
   using F32 = fp_format::F32;
   constexpr uint32_t kNegativeMax = F32::kSign | (F32::kInfinity - 1);

@@ -4,7 +4,6 @@
 #include "library/perf.hpp"
 #include "common/clocks.hpp"
 #include "common/result.hpp"
-#include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
@@ -250,24 +249,8 @@ perf_event::open(double freq, std::uint32_t batch_size, pid_t pid, int cpu)
 }
 
 /// Read event count
-long
-perf_event::get_fileno() const
-{
-    return m_fd;
-}
 
 /// Read event count
-std::uint64_t
-perf_event::get_count() const
-{
-    std::uint64_t count;
-    if(read(m_fd, &count, sizeof(std::uint64_t)) != sizeof(std::uint64_t))
-    {
-        LOG_CRITICAL("Failed to read event count from perf_event file");
-        std::exit(1);
-    }
-    return count;
-}
 
 /// Start counting events
 bool
@@ -486,30 +469,6 @@ perf_event::record::get_ip() const
 }
 
 std::uint64_t
-perf_event::record::get_pid() const
-{
-    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::pid_tid))
-    {
-        LOG_CRITICAL("Record does not have a `pid` field ({}|{:p})", is_sample(),
-                     static_cast<const void*>(m_source));
-        std::abort();
-    }
-    return locate_field<sample::pid_tid, std::uint32_t*>()[0];
-}
-
-std::uint64_t
-perf_event::record::get_tid() const
-{
-    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::pid_tid))
-    {
-        LOG_CRITICAL("Record does not have a `tid` field ({}|{:p})", is_sample(),
-                     static_cast<const void*>(m_source));
-        std::abort();
-    }
-    return locate_field<sample::pid_tid, std::uint32_t*>()[1];
-}
-
-std::uint64_t
 perf_event::record::get_time() const
 {
     if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::time))
@@ -519,30 +478,6 @@ perf_event::record::get_time() const
         std::abort();
     }
     return *locate_field<sample::time, std::uint64_t*>();
-}
-
-std::uint64_t
-perf_event::record::get_period() const
-{
-    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::period))
-    {
-        LOG_CRITICAL("Record does not have a 'period' field ({}|{:p})", is_sample(),
-                     static_cast<const void*>(m_source));
-        std::abort();
-    }
-    return *locate_field<sample::period, std::uint64_t*>();
-}
-
-std::uint32_t
-perf_event::record::get_cpu() const
-{
-    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::cpu))
-    {
-        LOG_CRITICAL("Record does not have a 'cpu' field ({}|{:p})", is_sample(),
-                     static_cast<const void*>(m_source));
-        std::abort();
-    }
-    return *locate_field<sample::cpu, std::uint32_t*>();
 }
 
 container::c_array<std::uint64_t>

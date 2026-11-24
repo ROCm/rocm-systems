@@ -4,6 +4,7 @@
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -14,7 +15,7 @@ namespace rocjitsu {
 namespace {
 class ScalarExecution : public ::testing::Test {
 protected:
-  void initialize(rj_code_arch_t arch) {
+  void initialize(rocjitsu::IsaFamily arch) {
     amdgpu::ComputeUnitCore::Config config{};
     config.arch = arch;
     config.num_wf_slots = 2;
@@ -44,7 +45,7 @@ protected:
 
 class Rdna4Scalar : public ScalarExecution {
 protected:
-  void SetUp() override { initialize(ROCJITSU_CODE_ARCH_RDNA4); }
+  void SetUp() override { initialize(rocjitsu::IsaFamily::Rdna4); }
 
   void check_workgroup_barrier(std::span<const uint32_t> code, std::array<uint32_t, 2> expected) {
     constexpr uint64_t pc = 0x1000;
@@ -74,13 +75,13 @@ protected:
 };
 
 class ScalarFloatingPoint : public ScalarExecution,
-                            public ::testing::WithParamInterface<rj_code_arch_t> {
+                            public ::testing::WithParamInterface<rocjitsu::IsaFamily> {
 protected:
   void SetUp() override { initialize(GetParam()); }
 
   void set_mode(uint32_t mode) {
     // GFX11.5 has a selectable IEEE arithmetic mode. GFX12 uses IEEE NaN propagation.
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5)
+    if (GetParam() == rocjitsu::IsaFamily::Rdna3_5)
       mode |= amdgpu::Wavefront::IEEE_BIT;
     wave->set_mode_raw(mode);
   }
@@ -88,7 +89,8 @@ protected:
 
 // Expected bit patterns were measured on gfx1201. Exercise the shared GFX11.5 implementation too.
 INSTANTIATE_TEST_SUITE_P(Architectures, ScalarFloatingPoint,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4));
+                         ::testing::Values(rocjitsu::IsaFamily::Rdna3_5,
+                                           rocjitsu::IsaFamily::Rdna4));
 
 TEST_P(ScalarFloatingPoint, UnsignedConversionUsesAll32BitsAndFlagsNegativeInputs) {
   struct Case {

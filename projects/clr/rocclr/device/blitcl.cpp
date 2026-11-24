@@ -98,20 +98,39 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
                                 offset, width, height, pitch);
     }
 
+    // copy_mode is the element size (16 or 4) for a cached copy. Above 16 it selects a 16-byte
+    // copy with nontemporal stores (17) or nontemporal loads and stores (18). The range check
+    // keeps the compiler from turning the selection into a switch, so the cached 16-byte loop
+    // stays first. Each mode has its own loop: with a shared loop the compiler merges the plain
+    // and nontemporal accesses and drops the hint.
     __kernel void __amd_rocclr_copyBuffer(__global uchar* src, __global uchar* dst, ulong size,
-                                          uint remainder, uint aligned_size, ulong end_ptr,
+                                          uint remainder, uint copy_mode, ulong end_ptr,
                                           uint next_chunk, uint workgroup_size) {
       uint l = __builtin_amdgcn_workitem_id_x();
       uint g = __builtin_amdgcn_workgroup_id_x();
       ulong id = (g * workgroup_size + l);
       ulong id_remainder = id;
 
-      if (aligned_size == sizeof(ulong2)) {
+      if (copy_mode == sizeof(ulong2)) {
         __global ulong2* srcD = (__global ulong2*)(src);
         __global ulong2* dstD = (__global ulong2*)(dst);
         while ((ulong)(&dstD[id]) < end_ptr) {
           dstD[id] = srcD[id];
           id += next_chunk;
+        }
+      } else if (copy_mode > sizeof(ulong2)) {
+        __global ulong2* srcD = (__global ulong2*)(src);
+        __global ulong2* dstD = (__global ulong2*)(dst);
+        if (copy_mode == sizeof(ulong2) + 1) {
+          while ((ulong)(&dstD[id]) < end_ptr) {
+            __builtin_nontemporal_store(srcD[id], &dstD[id]);
+            id += next_chunk;
+          }
+        } else {
+          while ((ulong)(&dstD[id]) < end_ptr) {
+            __builtin_nontemporal_store(__builtin_nontemporal_load(&srcD[id]), &dstD[id]);
+            id += next_chunk;
+          }
         }
       } else {
         __global uint* srcD = (__global uint*)(src);

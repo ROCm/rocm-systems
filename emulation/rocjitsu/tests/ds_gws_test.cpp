@@ -23,6 +23,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gws_device.h"
@@ -76,28 +77,28 @@ constexpr std::array<GwsVariant, 6> kGwsVariants{{
 }};
 
 // GFX11 routes GWS completion through DSCNT; the older ISAs use LGKMCNT.
-amdgpu::WaitCounterType expected_wait_counter(rj_code_arch_t arch) {
-  return (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+amdgpu::WaitCounterType expected_wait_counter(rocjitsu::IsaFamily arch) {
+  return (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5)
              ? amdgpu::WaitCounterType::DSCNT
              : amdgpu::WaitCounterType::LGKMCNT;
 }
 
-std::array<uint32_t, 2> build_gws(rj_code_arch_t arch, uint16_t op, uint8_t gds, uint8_t addr,
+std::array<uint32_t, 2> build_gws(rocjitsu::IsaFamily arch, uint16_t op, uint8_t gds, uint8_t addr,
                                   uint8_t offset0 = 0) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::build_ds(op, {.offset0 = offset0, .gds = gds, .addr = addr});
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::build_ds(op, {.offset0 = offset0, .gds = gds, .addr = addr});
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_ds(op, {.offset0 = offset0, .gds = gds, .addr = addr});
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::build_ds(op, {.offset0 = offset0, .gds = gds, .addr = addr});
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::build_ds(op, {.offset0 = offset0, .gds = gds, .addr = addr});
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::build_ds(op, {.offset0 = offset0, .gds = gds, .addr = addr});
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::build_ds(op, {.offset0 = offset0, .gds = gds, .addr = addr});
   default:
     ADD_FAILURE() << "unsupported arch for GWS build: " << unsigned(arch);
@@ -107,21 +108,21 @@ std::array<uint32_t, 2> build_gws(rj_code_arch_t arch, uint16_t op, uint8_t gds,
 
 // Build a plain workgroup s_barrier (SOPP) for the given arch. GFX9/GFX10 use
 // opcode 10; GFX11 uses 61.
-std::array<uint32_t, 1> build_s_barrier(rj_code_arch_t arch) {
+std::array<uint32_t, 1> build_s_barrier(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::build_sopp(cdna1::kSBarrierSopp);
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::build_sopp(cdna2::kSBarrierSopp);
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_sopp(cdna3::kSBarrierSopp);
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::build_sopp(rdna1::kSBarrierSopp);
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::build_sopp(rdna2::kSBarrierSopp);
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::build_sopp(rdna3::kSBarrierSopp);
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::build_sopp(rdna3_5::kSBarrierSopp);
   default:
     ADD_FAILURE() << "unsupported arch for s_barrier build: " << unsigned(arch);
@@ -133,21 +134,21 @@ std::array<uint32_t, 1> build_s_barrier(rj_code_arch_t arch) {
 // (RDNA3/3.5) uses opcode 48 -- the same word on GFX11 would decode to s_setkill,
 // so a parked wave released to this PC must use the arch-correct encoding to
 // actually retire.
-uint32_t gws_s_endpgm_word(rj_code_arch_t arch) {
+uint32_t gws_s_endpgm_word(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::build_sopp(cdna1::kSEndpgmSopp)[0];
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::build_sopp(cdna2::kSEndpgmSopp)[0];
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_sopp(cdna3::kSEndpgmSopp)[0];
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::build_sopp(rdna1::kSEndpgmSopp)[0];
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::build_sopp(rdna2::kSEndpgmSopp)[0];
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::build_sopp(rdna3::kSEndpgmSopp)[0];
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::build_sopp(rdna3_5::kSEndpgmSopp)[0];
   default:
     ADD_FAILURE() << "unsupported arch for s_endpgm build: " << unsigned(arch);
@@ -156,12 +157,12 @@ uint32_t gws_s_endpgm_word(rj_code_arch_t arch) {
 }
 
 // Build a GWS op carrying the DS acc bit (CDNA2/3 only, where the field exists).
-std::array<uint32_t, 2> build_gws_acc(rj_code_arch_t arch, uint16_t op, uint8_t acc, uint8_t addr,
-                                      uint8_t offset0 = 0) {
+std::array<uint32_t, 2> build_gws_acc(rocjitsu::IsaFamily arch, uint16_t op, uint8_t acc,
+                                      uint8_t addr, uint8_t offset0 = 0) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::build_ds(op, {.offset0 = offset0, .gds = 1, .acc = acc, .addr = addr});
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_ds(op, {.offset0 = offset0, .gds = 1, .acc = acc, .addr = addr});
   default:
     ADD_FAILURE() << "DS acc bit only exists on CDNA2/3: " << unsigned(arch);
@@ -217,7 +218,7 @@ void setup_workgroup(amdgpu::ComputeUnitCore &cu, std::array<amdgpu::Wavefront *
 // teardown and store-lifetime scenarios remain explicit.
 class GwsTestContext {
 public:
-  explicit GwsTestContext(rj_code_arch_t arch) : arch(arch), decoder(Decoder::create(arch)) {
+  explicit GwsTestContext(rocjitsu::IsaFamily arch) : arch(arch), decoder(Decoder::create(arch)) {
     l2.set_backing_memory(&mem);
   }
 
@@ -236,7 +237,7 @@ public:
         rocjitsu::test::initialize_compute_unit(cu, "ds_gws_cu", cu_config(wf_slots), &mem, &l2));
   }
 
-  const rj_code_arch_t arch;
+  const rocjitsu::IsaFamily arch;
   amdgpu::GpuMemory mem{"ds_gws_mem"};
   amdgpu::L2Cache l2{"ds_gws_l2"};
   std::unique_ptr<Decoder> decoder;
@@ -292,7 +293,7 @@ TEST(Gfx10OrderedAppend, AllocationAndReleaseWrapAtTheProgrammedMaximum) {
 }
 
 TEST(DsGwsFixture, FailedWorkgroupSetupPreservesLiveGroupAndReleasesAllocatedWaves) {
-  GwsTestContext context(ROCJITSU_CODE_ARCH_RDNA3);
+  GwsTestContext context(rocjitsu::IsaFamily::Rdna3);
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   ASSERT_NO_FATAL_FAILURE(context.make_cu(cu, 3));
   std::array<amdgpu::Wavefront *, 2> waves;
@@ -317,16 +318,16 @@ TEST(DsGwsFixture, FailedWorkgroupSetupPreservesLiveGroupAndReleasesAllocatedWav
   second->halt();
 }
 
-class DsGwsTest : public ::testing::TestWithParam<rj_code_arch_t>, public GwsTestContext {
+class DsGwsTest : public ::testing::TestWithParam<rocjitsu::IsaFamily>, public GwsTestContext {
 public:
   DsGwsTest() : GwsTestContext(GetParam()) {}
 };
 
 INSTANTIATE_TEST_SUITE_P(GwsArchitectures, DsGwsTest,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                           ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_RDNA1,
-                                           ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
-                                           ROCJITSU_CODE_ARCH_RDNA3_5));
+                         ::testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                           rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Rdna1,
+                                           rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3,
+                                           rocjitsu::IsaFamily::Rdna3_5));
 
 // Each GWS operation must decode, execute without raising
 // UnimplementedInstruction, and publish a zero-payload LOCAL_MEM state that
@@ -445,7 +446,7 @@ TEST_P(DsGwsTest, RejectsExecutionWithoutGdsBit) {
 // (the pre-fix behavior) would instead leave the first arrival RUNNING. This is
 // RDNA3/3.5-specific, so the case is skipped on the other parameterized targets.
 TEST_P(DsGwsTest, Rdna3CountOpsHonorLaneZeroWhenExecEmpty) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch != rocjitsu::IsaFamily::Rdna3 && arch != rocjitsu::IsaFamily::Rdna3_5)
     GTEST_SKIP() << "EXEC=0 lane-0 count ops are specific to RDNA3/3.5";
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   ASSERT_NO_FATAL_FAILURE(make_cu(cu));
@@ -466,7 +467,7 @@ TEST_P(DsGwsTest, Rdna3CountOpsHonorLaneZeroWhenExecEmpty) {
 }
 
 TEST_P(DsGwsTest, Rdna3InitSeedsCreditViaLaneZeroWhenExecEmpty) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch != rocjitsu::IsaFamily::Rdna3 && arch != rocjitsu::IsaFamily::Rdna3_5)
     GTEST_SKIP() << "EXEC=0 lane-0 count ops are specific to RDNA3/3.5";
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   ASSERT_NO_FATAL_FAILURE(make_cu(cu));
@@ -492,7 +493,7 @@ TEST_P(DsGwsTest, Rdna3InitSeedsCreditViaLaneZeroWhenExecEmpty) {
 // with EXEC=0 still releases parked waiters, taking the release count from lane 0.
 // (sema_p itself stays EXEC-gated, so the waiter is parked with a live lane.)
 TEST_P(DsGwsTest, Rdna3SemaBrReleasesViaLaneZeroWhenExecEmpty) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch != rocjitsu::IsaFamily::Rdna3 && arch != rocjitsu::IsaFamily::Rdna3_5)
     GTEST_SKIP() << "EXEC=0 lane-0 count ops are specific to RDNA3/3.5";
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   ASSERT_NO_FATAL_FAILURE(make_cu(cu));
@@ -516,7 +517,7 @@ TEST_P(DsGwsTest, Rdna3SemaBrReleasesViaLaneZeroWhenExecEmpty) {
 // EXEC-gated structural no-op (no park). The identical op with a live lane still
 // parks normally, proving only the empty mask -- not the resource -- was gated.
 TEST_P(DsGwsTest, OlderTargetsSkipCountOpsWhenExecEmpty) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5)
     GTEST_SKIP() << "RDNA3/3.5 run EXEC=0 count ops via lane 0 rather than gating";
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   ASSERT_NO_FATAL_FAILURE(make_cu(cu));
@@ -895,7 +896,9 @@ TEST_P(DsGwsTest, UnsatisfiedBarrierFailsAtWaitLimit) {
     cu->step();
     EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
   }
-  EXPECT_THROW(cu->step(), std::runtime_error);
+  EXPECT_NO_THROW(cu->step());
+  EXPECT_EQ(wf0->instruction_execution_error(), amdgpu::InstructionExecutionError::GwsFailure);
+  EXPECT_STREQ(wf0->instruction_execution_error_detail(), "GWS inactivity limit exceeded");
   EXPECT_FALSE(cu->has_active_wfs());
   EXPECT_FALSE(cu->gws_device().any_parked());
 }
@@ -926,7 +929,9 @@ TEST_P(DsGwsTest, MixedBarrierWaitFailsAtWaitLimit) {
     cu->step();
     EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
   }
-  EXPECT_THROW(cu->step(), std::runtime_error);
+  EXPECT_NO_THROW(cu->step());
+  EXPECT_EQ(wf0->instruction_execution_error(), amdgpu::InstructionExecutionError::GwsFailure);
+  EXPECT_STREQ(wf0->instruction_execution_error_detail(), "GWS inactivity limit exceeded");
   EXPECT_FALSE(cu->has_active_wfs());
   EXPECT_FALSE(cu->gws_device().any_parked());
 }
@@ -1404,7 +1409,7 @@ TEST_P(DsGwsTest, SeparateInitDispatchSeedsLaterDispatch) {
 }
 
 TEST_P(DsGwsTest, AccBitSelectsAgprCountOperand) {
-  if (arch != ROCJITSU_CODE_ARCH_CDNA2 && arch != ROCJITSU_CODE_ARCH_CDNA3)
+  if (arch != rocjitsu::IsaFamily::Cdna2 && arch != rocjitsu::IsaFamily::Cdna3)
     GTEST_SKIP() << "DS acc bit only exists on CDNA2/3";
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   ASSERT_NO_FATAL_FAILURE(make_cu(cu));
@@ -1464,13 +1469,70 @@ TEST_P(DsGwsTest, AccBitSelectsAgprCountOperand) {
 }
 
 TEST_P(DsGwsTest, BarrierRequiresExplicitInitialization) {
+  for (bool issue : {false, true}) {
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(make_cu(cu));
+    auto *wave = cu->dispatch_wf(0, 0, 102, 16);
+    ASSERT_NE(wave, nullptr);
+    cu->begin_workgroup(0, 0, 1);
+    const auto words = build_gws(arch, gws_opcode(arch, GwsOp::kBarrier), /*gds=*/1, kAddrVgpr, 0);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    unsigned failures = 0;
+    cu->set_execution_failure_handler([&](amdgpu::Wavefront &) {
+      ++failures;
+      return true;
+    });
+    wave->pc = 0x200000;
+    if (issue) {
+      for (size_t i = 0; i < words.size(); ++i)
+        mem.write32(wave->pc + 4 * i, words[i]);
+      EXPECT_NO_THROW(cu->step());
+    } else {
+      EXPECT_NO_THROW(EXPECT_TRUE(cu->execute_instruction(inst.get(), *wave).failed()));
+    }
+    EXPECT_EQ(failures, 1u);
+    EXPECT_EQ(wave->pc, 0x200000u);
+    EXPECT_EQ(wave->instruction_execution_error(), amdgpu::InstructionExecutionError::GwsFailure);
+    EXPECT_STREQ(wave->instruction_execution_error_detail(),
+                 "GWS barrier used before initialization");
+    EXPECT_FALSE(cu->has_active_wfs());
+  }
+}
+
+TEST_P(DsGwsTest, RejectedGwsDetailDoesNotOutliveHaltedWave) {
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   ASSERT_NO_FATAL_FAILURE(make_cu(cu));
+  cu->set_execution_failure_handler([](amdgpu::Wavefront &) { return true; });
+
   auto *wave = cu->dispatch_wf(0, 0, 102, 16);
   ASSERT_NE(wave, nullptr);
   cu->begin_workgroup(0, 0, 1);
-  EXPECT_THROW(cu->gws_barrier_arrive(*wave, 0, 1), std::runtime_error);
-  EXPECT_FALSE(cu->has_active_wfs());
+  const auto barrier = build_gws(arch, gws_opcode(arch, GwsOp::kBarrier), /*gds=*/1, kAddrVgpr);
+  wave->pc = 0x200000;
+  for (size_t index = 0; index < barrier.size(); ++index)
+    mem.write32(wave->pc + 4 * index, barrier[index]);
+  testing::internal::CaptureStderr();
+  cu->step();
+  const std::string first_warning = testing::internal::GetCapturedStderr();
+  EXPECT_NE(first_warning.find("GWS barrier used before initialization"), std::string::npos)
+      << first_warning;
+  ASSERT_FALSE(cu->has_active_wfs());
+
+  auto *next = cu->dispatch_wf(1, 0, 102, 16);
+  ASSERT_NE(next, nullptr);
+  cu->begin_workgroup(1, 0, 1);
+  next->set_exec(1);
+  const auto invalid = build_gws(arch, gws_opcode(arch, GwsOp::kBarrier), /*gds=*/0, kAddrVgpr);
+  next->pc = 0x300000;
+  for (size_t index = 0; index < invalid.size(); ++index)
+    mem.write32(next->pc + 4 * index, invalid[index]);
+  testing::internal::CaptureStderr();
+  cu->step();
+  const std::string next_warning = testing::internal::GetCapturedStderr();
+  EXPECT_NE(next_warning.find("invalid instruction encoding"), std::string::npos) << next_warning;
+  EXPECT_EQ(next_warning.find("GWS barrier used before initialization"), std::string::npos)
+      << next_warning;
 }
 
 // A V leaves a credit for a P already parked (possibly on another CU), delivered
@@ -1900,7 +1962,7 @@ TEST_P(DsGwsTest, SemaphoreReleaseAllPreservesBankedCreditsOnGfx11) {
   run_gws(*cu, GwsOp::kSemaP, *first, /*count=*/0);
   run_gws(*cu, GwsOp::kSemaP, *second, /*count=*/0);
   const bool preserves_credits =
-      arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+      arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5;
   EXPECT_EQ(first->state(),
             preserves_credits ? amdgpu::WfState::RUNNING : amdgpu::WfState::GWS_WAIT);
   EXPECT_EQ(second->state(), amdgpu::WfState::GWS_WAIT);
@@ -1918,7 +1980,7 @@ TEST_P(DsGwsTest, ReleaseAllUsesTargetCreditPolicyBeforeBarrier) {
   run_gws(*cu, GwsOp::kReleaseAll, *wave, /*count=*/0);
   run_gws(*cu, GwsOp::kBarrier, *wave, /*count=*/0);
   const bool preserves_credits =
-      arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+      arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5;
   EXPECT_EQ(wave->state(),
             preserves_credits ? amdgpu::WfState::GWS_WAIT : amdgpu::WfState::RUNNING);
   wave->halt();
@@ -2062,7 +2124,10 @@ TEST_P(DsGwsTest, OnlySameProcessInstructionProgressExtendsWaitBudget) {
       waiter->halt();
     } else {
       ASSERT_NO_THROW(producer_cu->step());
-      EXPECT_THROW(waiter_cu->step(), std::runtime_error);
+      EXPECT_NO_THROW(waiter_cu->step());
+      EXPECT_EQ(waiter->instruction_execution_error(),
+                amdgpu::InstructionExecutionError::GwsFailure);
+      EXPECT_STREQ(waiter->instruction_execution_error_detail(), "GWS inactivity limit exceeded");
       EXPECT_TRUE(waiter->is_halted());
     }
     producer->halt();

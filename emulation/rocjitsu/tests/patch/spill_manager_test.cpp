@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/spill_manager.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "decode_test_util.h"
 #include "rocjitsu/code/analysis/exec_state.h"
@@ -566,7 +567,7 @@ TEST(SpillManager, IntegrationFromLiveBefore) {
   };
   TestCodeObject co(std::move(words));
   IntegDecoder decoder;
-  auto blocks = build_valid_blocks(co, decoder, ROCJITSU_CODE_ARCH_CDNA3);
+  auto blocks = build_valid_blocks(co, decoder, rocjitsu::IsaFamily::Cdna3);
   ASSERT_FALSE(blocks.empty());
 
   // Pick the probe-site instruction by mnemonic match.

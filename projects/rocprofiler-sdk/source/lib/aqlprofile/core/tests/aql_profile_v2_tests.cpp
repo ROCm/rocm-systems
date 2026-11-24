@@ -13,6 +13,7 @@
 #include <cstring>
 #include <vector>
 #include <memory>
+#include <set>
 
 extern "C" int
 aql_profile_v2_c_compatibility_test(void);
@@ -704,6 +705,38 @@ protected:
         return memory_copy_mock(dst, src, size, nullptr);
     }
 
+    struct tracked_memory
+    {
+        size_t          allocations = 0;
+        size_t          copies      = 0;
+        std::set<void*> live{};
+    };
+
+    static hsa_status_t tracked_alloc(void**                         ptr,
+                                      uint64_t                       size,
+                                      aqlprofile_buffer_desc_flags_t flags,
+                                      void*                          userdata)
+    {
+        const auto status = memory_alloc_mock(ptr, size, flags, nullptr);
+        if(status != HSA_STATUS_SUCCESS) return status;
+        auto* memory = static_cast<tracked_memory*>(userdata);
+        ++memory->allocations;
+        memory->live.insert(*ptr);
+        return status;
+    }
+
+    static void tracked_dealloc(void* ptr, void* userdata)
+    {
+        static_cast<tracked_memory*>(userdata)->live.erase(ptr);
+        memory_dealloc_mock(ptr, nullptr);
+    }
+
+    static hsa_status_t failing_memory_copy(void*, const void*, size_t, void* userdata)
+    {
+        ++static_cast<tracked_memory*>(userdata)->copies;
+        return HSA_STATUS_ERROR;
+    }
+
     static hsa_status_t capture_spm_configurations(
         const aqlprofile_spm_available_configuration_t* cfg,
         size_t                                          count,
@@ -1044,6 +1077,96 @@ TEST_F(AqlProfileV2ApiTest, SpmTcaProgramsOneDelayPerInstance)
         const auto*                 delays = block_info->delay_info.val;
         const std::vector<uint32_t> expected_delays(delays, delays + block_info->instance_count);
         EXPECT_EQ(written_delays, expected_delays) << gfxip;
+    }
+}
+
+TEST_F(AqlProfileV2ApiTest, PmcCreateCopyFailureReleasesAllocations)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx942";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBM;
+    event.event_id   = 2;
+
+    tracked_memory                 memory{};
+    aqlprofile_handle_t            handle{};
+    aqlprofile_pmc_aql_packets_t   packets{};
+    const aqlprofile_pmc_profile_t profile{agent, &event, 1};
+    EXPECT_EQ(aqlprofile_pmc_create_packets(&handle,
+                                            &packets,
+                                            profile,
+                                            tracked_alloc,
+                                            tracked_dealloc,
+                                            failing_memory_copy,
+                                            &memory),
+              HSA_STATUS_ERROR);
+    EXPECT_EQ(memory.copies, 1u);
+    EXPECT_EQ(handle.handle, 0u);
+    EXPECT_GT(memory.allocations, 0u);
+    EXPECT_TRUE(memory.live.empty());
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmCreateFailureReleasesAllocations)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx942";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI;
+    event.event_id   = 1;
+
+    // REFCLK sampling needs gfx12, and is rejected after the output buffer is allocated.
+    aqlprofile_spm_parameter_t refclk{AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE,
+                                      AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_REFCLK};
+
+    struct failure_case_t
+    {
+        const char*                 name;
+        aqlprofile_spm_parameter_t* parameter;
+        hsa_status_t                status;
+        size_t                      copies;
+    };
+
+    for(const auto& [name, parameter, status, copies] :
+        {failure_case_t{"copy fails", nullptr, HSA_STATUS_ERROR, 1},
+         failure_case_t{"REFCLK before gfx12", &refclk, HSA_STATUS_ERROR_INVALID_ARGUMENT, 0}})
+    {
+        tracked_memory           memory{};
+        aqlprofile_spm_profile_t profile{};
+        profile.aql_agent       = agent;
+        profile.events          = &event;
+        profile.event_count     = 1;
+        profile.parameters      = parameter;
+        profile.parameter_count = parameter ? 1 : 0;
+        profile.alloc_cb        = tracked_alloc;
+        profile.dealloc_cb      = tracked_dealloc;
+        profile.memcpy_cb       = failing_memory_copy;
+        profile.userdata        = &memory;
+
+        aqlprofile_handle_t          handle{};
+        aqlprofile_spm_buffer_desc_t desc{};
+        aqlprofile_spm_aql_packets_t packets{};
+        EXPECT_EQ(aqlprofile_spm_create_packets(&handle, &desc, &packets, profile, 0), status)
+            << name;
+        EXPECT_EQ(memory.copies, copies) << name;
+        EXPECT_EQ(handle.handle, 0u) << name;
+        EXPECT_GT(memory.allocations, 0u) << name;
+        EXPECT_TRUE(memory.live.empty()) << name;
     }
 }
 }  // namespace aql_profile_v2_tests

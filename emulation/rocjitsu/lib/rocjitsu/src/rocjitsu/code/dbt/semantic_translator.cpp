@@ -5,6 +5,7 @@
 /// @brief Small dispatch facade for ISA-pair semantic expansion rules.
 
 #include "rocjitsu/code/dbt/semantic_translator.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/dbt/semantic/rules.h"
 #include "rocjitsu/isa/instruction.h"
@@ -21,20 +22,21 @@ namespace {
 /// @brief Select the handwritten rewrite registry for one ISA pair.
 /// @details Most ISA pairs currently have only an opcode table and do not offer
 /// complete registry-level rewrite-discharge verification.
-[[nodiscard]] RewriteRegistry rewrite_registry_for(rj_code_arch_t guest, rj_code_arch_t host,
+[[nodiscard]] RewriteRegistry rewrite_registry_for(rocjitsu::IsaFamily guest,
+                                                   rocjitsu::IsaFamily host,
                                                    ProcessorRevision input_revision,
                                                    ProcessorRevision output_revision) {
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Rdna4)
     return {semantic_expand_rules_cdna4_to_rdna4(), cdna4_reverse_shift_rules_for_rdna(host)};
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3)
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Cdna3)
     return {semantic_expand_rules_cdna4_to_cdna3(), {}};
   // gfx1250 A0 and B0 share one architectural target ID. Select the B0-to-A0
   // profile only for that explicit revision pair.
-  if (guest == ROCJITSU_CODE_ARCH_CDNA5 && host == ROCJITSU_CODE_ARCH_CDNA5 &&
+  if (guest == rocjitsu::IsaFamily::Cdna5 && host == rocjitsu::IsaFamily::Cdna5 &&
       input_revision == ProcessorRevision::Gfx1250B0 &&
       output_revision == ProcessorRevision::Gfx1250A0)
     return rewrite_registry_gfx1250_b0_to_a0();
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3)
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Rdna3)
     return {semantic_expand_rules_cdna4_to_rdna3(), cdna4_reverse_shift_rules_for_rdna(host)};
   return {};
 }
@@ -51,7 +53,7 @@ namespace {
 
 } // namespace
 
-SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host,
+SemanticTranslator::SemanticTranslator(rocjitsu::IsaFamily guest, rocjitsu::IsaFamily host,
                                        ProcessorRevision input_revision,
                                        ProcessorRevision output_revision)
     : rewrite_registry_(rewrite_registry_for(guest, host, input_revision, output_revision)),

@@ -26,6 +26,7 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
@@ -43,7 +44,7 @@ namespace rocjitsu::dbi_test {
 /// @brief Everything that differs between one target's run of these tests and
 ///        another's. Each test file defines one constant per supported target.
 struct DbiTargetParams {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   rj_code_target_id_t target;
   /// kernel_path() stem of the kernel to instrument.
   const char *kernel_fixture;
@@ -58,7 +59,7 @@ struct DbiTargetParams {
 
 // Select anchors only from the kernel that the HSA fixture dispatches. HIP may
 // link unrelated device functions and alignment bytes ahead of vector_add.
-inline void find_vector_add_anchors(const AmdGpuCodeObject &object, rj_code_arch_t arch,
+inline void find_vector_add_anchors(const AmdGpuCodeObject &object, rocjitsu::IsaFamily arch,
                                     std::vector<uint64_t> &offsets) {
   std::string error;
   const auto kernel = resolve_probe_symbol(object, "vector_add", &error);

@@ -324,7 +324,7 @@ def test_create_df_pmc_with_slot_ids_returns_pass_tables_in_pass_order(
         "pmc_perf_SQ_INST_LEVEL_LDS_ACCUM",
     ]
     assert pass_tables["pmc_perf_2"]["SQ_WAVES"].tolist() == [4]
-    assert "SQ_WAVES" not in pass_tables["pmc_perf_10"].columns
+    assert "SQ_WAVES" not in pass_tables["pmc_perf_10"]
     assert df[["SQ_WAVES", "SQ_BUSY_CYCLES"]].iloc[0].tolist() == [4, 100]
 
 

@@ -51,6 +51,7 @@ fn fixture() -> (
     ))
     .unwrap();
     let node = sysfs::KfdNode {
+        debug: sysfs::KfdDebugProperties::default(),
         host_atomics: false,
         node: 1,
         gpu_id: 42,

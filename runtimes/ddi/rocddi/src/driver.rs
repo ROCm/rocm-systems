@@ -380,6 +380,15 @@ pub(crate) trait VirtualMemoryOperations: Driver {
         permissions: DeviceAccess,
     ) -> Result<(), Error>;
     /// Unmaps one host range, retaining its owner if cleanup fails.
+    /// Borrows a still-mapped CPU interval independently of device health.
+    fn diagnostic_virtual_host_mapping(
+        _mapping: &Self::VirtualHostMapping,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        Err(Error::Operation {
+            kind: crate::ErrorKind::Unsupported,
+            detail: "virtual host diagnostics unavailable",
+        })
+    }
     fn free_virtual_host_mapping(mapping: &mut Self::VirtualHostMapping) -> Result<(), Error>;
 }
 
@@ -395,6 +404,15 @@ pub(crate) trait UserQueueResource: CachedInfo<Info = QueueTransport> {
     fn check(&self) -> Result<(), Error>;
     /// Samples the native read and write positions without retiring work.
     fn progress(&self) -> Result<(u64, u64), Error>;
+    /// Permanently stops and captures native compute diagnostic state.
+    fn core_snapshot(
+        &mut self,
+    ) -> Result<crate::device::gpu::diagnostic::CoreQueueSnapshot<'_>, Error> {
+        Err(Error::Operation {
+            kind: crate::ErrorKind::Unsupported,
+            detail: "native core capture unavailable",
+        })
+    }
     /// Stops native execution while retaining the queue's backing.
     fn inactivate(&mut self) -> Result<(), Error>;
     /// Changes the native scheduling priority when supported.

@@ -57,6 +57,8 @@ ImageLoadVimage::ImageLoadVimage(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 bool ImageLoadVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -140,6 +142,8 @@ ImageLoadMipVimage::ImageLoadMipVimage(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_MIP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 bool ImageLoadMipVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -227,6 +231,8 @@ ImageLoadPckVimage::ImageLoadPckVimage(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 bool ImageLoadPckVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -310,6 +316,8 @@ ImageLoadPckSgnVimage::ImageLoadPckSgnVimage(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_PCK_SGN);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 bool ImageLoadPckSgnVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -393,6 +401,8 @@ ImageLoadMipPckVimage::ImageLoadMipPckVimage(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_MIP_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 bool ImageLoadMipPckVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -480,6 +490,8 @@ ImageLoadMipPckSgnVimage::ImageLoadMipPckSgnVimage(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_MIP_PCK_SGN);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 bool ImageLoadMipPckSgnVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -565,6 +577,8 @@ ImageStoreVimage::ImageStoreVimage(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 bool ImageStoreVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -630,6 +644,8 @@ ImageStoreMipVimage::ImageStoreMipVimage(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_MIP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 bool ImageStoreMipVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -697,6 +713,8 @@ ImageStorePckVimage::ImageStorePckVimage(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 bool ImageStorePckVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -762,6 +780,8 @@ ImageStoreMipPckVimage::ImageStoreMipPckVimage(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_MIP_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 bool ImageStoreMipPckVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -845,6 +865,8 @@ ImageAtomicSwapVimage::ImageAtomicSwapVimage(const MachineInst *inst)
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_SWAP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicSwapVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -926,6 +948,8 @@ ImageAtomicCmpswapVimage::ImageAtomicCmpswapVimage(const MachineInst *inst)
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_CMPSWAP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicCmpswapVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1007,6 +1031,8 @@ ImageAtomicAddUintVimage::ImageAtomicAddUintVimage(const MachineInst *inst)
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_ADD_UINT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicAddUintVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1088,6 +1114,8 @@ ImageAtomicSubUintVimage::ImageAtomicSubUintVimage(const MachineInst *inst)
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_SUB_UINT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicSubUintVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1169,6 +1197,8 @@ ImageAtomicMinIntVimage::ImageAtomicMinIntVimage(const MachineInst *inst)
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_MIN_INT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicMinIntVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1250,6 +1280,8 @@ ImageAtomicMinUintVimage::ImageAtomicMinUintVimage(const MachineInst *inst)
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_MIN_UINT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicMinUintVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1331,6 +1363,8 @@ ImageAtomicMaxIntVimage::ImageAtomicMaxIntVimage(const MachineInst *inst)
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_MAX_INT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicMaxIntVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1412,6 +1446,8 @@ ImageAtomicMaxUintVimage::ImageAtomicMaxUintVimage(const MachineInst *inst)
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_MAX_UINT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicMaxUintVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1493,6 +1529,8 @@ ImageAtomicAndVimage::ImageAtomicAndVimage(const MachineInst *inst)
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_AND);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicAndVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1574,6 +1612,8 @@ ImageAtomicOrVimage::ImageAtomicOrVimage(const MachineInst *inst)
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_OR);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicOrVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1655,6 +1695,8 @@ ImageAtomicXorVimage::ImageAtomicXorVimage(const MachineInst *inst)
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_XOR);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicXorVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1736,6 +1778,8 @@ ImageAtomicIncUintVimage::ImageAtomicIncUintVimage(const MachineInst *inst)
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_INC_UINT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicIncUintVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1817,6 +1861,8 @@ ImageAtomicDecUintVimage::ImageAtomicDecUintVimage(const MachineInst *inst)
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_DEC_UINT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicDecUintVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1881,6 +1927,8 @@ ImageGetResinfoVimage::ImageGetResinfoVimage(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GET_RESINFO);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Other);
 }
 
 bool ImageGetResinfoVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1923,6 +1971,8 @@ ImageBvhIntersectRayVimage::ImageBvhIntersectRayVimage(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_BVH_INTERSECT_RAY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Bvh);
 }
 
 namespace detail {
@@ -1950,6 +2000,8 @@ ImageBvh64IntersectRayVimage::ImageBvh64IntersectRayVimage(const MachineInst *in
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_BVH64_INTERSECT_RAY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Bvh);
 }
 
 namespace detail {
@@ -1977,6 +2029,8 @@ ImageBvhDualIntersectRayVimage::ImageBvhDualIntersectRayVimage(const MachineInst
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_BVH_DUAL_INTERSECT_RAY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Bvh);
 }
 
 namespace detail {
@@ -2004,6 +2058,8 @@ ImageBvh8IntersectRayVimage::ImageBvh8IntersectRayVimage(const MachineInst *inst
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_BVH8_INTERSECT_RAY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Bvh);
 }
 
 namespace detail {
@@ -2049,6 +2105,8 @@ ImageAtomicAddFltVimage::ImageAtomicAddFltVimage(const MachineInst *inst)
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_ADD_FLT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicAddFltVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -2130,6 +2188,8 @@ ImageAtomicMinFltVimage::ImageAtomicMinFltVimage(const MachineInst *inst)
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_MIN_FLT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicMinFltVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -2211,6 +2271,8 @@ ImageAtomicMaxFltVimage::ImageAtomicMaxFltVimage(const MachineInst *inst)
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_MAX_FLT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicMaxFltVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -2292,6 +2354,8 @@ ImageAtomicPkAddF16Vimage::ImageAtomicPkAddF16Vimage(const MachineInst *inst)
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_PK_ADD_F16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicPkAddF16Vimage::should_print_src_operand(uint8_t operand_index) const {
@@ -2373,6 +2437,8 @@ ImageAtomicPkAddBf16Vimage::ImageAtomicPkAddBf16Vimage(const MachineInst *inst)
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_PK_ADD_BF16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicPkAddBf16Vimage::should_print_src_operand(uint8_t operand_index) const {

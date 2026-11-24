@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include "StickyHipLastError.h"
 #include "fakes/hip_fakes.h"
 
 #include "nccl.h"
@@ -138,6 +139,7 @@ struct VmmLog {
   std::string failAt;  // the call that returns an error; empty means all succeed
   size_t granularity = 4096;
   bool exportInvalidFd = false;  // DMA-BUF export succeeds but hands back fd -1
+  StickyHipLastError* lastError = nullptr;  // when set, the failing call also leaves its error pending
 };
 
 class RocmwrapMicrotest : public ::testing::Test {
@@ -231,7 +233,8 @@ protected:
   static void InstallVmm(VmmLog& log) {
     auto step = [&log](const char* name) {
       log.calls.push_back(name);
-      return log.failAt == name ? hipErrorInvalidValue : hipSuccess;
+      if (log.failAt != name) return hipSuccess;
+      return log.lastError ? log.lastError->Fail(hipErrorInvalidValue) : hipErrorInvalidValue;
     };
     g_hipMemGetAllocationGranularity = [&log, step](size_t* g, const hipMemAllocationProp* prop,
                                                     hipMemAllocationGranularity_flags) {
@@ -369,7 +372,8 @@ TEST_F(RocmwrapMicrotest, FunctionalProbe_ZeroGranularityFailsBeforeCreating) {
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "cuMem functional probe failed on device 0"));
 }
 
-// Each failing step undoes exactly the steps that succeeded before it, in reverse order.
+// Each failing step undoes exactly the steps that succeeded before it, in reverse order, and leaves no HIP
+// last error behind -- including the early exits before anything was created.
 TEST_F(RocmwrapMicrotest, FunctionalProbe_EachFailureUndoesOnlyTheCompletedSteps) {
   struct Case {
     const char* failAt;
@@ -390,11 +394,14 @@ TEST_F(RocmwrapMicrotest, FunctionalProbe_EachFailureUndoesOnlyTheCompletedSteps
   for (const auto& c : cases) {
     SCOPED_TRACE(c.failAt);
     g_logged.clear();
+    StickyHipLastError lastError;
     VmmLog log;
     log.failAt = c.failAt;
+    log.lastError = &lastError;
     InstallVmm(log);
     EXPECT_EQ(ncclCuMemFunctionalProbe(0, 1), 0);
     EXPECT_EQ(log.calls, c.calls);
+    EXPECT_EQ(lastError.pending, hipSuccess) << "the failed probe left a HIP last error behind";
     EXPECT_TRUE(Logged(NCCL_LOG_INFO, "cuMem functional probe failed on device 1"));
   }
 }
@@ -662,6 +669,29 @@ TEST_F(RocmwrapMicrotest, CuMemHostEnable_ReturnsTheCachedValue) {
   ncclCumemHostEnable = 1;
   EXPECT_EQ(ncclCuMemHostEnable(), 1);
 }
+
+#if NCCL_CUMEM_HOST_GATE
+// The host probe's hipMemCreate is expected to fail where containers block get_mempolicy. The fallback
+// must not leave that failure as the thread's HIP last error for the application to read later.
+TEST_F(RocmwrapMicrotest, CuMemHostEnable_FailedHostProbeFallsBackAndClearsTheLastError) {
+  g_params["CUMEM_HOST_ENABLE"] = 1;
+  StickyHipLastError lastError;
+  g_hipMemCreate = [&](hipMemGenericAllocationHandle_t*, size_t, const hipMemAllocationProp* prop,
+                       unsigned long long) {
+    EXPECT_EQ(prop->location.type, hipMemLocationTypeHost);
+    return lastError.Fail(hipErrorNotSupported);
+  };
+  EXPECT_EQ(ncclCuMemHostEnable(), 0);
+  EXPECT_EQ(lastError.pending, hipSuccess) << "the failed host probe left a HIP last error behind";
+  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "cuMem host allocations do not appear to be working"));
+}
+
+TEST_F(RocmwrapMicrotest, CuMemHostEnable_WorkingHostProbeEnablesAndReleasesTheHandle) {
+  g_params["CUMEM_HOST_ENABLE"] = 1;
+  EXPECT_EQ(ncclCuMemHostEnable(), 1);
+  EXPECT_EQ(defaultVmm_.calls, (std::vector<std::string>{"granularity", "create", "release"}));
+}
+#endif
 
 // initOnceFunc / rocmLibraryInit
 

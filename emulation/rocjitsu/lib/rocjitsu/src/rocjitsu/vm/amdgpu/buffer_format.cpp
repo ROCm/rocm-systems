@@ -5,6 +5,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/hwfloat/unorm.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/buffer_format_detail.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
@@ -385,16 +386,16 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
     return false;
   const uint32_t word3 = read_scalar_selector(wf, resource + 3);
   const auto arch = wf.cu().arch();
-  if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-       arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) &&
+  if ((arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+       arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5) &&
       (word3 >> 30) != 0) {
     d.exec_mask = 0;
     return false;
   }
-  d.buffer_format_encoding = arch_is_cdna_4_or_lower(arch)      ? BufferFormatEncoding::Gfx9
-                             : arch == ROCJITSU_CODE_ARCH_RDNA1 ? BufferFormatEncoding::Rdna1
-                             : arch == ROCJITSU_CODE_ARCH_RDNA2 ? BufferFormatEncoding::Rdna2
-                                                                : BufferFormatEncoding::Gfx11;
+  d.buffer_format_encoding = arch_is_cdna_4_or_lower(arch)        ? BufferFormatEncoding::Gfx9
+                             : arch == rocjitsu::IsaFamily::Rdna1 ? BufferFormatEncoding::Rdna1
+                             : arch == rocjitsu::IsaFamily::Rdna2 ? BufferFormatEncoding::Rdna2
+                                                                  : BufferFormatEncoding::Gfx11;
   d.buffer_format = format < 0 ? addr_calc::rdna_buffer_resource_format(arch, word3)
                                : static_cast<uint32_t>(format);
   if (format < 0 && d.buffer_format_encoding == BufferFormatEncoding::Gfx9)
@@ -439,7 +440,7 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
 void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data_base, bool raw) {
   // Native gfx1201 replicates X and gfx1100 zero-fills. Other families use the
   // extrapolated zero-fill policy described by BufferStoreMissingChannel.
-  const auto missing = wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4
+  const auto missing = wf.cu().arch() == rocjitsu::IsaFamily::Rdna4
                            ? BufferStoreMissingChannel::ReplicateFirst
                            : BufferStoreMissingChannel::Zero;
   RegisterAccess regs(wf);

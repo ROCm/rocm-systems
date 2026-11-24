@@ -69,12 +69,19 @@ constexpr size_t kLLMultiChunk = 4112;
 // 4 and 8 keep the aligned path on buffers that are not 16-byte aligned.
 constexpr std::pair<size_t, size_t> kLLOffsets[] = {{4, 4}, {8, 8}, {4, 8}, {1, 1}, {2, 6}, {3, 0}, {0, 5}};
 
-// gfx1250 LL128 slice payload. First size past the LL cap: 136 slices and a partial one.
-constexpr size_t kLL128SliceBytes = 1920;
-constexpr size_t kLL128PartialSlice = kLLCap + 16;
-constexpr size_t kLL128WholeSlices = 137 * kLL128SliceBytes;
-constexpr size_t kLL128Mid = 1024 * 1024 + 16;
-static_assert(kLL128PartialSlice % kLL128SliceBytes != 0 && kLL128WholeSlices > kLLCap, "LL128 sizes");
+// gfx1250 LL128 slice payload: 15 × 8-byte words per lane in a warp-32 group → 1920 B.
+// One-shot sizes are all below kDdaLL128BcTwoShotMin (256 KiB).
+constexpr size_t kLL128SliceBytes   = 1920;
+constexpr size_t kLL128PartialSlice = kLL128SliceBytes + 16;    // 1936 B, partial last slice
+constexpr size_t kLL128Mid          = 64  * kLL128SliceBytes;   // 122 880 B
+constexpr size_t kLL128WholeSlices  = 133 * kLL128SliceBytes;   // 255 360 B, whole slices just under 256 KiB
+static_assert(kLL128PartialSlice % kLL128SliceBytes != 0 && kLL128WholeSlices < 256 * 1024, "LL128 one-shot sizes");
+
+// Two-shot sizes: all >= kDdaLL128BcTwoShotMin (256 KiB).
+constexpr size_t kLL128TwoShotMin        = 256 * 1024 + 16;
+constexpr size_t kLL128TwoShotMultiChunk = 256 * 1024 + 1920 * 5 + 960;  // partial two-shot chunk, ~265 KiB
+constexpr size_t kLL128TwoShotMid        = 1024 * 1024;
+constexpr size_t kLL128TwoShotCap        = 2 * 1024 * 1024;
 
 // The LL128 launcher takes kAligned=false below 16-byte alignment.
 constexpr std::pair<size_t, size_t> kLL128Offsets[] = {{4, 4}, {8, 8}, {4, 12}, {1, 3}, {0, 8}, {8, 0}};
@@ -423,16 +430,34 @@ TEST_F(DdaMPI_BroadcastLL, BackToBackNoSync) {
   backToBackRounds(sizes, RCCL_DDA_FABRIC_LL);
 }
 
-class DdaMPI_BroadcastLL128 : public DdaBroadcastMPITest {};
+// ---- DDA fabric Broadcast LL128 one-shot ----
 
-// Every root, partial and whole last slices up to the cap, separate buffers.
+class DdaMPI_BroadcastLL128 : public DdaBroadcastMPITest {
+ protected:
+  std::vector<std::pair<const char*, std::string>> ddaEnv() const override {
+    // Suppress LL so LL128 is chosen for sizes well below the LL cap.
+    return {{"RCCL_DDA_BC", "1"},
+            {"RCCL_DDA_LL_THRESHOLD", "0"},
+            {"RCCL_DDA_LL128_THRESHOLD", std::to_string(kLL128Cap)}};
+  }
+  std::string configMismatch() override {
+    ncclComm* comm = getActiveCommunicator();
+    if (rcclParamDdaBc() <= 0) return "RCCL_DDA_BC is not on in this process";
+    if (rcclDdaLLThreshold(comm, ncclFuncBroadcast) != 0) return "RCCL_DDA_LL_THRESHOLD is not 0";
+    if (rcclDdaLL128Threshold(comm, ncclFuncBroadcast) != kLL128Cap)
+      return "Broadcast LL128 cap is not kLL128Cap";
+    return {};
+  }
+};
+
+// Every root, partial and whole last slices, separate buffers.
 TEST_F(DdaMPI_BroadcastLL128, AllRootsOutOfPlace) {
-  allRoots({kLL128PartialSlice, kLL128WholeSlices, kLL128Mid, kLL128Cap}, false, RCCL_DDA_FABRIC_LL128);
+  allRoots({kLL128PartialSlice, kLL128Mid, kLL128WholeSlices}, false, RCCL_DDA_FABRIC_LL128);
 }
 
-// Every root, partial and whole last slices up to the cap, sendbuff == recvbuff.
+// Every root, partial and whole last slices, sendbuff == recvbuff.
 TEST_F(DdaMPI_BroadcastLL128, AllRootsInPlace) {
-  allRoots({kLL128PartialSlice, kLL128WholeSlices, kLL128Mid, kLL128Cap}, true, RCCL_DDA_FABRIC_LL128);
+  allRoots({kLL128PartialSlice, kLL128Mid, kLL128WholeSlices}, true, RCCL_DDA_FABRIC_LL128);
 }
 
 // Odd then even run of launches: both banks, each start token, a fresh payload every call.
@@ -452,19 +477,114 @@ TEST_F(DdaMPI_BroadcastLL128, UnalignedBuffers) {
 
 // Seven launches with no sync between them: ranks run ahead into the reused bank and the start-token wait.
 TEST_F(DdaMPI_BroadcastLL128, BackToBackNoSync) {
-  const size_t sizes[7] = {kLL128PartialSlice, kLL128Mid, kLL128WholeSlices, kLL128Cap,
-                           kLL128PartialSlice, kLL128Mid, kLL128PartialSlice};
+  const size_t sizes[7] = {kLL128PartialSlice, kLL128Mid, kLL128WholeSlices, kLL128Mid,
+                           kLL128PartialSlice, kLL128WholeSlices, kLL128Mid};
+  backToBackRounds(sizes, RCCL_DDA_FABRIC_LL128);
+}
+
+// ---- DDA fabric Broadcast LL128 two-shot ----
+//
+// Environment set by standard_env_dda_bc_ll128_two_shot in test_categories_mpi.yaml:
+//   RCCL_DDA_BC=1                      -- opt-in to DDA Broadcast
+//   RCCL_DDA_LL_THRESHOLD=0            -- suppress LL tier so LL128 is chosen
+//   RCCL_DDA_LL128_THRESHOLD=<cap>     -- cap LL128 tier (kLL128TwoShotCap bytes)
+//   RCCL_DDA_LL128_BC_FANOUT=1         -- exercise the two-shot fan-out path
+
+class DdaMPI_BroadcastLL128TwoShot : public DdaBroadcastMPITest {
+ protected:
+  std::vector<std::pair<const char*, std::string>> ddaEnv() const override {
+    return {
+      {"RCCL_DDA_BC", "1"},
+      {"RCCL_DDA_LL_THRESHOLD", "0"},
+      {"RCCL_DDA_LL128_THRESHOLD", std::to_string(kLL128TwoShotCap)},
+      {"RCCL_DDA_LL128_BC_FANOUT", "1"},
+    };
+  }
+
+  std::string configMismatch() override {
+    ncclComm* comm = getActiveCommunicator();
+    if (rcclParamDdaBc() <= 0) return "RCCL_DDA_BC is not on in this process";
+    if (rcclDdaLLThreshold(comm, ncclFuncBroadcast) != 0)
+      return "RCCL_DDA_LL_THRESHOLD is not 0; LL tier is not suppressed";
+    if (rcclDdaLL128Threshold(comm, ncclFuncBroadcast) != kLL128TwoShotCap)
+      return "Broadcast LL128 cap is not kLL128TwoShotCap; check RCCL_DDA_LL128_THRESHOLD";
+    return {};
+  }
+};
+
+TEST_F(DdaMPI_BroadcastLL128TwoShot, AllRootsOutOfPlace) {
+  allRoots({kLL128TwoShotMin, kLL128TwoShotMultiChunk, kLL128TwoShotMid, kLL128TwoShotCap}, false, RCCL_DDA_FABRIC_LL128);
+}
+
+TEST_F(DdaMPI_BroadcastLL128TwoShot, AllRootsInPlace) {
+  allRoots({kLL128TwoShotMin, kLL128TwoShotMultiChunk, kLL128TwoShotMid, kLL128TwoShotCap}, true, RCCL_DDA_FABRIC_LL128);
+}
+
+// Partial last chunk: kLL128TwoShotMultiChunk exercises the tail-slice handling in the
+// two-shot tiling where the last chunk is not a full set of slices.
+TEST_F(DdaMPI_BroadcastLL128TwoShot, PartialLastChunk) {
+  for (int root = 0; root < nRanks_; ++root) {
+    broadcastAndCheck({kLL128TwoShotMultiChunk, root, false, 0, 0}, RCCL_DDA_FABRIC_LL128);
+    if (HasFatalFailure() || IsSkipped()) return;
+    broadcastAndCheck({kLL128TwoShotMultiChunk, root, true, 0, 0}, RCCL_DDA_FABRIC_LL128);
+    if (HasFatalFailure() || IsSkipped()) return;
+  }
+}
+
+// Back-to-back launches: exercises bank alternation and start-token reuse with RCCL_DDA_LL128_BC_FANOUT=1.
+TEST_F(DdaMPI_BroadcastLL128TwoShot, BackToBackNoSync) {
+  const size_t sizes[7] = {kLL128TwoShotMin, kLL128TwoShotMultiChunk, kLL128TwoShotMid, kLL128TwoShotCap,
+                           kLL128TwoShotMultiChunk, kLL128TwoShotMin, kLL128TwoShotMid};
+  backToBackRounds(sizes, RCCL_DDA_FABRIC_LL128);
+}
+
+// ---- DDA fabric Broadcast LL128 two-shot, default fan-out ----
+//
+// Environment set by standard_env_dda_bc_ll128_default_fanout in test_categories_mpi.yaml:
+//   (no RCCL_DDA_LL128_BC_FANOUT)      -- exercises the default flat scatter path
+
+class DdaMPI_BroadcastLL128DefaultFanOut : public DdaMPI_BroadcastLL128TwoShot {
+ protected:
+  std::vector<std::pair<const char*, std::string>> ddaEnv() const override {
+    return {
+      {"RCCL_DDA_BC", "1"},
+      {"RCCL_DDA_LL_THRESHOLD", "0"},
+      {"RCCL_DDA_LL128_THRESHOLD", std::to_string(kLL128TwoShotCap)},
+    };
+  }
+};
+
+TEST_F(DdaMPI_BroadcastLL128DefaultFanOut, AllRootsOutOfPlace) {
+  allRoots({kLL128TwoShotMin, kLL128TwoShotMultiChunk, kLL128TwoShotMid, kLL128TwoShotCap}, false, RCCL_DDA_FABRIC_LL128);
+}
+
+TEST_F(DdaMPI_BroadcastLL128DefaultFanOut, AllRootsInPlace) {
+  allRoots({kLL128TwoShotMin, kLL128TwoShotMultiChunk, kLL128TwoShotMid, kLL128TwoShotCap}, true, RCCL_DDA_FABRIC_LL128);
+}
+
+TEST_F(DdaMPI_BroadcastLL128DefaultFanOut, PartialLastChunk) {
+  for (int root = 0; root < nRanks_; ++root) {
+    broadcastAndCheck({kLL128TwoShotMultiChunk, root, false, 0, 0}, RCCL_DDA_FABRIC_LL128);
+    if (HasFatalFailure() || IsSkipped()) return;
+    broadcastAndCheck({kLL128TwoShotMultiChunk, root, true, 0, 0}, RCCL_DDA_FABRIC_LL128);
+    if (HasFatalFailure() || IsSkipped()) return;
+  }
+}
+
+TEST_F(DdaMPI_BroadcastLL128DefaultFanOut, BackToBackNoSync) {
+  const size_t sizes[7] = {kLL128TwoShotMin, kLL128TwoShotMultiChunk, kLL128TwoShotMid, kLL128TwoShotCap,
+                           kLL128TwoShotMultiChunk, kLL128TwoShotMin, kLL128TwoShotMid};
   backToBackRounds(sizes, RCCL_DDA_FABRIC_LL128);
 }
 
 class DdaMPI_BroadcastTransition : public DdaBroadcastMPITest {};
 
-// LL, LL128, LL on one comm, twice over: each protocol reads the scratch the other just wrote.
+// LL, LL128 two-shot, LL on one comm, twice over: each protocol reads the scratch the other just wrote.
 TEST_F(DdaMPI_BroadcastTransition, LLThenLL128ThenLL) {
   const std::pair<size_t, int> steps[] = {{kLLMultiChunk, RCCL_DDA_FABRIC_LL},
-                                          {kLL128PartialSlice, RCCL_DDA_FABRIC_LL128},
+                                          {kLL128TwoShotMin, RCCL_DDA_FABRIC_LL128},
                                           {64 * 1024, RCCL_DDA_FABRIC_LL},
-                                          {kLL128Mid, RCCL_DDA_FABRIC_LL128},
+                                          {kLL128TwoShotMid, RCCL_DDA_FABRIC_LL128},
                                           {kLLCap, RCCL_DDA_FABRIC_LL}};
   int k = 0;
   for (int round = 0; round < 2; ++round) {
@@ -476,21 +596,22 @@ TEST_F(DdaMPI_BroadcastTransition, LLThenLL128ThenLL) {
   }
 }
 
-// LL and LL128 interleaved with no sync between launches.
+// LL and LL128 two-shot interleaved with no sync between launches.
 TEST_F(DdaMPI_BroadcastTransition, BackToBackNoSync) {
   const std::pair<size_t, int> steps[7] = {{kLLMultiChunk, RCCL_DDA_FABRIC_LL},
-                                           {kLL128PartialSlice, RCCL_DDA_FABRIC_LL128},
+                                           {kLL128TwoShotMin, RCCL_DDA_FABRIC_LL128},
                                            {64 * 1024, RCCL_DDA_FABRIC_LL},
-                                           {kLL128Mid, RCCL_DDA_FABRIC_LL128},
+                                           {kLL128TwoShotMid, RCCL_DDA_FABRIC_LL128},
                                            {kLLCap, RCCL_DDA_FABRIC_LL},
-                                           {kLL128Cap, RCCL_DDA_FABRIC_LL128},
+                                           {kLL128TwoShotCap, RCCL_DDA_FABRIC_LL128},
                                            {16, RCCL_DDA_FABRIC_LL}};
   backToBackRounds(steps);
 }
 
-// Stale flags: an LL128 call carries, in every 32-bit word, the flag of the LL call two launches later in the
-// same bank, so its leftovers would pass that call's line polls. The LL root enqueues late, so non-roots poll
-// the leftovers first; only the LL128 receivers clearing what they consumed keeps the LL data correct.
+// Stale flags: an LL128 two-shot call carries, in every 32-bit word, the flag of the LL call two launches
+// later in the same bank, so its leftovers would pass that call's line polls. The LL root enqueues late,
+// so non-roots poll the leftovers first; only the LL128 receivers clearing what they consumed keeps the LL
+// data correct.
 TEST_F(DdaMPI_BroadcastTransition, LL128LeftoversDoNotPassLLPoll) {
   for (int round = 0; round < 3; ++round) {
     const int root = round % nRanks_;
@@ -499,8 +620,8 @@ TEST_F(DdaMPI_BroadcastTransition, LL128LeftoversDoNotPassLLPoll) {
     MPI_Allreduce(MPI_IN_PLACE, &lo, 1, MPI_UINT32_T, MPI_MIN, MPI_COMM_WORLD);
     MPI_Allreduce(MPI_IN_PLACE, &hi, 1, MPI_UINT32_T, MPI_MAX, MPI_COMM_WORLD);
     ASSERT_MPI_EQ(lo, hi);
-    // Flags: LL128 epoch+1, filler epoch+2 (other bank), target LL epoch+3 (the LL128 bank).
-    broadcastAndCheck({kLL128PartialSlice, root, false, 0, 0, epoch + 3}, RCCL_DDA_FABRIC_LL128);
+    // Flags: LL128 two-shot epoch+1, filler epoch+2 (other bank), target LL epoch+3 (the LL128 bank).
+    broadcastAndCheck({kLL128TwoShotMin, root, false, 0, 0, epoch + 3}, RCCL_DDA_FABRIC_LL128);
     if (HasFatalFailure() || IsSkipped()) return;
     broadcastAndCheck({16, root, false, 0, 0}, RCCL_DDA_FABRIC_LL);
     if (HasFatalFailure() || IsSkipped()) return;

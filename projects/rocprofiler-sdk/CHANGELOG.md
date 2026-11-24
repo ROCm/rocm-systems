@@ -18,8 +18,18 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - rocJPEG API tracing for `rocJpegDecodeAsync`, `rocJpegDecodeSync`, `rocJpegDecodeBatchedAsync`, `rocJpegDecodeBatchedSync`, and `rocJpegGetDecoderCaps`. The rocJPEG dispatch table the SDK expects is now step version 3.
   - New `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeSync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedSync`, and `ROCPROFILER_ROCJPEG_API_ID_rocJpegGetDecoderCaps` operation IDs, and matching entries in `rocprofiler_rocjpeg_api_args_t`.
 
+**API:**
+
+- Added `pipe_id` to the kernel dispatch completion records, `rocprofiler_callback_tracing_kernel_dispatch_data_t` and `rocprofiler_buffer_tracing_kernel_dispatch_record_t`: the hardware pipe the kernel ran on (the pipe its completion was reported on), counted from 0. It is reported for dispatches that complete through KFD dispatch-log signal-less completion (`ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS=1`), and is `ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE` (-1) otherwise, including on every `ROCPROFILER_KERNEL_DISPATCH_ENQUEUE` callback.
+
+**rocprofv3 (CLI):**
+
+- rocpd schema bumped to 3.1.1 with a `pipe_id` column on `rocpd_kernel_dispatch` and the `kernels` data view (-1 if unknown). The rocpd CSV, Perfetto, and OTF2 conversions report it for databases of schema 3.1.1 or later; Perfetto and OTF2 leave it out when the pipe is unknown.
+
 ### Changed
 
+- Profiling a child that continues after `fork()` without `exec()` is unsupported. Use
+  `fork()` followed by `exec()` or a spawn operation to profile a new child process.
 - `rocprof-attach` and `rocprofv3 --attach` now profile the target process with the tool library of the rocprofiler-sdk installation that the target is running, located through `/proc/<pid>/maps`. When that library cannot be found, they fall back to the tool library of the attaching installation and print a warning. With `--attach-children`, every process in the tree uses the selection made for the target PID.
 - A warning is printed when the target runs a different rocprofiler-sdk installation, because options that installation does not support are ignored or skipped. Aggregate options such as `--sys-trace` only enable what the target's installation supports.
 - `rocprof-attach -t/--attach-tool-library` is now optional. A tool library given with `-t` or `ROCPROF_ATTACH_TOOL_LIBRARY` is used exactly as given and is interpreted in the target's filesystem. `rocprofv3 --attach` now honors a user-set `ROCPROF_ATTACH_TOOL_LIBRARY`.

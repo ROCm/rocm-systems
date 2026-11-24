@@ -35,10 +35,17 @@ if(HIPFILE_GTEST_TRY_SYSTEM)
 endif()
 
 if(NOT GTest_FOUND)
-    # CMAKE_CXX_CLANG_TIDY runs on all CMake targets after it is set, including those
-    # fetched via FetchContent. clang-tidy should not run on 3rd party code at all.
+    # CMAKE_CXX_CLANG_TIDY and CMAKE_<LANG>_INCLUDE_WHAT_YOU_USE run on all CMake
+    # targets after they are set, including those fetched via FetchContent.
+    # clang-tidy and include-what-you-use should not run on 3rd party code at all.
+    # Set them to empty rather than unset() them: unset() would expose a cache
+    # entry of the same name, such as one set with -D on the command line.
     set(_hipfile_saved_cxx_clang_tidy "${CMAKE_CXX_CLANG_TIDY}")
-    unset(CMAKE_CXX_CLANG_TIDY)
+    set(CMAKE_CXX_CLANG_TIDY "")
+    set(_hipfile_saved_c_iwyu "${CMAKE_C_INCLUDE_WHAT_YOU_USE}")
+    set(_hipfile_saved_cxx_iwyu "${CMAKE_CXX_INCLUDE_WHAT_YOU_USE}")
+    set(CMAKE_C_INCLUDE_WHAT_YOU_USE "")
+    set(CMAKE_CXX_INCLUDE_WHAT_YOU_USE "")
 # lint_cmake: -readability/wonkycase
     FetchContent_Declare(
       googletest
@@ -51,6 +58,10 @@ if(NOT GTest_FOUND)
 # lint_cmake: +readability/wonkycase
     set(CMAKE_CXX_CLANG_TIDY "${_hipfile_saved_cxx_clang_tidy}")
     unset(_hipfile_saved_cxx_clang_tidy)
+    set(CMAKE_C_INCLUDE_WHAT_YOU_USE "${_hipfile_saved_c_iwyu}")
+    set(CMAKE_CXX_INCLUDE_WHAT_YOU_USE "${_hipfile_saved_cxx_iwyu}")
+    unset(_hipfile_saved_c_iwyu)
+    unset(_hipfile_saved_cxx_iwyu)
 endif()
 
 if(googletest_SOURCE_DIR)

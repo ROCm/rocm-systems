@@ -2579,13 +2579,6 @@ get_exe_realpath()
     return _v;
 }
 
-std::string
-get_config_file()
-{
-    static auto const _v = get_config()->find(std::string{ env_vars::CONFIG_FILE });
-    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-}
-
 state::process::Mode
 get_mode()
 {
@@ -2745,34 +2738,6 @@ get_use_process_sampling()
 }
 
 bool&
-get_cpu_freq_enabled()
-{
-    static auto const _v = get_config()->find(std::string{ env_vars::CPU_FREQ_ENABLED });
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
-std::string
-get_sampling_ainics()
-{
-#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-    static auto const _v = get_config()->find(std::string{ env_vars::SAMPLING_AINICS });
-    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-#else
-    return std::string{};
-#endif
-}
-
-bool
-get_ainic_supported()
-{
-#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-    return true;
-#else
-    return false;
-#endif
-}
-
-bool&
 get_use_pid()
 {
     static auto const _v = get_config()->find(std::string{ env_vars::USE_PID });
@@ -2797,13 +2762,6 @@ bool&
 get_use_shmem()
 {
     static auto const _v = get_config()->find(std::string{ env_vars::USE_OPENSHMEM });
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
-bool
-get_use_kokkosp()
-{
-    static auto const _v = get_config()->find(std::string{ env_vars::USE_KOKKOSP });
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
@@ -3035,14 +2993,6 @@ get_perfetto_annotations()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
-std::uint64_t
-get_thread_pool_size()
-{
-    static const std::uint64_t _v =
-        get_config()->get<std::uint64_t>(std::string{ env_vars::THREAD_POOL_SIZE });
-    return _v;
-}
-
 std::string&
 get_perfetto_backend()
 {
@@ -3211,14 +3161,6 @@ get_cpu_metrics()
 }
 
 std::set<std::int64_t>
-get_sampling_tids()
-{
-    auto const _v = get_config()->find(std::string{ env_vars::SAMPLING_TIDS });
-    return parse_numeric_range<>(
-        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs", 1L);
-}
-
-std::set<std::int64_t>
 get_sampling_cputime_tids()
 {
     auto const _v = get_config()->find(std::string{ env_vars::SAMPLING_CPUTIME_TIDS });
@@ -3348,28 +3290,6 @@ get_trace_region()
 {
     static auto const _v = get_config()->find(std::string{ env_vars::SELECTED_REGIONS });
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-}
-
-bool
-get_debug_tid()
-{
-    static auto const _vlist =
-        parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
-            rocprofsys::get_env<std::string>(env_vars::DEBUG_TIDS, ""), "debug tids", 1L);
-    static thread_local const bool _v =
-        _vlist.empty() || _vlist.contains(tim::threading::get_id());
-    return _v;
-}
-
-bool
-get_debug_pid()
-{
-    static auto const _vlist =
-        parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
-            rocprofsys::get_env<std::string>(env_vars::DEBUG_PIDS, ""), "debug pids", 1L);
-    static const bool _v = _vlist.empty() || _vlist.contains(tim::process::get_id()) ||
-                           _vlist.contains(dmp::rank());
-    return _v;
 }
 
 bool

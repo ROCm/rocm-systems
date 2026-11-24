@@ -252,7 +252,7 @@ namespace RcclUnitTesting
   // Regression test for FP8 avg scaling by 1/(2*nRanks) wherever the device fp8 type is
   // FNUZ (AICOMRCCL-1945). It discriminates on gfx942 and the software fallback; where host
   // and device are both OCP it only guards the float scalar, whose host half is pinned in
-  // test/host/enqueue-test.cc. One rank runs the separate oneRankReduce kernel.
+  // test/host/enqueue/enqueue-test.cc. One rank runs the separate oneRankReduce kernel.
   //
   // E5M2 is left out: ExpectedReduceFp8 (test/common/DeviceDataOps.hpp) sums in fp8 and
   // divides last, which disagrees with RCCL's pre-scale for a 2-bit mantissa on unpatched

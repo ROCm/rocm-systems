@@ -397,6 +397,12 @@ device:
   Unit_hipInit_Positive:
     <<: *level_default
     tags: [init, smoke, P0]
+  Unit_hipInit_Positive_NoQueuesAtInit:
+    <<: *level_default
+    unsupported:
+      targets: [amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+      reason: "ROCM-34268 - counts the process's KFD create-queue ioctls: unit/device/CMakeLists.txt builds it only for AMD on UNIX, and WSL has no KFD."
+    tags: [init, P0]
   Unit_hipInit_Negative:
     <<: *level_default
     disabled:

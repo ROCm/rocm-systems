@@ -39,14 +39,12 @@ jobs:
           python-version: "3.12"
           cache: 'pip'
 
-      # requirements.in from the docs is needed to lint conf.py
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
           python -m pip install pylint
           python -m pip install black
           python -m pip install pytest
-          pip install -r projects/hipfile/docs/sphinx/requirements.in
 
       - name: Lint all Python files
         run: |

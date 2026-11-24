@@ -6,6 +6,7 @@
 
 #include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <algorithm>
 #include <cstring>
@@ -146,7 +147,7 @@ struct CwsrGeometry {
 };
 
 CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveState> &waves,
-                              rj_code_arch_t arch, uint32_t control_stack_capacity,
+                              rocjitsu::IsaFamily arch, uint32_t control_stack_capacity,
                               std::optional<CwsrDebugRegion> runtime_debug_region = {}) {
   CwsrGeometry geometry{};
   const CwsrAbiProperties abi = cwsr_abi_properties(arch);
@@ -180,7 +181,7 @@ CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveStat
       return geometry;
     max_vgprs = std::max(max_vgprs, wave.num_vgprs);
     const uint32_t sgpr_count =
-        arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::physical_sgpr_count(wave.num_sgprs) : max_sgprs;
+        arch == rocjitsu::IsaFamily::Cdna3 ? cdna3::physical_sgpr_count(wave.num_sgprs) : max_sgprs;
     uint32_t group_lds = active_lds;
     if (wave.is_first_in_group) {
       if (wave.lds.size() > max_encoded_lds)
@@ -256,7 +257,7 @@ uint32_t image_word(std::span<const uint8_t> image, uint32_t offset) {
 } // namespace
 
 CwsrCapacity cwsr_capacity_for_device(const config::KfdDeviceConfig &device, uint32_t num_xcc) {
-  const rj_code_arch_t arch =
+  const rocjitsu::IsaFamily arch =
       cwsr_arch_for_gc_ip_version(gc_ip_version_for_gfx_target_version(device.gfx_target_version));
   if (num_xcc == 0 || !cwsr_capacity_eligible_device(device, arch))
     return {};
@@ -328,7 +329,7 @@ CwsrCapacity cwsr_capacity_for_device(const config::KfdDeviceConfig &device, uin
 CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                                 const std::vector<CwsrWaveState> &waves,
                                 const std::function<void(uint64_t, uint32_t)> &write32,
-                                rj_code_arch_t arch, uint32_t control_stack_capacity,
+                                rocjitsu::IsaFamily arch, uint32_t control_stack_capacity,
                                 std::optional<CwsrDebugRegion> runtime_debug_region) {
   CwsrLayout layout{};
   if (!cwsr_layout_modelled(arch) || waves.empty() || !write32 ||
@@ -507,8 +508,9 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
 
 CwsrLayout serialize_queue_cwsr_bulk(
     uint64_t ctx_base, uint32_t area_size, const std::vector<CwsrWaveState> &waves,
-    const std::function<void(uint64_t, std::span<const uint8_t>)> &write_block, rj_code_arch_t arch,
-    uint32_t control_stack_capacity, std::optional<CwsrDebugRegion> runtime_debug_region) {
+    const std::function<void(uint64_t, std::span<const uint8_t>)> &write_block,
+    rocjitsu::IsaFamily arch, uint32_t control_stack_capacity,
+    std::optional<CwsrDebugRegion> runtime_debug_region) {
   if (!write_block)
     return {};
 
@@ -537,8 +539,8 @@ CwsrLayout serialize_queue_cwsr_bulk(
 
 bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                             std::vector<CwsrWaveState> &waves,
-                            const std::function<uint32_t(uint64_t)> &read32, rj_code_arch_t arch,
-                            uint32_t control_stack_capacity) {
+                            const std::function<uint32_t(uint64_t)> &read32,
+                            rocjitsu::IsaFamily arch, uint32_t control_stack_capacity) {
   if (!cwsr_layout_modelled(arch) || waves.empty() || !read32 ||
       (ctx_base & (alignof(uint32_t) - 1)) != 0)
     return false;
@@ -665,7 +667,7 @@ bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
 
 bool deserialize_queue_cwsr_bulk(
     uint64_t ctx_base, uint32_t area_size, std::vector<CwsrWaveState> &waves,
-    const std::function<void(uint64_t, std::span<uint8_t>)> &read_block, rj_code_arch_t arch,
+    const std::function<void(uint64_t, std::span<uint8_t>)> &read_block, rocjitsu::IsaFamily arch,
     uint32_t control_stack_capacity) {
   if (!read_block || (ctx_base & (alignof(uint32_t) - 1)) != 0)
     return false;

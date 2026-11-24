@@ -44,8 +44,6 @@
 
 namespace rocprofsys::tracing
 {
-using interval_data_instances = thread_data<std::vector<bool>>;
-
 //
 //  declarations
 //
@@ -254,42 +252,5 @@ pop_timemory(CategoryT, std::string_view name, Args&&... args)
     {
         destroy_timemory(std::move(_data));
     }
-}
-
-template <typename FuncT>
-std::int64_t
-get_clock_skew(FuncT&& _timestamp_func, std::int64_t _n = 1)
-{
-    namespace cpu = tim::cpu;
-    // synchronize timestamps
-    // We'll take a CPU timestamp before and after taking a GPU timestmp, then
-    // take the average of those two, hoping that it's roughly at the same time
-    // as the GPU timestamp.
-    auto _cpu_now = []() {
-        cpu::fence();
-        return now();
-    };
-
-    auto _gpu_now = [&_timestamp_func]() {
-        cpu::fence();
-        return std::forward<FuncT>(_timestamp_func)();
-    };
-
-    auto _compute = [&_cpu_now, &_gpu_now]() {
-        volatile std::uint64_t _cpu_ts = 0;
-        volatile std::uint64_t _gpu_ts = 0;
-        _cpu_ts += _cpu_now();
-        _gpu_ts += _gpu_now();
-        _cpu_ts += _cpu_now();
-        return static_cast<std::int64_t>(_cpu_ts / 2) -
-               static_cast<std::int64_t>(_gpu_ts);
-    };
-
-    std::int64_t _diff = 0;
-    for(std::int64_t i = 0; i < _n; ++i)
-    {
-        _diff += _compute();
-    }
-    return (_diff / _n);
 }
 }  // namespace rocprofsys::tracing

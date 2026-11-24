@@ -82,6 +82,8 @@ static ncclResult_t ncclIbPrintWr(struct ibv_send_wr* wr, char* wrStr) {
 // The alignment for IB writes that is required to make LL and LL128 protocols work
 #define IB_WRITE_CHUNK_ALIGNMENT 128
 
+// Keep this hot loop on a 64-byte boundary.
+__attribute__((aligned(64)))
 ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   struct ncclIbRequest** reqs = comm->sendReqs[slot];
   volatile struct ncclIbSendFifo* slots = comm->ctsFifo[slot];
@@ -324,6 +326,8 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   return ncclSuccess;
 }
 
+// Keep this hot loop on a 64-byte boundary.
+__attribute__((aligned(64)))
 ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle,
                          void** request) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
@@ -465,6 +469,8 @@ isendFail:
   return ret;
 }
 
+// Keep this hot loop on a 64-byte boundary.
+__attribute__((aligned(64)))
 ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* req, int slot) {
   ncclIbQp* ctsQp = NULL;
   NCCLCHECK(ncclIbRecvCommGetQpForCts(comm, req->id, &ctsQp));
@@ -546,6 +552,8 @@ postFifoFail:
   return postFifoRet;
 }
 
+// Keep this hot loop on a 64-byte boundary.
+__attribute__((aligned(64)))
 ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** phandles,
                          void** request) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
@@ -1101,6 +1109,8 @@ static inline ncclResult_t ncclIbCompletionEventProcess(struct ncclIbNetCommBase
   return ncclSuccess;
 }
 
+// Keep this hot loop on a 64-byte boundary.
+__attribute__((aligned(64)))
 ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
   struct ncclIbRequest* r = (struct ncclIbRequest*)request;
   *done = 0;

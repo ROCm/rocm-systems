@@ -166,12 +166,6 @@ bar::bar(std::string label, std::uint64_t total, bar_options opts)
 bar::~bar() { on_finish(); }
 
 void
-bar::on_set_total(std::uint64_t total) noexcept
-{
-    m_total.store(total, std::memory_order_relaxed);
-}
-
-void
 bar::on_advance(std::uint64_t delta) noexcept
 {
     if(delta == 0)

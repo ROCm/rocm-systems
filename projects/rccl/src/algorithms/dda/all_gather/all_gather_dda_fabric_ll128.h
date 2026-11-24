@@ -120,9 +120,7 @@ __launch_bounds__(1024)
     }
     ddaLL128StoreRegs<int8_t>(dstBytes + dataByte, vr, eltInSlice, lane, flagLane);
   }
-#if (defined(__gfx1250__) || defined(__gfx1250_strict__))
-  asm volatile("s_wait_storecnt 0x0" ::: "memory");
-#endif
+  ddaLL128WaitStores();
   __syncthreads();
   ddaSetLLEpoch(epochDev, epochLen, flatBlockId, total, flag32);
 }
