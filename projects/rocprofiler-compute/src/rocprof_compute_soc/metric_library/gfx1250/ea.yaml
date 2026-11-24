@@ -135,43 +135,43 @@ ea.stalled_by_sdp:
   formula: 100 * SUM(GC_EA_SE_SARB_STALLED_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Percent
   description: >-
-    Percentage of EA-busy cycles where the EA front end has a request ready but the EA
-    back end is not ready to send it to the Scalable Data SOC (SDP).
+    Percentage of EA-busy cycles where the EA has a request ready but cannot send it to
+    the Scalable Data Port (SDP), the EA's link to the data fabric.
 ea.stalled_by_sdp_dram:
   name: EA Stalled by SDP - DRAM
   formula: 100 * SUM(GC_EA_SE_STALL_DRAM_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Percent
   description: >-
-    Percentage of EA-busy cycles where the DRAM front end is ready but the EA back end
-    for DRAM reads and writes is not ready to send to the Scalable Data SOC (SDP).
+    Percentage of EA-busy cycles where the EA cannot send DRAM requests to the Scalable
+    Data Port (SDP).
 ea.stalled_by_sdp_gmi:
   name: EA Stalled by SDP - GMI
   formula: 100 * SUM(GC_EA_SE_STALL_GMI_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Percent
   description: >-
-    Percentage of EA-busy cycles where the GMI front end is ready but the EA back end
-    for GMI reads and writes is not ready to send to the Scalable Data SOC (SDP).
+    Percentage of EA-busy cycles where the EA cannot send GMI requests to the Scalable
+    Data Port (SDP).
 ea.stalled_by_sdp_hdm:
   name: EA Stalled by SDP - HDM
   formula: 100 * SUM(GC_EA_SE_STALL_HDM_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Percent
   description: >-
-    Percentage of EA-busy cycles where the HDM front end is ready but the EA back end
-    for HDM reads and writes is not ready to send to the Scalable Data SOC (SDP).
+    Percentage of EA-busy cycles where the EA cannot send HDM requests to the Scalable
+    Data Port (SDP).
 ea.stalled_by_sdp_io_rd:
   name: EA Stalled by SDP - IO Read
   formula: 100 * SUM(GC_EA_SE_STALL_IO_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Percent
   description: >-
-    Percentage of EA-busy cycles where the IO read front end is ready but the EA back
-    end for IO reads is not ready to send to the Scalable Data SOC (SDP).
+    Percentage of EA-busy cycles where the EA cannot send IO read requests to the
+    Scalable Data Port (SDP).
 ea.stalled_by_sdp_io_wr:
   name: EA Stalled by SDP - IO Write
   formula: 100 * SUM(GC_EA_SE_STALL_IO_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Percent
   description: >-
-    Percentage of EA-busy cycles where the IO write front end is ready but the EA back
-    end for IO writes is not ready to send to the Scalable Data SOC (SDP).
+    Percentage of EA-busy cycles where the EA cannot send IO write requests to the
+    Scalable Data Port (SDP).
 ea.util:
   name: EA Utilization
   formula: 100 * SUM(GC_EA_SE_BUSY_CYCLE_sum) / SUM(GC_EA_SE_CYCLE_sum)
