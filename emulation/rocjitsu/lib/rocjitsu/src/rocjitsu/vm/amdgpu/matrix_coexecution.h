@@ -96,6 +96,9 @@ inline void register_helper_fork_guard() {
 struct alignas(64) OccupancyShard {
   std::atomic<int> threads{0};
 };
+/// True when engines and the host core already fill the borrowing budget, so
+/// no helper can ever be claimed; async issue then adds only overhead.
+inline bool borrow_budget_exhausted();
 inline constexpr unsigned kMaxOccupancyShards = 256;
 inline constinit std::array<std::atomic<OccupancyShard *>, kMaxOccupancyShards> occupancy_shards{};
 inline constinit std::atomic<unsigned> occupancy_shard_end{0};
@@ -116,6 +119,10 @@ inline int borrow_budget() {
     return int(std::thread::hardware_concurrency());
   }();
   return budget;
+}
+inline bool borrow_budget_exhausted() {
+  const int budget = borrow_budget();
+  return budget && reserved_threads.load(std::memory_order_relaxed) >= budget;
 }
 /// @brief Registers one command processor's occupancy for its lifetime.
 class ScopedOccupancyShard {

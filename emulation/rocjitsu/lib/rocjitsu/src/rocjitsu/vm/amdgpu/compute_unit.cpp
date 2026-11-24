@@ -3106,6 +3106,11 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
     }
   }
   const uint64_t full_exec = wave_size == 64 ? ~uint64_t{0} : uint64_t{0xFFFFFFFF};
+  if (matrix_coexecution::borrow_budget_exhausted()) {
+    // Engines already use every borrowable core: behave like a synchronous CU.
+    issue_instruction(active);
+    return;
+  }
   if (active->wf_size() != wave_size || active->exec() != full_exec ||
       active->vgpr_msb_mode() != 0 || active->gpr_idx_en() || debug_active() ||
       active->debug_single_step() || active->in_trap_handler() ||
