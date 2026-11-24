@@ -23,6 +23,7 @@ target_link_libraries(
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-static-library
+            rocprofiler-sdk::counter-test-constants
             GTest::gtest
             GTest::gtest_main)
 

@@ -50,10 +50,14 @@ then
 fi
 
 APP_PID=""
+APP_LOG="${OUTPUT_DIR}/target.log"
 cleanup() {
     if [ -n "${APP_PID}" ] && kill -0 "${APP_PID}" 2>/dev/null; then
         kill -2 "${APP_PID}" 2>/dev/null || true
         wait "${APP_PID}" 2>/dev/null || true
+    fi
+    if [ -f "${APP_LOG}" ]; then
+        cat "${APP_LOG}"
     fi
 }
 trap cleanup EXIT
@@ -79,7 +83,8 @@ wait_for_attach_ready() {
     return 1
 }
 
-ROCPROFILER_ATTACH_TEST_DELAY_MSEC=1 LD_PRELOAD=${ROCPROF_PRELOAD} "${TEST_APP}" &
+ROCPROFILER_ATTACH_TEST_DELAY_MSEC=1 \
+    LD_PRELOAD="${ROCPROF_PRELOAD:-}" "${TEST_APP}" >"${APP_LOG}" 2>&1 &
 APP_PID=$!
 wait_for_attach_ready "${APP_PID}"
 
@@ -95,7 +100,7 @@ set -e
 cat "${ROCPROFV3_LOG}"
 
 if [ -n "${PC_SAMPLING_SKIP_REGEX}" ] \
-&& grep -Eq "${PC_SAMPLING_SKIP_REGEX}" "${ROCPROFV3_LOG}"
+&& grep -Eq -- "${PC_SAMPLING_SKIP_REGEX}" "${ROCPROFV3_LOG}" "${APP_LOG}"
 then
     echo "This test is skipped. PC sampling is unavailable."
     touch "${OUTPUT_DIR}/skipped"
@@ -114,6 +119,7 @@ fi
 kill -2 "${APP_PID}"
 wait "${APP_PID}"
 APP_PID=""
+cat "${APP_LOG}"
 trap - EXIT
 
 if [ ! -s "${OUTPUT_DIR}/out_results.json" ]; then

@@ -46,7 +46,7 @@ def method(request):
 def json_data(request):
     skip_file = request.config.getoption("--skip-if")
     if skip_file and os.path.exists(skip_file):
-        pytest.skip("Attach tests unavailable due to insufficient ptrace permissions")
+        pytest.skip("PC sampling attachment is unavailable on this system")
 
     filename = request.config.getoption("--json-input")
     with open(filename, encoding="utf-8") as inp:

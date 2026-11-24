@@ -32,6 +32,13 @@ find_package(rocprofiler-sdk REQUIRED)
 rocprofiler_sdk_pc_sampling_disabled(IS_HOST_TRAP_DISABLED)
 rocprofiler_sdk_pc_sampling_stochastic_disabled(IS_STOCHASTIC_DISABLED)
 
+set(_attachment_memchecks AddressSanitizer UndefinedBehaviorSanitizer)
+list(APPEND _attachment_memchecks ThreadSanitizer LeakSanitizer)
+if(ROCPROFILER_MEMCHECK IN_LIST _attachment_memchecks)
+    set(IS_HOST_TRAP_DISABLED TRUE)
+    set(IS_STOCHASTIC_DISABLED TRUE)
+endif()
+
 set(attachment-pc-sampling-env
     "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
