@@ -1255,8 +1255,8 @@ void VCvtPkRtzF16F32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (wf.fp16_ovfl()) {
     flags |= RJ_ARITH_FP16_OVFL;
   }
-  amdgpu::arith::execute_float_pack(wf, rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx950,
-                                    rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx950, flags, 0, vdst, src0,
+  amdgpu::arith::execute_float_pack(wf, rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx10,
+                                    rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx10, flags, 0, vdst, src0,
                                     vsrc1, /*half_sources=*/false);
 }
 
@@ -1294,8 +1294,8 @@ RJ_NOINLINE void VCvtPkRtzF16F32Vop2::execute_modifier_impl(amdgpu::Wavefront &w
   if (wf.fp16_ovfl()) {
     flags |= RJ_ARITH_FP16_OVFL;
   }
-  amdgpu::arith::execute_float_pack(wf, rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx950,
-                                    rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx950, flags, 0, vdst, src0,
+  amdgpu::arith::execute_float_pack(wf, rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx10,
+                                    rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx10, flags, 0, vdst, src0,
                                     vsrc1, /*half_sources=*/false);
   dpp_write_mask_scope_.restore();
 }

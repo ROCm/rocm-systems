@@ -1787,6 +1787,55 @@ int rj_arith_v_pk_max_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_
       flags, exec_mask, instruction_flags, d, a, b);
 }
 
+// MI350X (gfx950) legacy FP16 selection uses first-NaN priority, matching the RDNA3 model.
+int rj_arith_v_min_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts) {
+  return rj_arith_v_min_f16_w32(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+int rj_arith_v_min_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts) {
+  return rj_arith_v_min_f16_w64(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+int rj_arith_v_max_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts) {
+  return rj_arith_v_max_f16_w32(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+int rj_arith_v_max_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts) {
+  return rj_arith_v_max_f16_w64(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+int rj_arith_v_pk_min_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts) {
+  return rj_arith_v_pk_min_f16_w32(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+int rj_arith_v_pk_min_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts) {
+  return rj_arith_v_pk_min_f16_w64(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+int rj_arith_v_pk_max_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts) {
+  return rj_arith_v_pk_max_f16_w32(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+int rj_arith_v_pk_max_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts) {
+  return rj_arith_v_pk_max_f16_w64(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
 namespace {
 // gfx1250 Compatibility inherits the old packed selection's canonical NaNs and
 // output-denormal flushing. Loose retains the common fast selection behavior.

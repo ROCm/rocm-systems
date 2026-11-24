@@ -13262,7 +13262,10 @@ TEST(ArithBridgeTest, CdnaBitPacking) {
                            ((ieee || arch == rocjitsu::IsaFamily::Cdna5) ? 0x7e01U : 0x7c01U);
               } else {
                 const int shift = (lane & 3) * 8;
-                const uint32_t byte = op == 2     ? (arch == rocjitsu::IsaFamily::Cdna3 ? 2 : 1)
+                const uint32_t byte = op == 2     ? ((arch == rocjitsu::IsaFamily::Cdna3 ||
+                                                  arch == rocjitsu::IsaFamily::Cdna4)
+                                                         ? 2
+                                                         : 1)
                                       : modifiers ? 0
                                                   : 2;
                 expected = (0xabcdef12U & ~(0xffU << shift)) | (byte << shift);
@@ -14872,7 +14875,8 @@ TEST(ArithBridgeTest, CdnaTernaryMedianPolicy) {
       fixture.wave->set_trapsts(0x80);
       const uint32_t sign = 1U << (width - 1);
       const uint32_t upper = width == 16 ? 0xdead0000U : 0;
-      const uint32_t kept_upper = arch == rocjitsu::IsaFamily::Cdna5 ? upper : 0;
+      const bool ordered = arch == rocjitsu::IsaFamily::Cdna4 || arch == rocjitsu::IsaFamily::Cdna5;
+      const uint32_t kept_upper = ordered ? upper : 0;
       const uint32_t nan = width == 16 ? 0x7e00U : 0x7fc00000U;
       for (unsigned lane = 0; lane < lanes; ++lane) {
         for (int source = 0; source < 3; ++source) {
@@ -14897,11 +14901,10 @@ TEST(ArithBridgeTest, CdnaTernaryMedianPolicy) {
       ASSERT_TRUE(instruction.succeeded());
       ASSERT_FALSE(
           fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed());
-      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 0),
-                kept_upper | (arch == rocjitsu::IsaFamily::Cdna5 ? sign : 0));
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 0), kept_upper | (ordered ? sign : 0));
       EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 1), upper | sign);
       EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lanes - 1),
-                kept_upper | nan | (arch == rocjitsu::IsaFamily::Cdna5 ? 1U : 3U));
+                kept_upper | nan | (ordered ? 1U : 3U));
       EXPECT_EQ(fixture.wave->trapsts(), 0x80U);
     }
   }
@@ -15010,7 +15013,9 @@ TEST(ArithBridgeTest, CdnaBinarySelectionNaNPolicy) {
             fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed());
         for (unsigned lane : {0u, 1u, lanes - 1}) {
           const bool signaling = lane == lanes - 1;
-          const bool first = lane == 1 || arch == rocjitsu::IsaFamily::Cdna5 || (ieee && signaling);
+          const bool first = lane == 1 || arch == rocjitsu::IsaFamily::Cdna5 ||
+                             (arch == rocjitsu::IsaFamily::Cdna4 && width == 16) ||
+                             (ieee && signaling);
           const uint64_t expected =
               infinity | (first ? 1 : 2) |
               (!signaling || ieee || arch == rocjitsu::IsaFamily::Cdna5 ? quiet : 0);
@@ -15069,54 +15074,61 @@ TEST(ArithBridgeTest, Gfx950Maximum3ScaledStrictPolicy) {
 }
 
 TEST(ArithBridgeTest, Gfx1250PackedSelectionRejectsUnqualifiedNans) {
-  for (auto arch : {rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5}) {
-    for (bool ternary : {false, true}) {
-      if (!ternary && arch != rocjitsu::IsaFamily::Cdna5) {
-        continue;
-      }
-      for (bool maximum : {false, true}) {
-        uint32_t loose_result = 0;
-        for (auto semantics :
-             {ArithmeticSemantics::Loose, ArithmeticSemantics::BitExactEmpiricalAllowLoose,
-              ArithmeticSemantics::BitExactEmpiricalNoFpStatus}) {
-          BridgeFixture f(arch, arch == rocjitsu::IsaFamily::Cdna5 ? 32 : 64,
-                          ArithmeticPolicy{semantics});
-          f.wave->set_exec(1);
-          f.wave->set_mode_raw(0xf0);
-          f.cu->write_vgpr(f.base(), 0, ternary ? 0x3c007e55U : 0x3c007c55U);
-          f.cu->write_vgpr(f.base() + 1, 0, ternary ? 0x3c003c00U : 0x3c007e23U);
-          const auto opcode =
-              ternary ? (maximum ? cdna5::kVPkMaximum3F16Vop3p : cdna5::kVPkMinimum3F16Vop3p)
-                      : (maximum ? cdna5::kVPkMaximumF16Vop3p : cdna5::kVPkMinimumF16Vop3p);
-          const auto words =
-              arch == rocjitsu::IsaFamily::Cdna5
-                  ? cdna5::build_vop3p(
-                        opcode, {.vdst = 2, .src0 = 256, .src1 = 257, .src2 = 257, .opsel_hi = 7})
-                  : cdna4::build_vop3p(maximum ? cdna4::kVPkMaximum3F16Vop3p
-                                               : cdna4::kVPkMinimum3F16Vop3p,
-                                       {.vdst = 2,
-                                        .op_sel_hi_2 = 1,
-                                        .src0 = 256,
-                                        .src1 = 257,
-                                        .src2 = 257,
-                                        .op_sel_hi = 3});
-          auto instruction = f.decoder->decode_window(words);
-          ASSERT_TRUE(instruction.succeeded());
-          const bool success =
-              f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded();
-          const uint32_t result = f.cu->read_vgpr(f.base() + 2, 0);
-          if (semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus) {
-            EXPECT_FALSE(success);
-            EXPECT_EQ(result, 0x3c003c00U);
-          } else {
-            ASSERT_TRUE(success);
-            if (semantics == ArithmeticSemantics::Loose) {
-              loose_result = result;
-            }
-            EXPECT_EQ(result, loose_result);
+  for (bool ternary : {false, true}) {
+    for (bool maximum : {false, true}) {
+      uint32_t loose_result = 0;
+      for (auto semantics :
+           {ArithmeticSemantics::Loose, ArithmeticSemantics::BitExactEmpiricalAllowLoose,
+            ArithmeticSemantics::BitExactEmpiricalNoFpStatus}) {
+        BridgeFixture f(rocjitsu::IsaFamily::Cdna5, 32, ArithmeticPolicy{semantics});
+        f.wave->set_exec(1);
+        f.wave->set_mode_raw(0xf0);
+        f.cu->write_vgpr(f.base(), 0, ternary ? 0x3c007e55U : 0x3c007c55U);
+        f.cu->write_vgpr(f.base() + 1, 0, ternary ? 0x3c003c00U : 0x3c007e23U);
+        const auto opcode =
+            ternary ? (maximum ? cdna5::kVPkMaximum3F16Vop3p : cdna5::kVPkMinimum3F16Vop3p)
+                    : (maximum ? cdna5::kVPkMaximumF16Vop3p : cdna5::kVPkMinimumF16Vop3p);
+        const auto words = cdna5::build_vop3p(
+            opcode, {.vdst = 2, .src0 = 256, .src1 = 257, .src2 = 257, .opsel_hi = 7});
+        auto instruction = f.decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        const bool success =
+            f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded();
+        const uint32_t result = f.cu->read_vgpr(f.base() + 2, 0);
+        if (semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus) {
+          EXPECT_FALSE(success);
+          EXPECT_EQ(result, 0x3c003c00U);
+        } else {
+          ASSERT_TRUE(success);
+          if (semantics == ArithmeticSemantics::Loose) {
+            loose_result = result;
           }
+          EXPECT_EQ(result, loose_result);
         }
       }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx950PackedMinimum3ExactNanAndDenormal) {
+  for (bool maximum : {false, true}) {
+    for (auto semantics :
+         {ArithmeticSemantics::Compatibility, ArithmeticSemantics::BitExactEmpiricalNoFpStatus}) {
+      BridgeFixture f(rocjitsu::IsaFamily::Cdna4, 64, ArithmeticPolicy{semantics});
+      f.wave->set_exec(3);
+      f.wave->set_mode_raw(0x70); // FP16 output denormals flushed, inputs kept
+      f.cu->write_vgpr(f.base(), 0, 0xfc027c55U);
+      f.cu->write_vgpr(f.base() + 1, 0, 0x7e997e23U);
+      f.cu->write_vgpr(f.base(), 1, maximum ? 0x3c008001U : 0x3c000001U);
+      f.cu->write_vgpr(f.base() + 1, 1, maximum ? 0x3c00bc00U : 0x3c003c00U);
+      const auto words = cdna4::build_vop3p(
+          maximum ? cdna4::kVPkMaximum3F16Vop3p : cdna4::kVPkMinimum3F16Vop3p,
+          {.vdst = 2, .op_sel_hi_2 = 1, .src0 = 256, .src1 = 257, .src2 = 257, .op_sel_hi = 3});
+      auto inst = f.decoder->decode_window(words);
+      ASSERT_TRUE(inst.succeeded());
+      ASSERT_TRUE(f.cu->execute_instruction(inst.value().get(), *f.wave).succeeded());
+      EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0), 0xfe027e55U);
+      EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 1), 0x3c000000U | (maximum ? 0x8001U : 0x0001U));
     }
   }
 }
@@ -17850,8 +17862,8 @@ TEST(ArithBridgeTest, ConversionStrictExactAcceptancePerArchitecture) {
   const uint32_t inputs[] = {0u, 1u, 0xffffffffu, 0x7fffffffu};
   const uint32_t expected[] = {0u, 0x3f800000u, 0xbf800000u, 0x4f000000u};
   for (auto arch :
-       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna3,
-        rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5}) {
+       {rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna4,
+        rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5}) {
     for (bool strict : {false, true}) {
       ArithmeticPolicy policy{};
       if (strict) {
@@ -17868,6 +17880,9 @@ TEST(ArithBridgeTest, ConversionStrictExactAcceptancePerArchitecture) {
       }
       std::array<uint32_t, 1> words{};
       switch (arch) {
+      case rocjitsu::IsaFamily::Rdna2:
+        words = rdna2::build_vop1(rdna2::kVCvtF32I32Vop1, {.src0 = 256, .vdst = 1});
+        break;
       case rocjitsu::IsaFamily::Rdna3:
         words = rdna3::build_vop1(rdna3::kVCvtF32I32Vop1, {.src0 = 256, .vdst = 1});
         break;
@@ -17886,9 +17901,9 @@ TEST(ArithBridgeTest, ConversionStrictExactAcceptancePerArchitecture) {
       }
       auto instruction = fixture.decoder->decode_window(words);
       ASSERT_TRUE(instruction.succeeded());
-      const bool qualified = arch == rocjitsu::IsaFamily::Rdna3 ||
-                             arch == rocjitsu::IsaFamily::Rdna4 ||
-                             arch == rocjitsu::IsaFamily::Cdna3;
+      const bool qualified =
+          arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna4 ||
+          arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
       const bool success =
           fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded();
       SCOPED_TRACE(::testing::Message() << "arch " << int(arch) << " strict " << strict);
@@ -17923,13 +17938,10 @@ TEST(ArithBridgeTest, CdnaPkaccumAndFp64StrictExactAcceptance) {
                                     {.vdst = 2, .clamp = uint8_t(clamp), .src0 = 256, .src1 = 257});
         auto inst = f.decoder->decode_window(words);
         ASSERT_TRUE(inst.succeeded());
-        const bool qualified = arch == rocjitsu::IsaFamily::Cdna3 && !clamp;
+        const bool qualified = !clamp;
         const bool ok = f.cu->execute_instruction(inst.value().get(), *f.wave).succeeded();
         EXPECT_EQ(ok, !strict || qualified);
-        EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0), !ok ? 0x11223344U
-                                                    : arch == rocjitsu::IsaFamily::Cdna3
-                                                        ? 0x11220244U
-                                                        : 0x11220144U);
+        EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0), !ok ? 0x11223344U : 0x11220244U);
       }
 
       ArithmeticPolicy policy{};
@@ -17950,7 +17962,7 @@ TEST(ArithBridgeTest, CdnaPkaccumAndFp64StrictExactAcceptance) {
       auto fract_inst = f.decoder->decode_window(fract_words);
       ASSERT_TRUE(fract_inst.succeeded());
       const bool ok = f.cu->execute_instruction(fract_inst.value().get(), *f.wave).succeeded();
-      EXPECT_EQ(ok, !strict || arch == rocjitsu::IsaFamily::Cdna3);
+      EXPECT_TRUE(ok);
       EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0), ok ? 0U : 0xdeadbeefU);
       EXPECT_EQ(f.cu->read_vgpr(f.base() + 3, 0), ok ? 0xfff80000U : 0xdeadbeefU);
     }

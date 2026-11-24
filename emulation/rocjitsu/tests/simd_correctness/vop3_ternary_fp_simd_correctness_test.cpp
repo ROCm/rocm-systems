@@ -632,7 +632,11 @@ TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabled
                 << "active lane " << lane;
             if (high) {
               EXPECT_EQ(static_cast<uint16_t>(actual), static_cast<uint16_t>(DST_SENTINEL32));
-            } else if (test.arch == rocjitsu::IsaFamily::Rdna3) {
+            } else if (test.arch == rocjitsu::IsaFamily::Rdna3 ||
+                       (test.arch == rocjitsu::IsaFamily::Cdna4 &&
+                        (test.opcode == cdna4::kVMin3F16Vop3 ||
+                         test.opcode == cdna4::kVMax3F16Vop3 ||
+                         test.opcode == cdna4::kVMed3F16Vop3))) {
               EXPECT_EQ(actual >> 16, DST_SENTINEL32 >> 16);
             }
           }
