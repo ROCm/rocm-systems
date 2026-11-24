@@ -28,16 +28,32 @@ int main(int argc, char **argv) {
     return 2;
   }
   const Capture &capture = captured.value();
+  const auto write_sites = [](const Manifest &manifest) {
+    bool first_site = true;
+    for (const SiteFacts &site : manifest.sites) {
+      if (!first_site)
+        std::cout << ',';
+      first_site = false;
+      std::cout << "{\"id\":" << site.id << ",\"access\":" << uint32_t(site.access)
+                << ",\"width\":" << site.width << ",\"original_offset\":" << site.original_offset
+                << ",\"guest_offset\":" << site.prepared_guest_offset << '}';
+    }
+  };
   std::cout << "{\"execution_conditions\":" << capture.header.execution_conditions
             << ",\"sites\":[";
+  if (capture.header.image.entries.size() == 1 && capture.header.image.entries.front().selected)
+    write_sites(*capture.header.image.entries.front().selected);
+  std::cout << "],\"entries\":[";
   bool first = true;
-  for (const SiteFacts &site : capture.header.manifest.sites) {
+  for (const ImageEntryFacts &entry : capture.header.image.entries) {
     if (!first)
       std::cout << ',';
     first = false;
-    std::cout << "{\"id\":" << site.id << ",\"access\":" << uint32_t(site.access)
-              << ",\"width\":" << site.width << ",\"original_offset\":" << site.original_offset
-              << ",\"guest_offset\":" << site.prepared_guest_offset << '}';
+    std::cout << "{\"entry_key\":" << entry.key
+              << ",\"selected\":" << (entry.selected ? "true" : "false") << ",\"sites\":[";
+    if (entry.selected)
+      write_sites(*entry.selected);
+    std::cout << "]}";
   }
   std::cout << "],\"executions\":[";
   first = true;
@@ -45,12 +61,15 @@ int main(int argc, char **argv) {
     if (!first)
       std::cout << ',';
     first = false;
-    const FailureOr<LaunchLayout> layout =
-        plan_launch(capture.header.manifest, execution.dimensions, execution.group_bytes,
-                    execution.private_bytes);
+    const Manifest *manifest = selected_manifest(capture.header.image, execution.entry_key);
+    if (manifest == nullptr)
+      return 2;
+    const FailureOr<LaunchLayout> layout = plan_launch(
+        *manifest, execution.dimensions, execution.group_bytes, execution.private_bytes);
     if (layout.failed())
       return 2;
     std::cout << "{\"serial\":" << execution.serial << ",\"slot\":" << execution.storage_slot
+              << ",\"entry_key\":" << execution.entry_key
               << ",\"generation\":" << execution.storage_generation << ",\"report_address\":"
               << *wire::read_u64(execution.context, wire::kContextReportPointer)
               << ",\"grid_x\":" << execution.dimensions.grid[0]
@@ -80,10 +99,9 @@ int main(int argc, char **argv) {
                 << *wire::read_u32(execution.report, row + wire::kRowFinalPhase)
                 << ",\"completions\":[";
       bool first_completion = true;
-      if (!capture.header.manifest.barriers.empty())
+      if (!manifest->barriers.empty())
         for (uint32_t slot = 0; slot < kSyncCapacity; ++slot) {
-          const size_t offset =
-              row + sync_offset(capture.header.manifest.sites.size()) + slot * kSyncRecordBytes;
+          const size_t offset = row + sync_offset(manifest->sites.size()) + slot * kSyncRecordBytes;
           if (wire::read_u32(execution.report, offset + wire::kSyncCommit) == 0)
             continue;
           if (!first_completion)
@@ -103,7 +121,7 @@ int main(int argc, char **argv) {
         }
       std::cout << ']' << ",\"records\":[";
       bool first_record = true;
-      for (const SiteFacts &site : capture.header.manifest.sites) {
+      for (const SiteFacts &site : manifest->sites) {
         for (uint32_t address_group = 0; address_group < kAddressGroupsPerSite; ++address_group) {
           const size_t record =
               row + kRowHeaderBytes + (site.first_slot + address_group) * kAccessRecordBytes;

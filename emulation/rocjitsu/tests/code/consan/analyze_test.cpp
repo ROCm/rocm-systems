@@ -18,17 +18,18 @@ class ConSanAnalysis : public ::testing::Test {
 protected:
   void SetUp() override {
     capture_.header = test::capture_header();
-    capture_.header.manifest.entry.original_group_bytes = 128;
-    capture_.header.manifest.entry.prepared_group_bytes = 128;
+    test::manifest(capture_.header).entry.original_group_bytes = 128;
+    test::manifest(capture_.header).entry.prepared_group_bytes = 128;
     append_execution();
   }
 
   void append_execution(LaunchDimensions dimensions = {{64, 1, 1}, {64, 1, 1}}) {
+    test::refresh_image(capture_.header);
     const uint64_t serial = capture_.executions.size() + 1;
     CapturedExecution execution =
-        test::execution(capture_.header.manifest, serial, serial, dimensions);
-    const FailureOr<LaunchLayout> layout =
-        plan_launch(capture_.header.manifest, execution.dimensions, execution.group_bytes, 0);
+        test::execution(test::manifest(capture_.header), serial, serial, dimensions);
+    const FailureOr<LaunchLayout> layout = plan_launch(
+        test::manifest(capture_.header), execution.dimensions, execution.group_bytes, 0);
     ASSERT_TRUE(layout.succeeded());
     stride_ = layout.value().row_stride;
     for (uint32_t wave = 0; wave < layout.value().wave_count; ++wave)
@@ -44,13 +45,17 @@ protected:
   }
 
   size_t completion(uint32_t wave, uint32_t slot = 0) const {
-    return row(wave) + sync_offset(capture_.header.manifest.sites.size()) + slot * kSyncRecordBytes;
+    return row(wave) + sync_offset(test::manifest(capture_.header).sites.size()) +
+           slot * kSyncRecordBytes;
   }
 
   void access(uint32_t wave, uint32_t site, uint32_t sequence, uint32_t offset = 0,
               uint64_t mask = 1, uint32_t address_group = 0, uint32_t execution = 0) {
     std::vector<uint8_t> &report = capture_.executions[execution].report;
-    const SiteFacts &facts = capture_.header.manifest.sites[site];
+    const Manifest *owner =
+        selected_manifest(capture_.header.image, capture_.executions[execution].entry_key);
+    ASSERT_NE(owner, nullptr);
+    const SiteFacts &facts = owner->sites[site];
     const size_t base = record(wave, site, address_group);
     for (const auto &[field, value] : std::array<std::pair<uint32_t, uint32_t>, 9>{
              {{wire::kRecordCommit, wire::kAccessCommitted},
@@ -64,7 +69,7 @@ protected:
               {wire::kRecordFlags, wire::kExactGuestMask}}})
       wire::write_u32(report, base + field, value);
     const uint32_t phase = static_cast<uint32_t>(
-        std::ranges::count_if(capture_.header.manifest.barriers, [&](const BarrierFacts &barrier) {
+        std::ranges::count_if(owner->barriers, [&](const BarrierFacts &barrier) {
           return barrier.original_wait < facts.original_offset;
         }));
     wire::write_u32(report, base + wire::kRecordPhase, phase);
@@ -74,6 +79,7 @@ protected:
   }
 
   FailureOr<std::vector<uint8_t>> encode() {
+    test::refresh_image(capture_.header);
     CaptureEncoder encoder;
     FailureOr<std::vector<uint8_t>> bytes = encoder.start(capture_.header, error_.emitter());
     if (bytes.failed())
@@ -91,6 +97,12 @@ protected:
     return bytes;
   }
 
+  FailureOr<LdsRaceResult> analyze_typed(Capture &capture, AnalysisOptions options = {},
+                                         util::DiagnosticEmitter diagnostic = {}) {
+    test::refresh_image(capture.header);
+    return analyze_capture(capture, options, diagnostic);
+  }
+
   FailureOr<LdsRaceResult> analyze(AnalysisOptions options = {}) {
     const FailureOr<std::vector<uint8_t>> bytes = encode();
     if (bytes.failed())
@@ -102,7 +114,7 @@ protected:
   }
 
   void many_sites(uint32_t count) {
-    Manifest &facts = capture_.header.manifest;
+    Manifest &facts = test::manifest(capture_.header);
     facts.sites.clear();
     facts.original_text_bytes = 8 * count + 64;
     facts.prepared_text_bytes = 128 * count + 768;
@@ -129,7 +141,7 @@ protected:
   }
 
   void barrier() {
-    Manifest &facts = capture_.header.manifest;
+    Manifest &facts = test::manifest(capture_.header);
     facts.target = 1250;
     facts.scope = ScopeKind::NativeLdsWorkgroupBarrier;
     facts.sites[1].original_offset = 32;
@@ -173,10 +185,10 @@ protected:
   }
 
   void many_barrier_sites(uint32_t count, uint32_t split, uint32_t waves = 2) {
-    capture_.header.manifest.barriers.clear();
-    capture_.header.manifest.scope = ScopeKind::NativeLdsNoSynchronization;
+    test::manifest(capture_.header).barriers.clear();
+    test::manifest(capture_.header).scope = ScopeKind::NativeLdsNoSynchronization;
     many_sites(count);
-    Manifest &facts = capture_.header.manifest;
+    Manifest &facts = test::manifest(capture_.header);
     facts.target = 1250;
     facts.scope = ScopeKind::NativeLdsWorkgroupBarrier;
     for (uint32_t site = split; site < count; ++site) {
@@ -205,9 +217,9 @@ protected:
   }
 
   void workgroups(uint32_t count = 4, uint32_t target = 1250, uint32_t wave_size = 32) {
-    capture_.header.manifest.target = target;
-    capture_.header.manifest.wave_size = wave_size;
-    capture_.header.manifest.entry.workgroup_id_scalar =
+    test::manifest(capture_.header).target = target;
+    test::manifest(capture_.header).wave_size = wave_size;
+    test::manifest(capture_.header).entry.workgroup_id_scalar =
         target == 1201 || target == 1250 ? 117 : 15;
     capture_.executions.clear();
     const uint32_t threads = 2 * wave_size + 1;
@@ -217,7 +229,7 @@ protected:
   void workgroup_barriers() {
     barrier();
     const FailureOr<LaunchLayout> layout =
-        plan_launch(capture_.header.manifest, capture_.executions[0].dimensions,
+        plan_launch(test::manifest(capture_.header), capture_.executions[0].dimensions,
                     capture_.executions[0].group_bytes, 0);
     ASSERT_TRUE(layout.succeeded());
     for (uint32_t index = 0; index < layout.value().wave_count; ++index) {
@@ -243,7 +255,7 @@ TEST_F(ConSanAnalysis, DecoderControlUnequalLoopFinalPhasesCannotConfirmAnUnorde
   access(0, 0, 1);
   access(1, 1, 1);
   barrier();
-  capture_.header.manifest.scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
+  test::manifest(capture_.header).scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
   std::vector<uint8_t> &report = capture_.executions[0].report;
   // Both endpoints precede the first barrier. One row claims a zero-iteration
   // exit. Its absence of a completion cannot establish absence of ordering.
@@ -262,7 +274,7 @@ TEST_F(ConSanAnalysis, DecoderControlLoopQuotaLossKeepsIndependentWitnessWithout
   access(0, 0, 1, 0, 3);
   access(1, 1, 1);
   barrier();
-  capture_.header.manifest.scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
+  test::manifest(capture_.header).scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
   std::vector<uint8_t> &report = capture_.executions[0].report;
   for (uint32_t wave = 0; wave < 2; ++wave) {
     wire::write_u32(report, row(wave) + wire::kRowFinalPhase, kSyncCapacity + 1);
@@ -293,8 +305,8 @@ TEST_F(ConSanAnalysis, DecoderControlLoopQuotaLossKeepsIndependentWitnessWithout
 
 TEST_F(ConSanAnalysis, SaturatedAccessPhasesAreCoverageLossWithoutInventingOrdering) {
   barrier();
-  capture_.header.manifest.scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
-  capture_.header.manifest.sites[1].access = AccessKind::Write;
+  test::manifest(capture_.header).scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
+  test::manifest(capture_.header).sites[1].access = AccessKind::Write;
   std::vector<uint8_t> &report = capture_.executions[0].report;
   for (uint32_t wave = 0; wave < 2; ++wave) {
     access(wave, 1, 1, 0, 3);
@@ -349,7 +361,7 @@ TEST_F(ConSanAnalysis, SaturatedAccessPhasesAreCoverageLossWithoutInventingOrder
 
 TEST_F(ConSanAnalysis, SaturatedPhaseResidueIsUnknownOnlyAfterCounterExhaustion) {
   barrier();
-  Manifest &facts = capture_.header.manifest;
+  Manifest &facts = test::manifest(capture_.header);
   facts.scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
   facts.sites[1].access = AccessKind::Write;
   facts.barriers.push_back({.original_drain = 40,
@@ -414,10 +426,10 @@ TEST_F(ConSanAnalysis, SaturatedPhaseResidueIsUnknownOnlyAfterCounterExhaustion)
 TEST_F(ConSanAnalysis, DecoderControlSeededCounterLimitsKeepCandidatesBoundedAndCollisionsValid) {
   // Both sites are actually before the barrier in the qualified static order.
   many_barrier_sites(2, 2);
-  capture_.header.manifest.sites[1].access = AccessKind::Read;
+  test::manifest(capture_.header).sites[1].access = AccessKind::Read;
   access(0, 0, 1, 0, 3);
   access(1, 1, 1);
-  capture_.header.manifest.scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
+  test::manifest(capture_.header).scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
   std::vector<uint8_t> &report = capture_.executions[0].report;
   for (uint32_t wave = 0; wave < 2; ++wave) {
     wire::write_u32(report, row(wave) + wire::kRowFinalPhase, UINT32_MAX);
@@ -476,16 +488,16 @@ TEST_F(ConSanAnalysis, OverlappingWriteReadProducesAttributedUnorderedCrossWaveF
 }
 
 TEST_F(ConSanAnalysis, UnequalStartMixedWidthRangesOverlapAndAdjacentRangesDoNot) {
-  capture_.header.manifest.target = 1250;
-  capture_.header.manifest.sites[0].width = 8;
+  test::manifest(capture_.header).target = 1250;
+  test::manifest(capture_.header).sites[0].width = 8;
   for (const AccessKind wide_access : {AccessKind::Write, AccessKind::Read})
     for (const AccessKind narrow_access : {AccessKind::Read, AccessKind::Write})
       for (const uint32_t offset : {4u, 8u}) {
         SCOPED_TRACE(::testing::Message()
                      << "wide_access=" << static_cast<uint32_t>(wide_access) << ", narrow_access="
                      << static_cast<uint32_t>(narrow_access) << ", narrow_offset=" << offset);
-        capture_.header.manifest.sites[0].access = wide_access;
-        capture_.header.manifest.sites[1].access = narrow_access;
+        test::manifest(capture_.header).sites[0].access = wide_access;
+        test::manifest(capture_.header).sites[1].access = narrow_access;
         capture_.executions.clear();
         append_execution();
         access(0, 0, 1, 0);
@@ -501,9 +513,9 @@ TEST_F(ConSanAnalysis, UnequalStartMixedWidthRangesOverlapAndAdjacentRangesDoNot
 }
 
 TEST_F(ConSanAnalysis, DecoderControlWideBoundsCannotWrapOrSilentlyBecomeB32) {
-  capture_.header.manifest.target = 1250;
+  test::manifest(capture_.header).target = 1250;
   for (const uint32_t width : {2u, 8u, 16u}) {
-    capture_.header.manifest.sites[0].width = width;
+    test::manifest(capture_.header).sites[0].width = width;
     for (const uint32_t offset : {1u, 128u - width + 1, UINT32_MAX - 7}) {
       capture_.executions.clear();
       append_execution();
@@ -519,16 +531,16 @@ TEST_F(ConSanAnalysis, DecoderControlWideBoundsCannotWrapOrSilentlyBecomeB32) {
     }
   }
   for (const uint32_t width : {0u, 1u, 3u, 12u, 32u}) {
-    capture_.header.manifest.sites[0].width = width;
-    EXPECT_TRUE(validate_manifest(capture_.header.manifest).failed());
+    test::manifest(capture_.header).sites[0].width = width;
+    EXPECT_TRUE(validate_manifest(test::manifest(capture_.header)).failed());
   }
-  capture_.header.manifest.sites[0].width = 8;
-  capture_.header.manifest.target = 1201;
-  EXPECT_TRUE(validate_manifest(capture_.header.manifest).succeeded());
+  test::manifest(capture_.header).sites[0].width = 8;
+  test::manifest(capture_.header).target = 1201;
+  EXPECT_TRUE(validate_manifest(test::manifest(capture_.header)).succeeded());
 }
 
 TEST_F(ConSanAnalysis, MixedWidthUnequalStartPairUsesTheQualifiedBarrierCertificate) {
-  capture_.header.manifest.sites[0].width = 8;
+  test::manifest(capture_.header).sites[0].width = 8;
   access(0, 0, 1, 0);
   access(1, 1, 1, 4);
   barrier();
@@ -552,7 +564,8 @@ TEST_F(ConSanAnalysis, IdenticalOffsetsInDifferentWorkgroupsNeverFormLdsCandidat
 TEST_F(ConSanAnalysis, LocalConflictsAndReadReadExclusionApplyIndependentlyInEveryWorkgroup) {
   for (const bool read_read : {false, true}) {
     workgroups();
-    capture_.header.manifest.sites[0].access = read_read ? AccessKind::Read : AccessKind::Write;
+    test::manifest(capture_.header).sites[0].access =
+        read_read ? AccessKind::Read : AccessKind::Write;
     for (uint32_t group = 0; group < 4; ++group) {
       access(3 * group, 0, 1);
       access(3 * group + 1, 1, 1);
@@ -581,7 +594,8 @@ TEST_F(ConSanAnalysis, EveryTargetKeepsNoSyncConflictsAndReadReadExclusionLocalT
       for (const bool read_read : {false, true}) {
         SCOPED_TRACE(read_read);
         ASSERT_NO_FATAL_FAILURE(workgroups(4, target.id, wave_size));
-        capture_.header.manifest.sites[0].access = read_read ? AccessKind::Read : AccessKind::Write;
+        test::manifest(capture_.header).sites[0].access =
+            read_read ? AccessKind::Read : AccessKind::Write;
         for (uint32_t group = 0; group < 4; ++group) {
           access(3 * group, 0, 1);
           access(3 * group + 1, 1, 1);
@@ -684,7 +698,7 @@ TEST_F(ConSanAnalysis,
   workgroup_barriers();
   const std::vector<uint8_t> saved = capture_.executions[0].report;
   for (const uint32_t field :
-       {static_cast<uint32_t>(sync_offset(capture_.header.manifest.sites.size()) +
+       {static_cast<uint32_t>(sync_offset(test::manifest(capture_.header).sites.size()) +
                               wire::kSyncCommit),
         wire::kRowWorkgroupX}) {
     capture_.executions[0].report = saved;
@@ -837,7 +851,8 @@ TEST_F(ConSanAnalysis, FixedBarrierReadReadAndDisjointKeepObservationsWithoutCan
   for (const bool read_read : {false, true}) {
     capture_.executions.clear();
     append_execution();
-    capture_.header.manifest.sites[0].access = read_read ? AccessKind::Read : AccessKind::Write;
+    test::manifest(capture_.header).sites[0].access =
+        read_read ? AccessKind::Read : AccessKind::Write;
     access(0, 0, 1);
     access(1, 1, 1, read_read ? 0 : 4);
     barrier();
@@ -891,7 +906,7 @@ TEST_F(ConSanAnalysis, SamePhaseRequiresCompleteJournalWithoutUnexpectedTail) {
   // Before B0, entry and B0 already close the interval independently of any
   // unexpected later journal bytes, just as they do under loop journal loss.
   many_barrier_sites(2, 0);
-  capture_.header.manifest.sites[1].access = AccessKind::Read;
+  test::manifest(capture_.header).sites[1].access = AccessKind::Read;
   access(0, 0, 1);
   access(1, 1, 1);
   std::vector<uint8_t> &report = capture_.executions[0].report;
@@ -943,7 +958,7 @@ TEST_F(ConSanAnalysis, SamePhaseRequiresCompleteJournalWithoutUnexpectedTail) {
 
 TEST_F(ConSanAnalysis, StaticAccessPhaseCannotBeReplacedByAConsistentDynamicBoundary) {
   many_barrier_sites(2, 0);
-  capture_.header.manifest.sites[1].access = AccessKind::Read;
+  test::manifest(capture_.header).sites[1].access = AccessKind::Read;
   access(0, 0, 1);
   access(1, 1, 1);
   const FailureOr<LdsRaceResult> baseline = analyze();
@@ -972,7 +987,7 @@ TEST_F(ConSanAnalysis, StaticAccessPhaseCannotBeReplacedByAConsistentDynamicBoun
 
 TEST_F(ConSanAnalysis, DecoderControlBoundaryContradictionKeepsIndependentEndpointsAndCollisions) {
   many_barrier_sites(4, 1);
-  Manifest &facts = capture_.header.manifest;
+  Manifest &facts = test::manifest(capture_.header);
   facts.sites[3].original_offset = 64;
   facts.barriers.push_back({.original_drain = 40,
                             .original_signal = 44,
@@ -1026,7 +1041,7 @@ TEST_F(ConSanAnalysis, DecoderControlBoundaryContradictionKeepsIndependentEndpoi
 
 TEST_F(ConSanAnalysis, DecoderControlContradictionIsLocalToOccurrenceAndWorkgroup) {
   many_barrier_sites(3, 1);
-  Manifest &facts = capture_.header.manifest;
+  Manifest &facts = test::manifest(capture_.header);
   facts.scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
   facts.entry.workgroup_id_scalar = 117;
   facts.sites[2].original_offset = 64;
@@ -1100,7 +1115,7 @@ TEST_F(ConSanAnalysis, MultipleEpochsUseIndependentGroupWitnesses) {
   access(0, 0, 1);
   access(1, 1, 1);
   barrier();
-  Manifest &facts = capture_.header.manifest;
+  Manifest &facts = test::manifest(capture_.header);
   facts.sites[1].original_offset = 64;
   facts.barriers.push_back({.original_drain = 48,
                             .original_signal = 52,
@@ -1143,7 +1158,7 @@ TEST_F(ConSanAnalysis, AdjacentEffectiveByteRangesAreDisjointWithNonemptyObserva
 }
 
 TEST_F(ConSanAnalysis, OverlappingReadReadGroupsAreNotConflictCandidates) {
-  capture_.header.manifest.sites[0].access = AccessKind::Read;
+  test::manifest(capture_.header).sites[0].access = AccessKind::Read;
   access(0, 0, 1, 0, 3);
   access(1, 1, 1, 0, UINT32_MAX);
   const FailureOr<LdsRaceResult> result = analyze();
@@ -1214,7 +1229,7 @@ TEST_F(ConSanAnalysis, BothChecksConsumeTheSameWriteObservation) {
 }
 
 TEST_F(ConSanAnalysis, ExampleLimitsNeverChangeCompleteGroupOrLanePairCounts) {
-  capture_.header.manifest.sites[1].access = AccessKind::Write;
+  test::manifest(capture_.header).sites[1].access = AccessKind::Write;
   for (uint32_t wave = 0; wave < 2; ++wave) {
     access(wave, 0, 1, 0, 3);
     access(wave, 1, 2, 0, 3);
@@ -1259,8 +1274,8 @@ TEST_F(ConSanAnalysis, NoSynchronizationKeepsConflictsDespiteUnrelatedRowDamage)
   }};
   for (const RowDamage &damage : cases) {
     SCOPED_TRACE(damage.field);
-    capture_.header.manifest.target = damage.target;
-    capture_.header.manifest.wave_size = damage.wave_size;
+    test::manifest(capture_.header).target = damage.target;
+    test::manifest(capture_.header).wave_size = damage.wave_size;
     capture_.executions.clear();
     append_execution({{3 * damage.wave_size, 1, 1}, {3 * damage.wave_size, 1, 1}});
     access((damage.wave + 1) % 3, 0, 1);
@@ -1288,7 +1303,7 @@ TEST_F(ConSanAnalysis, NoSynchronizationKeepsConflictsDespiteUnrelatedRowDamage)
 }
 
 TEST_F(ConSanAnalysis, NoSynchronizationStillRejectsDamagedEndpointRows) {
-  capture_.header.manifest.target = 1250;
+  test::manifest(capture_.header).target = 1250;
   capture_.executions.clear();
   append_execution({{96, 1, 1}, {96, 1, 1}});
   access(0, 0, 1);
@@ -1392,16 +1407,16 @@ TEST_F(ConSanAnalysis, InvalidRecordIdentityMaskAndBoundsAreGapsBeyondTheContain
 
 TEST_F(ConSanAnalysis, MissingStaticMappingIsAnInputErrorNotInstructionZero) {
   access(0, 0, 1);
-  capture_.header.manifest.sites[0].original_size = 0;
-  EXPECT_TRUE(analyze_capture(capture_, {}, error_.emitter()).failed());
+  test::manifest(capture_.header).sites[0].original_size = 0;
+  EXPECT_TRUE(analyze_typed(capture_, {}, error_.emitter()).failed());
   EXPECT_EQ(error_.message(), "invalid site identity, mapping or address group");
 }
 
 TEST_F(ConSanAnalysis, UnmodeledScopeCannotBeTreatedAsConfirmedUnorderedAccesses) {
   access(0, 0, 1);
   access(1, 1, 1);
-  capture_.header.manifest.scope = static_cast<ScopeKind>(99);
-  EXPECT_TRUE(analyze_capture(capture_, {}, error_.emitter()).failed());
+  test::manifest(capture_.header).scope = static_cast<ScopeKind>(99);
+  EXPECT_TRUE(analyze_typed(capture_, {}, error_.emitter()).failed());
   EXPECT_EQ(error_.message(), "empty image or unsupported target, ABI, scope or options");
 }
 
@@ -1409,23 +1424,23 @@ TEST_F(ConSanAnalysis, TypedHeaderConditionsAndIdentityCannotBypassFileValidatio
   const CaptureHeader saved = capture_.header;
   for (const uint32_t unsupported : {0u, 14u, 13u, 11u, 7u, 31u}) {
     capture_.header.execution_conditions = unsupported;
-    EXPECT_TRUE(analyze_capture(capture_, {}, error_.emitter()).failed());
+    EXPECT_TRUE(analyze_typed(capture_, {}, error_.emitter()).failed());
     EXPECT_EQ(error_.message(), "unsupported capture execution conditions");
   }
   capture_.header = saved;
   capture_.header.run_identity = {};
-  EXPECT_TRUE(analyze_capture(capture_, {}, error_.emitter()).failed());
+  EXPECT_TRUE(analyze_typed(capture_, {}, error_.emitter()).failed());
   EXPECT_EQ(error_.message(), "missing capture run identity");
   capture_.header = saved;
-  EXPECT_TRUE(analyze_capture(capture_).succeeded());
+  EXPECT_TRUE(analyze_typed(capture_).succeeded());
 }
 
 TEST_F(ConSanAnalysis, TypedAnalysisBudgetsRetainTheirIndependentLimits) {
-  EXPECT_TRUE(analyze_capture(capture_, {kMaxFindingExamples}).succeeded());
-  EXPECT_TRUE(analyze_capture(capture_, {kMaxFindingExamples + 1}, error_.emitter()).failed());
+  EXPECT_TRUE(analyze_typed(capture_, {kMaxFindingExamples}).succeeded());
+  EXPECT_TRUE(analyze_typed(capture_, {kMaxFindingExamples + 1}, error_.emitter()).failed());
   EXPECT_EQ(error_.message(), "finding example budget exceeded");
   capture_.executions.resize(CaptureLimits{}.executions + 1);
-  EXPECT_TRUE(analyze_capture(capture_, {}, error_.emitter()).failed());
+  EXPECT_TRUE(analyze_typed(capture_, {}, error_.emitter()).failed());
   EXPECT_EQ(error_.message(), "capture execution budget exceeded");
 }
 
@@ -1478,7 +1493,7 @@ TEST_F(ConSanAnalysis, InvertedSiteOccurrenceOrderCannotBeAValidForwardOnlyExecu
 
 TEST_F(ConSanAnalysis, ShortTypedReportCannotEscapeTheCoreBoundsCheck) {
   capture_.executions[0].report.resize(1);
-  const FailureOr<LdsRaceResult> result = analyze_capture(capture_, {}, error_.emitter());
+  const FailureOr<LdsRaceResult> result = analyze_typed(capture_, {}, error_.emitter());
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_FALSE(result.value().coverage_complete);
   EXPECT_EQ(result.value().executions.front().valid_observations, 0u);
@@ -1532,7 +1547,7 @@ TEST_F(ConSanAnalysis, UnalignedOperandsNeedAlignmentModeEvidenceAndCannotProduc
 }
 
 TEST_F(ConSanAnalysis, ReaderOwnedEvidenceAndRenderedSemanticReplayAreDeterministic) {
-  capture_.header.manifest.entry.name = "kernel\"\\\n";
+  test::manifest(capture_.header).entry.name = "kernel\"\\\n";
   access(0, 0, 1, 0, 3);
   access(1, 1, 1);
   FailureOr<std::vector<uint8_t>> bytes = encode();
@@ -1554,10 +1569,10 @@ TEST_F(ConSanAnalysis, ReaderOwnedEvidenceAndRenderedSemanticReplayAreDeterminis
 TEST_F(ConSanAnalysis, AcceptedUtf8EntryNamesRetainTheirBytesInJson) {
   // Exercise two-, three- and four-byte UTF-8 alongside JSON escapes.
   const std::string name = "lds_producer_consum\xc3\xa9_\xe6\xa0\xb8_\xf0\x9f\x98\x80";
-  capture_.header.manifest.entry.name = name + "\"\\\n\t";
+  test::manifest(capture_.header).entry.name = name + "\"\\\n\t";
   const FailureOr<LdsRaceResult> result = analyze();
   ASSERT_TRUE(result.succeeded()) << error_.message();
-  EXPECT_EQ(result.value().entry, capture_.header.manifest.entry.name);
+  EXPECT_EQ(result.value().entry, test::manifest(capture_.header).entry.name);
   EXPECT_NE(
       render_analysis(result.value()).find("\"entry\":\"" + name + "\\\"\\\\\\u000a\\u0009\""),
       std::string::npos);
@@ -1568,14 +1583,15 @@ TEST_F(ConSanAnalysis, InvalidUtf8EntryNamesAreAnalysisInputErrorsAfterBinaryRou
        {"\x80", "\xbf", "\xc0\x80", "\xc1\xbf", "\xc2", "\xc2\x7f", "\xdf\xff", "\xe0\x80\x80",
         "\xed\xa0\x80", "\xef\xbf", "\xf0\x80\x80\x80", "\xf4\x90\x80\x80", "\xf5\x80\x80\x80",
         "\xf8\x88\x80\x80\x80", "\xff"}) {
-    capture_.header.manifest.entry.name = "kernel_" + std::string(invalid);
+    test::manifest(capture_.header).entry.name = "kernel_" + std::string(invalid);
     // Binary capture remains byte preserving; only JSON-producing analysis
     // requires text. Re-encode each case so checksums cannot hide this check.
     const FailureOr<std::vector<uint8_t>> bytes = encode();
     ASSERT_TRUE(bytes.succeeded()) << error_.message();
     const FailureOr<Capture> decoded = decode_capture(bytes.value(), error_.emitter());
     ASSERT_TRUE(decoded.succeeded()) << error_.message();
-    EXPECT_EQ(decoded.value().header.manifest.entry.name, capture_.header.manifest.entry.name);
+    EXPECT_EQ(test::manifest(decoded.value().header).entry.name,
+              test::manifest(capture_.header).entry.name);
     const FailureOr<LdsRaceResult> result = analyze_capture(decoded.value(), {}, error_.emitter());
     EXPECT_TRUE(result.failed());
     EXPECT_EQ(error_.message(), "entry name is not valid UTF-8 for JSON output");
@@ -1585,7 +1601,7 @@ TEST_F(ConSanAnalysis, InvalidUtf8EntryNamesAreAnalysisInputErrorsAfterBinaryRou
 TEST_F(ConSanAnalysis, Utf8ScalarBoundariesRetainTheirBytesInJson) {
   const std::string name = "kernel_\xc2\x80\xdf\xbf\xe0\xa0\x80\xed\x9f\xbf"
                            "\xee\x80\x80\xef\xbf\xbf\xf0\x90\x80\x80\xf4\x8f\xbf\xbf";
-  capture_.header.manifest.entry.name = name;
+  test::manifest(capture_.header).entry.name = name;
   const FailureOr<LdsRaceResult> result = analyze();
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_NE(render_analysis(result.value()).find("\"entry\":\"" + name + "\""), std::string::npos);
@@ -1689,15 +1705,16 @@ TEST_F(ConSanAnalysis, BarrierCountsAndExampleOrderMatchExhaustiveCandidatePairs
                   : (first_site < split) != (second_site < split) ? LdsRaceOrdering::Ordered
                                                                   : LdsRaceOrdering::Unordered;
               const auto participant = [&](uint32_t wave, uint32_t site) {
-                return LdsRaceParticipant{wave,
-                                          site,
-                                          site + 1,
-                                          (uint64_t{1} << (wave + 1)) - 1,
-                                          0,
-                                          4,
-                                          capture_.header.manifest.sites[site].original_offset,
-                                          AccessKind::Write,
-                                          site < split ? 0u : 1u};
+                return LdsRaceParticipant{
+                    wave,
+                    site,
+                    site + 1,
+                    (uint64_t{1} << (wave + 1)) - 1,
+                    0,
+                    4,
+                    test::manifest(capture_.header).sites[site].original_offset,
+                    AccessKind::Write,
+                    site < split ? 0u : 1u};
               };
               const uint64_t lanes = uint64_t{first_wave + 1} * (second_wave + 1);
               LdsRaceFinding finding{LdsRaceFindingKind::CrossWave,
@@ -1752,8 +1769,8 @@ TEST_F(ConSanAnalysis, CorruptRecordDiagnosticsAreBoundedWithoutLosingIntegrityC
 }
 
 TEST_F(ConSanAnalysis, Wave64HighLanesAndFullMasksRetainExactLanePairCounts) {
-  capture_.header.manifest.target = 942;
-  capture_.header.manifest.wave_size = 64;
+  test::manifest(capture_.header).target = 942;
+  test::manifest(capture_.header).wave_size = 64;
   capture_.executions.clear();
   append_execution({{128, 1, 1}, {128, 1, 1}});
   access(0, 0, 1, 0, uint64_t{3} << 62);
@@ -1822,7 +1839,7 @@ TEST_F(ConSanAnalysis, DecoderControlDisjointBoundaryContradictionIsAnIntegrityI
 }
 
 TEST_F(ConSanAnalysis, DecoderControlReadReadBoundaryContradictionIsAnIntegrityIssue) {
-  capture_.header.manifest.sites[0].access = AccessKind::Read;
+  test::manifest(capture_.header).sites[0].access = AccessKind::Read;
   access(0, 0, 1);
   access(1, 1, 1, 0);
   barrier();
@@ -1844,7 +1861,7 @@ TEST_F(ConSanAnalysis, DecoderControlRepeatedStaticPhaseContradictionMustNotConf
   access(0, 0, 1);
   access(1, 1, 1);
   barrier();
-  Manifest &facts = capture_.header.manifest;
+  Manifest &facts = test::manifest(capture_.header);
   facts.scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
   facts.barriers.push_back({.original_drain = 48,
                             .original_signal = 52,
@@ -1892,7 +1909,7 @@ TEST_F(ConSanAnalysis, DecoderControlRepeatedStaticPhaseContradictionMustNotConf
 
 TEST_F(ConSanAnalysis, DecoderControlLaterJournalLossKeepsEarlierUnorderedPair) {
   many_barrier_sites(2, 2);
-  capture_.header.manifest.scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
+  test::manifest(capture_.header).scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
   access(0, 0, 1);
   access(1, 1, 1);
   std::vector<uint8_t> &report = capture_.executions[0].report;
@@ -1922,7 +1939,7 @@ TEST_F(ConSanAnalysis, DecoderControlLaterJournalLossKeepsEarlierUnorderedPair) 
 
 TEST_F(ConSanAnalysis, DecoderControlUnorderedIntervalNeedsBothAdjacentOccurrences) {
   many_barrier_sites(2, 0);
-  capture_.header.manifest.scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
+  test::manifest(capture_.header).scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
   access(0, 0, 1);
   access(1, 1, 1);
   std::vector<uint8_t> &report = capture_.executions[0].report;
@@ -1959,7 +1976,7 @@ TEST_F(ConSanAnalysis, DecoderControlRepeatedCycleEdgesRespectFinalPhaseAndZeroT
   access(0, 0, 1);
   access(1, 1, 1);
   barrier();
-  capture_.header.manifest.scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
+  test::manifest(capture_.header).scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
   std::vector<uint8_t> &report = capture_.executions[0].report;
   const std::vector<uint8_t> original = report;
   for (const uint32_t wave : {0u, 1u}) {
@@ -1992,7 +2009,7 @@ TEST_F(ConSanAnalysis, DecoderControlRepeatedCycleEdgesRespectFinalPhaseAndZeroT
 
 TEST_F(ConSanAnalysis, DecoderControlUnorderedIntervalRequiresTheEmptyAccessWave) {
   many_barrier_sites(2, 2, 3);
-  capture_.header.manifest.scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
+  test::manifest(capture_.header).scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
   access(0, 0, 1);
   access(1, 1, 1);
   std::vector<uint8_t> &report = capture_.executions[0].report;
@@ -2024,7 +2041,7 @@ TEST_F(ConSanAnalysis, DecoderControlUnorderedIntervalRequiresTheEmptyAccessWave
 TEST_F(ConSanAnalysis, LargeTruncatedLoopCountsKeepDistinctLatePhasesAggregated) {
   constexpr uint32_t sites = 1024, final_phase = sites + kSyncCapacity + 1;
   many_barrier_sites(sites, 0);
-  capture_.header.manifest.scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
+  test::manifest(capture_.header).scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
   std::vector<uint8_t> &report = capture_.executions[0].report;
   for (uint32_t wave = 0; wave < 2; ++wave) {
     for (uint32_t site = 0; site < sites; ++site) {
@@ -2053,6 +2070,55 @@ TEST_F(ConSanAnalysis, LargeTruncatedLoopCountsKeepDistinctLatePhasesAggregated)
     EXPECT_EQ(execution.unresolved_examples.size(), examples);
     EXPECT_FALSE(execution.coverage_complete);
   }
+}
+
+TEST_F(ConSanAnalysis, SameImageEntriesUseTheirOwnFactsAndRepeatAttribution) {
+  capture_.header = test::multi_entry_header();
+  capture_.executions.clear();
+  const std::array<EntryKey, 3> keys = {128, 192, 128};
+  for (uint32_t index = 0; index < keys.size(); ++index) {
+    const Manifest *facts = selected_manifest(capture_.header.image, keys[index]);
+    ASSERT_NE(facts, nullptr);
+    CapturedExecution execution = test::execution(*facts, index + 1, index + 1);
+    for (uint32_t wave = 0; wave < 2; ++wave)
+      wire::write_u32(execution.report, row(wave) + wire::kRowStatus,
+                      wire::kRowEntered | wire::kRowExited);
+    capture_.executions.push_back(std::move(execution));
+    access(0, 0, 1, 0, 1, 0, index);
+    access(1, 1, 1, 0, 1, 0, index);
+  }
+  util::StringDiagnostic error;
+  CaptureEncoder encoder;
+  const FailureOr<std::vector<uint8_t>> prefix = encoder.start(capture_.header, error.emitter());
+  ASSERT_TRUE(prefix.succeeded()) << error.message();
+  std::vector<uint8_t> bytes = prefix.value();
+  for (const CapturedExecution &execution : capture_.executions) {
+    const FailureOr<std::vector<uint8_t>> frame = encoder.append(execution, error.emitter());
+    ASSERT_TRUE(frame.succeeded()) << error.message();
+    bytes.insert(bytes.end(), frame.value().begin(), frame.value().end());
+  }
+  const FailureOr<std::vector<uint8_t>> end = encoder.finish(error.emitter());
+  ASSERT_TRUE(end.succeeded()) << error.message();
+  bytes.insert(bytes.end(), end.value().begin(), end.value().end());
+  const FailureOr<Capture> decoded = decode_capture(bytes, error.emitter());
+  ASSERT_TRUE(decoded.succeeded()) << error.message();
+  const FailureOr<LdsRaceResult> result = analyze_capture(decoded.value(), {}, error.emitter());
+  ASSERT_TRUE(result.succeeded()) << error.message();
+  ASSERT_EQ(result.value().executions.size(), 3u);
+  EXPECT_EQ(result.value().cross_wave_pairs, 2u);
+  EXPECT_TRUE(result.value().coverage_complete);
+  EXPECT_EQ(result.value().executions[0].cross_wave_pairs, 1u);
+  EXPECT_EQ(result.value().executions[1].cross_wave_pairs, 0u);
+  EXPECT_EQ(result.value().executions[2].cross_wave_pairs, 1u);
+  for (uint32_t index = 0; index < keys.size(); ++index) {
+    EXPECT_EQ(result.value().executions[index].entry_key, keys[index]);
+    EXPECT_EQ(result.value().executions[index].valid_observations, 2u);
+  }
+  EXPECT_EQ(result.value().executions[1].entry, "second_codec_fixture");
+  capture_.executions[0].entry_key = 999;
+  EXPECT_TRUE(analyze_typed(capture_, {}, error.emitter()).failed());
+  capture_.executions[0].entry_key = 192;
+  EXPECT_TRUE(analyze_typed(capture_, {}, error.emitter()).failed());
 }
 
 } // namespace

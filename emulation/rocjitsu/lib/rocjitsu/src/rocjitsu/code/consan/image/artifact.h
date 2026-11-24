@@ -10,7 +10,7 @@
 namespace rocjitsu::consan {
 
 struct LoadedArtifact {
-  Manifest manifest;
+  ImageFacts facts;
   std::vector<uint8_t> prepared;
 };
 
@@ -27,10 +27,11 @@ struct LoadedArtifact {
                                             std::span<const uint8_t> prepared,
                                             util::DiagnosticEmitter diagnostic = {});
 
-/// @brief Read one ready artifact with bounded owning storage; never compile.
+/// @brief Read one ready artifact with independently configured selection identity.
 [[nodiscard]] FailureOr<LoadedArtifact> load_artifact(const std::filesystem::path &directory,
                                                       std::span<const uint8_t> original,
                                                       std::string_view concrete_target,
+                                                      const Digest &expected_selection_profile,
                                                       util::DiagnosticEmitter diagnostic = {});
 
 } // namespace rocjitsu::consan
