@@ -392,8 +392,9 @@ util::FailureOr<RunStats> run_input_once(
     const std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> &async_resources,
     util::DiagnosticEmitter diagnostic) {
   const auto terminated = terminated_program(instructions, resolved_target, diagnostic);
-  if (terminated.failed())
+  if (terminated.failed()) {
     return util::Result::failure();
+  }
   const std::vector<uint8_t> &code = terminated.value();
 
   // Keep a mapped data island near the program. Address-bearing initial state

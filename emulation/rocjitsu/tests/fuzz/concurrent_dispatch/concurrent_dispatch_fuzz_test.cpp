@@ -34,9 +34,11 @@ constexpr uint16_t kHwIdSimdId = 0x0904; // hwreg(HW_REG_HW_ID, 4, 2)
 constexpr std::array<uint32_t, 2> kInvalidCdna3Instruction{0xe0ffebf5, 0x00020000};
 
 template <typename Words> void append_words(std::vector<uint8_t> &input, const Words &words) {
-  for (uint32_t word : words)
-    for (unsigned byte = 0; byte < sizeof(word); ++byte)
+  for (uint32_t word : words) {
+    for (unsigned byte = 0; byte < sizeof(word); ++byte) {
       input.push_back(static_cast<uint8_t>(word >> (8 * byte)));
+    }
+  }
 }
 
 void append_xcc_zero_test(std::vector<uint8_t> &input) {
@@ -353,14 +355,16 @@ TEST(ConcurrentDispatchFuzzTest, MatchingQueueFaultsAllowFatalInFlightInstructio
   append_xcc_zero_test(input);
   constexpr uint16_t kOwnerPathWords = 7; // Three moves, two store words, wait, end.
   append_words(input, cdna3::build_sopp(cdna3::kSCbranchScc0Sopp, {.simm16 = kOwnerPathWords}));
-  for (uint8_t reg : {uint8_t{0}, uint8_t{1}, uint8_t{2}})
+  for (uint8_t reg : {uint8_t{0}, uint8_t{1}, uint8_t{2}}) {
     append_words(input, cdna3::build_vop1(cdna3::kVMovB32Vop1, {.src0 = kInlineZero, .vdst = reg}));
+  }
   append_words(input, cdna3::build_flat(cdna3::kFlatStoreDwordFlat,
                                         {.addr = 0, .data = 2, .saddr = kCdnaFlatSaddrOff}));
   append_words(input, cdna3::build_sopp(cdna3::kSWaitcntSopp));
   append_words(input, cdna3::build_sopp(cdna3::kSEndpgmSopp));
-  for (unsigned delay = 0; delay < 8; ++delay)
+  for (unsigned delay = 0; delay < 8; ++delay) {
     append_words(input, cdna3::build_sopp(cdna3::kSNopSopp));
+  }
   append_words(input, kInvalidCdna3Instruction);
 
   for (unsigned repetition = 0; repetition < 20; ++repetition) {
@@ -402,8 +406,9 @@ TEST(ConcurrentDispatchFuzzTest, TerminalFaultCancelsOlderUnbarrieredPacket) {
   for (uint8_t control : {uint8_t{0}, kXcdFanoutBit}) {
     SCOPED_TRACE(control);
     std::vector<uint8_t> input = simd_id_fault_input(/*halt_on_simd_zero=*/true, control);
-    if (control == 0)
+    if (control == 0) {
       input[2] = 0; // Three workgroups, one first-wave slot per CU.
+    }
     const RunStats one_packet = run_input(input).value();
     ASSERT_EQ(one_packet.packets, 1u);
     ASSERT_EQ(one_packet.terminal_faulted_modes, 0u);
