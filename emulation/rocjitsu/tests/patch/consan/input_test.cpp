@@ -150,6 +150,61 @@ TEST(ConSanInput, StrictRejectsConditionalOnlyImageAndRevalidatesTheSavedPolicy)
   EXPECT_NE(error.message.find("no observed LDS sites"), std::string::npos);
 }
 
+TEST(ConSanInput, ScalarFlatAppliesTheSitePolicyToTheAllocatedScalarPair) {
+  const auto image =
+      test::read_fixture(test::target_fixture_path({"gfx1250", 32}, "width-flat-load-backward"));
+  const auto &target = *target_profile(1250);
+  InputError error;
+  const auto valid = build_input_program(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(valid.succeeded()) << error.message;
+  const auto &program = valid.value();
+  ASSERT_EQ(program.accesses.size(), 2u);
+  const auto &flat = program.accesses.back();
+  EXPECT_EQ(flat.scalar_base, 4u);
+  EXPECT_TRUE(flat.scaled_vector_offset);
+  EXPECT_EQ(flat.immediate_bytes, -4);
+  const size_t anchor = program.text_file_offset + flat.original_offset;
+  for (const uint8_t selector : {3, 100, 124}) {
+    auto invalid = image;
+    // Odd and unallocated register pairs cannot form an ordinary base.
+    // A null SADDR cannot scale the unmodified VGPR-pair address.
+    invalid[anchor] = selector;
+    EXPECT_TRUE(build_input_program(invalid, target, "lds_producer_consumer", error).failed());
+  }
+  const size_t entry = program.text_file_offset + program.kernel.entry_text_offset;
+  const uint32_t shared_pair = 0xbe8401eb; // s_mov_b64 s[4:5], src_shared_base
+  auto global_image = image;
+  bool found = false;
+  for (size_t pos = entry; pos + 4 <= anchor; pos += 4) {
+    if (std::memcmp(image.data() + pos, &shared_pair, 4) == 0) {
+      global_image[pos] = 0; // s[0:1], the global kernarg pointer
+      found = true;
+      break;
+    }
+  }
+  ASSERT_TRUE(found);
+  const auto global = prepare(global_image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(global.succeeded()) << error.message;
+  ASSERT_EQ(global.value().manifest.sites.size(), 1u);
+  ASSERT_EQ(global.value().manifest.flat_exclusions.size(), 1u);
+  EXPECT_EQ(global.value().manifest.flat_exclusions.front().reason, FlatExclusionReason::NonGroup);
+
+  auto selected = image;
+  // Replace the final vector displacement setup with s_cselect_b32 s5, s5, s7.
+  // One arm retains the shared high word; the other has no aperture provenance.
+  const uint32_t select = 0x98050705;
+  std::memcpy(selected.data() + anchor - 4, &select, 4);
+  const auto likely = prepare(selected, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(likely.succeeded()) << error.message;
+  ASSERT_EQ(likely.value().manifest.sites.size(), 2u);
+  EXPECT_EQ(likely.value().manifest.sites.back().assumption, FlatAssumption::SelectedSharedHigh);
+  const auto strict = prepare(selected, target, "lds_producer_consumer", error, FlatPolicy::Strict);
+  ASSERT_TRUE(strict.succeeded()) << error.message;
+  ASSERT_EQ(strict.value().manifest.sites.size(), 1u);
+  ASSERT_EQ(strict.value().manifest.flat_exclusions.size(), 1u);
+  EXPECT_EQ(strict.value().manifest.flat_exclusions.front().reason, FlatExclusionReason::Strict);
+}
+
 TEST(ConSanInput, IdenticalFlatOpcodesKeepTheirSharedAndNonGroupMappings) {
   const std::filesystem::path fixture =
       test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap");

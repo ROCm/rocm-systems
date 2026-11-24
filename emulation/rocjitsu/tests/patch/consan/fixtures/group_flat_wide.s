@@ -48,8 +48,16 @@ CONSAN_KERNEL:
 .endm
 
 .macro address_pair
+#ifdef FLAT_SCALAR_WIDTH
+#ifdef FLAT_VALUES
+  VECTOR_ADD v4, -2, v12
+#else
+  v_mov_b32 v4, -2
+#endif
+#else
   v_mov_b32 v4, v15
   v_mov_b32 v5, s5
+#endif
 .endm
 
 .macro save_word reg
@@ -73,6 +81,9 @@ CONSAN_KERNEL:
   v_and_b32 v13, (CONSAN_WAVE_SIZE-1), v0
   VECTOR_ADD v14, s4, v12
   s_mov_b64 s[4:5], src_shared_base
+#ifdef FLAT_SCALAR_WIDTH
+  s_mov_b32 s4, 1024
+#endif
 #ifdef FLAT_VALUES
   v_lshlrev_b32 v15, SHIFT, v12
   VECTOR_ADD v15, (1024-2*WIDTH), v15
@@ -96,7 +107,11 @@ CONSAN_KERNEL:
 #endif
   address_pair
   // Preserve both pointer halves even when overwritten by the result tuple.
+#ifdef FLAT_SCALAR_WIDTH
+  FLAT_READ REGS, v4, s[4:5] scale_offset
+#else
   FLAT_READ REGS, v[4:5]
+#endif
   flat_wait
 #ifdef FLAT_VALUES
   save_tuple
@@ -106,7 +121,11 @@ CONSAN_KERNEL:
   v_mov_b32 v9, 0x2468ace0
   v_mov_b32 v10, 0x10203040
   v_mov_b32 v11, v14
+#ifdef FLAT_SCALAR_WIDTH
+  FLAT_WRITE v4, DATA, s[4:5] scale_offset
+#else
   FLAT_WRITE v[4:5], DATA
+#endif
   flat_wait
   consan_wait_stores
 #ifdef FLAT_VALUES

@@ -140,6 +140,11 @@ void add_program_points(Instrumentor &instrumentor, const InputProgram &program,
     args.push_back(probe_arg_imm(program.repeated));
     const char *symbol =
         is_transpose(access.lds_ranges.shape) ? "rj_consan_transpose" : "rj_consan_access";
+    if (access.scalar_base) {
+      symbol = "rj_consan_flat_scalar";
+      args.push_back(probe_arg_sgpr(*access.scalar_base));
+      args.push_back(probe_arg_imm(access.scaled_vector_offset ? access.width : 1u));
+    }
     add(access.original_offset, InstrumentationKind::BeforeInst, symbol, std::move(args));
   }
   // Advance phase only after the unchanged guest wait completes. Recording at

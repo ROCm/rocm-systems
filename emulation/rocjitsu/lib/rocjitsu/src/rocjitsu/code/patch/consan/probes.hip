@@ -70,10 +70,11 @@ rj_consan_entry(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgroup
   }
 }
 
-template <bool Transpose>
+template <bool Transpose, bool ScalarBase = false>
 static __device__ __attribute__((always_inline)) void
 record_access(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgroup, u32 site,
-              u32 address, u32 immediate, u32 mask_low, u32 mask_high, u32 width, u32 repeated) {
+              u32 address, u32 immediate, u32 mask_low, u32 mask_high, u32 width, u32 repeated,
+              u32 scalar = 0, u32 scale = 1) {
   GlobalWords dispatch = context(low, high);
   GlobalWords output =
       row(dispatch, uniform(first_workitem) / CONSAN_PROBE_WAVE_SIZE, stride, workgroup);
@@ -114,7 +115,10 @@ record_access(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgroup, 
     } else if (lane_id() == 0) {
       // VFLAT sign-extends its immediate. Native DS offsets are nonnegative.
       // Widen before adding so bounds checking detects either end wrapping.
-      const u64 offset = u64{selected} + static_cast<long long>(static_cast<int>(uniform(immediate)));
+      long long relative = selected;
+      if constexpr (ScalarBase)
+        relative = static_cast<long long>(static_cast<int>(selected)) * uniform(scale) + uniform(scalar);
+      const u64 offset = relative + static_cast<int>(uniform(immediate));
       record[wire::kRecordAnalysis / 4] = u32(rocjitsu::consan::AnalysisKind::LdsRaceDetection);
       record[wire::kRecordKind / 4] = u32(rocjitsu::consan::RecordKind::Access);
       record[wire::kRecordSite / 4] = uniform(site);
@@ -149,6 +153,17 @@ rj_consan_access(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgrou
   record_access<false>(low, high, first_workitem, stride, workgroup, site, address, immediate,
                        mask_low, mask_high, width, repeated);
 }
+
+#if defined(__gfx1250__)
+extern "C" __device__ __attribute__((noinline, used, visibility("default"))) void
+rj_consan_flat_scalar(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgroup, u32 site,
+                      u32 address, u32 immediate, u32 mask_low, u32 mask_high, u32 width,
+                      u32 repeated, u32 scalar, u32 scale) {
+  record_access<false, true>(low, high, first_workitem, stride, workgroup, site, address, immediate,
+                             mask_low, mask_high, width, repeated, scalar, scale);
+}
+__device__ auto rj_consan_flat_scalar_keepalive = &rj_consan_flat_scalar;
+#endif
 
 extern "C" __device__ __attribute__((noinline, used, visibility("default"))) void
 rj_consan_transpose(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgroup, u32 site,

@@ -1266,9 +1266,13 @@ TEST_P(ConSanGroupFlatSim, GroupFlatUsesTheOriginalPointerAndGuestBarrier) {
   const uint64_t high = uint64_t{1} << (target.wave_size - 1);
   const bool cdna =
       std::string_view(target.target) == "gfx942" || std::string_view(target.target) == "gfx950";
-  for (std::string_view form :
-       {"load-overlap", "load-adjacent", "load-ordered", "load-empty", "load-oob", "load-offset",
-        "load-readread", "store-overlap", "store-adjacent", "store-ordered", "store-tail"}) {
+  std::vector<std::string_view> forms{"load-overlap",  "load-adjacent", "load-ordered",
+                                      "load-empty",    "load-oob",      "load-offset",
+                                      "load-readread", "store-overlap", "store-adjacent",
+                                      "store-ordered", "store-tail"};
+  if (std::string_view(target.target) == "gfx1250")
+    forms.insert(forms.end(), {"load-scalar", "store-scalar", "load-backward", "store-backward"});
+  for (const std::string_view form : forms) {
     const bool store = form.starts_with("store-");
     const std::string_view scenario = form.substr(form.find('-') + 1);
     const std::string_view mnemonic = store ? (cdna ? "flat_store_dword" : "flat_store_b32")
@@ -1322,8 +1326,11 @@ TEST_P(ConSanGroupFlatSim, GroupFlatUsesTheOriginalPointerAndGuestBarrier) {
     EXPECT_EQ(analysis.coverage_complete, !oob);
     EXPECT_EQ(analysis.rejected_records, oob ? 1u : 0u);
     EXPECT_EQ(analysis.valid_observations, records.size() - (oob ? 1u : 0u));
-    EXPECT_EQ(analysis.cross_wave_pairs,
-              scenario == "overlap" || scenario == "offset" || scenario == "tail" ? 1u : 0u);
+    EXPECT_EQ(analysis.cross_wave_pairs, scenario == "overlap" || scenario == "offset" ||
+                                                 scenario == "tail" || scenario == "scalar" ||
+                                                 scenario == "backward"
+                                             ? 1u
+                                             : 0u);
     EXPECT_EQ(analysis.ordered_pairs, ordered ? 1u : 0u);
     EXPECT_EQ(analysis.ordering_unresolved_pairs, 0u);
 #endif

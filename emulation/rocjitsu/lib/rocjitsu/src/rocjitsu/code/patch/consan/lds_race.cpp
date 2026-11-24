@@ -337,7 +337,7 @@ qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputE
 Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::IsaFamily arch,
                                      uint32_t allocated_vgprs,
                                      std::vector<NativeLdsAccess> &accesses, InputError &error,
-                                     const FlatSitePolicy *flat_policy) {
+                                     const FlatSitePolicy *flat_policy, uint32_t allocated_sgprs) {
   const std::string_view name = instruction.mnemonic();
   const amdgpu::Operation operation = instruction.amdgpu_operation();
   const amdgpu::MemoryAddressing addressing = instruction.amdgpu_memory_addressing();
@@ -353,12 +353,26 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
     const bool read = instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Load;
     const uint32_t *words = instruction.raw_encoding();
     int32_t immediate;
+    std::optional<uint16_t> scalar_base;
+    bool scaled_vector_offset = false;
     if (wide) {
-      // VFLAT uses a VGPR pair when SADDR is null. Exclude routing, scale,
-      // cache/scope and reserved bits. The unused load/store value must be zero.
+      // SADDR changes VADDR into a signed single-dword displacement on CDNA5.
+      // The null selector keeps the VGPR-pair form on both architectures.
       const uint32_t value_mask = read ? 0xffu : (0xffu << 23);
-      if (instruction.size() != 12 || (words[0] & 0x00c03fffu) != 0x7c ||
-          (words[1] & ~value_mask) != 0)
+      const uint16_t saddr = words[0] & 0x7fu;
+      if (saddr != 0x7c && arch == IsaFamily::Cdna5) {
+        const auto base =
+            instruction.src_operand(instruction.num_src_operands() - 1)->to_register_ref();
+        if (!base || base->cls != RegClass::SGPR || base->width != 2 || base->index != saddr ||
+            (saddr & 1u) || saddr + 2u > allocated_sgprs)
+          return reject_instruction(error, InputErrorCode::UnsupportedAccess,
+                                    "FLAT scalar base exceeds ordinary SGPR allocation", offset);
+        scalar_base = saddr;
+        scaled_vector_offset = (words[1] & (1u << 16)) != 0;
+      }
+      const uint32_t operand_mask = value_mask | (scalar_base ? 1u << 16 : 0u);
+      if (instruction.size() != 12 || (words[0] & 0x00c03f80u) || (saddr != 0x7c && !scalar_base) ||
+          (words[1] & ~operand_mask) != 0)
         return reject_instruction(error, InputErrorCode::UnsupportedAccess,
                                   "unsupported Group-FLAT encoding", offset);
       immediate = static_cast<int32_t>(words[2]) >> 8;
@@ -372,14 +386,16 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
                                   "unsupported Group-FLAT encoding", offset);
       immediate = words[0] & 0xfff;
     }
-    const auto address = allocated_vgpr_tuple(instruction.src_operand(0), 2, allocated_vgprs);
+    const auto address =
+        allocated_vgpr_tuple(instruction.src_operand(0), scalar_base ? 1 : 2, allocated_vgprs);
     const auto value =
         allocated_vgpr_tuple(read ? instruction.dst_operand(0) : instruction.src_operand(1),
                              (flat_width + 3) / 4, allocated_vgprs);
     if (!address || !value)
       return reject_instruction(error, InputErrorCode::UnsupportedAccess,
                                 "FLAT operands exceed allocation", offset);
-    const RegisterRef high{RegClass::VGPR, static_cast<uint16_t>(address->index + 1), 1};
+    const RegisterRef high{scalar_base ? RegClass::SGPR : RegClass::VGPR,
+                           static_cast<uint16_t>(scalar_base.value_or(address->index) + 1), 1};
     if (!flat_policy)
       return reject_instruction(error, InputErrorCode::UnsupportedAccess,
                                 "FLAT access requires aperture classification", offset);
@@ -399,12 +415,13 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
       }
     }
     // The shared aperture is 4-GiB aligned. Under the saved classification,
-    // BeforeInst captures its relative byte offset in the low VGPR. The
-    // ordinary probe widens before adding the immediate and flags overflow.
+    // its low word and the anchor operands determine the offset for each lane.
     accesses.push_back({.site = static_cast<uint32_t>(accesses.size()),
                         .original_offset = offset,
                         .kind = read ? AccessKind::Read : AccessKind::Write,
                         .address_vgpr = address->index,
+                        .scalar_base = scalar_base,
+                        .scaled_vector_offset = scaled_vector_offset,
                         .immediate_bytes = immediate,
                         .guest_size = static_cast<uint32_t>(instruction.size()),
                         .width = flat_width,
