@@ -6387,18 +6387,18 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
   sigemptyset(&action.sa_mask);
   ASSERT_EQ(sigaction(SIGUSR1, &action, &old_action), 0);
   std::atomic<pid_t> tid{0};
-  bool unwound = false, returned = false;
+  bool cleaned_up = false, returned = false;
   std::thread waiter([&] {
-    struct Cleanup {
-      bool &unwound;
-      ~Cleanup() { unwound = true; }
-    } cleanup{unwound};
+    // Observe native cleanup even when C++ exception unwinding is disabled.
+    pthread_cleanup_push(
+        +[](void *argument) { *static_cast<bool *>(argument) = true; }, &cleaned_up);
     tid.store(syscall(SYS_gettid), std::memory_order_release);
     (void)call(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
     returned = true;
+    pthread_cleanup_pop(0);
   });
   // Wait for the actual futex sleep so a signal during setup cannot make this
-  // pass without exercising forced unwinding through the interposer.
+  // pass without exercising native thread exit through the interposer.
   bool blocked = false;
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
   while (std::chrono::steady_clock::now() < deadline) {
@@ -6419,13 +6419,13 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
   }
   waiter.join();
   EXPECT_TRUE(blocked);
-  EXPECT_TRUE(unwound);
+  EXPECT_TRUE(cleaned_up);
   EXPECT_FALSE(returned);
   EXPECT_EQ(sigaction(SIGUSR1, &old_action, nullptr), 0);
   drm_syncobj_destroy destroy{};
   destroy.handle = create.handle;
   EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
-  // Closing the file also checks that unwinding released its ioctl reservation.
+  // Closing the file also exercises release of the ioctl reservation.
   EXPECT_EQ(close(drm), 0);
   EXPECT_EQ(close(kfd), 0);
 }

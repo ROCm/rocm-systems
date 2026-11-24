@@ -102,27 +102,29 @@ std::optional<std::string> read_active_config_json() {
 bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
                                uint32_t lds_size_kb, std::string_view external_host_config = {},
                                bool include_resolved_gpu_id = true) {
-  try {
-    const std::filesystem::path runtime = config_handoff_dir();
-    std::filesystem::create_directories(runtime);
-    const std::filesystem::path config_path = runtime / "inline_dbt_failure_config.json";
+  const std::filesystem::path runtime = config_handoff_dir();
+  std::error_code error;
+  std::filesystem::create_directories(runtime, error);
+  if (error)
+    return false;
+  const std::filesystem::path config_path = runtime / "inline_dbt_failure_config.json";
 
-    const size_t insert_pos = simulator_json.find('{');
-    if (insert_pos == std::string::npos)
-      return false;
-    std::ostringstream dbt_guest;
-    dbt_guest << R"(
+  const size_t insert_pos = simulator_json.find('{');
+  if (insert_pos == std::string::npos)
+    return false;
+  std::ostringstream dbt_guest;
+  dbt_guest << R"(
   "dbt_guest": {
     "enabled": true,
     "guest_isa": "gfx950",
     "host_isa": ")"
-              << host_isa << R"(",
+            << host_isa << R"(",
     "execution_backend": "simulator",)";
-    if (!external_host_config.empty())
-      dbt_guest << R"(
-    "simulator_config": ")"
-                << external_host_config << R"(",)";
+  if (!external_host_config.empty())
     dbt_guest << R"(
+    "simulator_config": ")"
+              << external_host_config << R"(",)";
+  dbt_guest << R"(
     "guest_device": {
       "gpu_id": 38144,
       "gfx_target_version": 90500,
@@ -135,29 +137,26 @@ bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
       "max_slots_scratch_cu": 32,
       "num_sdma_queues_per_engine": 2,
       "lds_size_kb": )"
-              << lds_size_kb << R"(
+            << lds_size_kb << R"(
     }
   },)";
-    simulator_json.insert(insert_pos + 1, dbt_guest.str());
+  simulator_json.insert(insert_pos + 1, dbt_guest.str());
 
-    std::ofstream config(config_path);
-    if (!config)
-      return false;
-    config << simulator_json;
-    config.close();
-    if (!config)
-      return false;
-
-    std::ofstream active_config(runtime / "config_path");
-    if (!active_config)
-      return false;
-    active_config << config_path.string() << '\n';
-    if (include_resolved_gpu_id)
-      active_config << "50148\n";
-    return active_config.good();
-  } catch (const std::filesystem::filesystem_error &) {
+  std::ofstream config(config_path);
+  if (!config)
     return false;
-  }
+  config << simulator_json;
+  config.close();
+  if (!config)
+    return false;
+
+  std::ofstream active_config(runtime / "config_path");
+  if (!active_config)
+    return false;
+  active_config << config_path.string() << '\n';
+  if (include_resolved_gpu_id)
+    active_config << "50148\n";
+  return active_config.good();
 }
 
 using rocjitsu::test::LongPathHandoff;
