@@ -630,13 +630,8 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ZeroPolicyForceOff_NoCe_Isolate
     EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options));
 }
 
-// Min-bound env-override via rcclSelectAllReduce: RCCL_CE_AR_2SHOT_MIN_BYTES=1024.
-// rcclUseCeAr2Shot (tested above) checks basic eligibility but not the
-// message-size window; the min-bound is enforced in rcclSelectAllReduce via
-// rcclWindowFits(msgBytes, arTwoShotMin, arTwoShotMax).
-//
-// 252 * sizeof(float) = 1008 bytes < 1024 → rejected (no CE algo selected).
-// 256 * sizeof(float) = 1024 bytes == min  → accepted (CE algo selected).
+// RCCL_CE_AR_2SHOT_MIN_BYTES=1024: 252 floats (1008 B) declines CE, 256 floats (1024 B) selects it.
+// ncclProd skips ncclSymkInitOnce, and query=false keeps the ring fallback off getAlgoInfo on this mock.
 TEST(RcclCeAllReduceEligibility, SelectAllReduce_MinBound_Isolated)
 {
     if (!isCeRuntimeDriverSupported()) GTEST_SKIP() << "CE is unsupported by this runtime";
@@ -647,8 +642,8 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_MinBound_Isolated)
         bool         expectCe;
     };
     const MinBoundCase cases[] = {
-        {"MinBoundRejects",  252, false},
-        {"AtMinBoundPasses", 256, true},
+        {"MinBoundRejects_Isolated",  252, false},
+        {"AtMinBoundPasses_Isolated", 256, true},
     };
     for (const auto& tc : cases)
     {
@@ -671,8 +666,8 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_MinBound_Isolated)
                         mock.get(),
                         reinterpret_cast<void*>(0x1000),
                         reinterpret_cast<void*>(0x2000),
-                        tc.count, ncclFloat32, ncclSum,
-                        /*stream=*/nullptr, /*query=*/true,
+                        tc.count, ncclFloat32, ncclProd,
+                        /*stream=*/nullptr, /*query=*/false,
                         /*graphCapturingHint=*/false, &decision);
                     EXPECT_EQ(res, ncclSuccess);
                     if (tc.expectCe) {
