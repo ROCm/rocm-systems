@@ -543,8 +543,10 @@ public:
                      .page_table_generation = process_.page_table_generation(),
                      .request_mutex = {},
                      .access_admission = std::move(admission)});
-    if (!address_space_)
-      throw std::runtime_error("cannot register the translated SDMA test address space");
+    if (!address_space_) {
+      ADD_FAILURE() << "cannot register the translated SDMA test address space";
+      std::abort();
+    }
     process_.map_pages(kRingVa, ring_.data(), ring_.size() * sizeof(ring_[0]));
     process_.map_pages(kQueueStateVa, queue_state_.data(),
                        queue_state_.size() * sizeof(queue_state_[0]));

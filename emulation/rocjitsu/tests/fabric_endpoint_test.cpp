@@ -26,12 +26,12 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <fcntl.h>
 #include <future>
 #include <memory>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <sys/mman.h>
@@ -120,18 +120,20 @@ config::LoadedConfig load_assembly_config(std::string json, std::string_view nod
   auto loaded = config::load_config_from_string_for_node(json, kEmbeddedSchema, node_id,
                                                          diagnostic.emitter());
   if (loaded.failed()) {
-    throw std::runtime_error(diagnostic.message());
+    ADD_FAILURE() << diagnostic.message();
+    std::abort();
   }
   return std::move(loaded.value());
 }
 
-VirtualMachine *assemble_topology_or_throw(config::LoadedConfig &loaded,
-                                           simdojo::Topology &topology, bool daemon_mode) {
+VirtualMachine *assemble_test_topology(config::LoadedConfig &loaded, simdojo::Topology &topology,
+                                       bool daemon_mode) {
   util::StringDiagnostic diagnostic;
   auto assembled =
       assemble_virtual_machine_topology(loaded, topology, daemon_mode, diagnostic.emitter());
   if (assembled.failed()) {
-    throw std::runtime_error(diagnostic.message());
+    ADD_FAILURE() << diagnostic.message();
+    std::abort();
   }
   return assembled.value();
 }
@@ -1899,8 +1901,8 @@ protected:
   void SetUp() override {
     auto loaded = load_assembly_config(assembly_coherence_config());
     ASSERT_EQ(loaded.num_gpus, 2u);
-    machine_ = assemble_topology_or_throw(loaded, engine_.topology(),
-                                          /*daemon_mode=*/false);
+    machine_ = assemble_test_topology(loaded, engine_.topology(),
+                                      /*daemon_mode=*/false);
     ASSERT_NE(machine_, nullptr);
     ASSERT_EQ(machine_->num_socs(), 2u);
     endpoint_ = machine_->fabric_endpoint();
@@ -2013,7 +2015,7 @@ TEST(FabricEndpointAssemblyTest, RetainsExplicitLocalRouteAfterLoadedConfigIsRel
     auto loaded = load_assembly_config(assembly_config(kLocalSwitchManifest));
     ASSERT_EQ(loaded.num_gpus, 2u);
     ASSERT_EQ(loaded.extra_gpu_builds.size(), 1u);
-    machine = assemble_topology_or_throw(loaded, topology, /*daemon_mode=*/false);
+    machine = assemble_test_topology(loaded, topology, /*daemon_mode=*/false);
     ASSERT_NE(machine, nullptr);
     loaded.system_graph = {}; // the VM must retain an independent projection
   }
@@ -2041,7 +2043,7 @@ TEST(FabricEndpointAssemblyTest, RouteFreeLegacyOwnerResolvesLateGpuIdentityForS
   auto loaded = load_assembly_config(assembly_config());
   simdojo::SimulationEngine engine{{.num_threads = 1}};
   VirtualMachine *machine =
-      assemble_topology_or_throw(loaded, engine.topology(), /*daemon_mode=*/false);
+      assemble_test_topology(loaded, engine.topology(), /*daemon_mode=*/false);
   ASSERT_NE(machine, nullptr);
   FabricEndpoint *endpoint = machine->fabric_endpoint();
   ASSERT_NE(endpoint, nullptr);
@@ -2071,7 +2073,8 @@ TEST(FabricEndpointAssemblyTest, RouteFreeLegacyOwnerResolvesLateGpuIdentityForS
         [&resolved_dirty_line](uint32_t, uint32_t, uint64_t,
                                size_t) -> amdgpu::PreparedCanonicalWriteback {
       resolved_dirty_line = true;
-      throw std::runtime_error("unexpected dirty line in route-free endpoint test");
+      ADD_FAILURE() << "unexpected dirty line in route-free endpoint test";
+      std::abort();
     };
     return authority;
   };
@@ -2098,7 +2101,7 @@ TEST(FabricEndpointAssemblyTest, RetryablePreparedMaintenanceReleasesPermitAndCo
   auto loaded = load_assembly_config(assembly_config());
   simdojo::SimulationEngine engine{{.num_threads = 1}};
   VirtualMachine *machine =
-      assemble_topology_or_throw(loaded, engine.topology(), /*daemon_mode=*/false);
+      assemble_test_topology(loaded, engine.topology(), /*daemon_mode=*/false);
   ASSERT_NE(machine, nullptr);
   FabricEndpoint *endpoint = machine->fabric_endpoint();
   ASSERT_NE(endpoint, nullptr);
@@ -2147,7 +2150,8 @@ TEST(FabricEndpointAssemblyTest, RetryablePreparedMaintenanceReleasesPermitAndCo
                                        .backing_offset = kAddress});
     authority.resolve_writeback = [](uint32_t, uint32_t, uint64_t,
                                      size_t) -> amdgpu::PreparedCanonicalWriteback {
-      throw std::runtime_error("selected line unexpectedly dirty");
+      ADD_FAILURE() << "selected line unexpectedly dirty";
+      std::abort();
     };
     authority.resolve_witness = [&](uint32_t, uint32_t, uint64_t, size_t, uint64_t,
                                     uint64_t) -> std::optional<amdgpu::CanonicalLineWitness> {
@@ -2187,8 +2191,8 @@ TEST(FabricEndpointAssemblyTest, LegacyAndRemoteSharedSwitchInstallRouteFreeOwne
   VirtualMachine *legacy_machine = nullptr;
   {
     auto loaded = load_assembly_config(assembly_config());
-    legacy_machine = assemble_topology_or_throw(loaded, legacy_topology,
-                                                /*daemon_mode=*/false);
+    legacy_machine = assemble_test_topology(loaded, legacy_topology,
+                                            /*daemon_mode=*/false);
   }
   ASSERT_NE(legacy_machine, nullptr);
   EXPECT_TRUE(legacy_machine->peer_routes().routes().empty());
@@ -2202,8 +2206,8 @@ TEST(FabricEndpointAssemblyTest, LegacyAndRemoteSharedSwitchInstallRouteFreeOwne
   {
     auto loaded = load_assembly_config(assembly_config(kRemoteSharedSwitchManifest), "local");
     ASSERT_EQ(loaded.num_gpus, 2u);
-    remote_machine = assemble_topology_or_throw(loaded, remote_topology,
-                                                /*daemon_mode=*/false);
+    remote_machine = assemble_test_topology(loaded, remote_topology,
+                                            /*daemon_mode=*/false);
     loaded.system_graph = {};
   }
   ASSERT_NE(remote_machine, nullptr);

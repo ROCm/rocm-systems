@@ -616,35 +616,23 @@ void FabricEndpoint::send_next(const Route &route, WireMessage &message) {
 }
 
 bool FabricEndpoint::retry_request(const std::shared_ptr<Request> &request) noexcept {
-  try {
-    std::lock_guard lock(state_->mutex);
-    if (!state_->accepting || state_->owner != this || state_->generation != request->generation ||
-        !state_->pending.contains(request->id) ||
-        request->cancelled.load(std::memory_order_acquire)) {
-      return false;
-    }
-    state_->inbox.push_back(request);
-    Request::EffectPhase expected = Request::EffectPhase::Entered;
-    if (!request->phase.compare_exchange_strong(expected, Request::EffectPhase::Queued,
-                                                std::memory_order_acq_rel)) {
-      state_->inbox.pop_back();
-      return false;
-    }
-    // Waking on the next tick lets a fill blocked behind maintenance finish
-    // after its lease is released. Peer requests traverse their route again.
-    try {
-      engine()->schedule_event_next_tick(&inbox_event_);
-    } catch (...) {
-      state_->inbox.pop_back();
-      expected = Request::EffectPhase::Queued;
-      request->phase.compare_exchange_strong(expected, Request::EffectPhase::Revoked,
-                                             std::memory_order_acq_rel);
-      return false;
-    }
-    return true;
-  } catch (...) {
+  std::lock_guard lock(state_->mutex);
+  if (!state_->accepting || state_->owner != this || state_->generation != request->generation ||
+      !state_->pending.contains(request->id) ||
+      request->cancelled.load(std::memory_order_acquire)) {
     return false;
   }
+  state_->inbox.push_back(request);
+  Request::EffectPhase expected = Request::EffectPhase::Entered;
+  if (!request->phase.compare_exchange_strong(expected, Request::EffectPhase::Queued,
+                                              std::memory_order_acq_rel)) {
+    state_->inbox.pop_back();
+    return false;
+  }
+  // Waking on the next tick lets a fill blocked behind maintenance finish
+  // after its lease is released. Peer requests traverse their route again.
+  engine()->schedule_event_next_tick(&inbox_event_);
+  return true;
 }
 
 void FabricEndpoint::receive(Node &node, WireMessage &message) {
@@ -757,12 +745,9 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
     return;
   }
   amdgpu::MemoryIngressAdmission pre_effect;
-  try {
-    if (request->admit_pre_effect) {
-      pre_effect = request->admit_pre_effect();
-    }
-  } catch (...) {
-    pre_effect.outcome = VmAccessOutcome::Faulted;
+
+  if (request->admit_pre_effect) {
+    pre_effect = request->admit_pre_effect();
   }
 
   bool admitted = false;
@@ -777,16 +762,9 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
         // A retry can reach the target before its prior handler has unwound.
         // Leave its phase Queued and revisit the owner inbox next tick.
         if (request->phase.load(std::memory_order_acquire) == Request::EffectPhase::Queued) {
-          try {
-            state_->inbox.push_back(request);
-            try {
-              engine()->schedule_event_next_tick(&inbox_event_);
-              deferred = true;
-            } catch (...) {
-              state_->inbox.pop_back();
-            }
-          } catch (...) {
-          }
+          state_->inbox.push_back(request);
+          engine()->schedule_event_next_tick(&inbox_event_);
+          deferred = true;
         } else {
           // A duplicate target packet must not retire an active effect.
           return;
@@ -843,13 +821,9 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
   if (pre_effect.outcome != VmAccessOutcome::Complete) {
     effect_authority.outcome = pre_effect.outcome;
   } else {
-    try {
-      if (request->admit_effect) {
-        effect_authority =
-            request->admit_effect(request->backing, request->write, request->request_reservation);
-      }
-    } catch (...) {
-      effect_authority.outcome = VmAccessOutcome::Faulted;
+    if (request->admit_effect) {
+      effect_authority =
+          request->admit_effect(request->backing, request->write, request->request_reservation);
     }
   }
   const bool authority_ready =
@@ -888,29 +862,32 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
   };
   bool maintenance_ready = authority_ready;
   if (maintenance_ready) {
-    try {
-      // The legacy single-GPU driver learns its GPU ID after assembly. Its
-      // admitted backing supplies the identity for the sole cache domain.
-      amdgpu::DeviceCacheDomain owner_domain;
-      std::span<const amdgpu::DeviceCacheDomain> effect_domains = prepared_domains_;
-      if (prepared_domains_.size() == 1 && prepared_domains_[0].gpu_id == 0) {
-        owner_domain = {prepared_domains_[0].coherence, request->backing.owner_gpu_id()};
-        effect_domains = {&owner_domain, 1};
-      }
+    // The legacy single-GPU driver learns its GPU ID after assembly. Its
+    // admitted backing supplies the identity for the sole cache domain.
+    amdgpu::DeviceCacheDomain owner_domain;
+    std::span<const amdgpu::DeviceCacheDomain> effect_domains = prepared_domains_;
+    if (prepared_domains_.size() == 1 && prepared_domains_[0].gpu_id == 0) {
+      owner_domain = {prepared_domains_[0].coherence, request->backing.owner_gpu_id()};
+      effect_domains = {&owner_domain, 1};
+    }
+    const auto acquire = [&]() -> util::FailureOr<amdgpu::CacheMaintenanceGroupResult> {
       if (!effect_authority.cache_aliases.empty()) {
-        maintenance = amdgpu::DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
+        return amdgpu::DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
             effect_domains, effect_authority.cache_aliases, effect_authority.resolve_writeback,
             effect_authority.resolve_witness);
       } else if (resolve_cache_writeback_) {
-        maintenance = amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
+        return amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
             effect_domains, amdgpu::DeviceCacheOperation::WritebackInvalidate,
             resolve_cache_writeback_);
       } else {
-        maintenance = amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
+        return amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
             coherence_domains_, amdgpu::DeviceCacheOperation::WritebackInvalidate);
       }
-    } catch (const amdgpu::CacheMaintenanceUnavailable &) {
-      release_maintenance();
+    };
+    auto acquired = acquire();
+    if (acquired.failed()) {
+      maintenance_ready = false;
+    } else if (acquired.value().outcome == amdgpu::CacheMaintenanceOutcome::Retry) {
       effect_authority.permit.reset();
       if (retry_request(request)) {
         return;
@@ -920,11 +897,8 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
                                              std::memory_order_acq_rel);
       finish(request->id, VmAccessOutcome::Revoked);
       return;
-    } catch (...) {
-      // A missing maintenance backing or failed dirty writeback is terminal for
-      // this request. The VM gate has not entered and no fabric backing effect ran.
-      release_maintenance();
-      maintenance_ready = false;
+    } else {
+      maintenance = std::move(acquired.value().leases);
     }
   }
 
@@ -953,80 +927,65 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
     if (!coherence_domains_.empty()) {
       writer.invalidate_all();
     }
-    bool gate_entered = false;
-    try {
-      gate_entered = request->effect_gate->commit([&] {
-        if (request->phase.load(std::memory_order_acquire) != Request::EffectPhase::Entered) {
-          return;
+    const bool gate_entered = request->effect_gate->commit([&] {
+      if (request->phase.load(std::memory_order_acquire) != Request::EffectPhase::Entered) {
+        return;
+      }
+      if (effect_probe_for_testing_) {
+        effect_probe_for_testing_();
+      }
+      Request::EffectPhase expected = Request::EffectPhase::Entered;
+      if (!request->phase.compare_exchange_strong(expected, Request::EffectPhase::Committing,
+                                                  std::memory_order_acq_rel)) {
+        return;
+      }
+      const bool complete = request->write ? request->backing.write(request->payload)
+                                           : request->backing.read(request->effect_response);
+      if (complete) {
+        if (request->write) {
+          writer.advance(request->backing.backing_id(), request->backing.offset(),
+                         request->backing.extent());
+        } else {
+          request->read_stamp = line_freshness_.capture_read_under_writer(
+              writer, request->backing.backing_id(), request->backing.offset(),
+              request->backing.extent());
         }
-        if (effect_probe_for_testing_) {
-          effect_probe_for_testing_();
-        }
-        Request::EffectPhase expected = Request::EffectPhase::Entered;
-        if (!request->phase.compare_exchange_strong(expected, Request::EffectPhase::Committing,
-                                                    std::memory_order_acq_rel)) {
-          return;
-        }
-        const bool complete = request->write ? request->backing.write(request->payload)
-                                             : request->backing.read(request->effect_response);
-        if (complete) {
-          if (request->write) {
-            writer.advance(request->backing.backing_id(), request->backing.offset(),
-                           request->backing.extent());
-          } else {
-            request->read_stamp = line_freshness_.capture_read_under_writer(
-                writer, request->backing.backing_id(), request->backing.offset(),
-                request->backing.extent());
-          }
-        }
-        writer = {};
-        // Releasing inside the gate publishes all SoC epochs before the
-        // committed outcome becomes visible to polling or reconciliation.
-        release_maintenance();
-        request->effect_outcome = complete ? VmAccessOutcome::Complete : VmAccessOutcome::Faulted;
-        if (complete) {
-          std::lock_guard state_lock(state_->mutex);
-          ++state_->diagnostics.effects;
-          if (!request->local) {
-            const std::size_t direction = request->step < 0 ? 1 : 0;
-            auto &directed =
-                state_->diagnostics.directed_effects[request->route_index * 2 + direction];
-            ++(request->write ? directed.writes : directed.reads);
-            (request->write ? directed.write_bytes : directed.read_bytes) +=
-                request->backing.extent();
-            if (state_->effect_trace_capacity != 0) {
-              auto &trace = state_->diagnostics.committed_effects;
-              if (trace.size() < state_->effect_trace_capacity) {
-                trace.push_back({.request_id = request->id,
-                                 .backing_id = request->backing.backing_id(),
-                                 .backing_offset = request->backing.offset(),
-                                 .bytes = request->backing.extent(),
-                                 .requester_gpu_id = directed.requester_gpu_id,
-                                 .owner_gpu_id = directed.owner_gpu_id,
-                                 .write = request->write,
-                                 .origin = request->trace_origin});
-              } else {
-                ++state_->diagnostics.effect_trace_dropped;
-              }
+      }
+      writer = {};
+      // Releasing inside the gate publishes all SoC epochs before the
+      // committed outcome becomes visible to polling or reconciliation.
+      release_maintenance();
+      request->effect_outcome = complete ? VmAccessOutcome::Complete : VmAccessOutcome::Faulted;
+      if (complete) {
+        std::lock_guard state_lock(state_->mutex);
+        ++state_->diagnostics.effects;
+        if (!request->local) {
+          const std::size_t direction = request->step < 0 ? 1 : 0;
+          auto &directed =
+              state_->diagnostics.directed_effects[request->route_index * 2 + direction];
+          ++(request->write ? directed.writes : directed.reads);
+          (request->write ? directed.write_bytes : directed.read_bytes) +=
+              request->backing.extent();
+          if (state_->effect_trace_capacity != 0) {
+            auto &trace = state_->diagnostics.committed_effects;
+            if (trace.size() < state_->effect_trace_capacity) {
+              trace.push_back({.request_id = request->id,
+                               .backing_id = request->backing.backing_id(),
+                               .backing_offset = request->backing.offset(),
+                               .bytes = request->backing.extent(),
+                               .requester_gpu_id = directed.requester_gpu_id,
+                               .owner_gpu_id = directed.owner_gpu_id,
+                               .write = request->write,
+                               .origin = request->trace_origin});
+            } else {
+              ++state_->diagnostics.effect_trace_dropped;
             }
           }
         }
-        request->phase.store(Request::EffectPhase::Done, std::memory_order_release);
-      });
-    } catch (...) {
-      release_maintenance();
-      const Request::EffectPhase phase = request->phase.load(std::memory_order_acquire);
-      if (phase == Request::EffectPhase::Entered) {
-        request->effect_outcome = VmAccessOutcome::Faulted;
-        Request::EffectPhase expected = Request::EffectPhase::Entered;
-        request->phase.compare_exchange_strong(expected, Request::EffectPhase::Done,
-                                               std::memory_order_acq_rel);
-      } else if (phase == Request::EffectPhase::Committing) {
-        // Backing already returned and published its result. Retain that result
-        // if later bookkeeping failed, so reconciliation cannot replay it.
-        request->phase.store(Request::EffectPhase::Done, std::memory_order_release);
       }
-    }
+      request->phase.store(Request::EffectPhase::Done, std::memory_order_release);
+    });
+
     release_maintenance();
     if (!gate_entered) {
       // The VM gate closed before entry. No backing effect was possible.

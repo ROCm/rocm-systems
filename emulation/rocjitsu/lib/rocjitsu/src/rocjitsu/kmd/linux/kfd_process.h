@@ -30,6 +30,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <iterator>
 #include <memory>
 #include <memory_resource>
@@ -37,7 +38,6 @@
 #include <optional>
 #include <shared_mutex>
 #include <span>
-#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -270,8 +270,7 @@ public:
     // Scratch backing is created by the driver for an executing GPU request,
     // rather than by an application KFD allocation/MAP sequence.
     bool driver_gpu_mapping = false;
-    // A page-table allocation failure can leave a mapped prefix. A later
-    // scratch request must finish the map before treating this VA as backed.
+    // A rejected scratch map must be retried before treating this VA as backed.
     bool scratch_mapping_incomplete = false;
     uint64_t driver_admission_generation = 0;
     // KFD MAP/UNMAP grants. The process page table is shared by all local
@@ -1487,27 +1486,20 @@ public:
     auto *base = static_cast<uint8_t *>(host_ptr);
     uint64_t mapped_va = gpu_va;
     size_t host_offset = 0;
-    try {
-      while (host_offset < size) {
-        const size_t gpu_page_offset = mapped_va & (kPageSize - 1);
-        const size_t host_backed_bytes =
-            std::min<size_t>(kPageSize - gpu_page_offset, size - host_offset);
-        auto [page, inserted] =
-            page_table_.try_emplace(mapped_va >> kPageShift, base + host_offset, mtype,
-                                    host_backed_bytes, gpu_page_offset, owner, va_owner);
-        if (!inserted) {
-          page->second.mtype = mtype;
-          replace_host_extent(page->second, {base + host_offset, host_backed_bytes, gpu_page_offset,
-                                             owner, va_owner});
-        }
-        mapped_va += host_backed_bytes;
-        host_offset += host_backed_bytes;
+    while (host_offset < size) {
+      const size_t gpu_page_offset = mapped_va & (kPageSize - 1);
+      const size_t host_backed_bytes =
+          std::min<size_t>(kPageSize - gpu_page_offset, size - host_offset);
+      auto [page, inserted] =
+          page_table_.try_emplace(mapped_va >> kPageShift, base + host_offset, mtype,
+                                  host_backed_bytes, gpu_page_offset, owner, va_owner);
+      if (!inserted) {
+        page->second.mtype = mtype;
+        replace_host_extent(page->second, {base + host_offset, host_backed_bytes, gpu_page_offset,
+                                           owner, va_owner});
       }
-    } catch (...) {
-      // An allocation failure can leave a mapped prefix or an updated MTYPE.
-      // Cached translations must still observe the changed page table.
-      publish_page_table_mutation_locked();
-      throw;
+      mapped_va += host_backed_bytes;
+      host_offset += host_backed_bytes;
     }
     // Keep publication in the page-table critical section. Cached readers
     // validate this generation while holding the shared side of the same lock;
@@ -1566,26 +1558,21 @@ public:
     invalidate_page_policies_locked();
     uint64_t mapped_va = gpu_va;
     size_t unmapped_bytes = 0;
-    try {
-      while (unmapped_bytes < size) {
-        const size_t chunk =
-            std::min<size_t>(kPageSize - (mapped_va & (kPageSize - 1)), size - unmapped_bytes);
-        auto page = page_table_.find(mapped_va >> kPageShift);
-        if (page != page_table_.end()) {
-          // Avoid building a temporary extent vector for a page being discarded.
-          if (chunk != kPageSize) {
-            erase_host_extent(page->second, mapped_va & (kPageSize - 1), chunk);
-          }
-          if (chunk == kPageSize || page->second.host_extents.empty()) {
-            page_table_.erase(page);
-          }
+    while (unmapped_bytes < size) {
+      const size_t chunk =
+          std::min<size_t>(kPageSize - (mapped_va & (kPageSize - 1)), size - unmapped_bytes);
+      auto page = page_table_.find(mapped_va >> kPageShift);
+      if (page != page_table_.end()) {
+        // Avoid building a temporary extent vector for a page being discarded.
+        if (chunk != kPageSize) {
+          erase_host_extent(page->second, mapped_va & (kPageSize - 1), chunk);
         }
-        mapped_va += chunk;
-        unmapped_bytes += chunk;
+        if (chunk == kPageSize || page->second.host_extents.empty()) {
+          page_table_.erase(page);
+        }
       }
-    } catch (...) {
-      publish_page_table_mutation_locked();
-      throw;
+      mapped_va += chunk;
+      unmapped_bytes += chunk;
     }
     // See map_pages(): the mutation and generation publication are one
     // page-table critical section by design.
@@ -2212,8 +2199,7 @@ private:
     normalize_host_extents(page);
   }
 
-  // Invalidate copied policies before mutation, including a partial update
-  // that throws before publishing the ordinary translation generation.
+  // Invalidate copied policies before publishing page-table mutations.
   void invalidate_page_policies_locked() {
     page_table_mutation_epoch_->value.fetch_add(1, std::memory_order_release);
     page_table_cache_state_->invalidate_and_wait();
@@ -2231,7 +2217,7 @@ private:
   ///          so the counter itself does not need atomics.
   uint64_t page_table_generation_{1};
   /// @brief Retained atomic token for lockless copied-policy checks.
-  /// @details Invalidate before mutation, including partially throwing updates.
+  /// @details Invalidate before mutation, before updating page ownership.
   /// Cache hits read the epoch while misses copy and release its owner.
   util::IntrusiveSharedPtr<amdgpu::VmMutationEpoch> page_table_mutation_epoch_ =
       util::IntrusiveSharedPtr<amdgpu::VmMutationEpoch>::make(1);
@@ -2246,7 +2232,7 @@ inline void KfdProcess::publish_gpu_grants_locked() {
 
 inline void KfdProcess::publish_gpu_grants_locked(PageTableTransaction &transaction) {
   if (transaction.process_ != this || !transaction.request_lock_.owns_lock()) {
-    throw std::logic_error("GPU grant publication requires a live page-table transaction");
+    std::abort();
   }
   replace_gpu_grants(build_gpu_grant_index_locked(retired_gpu_ranges_));
 }

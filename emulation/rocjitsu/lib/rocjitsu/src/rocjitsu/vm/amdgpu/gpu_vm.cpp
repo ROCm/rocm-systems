@@ -14,26 +14,25 @@
 #include <atomic>
 #include <bit>
 #include <cassert>
+#include <cstdlib>
 #include <deque>
 #include <format>
 #include <limits>
 #include <mutex>
 #include <shared_mutex>
-#include <stdexcept>
 #include <type_traits>
 #include <utility>
 
 namespace rocjitsu::amdgpu {
-
 namespace {
-
 std::atomic<uint64_t> next_vm_access_state_id{1};
 
 uint64_t allocate_vm_access_state_id() {
   uint64_t id = next_vm_access_state_id.load(std::memory_order_relaxed);
   for (;;) {
     if (id == std::numeric_limits<uint64_t>::max()) {
-      throw std::overflow_error("GPU VM cache identity exhausted");
+      util::Logger::warn("GPU VM cache identity exhausted");
+      std::abort();
     }
     if (next_vm_access_state_id.compare_exchange_weak(id, id + 1, std::memory_order_relaxed)) {
       return id;
@@ -155,7 +154,6 @@ public:
 };
 
 namespace {
-
 std::atomic<uint64_t> next_vm_instance_id{1};
 
 thread_local uint32_t vm_access_batch_depth = 0;
@@ -1789,7 +1787,6 @@ Gfx12PageTableTranslator::Gfx12PageTableTranslator(std::shared_ptr<PhysicalMemor
     : memory_(std::move(memory)), page_table_base_(page_table_base), config_(config) {}
 
 namespace {
-
 std::optional<VmTransferToken> prepare_gfx12_read(const AddressSpaceTranslator &translator,
                                                   PhysicalMemoryAccess &memory, uint64_t address,
                                                   std::size_t size, VmAccessKind access,
@@ -2433,8 +2430,7 @@ bool GpuVm::unregister_address_space(AddressSpaceHandle handle) {
   }
   free_slots_.push_back(handle.slot);
   // The binding state just expired. Clear this handle's policy without an
-  // allocation, then compact the immutable index on a best-effort basis. A
-  // failed compaction cannot make the retired guard match a reused VMID.
+  // allocation, then compact the immutable index.
   {
     std::lock_guard policy_lock(controlled_backing_mutex_);
     const auto current = controlled_backings_.load(std::memory_order_acquire);
@@ -2444,17 +2440,15 @@ bool GpuVm::unregister_address_space(AddressSpaceHandle handle) {
           entry.active->store(false, std::memory_order_release);
         }
       }
-      try {
-        auto replacement = std::make_shared<std::vector<ControlledCacheBacking>>();
-        replacement->reserve(current->size());
-        for (const ControlledCacheBacking &entry : *current) {
-          if (entry.active->load(std::memory_order_acquire) && !entry.binding.expired()) {
-            replacement->push_back(entry);
-          }
+
+      auto replacement = std::make_shared<std::vector<ControlledCacheBacking>>();
+      replacement->reserve(current->size());
+      for (const ControlledCacheBacking &entry : *current) {
+        if (entry.active->load(std::memory_order_acquire) && !entry.binding.expired()) {
+          replacement->push_back(entry);
         }
-        controlled_backings_.store(std::move(replacement), std::memory_order_release);
-      } catch (const std::bad_alloc &) {
       }
+      controlled_backings_.store(std::move(replacement), std::memory_order_release);
     }
   }
   return true;
@@ -2482,20 +2476,17 @@ GpuVm::try_acquire_current_namespace(AddressSpaceHandle handle,
   if (!expected || expected.address_space != handle) {
     return {};
   }
-  try {
-    std::shared_lock lock(mutex_, std::try_to_lock);
-    if (!lock.owns_lock()) {
-      return {};
-    }
-    const Binding *binding = find_locked(handle);
-    if (binding == nullptr || binding->translation_epoch != expected.translation_epoch ||
-        binding->access_state == nullptr || !binding->access_state->valid) {
-      return {};
-    }
-    return CurrentNamespaceLease(std::move(lock));
-  } catch (...) {
+
+  std::shared_lock lock(mutex_, std::try_to_lock);
+  if (!lock.owns_lock()) {
     return {};
   }
+  const Binding *binding = find_locked(handle);
+  if (binding == nullptr || binding->translation_epoch != expected.translation_epoch ||
+      binding->access_state == nullptr || !binding->access_state->valid) {
+    return {};
+  }
+  return CurrentNamespaceLease(std::move(lock));
 }
 
 std::optional<GpuVmAccess> GpuVm::snapshot_pinned(AddressSpaceHandle handle) {
