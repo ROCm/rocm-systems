@@ -374,11 +374,14 @@ MemObjMap::LookupResult MemObjMap::findMemObjNoLock(const void* ptr, Device* dev
   if (it != MemObjMap_.begin()) {
     --it;
     amd::Memory* mem = it->second;
-    size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
-                          ? sizeof(mem->getUserData().hsa_handle)
-                          : mem->getSize();
-    if (key >= it->first && key < (it->first + mem_size)) {
-      return {it->second, key - it->first};
+    const size_t mem_offset = key - it->first;
+    // Physical handles are opaque keys.
+    if (mem->getMemFlags() & ROCCLR_MEM_PHYMEM) {
+      if (mem_offset == 0) {
+        return {mem, 0};
+      }
+    } else if (mem_offset < mem->getSize()) {
+      return {mem, mem_offset};
     }
   }
 
@@ -414,10 +417,8 @@ amd::Memory* MemObjMap::FindOverlap(const void* ptr, size_t size) {
   if (it != MemObjMap_.begin()) {
     --it;
     amd::Memory* mem = it->second;
-    size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
-                          ? sizeof(mem->getUserData().hsa_handle)
-                          : mem->getSize();
-    if ((it->first + mem_size) > start) {
+    if ((mem->getMemFlags() & ROCCLR_MEM_PHYMEM) ? it->first >= start
+                                                 : (it->first + mem->getSize()) > start) {
       return mem;
     }
   }
@@ -435,10 +436,8 @@ amd::Memory* MemObjMap::FindAndRemoveMemObj(const void* k) {
   }
   --it;
   amd::Memory* mem = it->second;
-  size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
-                        ? sizeof(mem->getUserData().hsa_handle)
-                        : mem->getSize();
-  if (key < it->first || key >= (it->first + mem_size)) {
+  const size_t mem_offset = key - it->first;
+  if ((mem->getMemFlags() & ROCCLR_MEM_PHYMEM) ? mem_offset != 0 : mem_offset >= mem->getSize()) {
     return nullptr;
   }
 
@@ -1624,12 +1623,10 @@ amd::Memory* Device::FindDevMemObj(const void* k, size_t* offset) const {
 
   --it;
   amd::Memory* mem = it->second;
-  size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
-                        ? sizeof(mem->getUserData().hsa_handle)
-                        : mem->getSize();
-  if (key >= it->first && key < (it->first + mem_size)) {
+  const size_t mem_offset = key - it->first;
+  if ((mem->getMemFlags() & ROCCLR_MEM_PHYMEM) ? mem_offset == 0 : mem_offset < mem->getSize()) {
     if (offset != nullptr) {
-      *offset = key - it->first;
+      *offset = mem_offset;
     }
     return mem;
   }
