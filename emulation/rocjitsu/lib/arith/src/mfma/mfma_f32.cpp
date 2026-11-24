@@ -21,11 +21,12 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
   }
-  // Only the captured gfx942 forms with default source controls are qualified.
+  // Only the captured gfx942 XF32 forms with default source controls are qualified.
   // Compatibility retains the existing fast approximate implementation.
   if constexpr (Gfx942) {
-    if (is_exact(flags) && !controls && !(flags & RJ_ARITH_FP16_OVFL)) {
-      mfma_gfx942_exact(MfmaGfx942Format::Xf32, M, K, Batch, d, a, b, c);
+    if (is_exact(flags) && !controls) {
+      mfma_gfx942_exact(MfmaGfx942Format::Xf32, M, K, Batch, (flags & RJ_ARITH_FP16_OVFL) != 0, d,
+                        a, b, c);
       return RJ_ARITH_SUCCESS;
     }
   }

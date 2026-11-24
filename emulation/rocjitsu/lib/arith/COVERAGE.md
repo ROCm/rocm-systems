@@ -98,15 +98,16 @@ and five gfx1250 half-input WMMA forms plus sixteen FP8/BF8 K64/K128 forms.
 gfx942 FP8/BF8 uses FNUZ; gfx950 and gfx1250 use OCP.
 All have scalar, AVX2 and AVX-512-v4 approximate implementations. Loose and
 Compatibility retain those paths. The twenty dense gfx942 MFMA forms (with
-default CBSZ/ABID/BLGP and `FP16_OVFL` clear) and the twelve sparse gfx942
-`V_SMFMAC_F32_*` forms (with `FP16_OVFL` clear, across all CBSZ/ABID metadata
-selectors) support the integer empirical model contributed in #14809. Exact
-modes use that model; exact-allow-Loose falls back outside its qualified
-controls. All-negative-zero sums (+0), negative subnormal underflow to +0,
-subnormal C preservation, XF32 NaNs with payload only in bits 12:0 (truncating
-to infinity), BF16 2^128 product overflow, and subnormal BF16 product outputs
-and ties are all MI300X hardware-captured. This qualification does not extend
-to gfx950 or gfx1250, whose strict modes remain unsupported.
+default CBSZ/ABID/BLGP controls) and the twelve sparse gfx942 `V_SMFMAC_F32_*`
+forms (across all CBSZ/ABID metadata selectors) support the integer empirical
+model contributed in #14809 for both `FP16_OVFL` clear and set (flushing NaN to
++0.0 and clamping +-Inf to +-MAX_FLOAT after each internal K-step). Exact modes
+use that model; exact-allow-Loose falls back outside its qualified controls.
+All-negative-zero sums (+0), negative subnormal underflow to +0, subnormal C
+preservation, XF32 NaNs with payload only in bits 12:0 (truncating to
+infinity), BF16 2^128 product overflow, and subnormal BF16 product outputs and
+ties are all MI300X hardware-captured. This qualification does not extend to
+gfx950 or gfx1250, whose strict modes remain unsupported.
 Comparison and register-routing instructions also use rj-arith. Other families
 are migrating independently; an entry point's header documents its supported
 semantics and controls.
