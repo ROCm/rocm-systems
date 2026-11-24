@@ -320,6 +320,15 @@ uint64_t
 interposition_sync(const uint64_t timeout_ns = 0);
 
 /**
+ * @brief Report the in-flight completions without waiting for them
+ *
+ * The non-blocking counterpart to @ref interposition_sync, reading the same counter. Zero means a
+ * drain would not have waited on this source.
+ */
+uint64_t
+interposition_peek_inflight();
+
+/**
  * @brief Create the wake signal and launch the completion-monitor thread
  *
  * Does nothing if the monitor is already running, if interception was never installed, or once

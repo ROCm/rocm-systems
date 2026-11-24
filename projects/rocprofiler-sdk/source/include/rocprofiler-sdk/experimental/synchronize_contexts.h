@@ -53,7 +53,8 @@ typedef struct rocprofiler_synchronize_context_options_t
     uint64_t size;   ///< must be set by user
     uint64_t flags;  ///< bitset of rocprofiler_synchronize_context_flags_t
     /// Bounds each wait the call makes, not the call as a whole, so the total may exceed it.
-    /// Zero means wait indefinitely.
+    /// Zero leaves each wait to its own internal budget, which for some is finite, so it is not
+    /// the most patient setting: pass an explicit value to bound every wait uniformly.
     uint64_t timeout_ns;
 } rocprofiler_synchronize_context_options_t;
 
@@ -95,7 +96,7 @@ typedef struct rocprofiler_synchronize_context_result_t
  *
  * @param [in] context Context whose records the caller needs written; must be owned by the caller
  * @param [in] options Options controlling the behavior of synchronization. May be NULL, which
- * selects no flags and an unbounded wait.
+ * selects no flags and leaves each wait to its own internal budget.
  * @param [out] result Filled with the outcome of the synchronization attempt. May be NULL unless
  * ::ROCPROFILER_SYNCHRONIZE_CONTEXT_NOHANG is set. Its counts are zeroed before any work is
  * done, so they are readable on every status except

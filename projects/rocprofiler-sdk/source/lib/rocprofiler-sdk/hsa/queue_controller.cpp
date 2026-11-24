@@ -1154,10 +1154,12 @@ queue_controller_sync(const uint64_t timeout_ns)
     return outstanding_records;
 }
 
+// Enumerates the same sources as queue_controller_sync: a peek omitting the completion batches
+// reports zero while a drain on the same state would still block.
 uint64_t
 queue_controller_peek_active_async_packets()
 {
-    auto outstanding_records = uint64_t{0};
+    auto outstanding_records = queue_interposition::interposition_peek_inflight();
 
     if(get_queue_controller())
     {

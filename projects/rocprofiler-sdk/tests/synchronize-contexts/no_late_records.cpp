@@ -276,8 +276,8 @@ nothing_arrives_after_the_window_closes(const gpu_workload& workload)
     // either side of the flip, which can only under-report, never fail a build that drained.
     g_window_closed.store(true);
 
-    // The wait was unbounded, so a success reporting outstanding records would mean the status
-    // and the result disagree -- and would explain any late record below as one it admitted to.
+    // Success means the drain reported nothing outstanding, so a nonzero count is the status and
+    // the result disagreeing -- and would explain any late record below as one it admitted to.
     if(result.num_timeout_records != 0)
     {
         ++failures;

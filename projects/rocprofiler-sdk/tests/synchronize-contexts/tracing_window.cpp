@@ -304,8 +304,8 @@ every_window_sees_its_own_record(const gpu_workload& workload)
         CHECK_ROCP(rocprofiler_synchronize_context(g_context, &options, &result));
         pop_tag();
 
-        // The wait was unbounded, so a success reporting outstanding records would mean the
-        // status and the result disagree.
+        // Success means the drain reported nothing outstanding, so a nonzero count is the
+        // status and the result disagreeing.
         if(result.num_timeout_records != 0)
         {
             ++failures;

@@ -175,3 +175,44 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT
         "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
+
+# The windows above, but with dispatches in flight on other threads. The sibling tests are
+# single-threaded, so nothing else covers the drain's cross-thread behaviour.
+add_executable(synchronize-contexts-concurrent-windows)
+target_sources(synchronize-contexts-concurrent-windows PRIVATE concurrent_windows.cpp)
+set_source_files_properties(concurrent_windows.cpp PROPERTIES LANGUAGE HIP)
+
+target_link_libraries(
+    synchronize-contexts-concurrent-windows
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
+            Threads::Threads)
+
+set_target_properties(synchronize-contexts-concurrent-windows PROPERTIES ENABLE_EXPORTS
+                                                                         ON)
+
+# Interposition is pinned so the enqueue path the concurrent synchronize contends with is
+# the same on every run.
+rocprofiler_add_integration_execute_test(
+    synchronize-contexts-concurrent-windows
+    COMMAND $<TARGET_FILE:synchronize-contexts-concurrent-windows>
+    DEPENDS synchronize-contexts-concurrent-windows
+    TIMEOUT 120
+    LABELS "integration-tests"
+    ENVIRONMENT
+        "ROCPROFILER_QUEUE_INTERPOSITION=1"
+        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    )
+
+# The same binary with signal-less completion requested: the enqueue path differs between
+# the two routes. Skipped when no batch registered, since the run never reached the route.
+rocprofiler_add_integration_execute_test(
+    synchronize-contexts-concurrent-windows-signal-less
+    COMMAND $<TARGET_FILE:synchronize-contexts-concurrent-windows>
+    DEPENDS synchronize-contexts-concurrent-windows
+    TIMEOUT 120
+    LABELS "integration-tests"
+    ENVIRONMENT
+        "ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS=true"
+        "ROCPROFILER_QUEUE_INTERPOSITION=1"
+        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    SKIP_REGULAR_EXPRESSION "signal-less summary: registered=0 ")

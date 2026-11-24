@@ -524,9 +524,8 @@ drain_signal_less_completions(const uint64_t timeout_ns)
 {
     if(!signal_less_state_present()) return 0;
 
-    // Mirrors signal_less_fence_completions without its teardown: the reader keeps running. The
+    // No queue-gate fence here: a caller already holding a queue gate would self-deadlock. The
     // quiesce is retried once, since the first pass can return with the ring still draining.
-    drain_signal_less_interceptor();
     const auto timeout = (timeout_ns > 0) ? timeout_ns : quiesce_budget_ns();
 
     bool _drained = wait_for_reader_quiesce(timeout);

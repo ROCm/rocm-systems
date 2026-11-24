@@ -1122,12 +1122,12 @@ completion_monitor_loop(completion_monitor& mon)
 }
 
 // Poll the in-flight counter down to zero, warning every drain_warn_interval. The counter falls
-// without the monitor thread: the record emitter decrements it once a batch's records are out. The
-// wait is unbounded, as are the callers it gates -- code-object unload and signal-pool teardown are
-// safe only once the records naming those objects are out.
+// without the monitor thread: the record emitter decrements it once a batch's records are out.
+// timeout_ns == 0 waits forever, which is what code-object unload and signal-pool teardown need:
+// they are safe only once the records naming those objects are out.
 //
 // A drain entered from a tool callback running on the record emitter waits on that callback's own
-// still-counted batch and never returns; the warning names that case.
+// still-counted batch; with no timeout that wait never returns.
 uint64_t
 wait_for_inflight_drain(completion_monitor& mon, const uint64_t timeout_ns)
 {
@@ -1177,6 +1177,16 @@ drain_completion_monitor(const uint64_t timeout_ns)
     // arbitrary tool threads with nothing serializing it against stop_completion_monitor, which
     // destroys that signal.
     return wait_for_inflight_drain(get_completion_monitor(), timeout_ns);
+}
+
+// The batches a drain would wait for, read without waiting. Guarded like drain_completion_monitor:
+// past destroy_static_objects the monitor's static_object is null and must not be dereferenced.
+uint64_t
+peek_completion_monitor_inflight()
+{
+    if(registration::get_fini_status() != 0 || internal_threading::fork_stale()) return 0;
+
+    return get_completion_monitor().inflight.load(std::memory_order_acquire);
 }
 
 // Local kernel-dispatch tracing path: swaps in pooled completion signals,
@@ -2339,6 +2349,12 @@ uint64_t
 interposition_sync(const uint64_t timeout_ns)
 {
     return drain_completion_monitor(timeout_ns);
+}
+
+uint64_t
+interposition_peek_inflight()
+{
+    return peek_completion_monitor_inflight();
 }
 
 // Create the wake signal and launch the monitor thread. A second call while it is already

@@ -88,9 +88,9 @@ peek_outstanding_records(const rocprofiler_context_id_t context)
 // rocprofiler_flush_buffer rather than buffer::flush because that is the only one of the two that
 // also drains the PC sampling agent buffers.
 //
-// Buffer ids are snapshotted before any flush: a flush runs the tool's buffer callback on this
-// thread, and a callback that creates or destroys a context would deadlock against a registry
-// held across it.
+// Buffer ids are snapshotted before any flush: a flush blocks this thread until the tool's buffer
+// callback has run on the buffer's callback thread, and a callback that creates or destroys a
+// context would deadlock against a registry held across it.
 rocprofiler_status_t
 flush_context_buffers(const rocprofiler_context_id_t context)
 {
