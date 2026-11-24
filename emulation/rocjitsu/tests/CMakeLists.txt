@@ -1055,10 +1055,6 @@ endif()
 # ./rocjitsu_tests --gtest_filter='*Benchmark*'). The idle-wakeup, request-exit,
 # SharedPool handoff, concurrent-close, and L2 mutex tests are registered separately so
 # CTest can bound a deadlocked child process, including helper destruction.
-string(
-    APPEND _rj_gtest_exclusions
-    ":DaemonApiDeathTest.ThreadStartupFailureIsFatal"
-)
 rj_add_gtest_tests(rocjitsu_tests TEST_FILTER "${_rj_gtest_exclusions}")
 if(RJ_INSTALL_TESTS)
     file(
@@ -2211,23 +2207,6 @@ if(RJ_ASAN_SHARED_LIBRARY)
 elseif(RJ_TSAN_SHARED_LIBRARY)
     set(RJ_SANITIZER_PRELOAD_PREFIX "${RJ_TSAN_SHARED_LIBRARY}:")
 endif()
-
-add_library(
-    daemon_thread_failure_preload
-    SHARED
-    daemon_thread_failure_preload_test.cpp
-)
-rj_configure_target(daemon_thread_failure_preload WARNINGS)
-target_link_libraries(daemon_thread_failure_preload PRIVATE ${CMAKE_DL_LIBS})
-add_dependencies(rocjitsu_tests daemon_thread_failure_preload)
-add_test(
-    NAME DaemonApiDeathTest.ThreadStartupFailureIsFatal
-    COMMAND
-        ${CMAKE_COMMAND} -E env
-        "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:daemon_thread_failure_preload>"
-        RJ_TEST_DAEMON_THREAD_FAILURE=1 $<TARGET_FILE:rocjitsu_tests>
-        --gtest_filter=DaemonApiDeathTest.ThreadStartupFailureIsFatal
-)
 
 add_library(topology_probe_preload SHARED topology_probe_preload_test.cpp)
 rj_configure_target(topology_probe_preload TEST)

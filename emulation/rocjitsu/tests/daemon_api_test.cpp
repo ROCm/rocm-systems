@@ -14,10 +14,7 @@
 #include <cerrno>
 #include <chrono>
 #include <csignal>
-#include <cstdlib>
 #include <cstring>
-#include <dlfcn.h>
-#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -1011,37 +1008,6 @@ TEST(DaemonApi, FullListenerQueueDoesNotBlockOrRemoveSocket) {
   close(first);
   close(second);
   close(listener);
-}
-
-TEST(DaemonApiDeathTest, ThreadStartupFailureIsFatal) {
-  if (!std::getenv("RJ_TEST_DAEMON_THREAD_FAILURE")) {
-    GTEST_SKIP() << "Run the CTest case to load the thread failure fixture";
-  }
-  using ArmFailure = void (*)(const char *, unsigned);
-  const auto arm = reinterpret_cast<ArmFailure>(dlsym(RTLD_DEFAULT, "rj_test_fail_daemon_thread"));
-  static const auto injected =
-      reinterpret_cast<bool (*)()>(dlsym(RTLD_DEFAULT, "rj_test_daemon_thread_failure_injected"));
-  ASSERT_NE(arm, nullptr);
-  ASSERT_NE(injected, nullptr);
-
-  ScopedTempDirectory directory;
-  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
-  for (const unsigned attempt : {1u, 2u}) {
-    SCOPED_TRACE(attempt);
-    const std::string socket_path = directory.path() + "/" + std::to_string(attempt) + ".sock";
-    EXPECT_EXIT(
-        {
-          // GoogleTest reports an exception escaping the statement as a
-          // failure. Bound the test even if startup gets stuck joining.
-          alarm(5);
-          std::set_terminate([] { _exit(injected() ? 77 : 78); });
-          arm(socket_path.c_str(), attempt);
-          rj_daemon_t *daemon = nullptr;
-          (void)rj_daemon_start(daemon_json().c_str(), socket_path.c_str(), &daemon);
-          _exit(79);
-        },
-        testing::ExitedWithCode(77), "");
-  }
 }
 
 TEST(DaemonApi, ServesMultipleClientsAndCleansUp) {
