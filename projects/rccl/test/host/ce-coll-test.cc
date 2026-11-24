@@ -1003,7 +1003,7 @@ INSTANTIATE_TEST_SUITE_P(LaunchPaths, CeAlltoAllvSyncMicrotest,
 
 // Hierarchical CE AllGather rail algorithm selection (ncclHierCeAllGatherUseRing). Sizes are per rank; the
 // rccl-tests size is that times nRanks, so 2 MiB per rank is 64/128/256 MiB total on 4/8/16 nodes of 8 GPUs.
-class HierCeAgRailSelectMicrotest : public ::testing::Test {
+class CeCollHierAgRailSelectMicrotest : public ::testing::Test {
  protected:
   int64_t enable_ = -1;
   int64_t threshold_ = -1;
@@ -1014,13 +1014,13 @@ class HierCeAgRailSelectMicrotest : public ::testing::Test {
   }};
 };
 
-TEST_F(HierCeAgRailSelectMicrotest, Auto_TwoNodes_IsDirectAtEverySize) {
+TEST_F(CeCollHierAgRailSelectMicrotest, Auto_TwoNodes_IsDirectAtEverySize) {
   for (size_t bytes : {size_t(1024), 2 * kMiB, 128 * kMiB, 1024 * kMiB}) {
     EXPECT_FALSE(ncclHierCeAllGatherUseRing(/*nNodes=*/2, bytes)) << bytes;
   }
 }
 
-TEST_F(HierCeAgRailSelectMicrotest, Auto_ThreeOrMoreNodes_SwitchesToRingAtTwoMiBPerRank) {
+TEST_F(CeCollHierAgRailSelectMicrotest, Auto_ThreeOrMoreNodes_SwitchesToRingAtTwoMiBPerRank) {
   for (int nNodes : {3, 4, 8, 16, 32}) {
     EXPECT_FALSE(ncclHierCeAllGatherUseRing(nNodes, 1 * kMiB)) << nNodes;
     EXPECT_FALSE(ncclHierCeAllGatherUseRing(nNodes, 2 * kMiB - 1)) << nNodes;
@@ -1029,7 +1029,7 @@ TEST_F(HierCeAgRailSelectMicrotest, Auto_ThreeOrMoreNodes_SwitchesToRingAtTwoMiB
   }
 }
 
-TEST_F(HierCeAgRailSelectMicrotest, Auto_ThresholdOverride_MovesTheCrossover) {
+TEST_F(CeCollHierAgRailSelectMicrotest, Auto_ThresholdOverride_MovesTheCrossover) {
   threshold_ = 8 * kMiB;
   EXPECT_FALSE(ncclHierCeAllGatherUseRing(/*nNodes=*/8, 4 * kMiB));
   EXPECT_TRUE(ncclHierCeAllGatherUseRing(/*nNodes=*/8, 8 * kMiB));
@@ -1038,12 +1038,92 @@ TEST_F(HierCeAgRailSelectMicrotest, Auto_ThresholdOverride_MovesTheCrossover) {
   EXPECT_FALSE(ncclHierCeAllGatherUseRing(/*nNodes=*/2, 1024)) << "the threshold does not apply on two nodes";
 }
 
-TEST_F(HierCeAgRailSelectMicrotest, Forced_IgnoresNodesAndSize) {
+TEST_F(CeCollHierAgRailSelectMicrotest, Forced_IgnoresNodesAndSize) {
   enable_ = 1;
   EXPECT_TRUE(ncclHierCeAllGatherUseRing(/*nNodes=*/2, 1024));
   EXPECT_TRUE(ncclHierCeAllGatherUseRing(/*nNodes=*/16, 1024));
   enable_ = 0;
   EXPECT_FALSE(ncclHierCeAllGatherUseRing(/*nNodes=*/16, 1024 * kMiB));
+}
+
+// Hierarchical CE AllGather ring fan-out: the scatter batch shape follows the running runtime, and the per-piece
+// shape merges a round's arrived chunks into contiguous recvbuf pieces.
+class CeCollHierAgRingScatterMicrotest : public ::testing::Test {
+ protected:
+  void TearDown() override {
+    ncclHierCollFreeChunkPlan(&cw_);
+    ncclHierCollFreeChunkPlan(&ccw_);
+    ResetNcclStubs();
+  }
+
+  // Splits perRankBytes into cw and ccw halves the way ncclHierCeAllGatherRing does, chunked at maxChunk.
+  void Plan(size_t perRankBytes, size_t maxChunk) {
+    cwBytes_ = perRankBytes <= 1 ? perRankBytes : perRankBytes / 2;
+    size_t ccwBytes = perRankBytes - cwBytes_;
+    ASSERT_EQ(ncclSuccess, ncclHierCollBuildChunk(cwBytes_, 1, maxChunk, &cw_));
+    if (ccwBytes > 0) ASSERT_EQ(ncclSuccess, ncclHierCollBuildChunk(ccwBytes, 1, maxChunk, &ccw_));
+  }
+
+  // Pieces for a round whose cw half comes from originCw and ccw half from originCcw.
+  std::vector<ncclHierCeAgRingPiece> Pieces(size_t perRankBytes, int originCw, int originCcw) {
+    ncclHierChunkPlan* plans[2] = {&cw_, &ccw_};
+    uint8_t* bases[2] = {kRecv + originCw * perRankBytes, kRecv + originCcw * perRankBytes + cwBytes_};
+    int nChunks = (cw_.chunkStart ? cw_.chunkStart[1] : 0) + (ccw_.chunkStart ? ccw_.chunkStart[1] : 0);
+    std::vector<ncclHierCeAgRingPiece> pieces(nChunks);
+    pieces.resize(ncclHierCeAgRingScatterPieces(plans, bases, pieces.data()));
+    return pieces;
+  }
+
+  uint8_t* const kRecv = reinterpret_cast<uint8_t*>(kRecvBase);
+  ncclHierChunkPlan cw_ = {};
+  ncclHierChunkPlan ccw_ = {};
+  size_t cwBytes_ = 0;
+};
+
+TEST_F(CeCollHierAgRingScatterMicrotest, SingleBatch_OnlyOnRuntimesThatCompleteMultiCopyBatches) {
+  ncclCudaDriverVersionCache = 71726431;  // 7.17.26431 (TheRock 10.3.0a20261028) hangs on the multi-copy batch
+  EXPECT_FALSE(ncclHierCeAgRingSingleScatterBatch());
+  ncclCudaDriverVersionCache = ROCM_VER_7_18_26461 - 1;
+  EXPECT_FALSE(ncclHierCeAgRingSingleScatterBatch());
+  ncclCudaDriverVersionCache = ROCM_VER_7_18_26461;
+  EXPECT_TRUE(ncclHierCeAgRingSingleScatterBatch());
+  ncclCudaDriverVersionCache = ROCM_VER_7_12_0;
+  EXPECT_FALSE(ncclHierCeAgRingSingleScatterBatch()) << "batch-capable runtimes before the fix stay per piece";
+}
+
+TEST_F(CeCollHierAgRingScatterMicrotest, SameOrigin_AdjacentHalvesMergeIntoOnePiece) {
+  const size_t perRank = 24 * kMiB;
+  Plan(perRank, 4 * kMiB);
+  ASSERT_GT(cw_.chunkStart[1], 1) << "each half must span several chunks";
+
+  const auto pieces = Pieces(perRank, /*originCw=*/1, /*originCcw=*/1);  // 2 nodes: both halves from one rank
+
+  ASSERT_EQ(1u, pieces.size());
+  EXPECT_EQ(kRecv + 1 * perRank, pieces[0].slot);
+  EXPECT_EQ(perRank, pieces[0].bytes);
+}
+
+TEST_F(CeCollHierAgRingScatterMicrotest, DifferentOrigins_EachHalfIsItsOwnPiece) {
+  const size_t perRank = 24 * kMiB;
+  Plan(perRank, 4 * kMiB);
+
+  const auto pieces = Pieces(perRank, /*originCw=*/2, /*originCcw=*/1);  // 3+ nodes: the halves are not adjacent
+
+  ASSERT_EQ(2u, pieces.size());
+  EXPECT_EQ(kRecv + 2 * perRank, pieces[0].slot);
+  EXPECT_EQ(cwBytes_, pieces[0].bytes);
+  EXPECT_EQ(kRecv + 1 * perRank + cwBytes_, pieces[1].slot);
+  EXPECT_EQ(perRank - cwBytes_, pieces[1].bytes);
+}
+
+TEST_F(CeCollHierAgRingScatterMicrotest, SingleByte_OnlyTheCwHalfIsAPiece) {
+  Plan(/*perRankBytes=*/1, 4 * kMiB);
+
+  const auto pieces = Pieces(1, /*originCw=*/2, /*originCcw=*/1);
+
+  ASSERT_EQ(1u, pieces.size());
+  EXPECT_EQ(kRecv + 2, pieces[0].slot);
+  EXPECT_EQ(1u, pieces[0].bytes);
 }
 
 struct CeBatchShape {

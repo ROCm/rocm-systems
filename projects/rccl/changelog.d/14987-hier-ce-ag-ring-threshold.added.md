@@ -1,0 +1,1 @@
+* `NCCL_HIER_CE_COLL_AG_RAIL_RING_THRESHOLD` (default `-1`, which selects 2 MiB): per-rank bytes at and above which the automatic selection of `NCCL_HIER_CE_COLL_AG_RAIL_RING_ENABLE=-1` uses the ring on three or more nodes. 2 MiB per rank is 64 MiB of total AllGather size on 4 nodes, 128 MiB on 8 and 256 MiB on 16 with eight GPUs per node.

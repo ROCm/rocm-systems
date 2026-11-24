@@ -3456,6 +3456,28 @@
         }
       ]
     },
+    "ce_hier_allgather_ring": {
+      "extends": "ce_base",
+      "num_ranks": 6,
+      "num_nodes": 3,
+      "num_gpus": 2,
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_HIER_CE_COLL_AG_RAIL_RING_ENABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "CE_AllGather_MultiNodeHierarchicalRing",
+          "description": "Hierarchical CE AllGather with the rail ring forced on 3 nodes (2 ranks/node), where the cw and ccw halves of each round come from different origin ranks",
+          "test_filter": "CeMPI_AllGather.MultiNodeHierarchical"
+        },
+        {
+          "name": "CE_AllGather_MultiNodeHierarchicalRingChunkBoundary",
+          "description": "Hierarchical CE AllGather ring on 3 nodes at 68 MiB per rank, so each half spans several chunks",
+          "test_filter": "CeMPI_AllGather.MultiNodeHierarchicalChunkBoundary"
+        }
+      ]
+    },
     "ce_internal": {
       "extends": "ce_base",
       "num_ranks": 2,
@@ -4519,6 +4541,12 @@
       "name": "CE Tests - Hierarchical AlltoAllv (multi-node)",
       "description": "Hierarchical CE AlltoAllv on 2 nodes (2 ranks/node): MultiNodeHierarchical, ChunkBoundary, and Sparse. Skips when scale-out CE prerequisites are absent.",
       "config": "ce_hier_alltoallv",
+      "enabled": true
+    },
+    {
+      "name": "CE Tests - Hierarchical AllGather Ring (3 nodes)",
+      "description": "Hierarchical CE AllGather with the rail ring forced on 3 nodes (2 ranks/node): MultiNodeHierarchical and ChunkBoundary. Skips when scale-out CE prerequisites are absent.",
+      "config": "ce_hier_allgather_ring",
       "enabled": true
     },
     {
