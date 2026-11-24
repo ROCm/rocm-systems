@@ -103,7 +103,8 @@ int run(int argc, char **argv) {
                  "[--bad-geometry] [--profiling] [--reuse-signal] [--target GPU] [--wave-size N] "
                  "[--threads N] [--test-statistics] [--batch-barrier-and|--batch-barrier-or] "
                  "[--separate-barrier] [--high-lane] [--workgroups N] [--amd-signals]\n"
-                 "MODE: grouped, grouped_sync, defined, synchronized, mixed, wide_u16, wide_i16, "
+                 "MODE: grouped, grouped_sync, defined, synchronized, mixed, wide_u8, wide_i8, "
+                 "wide_b8_peer, wide_u16, wide_i16, "
                  "wide_b64, wide_b96, wide_b128, observe\n";
     return 3;
   }
@@ -119,11 +120,12 @@ int run(int argc, char **argv) {
   const bool group_barrier = mode == "grouped_sync";
   const bool mixed = mode == "mixed";
   const bool synchronized = mode == "synchronized" || mixed;
-  const uint32_t wide_width = mode == "wide_u16" || mode == "wide_i16" ? 2
-                              : mode == "wide_b64"                     ? 8
-                              : mode == "wide_b96"                     ? 12
-                              : mode == "wide_b128"                    ? 16
-                                                                       : 0;
+  const uint32_t wide_width = mode == "wide_u8" || mode == "wide_i8" || mode == "wide_b8_peer" ? 1
+                              : mode == "wide_u16" || mode == "wide_i16"                       ? 2
+                              : mode == "wide_b64"                                             ? 8
+                              : mode == "wide_b96"                                             ? 12
+                              : mode == "wide_b128"                                            ? 16
+                                                                                               : 0;
   if (!defined && !synchronized && !grouped && wide_width == 0 && mode != "observe") {
     return 3;
   }
@@ -446,7 +448,13 @@ int run(int argc, char **argv) {
     if (wide_width) {
       for (uint32_t wave = 0; wave < wave_count; ++wave) {
         std::array<uint32_t, 4> expected{input + wave, 0x01234567u, 0x76543210u, 0xa5a5a5a5u};
-        if (mode == "wide_i16") {
+        if (wide_width == 1) {
+          const uint32_t byte = (0x80u + input + wave) & 0xffu;
+          expected[0] = mode == "wide_i8" && (byte & 0x80) ? (0xffffff00u | byte) : byte;
+          if (mode != "wide_b8_peer") {
+            expected[1] = (byte << 24) | 0x00234567u;
+          }
+        } else if (mode == "wide_i16") {
           expected[0] += 0xffff8000u;
         } else if (wide_width == 2) {
           expected[0] += 0x8000u;

@@ -52,6 +52,11 @@ CASES = (
     'loop_no_b0_sync_loss',
     'loop_no_b1',
     'loop_late',
+    'wide_u8',
+    'wide_i8_alias_high',
+    'wide_b8_overlap',
+    'wide_b8_adjacent',
+    'wide_b8_disjoint',
     'wide_u16',
     'wide_i16',
     'wide_b64',
@@ -317,6 +322,10 @@ class Driver:
                     else fixture_name.removesuffix('_high')
                 )
             )
+        if fixture_name.startswith('wide_b8_'):
+            mode = 'wide_b8_peer'
+        if fixture_name == 'wide_i8_alias_high':
+            mode = 'wide_i8'
         if fixture_name.startswith('wide_b96'):
             mode = 'wide_b96'
         if fixture_name == 'mixed_barrier':
@@ -725,6 +734,11 @@ class Driver:
             'wide_b96_adjacent': 28,
             'wide_b96_disjoint': 32,
         }.get(fixture)
+        byte_stride = {
+            'wide_b8_overlap': 0,
+            'wide_b8_adjacent': 1,
+            'wide_b8_disjoint': 2,
+        }.get(fixture)
         high = fixture.endswith('_high')
         for index, execution in enumerate(decoded['executions']):
             assert execution['serial'] == index + 1
@@ -734,7 +748,42 @@ class Driver:
                 assert row['wave'] == wave and row['serial'] == index + 1
                 assert row['status'] == ROW_ENTERED | ROW_EXITED and row['loss'] == 0
                 records = row['records']
-                if peer_offset is not None:
+                if byte_stride is not None:
+                    assert waves == 2
+                    assert row['final_sequence'] == len(records) == 1
+                    record = records[0]
+                    assert record['sequence'] == record['mask'] == record['width'] == 1
+                    assert record['site'] == 0
+                    assert decoded['sites'][0]['access'] == 2
+                    assert decoded['sites'][0]['width'] == 1
+                    assert record['offset'] == 1020 + wave * byte_stride
+                elif fixture in ('wide_u8', 'wide_i8_alias_high'):
+                    mask = (1 << (wave_size - 1)) if high else 1
+                    base = 1012 + 4 * wave
+                    expected = [
+                        (2, 4, base),
+                        (2, 1, base + 3),
+                        (1, 1, base + 3),
+                        (1, 4, base),
+                    ]
+                    if high and (wave + 1) * wave_size > self.args.threads:
+                        expected = []
+                    assert row['final_sequence'] == len(records) == len(expected)
+                    for site_id, (record, (access, size, offset)) in enumerate(
+                        zip(records, expected)
+                    ):
+                        assert (
+                            record['sequence'] == site_id + 1
+                            and record['site'] == site_id
+                        )
+                        assert decoded['sites'][site_id]['access'] == access
+                        assert (
+                            decoded['sites'][site_id]['width']
+                            == record['width']
+                            == size
+                        )
+                        assert record['offset'] == offset and record['mask'] == mask
+                elif peer_offset is not None:
                     assert waves == 2
                     assert row['final_sequence'] == len(records) == 1
                     record = records[0]

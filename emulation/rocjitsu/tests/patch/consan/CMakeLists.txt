@@ -482,6 +482,8 @@ if(TARGET consan_hsa_runner)
             endforeach()
             if(RJ_BUILD_CONSAN_ANALYZER)
                 set(_width_cases
+                    wide_u8
+                    wide_i8_alias_high
                     wide_u16
                     wide_i16
                     wide_b64
@@ -510,6 +512,9 @@ if(TARGET consan_hsa_runner)
                     )
                 endforeach()
                 foreach(_peer IN ITEMS overlap adjacent disjoint)
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                        wide_b8_${_peer} ${_threads} production analysis
+                    )
                     consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
                         wide_b96_${_peer} ${_threads} production analysis
                     )

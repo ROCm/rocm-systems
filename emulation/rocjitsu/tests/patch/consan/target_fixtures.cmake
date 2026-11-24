@@ -190,7 +190,11 @@ foreach(
                 b128-high:128:0:1:0:0
                 b128-alias:128:0:0:1:0
                 b64-collision:64:0:0:0:1
-                excluded-b8:8:0:0:0:0
+                u8:8:0:0:0:0
+                i8-alias-high:8:1:1:1:0
+                b8-overlap:8:0:0:0:0:0
+                b8-adjacent:8:0:0:0:0:1
+                b8-disjoint:8:0:0:0:0:2
                 b96:96:0:0:0:0
                 b96-alias-high:96:0:1:1:0
                 b96-overlap:96:0:0:0:0:4
@@ -220,7 +224,11 @@ foreach(
             list(LENGTH _parts _part_count)
             if(_part_count EQUAL 7)
                 list(GET _parts 6 _peer_offset)
-                set(_peer_option -DCONSAN_B96_PEER_OFFSET=${_peer_offset})
+                if(_width EQUAL 8)
+                    set(_peer_option -DCONSAN_B8_PEER_STRIDE=${_peer_offset})
+                else()
+                    set(_peer_option -DCONSAN_B96_PEER_OFFSET=${_peer_offset})
+                endif()
             endif()
             set(_object ${_directory}/width-${_name}.o)
             set(_image ${_directory}/width-${_name}.hsaco)

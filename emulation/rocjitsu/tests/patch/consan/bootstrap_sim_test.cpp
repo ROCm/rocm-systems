@@ -1145,20 +1145,26 @@ TEST_P(ConSanTargetSim, NativeWidthsPreserveEveryWordAndAllGuestState) {
 
 // The capture counts probes. Count the original memory operations independently,
 // including a second execution if instrumentation accidentally duplicates one.
-class B96IssueCounter final : public ExecutionPlugin {
+class NativeWidthIssueCounter final : public ExecutionPlugin {
 public:
-  explicit B96IssueCounter(std::vector<std::array<unsigned, 2>> &counts)
-      : ExecutionPlugin("b96_issue_counter"), counts_(counts) {}
+  explicit NativeWidthIssueCounter(std::vector<std::array<unsigned, 2>> &counts)
+      : ExecutionPlugin("native_width_issue_counter"), counts_(counts) {}
   bool requires_serial_hot_hooks() const override { return true; }
   void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &instruction,
                                         amdgpu::Wavefront &wave) override {
     if (!wave.exec())
       return;
     switch (instruction.amdgpu_operation()) {
+    case amdgpu::Operation::DS_STORE_B8:
+    case amdgpu::Operation::DS_WRITE_B8:
     case amdgpu::Operation::DS_STORE_B96:
     case amdgpu::Operation::DS_WRITE_B96:
       ++counts_.at(wave.wave_in_group())[0];
       break;
+    case amdgpu::Operation::DS_LOAD_I8:
+    case amdgpu::Operation::DS_READ_I8:
+    case amdgpu::Operation::DS_LOAD_U8:
+    case amdgpu::Operation::DS_READ_U8:
     case amdgpu::Operation::DS_LOAD_B96:
     case amdgpu::Operation::DS_READ_B96:
       ++counts_.at(wave.wave_in_group())[1];
@@ -1181,9 +1187,9 @@ TEST_P(ConSanTargetSim, B96PreservesThreeWordsAndRecordsThePreGuestAddressOnce) 
     RunResult before, after;
     std::vector<std::array<unsigned, 2>> before_counts(3), after_counts(3);
     ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true, 4, false,
-                                1, std::make_unique<B96IssueCounter>(before_counts)));
+                                1, std::make_unique<NativeWidthIssueCounter>(before_counts)));
     ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true, 4,
-                                false, 1, std::make_unique<B96IssueCounter>(after_counts)));
+                                false, 1, std::make_unique<NativeWidthIssueCounter>(after_counts)));
     expect_guest_state(before, after);
     const unsigned active_waves = high ? 2 : 3;
     std::vector<uint32_t> expected;
@@ -1210,6 +1216,30 @@ TEST_P(ConSanTargetSim, B96PreservesThreeWordsAndRecordsThePreGuestAddressOnce) 
       EXPECT_EQ(record.wave, index / 2);
       EXPECT_EQ(record.offset, 16 + 16 * (index / 2));
       EXPECT_EQ(record.mask, high ? uint64_t{1} << (target.wave_size - 1) : 1u);
+    }
+  }
+}
+
+TEST_P(ConSanTargetSim, ByteAccessPreservesNeighborBytesAndExtendsOnlyActiveLanes) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size + 1;
+  for (const bool high : {false, true}) {
+    const char *fixture = high ? "width-i8-alias-high" : "width-u8";
+    SCOPED_TRACE(fixture);
+    RunResult before, after;
+    std::vector<std::array<unsigned, 2>> before_counts(3), after_counts(3);
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true, 4, false,
+                                1, std::make_unique<NativeWidthIssueCounter>(before_counts)));
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true, 4,
+                                false, 1, std::make_unique<NativeWidthIssueCounter>(after_counts)));
+    expect_guest_state(before, after);
+    for (unsigned wave = 0; wave < 3; ++wave) {
+      const unsigned count = high && wave == 2 ? 0 : 1;
+      EXPECT_EQ(before_counts[wave], (std::array<unsigned, 2>{count, count}));
+      EXPECT_EQ(after_counts[wave], before_counts[wave]);
+      const uint32_t byte = 0x87u + wave;
+      EXPECT_EQ(after.full_output[4 * wave], count ? (high ? 0xffffff00u | byte : byte) : 0);
+      EXPECT_EQ(after.full_output[4 * wave + 1], count ? (byte << 24) | 0x00234567u : 0);
     }
   }
 }

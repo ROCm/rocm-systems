@@ -118,16 +118,27 @@ TEST_P(ConSanTargetStatic, QualifyOnlyWholeRegisterSingleRangeForms) {
     }
     EXPECT_TRUE(validate_prepared(original, artifact.value(), error).succeeded()) << error.message;
   }
-  for (const char *name : {"excluded-b8", "excluded-partial"}) {
-    SCOPED_TRACE(name);
+  for (const char *name : {"u8", "i8-alias-high"}) {
     const std::vector<uint8_t> original =
         test::read_fixture(test::target_fixture_path(mode, "width-" + std::string(name)));
-    ASSERT_FALSE(original.empty());
     InputError error;
-    EXPECT_TRUE(
-        prepare(original, *target_profile(mode.target), "lds_producer_consumer", error).failed());
-    EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess) << error.message;
+    const FailureOr<PreparedArtifact> artifact =
+        prepare(original, *target_profile(mode.target), "lds_producer_consumer", error);
+    ASSERT_TRUE(artifact.succeeded()) << name << ": " << error.message;
+    const std::vector<SiteFacts> &sites = artifact.value().manifest.sites;
+    ASSERT_EQ(sites.size(), 4u);
+    for (size_t index = 0; index < sites.size(); ++index) {
+      EXPECT_EQ(sites[index].width, index == 1 || index == 2 ? 1u : 4u);
+      EXPECT_EQ(sites[index].access, index < 2 ? AccessKind::Write : AccessKind::Read);
+    }
   }
+  const std::vector<uint8_t> partial =
+      test::read_fixture(test::target_fixture_path(mode, "width-excluded-partial"));
+  ASSERT_FALSE(partial.empty());
+  InputError error;
+  EXPECT_TRUE(
+      prepare(partial, *target_profile(mode.target), "lds_producer_consumer", error).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess) << error.message;
 }
 
 TEST_P(ConSanTargetStatic, QualifiedBarriersPreserveOriginalOperations) {

@@ -41,6 +41,11 @@ RUNTIME_CASES = (
 )
 ANALYSIS_CASES = (*RUNTIME_CASES, 'repeat_race', 'utf8_entry')
 CORE_WIDTH_CASES = (
+    'wide_u8',
+    'wide_i8_alias_high',
+    'wide_b8_overlap',
+    'wide_b8_adjacent',
+    'wide_b8_disjoint',
     'wide_u16',
     'wide_i16',
     'wide_b64',
@@ -201,6 +206,7 @@ def required_names():
             'HighLaneMasksAndEmptyExecHaveRealPublicationEvidence',
             'ThreeWavesAndPartialTailUseDistinctRows',
             'NativeWidthsPreserveEveryWordAndAllGuestState',
+            'ByteAccessPreservesNeighborBytesAndExtendsOnlyActiveLanes',
             'PublicationBarrierBlocksAnEarlyConsumer',
             'BarrierPreservesOutputAndGuestStateAtEmptyExecAndHighLanes',
             'RepeatedBarrierLoopsPreserveStateAndRetainIndependentSites',

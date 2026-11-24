@@ -24,6 +24,9 @@
 #define DS_STORE_B64 ds_write_b64
 #define DS_STORE_B96 ds_write_b96
 #define DS_STORE_B128 ds_write_b128
+#define DS_LOAD_U8 ds_read_u8
+#define DS_LOAD_I8 ds_read_i8
+#define DS_LOAD_B32 ds_read_b32
 #define DS_LOAD_U16 ds_read_u16
 #define DS_LOAD_I16 ds_read_i16
 #define DS_LOAD_PARTIAL ds_read_u16_d16_hi
@@ -41,6 +44,9 @@
 #define DS_STORE_B64 ds_store_b64
 #define DS_STORE_B96 ds_store_b96
 #define DS_STORE_B128 ds_store_b128
+#define DS_LOAD_U8 ds_load_u8
+#define DS_LOAD_I8 ds_load_i8
+#define DS_LOAD_B32 ds_load_b32
 #define DS_LOAD_U16 ds_load_u16
 #define DS_LOAD_I16 ds_load_i16
 #define DS_LOAD_PARTIAL ds_load_u16_d16_hi
@@ -116,13 +122,29 @@ CONSAN_KERNEL:
   LOAD64 s[6:7], s[0:1], 8
   consan_wait_all
   v_lshrrev_b32 v6, WAVE_SHIFT, v0
+#if defined(CONSAN_B8_PEER_STRIDE)
+#if CONSAN_B8_PEER_STRIDE == 0
+  v_mov_b32 v1, 0
+#elif CONSAN_B8_PEER_STRIDE == 1
+  v_mov_b32 v1, v6
+#else
+  v_lshlrev_b32 v1, 1, v6
+#endif
+#elif CONSAN_WIDTH == 8
+  // Three waves occupy the last three dwords of the allocation.
+  v_lshlrev_b32 v1, 2, v6
+  VECTOR_ADD v1, (GROUP_BYTES-12), v1
+#else
   v_lshlrev_b32 v1, 4, v6
+#endif
 #if CONSAN_WIDTH == 96
   VECTOR_ADD v1, 4, v1
 #endif
   v_lshlrev_b32 v7, 4, v6
   VECTOR_ADD v2, s4, v6
-#if CONSAN_WIDTH == 16
+#if CONSAN_WIDTH == 8
+  VECTOR_ADD v2, 0x80, v2
+#elif CONSAN_WIDTH == 16
   VECTOR_ADD v2, 0x8000, v2
 #endif
   v_mov_b32 v3, 0x89abcdef
@@ -139,8 +161,26 @@ CONSAN_KERNEL:
   v_cmp_eq_u32 MASK_VCC, ((CONSAN_WAVE_SIZE-1)*CONSAN_HIGH), v12
 #endif
   MASK_AND_SAVE MASK_SAVE, MASK_VCC
-#if CONSAN_WIDTH == 8
-  DS_STORE_B8 v1, v2
+#if defined(CONSAN_B8_PEER_STRIDE)
+  DS_STORE_B8 v1, v2 offset:1020
+  v_and_b32 v8, 0xff, v2
+#elif CONSAN_WIDTH == 8
+  DS_STORE_B32 v1, v9
+  consan_wait_all
+  DS_STORE_B8 v1, v2 offset:3
+  consan_wait_all
+#if CONSAN_SIGNED
+#define DS_LOAD_BYTE DS_LOAD_I8
+#else
+#define DS_LOAD_BYTE DS_LOAD_U8
+#endif
+#if CONSAN_ALIAS
+  v_mov_b32 v8, v1
+  DS_LOAD_BYTE v8, v8 offset:3
+#else
+  DS_LOAD_BYTE v8, v1 offset:3
+#endif
+  DS_LOAD_B32 v9, v1
 #elif CONSAN_WIDTH == 96
 #if CONSAN_B96_PEER_OFFSET
   // Only wave zero writes the 12-byte range. The next wave writes one dword.

@@ -395,7 +395,7 @@ TEST(ConSanImageFacts, EveryQScopeWidthAndTargetWaveRoundTripsWorkgroupAndBarrie
       for (const ScopeKind scope :
            {ScopeKind::NativeLdsNoSynchronization, ScopeKind::NativeLdsWorkgroupBarrier,
             ScopeKind::NativeLdsWorkgroupBarrierLoop}) {
-        for (const uint32_t width : {2u, 4u, 8u, 12u, 16u}) {
+        for (const uint32_t width : {1u, 2u, 4u, 8u, 12u, 16u}) {
           SCOPED_TRACE(target.id);
           SCOPED_TRACE(wave_size);
           SCOPED_TRACE(static_cast<uint32_t>(scope));

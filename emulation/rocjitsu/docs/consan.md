@@ -179,7 +179,7 @@ original code-object files nor live HSA state.
 
 `LdsRaceDetection` is the only implemented analysis. It checks ordinary native
 LDS reads/writes at naturally aligned addresses, using the same observations
-for two checks. All supported targets admit ordinary single-range b16, b32,
+for two checks. All supported targets admit ordinary single-range b8, b16, b32,
 b64, b96, and b128: gfx942/gfx950 wave64, gfx1100/gfx1201 wave32 or wave64, and
 gfx1250 wave32.
 
@@ -204,20 +204,20 @@ this does not provide arbitrary native queue or HIP application integration.
 The multi-entry simulator fixture qualifies gfx1250 wave32; single-entry coverage
 on other modes does not establish their multi-entry execution qualification.
 
-The forms are `ds_store_b16`, `ds_load_u16`, `ds_load_i16`, and
+The subword forms are byte/halfword stores and whole-register signed or
+unsigned byte/halfword loads. The wider forms are
 `ds_store_b32/b64/b96/b128` or `ds_load_b32/b64/b96/b128` on gfx1100/gfx1201/gfx1250.
 gfx942/gfx950 use the corresponding `ds_write_*` and `ds_read_*` names.
-The b16 loads write a whole 32-bit result with unsigned or signed extension. Access probes
-capture addresses before an aliased load can overwrite them, record actual byte
+Access probes capture addresses before an aliased load can overwrite them, record actual byte
 widths and byte immediates, and preserve every guest result word. For b96 the
 range spans three dwords. Its effective start must be 16-byte aligned so the
-range is independent of the launch alignment mode. b8,
-partial-register subword loads, dual-range, transpose, FLAT, and atomic forms
+range is independent of the launch alignment mode. Partial-register
+subword loads, dual-range, transpose, FLAT, and atomic forms
 remain unsupported. The existing minimum fixed LDS extent remains four bytes.
 
 Access widths are measured in bytes. `NativeLdsAccess::width` and
 `SiteFacts::width` default to zero, meaning unspecified and invalid. Producers
-must explicitly supply 2, 4, 8, 12, or 16; zero never implies b32 or a zero-length
+must explicitly supply 1, 2, 4, 8, 12, or 16; zero never implies b32 or a zero-length
 access. Manifest admission rejects zero, and a committed observation must match
 its site's width. An all-zero uncommitted report slot still represents vacant
 storage, not an access.

@@ -542,6 +542,20 @@ TEST_F(ConSanAnalysis, ThreeDwordAccessRequiresNativeAlignmentAndCoversOnlyTwelv
   }
 }
 
+TEST_F(ConSanAnalysis, EarlierThreeDwordProfileCannotAdvertiseByteSites) {
+  // The selection identity emitted before whole-register byte loads were admitted.
+  Manifest &manifest = test::manifest(capture_.header);
+  manifest.options = {
+      0x0f, 0xd8, 0x00, 0xf0, 0xff, 0xf8, 0x77, 0xb0, 0xf0, 0x51, 0x04,
+      0x56, 0xfe, 0x42, 0x8d, 0x4c, 0xab, 0x4e, 0xe3, 0x50, 0x3b, 0xb6,
+      0x11, 0xe3, 0x11, 0xda, 0xd5, 0x94, 0x33, 0x0b, 0xd5, 0xf5,
+  };
+  manifest.sites[0].width = 12;
+  EXPECT_TRUE(validate_manifest(manifest).succeeded());
+  manifest.sites[0].width = 1;
+  EXPECT_TRUE(validate_manifest(manifest).failed());
+}
+
 TEST_F(ConSanAnalysis, DecoderControlWideBoundsCannotWrapOrSilentlyBecomeB32) {
   test::manifest(capture_.header).target = 1250;
   for (const uint32_t width : {2u, 8u, 12u, 16u}) {
@@ -560,7 +574,7 @@ TEST_F(ConSanAnalysis, DecoderControlWideBoundsCannotWrapOrSilentlyBecomeB32) {
       EXPECT_FALSE(result.value().coverage_complete);
     }
   }
-  for (const uint32_t width : {0u, 1u, 3u, 10u, 32u}) {
+  for (const uint32_t width : {0u, 3u, 5u, 10u, 32u}) {
     test::manifest(capture_.header).sites[0].width = width;
     EXPECT_TRUE(validate_manifest(test::manifest(capture_.header)).failed());
   }

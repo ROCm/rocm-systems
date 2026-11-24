@@ -143,14 +143,20 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
       0xa2, 0x32, 0x06, 0x3d, 0xb0, 0xa7, 0x24, 0x2c, 0x81, 0x8f, 0xe1,
       0x9f, 0xa8, 0x3e, 0x6c, 0x37, 0x78, 0xd4, 0x3c, 0xff, 0x17,
   };
-  const bool prior_widths = manifest.options == kPriorWidths;
+  constexpr Digest kB96Widths = {
+      0x0f, 0xd8, 0x00, 0xf0, 0xff, 0xf8, 0x77, 0xb0, 0xf0, 0x51, 0x04,
+      0x56, 0xfe, 0x42, 0x8d, 0x4c, 0xab, 0x4e, 0xe3, 0x50, 0x3b, 0xb6,
+      0x11, 0xe3, 0x11, 0xda, 0xd5, 0x94, 0x33, 0x0b, 0xd5, 0xf5,
+  };
+  const bool admits_bytes = manifest.options == mvp_options_digest();
+  const bool admits_b96 = admits_bytes || manifest.options == kB96Widths;
   const TargetProfile *target = target_profile(manifest.target);
   if (manifest.original.bytes == 0 || manifest.prepared.bytes == 0 || target == nullptr ||
       !supports_wave(*target, manifest.wave_size) || manifest.code_object_abi != 5 ||
       (manifest.scope != ScopeKind::NativeLdsNoSynchronization &&
        manifest.scope != ScopeKind::NativeLdsWorkgroupBarrier &&
        manifest.scope != ScopeKind::NativeLdsWorkgroupBarrierLoop) ||
-      (!prior_widths && manifest.options != mvp_options_digest())) {
+      (!admits_b96 && manifest.options != kPriorWidths)) {
     return diagnostic.emit() << "empty image or unsupported target, ABI, scope or options";
   }
 
@@ -241,7 +247,7 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
         site.range_id != 0 ||
         (site.access != AccessKind::Read && site.access != AccessKind::Write) ||
         (site.width != 2 && site.width != 4 && site.width != 8 && site.width != 16 &&
-         (prior_widths || site.width != 12)) ||
+         (!admits_b96 || site.width != 12) && (!admits_bytes || site.width != 1)) ||
         site.original_size != 8 || site.prepared_guest_size != 8 || site.probe_size == 0 ||
         (site.probe_size % 4) != 0 || (site.original_offset % 4) != 0 ||
         (site.prepared_guest_offset % 4) != 0 || (site.probe_offset % 4) != 0 ||
