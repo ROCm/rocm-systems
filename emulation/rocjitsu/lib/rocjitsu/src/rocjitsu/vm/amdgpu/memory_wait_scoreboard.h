@@ -67,14 +67,28 @@ public:
   bool test(size_t i, bool write = false) const {
     return i < kRegisters && (bytes_[i] & (write ? kResult | kSource : kResult));
   }
+  bool any_vgpr() const {
+    return (vgpr_mask_[0] | vgpr_mask_[1] | vgpr_mask_[2] | vgpr_mask_[3]) != 0;
+  }
+  bool any_vgpr_in(const std::array<uint64_t, 4> &mask) const {
+    return ((vgpr_mask_[0] & mask[0]) | (vgpr_mask_[1] & mask[1]) | (vgpr_mask_[2] & mask[2]) |
+            (vgpr_mask_[3] & mask[3])) != 0;
+  }
   bool pending_vgpr(uint16_t index, uint8_t width) const {
     assert(index + width <= REGISTER_SET_MAX_VGPRS);
     if (width == 1)
       return bytes_[index] != 0;
-    for (unsigned i = 0; i < width; ++i)
-      if (bytes_[index + i])
-        return true;
-    return false;
+    const unsigned word = index >> 6;
+    const unsigned bit = index & 63u;
+    if (bit + width <= 64u) {
+      const uint64_t mask = width == 64u ? ~uint64_t{0} : ((uint64_t{1} << width) - 1u) << bit;
+      return (vgpr_mask_[word] & mask) != 0;
+    }
+    const unsigned low_bits = 64u - bit;
+    const unsigned high_bits = width - low_bits;
+    const uint64_t lo_mask = (~uint64_t{0}) << bit;
+    const uint64_t hi_mask = (uint64_t{1} << high_bits) - 1u;
+    return ((vgpr_mask_[word] & lo_mask) | (vgpr_mask_[word + 1] & hi_mask)) != 0;
   }
 
   bool pending(RegisterRef reg, bool write = false) const {
@@ -87,8 +101,16 @@ public:
     }
     return false;
   }
-  void set(size_t i, uint8_t bits = kResult) { bytes_[i] |= bits; }
-  void clear(size_t i) { bytes_[i] = 0; }
+  void set(size_t i, uint8_t bits = kResult) {
+    bytes_[i] |= bits;
+    if (i < REGISTER_SET_MAX_VGPRS && bytes_[i])
+      vgpr_mask_[i >> 6] |= uint64_t{1} << (i & 63u);
+  }
+  void clear(size_t i) {
+    bytes_[i] = 0;
+    if (i < REGISTER_SET_MAX_VGPRS)
+      vgpr_mask_[i >> 6] &= ~(uint64_t{1} << (i & 63u));
+  }
 
   // Result ranges are normally contiguous physical VGPRs. Resolve their file
   // once and combine the overlap probe with marking the same shadow bytes.
@@ -97,9 +119,12 @@ public:
     bool overlap = false;
     if (reg.cls == RegClass::VGPR && reg.index + reg.width <= REGISTER_SET_MAX_VGPRS) {
       for (unsigned r = 0; r < reg.width; ++r) {
-        auto &byte = bytes_[reg.index + r];
+        const unsigned idx = reg.index + r;
+        auto &byte = bytes_[idx];
         overlap |= byte != 0;
         byte |= bits;
+        if (byte)
+          vgpr_mask_[idx >> 6] |= uint64_t{1} << (idx & 63u);
       }
     } else {
       for (unsigned r = 0; r < reg.width; ++r) {
@@ -108,6 +133,8 @@ public:
         if (const auto i = index(element); i < kRegisters) {
           overlap |= bytes_[i] != 0;
           bytes_[i] |= bits;
+          if (i < REGISTER_SET_MAX_VGPRS && bytes_[i])
+            vgpr_mask_[i >> 6] |= uint64_t{1} << (i & 63u);
         }
       }
     }
@@ -116,21 +143,31 @@ public:
   void clear(RegisterRef reg) {
     reg = canonical(reg);
     if (reg.cls == RegClass::VGPR && reg.index + reg.width <= REGISTER_SET_MAX_VGPRS) {
-      for (unsigned r = 0; r < reg.width; ++r)
-        bytes_[reg.index + r] = 0;
+      for (unsigned r = 0; r < reg.width; ++r) {
+        const unsigned idx = reg.index + r;
+        bytes_[idx] = 0;
+        vgpr_mask_[idx >> 6] &= ~(uint64_t{1} << (idx & 63u));
+      }
     } else {
       for (unsigned r = 0; r < reg.width; ++r) {
         auto element = reg;
         element.index += r;
-        if (const auto i = index(element); i < kRegisters)
+        if (const auto i = index(element); i < kRegisters) {
           bytes_[i] = 0;
+          if (i < REGISTER_SET_MAX_VGPRS)
+            vgpr_mask_[i >> 6] &= ~(uint64_t{1} << (i & 63u));
+        }
       }
     }
   }
-  void reset() { bytes_.fill(0); }
+  void reset() {
+    bytes_.fill(0);
+    vgpr_mask_.fill(0);
+  }
 
 private:
   uint16_t sgpr_alias_end_ = 0;
+  std::array<uint64_t, 4> vgpr_mask_{};
   std::array<uint8_t, kRegisters> bytes_{};
 };
 
@@ -199,6 +236,8 @@ public:
   using Reporter = void (*)(void *, const Hazard &);
 
   bool empty() const { return events_.empty(); }
+  bool has_pending_scalar() const { return pending_scalar_; }
+  const MemoryWaitShadow &shadow() const { return pending_; }
   void clear();
   /// Cancel the latest instruction's dependency and counter positions before
   /// debugger replay, preserving older producers and coalesced source records.

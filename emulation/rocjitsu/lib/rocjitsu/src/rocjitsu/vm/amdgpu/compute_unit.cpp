@@ -2112,6 +2112,38 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
       return;
     }
   }
+  // Pure non-FLAT LDS/VMEM stores have no register destination; record their
+  // single counter obligation directly without building ClassifiedEvents.
+  if (!config_.xcnt_checks_enabled() && !supports_expert_scheduling(config_.arch) &&
+      config_.arch != rocjitsu::IsaFamily::Rdna2 && inst.num_dst_operands() == 0 &&
+      inst.amdgpu_memory_kind() == MemoryKind::Store &&
+      inst.amdgpu_memory_addressing() != MemoryAddressing::Flat &&
+      inst.amdgpu_memory_addressing() != MemoryAddressing::Gds &&
+      !(inst.flags() & (CONDITIONAL_MEMORY_LANES | FIRST_ACTIVE_MEMORY_LANE)) && info &&
+      info->counter_obligations().size() == 1) {
+    const auto obligation = info->counter_obligations().front();
+    const auto completion = obligation.completion_class();
+    if (completion == MemoryCompletionClass::LDS || completion == MemoryCompletionClass::VMEM) {
+      const auto model = waitcnt_model(config_.arch).value();
+      const auto counter = completion == MemoryCompletionClass::LDS
+                               ? WaitCounterKind::Ds
+                               : vmem_store_wait_counter(model);
+      const auto kind = completion == MemoryCompletionClass::LDS ? WaitEventKind::Ds
+                                                                 : WaitEventKind::VmemStore;
+      auto &scoreboard = wf.ensure_memory_wait_scoreboard();
+      const uint64_t lanes =
+          info->exec_masked ? wf.memory_exec(inst)
+                            : (wf.wf_size() == 64 ? ~uint64_t{0} : uint64_t{0xffffffff});
+      if (!lanes && !scoreboard.outstanding(counter))
+        return;
+      const uint32_t ordering_kind =
+          (model == WaitcntModel::LegacyNoVscnt && counter == WaitCounterKind::Load)
+              ? 0
+              : (uint32_t{1} << static_cast<unsigned>(kind));
+      (void)scoreboard.issue(counter, false, ordering_kind, obligation.counter_increment());
+      return;
+    }
+  }
   const auto model = waitcnt_model(config_.arch);
   if (model.failed())
     return;

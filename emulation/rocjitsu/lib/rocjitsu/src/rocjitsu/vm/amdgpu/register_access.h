@@ -2117,6 +2117,7 @@ private:
   /// Read an encoding-selected control word while planning an instruction's
   /// accesses. This does not constitute an executed register access.
   std::optional<uint64_t> vector_control_value(RegisterRef reg, unsigned lane) const;
+  std::pair<const uint32_t *, const uint32_t *> vector_control_lanes(RegisterRef reg) const;
 
   [[nodiscard]] uint32_t vgpr_region_wave_size(uint32_t physical_base, uint32_t reg_count) const {
     if (wf_)

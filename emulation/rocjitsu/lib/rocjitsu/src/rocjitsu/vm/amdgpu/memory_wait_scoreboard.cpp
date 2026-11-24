@@ -58,6 +58,20 @@ std::optional<uint64_t> RegisterAccess::vector_control_value(RegisterRef reg, un
   return value;
 }
 
+std::pair<const uint32_t *, const uint32_t *>
+RegisterAccess::vector_control_lanes(RegisterRef reg) const {
+  const auto &wf = wavefront();
+  if (reg.cls != RegClass::VGPR || !reg.width || reg.width > 2)
+    return {nullptr, nullptr};
+  const auto base = wf.vgpr_alloc().base + reg.index;
+  if (!cu_->owns_vgpr_range(wf, base, reg.width))
+    return {nullptr, nullptr};
+  const auto *lo = reinterpret_cast<const uint32_t *>(cu_->raw_vgpr_data(base));
+  const auto *hi =
+      reg.width == 2 ? reinterpret_cast<const uint32_t *>(cu_->raw_vgpr_data(base + 1)) : nullptr;
+  return {lo, hi};
+}
+
 std::optional<RegisterRef> RegisterAccess::source_register(const Operand &op, bool wordwise) const {
   if (!op.reads_value() || op.size_bits() == 0)
     return std::nullopt;
@@ -250,17 +264,22 @@ MemoryWaitScoreboard::FlatLanes MemoryWaitScoreboard::flat_lanes(const Instructi
   const auto address = vector_pointer32
                            ? registers.block_data_register(*modifiers.flat_address, 0, false)
                            : registers.source_register(*modifiers.flat_address);
+  const auto [lo_lanes, hi_lanes] =
+      address ? registers.vector_control_lanes(*address)
+              : std::pair<const uint32_t *, const uint32_t *>{nullptr, nullptr};
+  const bool cdna5_scalar = modifiers.flat_scalar_address && arch == rocjitsu::IsaFamily::Cdna5;
   uint64_t remaining = result.requests;
   while (remaining) {
     const unsigned lane = std::countr_zero(remaining);
     remaining &= remaining - 1;
-    const uint64_t vector =
-        address ? registers.vector_control_value(*address, lane).value_or(0) : 0;
+    uint64_t vector = 0;
+    if (lo_lanes) {
+      vector = lo_lanes[lane];
+      if (hi_lanes)
+        vector |= uint64_t{hi_lanes[lane]} << 32;
+    }
     uint64_t value =
-        scalar +
-        flat_vector_offset(vector,
-                           modifiers.flat_scalar_address && arch == rocjitsu::IsaFamily::Cdna5,
-                           modifiers.flat_scale) +
+        scalar + flat_vector_offset(vector, cdna5_scalar, modifiers.flat_scale) +
         modifiers.flat_offset;
     if (vector_pointer32)
       value = static_cast<uint32_t>(value);
@@ -337,6 +356,8 @@ void MemoryWaitScoreboard::check_image_store_payload(const Instruction &inst, co
 void MemoryWaitScoreboard::check_instruction(const Instruction &inst, Wavefront &wf) {
   if (empty() || inst.is_empty_global_transpose(wf.exec()))
     return;
+  if (!pending_scalar_ && !pending_.any_vgpr())
+    return;
   const bool is_cdna2 = wf.cu().arch() == rocjitsu::IsaFamily::Cdna2;
   const bool cdna2_valu = is_cdna2 && (inst.flags() & VALU);
   if ((cdna2_valu && !cdna2::valu_destinations_in_range(inst, wf)) ||
@@ -345,6 +366,9 @@ void MemoryWaitScoreboard::check_instruction(const Instruction &inst, Wavefront 
   // A clear register byte proves independence for every lane and byte mask.
   // Only a possible overlap needs the precise instruction-specific footprints.
   if (!pending_scalar_ && (inst.flags() & DIRECT_REGISTER_ACCESSES) && !wf.gpr_idx_en()) {
+    const bool no_msb = wf.vgpr_msb_mode() == 0;
+    const uint32_t vgpr_limit =
+        std::min<uint32_t>(wf.vgpr_alloc().count, REGISTER_SET_MAX_VGPRS);
     auto pending = [&](const Operand &op) {
       const auto reg = op.decoded_vgpr();
       if (!reg)
@@ -352,24 +376,35 @@ void MemoryWaitScoreboard::check_instruction(const Instruction &inst, Wavefront 
       unsigned index = reg->index;
       if (cdna2_valu)
         index = apply_gpr_idx(wf, index, op.vgpr_msb_role());
-      else if (index < ACC_VGPR_OFFSET)
+      else if (!no_msb && index < ACC_VGPR_OFFSET)
         index += wf.vgpr_msb_for_role(op.vgpr_msb_role()) << 8;
-      if (index + reg->width > wf.vgpr_alloc().count || index + reg->width > REGISTER_SET_MAX_VGPRS)
+      if (index + reg->width > vgpr_limit)
         return true;
       return pending_.pending_vgpr(static_cast<uint16_t>(index), reg->width);
     };
     bool hit = false;
-    for (int i = 0; i < inst.num_src_operands(); ++i) {
+    const int num_src = inst.num_src_operands();
+    for (int i = 0; i < num_src; ++i) {
       if (!inst.tracks_explicit_source(i)) {
         // The instruction's implicit uses replace this decoded placeholder, so
         // the explicit-only prefilter cannot prove that the instruction misses.
         hit = true;
-        continue;
+        break;
       }
-      hit |= pending(*inst.src_operand(i));
+      if (pending(*inst.src_operand(i))) {
+        hit = true;
+        break;
+      }
     }
-    for (int i = 0; i < inst.num_dst_operands(); ++i)
-      hit |= pending(*inst.dst_operand(i));
+    if (!hit) {
+      const int num_dst = inst.num_dst_operands();
+      for (int i = 0; i < num_dst; ++i) {
+        if (pending(*inst.dst_operand(i))) {
+          hit = true;
+          break;
+        }
+      }
+    }
     if (!hit)
       return;
   }
