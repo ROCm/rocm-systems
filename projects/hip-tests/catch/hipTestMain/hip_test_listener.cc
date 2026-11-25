@@ -56,32 +56,63 @@ extern "C" hipError_t hipExtGetLastError(void);
 #endif
 
 // The reset is gated by HIP runtime initialization only on Linux, to protect
-// fork-based multiprocess parents; HSA (AMD) and the CUDA driver exist there.
+// fork-based multiprocess parents; /proc and the GPU device nodes exist there.
 #if HT_LINUX
+#include <dirent.h>
+#include <limits.h>
+#include <unistd.h>
+#include <cstring>
+
+// The GPU character devices a HIP runtime opens while initializing. Matched as
+// prefixes, so the per-device suffixes (renderD128, nvidia0, ...) are covered.
+static constexpr const char* kGpuDeviceNodes[] = {
 #if HT_AMD
-#include <hsa/hsa.h>
+    "/dev/kfd", "/dev/dri/renderD",
 #elif HT_NVIDIA
-#include <cuda.h>
+    "/dev/nvidia",
 #else
 #error "Platform not recognized"
 #endif
+};
 
 // Whether this process has initialized the HIP runtime, hence may hold a leaked
-// last error and can be reset without newly initializing a fork parent that
-// never used HIP. The underlying driver uses explicit initialization, so a call
-// made before it returns a "not initialized" status without initializing
-// anything -- a side-effect-free probe. AMD probes HSA, NVIDIA the CUDA driver.
+// last error. HIP cannot be asked -- every entry point that knows runs
+// HIP_INIT_API first -- so look for the device nodes it opens instead: no HIP
+// call runs without one, and touching no backend keeps this header-free.
 static bool hipRuntimeInitialized() {
-#if HT_AMD
-  uint16_t version = 0;
-  return hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MAJOR, &version) !=
-      HSA_STATUS_ERROR_NOT_INITIALIZED;
-#elif HT_NVIDIA
-  int count = 0;
-  return cuDeviceGetCount(&count) != CUDA_ERROR_NOT_INITIALIZED;
-#else
-#error "Platform not recognized"
-#endif
+  // HIP is never de-initialized mid-run, so this only ever flips false -> true.
+  static bool initialized = false;
+  if (initialized) {
+    return true;
+  }
+
+  DIR* dir = opendir("/proc/self/fd");
+  if (dir == nullptr) {
+    return false;
+  }
+  // Resolving each entry against the directory fd keeps this free of path
+  // formatting, which -Wformat-truncation rejects for a 255-byte d_name, and
+  // saves the kernel re-walking /proc/self/fd for every entry.
+  const int dir_fd = dirfd(dir);
+  while (const dirent* entry = readdir(dir)) {
+    char target[PATH_MAX];
+    const ssize_t length = readlinkat(dir_fd, entry->d_name, target, sizeof(target) - 1);
+    if (length <= 0) {
+      continue;
+    }
+    target[length] = '\0';
+    for (const char* node : kGpuDeviceNodes) {
+      if (strncmp(target, node, strlen(node)) == 0) {
+        initialized = true;
+        break;
+      }
+    }
+    if (initialized) {
+      break;
+    }
+  }
+  closedir(dir);
+  return initialized;
 }
 #endif  // HT_LINUX
 
