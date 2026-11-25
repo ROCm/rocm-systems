@@ -379,9 +379,9 @@ def parse_args() -> argparse.Namespace:
         "--base",
         default="HEAD",
         help=(
-            "Diff against this ref (default: %(default)s) "
+            "Diff against this ref (default: %(default)s). "
             f"Use '{FORK_SELECTOR}' for the point where this "
-            f"branch diverged from {FORK_REF}, or pass any ref/SHA."
+            f"branch diverged from {FORK_REF}, or pass any ref/SHA. "
             "Covers committed changes since the ref plus any "
             "staged/unstaged changes on top."
         ),
