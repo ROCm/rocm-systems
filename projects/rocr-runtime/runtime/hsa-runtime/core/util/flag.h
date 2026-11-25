@@ -308,6 +308,12 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_IPC_MODE_LEGACY");
     enable_ipc_mode_legacy_ = (var == "1") ? true : false;
 
+    // Opt-in: allow a process of a different user to attach an exported IPC
+    // buffer. Off by default, so the dma-buf IPC socket serves only peers of
+    // the exporting user.
+    var = os::GetEnvVar("HSA_ENABLE_IPC_CROSS_USER");
+    enable_ipc_cross_user_ = (var == "1") ? true : false;
+
     if (os::IsEnvVarSet("HSA_PCS_MAX_DEVICE_BUFFER_SIZE")) {
       var = os::GetEnvVar("HSA_PCS_MAX_DEVICE_BUFFER_SIZE");
       char* end;
@@ -493,6 +499,8 @@ class Flag {
 
   void set_ipc_mode_legacy(bool enable) { enable_ipc_mode_legacy_ = enable; }
 
+  void set_ipc_cross_user(bool enable) { enable_ipc_cross_user_ = enable; }
+
   bool disable_pc_sampling() const { return disable_pc_sampling_; }
 
   bool disable_gfx12_strict() const { return disable_gfx12_strict_; }
@@ -537,6 +545,8 @@ class Flag {
   SRAMECC_ENABLE sramecc_enable() const { return sramecc_enable_; }
 
   bool enable_ipc_mode_legacy() const { return enable_ipc_mode_legacy_; }
+
+  bool enable_ipc_cross_user() const { return enable_ipc_cross_user_; }
 
   size_t pc_sampling_max_device_buffer_size() const { return pc_sampling_max_device_buffer_size_; }
 
@@ -645,6 +655,7 @@ class Flag {
   bool enable_mwaitx_;
   bool enable_yielding_poll_;
   bool enable_ipc_mode_legacy_;
+  bool enable_ipc_cross_user_;
   bool wait_any_;
   bool dev_mem_queue_buf_;
   uint32_t signal_abort_timeout_;

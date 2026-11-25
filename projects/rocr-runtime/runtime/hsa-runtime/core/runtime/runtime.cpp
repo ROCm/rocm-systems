@@ -1528,7 +1528,11 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
     // lives in an abstract namespace that ignores filesystem permissions, so
     // IPC sharing is restricted to processes of the same user; a connection
     // from another user is dropped without disclosing a dma-buf descriptor.
-    if (!os::IsIPCSocketPeerSameUser(conn)) continue;
+    // HSA_ENABLE_IPC_CROSS_USER=1 opts out for deployments that intentionally
+    // share buffers across users within a trusted namespace.
+    if (!runtime_singleton_->flag().enable_ipc_cross_user() &&
+        !os::IsIPCSocketPeerSameUser(conn))
+      continue;
 
     // Bound blocking reads so a peer cannot park the server thread (which also
     // serializes exporter frees through ipc_sock_server_lock_) indefinitely by
