@@ -6,6 +6,7 @@
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
 #include "util/except.h"
+#include "util/log.h"
 
 #include <algorithm>
 #include <atomic>
@@ -882,18 +883,22 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
       owner_domain = {prepared_domains_[0].coherence, request->backing.owner_gpu_id()};
       effect_domains = {&owner_domain, 1};
     }
+    const auto report_error = [id = request->id](std::string_view message) {
+      util::Logger::warn("Fabric request ", id, " cache maintenance failed: ", message);
+    };
+    const util::DiagnosticEmitter emit_error(report_error);
     const auto acquire = [&]() -> util::FailureOr<amdgpu::CacheMaintenanceGroupResult> {
       if (!effect_authority.cache_aliases.empty()) {
         return amdgpu::DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
             effect_domains, effect_authority.cache_aliases, effect_authority.resolve_writeback,
-            effect_authority.resolve_witness);
+            effect_authority.resolve_witness, emit_error);
       } else if (resolve_cache_writeback_) {
         return amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
             effect_domains, amdgpu::DeviceCacheOperation::WritebackInvalidate,
-            resolve_cache_writeback_);
+            resolve_cache_writeback_, emit_error);
       } else {
         return amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
-            coherence_domains_, amdgpu::DeviceCacheOperation::WritebackInvalidate);
+            coherence_domains_, amdgpu::DeviceCacheOperation::WritebackInvalidate, emit_error);
       }
     };
     auto acquired = acquire();

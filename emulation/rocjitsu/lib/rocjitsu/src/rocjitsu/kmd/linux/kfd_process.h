@@ -1032,19 +1032,10 @@ public:
   /// @brief Publish while retaining the request lock across grant and PTE work.
   /// @pre The caller holds alloc_mutex_ and owns a transaction for this process.
   void publish_gpu_grants_locked(PageTableTransaction &transaction);
-  /// @brief Deny GPU access permanently if host VMA cleanup cannot publish.
-  /// @pre The caller holds alloc_mutex_. No allocation occurs on this path.
-  void fail_closed_gpu_grants_locked() noexcept {
-    gpu_grants_poisoned_ = true;
-    replace_gpu_grants(deny_all_gpu_grants_);
-  }
 
 private:
   std::shared_ptr<const GpuGrantIndex>
   build_gpu_grant_index_locked(std::span<const GpuGrantRange> retired_ranges) const {
-    if (gpu_grants_poisoned_) {
-      return deny_all_gpu_grants_;
-    }
     auto next = std::make_shared<GpuGrantIndex>();
     next->svm_denials = svm_denied_ranges_;
     next->ranges.reserve(allocations_.size() + retired_ranges.size());
@@ -1792,12 +1783,6 @@ public:
   std::atomic<uint64_t> gpu_grant_publication_{1};
   mutable util::DistributedSharedMutex gpu_grants_mutex_;
   std::shared_ptr<const GpuGrantIndex> gpu_grants_ = std::make_shared<const GpuGrantIndex>();
-  std::shared_ptr<const GpuGrantIndex> deny_all_gpu_grants_ = [] {
-    auto denied = std::make_shared<GpuGrantIndex>();
-    denied->valid = false;
-    return denied;
-  }();
-  bool gpu_grants_poisoned_ = false;
   std::shared_ptr<amdgpu::VmRawBackingWriteGate> raw_write_gate_ =
       std::make_shared<amdgpu::VmRawBackingWriteGate>();
   uint64_t gpu_admission_generation_ = 0;

@@ -154,16 +154,20 @@ uint64_t allocate_internal_identity(std::atomic<uint64_t> &next) noexcept {
 acquire_alias_retirement_maintenance(std::span<const amdgpu::DeviceCacheDomain> domains,
                                      std::span<const amdgpu::DeviceCacheAliasScope> selected,
                                      const amdgpu::PreparedWritebackResolver &resolve_writeback) {
+  const auto report_error = [](std::string_view message) {
+    util::Logger::warn("KFD alias retirement cache maintenance failed: ", message);
+  };
+  const util::DiagnosticEmitter emit_error(report_error);
   if (!selected.empty()) {
     auto scoped = amdgpu::DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
-        domains, selected, resolve_writeback);
+        domains, selected, resolve_writeback, {}, emit_error);
     if (scoped.failed() || scoped.value().outcome != amdgpu::CacheMaintenanceOutcome::Retry) {
       return scoped;
     }
     // Only a refusal before any writeback may use whole-group maintenance.
   }
   return amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
-      domains, amdgpu::DeviceCacheOperation::WritebackInvalidate, resolve_writeback);
+      domains, amdgpu::DeviceCacheOperation::WritebackInvalidate, resolve_writeback, emit_error);
 }
 
 #ifndef CLONE_ARGS_SIZE_VER0
@@ -3717,8 +3721,12 @@ void SimulatedKfd::init_command_processors_locked() {
               // Resolution reenters CuIngressAccess outside cache locks. Do not
               // hold its mutex while the prepared group takes those locks.
               const std::array domains{amdgpu::DeviceCacheDomain{cache_coherence, gpu_id}};
+              const auto report_error = [gpu_id, vmid](std::string_view message) {
+                util::Logger::warn("CU atomic cache maintenance failed for GPU ", gpu_id, ", VMID ",
+                                   vmid, ": ", message);
+              };
               auto leases = amdgpu::DeviceCacheCoherence::acquire_prepared_atomic_boundary(
-                  domains, resolve_writeback);
+                  domains, resolve_writeback, util::DiagnosticEmitter(report_error));
               if (leases.failed()) {
                 return util::Result::failure();
               }
@@ -9107,8 +9115,13 @@ int SimulatedKfd::promote_local_alias_for_ipc(KfdProcess &proc, uint64_t handle,
                                               size_t size) {
         return prepare_gpu_alias_writeback_for_vmid(gpu_id, vmid, address, size, &authority);
       };
+      const auto report_error = [gpu_id = alias.gpu_id](std::string_view message) {
+        util::Logger::warn("KFD alias export cache maintenance failed for GPU ", gpu_id, ": ",
+                           message);
+      };
       auto leases = amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
-          domains, amdgpu::DeviceCacheOperation::WritebackInvalidate, resolve);
+          domains, amdgpu::DeviceCacheOperation::WritebackInvalidate, resolve,
+          util::DiagnosticEmitter(report_error));
       if (leases.failed()) {
         return -EIO;
       }

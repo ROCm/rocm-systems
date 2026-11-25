@@ -757,12 +757,13 @@ TEST(KfdProcessGrantIndexTest, ConcurrentReadersObservePublicationAndRevocation)
   using rocjitsu::KfdProcess;
   constexpr uint32_t kGpuId = 42;
   constexpr uint64_t kVa = 0x20000;
+  constexpr size_t kBytes = 0x1000;
   constexpr size_t kReaderCount = 4;
   constexpr uint64_t kPublications = 200;
   KfdProcess process(123);
   KfdProcess::GpuAllocation allocation{};
   allocation.gpu_va = kVa;
-  allocation.size = 0x1000;
+  allocation.size = kBytes;
   allocation.gpu_id = kGpuId;
   allocation.domain = KfdProcess::GpuGrantDomain::Vram;
   allocation.local_backing_owner =
@@ -801,7 +802,7 @@ TEST(KfdProcessGrantIndexTest, ConcurrentReadersObservePublicationAndRevocation)
         }
       } while (!revoked.load(std::memory_order_acquire));
       EXPECT_FALSE(process.gpu_access_grant(kGpuId, kVa, 4).allowed);
-      EXPECT_FALSE(process.gpu_access_grant(kGpuId, kVa + 0x2000, 4).allowed);
+      EXPECT_TRUE(process.gpu_access_grant(kGpuId, kVa + 0x2000, 4).allowed);
       EXPECT_TRUE(process.gpu_local_alias_snapshot()->empty());
       EXPECT_FALSE(process.gpu_alias_grant_current(original_alias));
     });
@@ -815,7 +816,7 @@ TEST(KfdProcessGrantIndexTest, ConcurrentReadersObservePublicationAndRevocation)
   {
     std::lock_guard lock(process.alloc_mutex_);
     process.allocations_.clear();
-    process.fail_closed_gpu_grants_locked();
+    process.retire_gpu_range_locked(kVa, kBytes);
     process.publish_gpu_grants_locked();
   }
   revoked.store(true, std::memory_order_release);
