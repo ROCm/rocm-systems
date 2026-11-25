@@ -407,7 +407,7 @@ struct F16OutputCase {
   uint8_t omod;
   uint16_t expected;
   uint8_t clamp = 0;
-  amdgpu::SimdFastPath expected_simd_path = amdgpu::SimdFastPath::VOP3_TERNARY_FP16;
+  std::optional<amdgpu::SimdFastPath> expected_simd_path = amdgpu::SimdFastPath::VOP3_TERNARY_FP16;
 };
 
 // These cases separate destination-format rounding from OMOD/CLAMP ordering.
@@ -501,10 +501,9 @@ std::vector<F16OutputCase> f16_output_cases() {
                        3,
                        0x8400});
     }
+    // Selection now uses rj-arith's CPU dispatch rather than the legacy tracker.
     for (auto i = first; i != cases.size(); ++i) {
-      cases[i].expected_simd_path = arch == rocjitsu::IsaFamily::Rdna2
-                                        ? amdgpu::SimdFastPath::VOP3_TERNARY_RAW_FP
-                                        : amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16;
+      cases[i].expected_simd_path.reset();
     }
   };
   // MODE 0x80 cases exercise the emulator's old-target output-denormal gate.
@@ -613,7 +612,7 @@ TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabled
         if (force_scalar) {
           EXPECT_TRUE(tracker.no_tracked_path_executed())
               << test.name << ": forced-scalar execution used SIMD";
-        } else if (test.arch != rocjitsu::IsaFamily::Rdna3 &&
+        } else if (test.expected_simd_path && test.arch != rocjitsu::IsaFamily::Rdna3 &&
                    !(test.arch == rocjitsu::IsaFamily::Cdna4 &&
                      (test.opcode == cdna4::kVMin3F16Vop3 || test.opcode == cdna4::kVMax3F16Vop3 ||
                       test.opcode == cdna4::kVMed3F16Vop3 || test.opcode == cdna4::kVMadF16Vop3 ||
@@ -621,7 +620,7 @@ TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabled
                       test.opcode == cdna4::kVDivFixupF16Vop3 ||
                       test.opcode == cdna4::kVDivFixupLegacyF16Vop3))) {
           // Migrated operations use rj-arith, whose SIMD paths do not use this tracker.
-          EXPECT_TRUE(tracker.only_tracked_path_executed(test.expected_simd_path))
+          EXPECT_TRUE(tracker.only_tracked_path_executed(*test.expected_simd_path))
               << test.name << ": eligible execution did not use the ternary F16 SIMD path";
         }
         for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {

@@ -70,13 +70,21 @@ rj_consan_entry(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgroup
   }
 }
 
-extern "C" __device__ __attribute__((noinline, used, visibility("default"))) void
-rj_consan_access(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgroup, u32 site,
-                 u32 address, u32 immediate, u32 mask_low, u32 mask_high, u32 width, u32 repeated) {
+template <bool Transpose>
+static __device__ __attribute__((always_inline)) void
+record_access(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgroup, u32 site,
+              u32 address, u32 immediate, u32 mask_low, u32 mask_high, u32 width, u32 repeated) {
   GlobalWords dispatch = context(low, high);
   GlobalWords output =
       row(dispatch, uniform(first_workitem) / CONSAN_PROBE_WAVE_SIZE, stride, workgroup);
-  u64 remaining = u64{uniform(mask_low)} | (u64{uniform(mask_high)} << 32);
+  const u64 anchor_exec = u64{uniform(mask_low)} | (u64{uniform(mask_high)} << 32);
+  u64 remaining = anchor_exec;
+#if CONSAN_PROBE_WAVE_SIZE == 32
+  // CDNA5 transpose instructions fetch every physical source lane, including
+  // at empty EXEC. The full-EXEC envelope copied every pre-guest ADDR lane.
+  if constexpr (Transpose)
+    remaining = 0xffffffffu;
+#endif
   if (remaining == 0)
     return;
   const u32 sequence = wave_state(output).next_sequence(lane_id());
@@ -115,7 +123,12 @@ rj_consan_access(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgrou
       record[wire::kRecordWidth / 4] = uniform(width);
       record[wire::kRecordGuestMask / 4] = u32(matching);
       record[wire::kRecordGuestMask / 4 + 1] = u32(matching >> 32);
-      record[wire::kRecordFlags / 4] = wire::kExactGuestMask | (offset >> 32 ? 2u : 0u);
+      if constexpr (Transpose) {
+        record[wire::kRecordAnchorExec / 4] = u32(anchor_exec);
+        record[wire::kRecordAnchorExec / 4 + 1] = u32(anchor_exec >> 32);
+      }
+      const u32 mask_kind = Transpose ? wire::kExactTransposeRequestMask : wire::kExactGuestMask;
+      record[wire::kRecordFlags / 4] = mask_kind | (offset >> 32 ? 2u : 0u);
       publish(record + wire::kRecordCommit / 4, wire::kAccessCommitted);
     }
   }
@@ -126,6 +139,21 @@ rj_consan_access(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgrou
     wave_state(output).advance(output + wire::kRowAddressLoss / 4, lane_id());
   if (remaining)
     wave_state(output).record_loss(lane_id());
+}
+
+extern "C" __device__ __attribute__((noinline, used, visibility("default"))) void
+rj_consan_access(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgroup, u32 site,
+                 u32 address, u32 immediate, u32 mask_low, u32 mask_high, u32 width, u32 repeated) {
+  record_access<false>(low, high, first_workitem, stride, workgroup, site, address, immediate,
+                       mask_low, mask_high, width, repeated);
+}
+
+extern "C" __device__ __attribute__((noinline, used, visibility("default"))) void
+rj_consan_transpose(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgroup, u32 site,
+                    u32 address, u32 immediate, u32 mask_low, u32 mask_high, u32 width,
+                    u32 repeated) {
+  record_access<true>(low, high, first_workitem, stride, workgroup, site, address, immediate,
+                      mask_low, mask_high, width, repeated);
 }
 
 extern "C" __device__ __attribute__((noinline, used, visibility("default"))) void
@@ -191,6 +219,7 @@ rj_consan_exit(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgroup)
 // Retain standalone functions through HIP device internalization and linking.
 __device__ auto rj_consan_entry_keepalive = &rj_consan_entry;
 __device__ auto rj_consan_access_keepalive = &rj_consan_access;
+__device__ auto rj_consan_transpose_keepalive = &rj_consan_transpose;
 __device__ auto rj_consan_exit_keepalive = &rj_consan_exit;
 
 __device__ auto rj_consan_barrier_keepalive = &rj_consan_barrier;

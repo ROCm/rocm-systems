@@ -89,7 +89,9 @@ def gen_pk_binop(
     dtype: str | None,
     opsel_exprs: tuple[str, str] = ('', ''),
 ) -> str:
-    """Generate packed FP16/BF16 binary arithmetic."""
+    """Generate the remaining BF16 packed binary fallback bodies."""
+    if dtype != 'bf16':
+        raise ValueError(f'packed binary fallback does not support {dtype}')
     d, s0, s1 = dst[0], src[0], src[1]
     L = []
     L.append('  uint64_t exec = wf.exec();')
@@ -105,25 +107,7 @@ def gen_pk_binop(
     L.append(f'    bool sel0_hi = ({opsel_hi} >> 0) & 1;')
     L.append(f'    bool sel1_hi = ({opsel_hi} >> 1) & 1;')
 
-    if dtype == 'f16':
-        for half, neg in (('lo', 'neg'), ('hi', 'neg_hi')):
-            for name, raw, selector, bit in (
-                ('a', 'raw0', f'sel0_{half}', 0),
-                ('b', 'raw1', f'sel1_{half}', 1),
-            ):
-                L.append(
-                    f'    uint16_t {name}_{half} = static_cast<uint16_t>({selector} ? ({raw} >> 16) : {raw});'
-                )
-                L.append(
-                    f'    if (inst_.{neg} & {1 << bit}u) {name}_{half} ^= 0x8000u;'
-                )
-            L.append(
-                f'    const uint16_t r{half} = amdgpu::fp_mode::packed_binary_f16(amdgpu::fp_mode::PackedBinaryOp::{op.upper()}, a_{half}, b_{half}, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), wf.cu().arch(), wf.ieee_mode());'
-            )
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, rlo | (static_cast<uint32_t>(rhi) << 16));'
-        )
-    elif dtype == 'bf16':
+    if dtype == 'bf16':
         L.append(
             '    float a_lo = util::bf16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));'
         )
@@ -466,39 +450,6 @@ def gen_pk_lshl_add_u64(dst: list[str], src: list[str]) -> str:
             f'      wf, rj_arith_v_pk_lshl_add_u64_w32, 0, {dst[0]}, {src[0]}, {src[1]}, &{src[2]});',
         ]
     )
-
-
-def gen_pk_mov_b32(
-    dst: list[str],
-    src: list[str],
-    opsel_exprs: tuple[str, str] = ('', ''),
-) -> str:
-    """Generate V_PK_MOV_B32: move two 32-bit values based on op_sel."""
-    d, s0, s1 = dst[0], src[0], src[1]
-    L = []
-    L.append('  uint64_t exec = wf.exec();')
-    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-    L.append('    if (!(exec & (1ULL << lane))) continue;')
-    for var, src in [('s0', s0), ('s1', s1)]:
-        L.append(
-            f'    uint64_t {var}_pair_w = amdgpu::RegisterAccess(wf).read_lane64({src}, lane);'
-        )
-        L.append(f'    uint32_t {var}_lo_w = static_cast<uint32_t>({var}_pair_w);')
-        L.append(
-            f'    uint32_t {var}_hi_w = static_cast<uint32_t>({var}_pair_w >> 32);'
-        )
-    opsel, opsel_hi = opsel_exprs
-    s0_lo = _pk_f32_word_expr('s0', 'lo')
-    s0_hi = _pk_f32_word_expr('s0', 'hi')
-    s1_lo = _pk_f32_word_expr('s1', 'lo')
-    s1_hi = _pk_f32_word_expr('s1', 'hi')
-    L.append(f'    uint32_t lo = ({opsel} & 1) ? {s0_hi} : {s0_lo};')
-    L.append(f'    uint32_t hi = ({opsel} & 2) ? {s1_hi} : {s1_lo};')
-    L.append(
-        f'    amdgpu::RegisterAccess(wf).write_lane64({d}, lane, static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32));'
-    )
-    L.append('  }')
-    return '\n'.join(L)
 
 
 # FP8 DOT4 semantic operation -> (src0 is FP8, src1 is FP8), as for FP8 WMMA.

@@ -86,7 +86,7 @@ function display_help()
     echo "       --disable-kernarg-preload  Disable -mllvm --amdgpu-kernarg-preload-count=16 compile/link flag"
     echo "       --dump-asm              Disassemble code and dump assembly with inline code"
     echo "    -c|--enable-code-coverage  Enable host-side code coverage instrumentation (requires --debug)"
-    echo "       --enable-full-coverage  Enable host + device code coverage (requires --debug and ROCm 10.3+)"
+    echo "       --enable-full-coverage  Enable host + device code coverage (requires --debug and ROCm 7.15+)"
     echo "       --enable_backtrace      Build with custom backtrace support"
     echo "       --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)"
     echo "       --enable-rccl-ep-tests  Build the rccl_ep multi-GPU tests (requires --enable-mpi-tests and a runtime with working cuMem symmetric memory)"

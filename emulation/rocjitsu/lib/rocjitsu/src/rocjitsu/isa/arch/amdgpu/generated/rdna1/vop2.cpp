@@ -3034,6 +3034,12 @@ VSubF16Vop2::VSubF16Vop2(const MachineInst *inst)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
     }
   }
+  if (src0.is_vgpr()) {
+    src0.set_register_byte_mask(0x3);
+  }
+  if (vsrc1.is_vgpr()) {
+    vsrc1.set_register_byte_mask(0x3);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 != amdgpu::SRC_SDWA) {
     vdst.set_register_byte_mask(0x3);
     vdst.set_preserve_unwritten_bytes();
@@ -3129,6 +3135,12 @@ VSubrevF16Vop2::VSubrevF16Vop2(const MachineInst *inst)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
     }
   }
+  if (src0.is_vgpr()) {
+    src0.set_register_byte_mask(0x3);
+  }
+  if (vsrc1.is_vgpr()) {
+    vsrc1.set_register_byte_mask(0x3);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 != amdgpu::SRC_SDWA) {
     vdst.set_register_byte_mask(0x3);
     vdst.set_preserve_unwritten_bytes();
@@ -3223,6 +3235,12 @@ VMulF16Vop2::VMulF16Vop2(const MachineInst *inst)
     if (sw->s1) {
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
     }
+  }
+  if (src0.is_vgpr()) {
+    src0.set_register_byte_mask(0x3);
+  }
+  if (vsrc1.is_vgpr()) {
+    vsrc1.set_register_byte_mask(0x3);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 != amdgpu::SRC_SDWA) {
     vdst.set_register_byte_mask(0x3);
@@ -3684,6 +3702,12 @@ VLdexpF16Vop2::VLdexpF16Vop2(const MachineInst *inst)
     if (sw->s1) {
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
     }
+  }
+  if (src0.is_vgpr()) {
+    src0.set_register_byte_mask(0x3);
+  }
+  if (vsrc1.is_vgpr()) {
+    vsrc1.set_register_byte_mask(0x3);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 != amdgpu::SRC_SDWA) {
     vdst.set_register_byte_mask(0x3);
