@@ -5561,7 +5561,11 @@ void *SimulatedKfd::mmap_observing_host_vma_change(void *addr, size_t length, in
 }
 
 void *SimulatedKfd::mmap(uint32_t process_id, void *addr, size_t length, int prot, int flags,
-                         off_t offset, const std::function<void()> &on_host_vma_change) {
+                         off_t offset, const std::function<void()> &on_host_vma_change)
+#if defined(__cpp_exceptions)
+    try
+#endif
+{
   auto p = find_process(process_id);
   if (!p) {
     errno = ESRCH;
@@ -5616,6 +5620,11 @@ void *SimulatedKfd::mmap(uint32_t process_id, void *addr, size_t length, int pro
   }
   return dispatch_mmap(*p, addr, length, prot, flags, offset, on_host_vma_change);
 }
+#if defined(__cpp_exceptions)
+catch (const std::bad_alloc &) {
+  std::terminate();
+}
+#endif
 
 void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, int prot, int flags,
                                   off_t offset, const std::function<void()> &on_host_vma_change) {
@@ -6440,7 +6449,11 @@ int SimulatedKfd::munmap_observing_host_vma_change(void *addr, size_t length,
 }
 
 int SimulatedKfd::munmap(uint32_t process_id, void *addr, size_t length,
-                         const std::function<void()> &on_host_vma_change) {
+                         const std::function<void()> &on_host_vma_change)
+#if defined(__cpp_exceptions)
+    try
+#endif
+{
   auto p = find_process(process_id);
   if (!p) {
     return -ESRCH;
@@ -6472,6 +6485,11 @@ int SimulatedKfd::munmap(uint32_t process_id, void *addr, size_t length,
   }
   return dispatch_munmap(*p, addr, length, on_host_vma_change);
 }
+#if defined(__cpp_exceptions)
+catch (const std::bad_alloc &) {
+  std::terminate();
+}
+#endif
 
 void SimulatedKfd::run_host_vma_replacement(std::span<const std::pair<uint64_t, uint64_t>> ranges,
                                             const std::function<bool()> &bare_mapping_change) {
