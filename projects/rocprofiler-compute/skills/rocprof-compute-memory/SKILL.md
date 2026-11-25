@@ -52,9 +52,10 @@ rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> --m
 
 On ROCm 10.2 and earlier, use `-b memchart` instead of `--memory-chart`.
 
-The Memory Chart shows the whole hierarchy at once: requests issued, what each
-cache level served, and what reached HBM. Read it before opening any single
-cache level, because it tells you which level to open.
+The Memory Chart shows the hierarchy at once: requests issued and what each
+instrumented cache level served. On CDNA GPUs it also reports HBM traffic where
+the required metrics are available. Read it before opening any single cache
+level, because it tells you which level to open.
 
 Always analyze one kernel at a time with `-k`.
 
@@ -66,6 +67,30 @@ rocprof-compute profile --name <workload_name> --memory-chart -b vl1d l2 lds -- 
 
 The cache aliases differ by architecture; for example, some GPUs name their
 caches `gl0` and `gl2`.
+
+### Navi48 (gfx1201)
+
+For the release, the `--experimental` option, and the `STABLE_STD` prerequisite,
+read the
+[Navi48 (gfx1201)](../rocprof-compute-speed-of-light/SKILL.md#navi48-gfx1201)
+section of the `rocprof-compute-speed-of-light` skill. Then read `memchart`
+first.
+
+GL1 is a write-combining buffer that reports only `Total Requests`. There is no
+GL1 utilization, stall, bandwidth, or GL1-GL2 metric, so do not invent a hit
+rate. There is no GL2 bandwidth table, no CPC panel, and no Efficiency Arbiter
+panel.
+
+The Memory Chart `Memory Read Bandwidth` and `Memory Write Bandwidth` include
+traffic served or absorbed by the Infinity Cache. They do not measure physical
+VRAM bytes and have no VRAM peak. The chart draws Infinity Cache and VRAM boxes
+without metrics, because no counter measures them. Treat the Infinity Cache hit
+rate and the VRAM bandwidth as unknown, not zero. The LDS byte-access rate
+normalization is provisional.
+
+For the RDNA4 hierarchy and traffic boundaries, see the
+[Efficiency Arbiter](../../docs/conceptual/rdna/gcea.rst) and the
+[RDNA3-RDNA4 performance model](../../docs/conceptual/rdna/rdna-performance-model.rst).
 
 ### Collect only what the question needs
 

@@ -71,6 +71,13 @@ and `GPU Arch`. Not every feature works on every GPU. The docs for each feature
 say which GPUs support it. When rocprof-compute reports that a feature is not
 supported, tell the user, and do not work around it.
 
+### Navi48 (gfx1201)
+
+Before profiling Navi48, read the
+[Navi48 (gfx1201)](../rocprof-compute-speed-of-light/SKILL.md#navi48-gfx1201)
+section of the `rocprof-compute-speed-of-light` skill for its release,
+performance-state prerequisite, unsupported modes, and provisional metrics.
+
 ## 2. Collect what you need before profiling
 
 Ask once:
@@ -260,7 +267,7 @@ disables terminal output, and `--output-name` sets the file name. See
 | Symptom | Likely cause |
 |---|---|
 | No workload data | `--path` is not the directory with `profiling_config.yaml` |
-| Empty or missing panels | those counters were not collected; re-profile |
+| Empty or missing panels | check architecture support and profiling diagnostics, then collect missing supported counters |
 | All metrics zero | kernel too short, or no dispatches were captured |
 | No kernel ids | the application launched no GPU kernels |
 | Roofline missing | not collected, or unsupported on this architecture |

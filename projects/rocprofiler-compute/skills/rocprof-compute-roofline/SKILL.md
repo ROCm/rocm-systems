@@ -48,6 +48,28 @@ script with that path.
 
 ## 1. Collect
 
+On Navi48 (gfx1201), read the
+[Navi48 (gfx1201)](../rocprof-compute-speed-of-light/SKILL.md#navi48-gfx1201)
+section of the `rocprof-compute-speed-of-light` skill for the release and the
+prerequisites. The roofline plots the `VRAM`, `L0`, and `LDS` bandwidth roofs.
+`roofline.csv` has 0 in `L1Bw`, `L2Bw`, and `MALLBw`, because gfx1201 measures no
+L1, L2, or Infinity Cache (`MALL`) roof.
+
+The `AI VRAM` point counts GL2C requests destined for memory, which the
+Infinity Cache can also serve, so the plot marks it once, at `VRAM`. A point
+above the `VRAM` roof can mean the Infinity Cache is absorbing the traffic, so
+never call that kernel VRAM-limited from the plot alone. "Limited by" and the
+hover text consider `VRAM` only. Under `STABLE_STD` the measured roofs sit well
+below the interface peak.
+
+The VALU roofline metrics subtract WMMA issues from all VALU issues and multiply
+by the wave size. They are estimates, most reliable for wave32 FP16 16x16x16 WMMA kernels.
+Integer and floating-point instructions both count and an FMA is one issue, so they read low for FMA-only loops and high when index
+arithmetic dominates. The WMMA metric is compared with the FP16 WMMA peak. WMMA
+points need an SDK that provides the `SQ_WMMA_VALU_INSTS` counter, so check the
+profiling warnings. See the
+[RDNA WGP page](../../docs/conceptual/rdna/wgp.rst) for the roofline details.
+
 Collect only the roofline block:
 
 ```bash
