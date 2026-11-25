@@ -90,14 +90,22 @@ def check_experimental_arch(
     )
 
 
+def read_rocm_version_at(rocm_base_path: path) -> Optional[str]:
+    """Return the ROCm version string under rocm_base_path/.info, or None."""
+    for version_file_name in VERSION_LOC:
+        version_file_path = path(rocm_base_path) / ".info" / version_file_name
+        if version_file_path.is_file():
+            return version_file_path.read_text(encoding="utf-8").strip()
+    return None
+
+
 def get_rocm_ver() -> str:
     """Detect the installed ROCm version from filesystem or environment."""
     rocm_base_path = path(os.getenv("ROCM_PATH", "/opt/rocm"))
 
-    for version_file_name in VERSION_LOC:
-        version_file_path = rocm_base_path / ".info" / version_file_name
-        if version_file_path.exists():
-            return version_file_path.read_text(encoding="utf-8").strip()
+    detected = read_rocm_version_at(rocm_base_path)
+    if detected is not None:
+        return detected
 
     rocm_ver_user = os.getenv("ROCM_VER")
     if rocm_ver_user:

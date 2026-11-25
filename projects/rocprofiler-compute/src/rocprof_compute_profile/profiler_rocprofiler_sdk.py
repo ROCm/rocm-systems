@@ -10,11 +10,16 @@ from typing import Dict, List, Optional, Union
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_debug, console_error, console_log, demarcate
+from utils.specs import get_rocm_ver
 from utils.utils_common import (
     PROFILE_OUTPUT_FORMAT,
     resolve_rocm_library_path,
 )
-from utils.utils_profile import find_attach_tool_library, pc_sampling_unit
+from utils.utils_profile import (
+    find_attach_tool_library,
+    pc_sampling_unit,
+    require_container_rocm_at_least_host,
+)
 
 
 def _resolve_sdk_roctx_library(rocprofiler_sdk_tool_path: str) -> Optional[str]:
@@ -90,6 +95,11 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             # In attach mode, tools are provided using ROCPROF_ATTACH_TOOL_LIBRARY
             # instead of LD_PRELOAD.
             # Build attach tool list (only our tools, not user's LD_PRELOAD)
+            if self._soc is not None:
+                host_rocm_version = self._soc._mspec.rocm_version
+            else:
+                host_rocm_version = get_rocm_ver()
+            require_container_rocm_at_least_host(args.attach_pid, host_rocm_version)
             sdk_attach_tool = find_attach_tool_library(args.attach_pid)
             if sdk_attach_tool is None:
                 console_error(

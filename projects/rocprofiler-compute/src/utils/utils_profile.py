@@ -27,6 +27,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.specs import read_rocm_version_at
 from utils.utils_common import (
     NATIVE_AGENTS_PREFIX,
     NATIVE_COUNTERS_PREFIX,
@@ -37,6 +38,7 @@ from utils.utils_common import (
     get_rocprof_cmd,
     parse_pmc_perf,
     resolve_rocm_library_path,
+    rocm_version_at_least,
 )
 from vendored import yaml
 
@@ -137,6 +139,61 @@ def find_attach_tool_library(pid: int) -> Optional[str]:
     if resolved is None or not Path(resolved).is_file():
         return None
     return str(tool_path.parent / Path(resolved).name)
+
+
+def is_process_in_container(pid: int) -> bool:
+    """Return whether process pid has a different mount root than this process."""
+    target_root = PROCFS_ROOT / str(pid) / "root"
+    try:
+        return not target_root.samefile("/")
+    except OSError:
+        return False
+
+
+def get_target_rocm_version(pid: int) -> Optional[str]:
+    """Return the ROCm version of process pid, as seen through its mount root."""
+    maps_lines = _read_process_maps(pid)
+    library_dir = _find_mapped_library_directory(
+        maps_lines, "librocprofiler-sdk-attach.so"
+    )
+    if library_dir is None:
+        library_dir = _find_mapped_library_directory(
+            maps_lines, "librocprofiler-register.so"
+        )
+    target_root = PROCFS_ROOT / str(pid) / "root"
+    candidates: List[Path] = []
+    if library_dir is not None:
+        candidates.append(Path(library_dir).parent)
+    candidates.append(Path("/opt/rocm"))
+    for candidate in candidates:
+        version = read_rocm_version_at(target_root / candidate.relative_to("/"))
+        if version is not None:
+            return version
+    return None
+
+
+def require_container_rocm_at_least_host(pid: int, host_rocm_version: str) -> None:
+    """Stop before attach when a container ROCm is older than the host ROCm.
+
+    Same-root targets are left unchecked. The target process is not attached, so
+    it keeps running when this check fails.
+    """
+    if not is_process_in_container(pid):
+        return
+    target_version = get_target_rocm_version(pid)
+    if target_version is None:
+        console_error(
+            f"Cannot read the ROCm version of container process {pid}. "
+            "Install a readable ROCm under the process mount root, or attach "
+            "only when the container ROCm is at least as new as the host "
+            f"ROCm ({host_rocm_version})."
+        )
+    if not rocm_version_at_least(target_version, host_rocm_version):
+        console_error(
+            f"Container process {pid} has ROCm {target_version}, which is "
+            f"older than the host ROCm {host_rocm_version}. Use a container "
+            "ROCm that is at least as new as the host, then retry."
+        )
 
 
 @contextmanager

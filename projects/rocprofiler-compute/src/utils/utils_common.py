@@ -164,6 +164,27 @@ def version_to_numeric(version_parts: List[int], max_len: int) -> int:
     return version_numeric
 
 
+def parse_rocm_version_tuple(version: str) -> Tuple[int, ...]:
+    """Parse the leading numeric fields of a ROCm version string.
+
+    Suffixes such as "10.2.0a" are ignored after the numeric prefix.
+    """
+    match = re.match(r"^(\d+(?:\.\d+)*)", version.strip())
+    if match is None:
+        raise ValueError(f"Invalid ROCm version: {version!r}")
+    return tuple(int(part) for part in match.group(1).split("."))
+
+
+def rocm_version_at_least(candidate: str, minimum: str) -> bool:
+    """Return whether candidate is at least minimum as a ROCm version."""
+    candidate_parts = parse_rocm_version_tuple(candidate)
+    minimum_parts = parse_rocm_version_tuple(minimum)
+    length = max(len(candidate_parts), len(minimum_parts))
+    candidate_padded = candidate_parts + (0,) * (length - len(candidate_parts))
+    minimum_padded = minimum_parts + (0,) * (length - len(minimum_parts))
+    return candidate_padded >= minimum_padded
+
+
 def resolve_rocm_library_path(library_path: Optional[str]) -> Optional[str]:
     """
     Resolve ROCm library path with automatic version fallback.

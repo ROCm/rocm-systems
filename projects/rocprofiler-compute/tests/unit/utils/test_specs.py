@@ -312,6 +312,15 @@ def test_detect_arch_dash_variant_maps_to_base():
 
 
 @pytest.mark.misc
+def test_read_rocm_version_at(tmp_path):
+    info_dir = tmp_path / ".info"
+    info_dir.mkdir()
+    (info_dir / "version").write_text("10.2.0a\n", encoding="utf-8")
+
+    assert specs.read_rocm_version_at(tmp_path) == "10.2.0a"
+    assert specs.read_rocm_version_at(tmp_path / "missing") is None
+
+
 def test_get_rocm_ver_env_override(monkeypatch, tmp_path):
     """ROCM_VER overrides detection when no .info/ directory is present."""
     monkeypatch.setenv("ROCM_PATH", str(tmp_path))

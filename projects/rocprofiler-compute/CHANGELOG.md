@@ -7,6 +7,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Host-to-container live attach now requires the container ROCm version to be at least as new as the host ROCm version. An older container ROCm fails with a clear error before attach, and the workload keeps running.
+
 ### Changed
 
 ### Removed

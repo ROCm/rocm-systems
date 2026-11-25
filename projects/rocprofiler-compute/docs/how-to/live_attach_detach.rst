@@ -9,6 +9,9 @@ Dynamic process attachment in ROCm Compute Profiler
 Dynamic process attachment in ROCm Compute Profiler allows coupling with a workload process, without controlling its start or end. The application can already be running before the profiler application is invoked. The profiler simply attaches to the process, collects the required counters, and then detaches—without altering the lifecycle of the workload.
 
 You can also attach from the host to a process that runs in a container.
+The ROCm version in the container must be at least as new as the host ROCm
+version. When the container ROCm is older, ROCm Compute Profiler exits with an
+error before attach, and the workload keeps running.
 
 A specific attach is not repeatable, and it can only collect the set of counters that the hardware is capable of capturing in a single run. As such, in the current implementation, you must specify a subset of counter groups that can be collected within one run. This can be done either by using the ``--block`` option (for example, --block 3.1.1 5.1.1) or by providing a predefined set through the use of single pass counter collection ``--set``.
 
@@ -46,5 +49,6 @@ The analyze options for Dynamic process attachment are completely compatible wit
   * To enable Dynamic process attachment, you need to have the correct supported version of :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` and ``rocprofiler-register``.
   * The process to attach to must run as the same user as ROCm Compute Profiler. For a process in a container, run the container as that user.
   * On many Linux systems, a process can only trace its own child processes. To attach, first run ``sudo sysctl kernel.yama.ptrace_scope=0``. This setting lets processes trace any process of the same user on the whole system.
+  * For host-to-container attach, the container ROCm version must be greater than or equal to the host ROCm version. An older container ROCm fails before attach.
   * To make the Dynamic process attachment feature work, you must use ``--block`` or ``--set`` to limit the number of counter input files to ensure single application run. You can also use "--iteration-multiplexing" to ensure single application run.
   * Due to the limitation of ROCprofiler-SDK, the attach can now only happen before Heterogeneous System Architecture (HSA) initialization. HSA initialization happens before the execution of the first HIP kernel call. It only happens once to save all the kernels' function signature, such as the function name and other launch parameters. Attaching after this stage misses all crucial information of the HIP kernel and makes it impossible to store the output. This limitation will be solved in later releases of ROCprofiler-SDK.

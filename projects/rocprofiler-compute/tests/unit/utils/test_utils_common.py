@@ -930,6 +930,16 @@ def test_validate_roofline_csv_invalid_inconsistent_columns():
 
 
 @pytest.mark.misc
+def test_parse_rocm_version_tuple_and_compare():
+    assert utils_common.parse_rocm_version_tuple("10.2.0a") == (10, 2, 0)
+    assert utils_common.parse_rocm_version_tuple("10.3") == (10, 3)
+    assert utils_common.rocm_version_at_least("10.3", "10.2.0a")
+    assert utils_common.rocm_version_at_least("10.3.0", "10.3")
+    assert not utils_common.rocm_version_at_least("10.2.0a", "10.3")
+    with pytest.raises(ValueError):
+        utils_common.parse_rocm_version_tuple("not-a-version")
+
+
 def test_version_to_numeric():
     """Test version_to_numeric helper function."""
     from utils.utils_common import version_to_numeric

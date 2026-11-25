@@ -1211,3 +1211,48 @@ def test_find_attach_tool_library_errors_when_maps_are_unreadable(
 
     with pytest.raises(SystemExit):
         utils_profile.find_attach_tool_library(42)
+
+
+def test_require_container_rocm_errors_when_target_is_older(tmp_path, monkeypatch):
+    """An older container ROCm fails before attach."""
+    target_root = make_container_target(tmp_path, monkeypatch)
+    write_target_maps([
+        "7f20-7f30 r-xp 00000000 08:01 3 "
+        "/opt/rocm-container/lib/librocprofiler-sdk-attach.so.1"
+    ])
+    info_dir = target_root / "opt/rocm-container/.info"
+    info_dir.mkdir(parents=True)
+    (info_dir / "version").write_text("10.2.0a\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        utils_profile.require_container_rocm_at_least_host(42, "10.3.0")
+
+
+def test_require_container_rocm_allows_newer_or_equal_target(tmp_path, monkeypatch):
+    target_root = make_container_target(tmp_path, monkeypatch)
+    write_target_maps([
+        "7f20-7f30 r-xp 00000000 08:01 3 "
+        "/opt/rocm-container/lib/librocprofiler-sdk-attach.so.1"
+    ])
+    info_dir = target_root / "opt/rocm-container/.info"
+    info_dir.mkdir(parents=True)
+    (info_dir / "version").write_text("10.3.0\n", encoding="utf-8")
+
+    utils_profile.require_container_rocm_at_least_host(42, "10.3")
+
+
+def test_require_container_rocm_skips_same_root_target(tmp_path, monkeypatch):
+    make_shared_root_target(tmp_path, monkeypatch)
+
+    utils_profile.require_container_rocm_at_least_host(42, "10.3.0")
+
+
+def test_require_container_rocm_errors_when_version_is_missing(tmp_path, monkeypatch):
+    make_container_target(tmp_path, monkeypatch)
+    write_target_maps([
+        "7f20-7f30 r-xp 00000000 08:01 3 "
+        "/opt/rocm-container/lib/librocprofiler-sdk-attach.so.1"
+    ])
+
+    with pytest.raises(SystemExit):
+        utils_profile.require_container_rocm_at_least_host(42, "10.3.0")
