@@ -82,6 +82,11 @@ struct pool_object
 
     bool acquire();
     bool release();
+    // the in-use exchange on its own. pool<Tp>::release() runs it under m_pool_mtx, which is
+    // what makes a successful exchange proof that no clear() intervened, and pool<Tp>::clear()
+    // runs it on each object it retires: clear() drains the free list itself, and it holds
+    // m_pool_mtx, which pool<Tp>::release() takes.
+    bool clear_in_use();
     bool in_use() const { return m_in_use.load(std::memory_order_relaxed); }
 
     Tp&       get() { return m_object; }
@@ -107,14 +112,22 @@ pool_object<Tp>::acquire()
 
 template <typename Tp>
 bool
-pool_object<Tp>::release()
+pool_object<Tp>::clear_in_use()
 {
     bool expected = true;
-    auto val      = m_in_use.compare_exchange_strong(expected, false);
+    return m_in_use.compare_exchange_strong(expected, false);
+}
 
-    if(val && m_pool) m_pool->release(m_index);
+template <typename Tp>
+bool
+pool_object<Tp>::release()
+{
+    // the exchange is deferred to the pool so that it happens under the same lock clear()
+    // takes, which is what stops it from succeeding on an object a clear() has already
+    // retired. Without a pool there is no lock and no free list, so exchange in place.
+    if(m_pool) return m_pool->release(*this);
 
-    return val;
+    return clear_in_use();
 }
 }  // namespace container
 }  // namespace common

@@ -37,10 +37,10 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
-#include <optional>
 #include <queue>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -51,8 +51,9 @@ namespace container
 template <typename Tp>
 struct pool
 {
-    using size_type       = size_t;
-    using pool_array_type = stable_vector<pool_object<Tp>, 32>;
+    using size_type          = size_t;
+    using pool_array_type    = stable_vector<pool_object<Tp>, 32>;
+    using retired_array_type = std::vector<pool_array_type>;
 
     template <typename FuncT, typename... Args>
     explicit pool(std::piecewise_construct_t, size_type count, FuncT&& ctor, Args&&... args);
@@ -66,14 +67,37 @@ struct pool
     // get an object from the pool. if all objects are in use, a new one will be created and added
     // to the pool
     pool_object<Tp>& acquire();
-    void             release(size_type idx);
+    bool             release(pool_object<Tp>& obj);
 
     template <typename FuncT, typename... Args>
     pool_object<Tp>& acquire(FuncT&& ctor, Args&&... args);
 
+    // retire every object in the pool, running func on each one before it is retired.
+    //
+    // func runs with the pool lock held -- the same lock release() takes -- so it must not call
+    // acquire(), release() or pool_object<Tp>::release(), not even on the object it was handed.
+    // Any of the three self-deadlocks. Read the object and destroy what it owns; that is all
+    // this callback is for. clear() itself clears the in-use flag directly rather than calling
+    // pool_object<Tp>::release() for exactly this reason.
+    //
+    // A violation hangs rather than fails, so it stalls CI on a timeout instead of reporting
+    // anything, which is why the rule is stated here rather than left to be discovered.
     template <typename FuncT = void (*)(pool_object<Tp>&)>
     void clear(FuncT&& func = [](pool_object<Tp>&) {});
 
+    // the pool's counters, snapshotted under both locks. get_usage_report() is this formatted
+    // for a log, so callers that want the numbers should read them here rather than parse the
+    // string: the wording of the report is not an interface.
+    struct usage
+    {
+        size_type size      = 0;
+        size_type available = 0;
+        size_type reused    = 0;
+        size_type released  = 0;
+        size_type batches   = 0;
+    };
+
+    usage       get_usage() const;
     std::string get_usage_report() const;
 
 private:
@@ -81,6 +105,7 @@ private:
     std::function<void()>  m_function      = nullptr;
     mutable std::mutex     m_pool_mtx      = {};
     pool_array_type        m_pool          = {};
+    retired_array_type     m_retired       = {};
     mutable std::mutex     m_available_mtx = {};
     std::queue<size_type>  m_available     = {};
     std::atomic<size_type> m_released      = 0;
@@ -115,60 +140,60 @@ template <typename Tp>
 pool_object<Tp>&
 pool<Tp>::acquire()
 {
-    auto _idx = std::optional<size_type>{};
+    // m_pool_mtx is taken before the free-list pop rather than after it, so the pop and the
+    // lookup that consumes the popped index are one critical section. clear() retires m_pool
+    // under this lock, so it can no longer land between the two and strand the popped index:
+    // a stale index is never produced, and there is nothing here left to validate. A bounds
+    // check could not have done that job -- it cannot tell an index stranded by a clear()
+    // from an in-range index belonging to a later generation -- and this is why no
+    // epoch/generation counter is needed to tell those apart.
+    auto _pool_lk  = std::unique_lock<std::mutex>{m_pool_mtx};
+    auto _avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
+
+    // m_function() appends a batch to m_pool and pushes its indices onto the free list, so it
+    // needs both locks, exactly as it already did on the growth path
+    while(m_available.empty())
     {
-        auto _avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
-        if(!m_available.empty())
-        {
-            _idx = m_available.front();
-            m_available.pop();
-            if(m_released > 0)
-            {
-                m_reused++;
-            }
-        }
+        ROCP_INFO << fmt::format(
+            "Pool of type {} exhausted. Creating new batch of {} objects. New pool size: {}",
+            cxx_demangle(typeid(Tp).name()),
+            m_count,
+            m_pool.size() + m_count);
+        m_new_batch++;
+        m_function();
     }
 
-    if(_idx.has_value())
+    auto _idx = m_available.front();
+    m_available.pop();
+    if(m_released > 0)
     {
-        auto  _read_lk = std::unique_lock<std::mutex>{m_pool_mtx};
-        auto& _obj     = m_pool.at(_idx.value());
-        ROCP_FATAL_IF(!_obj.acquire()) << fmt::format(
-            "Pool object at index {} was expected to be available but was not", _idx.value());
-        return _obj;
+        m_reused++;
     }
 
-    // add a new batch
-    {
-        auto _write_pool_lk  = std::unique_lock<std::mutex>{m_pool_mtx};
-        auto _write_avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
-        if(m_available.empty())
-        {
-            ROCP_INFO << fmt::format(
-                "Pool of type {} exhausted. Creating new batch of {} objects. New pool size: {}",
-                cxx_demangle(typeid(Tp).name()),
-                m_count,
-                m_pool.size() + m_count);
-            m_new_batch++;
-            m_function();
-        }
-    }
-
-    return acquire();
+    auto& _obj = m_pool.at(_idx);
+    ROCP_FATAL_IF(!_obj.acquire())
+        << fmt::format("Pool object at index {} was expected to be available but was not", _idx);
+    return _obj;
 }
 
 template <typename Tp>
-void
-pool<Tp>::release(size_type idx)
+bool
+pool<Tp>::release(pool_object<Tp>& obj)
 {
-    if(idx < m_pool.size())
-    {
-        auto _write_lk = std::unique_lock<std::mutex>{m_available_mtx};
-        ROCP_FATAL_IF(m_pool.at(idx).in_use())
-            << fmt::format("Pool object at index {} was expected to be not in use", idx);
-        m_available.push(idx);
-        m_released++;
-    }
+    // the in-use exchange happens here, under m_pool_mtx, and not in the caller before it
+    // arrives. clear() clears that flag on every object it retires while holding this same
+    // lock, so a successful exchange is itself proof that no clear() has intervened since the
+    // object was acquired: the flag does the work a generation counter would, and a retired
+    // object can never queue its index for a later acquire() to pop. An object is taken by
+    // reference rather than by index for the same reason -- an identity can be validated this
+    // way, a bare index cannot.
+    auto _pool_lk = std::unique_lock<std::mutex>{m_pool_mtx};
+    if(!obj.clear_in_use()) return false;
+
+    auto _write_avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
+    m_available.push(obj.index());
+    m_released++;
+    return true;
 }
 
 // get an object from the pool. if all objects are in use, a new one will be created and added to
@@ -194,7 +219,9 @@ pool<Tp>::clear(FuncT&& func)
     {
         ROCP_WARNING_IF(itr.in_use()) << fmt::format(
             "Pool object at index {} is still in use during pool clear", itr.index());
-        itr.release();
+        // not itr.release(): that re-enters pool<Tp>::release(), which takes m_pool_mtx. The
+        // free list is drained below, so the bookkeeping it would do is of no use here.
+        itr.clear_in_use();
         // run cleanup lambda
         if constexpr(std::is_invocable_v<FuncT, pool_object<Tp>&>)
         {
@@ -215,6 +242,21 @@ pool<Tp>::clear(FuncT&& func)
 
     while(!m_available.empty())
         m_available.pop();
+
+    // The storage is retired, not freed. A pool_object<Tp>* handed out before this call can
+    // outlive it -- the HSA async signal handler holds one per dispatch, and finalization
+    // reaches here without waiting for those handlers -- and a late release() on such an
+    // object reaches pool<Tp>::release(), which exchanges m_in_use on it, so freeing here
+    // would be a use-after-free on the object. The loop above already cleared m_in_use on
+    // every object, so that exchange fails and no retired index re-enters the free list.
+    // Moving a stable_vector moves only its chunk index, so the objects keep their addresses.
+    // Bounded: clear() is a teardown operation, and the storage is freed with the pool.
+    //
+    // Narrowed, not eliminated. The retired chunks go away when the pool itself is destroyed by
+    // destroy_static_objects(), which registration.cpp runs from the same atexit handler as
+    // finalize(); a signal handler already past its get_fini_status() > 0 early return can still
+    // be mid-body by then. The window shrinks from "after clear()" to "after set_fini_status(1)".
+    m_retired.emplace_back(std::move(m_pool));
     m_pool = pool_array_type{};
     m_released.store(0);
     m_reused.store(0);
@@ -222,19 +264,34 @@ pool<Tp>::clear(FuncT&& func)
 }
 
 template <typename Tp>
-std::string
-pool<Tp>::get_usage_report() const
+typename pool<Tp>::usage
+pool<Tp>::get_usage() const
 {
     auto _pool_lk  = std::unique_lock<std::mutex>{m_pool_mtx};
     auto _avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
+
+    auto _usage      = usage{};
+    _usage.size      = m_pool.size();
+    _usage.available = m_available.size();
+    _usage.reused    = m_reused.load();
+    _usage.released  = m_released.load();
+    _usage.batches   = m_new_batch.load();
+    return _usage;
+}
+
+template <typename Tp>
+std::string
+pool<Tp>::get_usage_report() const
+{
+    const auto _usage = get_usage();
     return fmt::format("Usage report for pool (type='{}') :: size={}, available={}, reused={}, "
                        "released={}, batches={}",
                        cxx_demangle(typeid(Tp).name()),
-                       m_pool.size(),
-                       m_available.size(),
-                       m_reused.load(),
-                       m_released.load(),
-                       m_new_batch.load());
+                       _usage.size,
+                       _usage.available,
+                       _usage.reused,
+                       _usage.released,
+                       _usage.batches);
 }
 }  // namespace container
 }  // namespace common
