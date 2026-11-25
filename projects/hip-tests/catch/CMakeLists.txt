@@ -32,6 +32,7 @@ option(ENABLE_SPIRV "Build hip-tests for SPIRV" OFF)
 option(ENABLE_YAML_TAGS "Enable YAML tags for test cases" ON)
 option(STANDALONE_TESTS "Generate standalone executable per source file" OFF)
 option(ENABLE_OOB_TESTS "Build OOB tests, deliberately wrong inputs" ON)
+option(HIP_TESTS_ENABLE_RPC "Build LLVM libc RPC runtime tests" ON)
 
 # Build tests with -Wall -Werror. Defaults to OFF
 set(_hiptests_werror_default OFF)

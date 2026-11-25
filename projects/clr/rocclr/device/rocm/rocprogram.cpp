@@ -31,9 +31,6 @@ static inline const char* hsa_strerror(hsa_status_t status) {
 Program::~Program() {
   // Destroy the executable.
   if (hsaExecutable_.handle != 0) {
-    // Drain pending RPC reports before unloading this executable's images so
-    // any in-flight sanitizer reports referencing its code are resolvable.
-    const_cast<roc::Device&>(rocDevice()).flushRpc();
     Hsa::executable_destroy(hsaExecutable_);
   }
   if (hsaCodeObjectReader_.handle != 0) {

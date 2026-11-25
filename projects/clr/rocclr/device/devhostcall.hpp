@@ -78,7 +78,7 @@ bool enableHostcalls(const amd::Device& dev, void* buffer, uint32_t numPackets);
 #endif  // USE_NEW_HOSTCALL_IMPL
 void disableHostcalls(void* buffer);
 
-bool enableRpc(const amd::Device& dev, void* buffer, uint32_t num_ports);
+bool enableRpc(amd::Device& dev, void* buffer, uint32_t num_lanes, uint32_t num_ports);
 void flushRpc(void* buffer);
 void disableRpc(void* buffer);
 

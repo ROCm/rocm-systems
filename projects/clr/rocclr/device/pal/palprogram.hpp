@@ -42,7 +42,7 @@ class Segment {
              bool zero);
 
   //! Copies data from host to the segment
-  void copy(size_t offset, const void* src, size_t size);
+  bool copy(size_t offset, const void* src, size_t size);
 
   //! Segment freeze
   bool freeze(bool destroySysmem);
@@ -221,6 +221,9 @@ class Program : public device::Program {
  protected:
   //! Allocate kernel table
   bool allocKernelTable();
+
+  //! Initialize the RPC client symbol when present.
+  bool initRpcClient();
 
   void* rawBinary_;                    //!< Pointer to the raw binary
   std::vector<Memory*> globalStores_;  //!< Global memory for the program

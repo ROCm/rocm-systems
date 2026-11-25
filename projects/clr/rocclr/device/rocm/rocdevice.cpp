@@ -4965,7 +4965,6 @@ cl_int ConvertHSAErrorIntoCLError(hsa_status_t hsa_status) {
 void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
   if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {
     Device* dev = reinterpret_cast<Device*>(data);
-    dev->flushRpc();
     std::string hostnameStr = GetLocalHostName();
     std::string host_tag = hostnameStr.empty() ? "" : "host: " + hostnameStr + ", ";
     std::string kernelName;
@@ -5110,35 +5109,36 @@ void* Device::getOrCreateRpcBuffer() {
 
   if (void* existing = rpcBuffer_.load(std::memory_order_acquire)) return existing;
 
-  auto wavesPerCu = info().maxThreadsPerCU_ / info().wavefrontWidth_;
+  uint32_t num_lanes = info().wavefrontWidth_;
+  auto wavesPerCu = info().maxThreadsPerCU_ / num_lanes;
   rpcPortCount_ = static_cast<uint32_t>(
       std::min(static_cast<uint64_t>(info().maxComputeUnits_ * wavesPerCu), amd::kMaxRpcPortCount));
 
-  auto size = amd::getRpcBufferSize(info().wavefrontWidth_, rpcPortCount_);
+  auto size = amd::getRpcBufferSize(num_lanes, rpcPortCount_);
 
-  void* buffer = context().svmAlloc(size, 64, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS);
+  void* buffer = context().svmAlloc(
+      size, 64, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS | ROCCLR_MEM_INTERNAL_MEMORY);
   if (!buffer) {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to allocate RPC buffer for device %p", this);
     return nullptr;
   }
   std::memset(buffer, 0, size);
 
-  if (!amd::enableRpc(*this, buffer, rpcPortCount_)) {
+  if (!amd::enableRpc(*this, buffer, num_lanes, rpcPortCount_)) {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to enable RPC for device %p", this);
     context().svmFree(buffer);
     return nullptr;
   }
 
   rpcBuffer_.store(buffer, std::memory_order_release);
-  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Created RPC buffer %p (ports=%u, size=%zu) for device %p",
-          buffer, rpcPortCount_, size, this);
+  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+          "Created RPC buffer %p (lanes=%u, ports=%u, size=%zu) for device %p", buffer, num_lanes,
+          rpcPortCount_, size, this);
   return buffer;
 }
 
 // ================================================================================================
 bool Device::initRpcForProgram(hsa_executable_t executable) {
-  if (!amd::rpcAvailable()) return true;
-
   hsa_agent_t agent = getBackendDevice();
   hsa_executable_symbol_t rpc_symbol;
 
@@ -5149,6 +5149,11 @@ bool Device::initRpcForProgram(hsa_executable_t executable) {
     return true;
   }
 
+  if (!amd::rpcAvailable()) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
+            "RPC: Program requires RPC, but this runtime was built without RPC support");
+    return false;
+  }
   hsa_symbol_kind_t sym_type;
   status = Hsa::executable_symbol_get_info(rpc_symbol, HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &sym_type);
   if (status != HSA_STATUS_SUCCESS || sym_type != HSA_SYMBOL_KIND_VARIABLE) {
@@ -5192,8 +5197,8 @@ bool Device::initRpcForProgram(hsa_executable_t executable) {
   }
 
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
-          "RPC: Initialized __llvm_rpc_client at device %p (sym_addr=%p, ports=%u)", sym_addr,
-          buffer, rpcPortCount_);
+          "RPC: Initialized __llvm_rpc_client at device %p (sym_addr=%p, ports=%u)", buffer,
+          sym_addr, rpcPortCount_);
   return true;
 }
 
@@ -5213,12 +5218,11 @@ void Device::flushRpc() {
 }
 
 void Device::destroyRpcBuffer() {
-  if (void* buffer = rpcBuffer_.load(std::memory_order_acquire)) {
+  if (void* buffer = rpcBuffer_.exchange(nullptr, std::memory_order_acq_rel)) {
     // Drain any reports the device pushed before we release the buffer.
     amd::flushRpc(buffer);
     amd::disableRpc(buffer);
     context().svmFree(buffer);
-    rpcBuffer_.store(nullptr, std::memory_order_release);
     ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Destroyed RPC buffer for device %p", this);
   }
 }

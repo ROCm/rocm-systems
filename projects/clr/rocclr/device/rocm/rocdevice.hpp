@@ -783,9 +783,8 @@ class Device : public NullDevice {
   //! executable, pointing it at this device's RPC buffer.
   bool initRpcForProgram(hsa_executable_t executable);
 
-  //! Drain all pending RPC requests on this device's buffer. Called before
-  //! teardown unloads images so sanitizer reports remain resolvable.
-  void flushRpc();
+  //! Service pending RPC requests before unloading device images.
+  void flushRpc() override;
 
   //! Free the device's RPC buffer during teardown.
   void destroyRpcBuffer();

@@ -418,6 +418,18 @@ class Device : public NullDevice {
   //! Create the device program.
   virtual device::Program* createProgram(amd::Program& owner, amd::option::Options* options = NULL);
 
+  //! Get or create the shared RPC buffer for this device.
+  void* getOrCreateRpcBuffer();
+
+  //! Return the number of ports in the shared RPC buffer.
+  uint32_t rpcPortCount() const { return rpcPortCount_; }
+
+  //! Service pending RPC requests before unloading device images.
+  void flushRpc() override;
+
+  //! Free the device's RPC buffer during teardown.
+  void destroyRpcBuffer();
+
   //! Attempt to bind with external graphics API's device/context
   virtual bool bindExternalDevice(uint flags, void* const pDevice[], void* pContext,
                                   bool validateOnly);
@@ -791,6 +803,9 @@ class Device : public NullDevice {
   Pal::gpusize maxFrameBufferAllocation_;  //!< To reserve some memory in frame buffer
   std::map<Pal::IQueue*, QueueRecycleInfo*> queue_pool_;  //!< Pool of PAL queues for recycling
   amd::Program* trap_handler_ = nullptr;  //!< Trap handler program for debugger setup
+  std::mutex rpcLock_;                    //!< Serializes RPC buffer creation
+  std::atomic<void*> rpcBuffer_{nullptr};  //!< RPC shared memory buffer for this device
+  uint32_t rpcPortCount_ = 0;              //!< Number of RPC ports allocated
 };
 
 /*@}*/  // namespace amd::pal

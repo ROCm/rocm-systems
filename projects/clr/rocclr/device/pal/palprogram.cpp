@@ -6,6 +6,7 @@
 
 #include "os/os.hpp"
 #include "utils/flags.hpp"
+#include "device/devrpc.hpp"
 #include "device/pal/palprogram.hpp"
 #include "device/pal/palblit.hpp"
 #include "utils/options.hpp"
@@ -122,9 +123,13 @@ bool Segment::alloc(pal::Program& prog, amdgpu_hsa_elf_segment_t segment, size_t
   return true;
 }
 
-void Segment::copy(size_t offset, const void* src, size_t size) {
+bool Segment::copy(size_t offset, const void* src, size_t size) {
+  if (offset > gpuAccess_->size() || size > gpuAccess_->size() - offset) {
+    return false;
+  }
   if (cpuAccess_ != nullptr) {
     std::memcpy(cpuAddress(offset), src, size);
+    return true;
   } else {
     if (cpuMem_ != nullptr) {
       std::memcpy(cpuAddress(offset), src, size);
@@ -134,15 +139,18 @@ void Segment::copy(size_t offset, const void* src, size_t size) {
     Memory& xferBuf = gpu.xferWrite().Acquire(size);
     size_t tmpSize = std::min(static_cast<size_t>(xferBuf.size()), size);
     size_t srcOffs = 0;
+    bool result = true;
     while (size != 0) {
       xferBuf.hostWrite(&gpu, reinterpret_cast<const_address>(src) + srcOffs, 0, tmpSize);
-      xferBuf.partialMemCopyTo(gpu, 0, (offset + srcOffs), tmpSize, *gpuAccess_, false, true);
+      result &=
+          xferBuf.partialMemCopyTo(gpu, 0, (offset + srcOffs), tmpSize, *gpuAccess_, false, true);
       size -= tmpSize;
       srcOffs += tmpSize;
       tmpSize = std::min(static_cast<size_t>(xferBuf.size()), size);
     }
     gpu.xferWrite().Release(xferBuf);
     gpu.waitAllEngines();
+    return result;
   }
 }
 
@@ -422,6 +430,11 @@ bool Program::createKernels(void* binary, size_t binSize, bool useUniformWorkGro
     return false;
   }
 
+  if (!initRpcClient()) {
+    buildLog_ += "Error: Failed to initialize RPC client for program\n";
+    return false;
+  }
+
   if (isInternal() && (owner()->language() == amd::Program::Assembly)) {
     // Don't register trap handler with the debugger, since user shouldn't see this kernel
     status = executable_->Freeze(nullptr);
@@ -456,6 +469,69 @@ bool Program::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
     maxVgprs_ = std::max(static_cast<uint>(kernel->workGroupInfo()->usedVGPRs_), maxVgprs_);
   }
   DestroySegmentCpuAccess();
+  return true;
+}
+
+bool Program::initRpcClient() {
+  if (isNull()) {
+    return true;
+  }
+
+  hsa_agent_t agent = {amd::Device::toHandle(&(device()))};
+  amd::hsa::loader::Symbol* symbol = executable_->GetSymbol("__llvm_rpc_client", &agent);
+  if (symbol == nullptr) {
+    return true;
+  }
+
+  if (!amd::rpcAvailable()) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
+            "RPC: Program requires RPC, but this runtime was built without RPC support");
+    return false;
+  }
+
+  hsa_symbol_kind_t type;
+  if (!symbol->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &type) ||
+      type != HSA_SYMBOL_KIND_VARIABLE) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "RPC: __llvm_rpc_client is not a variable symbol");
+    return false;
+  }
+
+  size_t symbol_size = 0;
+  if (!symbol->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE, &symbol_size) ||
+      symbol_size != amd::getRpcClientSize()) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "RPC: Invalid size of __llvm_rpc_client");
+    return false;
+  }
+
+  void* symbol_address = nullptr;
+  if (!symbol->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS, &symbol_address) ||
+      symbol_address == nullptr || codeSegment_ == nullptr) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "RPC: Failed to get __llvm_rpc_client address");
+    return false;
+  }
+
+  size_t offset = 0;
+  if (!codeSegment_->gpuAddressOffset(reinterpret_cast<uint64_t>(symbol_address), &offset)) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "RPC: Failed to locate __llvm_rpc_client segment");
+    return false;
+  }
+
+  void* buffer = palDevice().getOrCreateRpcBuffer();
+  if (buffer == nullptr) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "RPC: Failed to create RPC buffer for device");
+    return false;
+  }
+
+  auto client_staging = std::make_unique<char[]>(symbol_size);
+  amd::initRpcClient(client_staging.get(), buffer, palDevice().rpcPortCount());
+  if (!codeSegment_->copy(offset, client_staging.get(), symbol_size)) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "RPC: Failed to copy RPC client to device symbol");
+    return false;
+  }
+
+  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+          "RPC: Initialized __llvm_rpc_client at device %p (sym_addr=%p, ports=%u)", buffer,
+          symbol_address, palDevice().rpcPortCount());
   return true;
 }
 
@@ -514,8 +590,7 @@ bool PALHSALoaderContext::SegmentCopy(amdgpu_hsa_elf_segment_t segment, hsa_agen
     return true;
   }
   Segment* s = reinterpret_cast<Segment*>(dst);
-  s->copy(offset, src, size);
-  return true;
+  return s->copy(offset, src, size);
 }
 
 void PALHSALoaderContext::SegmentFree(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent,

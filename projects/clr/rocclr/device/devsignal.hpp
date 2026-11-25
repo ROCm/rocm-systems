@@ -17,6 +17,12 @@ namespace amd::device {
 // Light abstraction over HSA/PAL signals
 class Signal {
  public:
+  struct Doorbell {
+    uint64_t* value = nullptr;
+    uint64_t* mailbox = nullptr;
+    uint32_t eventId = 0;
+  };
+
   enum class Condition : uint32_t {
     Eq = 0,
     Ne = 1,
@@ -55,6 +61,9 @@ class Signal {
 
   // Return the handle to the underlying amd_signal_t object
   virtual void* getHandle() { return nullptr; }
+
+  // Return the fields needed for device-initiated interrupts.
+  virtual Doorbell getDoorbell() { return {}; }
 };
 
 };  // namespace amd::device

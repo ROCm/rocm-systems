@@ -13,7 +13,7 @@ namespace amd::roc {
 
 class Signal : public device::Signal {
  private:
-  hsa_signal_t signal_;
+  hsa_signal_t signal_{};
 
  public:
   ~Signal() override;
@@ -23,8 +23,10 @@ class Signal : public device::Signal {
   uint64_t Wait(uint64_t value, device::Signal::Condition c, uint64_t timeout) override;
 
   void Reset(uint64_t value) override;
+  uint64_t Load() override;
 
   void* getHandle() override { return reinterpret_cast<void*>(signal_.handle); }
+  Doorbell getDoorbell() override;
 };
 
 //! IPC-capable signal using hsa_amd_ipc_signal_create/attach.

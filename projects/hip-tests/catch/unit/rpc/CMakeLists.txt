@@ -2,40 +2,22 @@
 #
 # SPDX-License-Identifier: MIT
 
-# The RPC headers come from the installed 'clang' compiler.
-set(_rpc_candidates "")
-
-# Explicit override wins.
-if(RPC_SHARED_INCLUDE_DIR)
-  list(APPEND _rpc_candidates "${RPC_SHARED_INCLUDE_DIR}")
+set(RPC_SHARED_INCLUDE_DIR "" CACHE PATH
+    "Directory containing the LLVM libc shared RPC headers")
+set(_rpc_shared_headers_cmake "${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/RPCSharedHeaders.cmake")
+if(NOT EXISTS "${_rpc_shared_headers_cmake}")
+  set(_rpc_shared_headers_cmake "${CMAKE_CURRENT_LIST_DIR}/../../cmake/RPCSharedHeaders.cmake")
 endif()
-
-# Preferred: <prefix>/include derived from the compiler's resource dir.
-execute_process(
-  COMMAND "${CMAKE_CXX_COMPILER}" -print-resource-dir
-  OUTPUT_VARIABLE _rpc_resource_dir
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  ERROR_QUIET)
-if(_rpc_resource_dir)
-  get_filename_component(_rpc_prefix "${_rpc_resource_dir}/../../.." REALPATH)
-  list(APPEND _rpc_candidates "${_rpc_prefix}/include")
+include("${_rpc_shared_headers_cmake}")
+unset(_rpc_shared_headers_cmake)
+set(_rpc_compiler "${CMAKE_HIP_COMPILER}")
+if(NOT _rpc_compiler)
+  set(_rpc_compiler "${CMAKE_CXX_COMPILER}")
 endif()
-
-# Fallback: <compiler_bin>/../include.
-get_filename_component(_rpc_bin_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-get_filename_component(_rpc_bin_inc "${_rpc_bin_dir}/../include" REALPATH)
-list(APPEND _rpc_candidates "${_rpc_bin_inc}")
-
-set(_rpc_include "")
-foreach(_cand IN LISTS _rpc_candidates)
-  if(_cand AND EXISTS "${_cand}/shared/rpc.h")
-    set(_rpc_include "${_cand}")
-    break()
-  endif()
-endforeach()
+find_rpc_shared_headers(_rpc_include "${_rpc_compiler}")
 
 if(NOT _rpc_include)
-  message(STATUS "RPC: <shared/rpc.h> not found for this compiler; skipping RPC tests")
+  message(STATUS "RPC: required shared headers not found for this compiler; skipping RPC tests")
   return()
 endif()
 message(STATUS "RPC: using shared headers from ${_rpc_include}")
@@ -43,10 +25,14 @@ message(STATUS "RPC: using shared headers from ${_rpc_include}")
 set(TEST_SRC
     rpc_ping.cc)
 
-set_source_files_properties(rpc_ping.cc PROPERTIES
-    COMPILE_OPTIONS "-I${_rpc_include}")
-
 hip_add_exe_to_target(NAME RpcTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       PROPERTY CXX_STANDARD 17)
+target_include_directories(RpcTest PRIVATE "${_rpc_include}")
+
+hip_add_exe_to_target(NAME RpcHostcallTest
+                      TEST_SRC rpc_hostcall_coexistence.cc
+                      TEST_TARGET_NAME build_tests
+                      PROPERTY CXX_STANDARD 17)
+target_include_directories(RpcHostcallTest PRIVATE "${_rpc_include}")

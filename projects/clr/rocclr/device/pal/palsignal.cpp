@@ -14,9 +14,7 @@
 namespace amd::pal {
 
 Signal::~Signal() {
-  dev_->GlbCtx().svmFree(amdSignal_);
-
-  if (ws_ == device::Signal::WaitState::Blocked) {
+  if (eventRegistered_) {
 #if defined(_WIN32)
     Pal::Result result = Pal::Result::Success;
 
@@ -29,6 +27,9 @@ Signal::~Signal() {
               "Failed to unregister SQ event needed for hostcall buffer");
     }
 #endif
+  }
+  if (amdSignal_ != nullptr) {
+    dev_->GlbCtx().svmFree(amdSignal_);
   }
 }
 
@@ -80,6 +81,7 @@ bool Signal::Init(const amd::Device& dev, uint64_t init, device::Signal::WaitSta
     }
     amdSignal_->event_id = eventOutputInfo.shaderInterrupt.eventId;
     amdSignal_->event_mailbox_ptr = eventOutputInfo.shaderInterrupt.eventMailboxGpuVa;
+    eventRegistered_ = true;
     ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Registered SQ event %d with mailbox slot %p",
             amdSignal_->event_id, amdSignal_->event_mailbox_ptr);
 #endif
@@ -140,6 +142,13 @@ uint64_t Signal::Wait(uint64_t value, device::Signal::Condition c, uint64_t time
   return -1;
 }
 
-void Signal::Reset(uint64_t value) { amdSignal_->value = value; }
+void Signal::Reset(uint64_t value) {
+  amdSignal_->value = value;
+#if defined(_WIN32)
+  if (ws_ == device::Signal::WaitState::Blocked) {
+    event_.Set();
+  }
+#endif
+}
 
 };  // namespace amd::pal
