@@ -267,7 +267,10 @@ TEST(ConSanInput, CallableProbeInsideLocalHelperInheritsTheCallersMode) {
   for (const test::TargetMode mode : {test::TargetMode{"gfx950", 64}, {"gfx1250", 32}}) {
     SCOPED_TRACE(mode.target);
     const auto &profile = *target_profile(mode.target);
-    auto image = test::read_fixture(test::target_fixture_path(mode, "width-flat-load-helper"));
+    const std::filesystem::path fixture = test::target_fixture_path(mode, "width-flat-load-helper");
+    if (fixture.empty())
+      GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+    auto image = test::read_fixture(fixture);
     ASSERT_FALSE(image.empty());
     InputError error;
     const auto input = build_input_program(image, profile, "lds_producer_consumer", error);
@@ -318,8 +321,11 @@ TEST(ConSanInput, DirectLocalHelperRequiresTheTerminalApiOperationAndMatchingRet
   for (std::string_view control : {"lookalike", "other", "width", "earlier", "wrong", "private",
                                    "global", "alias", "badreturn", "clobber"}) {
     SCOPED_TRACE(control);
-    const auto image = test::read_fixture(
-        test::target_fixture_path(mode, "width-flat-load-helper" + std::string(control)));
+    const std::filesystem::path fixture =
+        test::target_fixture_path(mode, "width-flat-load-helper" + std::string(control));
+    if (fixture.empty())
+      GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+    const auto image = test::read_fixture(fixture);
     ASSERT_FALSE(image.empty());
     InputError error;
     if (control == "width") {
@@ -366,8 +372,10 @@ TEST(ConSanInput, HelperStoreMustPrecedeItsLaterObservedCallerSiteInSourceOrder)
   constexpr test::TargetMode mode = {.target = "gfx950", .wave_size = 64};
   const TargetProfile &profile = *target_profile(mode.target);
   InputError error;
-  const std::vector<uint8_t> placed_before =
-      test::read_fixture(test::target_fixture_path(mode, "width-flat-store-helper"));
+  const std::filesystem::path fixture = test::target_fixture_path(mode, "width-flat-store-helper");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  const std::vector<uint8_t> placed_before = test::read_fixture(fixture);
   ASSERT_FALSE(placed_before.empty());
   const FailureOr<PreparedArtifact> accepted =
       prepare(placed_before, profile, "lds_producer_consumer", error);
