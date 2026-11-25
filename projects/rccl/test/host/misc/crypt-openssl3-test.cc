@@ -122,53 +122,75 @@ TEST_F(CryptPskHandshakeTest, PskPeersConnect) {
   EXPECT_EQ(NCCL_CRYPT_HELLO_VERDICT_READY, verdict);
 }
 
+#if defined(NCCL_TLS_BACKEND_OPENSSL3)
+struct ImpostorOutcome {
+  ncclResult_t clientRes = ncclInProgress;
+  bool impostorHandshakeDone = false;
+  int leaked = 0;
+};
+
 // A peer without the PSK ignores the client's PSK offer and completes a
 // certificate handshake instead, which any client that skips verification accepts.
-// crypt.cc refuses it twice over: SSL_VERIFY_PEER on the client context, and
-// SSL_session_reused() once the handshake completes.
-TEST_F(CryptPskHandshakeTest, ClientRejectsServerWithoutPsk) {
-#if defined(NCCL_TLS_BACKEND_OPENSSL3)
+class CryptImpostorTest : public CryptPskHandshakeTest {
+ protected:
+  void ConnectToImpostor(bool clientSkipsVerification, ImpostorOutcome* out) {
 #define CRYPT_TEST_SYMBOLS(X) \
   X(EVP_PKEY_Q_keygen) X(EVP_PKEY_free) X(EVP_sha256) X(X509_new) X(X509_free) X(X509_get_serialNumber) \
   X(ASN1_INTEGER_set) X(X509_getm_notBefore) X(X509_getm_notAfter) X(X509_gmtime_adj) X(X509_set_pubkey) \
   X(X509_sign) X(TLS_server_method) X(SSL_CTX_new) X(SSL_CTX_free) X(SSL_CTX_use_certificate) \
-  X(SSL_CTX_use_PrivateKey) X(SSL_new) X(SSL_free) X(SSL_set_fd) X(SSL_accept) X(SSL_read)
+  X(SSL_CTX_use_PrivateKey) X(SSL_new) X(SSL_free) X(SSL_set_fd) X(SSL_accept) X(SSL_read) X(SSL_set_verify)
 #define CRYPT_TEST_LOAD(name) \
   auto name = (decltype(&::name))dlsym(libssl_, #name); \
   ASSERT_TRUE(name != nullptr) << #name;
-  CRYPT_TEST_SYMBOLS(CRYPT_TEST_LOAD)
+    CRYPT_TEST_SYMBOLS(CRYPT_TEST_LOAD)
 #undef CRYPT_TEST_LOAD
 #undef CRYPT_TEST_SYMBOLS
-  EVP_PKEY* key = EVP_PKEY_Q_keygen(nullptr, nullptr, "EC", "P-256");
-  X509* cert = X509_new();
-  SSL_CTX* ctx = SSL_CTX_new(TLS_server_method());
-  ASSERT_TRUE(key && cert && ctx);
-  // Without validity times the certificate does not parse and no client would accept it.
-  ASN1_INTEGER_set(X509_get_serialNumber(cert), 1);
-  X509_gmtime_adj(X509_getm_notBefore(cert), 0);
-  X509_gmtime_adj(X509_getm_notAfter(cert), 3600);
-  ASSERT_EQ(1, X509_set_pubkey(cert, key));
-  ASSERT_GT(X509_sign(cert, key, EVP_sha256()), 0);
-  ASSERT_EQ(1, SSL_CTX_use_certificate(ctx, cert));
-  ASSERT_EQ(1, SSL_CTX_use_PrivateKey(ctx, key));
-  SSL* impostor = SSL_new(ctx);
-  ASSERT_EQ(0, fcntl(fds_[1], F_SETFL, O_NONBLOCK));
-  ASSERT_EQ(1, SSL_set_fd(impostor, fds_[1]));
+    if (clientSkipsVerification) SSL_set_verify(client_.crypto->ssl, SSL_VERIFY_NONE, nullptr);
+    EVP_PKEY* key = EVP_PKEY_Q_keygen(nullptr, nullptr, "EC", "P-256");
+    X509* cert = X509_new();
+    SSL_CTX* ctx = SSL_CTX_new(TLS_server_method());
+    ASSERT_TRUE(key && cert && ctx);
+    // Without validity times the certificate does not parse and no client would accept it.
+    ASN1_INTEGER_set(X509_get_serialNumber(cert), 1);
+    X509_gmtime_adj(X509_getm_notBefore(cert), 0);
+    X509_gmtime_adj(X509_getm_notAfter(cert), 3600);
+    ASSERT_EQ(1, X509_set_pubkey(cert, key));
+    ASSERT_GT(X509_sign(cert, key, EVP_sha256()), 0);
+    ASSERT_EQ(1, SSL_CTX_use_certificate(ctx, cert));
+    ASSERT_EQ(1, SSL_CTX_use_PrivateKey(ctx, key));
+    SSL* impostor = SSL_new(ctx);
+    ASSERT_EQ(0, fcntl(fds_[1], F_SETFL, O_NONBLOCK));
+    ASSERT_EQ(1, SSL_set_fd(impostor, fds_[1]));
 
-  ncclResult_t res = ncclInProgress;
-  for (int i = 0; i < kMaxSteps && res == ncclInProgress; i++) {
-    res = ncclCryptConnectHello(&client_);
-    SSL_accept(impostor);
+    for (int i = 0; i < kMaxSteps && !out->impostorHandshakeDone; i++) {
+      if (out->clientRes == ncclInProgress) out->clientRes = ncclCryptConnectHello(&client_);
+      out->impostorHandshakeDone = SSL_accept(impostor) == 1;
+    }
+    char hello[NCCL_SOCKET_PLAIN_HELLO_BYTES];
+    out->leaked = SSL_read(impostor, hello, sizeof(hello));
+    SSL_free(impostor);
+    SSL_CTX_free(ctx);
+    X509_free(cert);
+    EVP_PKEY_free(key);
   }
-  char hello[NCCL_SOCKET_PLAIN_HELLO_BYTES];
-  int leaked = SSL_read(impostor, hello, sizeof(hello));
-  SSL_free(impostor);
-  SSL_CTX_free(ctx);
-  X509_free(cert);
-  EVP_PKEY_free(key);
-  EXPECT_EQ(ncclRemoteError, res) << "the client completed a TLS handshake that did not use the PSK";
-  EXPECT_LE(leaked, 0) << "a server without the PSK decrypted the client's socket hello";
-#endif
+};
+
+// The client context's SSL_VERIFY_PEER refuses the impostor's certificate mid-handshake.
+TEST_F(CryptImpostorTest, ClientRejectsServerWithoutPsk) {
+  ImpostorOutcome out;
+  ASSERT_NO_FATAL_FAILURE(ConnectToImpostor(false, &out));
+  EXPECT_EQ(ncclRemoteError, out.clientRes) << "the client completed a TLS handshake that did not use the PSK";
+  EXPECT_FALSE(out.impostorHandshakeDone) << "the client accepted the impostor's certificate";
+  EXPECT_LE(out.leaked, 0) << "a server without the PSK decrypted the client's socket hello";
 }
+
+// Even when certificate verification is off, a completed handshake that did not use the PSK is refused.
+TEST_F(CryptImpostorTest, ClientRejectsNonPskHandshakeWithoutVerification) {
+  ImpostorOutcome out;
+  ASSERT_NO_FATAL_FAILURE(ConnectToImpostor(true, &out));
+  EXPECT_EQ(ncclRemoteError, out.clientRes) << "the client completed a TLS handshake that did not use the PSK";
+  EXPECT_LE(out.leaked, 0) << "a server without the PSK decrypted the client's socket hello";
+}
+#endif
 
 }  // namespace
