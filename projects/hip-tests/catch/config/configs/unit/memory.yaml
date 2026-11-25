@@ -143,6 +143,9 @@ memory:
     tags: [multigpu, transfer, P1]
   Unit_hipMemcpy2D_Positive_NarrowTallHostRect:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2744 - the narrow tall host rect copy takes several seconds on Windows PAL; the faster rect copy kernels are used only on the ROCr path."
     tags: [transfer]
   Unit_hipMemcpy2D_Positive_Basic:
     <<: *level_default

@@ -14,6 +14,9 @@ device:
     tags: [query]
   Unit_hipDeviceFlushGPUDirectRDMAWrites_VmmImpliesRdma:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2744 - on Windows ROCr hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported is 1 while hipDeviceAttributeGPUDirectRDMASupported is 0."
     tags: [query]
   Unit_hipDeviceFlushGPUDirectRDMAWrites_CapabilityConsistency:
     <<: *level_default
@@ -284,6 +287,9 @@ device:
     tags: [config, P0]
   Unit_hipDeviceSetLimit_Positive_LargeDynamicStack:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2744 - on Windows ROCr (gfx1101) the large stack kernel fails with scratch_size overflow, too many resources requested for launch."
     tags: [config]
   Unit_hipDeviceSetLimit_Positive_PrintfFifoSize:
     <<: *level_default
