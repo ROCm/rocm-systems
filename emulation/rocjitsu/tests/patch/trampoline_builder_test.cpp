@@ -57,6 +57,40 @@ TrampolinePlan make_omitted_original_plan(rocjitsu::IsaFamily arch,
 // from a valid plan.
 //==============================================================================
 
+TEST(TrampolineBuilder, DistinguishesBranchCapacityFromMalformedCoordinates) {
+  const TrampolinePlan original = make_omitted_original_plan(IsaFamily::Cdna4, {0xbe800080u});
+  std::string message;
+  TrampolineBuildErrorCode code = TrampolineBuildErrorCode::None;
+  TrampolinePlan plan = original;
+  plan.trampoline_offset = 0x40000;
+  EXPECT_FALSE(TrampolineBuilder::build(plan, &message, &code));
+  EXPECT_EQ(code, TrampolineBuildErrorCode::UnsupportedControlTransferRange);
+  plan.patch_anchor = false;
+  EXPECT_FALSE(TrampolineBuilder::build(plan, &message, &code));
+  EXPECT_EQ(code, TrampolineBuildErrorCode::UnsupportedControlTransferRange);
+  plan = original;
+  plan.anchor_offset += 2;
+  EXPECT_FALSE(TrampolineBuilder::build(plan, &message, &code));
+  EXPECT_EQ(code, TrampolineBuildErrorCode::InvalidPlan);
+  plan = original;
+  plan.return_target += 2;
+  EXPECT_FALSE(TrampolineBuilder::build(plan, &message, &code));
+  EXPECT_EQ(code, TrampolineBuildErrorCode::InvalidPlan);
+  plan = original;
+  plan.patch_anchor = false;
+  plan.trampoline_offset = UINT64_MAX - 3;
+  EXPECT_FALSE(TrampolineBuilder::build(plan, &message, &code));
+  EXPECT_EQ(code, TrampolineBuildErrorCode::InvalidPlan);
+  plan = original;
+  plan.original_words.clear();
+  EXPECT_FALSE(TrampolineBuilder::build(plan, &message, &code));
+  EXPECT_EQ(code, TrampolineBuildErrorCode::InvalidPlan);
+  EXPECT_TRUE(TrampolineBuilder::build(original, &message, &code));
+  EXPECT_EQ(code, TrampolineBuildErrorCode::None);
+  EXPECT_FALSE(TrampolineBuilder::emit_probe_call(original, &message, &code));
+  EXPECT_EQ(code, TrampolineBuildErrorCode::InvalidPlan);
+}
+
 TEST(TrampolineBuilder, Emits4ByteRelocationAnchorPatch) {
   constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
   constexpr uint64_t kAnchor = 0x100;

@@ -72,6 +72,37 @@ std::optional<ScopeKind> selected_scope(const ImageFacts &image) {
   return scope;
 }
 
+Digest image_selection_profile_digest(const ImageFacts &image) {
+  const std::optional<ScopeKind> scope = selected_scope(image);
+  std::vector<EntryKey> keys;
+  const Digest *options = nullptr;
+  for (const ImageEntryFacts &entry : image.entries) {
+    if (entry.selected) {
+      keys.push_back(entry.key);
+      options = &entry.selected->options;
+    }
+  }
+  if (scope) {
+    return selection_profile_digest(keys, *scope, *options);
+  }
+  util::Sha256 hash;
+  hash.update("consan-image-mixed-lds-selection-v1");
+  std::array<uint8_t, 4> count{};
+  wire::write_u32(count, 0, static_cast<uint32_t>(keys.size()));
+  hash.update(count.data(), count.size());
+  for (const ImageEntryFacts &entry : image.entries) {
+    if (!entry.selected) {
+      continue;
+    }
+    std::array<uint8_t, 12> identity{};
+    wire::write_u64(identity, 0, entry.key);
+    wire::write_u32(identity, 8, static_cast<uint32_t>(entry.selected->scope));
+    hash.update(identity.data(), identity.size());
+    hash.update(entry.selected->options.data(), entry.selected->options.size());
+  }
+  return hash.finish();
+}
+
 const ImageEntryFacts *find_image_entry(const ImageFacts &image, EntryKey key) {
   const std::vector<ImageEntryFacts>::const_iterator found =
       std::ranges::lower_bound(image.entries, key, {}, &ImageEntryFacts::key);
@@ -129,6 +160,7 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
   uint64_t total_sites = 0;
   std::vector<EntryKey> selected_keys;
   const Digest *selected_options = nullptr;
+  bool same_options = true;
   std::set<std::string> names;
   std::set<uint64_t> original_entries;
   std::set<uint64_t> prepared_entries;
@@ -291,7 +323,7 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
                                            boundary.probe_offset + boundary.probe_size);
       }
       if (selected_options && *selected_options != manifest.options) {
-        return diagnostic.emit() << "selected entries must share one options profile";
+        same_options = false;
       }
       selected_options = &manifest.options;
       selected_keys.push_back(entry.key);
@@ -309,18 +341,24 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
     }
   }
   const std::optional<ScopeKind> scope = selected_scope(image);
-  if (!scope) {
+  if (selected_keys.empty()) {
     return diagnostic.emit() << "selected entries must share one qualified scope";
   }
-  if (*scope == ScopeKind::ExecutionTrace &&
-      std::ranges::any_of(image.entries, [](const ImageEntryFacts &entry) {
+  const bool has_trace = std::ranges::any_of(image.entries, [](const ImageEntryFacts &entry) {
+    return entry.selected && entry.selected->scope == ScopeKind::ExecutionTrace;
+  });
+  if (!scope && has_trace) {
+    return diagnostic.emit() << "trace and LDS entries cannot share one prepared image";
+  }
+  if (has_trace && std::ranges::any_of(image.entries, [](const ImageEntryFacts &entry) {
         return entry.no_probes_needed.has_value();
       })) {
     return diagnostic.emit() << "LDS no-probes-needed certificate cannot qualify execution trace";
   }
-  if (selected_keys.empty() || !selected_options ||
-      image.selection_profile !=
-          selection_profile_digest(selected_keys, *scope, *selected_options)) {
+  if (!same_options) {
+    return diagnostic.emit() << "selected entries must share one options profile";
+  }
+  if (image.selection_profile != image_selection_profile_digest(image)) {
     return diagnostic.emit() << "image selection profile differs from entries";
   }
   return Result::success();

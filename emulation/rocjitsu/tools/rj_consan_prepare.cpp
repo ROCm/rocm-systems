@@ -30,10 +30,10 @@ int run(int argc, char **argv) {
   rocjitsu::consan::ScopeKind scope = rocjitsu::consan::ScopeKind::NativeLdsNoSynchronization;
   bool profile_seen = false;
   bool require_all = false;
-  if (argc == 5) {
+  if (argc == 5 && !std::string_view(argv[4]).starts_with("--")) {
     entries.push_back(argv[3]);
     destination = argv[4];
-  } else if (argc >= 6) {
+  } else if (argc >= 4) {
     destination = argv[3];
     for (int index = 4; index < argc; ++index) {
       const std::string_view option(argv[index]);
@@ -61,7 +61,7 @@ int run(int argc, char **argv) {
     }
   } else {
     std::cerr << "Usage: rj_consan_prepare ORIGINAL TARGET NEW-DIRECTORY [--profile "
-                 "lds|execution-trace] [--require-all] --entry NAME [--entry NAME]\n"
+                 "lds|execution-trace] [--require-all] [--entry NAME ...]\n"
                  "   or: rj_consan_prepare ORIGINAL TARGET ENTRY NEW-DIRECTORY\n";
     return 2;
   }

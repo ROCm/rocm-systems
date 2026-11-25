@@ -27,6 +27,8 @@
 
 namespace rocjitsu {
 
+enum class TrampolineBuildErrorCode { None, InvalidPlan, UnsupportedControlTransferRange };
+
 /// @brief Concrete instruction words placed before or after the optional
 ///        original in the trampoline. Declared clobbers are intentionally
 ///        deferred to a later milestone.
@@ -242,11 +244,15 @@ public:
   ///   - original_words size mismatch with original_size
   ///   - A requested forward or return branch outside s_branch simm16 range
   ///
+  /// The optional error code distinguishes a representable branch that exceeds
+  /// hardware reach from malformed plans; callers must still treat other errors
+  /// as hard failures rather than infer recoverability from diagnostic text.
   /// The builder does not enforce milestone-scoped restrictions on body
   /// shape; the orchestrator decides what kind of plan to emit and calls
   /// validate_inline_nop_plan (in instrumentor.h) when appropriate.
-  [[nodiscard]] static std::optional<TrampolineBytes> build(const TrampolinePlan &plan,
-                                                            std::string *error_out = nullptr);
+  [[nodiscard]] static std::optional<TrampolineBytes>
+  build(const TrampolinePlan &plan, std::string *error_out = nullptr,
+        TrampolineBuildErrorCode *error_code = nullptr);
 
   /// @brief Select the probe-call envelope resources and record them on @p plan.
   ///
@@ -315,7 +321,8 @@ public:
   /// builder rejects the architecture or register class, build() reports a
   /// branch-range failure, or a delegated vector builder rejects an argument operand.
   [[nodiscard]] static std::optional<TrampolineBytes>
-  emit_probe_call(const TrampolinePlan &plan, std::string *error_out = nullptr);
+  emit_probe_call(const TrampolinePlan &plan, std::string *error_out = nullptr,
+                  TrampolineBuildErrorCode *error_code = nullptr);
 };
 
 } // namespace rocjitsu

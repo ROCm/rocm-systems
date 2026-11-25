@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -23,6 +24,28 @@ namespace rocjitsu {
 namespace {
 using KD = amdhsa::kernel_descriptor_t;
 } // namespace
+
+std::optional<int16_t> plan_dbi_entry_branch(uint64_t stub_offset, std::size_t word_index,
+                                             uint64_t target, EntryPrologueErrorCode *error_code) {
+  if (error_code != nullptr)
+    *error_code = EntryPrologueErrorCode::InvalidPlan;
+
+  constexpr uint64_t kWordBytes = sizeof(uint32_t);
+  constexpr uint64_t kMaxSignedTarget = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+  constexpr uint64_t kMaxSignedBranchPc = kMaxSignedTarget - kWordBytes;
+  if (stub_offset % kWordBytes != 0 || target % kWordBytes != 0 ||
+      stub_offset > kMaxSignedBranchPc || target > kMaxSignedTarget ||
+      word_index > (kMaxSignedBranchPc - stub_offset) / kWordBytes)
+    return std::nullopt;
+
+  const uint64_t branch_pc = stub_offset + static_cast<uint64_t>(word_index) * kWordBytes;
+  const std::optional<int16_t> immediate = compute_sopp_branch_simm16(branch_pc, target);
+  if (error_code != nullptr) {
+    *error_code = immediate ? EntryPrologueErrorCode::None
+                            : EntryPrologueErrorCode::UnsupportedControlTransferRange;
+  }
+  return immediate;
+}
 
 uint32_t dbi_entry_storage_floor(KernelBlockScope blocks, const KD &desc,
                                  rocjitsu::IsaFamily arch) {

@@ -83,8 +83,9 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
       << "\",\"scope\":\""
       << (result.has_dual_ranges ? "native_lds_multi_range_" : "native_lds_single_range_")
       << (result.has_transpose ? "transpose_" : "")
-      << (result.scope != ScopeKind::NativeLdsNoSynchronization ? "epoch_workgroup_barriers"
-                                                                : "no_sync_bounded_1d")
+      << (!result.scope                                            ? "mixed_scopes"
+          : *result.scope != ScopeKind::NativeLdsNoSynchronization ? "epoch_workgroup_barriers"
+                                                                   : "no_sync_bounded_1d")
       << "\",\"lds_analysis\":\"" << (result.executions.empty() ? "not_performed" : "performed")
       << "\",\"run_identity\":\"" << hex_bytes(result.run_identity) << "\",\"original_sha256\":\""
       << hex_bytes(result.original.sha256) << "\",\"original_bytes\":" << result.original.bytes

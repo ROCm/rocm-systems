@@ -13,6 +13,7 @@
 #include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -20,6 +21,26 @@
 #include <vector>
 
 namespace rocjitsu {
+
+/// @brief Distinguish entry-branch reach limits from malformed placement coordinates.
+enum class EntryPrologueErrorCode : uint8_t {
+  None,
+  InvalidPlan,
+  UnsupportedControlTransferRange,
+};
+
+/// @brief Plan a branch from one word of an appended DBI entry stub.
+///
+/// @details Uses the shared SOPP branch calculation after checking the stub's
+/// word-index addition. Only aligned, representable coordinates whose displacement
+/// exceeds the signed 16-bit field report UnsupportedControlTransferRange. Invalid
+/// coordinates and arithmetic overflow report InvalidPlan instead, so callers may
+/// classify a placement capacity limit without hiding a malformed plan.
+///
+/// @param error_code Optional; set to None on success and a typed cause on failure.
+[[nodiscard]] std::optional<int16_t>
+plan_dbi_entry_branch(uint64_t stub_offset, std::size_t word_index, uint64_t target,
+                      EntryPrologueErrorCode *error_code = nullptr);
 
 /// @brief SGPRs the entry prologue reserves: a persistent pair plus an
 ///        entry-only temporary pair, allocated as one aligned run.

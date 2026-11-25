@@ -111,7 +111,8 @@ struct LdsRaceResult {
   uint32_t execution_conditions = 0;
   uint32_t target = 0;
   uint32_t wave_size = 0;
-  ScopeKind scope = ScopeKind::NativeLdsNoSynchronization;
+  // nullopt means the image mixes qualified LDS scopes; executions retain exact manifests.
+  std::optional<ScopeKind> scope = ScopeKind::NativeLdsNoSynchronization;
   bool has_dual_ranges = false;
   bool has_transpose = false;
   // Totals over executions, using the same record-pair/group units as above.

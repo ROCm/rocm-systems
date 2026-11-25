@@ -325,7 +325,13 @@ util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &
 } // namespace
 
 std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &plan,
-                                                        std::string *error_out) {
+                                                        std::string *error_out,
+                                                        TrampolineBuildErrorCode *error_code) {
+  if (error_code)
+    *error_code = TrampolineBuildErrorCode::InvalidPlan;
+  const auto valid_pc = [](uint64_t pc) {
+    return pc % sizeof(uint32_t) == 0 && pc <= uint64_t{INT64_MAX} - sizeof(uint32_t);
+  };
   OptionalStringDiagnosticSink record_error(error_out);
   const util::DiagnosticEmitter error(record_error);
 
@@ -338,6 +344,8 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
                        ? compute_sopp_branch_simm16(plan.anchor_offset, plan.trampoline_offset)
                        : std::optional<int16_t>{};
   if (plan.patch_anchor && !fwd) {
+    if (error_code && valid_pc(plan.anchor_offset) && valid_pc(plan.trampoline_offset))
+      *error_code = TrampolineBuildErrorCode::UnsupportedControlTransferRange;
     report(error_out, "relocation trampoline forward branch exceeds s_branch simm16");
     return std::nullopt;
   }
@@ -359,9 +367,17 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
     body.insert(body.end(), item.words.begin(), item.words.end());
   }
 
+  if (!valid_pc(plan.trampoline_offset) ||
+      body.size() >
+          (uint64_t{INT64_MAX} - sizeof(uint32_t) - plan.trampoline_offset) / sizeof(uint32_t)) {
+    report(error_out, "relocation trampoline return coordinate is not representable");
+    return std::nullopt;
+  }
   const uint64_t return_branch_pc = plan.trampoline_offset + body.size() * sizeof(uint32_t);
   const auto ret = compute_sopp_branch_simm16(return_branch_pc, plan.return_target);
   if (plan.returns_to_kernel && !ret) {
+    if (error_code && valid_pc(plan.return_target))
+      *error_code = TrampolineBuildErrorCode::UnsupportedControlTransferRange;
     report(error_out, "relocation trampoline return branch exceeds s_branch simm16");
     return std::nullopt;
   }
@@ -399,6 +415,8 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
     }
     out.trampoline_words.push_back(backward.value());
   }
+  if (error_code)
+    *error_code = TrampolineBuildErrorCode::None;
   return out;
 }
 
@@ -741,8 +759,11 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   return true;
 }
 
-std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const TrampolinePlan &plan,
-                                                                  std::string *error_out) {
+std::optional<TrampolineBytes>
+TrampolineBuilder::emit_probe_call(const TrampolinePlan &plan, std::string *error_out,
+                                   TrampolineBuildErrorCode *error_code) {
+  if (error_code)
+    *error_code = TrampolineBuildErrorCode::InvalidPlan;
   OptionalStringDiagnosticSink record_error(error_out, "probe-call emission: ");
   const util::DiagnosticEmitter error(record_error);
 
@@ -1265,7 +1286,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   std::vector<InlineAsmItem> &items =
       after_original ? emit_plan.after_items : emit_plan.before_items;
   items.push_back(InlineAsmItem{.words = std::move(env)});
-  return build(emit_plan, error_out);
+  return build(emit_plan, error_out, error_code);
 }
 
 } // namespace rocjitsu

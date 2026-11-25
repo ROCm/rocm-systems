@@ -579,6 +579,7 @@ TEST(ConSanImageFacts, DecoderRejectsTruncationCorruptionAndOversizedEntryClaims
 
 TEST(ConSanImageFacts, ReadEarlierWidthProfileWithoutAdmittingNewSitesUnderItsIdentity) {
   ImageFacts image = example_image(kPriorOptions);
+  EXPECT_EQ(image_selection_profile_digest(image), image.selection_profile);
   const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(image);
   ASSERT_TRUE(encoded.succeeded());
   EXPECT_TRUE(decode_image_facts(encoded.value()).succeeded());
@@ -643,7 +644,7 @@ TEST(ConSanImageFacts, EveryQScopeWidthAndTargetWaveRoundTripsWorkgroupAndBarrie
   }
 }
 
-TEST(ConSanImageFacts, ScopeIdentityIsExplicitAndMixedSelectedScopesAreRejected) {
+TEST(ConSanImageFacts, MixedLdsScopesHaveAnExplicitPerEntrySelectionIdentity) {
   const std::array<EntryKey, 2> keys = {2048, 2112};
   EXPECT_NE(selection_profile_digest(keys, ScopeKind::NativeLdsNoSynchronization),
             selection_profile_digest(keys, ScopeKind::NativeLdsWorkgroupBarrier));
@@ -657,8 +658,35 @@ TEST(ConSanImageFacts, ScopeIdentityIsExplicitAndMixedSelectedScopesAreRejected)
   EXPECT_FALSE(selected_scope(image).has_value());
   util::StringDiagnostic error;
   EXPECT_TRUE(encode_image_facts(image, error.emitter()).failed());
-  EXPECT_EQ(error.message(), "selected entries must share one qualified scope");
-  EXPECT_NE(error.message().find("share one qualified scope"), std::string::npos);
+  EXPECT_EQ(error.message(), "image selection profile differs from entries");
+  image.selection_profile = image_selection_profile_digest(image);
+  EXPECT_NE(image.selection_profile,
+            selection_profile_digest(keys, ScopeKind::NativeLdsWorkgroupBarrier));
+  EXPECT_NE(image.selection_profile,
+            selection_profile_digest(keys, ScopeKind::NativeLdsWorkgroupBarrierLoop));
+  const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(image);
+  ASSERT_TRUE(encoded.succeeded());
+  const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value());
+  ASSERT_TRUE(decoded.succeeded());
+  EXPECT_EQ(decoded.value(), image);
+  EXPECT_FALSE(selected_scope(decoded.value()));
+  ImageFacts historical = image;
+  for (ImageEntryFacts &entry : historical.entries) {
+    if (entry.selected) {
+      entry.selected->options = kPriorOptions;
+    }
+  }
+  historical.selection_profile = image_selection_profile_digest(historical);
+  EXPECT_NE(historical.selection_profile, image.selection_profile);
+  const FailureOr<std::vector<uint8_t>> historical_bytes = encode_image_facts(historical);
+  ASSERT_TRUE(historical_bytes.succeeded());
+  const FailureOr<ImageFacts> historical_decoded = decode_image_facts(historical_bytes.value());
+  ASSERT_TRUE(historical_decoded.succeeded());
+  EXPECT_EQ(historical_decoded.value(), historical);
+  historical.entries.front().selected->options = mvp_options_digest();
+  historical.selection_profile = image_selection_profile_digest(historical);
+  EXPECT_TRUE(encode_image_facts(historical, error.emitter()).failed());
+  EXPECT_EQ(error.message(), "selected entries must share one options profile");
 }
 
 TEST(ConSanImageFacts, BarrierBytesParticipateInTheInclusiveAggregateMetadataBudget) {
@@ -826,7 +854,7 @@ TEST(ConSanImageFacts, TraceScopeKeepsBoundaryBudgetAndSelectionSeparateFromQLds
   mixed.entries[1] = example_image().entries[1];
   ASSERT_TRUE(validate_manifest(*mixed.entries[1].selected).succeeded());
   EXPECT_TRUE(validate_image_facts(mixed, error.emitter()).failed());
-  EXPECT_EQ(error.message(), "selected entries must share one options profile");
+  EXPECT_NE(error.message().find("trace and LDS entries cannot share"), std::string::npos);
   // A selected entry cannot reuse another entry's original or prepared boundary.
   ImageFacts aliased = image;
   aliased.entries[1].selected->boundaries.back().original_offset =
