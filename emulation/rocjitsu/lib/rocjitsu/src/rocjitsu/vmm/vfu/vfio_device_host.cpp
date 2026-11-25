@@ -324,12 +324,7 @@ void dma_unregister_trampoline(vfu_ctx_t *ctx, vfu_dma_info_t *info) {
   host_of(ctx).forget_guest_region(region);
 }
 
-int quiesce_trampoline(vfu_ctx_t *ctx) try {
-  return host_of(ctx).begin_target_quiesce();
-} catch (...) {
-  errno = EIO;
-  return -1;
-}
+int quiesce_trampoline(vfu_ctx_t *ctx) { return host_of(ctx).begin_target_quiesce(); }
 
 simdojo::ResetKind to_reset_kind(vfu_reset_type_t type) {
   switch (type) {

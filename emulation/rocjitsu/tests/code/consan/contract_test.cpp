@@ -33,7 +33,7 @@ TEST(ConSanDigest, OptionsIdentityNamesTheSoftwareAddressGroupReservation) {
       "address-groups-per-site=" + std::to_string(kAddressGroupsPerSite) + ";";
   EXPECT_NE(kMvpOptions.find(reservation), std::string_view::npos);
   EXPECT_EQ(hex(mvp_options_digest()),
-            "8e4e17c79d00156a938aeba232063db0a7242c818fe19fa83e6c3778d43cff17");
+            "9d204e58c8f7599498f943f588810551497b7cedc3a922d4082a48511b62882e");
 }
 
 TEST(ConSanDigest, KnownAnswersIncludePaddingAndMultipleBlocks) {
@@ -923,6 +923,31 @@ TEST_F(ConSanContract, GuestMappingsAndReservationsMustBeUnambiguous) {
   manifest = example();
   manifest.sites.clear();
   EXPECT_TRUE(validate_manifest(manifest, error_.emitter()).failed());
+}
+
+TEST_F(ConSanContract, AtomicAccessRequiresASingleDwordOrQwordOnSupportedWaves) {
+  Manifest manifest = example();
+  SiteFacts &site = manifest.sites.front();
+  site.access = AccessKind::Atomic;
+  for (const TargetProfile &target : kNativeLdsTargets)
+    for (const uint32_t wave : {32u, 64u}) {
+      manifest.target = target.id;
+      manifest.wave_size = wave;
+      for (const uint32_t width : {4u, 8u}) {
+        site.width = width;
+        EXPECT_EQ(validate_manifest(manifest).succeeded(), supports_wave(target, wave))
+            << target.name << " wave" << wave << " width " << width;
+      }
+    }
+  manifest.target = 950;
+  manifest.wave_size = 64;
+  for (const uint32_t width : {1u, 2u, 12u, 16u}) {
+    site.width = width;
+    EXPECT_TRUE(validate_manifest(manifest).failed()) << width;
+  }
+  site.width = 8;
+  site.lds_ranges.shape = LdsRangeShape::Dual;
+  EXPECT_TRUE(validate_manifest(manifest).failed());
 }
 
 TEST_F(ConSanContract, UnsupportedTargetAbiAndOptionsAreRejected) {

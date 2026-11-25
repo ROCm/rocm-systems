@@ -206,7 +206,7 @@ TEST(MfmaGfx942Exact, SpecialValues) {
 }
 
 TEST(MfmaGfx942Exact, ProductsAt2To128CountAsInfinite) {
-  // Model-derived BF16 overflow: a 2^64 * 2^64 product counts as +Inf even with C = -2^127,
+  // MI300X-captured BF16 overflow: a 2^64 * 2^64 product counts as +Inf even with C = -2^127,
   // and opposite-sign +-2^128 products produce canonical NaN.
   constexpr uint32_t kPos2To64 = 0x5f800000U;
   constexpr uint32_t kNeg2To64 = 0xdf800000U;
@@ -235,16 +235,16 @@ TEST(MfmaGfx942Exact, ProductsAt2To128CountAsInfinite) {
 }
 
 TEST(MfmaGfx942Exact, Bf16OutputDenormals) {
-  // Model-derived subnormal BF16 product outputs and nearest-even ties at C = 0.
+  // MI300X-captured subnormal BF16 product outputs, nearest-even ties, and negative
+  // underflow to +0.0 at C = 0.
   struct DenormalCase {
     uint16_t a, b;
     uint32_t expected;
   };
   constexpr DenormalCase kDenormals[] = {
-      {0x0080U, 0x3f00U, 0x00400000U},
-      {0x0001U, 0x3780U, 0x00000001U},
-      {0x0001U, 0x3700U, 0x00000000U},
-      {0x0001U, 0x37c0U, 0x00000002U},
+      {0x0080U, 0x3f00U, 0x00400000U}, {0x0001U, 0x3780U, 0x00000001U},
+      {0x0001U, 0x3700U, 0x00000000U}, {0x0001U, 0x37c0U, 0x00000002U},
+      {0x8001U, 0x3700U, 0x00000000U}, {0x8001U, 0x37c0U, 0x80000002U},
   };
   for (const auto &form : kForms) {
     if (form.format_a != 1 || form.format_b != 1) {
@@ -262,6 +262,33 @@ TEST(MfmaGfx942Exact, Bf16OutputDenormals) {
   }
 }
 
+TEST(MfmaGfx942Exact, Xf32LowPayloadNansTruncateToInfinity) {
+  // MI300X-captured XF32 pre-reduction truncation: NaNs with payload only in bits 12:0
+  // truncate to +-Inf, while bit 13+ payloads remain NaN.
+  struct Xf32Corner {
+    uint32_t a, b, expected;
+  };
+  constexpr Xf32Corner kCorners[] = {
+      {0x7f800001U, 0x3f800000U, 0x7f800000U}, {0xff800001U, 0x3f800000U, 0xff800000U},
+      {0x7f801fffU, 0x3f800000U, 0x7f800000U}, {0x7f802000U, 0x3f800000U, 0xffc00000U},
+      {0x7f800001U, 0x00000000U, 0xffc00000U},
+  };
+  for (const auto &form : kForms) {
+    if (form.format_a != 2) {
+      continue;
+    }
+    for (const auto &corner : kCorners) {
+      std::array<uint32_t, 18> values{};
+      values[0] = corner.a;
+      values[form.k] = corner.b;
+      values[2 * form.k + 1] = corner.expected;
+      auto test = form;
+      test.captured = std::span<const uint32_t>(values).first(2 * form.k + 2);
+      captured_wave(test, {}, false);
+    }
+  }
+}
+
 TEST(MfmaGfx942Exact, QualificationIsLocalToTargetAndControls) {
   for (const auto &form : kForms) {
     SCOPED_TRACE(form.name);
@@ -269,6 +296,143 @@ TEST(MfmaGfx942Exact, QualificationIsLocalToTargetAndControls) {
                                RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
       EXPECT_EQ(form.entry(semantics, 1, nullptr, nullptr, nullptr, nullptr),
                 RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      EXPECT_EQ(form.entry(semantics | RJ_ARITH_FP16_OVFL, 0, nullptr, nullptr, nullptr, nullptr),
+                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      EXPECT_EQ(form.gfx950(semantics, 0, nullptr, nullptr, nullptr, nullptr),
+                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+    }
+  }
+}
+
+using SparseEntry = decltype(&rj_arith_v_smfmac_f32_16x16x32_f16_w64);
+struct SparseForm {
+  const char *name;
+  int m, k, format_a, format_b;
+  SparseEntry entry, gfx950;
+  std::span<const uint32_t> captured;
+};
+
+const SparseForm kSparseForms[] = {
+    {"smfmac_f16_16x16x32", 16, 32, 0, 0, rj_arith_v_smfmac_f32_16x16x32_f16_w64,
+     rj_arith_v_smfmac_f32_16x16x32_f16_w64_gfx950, ksmfmac_f16_16x16x32},
+    {"smfmac_bf16_16x16x32", 16, 32, 1, 1, rj_arith_v_smfmac_f32_16x16x32_bf16_w64,
+     rj_arith_v_smfmac_f32_16x16x32_bf16_w64_gfx950, ksmfmac_bf16_16x16x32},
+    {"smfmac_f16_32x32x16", 32, 16, 0, 0, rj_arith_v_smfmac_f32_32x32x16_f16_w64,
+     rj_arith_v_smfmac_f32_32x32x16_f16_w64_gfx950, ksmfmac_f16_32x32x16},
+    {"smfmac_bf16_32x32x16", 32, 16, 1, 1, rj_arith_v_smfmac_f32_32x32x16_bf16_w64,
+     rj_arith_v_smfmac_f32_32x32x16_bf16_w64_gfx950, ksmfmac_bf16_32x32x16},
+    {"smfmac_fp8_fp8_16x16x64", 16, 64, 3, 3, rj_arith_v_smfmac_f32_16x16x64_fp8_fp8_w64,
+     rj_arith_v_smfmac_f32_16x16x64_fp8_fp8_w64_gfx950, ksmfmac_fp8_fp8_16x16x64},
+    {"smfmac_fp8_bf8_16x16x64", 16, 64, 3, 4, rj_arith_v_smfmac_f32_16x16x64_fp8_bf8_w64,
+     rj_arith_v_smfmac_f32_16x16x64_fp8_bf8_w64_gfx950, ksmfmac_fp8_bf8_16x16x64},
+    {"smfmac_bf8_fp8_16x16x64", 16, 64, 4, 3, rj_arith_v_smfmac_f32_16x16x64_bf8_fp8_w64,
+     rj_arith_v_smfmac_f32_16x16x64_bf8_fp8_w64_gfx950, ksmfmac_bf8_fp8_16x16x64},
+    {"smfmac_bf8_bf8_16x16x64", 16, 64, 4, 4, rj_arith_v_smfmac_f32_16x16x64_bf8_bf8_w64,
+     rj_arith_v_smfmac_f32_16x16x64_bf8_bf8_w64_gfx950, ksmfmac_bf8_bf8_16x16x64},
+    {"smfmac_fp8_fp8_32x32x32", 32, 32, 3, 3, rj_arith_v_smfmac_f32_32x32x32_fp8_fp8_w64,
+     rj_arith_v_smfmac_f32_32x32x32_fp8_fp8_w64_gfx950, ksmfmac_fp8_fp8_32x32x32},
+    {"smfmac_fp8_bf8_32x32x32", 32, 32, 3, 4, rj_arith_v_smfmac_f32_32x32x32_fp8_bf8_w64,
+     rj_arith_v_smfmac_f32_32x32x32_fp8_bf8_w64_gfx950, ksmfmac_fp8_bf8_32x32x32},
+    {"smfmac_bf8_fp8_32x32x32", 32, 32, 4, 3, rj_arith_v_smfmac_f32_32x32x32_bf8_fp8_w64,
+     rj_arith_v_smfmac_f32_32x32x32_bf8_fp8_w64_gfx950, ksmfmac_bf8_fp8_32x32x32},
+    {"smfmac_bf8_bf8_32x32x32", 32, 32, 4, 4, rj_arith_v_smfmac_f32_32x32x32_bf8_bf8_w64,
+     rj_arith_v_smfmac_f32_32x32x32_bf8_bf8_w64_gfx950, ksmfmac_bf8_bf8_32x32x32},
+};
+
+void captured_sparse_wave(const SparseForm &form, int row, int col) {
+  SCOPED_TRACE(::testing::Message() << form.name << " row " << row << " column " << col);
+  const bool half = form.format_a < 2;
+  const int per_word = half ? 2 : 4;
+  const int elem_bits = 32 / per_word;
+  const int outputs = form.m * form.m / 64;
+  const int set_bits = form.m * form.k / 64;
+  const uint32_t set_mask = (1U << set_bits) - 1U;
+  const uint64_t meta = uint64_t(form.captured[0]) | (uint64_t(form.captured[1]) << 32);
+
+  for (uint64_t controls : {0ULL, 8ULL, 16ULL, 24ULL, 9ULL}) {
+    SCOPED_TRACE(controls);
+    const int shift =
+        (controls & 3) == 0 ? set_bits * int((controls >> 3) & (32 / set_bits - 1)) : 0;
+    std::array<std::array<uint32_t, 64>, 23> input{};
+    // Fill unselected metadata sets with 0xf distractors so wrong CBSZ/ABID shifts fail.
+    input[6].fill(~(set_mask << shift));
+    for (int q = 0; q < form.k / 4; ++q) {
+      const int half_groups = form.k / 8;
+      const int lane = half ? (q / 2) * form.m + row : ((q % half_groups) / 2) * form.m + row;
+      const int nibble = half ? q % 2 : 2 * (q / half_groups) + (q % 2);
+      input[6][lane] |= uint32_t((meta >> (4 * q)) & 0xfU) << (shift + 4 * nibble);
+      for (int s = 0; s < 2; ++s) {
+        const int elem = half ? (2 * q + s) % 4 : 4 * (q / half_groups) + (2 * q + s) % 4;
+        input[elem / per_word][lane] |= encode(form.captured[2 + 2 * q + s], form.format_a)
+                                        << (elem_bits * (elem % per_word));
+      }
+    }
+    for (int depth = 0; depth < form.k; ++depth) {
+      int lane = 0, elem = 0;
+      if (half) {
+        lane = form.m == 16 ? (depth / 8) * 16 + col
+                            : 16 * ((col / 16) + 2 * (depth / 8)) + (col % 16);
+        elem = depth % 8;
+      } else {
+        lane = form.m == 16 ? 16 * ((depth % 32) / 8) + col : 32 * ((depth % 16) / 8) + col;
+        elem = form.m == 16 ? 8 * (depth / 32) + (depth % 8) : 8 * (depth / 16) + (depth % 8);
+      }
+      input[2 + elem / per_word][lane] |=
+          encode(form.captured[2 + form.k / 2 + depth], form.format_b)
+          << (elem_bits * (elem % per_word));
+    }
+    const int output_reg = row / (256 / form.m) * 4 + row % 4;
+    const int output_lane = row / 4 % (64 / form.m) * form.m + col;
+    input[7 + output_reg][output_lane] = form.captured[2 + 3 * form.k / 2];
+    const uint32_t expected_d = form.captured[2 + 3 * form.k / 2 + 1];
+
+    for (uint64_t cpu : supported_cpu_levels()) {
+      for (uint64_t semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
+                                 RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
+                                 RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+        auto storage = input;
+        const uint32_t *a[] = {storage[0].data(), storage[1].data()};
+        const uint32_t *b[] = {storage[2].data(), storage[3].data(), storage[4].data(),
+                               storage[5].data()};
+        const uint32_t *index[] = {storage[6].data()};
+        uint32_t *d[16];
+        for (int reg = 0; reg < outputs; ++reg) {
+          d[reg] = storage[7 + reg].data();
+        }
+        ASSERT_EQ(form.entry(cpu | semantics, controls, d, a, b, index), RJ_ARITH_SUCCESS);
+        for (int reg = 0; reg < 7 + outputs; ++reg) {
+          for (int lane = 0; lane < 64; ++lane) {
+            const uint32_t expected = reg < 7 ? input[reg][lane]
+                                      : reg == 7 + output_reg && lane == output_lane ? expected_d
+                                                                                     : 0U;
+            ASSERT_EQ(storage[reg][lane], expected) << "register " << reg << " lane " << lane;
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(MfmaGfx942Exact, SparseCapturedOutputsControlsAndAliasing) {
+  for (const auto &form : kSparseForms) {
+    const size_t row_words = size_t(3 * form.k / 2 + 4);
+    ASSERT_EQ(form.captured.size() % row_words, 0U);
+    for (size_t offset = 0; offset < form.captured.size(); offset += row_words) {
+      SCOPED_TRACE(offset / row_words);
+      auto test = form;
+      test.captured = form.captured.subspan(offset, row_words);
+      captured_sparse_wave(test, 0, 0);
+      captured_sparse_wave(test, form.m / 2, form.m / 2 + 1);
+      captured_sparse_wave(test, form.m - 1, form.m - 1);
+    }
+  }
+}
+
+TEST(MfmaGfx942Exact, SparseQualificationIsLocalToTargetAndOverflow) {
+  for (const auto &form : kSparseForms) {
+    SCOPED_TRACE(form.name);
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
+                               RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
       EXPECT_EQ(form.entry(semantics | RJ_ARITH_FP16_OVFL, 0, nullptr, nullptr, nullptr, nullptr),
                 RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
       EXPECT_EQ(form.gfx950(semantics, 0, nullptr, nullptr, nullptr, nullptr),

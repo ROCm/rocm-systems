@@ -3006,7 +3006,7 @@
         {
           "name": "ImplicitLaunchOrder_MultiCommunicatorChain",
           "description": "Test NCCL_LAUNCH_ORDER_IMPLICIT serialization across multiple communicators",
-          "test_filter": "ImplicitLaunchOrderMPITest.MultiCommunicatorChain"
+          "test_filter": "ImplicitLaunchOrderMPITest.MultiCommunicatorChain*"
         }
       ]
     },
@@ -5782,7 +5782,7 @@
         "NCCL_DEBUG_SUBSYS": "REG,INIT,TUNING",
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_LEGACY_CUDA_REGISTER": "1",
-        "NCCL_LAUNCH_ORDER_IMPLICIT": "1",
+        "RCCL_DDA_ENABLE": "0",
         "RCCL_DIRECT_ALLGATHER_THRESHOLD": "2147483648",
         "RCCL_MPI_LOG_ALL_RANKS": "1"
       },

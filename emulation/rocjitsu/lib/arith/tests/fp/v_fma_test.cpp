@@ -962,7 +962,8 @@ TEST(FpFmaF64Gfx11, CapturedTininess) {
 TEST(FpFmaF64Cdna, ScaledMinimumNormal) {
   using namespace rocjitsu::arith::test;
   for (auto cpu : supported_cpu_levels()) {
-    for (auto call : {rj_arith_v_fma_f64_w32_gfx942, rj_arith_v_fma_f64_w32_gfx1250}) {
+    for (auto call : {rj_arith_v_fma_f64_w32_gfx942, rj_arith_v_fma_f64_w32_gfx950,
+                      rj_arith_v_fma_f64_w32_gfx1250}) {
       // Output flushing precedes OMOD, which also canonicalizes tiny scaled results.
       for (bool flush_core : {false, true}) {
         if (call != rj_arith_v_fma_f64_w32_gfx1250) {

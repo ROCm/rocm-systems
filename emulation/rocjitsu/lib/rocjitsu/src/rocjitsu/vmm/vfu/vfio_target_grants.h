@@ -192,9 +192,6 @@ private:
   // An unmapped or route-denied peer IOVA remains known for its requester's
   // session. A stale GPU PTE must not reinterpret it as ordinary RAM.
   std::map<SessionKey, std::map<uint64_t, uint64_t>> known_peer_ranges_;
-  // If retaining a denied range fails, refuse every copy until this session
-  // retires: VFIO-user cannot reject the DMA_MAP callback after the fact.
-  std::vector<bool> failed_peer_range_records_;
   std::shared_ptr<AdmissionLifetime> admission_lifetime_;
 };
 

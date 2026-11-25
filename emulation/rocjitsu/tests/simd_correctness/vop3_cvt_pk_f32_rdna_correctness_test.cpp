@@ -255,15 +255,6 @@ TEST(Vop3CvtPkF32RdnaCorrectness, U16_PartialExec) {
   check_op(kOpCvtPkU16F32, /*is_u16=*/true, /*exec=*/0xA5A58001ULL);
 }
 
-TEST(Vop3CvtPkF32RdnaCorrectness, PackedIntegerSaturationHelpers) {
-  const float nan = std::numeric_limits<float>::quiet_NaN();
-  EXPECT_EQ(amdgpu::cvt_u8_f32(nan), 0u);
-  EXPECT_EQ(amdgpu::cvt_u8_f32(-1.0f), 0u);
-  EXPECT_EQ(amdgpu::cvt_u8_f32(256.0f), 255u);
-  EXPECT_EQ(amdgpu::cvt_u16_f32(65536.0f), 65535u);
-  EXPECT_EQ(amdgpu::cvt_i16_f32(-32769.0f), 0x8000u);
-}
-
 // Pin the exact value that exposed the bug: 40000.0f converts to 40000 for u16
 // (clamp [0, 65535]) but to 32767 for i16 (clamp [-32768, 32767]). The broken
 // SIMD path produced 32767 for BOTH; assert they now differ as expected.

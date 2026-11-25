@@ -15,8 +15,13 @@
 namespace rocjitsu::consan {
 namespace {
 
+constexpr Digest kPriorOptions = {
+    0x8e, 0x4e, 0x17, 0xc7, 0x9d, 0x00, 0x15, 0x6a, 0x93, 0x8a, 0xeb, 0xa2, 0x32, 0x06, 0x3d, 0xb0,
+    0xa7, 0x24, 0x2c, 0x81, 0x8f, 0xe1, 0x9f, 0xa8, 0x3e, 0x6c, 0x37, 0x78, 0xd4, 0x3c, 0xff, 0x17,
+};
+
 // Deliberately synthetic codec facts; these do not claim valid ELF/GPU evidence.
-ImageFacts example_image() {
+ImageFacts example_image(const Digest &options = mvp_options_digest()) {
   ImageFacts image;
   image.original = {.sha256 = digest(std::array<uint8_t, 4096>{}), .bytes = 4096};
   image.prepared = {.sha256 = digest(std::array<uint8_t, 8192>{}), .bytes = 8192};
@@ -46,7 +51,7 @@ ImageFacts example_image() {
       Manifest manifest;
       manifest.original = image.original;
       manifest.prepared = image.prepared;
-      manifest.options = mvp_options_digest();
+      manifest.options = options;
       manifest.target = image.target;
       manifest.wave_size = image.wave_size;
       manifest.code_object_abi = image.code_object_abi;
@@ -71,7 +76,8 @@ ImageFacts example_image() {
     image.entries.push_back(std::move(entry));
   }
   const std::array<EntryKey, 2> keys = {2048, 2112};
-  image.selection_profile = selection_profile_digest(keys);
+  image.selection_profile =
+      selection_profile_digest(keys, ScopeKind::NativeLdsNoSynchronization, options);
   return image;
 }
 
@@ -121,7 +127,7 @@ TEST(ConSanImageFacts, EncodingPreservesKnownWireIdentity) {
   const Digest expected = {0xbb, 0xe5, 0xc6, 0x24, 0x70, 0x8c, 0xba, 0xde, 0xa9, 0xac, 0xb7,
                            0x75, 0x88, 0xd6, 0xde, 0x57, 0xff, 0x4e, 0xee, 0xfc, 0xb9, 0x4a,
                            0x05, 0xe9, 0x58, 0x89, 0x36, 0x30, 0x4a, 0x6a, 0xd8, 0x45};
-  const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(example_image());
+  const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(example_image(kPriorOptions));
   ASSERT_TRUE(encoded.succeeded());
   EXPECT_EQ(encoded.value().size(), 1331u);
   EXPECT_EQ(digest(encoded.value()), expected);
@@ -358,6 +364,15 @@ TEST(ConSanImageFacts, DecoderRejectsTruncationCorruptionAndOversizedEntryClaims
   EXPECT_EQ(error.message(), "producer contract mismatch");
 }
 
+TEST(ConSanImageFacts, ReadEarlierWidthProfileWithoutAdmittingNewSitesUnderItsIdentity) {
+  ImageFacts image = example_image(kPriorOptions);
+  const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(image);
+  ASSERT_TRUE(encoded.succeeded());
+  EXPECT_TRUE(decode_image_facts(encoded.value()).succeeded());
+  image.entries.front().selected->sites.front().width = 12;
+  EXPECT_TRUE(validate_image_facts(image).failed());
+}
+
 TEST(ConSanImageFacts, ExpectedProfileIsIndependentOfInternallyValidFacts) {
   const ImageFacts image = example_image();
   const std::array<uint8_t, 4096> original{};
@@ -380,7 +395,7 @@ TEST(ConSanImageFacts, EveryQScopeWidthAndTargetWaveRoundTripsWorkgroupAndBarrie
       for (const ScopeKind scope :
            {ScopeKind::NativeLdsNoSynchronization, ScopeKind::NativeLdsWorkgroupBarrier,
             ScopeKind::NativeLdsWorkgroupBarrierLoop}) {
-        for (const uint32_t width : {2u, 4u, 8u, 16u}) {
+        for (const uint32_t width : {1u, 2u, 4u, 8u, 12u, 16u}) {
           SCOPED_TRACE(target.id);
           SCOPED_TRACE(wave_size);
           SCOPED_TRACE(static_cast<uint32_t>(scope));
