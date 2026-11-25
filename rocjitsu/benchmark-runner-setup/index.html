@@ -202,8 +202,8 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 570 · build snapshot" aria-label="Stars: 570">570</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 512 · build snapshot" aria-label="Forks: 512">512</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 571 · build snapshot" aria-label="Stars: 571">571</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 513 · build snapshot" aria-label="Forks: 513">513</li>
       </ul>
     </div>
   </a>
@@ -255,8 +255,8 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 570 · build snapshot" aria-label="Stars: 570">570</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 512 · build snapshot" aria-label="Forks: 512">512</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 571 · build snapshot" aria-label="Stars: 571">571</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 513 · build snapshot" aria-label="Forks: 513">513</li>
       </ul>
     </div>
   </a>
@@ -748,6 +748,39 @@
     <span class="md-ellipsis">
       
         Configure the Actions runner
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#persistent-setup-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Persistent setup storage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#provider-preparation-phases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider preparation phases
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compiler-caching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compiler caching
       
     </span>
   </a>
@@ -1697,6 +1730,39 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#persistent-setup-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Persistent setup storage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#provider-preparation-phases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider preparation phases
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compiler-caching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compiler caching
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#run-benchmarks" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1835,6 +1901,98 @@ runs under <code>benchmark.slice</code>, inheriting its swap limit; the harness 
 <p>Record when measurement settings change. The dashboard doesn't separate results
 by installed host policy, so comparisons across the change can appear as
 code-performance changes.</p>
+<h2 id="persistent-setup-storage">Persistent setup storage<a class="headerlink" href="#persistent-setup-storage" title="Permanent link">&para;</a></h2>
+<p>The benchmark container requires two pre-provisioned, dedicated host directories:</p>
+<table>
+<thead>
+<tr>
+<th>Host directory</th>
+<th>Container mount</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/srv/rocjitsu-ci/sources</code></td>
+<td><code>/__w/rocm-systems/rocm-systems/ci-sources</code></td>
+<td>Separate pinned measurement, corpus, TensileLite, full Tensile, llama and nanobind checkouts</td>
+</tr>
+<tr>
+<td><code>/srv/rocjitsu-ci/cache</code></td>
+<td><code>/opt/rocjitsu-cache</code></td>
+<td>uv packages (<code>uv/</code>) and compiler objects (<code>ccache/</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>These are bind mounts, not restored Actions cache archives. They must exist before
+Docker starts the job; the workflow does not provision the host. The cache root
+must be owned by the container's configured UID 0; both mounts must be writable
+by that UID, without symbolic-link ancestors. Limit
+writers to the trusted benchmark runner/jobs. Same-repository opt-in PR workflows
+share this storage; it is not an isolation boundary for untrusted code. Operators
+own disk capacity, quotas and pruning, outside active jobs. Run only one benchmark
+job at a time on a shared source root.</p>
+<p>Checkouts retain immutable revisions, <code>clean: true</code> and disabled credential
+persistence. TensileLite includes <code>projects/hipblaslt/tensilelite</code>, <code>cmake</code>,
+<code>shared/origami</code>, <code>shared/stinkytofu</code> and <code>shared/mxdatagenerator</code> for the
+source-built ROCISA wheel and native adapter; full
+Tensile includes <code>shared/tensile</code>. Other measurement dependencies retain full
+checkouts, including recursive nanobind submodules. Workflow tooling remains an
+independent sparse scripts checkout at the workflow revision, not the measurement
+revision. Preparation still verifies source revisions and cleanliness.</p>
+<p>The pinned setup-uv action installs uv 0.12.21; Python remains 3.12 from the pinned
+setup-python action. Preparation uses the action's absolute uv executable output,
+not PATH. <code>uv venv --python 3.12</code> creates a fresh attempt-owned environment without
+seeding pip. Registry installs, package lists and dependency checks use <code>uv pip</code>
+with that environment's explicit Python. Registry installs retain explicit indexes
+and benchmark constraints, with bytecode compilation and copied cache materialization.
+<code>uv build --wheel --no-index --no-build-isolation</code> builds ROCISA from its pinned
+source using preinstalled build requirements, an external build directory and
+16 build workers. Exact-wheel installation uses an attempt-local requirements
+receipt with the wheel's SHA-256, <code>--require-hashes --no-index --no-deps</code>, and no
+bytecode compilation. Import checks still verify venv/noneditable URL origin,
+actual extension and mapped-library hashes, and exclude <code>/opt/rocm</code> mappings;
+they do not require an archive hash in uv's <code>direct_url.json</code>. Compact inventories
+read installed metadata with stdlib <code>importlib.metadata</code>; command logs retain
+verbose registry resolution information. No pip bootstrap, cache or configuration
+is used by benchmark preparation.</p>
+<p>Only package setup data and compiler-cache entries persist alongside sources.
+Complete builds, venvs, generated artifacts,
+Tensile helper caches, Triton caches and measurements remain attempt-local.
+Preparation rejects package-cache roots overlapping scratch or source roots and
+symbolic paths. Owned-scratch cleanup leaves both host mounts intact. Package
+cache reuse does not imply ROCISA wheel reuse or change workload cache policy.</p>
+<h2 id="provider-preparation-phases">Provider preparation phases<a class="headerlink" href="#provider-preparation-phases" title="Permanent link">&para;</a></h2>
+<p>The workflow retains <strong>Install benchmark dependencies</strong> and <strong>Build rocjitsu</strong>,
+then runs one <strong>Prepare benchmark providers</strong> step. Its owned-venv Python commands
+run serially: <code>rocisa</code>, <code>tensilelite-build</code>, <code>tensilelite-generate</code>, <code>tensile-build</code>,
+<code>tensile-generate</code>, <code>llama-build</code>, <code>gluon-verify</code>. The five inventory-consuming
+commands starting at <code>tensilelite-generate</code> require the selected <code>--manifest</code>.
+Granular command logs, timings and phase receipts remain in owned scratch. A
+failed command stops the grouped step and blocks suite admission. See the
+<a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/website/dashboard/docs/architecture-and-publication.md#isolated-preparation-before-measurement">preparation contract</a>
+for validation and environment-export boundaries. This split adds no wheel or
+artifact reuse and does not change measurement or JIT policy.</p>
+<h2 id="compiler-caching">Compiler caching<a class="headerlink" href="#compiler-caching" title="Permanent link">&para;</a></h2>
+<p>The workflow installs ccache inside the job container. Preparation shares
+<code>/opt/rocjitsu-cache/ccache</code> across C/C++ builds; no additional runner directory
+or mount needs provisioning. Fresh CMake builds initialize both C and C++ compiler
+launchers from the helper's environment, including the scikit-build ROCISA wheel,
+rocjitsu, the TensileLite adapter/host tests and the full-Tensile adapter.
+The pinned corpus llama builder explicitly disables caching and clears launchers;
+it remains excluded. HIP kernel generation/assembly and Gluon verification are
+not compiler-cache reuse paths.</p>
+<p>The helper removes inherited ccache/launcher overrides and writes an attempt-owned
+configuration with compiler-content checking and a <code>5G</code> shared size limit. A common
+source/scratch base directory normalizes changing attempt paths; <code>/</code> is not used.
+No sloppiness options or ignored headers are enabled. Per-phase ccache statistics
+logs, configuration and diagnostic summaries distinguish real hits from compiler
+fallbacks. Existing source, package, import/loader, host-test and artifact checks
+remain active.</p>
+<p>Only compilation results are reused. Configuration, linking, wheel packaging and
+validation still run against fresh attempt outputs. The helper does not export
+ccache settings or compiler launchers to the measured suite. No completed-artifact,
+Tensile helper/JIT, Triton cache or benchmark-result reuse is enabled here.</p>
 <h2 id="run-benchmarks">Run benchmarks<a class="headerlink" href="#run-benchmarks" title="Permanent link">&para;</a></h2>
 <p>Run the wrapper inside the Actions runner service context. Set <code>INSTALL_DIR</code>
 to the installation path in that shell:</p>
