@@ -247,7 +247,7 @@ Panel Config:
   metrics_description:
     Wavefront Occupancy: >-
       The time-averaged number of wavefronts resident on the accelerator, as a percent
-      of the maximum number of wavefronts all of its CUs can hold.
+      of the maximum number of wavefronts all of its WGPs can hold.
     VGPRs: >-
       The number of architected vector general-purpose registers allocated
       for the kernel. Note: this may not exactly match the number of VGPRs

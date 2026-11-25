@@ -77,8 +77,8 @@ System Speed-of-Light:
     unit: Bytes/s
 Memory chart - Workgroup Processors (WGPs):
   Wavefront Occupancy:
-    plain: The time-averaged number of wavefronts resident on the accelerator, as a percent of the maximum number of wavefronts all of its CUs can hold.
-    rst: The time-averaged number of :ref:`wavefronts <desc-wavefront>` resident on the accelerator, as a percent of the maximum number of wavefronts all of its :doc:`CUs <compute-unit>` can hold.
+    plain: The time-averaged number of wavefronts resident on the accelerator, as a percent of the maximum number of wavefronts all of its WGPs can hold.
+    rst: The time-averaged number of :ref:`wavefronts <desc-wavefront>` resident on the accelerator, as a percent of the maximum number of wavefronts all of its WGPs can hold.
     unit: Percent
   VGPRs:
     plain: 'The number of architected vector general-purpose registers allocated for the kernel. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
