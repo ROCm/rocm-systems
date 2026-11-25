@@ -8,6 +8,7 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_DRM_DRIVER_H_
 #define HSA_RUNTIME_CORE_INC_AMD_DRM_DRIVER_H_
 
+#include <mutex>
 #include <unordered_map>
 
 #include <amdgpu.h>
@@ -169,6 +170,7 @@ public:
   hsa_status_t SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
                               const void* buffer_base, uint64_t buffer_base_size) const override;
 
+                      
   // Legacy DestroyQueue signature for backward compatibility
   hsa_status_t DestroyQueue(HSA_QUEUEID queue_id) const override;
 
@@ -261,6 +263,13 @@ public:
   ///
   void FreeDoorbellOffset(core::Agent &agent, uint32_t offset);
 
+  hsa_status_t AllocateMemory(const core::MemoryRegion& mem_region,
+                              core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
+                              uint32_t agent_node_id,
+                              core::DriverMemoryHandle* handle) override;
+
+  hsa_status_t FreeMemory(const core::DriverMemoryHandle& handle) override;
+
   /// @brief Store doorbell info state per agent.
   std::unordered_map<core::Agent *, doorbell_info_t *> db_info_by_agent;
 
@@ -279,6 +288,12 @@ public:
   ///     current KFD path and when PCS support is added to the DRM path.
   ///   - ReleaseResources: called during single-threaded teardown.
   mutable std::unordered_map<core::Agent *, void *> trap_tma_by_agent_;
+
+  /// @brief Maps virtual address → GEM BO handle for DRM allocations.
+  /// Needed because handle.handle stores vaddr (fragment allocator convention),
+  /// not the BO handle. Protected by the agent's memory lock.
+  std::unordered_map<uint64_t, amdgpu_bo_handle> vaddr_to_bo_;
+  std::mutex vaddr_to_bo_mutex_;
 
 };
 

@@ -134,6 +134,13 @@ class Flag {
     // Enable DRM interface only when HSA_ENABLE_DRM_DEBUG=1 is explicitly set.
     var = os::GetEnvVar("HSA_ENABLE_DRM_DEBUG");
     enable_drm_ = (var == "1") ? true : false;
+
+    // Enable call flow via DRM interface only when HSA_DRM_DRIVER_ENABLED=1 is explicitly set.
+    // if this flag is set then we go through drm interfce and not thunk;
+    var = os::GetEnvVar("HSA_DRM_DRIVER_ENABLED");
+    enable_drm_interface_ = (var == "1") ? true : false;
+    enable_drm_ = (enable_drm_interface_) ? true : enable_drm_;
+
     // Opt-in multi-sample GPU/CPU clock correlation. Profiling tools enable this
     // at runtime through hsa_amd_enable_high_precision_timestamps. Unset or any
     // value other than "1" leaves the single-query path in place.
@@ -463,6 +470,7 @@ class Flag {
   SDMA_OVERRIDE enable_sdma_recommended_eng() const { return enable_sdma_recommended_eng_; }
 
   bool enable_drm() const { return enable_drm_; }
+  bool enable_drm_interface() const { return enable_drm_interface_; }
   bool enable_high_precision_timestamps() const {
     return enable_high_precision_timestamps_.load(std::memory_order_relaxed);
   }
@@ -669,6 +677,7 @@ class Flag {
   SDMA_OVERRIDE enable_sdma_recommended_eng_;
 
   bool enable_drm_;
+  bool enable_drm_interface_;
   std::atomic<bool> enable_high_precision_timestamps_{false};
 
   bool filter_visible_gpus_;

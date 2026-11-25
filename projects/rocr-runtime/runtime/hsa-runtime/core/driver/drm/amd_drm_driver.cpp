@@ -9,6 +9,7 @@
 #include <cstring>
 #include <unistd.h>
 #include <algorithm>
+#include <sys/mman.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -18,6 +19,7 @@
 #include "core/inc/amd_drm_driver.h"
 #include "core/inc/amd_aql_queue.h"
 #include "core/inc/amd_gpu_agent.h"
+#include "core/inc/amd_memory_region.h"
 #include "core/inc/exceptions.h"
 
 namespace rocr {
@@ -1170,6 +1172,201 @@ hsa_status_t DrmDriver::ComputeCwsrSizeFallback(const GpuAgent& gpu_agent,
   return HSA_STATUS_SUCCESS;
 }
 
+
+hsa_status_t DrmDriver::AllocateMemory(const core::MemoryRegion& mem_region,
+                                       core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
+                                       uint32_t agent_node_id,
+                                       core::DriverMemoryHandle* handle) {
+  if (!core::Runtime::runtime_singleton_->flag().enable_drm_interface()) {
+    return KfdDriver::AllocateMemory(mem_region, alloc_flags, size, agent_node_id, handle);
+  }
+
+  const MemoryRegion& m_region(static_cast<const MemoryRegion&>(mem_region));
+  auto& gpu_agent = static_cast<GpuAgent&>(*m_region.owner());
+  amdgpu_device_handle dev = gpu_agent.libDrmDev();
+  HsaMemFlags mem_flags = m_region.mem_flags();
+  void* mem = nullptr;
+
+  auto populate_handle = [&]() {
+    handle->handle = reinterpret_cast<uint64_t>(mem);
+    handle->vaddr = mem;
+    handle->size = size;
+    handle->owner = this;
+    handle->owns_allocation = true;
+  };
+
+  // --- Flag translation (mirrors KfdDriver::AllocateMemory) ---
+
+  if (alloc_flags & core::MemoryRegion::AllocatePCIeRW)
+    mem_flags.ui32.CoarseGrain = 0;
+
+  if (alloc_flags & core::MemoryRegion::AllocateUncached) {
+    mem_flags.ui32.Uncached = 1;
+    mem_flags.ui32.CoarseGrain = 0;
+    mem_flags.ui32.ExtendedCoherent = 0;
+  }
+
+  // --- Fragment suballocation (reuses driver-agnostic fragment allocator) ---
+
+  bool no_address = !!(alloc_flags & core::MemoryRegion::AllocateMemoryOnly);
+
+  if (!no_address) {
+    bool subAllocEnabled =
+        !core::Runtime::runtime_singleton_->flag().disable_fragment_alloc();
+    bool useSubAlloc = subAllocEnabled;
+    useSubAlloc &= ((alloc_flags & (~core::MemoryRegion::AllocateRestrict)) == 0);
+
+    if (useSubAlloc) {
+      mem = m_region.fragment_alloc(size);
+      if (m_region.IsSystem()) {
+        memset(mem, 0, size);
+      }
+      populate_handle();
+      return HSA_STATUS_SUCCESS;
+    }
+  }
+
+  // --- GEM domain and flags ---
+
+  uint32_t gem_domain = 0;
+  uint64_t gem_flags = 0;
+
+  if (m_region.IsLocalMemory()) {
+    gem_domain = AMDGPU_GEM_DOMAIN_VRAM;
+    if (mem_flags.ui32.HostAccess)
+      gem_flags |= AMDGPU_GEM_CREATE_CPU_ACCESS_REQUIRED;
+  } else if (m_region.IsSystem()) {
+    gem_domain = AMDGPU_GEM_DOMAIN_GTT;
+  } else {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+
+  // Coherence flags (replicates fmm.c:2454-2459)
+  if (!mem_flags.ui32.CoarseGrain)
+    gem_flags |= AMDGPU_GEM_CREATE_COHERENT;
+  if (mem_flags.ui32.ExtendedCoherent)
+    gem_flags |= AMDGPU_GEM_CREATE_EXT_COHERENT;
+  if (mem_flags.ui32.Uncached)
+    gem_flags |= AMDGPU_GEM_CREATE_UNCACHED;
+
+  // Coherence validation (from AILIROCR-542)
+  if (!mem_flags.ui32.CoarseGrain && !(gem_flags & AMDGPU_GEM_CREATE_COHERENT)) {
+    debug_print("DrmDriver: fine-grain memory missing COHERENT flag\n");
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+  if (mem_flags.ui32.CoarseGrain && !mem_flags.ui32.Uncached &&
+      (gem_flags & AMDGPU_GEM_CREATE_COHERENT)) {
+    debug_print("DrmDriver: coarse-grain memory should not have COHERENT flag\n");
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // --- GEM_CREATE ---
+
+  struct amdgpu_bo_alloc_request req = {};
+  amdgpu_bo_handle bo_handle = nullptr;
+
+  req.alloc_size = size;
+  req.phys_alignment = 0;
+  req.preferred_heap = gem_domain;
+  req.flags = gem_flags;
+
+  if (amdgpu_bo_alloc(dev, &req, &bo_handle) != 0) {
+    debug_print("DrmDriver::AllocateMemory: amdgpu_bo_alloc failed\n");
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  if (no_address) {
+    // Memory-only handle (no virtual address needed)
+    mem = reinterpret_cast<void*>(static_cast<uintptr_t>(0));
+    populate_handle();
+    handle->handle = reinterpret_cast<uint64_t>(bo_handle);
+    {
+      std::lock_guard<std::mutex> lock(vaddr_to_bo_mutex_);
+      vaddr_to_bo_[handle->handle] = bo_handle;
+    }
+    return HSA_STATUS_SUCCESS;
+  }
+
+  // --- Reserve VA + CPU mmap ---
+
+  // Reserve VA space
+  void* va = mmap(nullptr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (va == MAP_FAILED) {
+    amdgpu_bo_free(bo_handle);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  // Get mmap offset via GEM_MMAP ioctl
+  uint32_t kms_handle = 0;
+  if (amdgpu_bo_export(bo_handle, amdgpu_bo_handle_type_kms, &kms_handle) != 0) {
+    munmap(va, size);
+    amdgpu_bo_free(bo_handle);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  union drm_amdgpu_gem_mmap mmap_arg = {};
+  mmap_arg.in.handle = kms_handle;
+  int drm_fd = amdgpu_device_get_fd(dev);
+  if (drmIoctl(drm_fd, DRM_IOCTL_AMDGPU_GEM_MMAP, &mmap_arg) != 0) {
+    munmap(va, size);
+    amdgpu_bo_free(bo_handle);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  // Map the BO over the reserved VA
+  bool host_access = mem_flags.ui32.HostAccess || m_region.IsSystem();
+  int prot = host_access ? (PROT_READ | PROT_WRITE) : PROT_NONE;
+  void* mapped = mmap(va, size, prot, MAP_SHARED | MAP_FIXED, drm_fd,
+                      mmap_arg.out.addr_ptr);
+  if (mapped == MAP_FAILED) {
+    munmap(va, size);
+    amdgpu_bo_free(bo_handle);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  madvise(mapped, size, MADV_DONTFORK);
+
+  mem = mapped;
+  populate_handle();
+
+  // Track vaddr → BO handle for FreeMemory
+  {
+    std::lock_guard<std::mutex> lock(vaddr_to_bo_mutex_);
+    vaddr_to_bo_[reinterpret_cast<uint64_t>(mem)] = bo_handle;
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t DrmDriver::FreeMemory(const core::DriverMemoryHandle& handle) {
+  if (!core::Runtime::runtime_singleton_->flag().enable_drm_interface()) {
+    return KfdDriver::FreeMemory(handle);
+  }
+
+  amdgpu_bo_handle bo_handle = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(vaddr_to_bo_mutex_);
+    auto it = vaddr_to_bo_.find(handle.handle);
+    if (it == vaddr_to_bo_.end()) {
+      debug_print("DrmDriver::FreeMemory: vaddr 0x%lx not found in map\n",
+                  handle.handle);
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    }
+    bo_handle = it->second;
+    vaddr_to_bo_.erase(it);
+  }
+
+  if (handle.vaddr && handle.size > 0) {
+    munmap(handle.vaddr, handle.size);
+  }
+
+  if (amdgpu_bo_free(bo_handle) != 0) {
+    debug_print("DrmDriver::FreeMemory: amdgpu_bo_free failed\n");
+    return HSA_STATUS_ERROR;
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
 
 } // namespace AMD
 } // namespace rocr
