@@ -1,14 +1,15 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Sparse floating matrix validation and dispatch, retaining the legacy numerical model.
+// Sparse floating matrix validation and dispatch, with MI300X exact mode for gfx942 forms.
 #include "mfma/backends.h"
+#include "mfma/gfx942_exact.h"
 #include "mfma/sparse_float.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_mfma.h"
 namespace {
 // Validate policy and controls before accessing any operand.
-template <int M, int K, int Bits, bool BfA, bool BfB, bool Fnuz>
+template <int M, int K, int Bits, bool BfA, bool BfB, bool Fnuz, bool Gfx942 = false>
 int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
              const uint32_t *const *b, const uint32_t *const *index) {
   using namespace rocjitsu::arith;
@@ -17,9 +18,24 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
   }
+  // Only the captured gfx942 forms with FP16_OVFL clear are qualified.
+  // Compatibility retains the existing fast approximate implementation.
+  if constexpr (Gfx942) {
+    if (is_exact(flags) && !(flags & RJ_ARITH_FP16_OVFL)) {
+      constexpr auto format =
+          Bits == 16 ? (BfA ? MfmaGfx942Format::Bf16 : MfmaGfx942Format::F16)
+                     : (BfA ? (BfB ? MfmaGfx942Format::Bf8Bf8 : MfmaGfx942Format::Bf8Fp8)
+                            : (BfB ? MfmaGfx942Format::Fp8Bf8 : MfmaGfx942Format::Fp8Fp8));
+      smfmac_gfx942_exact(format, M, controls, d, a, b, index);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
   if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
+  // gfx942 carries this bit only to delimit exact qualification. Its inherited
+  // approximate policy ignores it; saturation belongs to the gfx950 variants.
+  const bool clamp_overflow = !Gfx942 && (flags & RJ_ARITH_FP16_OVFL);
   // Metadata sets occupy 8 bits for compact F16/BF16, 16 bits for
   // wide F16/BF16 or compact FP8/BF8, and all 32 bits for wide FP8/BF8.
   constexpr int set_bits = M * K / 64;
@@ -34,17 +50,17 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    smfmac_float_x86_64_v4<M, K, Bits, BfA, BfB, Fnuz>(d, a, b, index, flags & RJ_ARITH_FP16_OVFL);
+    smfmac_float_x86_64_v4<M, K, Bits, BfA, BfB, Fnuz>(d, a, b, index, clamp_overflow);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    smfmac_float_x86_64_v3<M, K, Bits, BfA, BfB, Fnuz>(d, a, b, index, flags & RJ_ARITH_FP16_OVFL);
+    smfmac_float_x86_64_v3<M, K, Bits, BfA, BfB, Fnuz>(d, a, b, index, clamp_overflow);
     return RJ_ARITH_SUCCESS;
   }
 #endif
-  smfmac_float_kernel<M, K, Bits, BfA, BfB, Fnuz>(d, a, b, index, flags & RJ_ARITH_FP16_OVFL);
+  smfmac_float_kernel<M, K, Bits, BfA, BfB, Fnuz>(d, a, b, index, clamp_overflow);
   return RJ_ARITH_SUCCESS;
 }
 } // namespace
@@ -53,6 +69,14 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
 int rj_arith_v_smfmac_f32_16x16x32_f16_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                            const uint32_t *const *a, const uint32_t *const *b,
                                            const uint32_t *const *index) {
+  return evaluate<16, 32, 16, false, false, false, true>(flags, controls, d, a, b, index);
+}
+
+// Evaluate the gfx950 form using the existing approximate model.
+int rj_arith_v_smfmac_f32_16x16x32_f16_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                  uint32_t *const *d, const uint32_t *const *a,
+                                                  const uint32_t *const *b,
+                                                  const uint32_t *const *index) {
   return evaluate<16, 32, 16, false, false, false>(flags, controls, d, a, b, index);
 }
 
@@ -60,6 +84,14 @@ int rj_arith_v_smfmac_f32_16x16x32_f16_w64(uint64_t flags, uint64_t controls, ui
 int rj_arith_v_smfmac_f32_16x16x32_bf16_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                             const uint32_t *const *a, const uint32_t *const *b,
                                             const uint32_t *const *index) {
+  return evaluate<16, 32, 16, true, true, false, true>(flags, controls, d, a, b, index);
+}
+
+// Evaluate the gfx950 form using the existing approximate model.
+int rj_arith_v_smfmac_f32_16x16x32_bf16_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                   uint32_t *const *d, const uint32_t *const *a,
+                                                   const uint32_t *const *b,
+                                                   const uint32_t *const *index) {
   return evaluate<16, 32, 16, true, true, false>(flags, controls, d, a, b, index);
 }
 
@@ -67,6 +99,14 @@ int rj_arith_v_smfmac_f32_16x16x32_bf16_w64(uint64_t flags, uint64_t controls, u
 int rj_arith_v_smfmac_f32_32x32x16_f16_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                            const uint32_t *const *a, const uint32_t *const *b,
                                            const uint32_t *const *index) {
+  return evaluate<32, 16, 16, false, false, false, true>(flags, controls, d, a, b, index);
+}
+
+// Evaluate the gfx950 form using the existing approximate model.
+int rj_arith_v_smfmac_f32_32x32x16_f16_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                  uint32_t *const *d, const uint32_t *const *a,
+                                                  const uint32_t *const *b,
+                                                  const uint32_t *const *index) {
   return evaluate<32, 16, 16, false, false, false>(flags, controls, d, a, b, index);
 }
 
@@ -74,6 +114,14 @@ int rj_arith_v_smfmac_f32_32x32x16_f16_w64(uint64_t flags, uint64_t controls, ui
 int rj_arith_v_smfmac_f32_32x32x16_bf16_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                             const uint32_t *const *a, const uint32_t *const *b,
                                             const uint32_t *const *index) {
+  return evaluate<32, 16, 16, true, true, false, true>(flags, controls, d, a, b, index);
+}
+
+// Evaluate the gfx950 form using the existing approximate model.
+int rj_arith_v_smfmac_f32_32x32x16_bf16_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                   uint32_t *const *d, const uint32_t *const *a,
+                                                   const uint32_t *const *b,
+                                                   const uint32_t *const *index) {
   return evaluate<32, 16, 16, true, true, false>(flags, controls, d, a, b, index);
 }
 
@@ -110,7 +158,7 @@ int rj_arith_v_smfmac_f32_16x16x64_fp8_fp8_w64(uint64_t flags, uint64_t controls
                                                uint32_t *const *d, const uint32_t *const *a,
                                                const uint32_t *const *b,
                                                const uint32_t *const *index) {
-  return evaluate<16, 64, 8, false, false, true>(flags, controls, d, a, b, index);
+  return evaluate<16, 64, 8, false, false, true, true>(flags, controls, d, a, b, index);
 }
 
 // Accumulate the selected sparse products into the tied destination.
@@ -126,7 +174,7 @@ int rj_arith_v_smfmac_f32_16x16x64_fp8_bf8_w64(uint64_t flags, uint64_t controls
                                                uint32_t *const *d, const uint32_t *const *a,
                                                const uint32_t *const *b,
                                                const uint32_t *const *index) {
-  return evaluate<16, 64, 8, false, true, true>(flags, controls, d, a, b, index);
+  return evaluate<16, 64, 8, false, true, true, true>(flags, controls, d, a, b, index);
 }
 
 // Accumulate the selected sparse products into the tied destination.
@@ -142,7 +190,7 @@ int rj_arith_v_smfmac_f32_16x16x64_bf8_fp8_w64(uint64_t flags, uint64_t controls
                                                uint32_t *const *d, const uint32_t *const *a,
                                                const uint32_t *const *b,
                                                const uint32_t *const *index) {
-  return evaluate<16, 64, 8, true, false, true>(flags, controls, d, a, b, index);
+  return evaluate<16, 64, 8, true, false, true, true>(flags, controls, d, a, b, index);
 }
 
 // Accumulate the selected sparse products into the tied destination.
@@ -158,7 +206,7 @@ int rj_arith_v_smfmac_f32_16x16x64_bf8_bf8_w64(uint64_t flags, uint64_t controls
                                                uint32_t *const *d, const uint32_t *const *a,
                                                const uint32_t *const *b,
                                                const uint32_t *const *index) {
-  return evaluate<16, 64, 8, true, true, true>(flags, controls, d, a, b, index);
+  return evaluate<16, 64, 8, true, true, true, true>(flags, controls, d, a, b, index);
 }
 
 // Accumulate the selected sparse products into the tied destination.
@@ -174,7 +222,7 @@ int rj_arith_v_smfmac_f32_32x32x32_fp8_fp8_w64(uint64_t flags, uint64_t controls
                                                uint32_t *const *d, const uint32_t *const *a,
                                                const uint32_t *const *b,
                                                const uint32_t *const *index) {
-  return evaluate<32, 32, 8, false, false, true>(flags, controls, d, a, b, index);
+  return evaluate<32, 32, 8, false, false, true, true>(flags, controls, d, a, b, index);
 }
 
 // Accumulate the selected sparse products into the tied destination.
@@ -190,7 +238,7 @@ int rj_arith_v_smfmac_f32_32x32x32_fp8_bf8_w64(uint64_t flags, uint64_t controls
                                                uint32_t *const *d, const uint32_t *const *a,
                                                const uint32_t *const *b,
                                                const uint32_t *const *index) {
-  return evaluate<32, 32, 8, false, true, true>(flags, controls, d, a, b, index);
+  return evaluate<32, 32, 8, false, true, true, true>(flags, controls, d, a, b, index);
 }
 
 // Accumulate the selected sparse products into the tied destination.
@@ -206,7 +254,7 @@ int rj_arith_v_smfmac_f32_32x32x32_bf8_fp8_w64(uint64_t flags, uint64_t controls
                                                uint32_t *const *d, const uint32_t *const *a,
                                                const uint32_t *const *b,
                                                const uint32_t *const *index) {
-  return evaluate<32, 32, 8, true, false, true>(flags, controls, d, a, b, index);
+  return evaluate<32, 32, 8, true, false, true, true>(flags, controls, d, a, b, index);
 }
 
 // Accumulate the selected sparse products into the tied destination.
@@ -222,7 +270,7 @@ int rj_arith_v_smfmac_f32_32x32x32_bf8_bf8_w64(uint64_t flags, uint64_t controls
                                                uint32_t *const *d, const uint32_t *const *a,
                                                const uint32_t *const *b,
                                                const uint32_t *const *index) {
-  return evaluate<32, 32, 8, true, true, true>(flags, controls, d, a, b, index);
+  return evaluate<32, 32, 8, true, true, true, true>(flags, controls, d, a, b, index);
 }
 
 // Accumulate the selected sparse products into the tied destination.

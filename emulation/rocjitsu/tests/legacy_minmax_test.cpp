@@ -6,6 +6,8 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
@@ -430,6 +432,212 @@ INSTANTIATE_TEST_SUITE_P(
                                      rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
                                      rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5),
                      testing::Bool()));
+
+// Finite literals cover all newly migrated selections, both waves, aliases and
+// guest output controls; existing policy tests above cover NaN/zero precedence.
+// Reusing another target's arithmetic does not qualify strict semantics here.
+TEST(OlderFloatingSelection, RejectsUnqualifiedStrictModelsBeforeWrites) {
+  for (auto arch : {IsaFamily::Cdna1, IsaFamily::Cdna2, IsaFamily::Rdna1, IsaFamily::Rdna2,
+                    IsaFamily::Rdna3_5}) {
+    for (auto semantics : {amdgpu::ArithmeticSemantics::BitExactEmpiricalNoFpStatus,
+                           amdgpu::ArithmeticSemantics::BitExactEmpirical}) {
+      amdgpu::GpuMemory memory("selection_qualification");
+      amdgpu::L2Cache cache("selection_qualification");
+      amdgpu::ComputeUnitCore::Config config{};
+      config.arch = arch;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 104;
+      config.vgprs_per_wf = 16;
+      config.lds_size_kb = 64;
+      config.arithmetic.semantics = semantics;
+      std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          test::initialize_compute_unit(cu, "selection_qualification", config, &memory, &cache));
+      auto decoder = Decoder::create(arch);
+      auto *wave = cu->dispatch_wf(0, 0, 104, 16, 64);
+      ASSERT_NE(wave, nullptr);
+      const bool cdna = arch == IsaFamily::Cdna1 || arch == IsaFamily::Cdna2;
+      const bool gfx11 = arch == IsaFamily::Rdna3_5;
+      const auto encode = [&](uint16_t c, uint16_t g10, uint16_t g11) {
+        if (cdna) {
+          return cdna2::build_vop3(c, {.vdst = 4, .src0 = 256, .src1 = 258, .src2 = 260});
+        }
+        if (gfx11) {
+          return rdna3_5::build_vop3(g11, {.vdst = 4, .src0 = 256, .src1 = 258, .src2 = 260});
+        }
+        return rdna2::build_vop3(g10, {.vdst = 4, .src0 = 256, .src1 = 258, .src2 = 260});
+      };
+      const auto base = wave->vgpr_alloc().base;
+      for (auto words :
+           {std::array<uint32_t, 2>{
+                (uint32_t(cdna ? 10 : 15) << 25) | (4u << 17) | (2u << 9) | 256u, 0},
+            encode(cdna2::kVMinF32Vop3, rdna2::kVMinF32Vop3, rdna3_5::kVMinF32Vop3),
+            encode(cdna2::kVMinF64Vop3, rdna2::kVMinF64Vop3, rdna3_5::kVMinF64Vop3),
+            encode(cdna2::kVMin3F32Vop3, rdna2::kVMin3F32Vop3, rdna3_5::kVMin3F32Vop3)}) {
+        auto instruction = decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        for (uint64_t exec_mask : {0ULL, 1ULL}) {
+          wave->set_exec(exec_mask);
+          cu->write_vgpr(base + 4, 0, 0xdeadbeef);
+          cu->write_vgpr(base + 5, 0, 0xdeadbeef);
+          EXPECT_EQ(cu->execute_instruction(instruction.value().get(), *wave).failed(),
+                    exec_mask != 0);
+          EXPECT_EQ(cu->read_vgpr_storage(base + 4, 0), 0xdeadbeefU);
+          EXPECT_EQ(cu->read_vgpr_storage(base + 5, 0), 0xdeadbeefU);
+        }
+      }
+      wave->halt();
+    }
+  }
+}
+
+TEST(OlderFloatingSelection, ControlsAliasesAndSdwa) {
+  struct Architecture {
+    rocjitsu::IsaFamily arch;
+    bool cdna, gfx10;
+  };
+  for (const auto profile : {Architecture{rocjitsu::IsaFamily::Cdna1, true, false},
+                             Architecture{rocjitsu::IsaFamily::Cdna2, true, false},
+                             Architecture{rocjitsu::IsaFamily::Rdna1, false, true},
+                             Architecture{rocjitsu::IsaFamily::Rdna2, false, true},
+                             Architecture{rocjitsu::IsaFamily::Rdna3_5, false, false}}) {
+    for (int lanes : {32, 64}) {
+      if (profile.cdna && lanes == 32) {
+        continue;
+      }
+      for (auto semantics :
+           {amdgpu::ArithmeticSemantics::Compatibility, amdgpu::ArithmeticSemantics::Loose}) {
+        amdgpu::GpuMemory memory("older_selection");
+        amdgpu::L2Cache cache("older_selection");
+        amdgpu::ComputeUnitCore::Config config{};
+        config.arch = profile.arch;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 104;
+        config.vgprs_per_wf = 16;
+        config.lds_size_kb = 64;
+        config.arithmetic.semantics = semantics;
+        std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+        ASSERT_NO_FATAL_FAILURE(
+            test::initialize_compute_unit(cu, "older_selection", config, &memory, &cache));
+        auto decoder = Decoder::create(profile.arch);
+        auto *wave = cu->dispatch_wf(0, 0, 104, 16, lanes);
+        ASSERT_NE(wave, nullptr);
+        const auto base = wave->vgpr_alloc().base;
+        const auto execute = [&](std::array<uint32_t, 2> words) {
+          auto inst = decoder->decode_window(words);
+          ASSERT_TRUE(inst.succeeded());
+          ASSERT_TRUE(cu->execute_instruction(inst.value().get(), *wave).succeeded());
+        };
+        const auto encode = [&](uint32_t cdna, uint32_t gfx10, uint32_t gfx11, int destination,
+                                int source_b, uint32_t omod = 0) {
+          if (profile.cdna) {
+            return cdna2::build_vop3(cdna, {.vdst = uint8_t(destination),
+                                            .src0 = 256,
+                                            .src1 = uint16_t(256 + source_b),
+                                            .src2 = 260,
+                                            .omod = uint8_t(omod)});
+          }
+          if (profile.gfx10) {
+            return rdna2::build_vop3(gfx10, {.vdst = uint8_t(destination),
+                                             .src0 = 256,
+                                             .src1 = uint16_t(256 + source_b),
+                                             .src2 = 260,
+                                             .omod = uint8_t(omod)});
+          }
+          return rdna3_5::build_vop3(gfx11, {.vdst = uint8_t(destination),
+                                             .src0 = 256,
+                                             .src1 = uint16_t(256 + source_b),
+                                             .src2 = 260,
+                                             .omod = uint8_t(omod)});
+        };
+        struct Operation {
+          uint16_t cdna, gfx10, gfx11;
+          bool wide;
+          uint64_t expected;
+        };
+        const Operation operations[] = {
+            {cdna2::kVMinF32Vop3, rdna2::kVMinF32Vop3, rdna3_5::kVMinF32Vop3, false, 0x3e800000},
+            {cdna2::kVMaxF32Vop3, rdna2::kVMaxF32Vop3, rdna3_5::kVMaxF32Vop3, false, 0x3f000000},
+            {cdna2::kVMin3F32Vop3, rdna2::kVMin3F32Vop3, rdna3_5::kVMin3F32Vop3, false, 0x3e800000},
+            {cdna2::kVMax3F32Vop3, rdna2::kVMax3F32Vop3, rdna3_5::kVMax3F32Vop3, false, 0x3f400000},
+            {cdna2::kVMed3F32Vop3, rdna2::kVMed3F32Vop3, rdna3_5::kVMed3F32Vop3, false, 0x3f000000},
+            {cdna2::kVMinF64Vop3, rdna2::kVMinF64Vop3, rdna3_5::kVMinF64Vop3, true,
+             0x3fd0000000000000ULL},
+            {cdna2::kVMaxF64Vop3, rdna2::kVMaxF64Vop3, rdna3_5::kVMaxF64Vop3, true,
+             0x3fe0000000000000ULL},
+        };
+        for (const auto &op : operations) {
+          SCOPED_TRACE(testing::Message() << profile.arch << '/' << lanes << '/' << op.cdna);
+          for (int destination : {0, 6}) {
+            for (bool suppress_omod : {false, true}) {
+              // IEEE suppresses legacy OMOD; otherwise multiply the selection by two.
+              wave->set_mode_raw(suppress_omod ? amdgpu::Wavefront::IEEE_BIT : 0);
+              const uint64_t exec_mask = 1ULL | (1ULL << (lanes - 1));
+              wave->set_exec(exec_mask);
+              wave->set_trapsts(0x100);
+              const uint64_t values[] = {op.wide ? 0x3fd0000000000000ULL : 0x3e800000ULL,
+                                         op.wide ? 0x3fe0000000000000ULL : 0x3f000000ULL,
+                                         op.wide ? 0x3fe8000000000000ULL : 0x3f400000ULL};
+              for (int lane = 0; lane < lanes; ++lane) {
+                for (int reg = 0; reg < 8; ++reg) {
+                  cu->write_vgpr(base + reg, lane, 0xdeadbeef);
+                }
+                for (int operand = 0; operand < 3; ++operand) {
+                  cu->write_vgpr(base + operand * 2, lane, uint32_t(values[operand]));
+                  if (op.wide) {
+                    cu->write_vgpr(base + operand * 2 + 1, lane, uint32_t(values[operand] >> 32));
+                  }
+                }
+              }
+              execute(encode(op.cdna, op.gfx10, op.gfx11, destination, 2, 1));
+              const uint64_t expected =
+                  op.expected + (suppress_omod ? 0 : (op.wide ? 1ULL << 52 : 1ULL << 23));
+              for (int lane = 0; lane < lanes; ++lane) {
+                const uint64_t before =
+                    destination ? (op.wide ? 0xdeadbeefdeadbeefULL : 0xdeadbeefULL) : values[0];
+                const uint64_t wanted = (exec_mask >> lane) & 1 ? expected : before;
+                EXPECT_EQ(cu->read_vgpr_storage(base + destination, lane), uint32_t(wanted));
+                if (op.wide) {
+                  EXPECT_EQ(cu->read_vgpr_storage(base + destination + 1, lane),
+                            uint32_t(wanted >> 32));
+                }
+              }
+              EXPECT_EQ(wave->trapsts(), 0x100U);
+            }
+          }
+        }
+        if (profile.cdna || profile.gfx10) {
+          // SDWA owns scaling and packed destination placement. Wave32 must not
+          // call the Wave64 entry point or read/write a second, nonexistent half.
+          for (int lane = 0; lane < lanes; ++lane) {
+            cu->write_vgpr(base, lane, 0x3e800000);
+            cu->write_vgpr(base + 1, lane, 0x3f000000);
+            cu->write_vgpr(base + 6, lane, 0xdeadbeef);
+          }
+          wave->set_exec(1ULL << (lanes - 1));
+          wave->set_mode_raw(0);
+          const uint32_t opcode = profile.cdna ? cdna2::kVMinF32Vop2 : rdna2::kVMinF32Vop2;
+          for (bool packed_destination : {false, true}) {
+            for (int lane = 0; lane < lanes; ++lane) {
+              cu->write_vgpr(base + 6, lane, 0xdeadbeef);
+            }
+            const uint32_t placement =
+                packed_destination ? amdgpu::sdwa::WORD_1 : amdgpu::sdwa::DWORD;
+            execute({(opcode << 25) | (6U << 17) | (1U << 9) | amdgpu::SRC_SDWA,
+                     (placement << 8) | (amdgpu::sdwa::UNUSED_PRESERVE << 11) | (1U << 14) |
+                         (amdgpu::sdwa::DWORD << 16) | (amdgpu::sdwa::DWORD << 24)});
+            const uint32_t expected = packed_destination ? 0x0000beefU : 0x3f000000U;
+            for (int lane = 0; lane < lanes; ++lane) {
+              EXPECT_EQ(cu->read_vgpr_storage(base + 6, lane),
+                        lane == lanes - 1 ? expected : 0xdeadbeefU);
+            }
+          }
+        }
+        wave->halt();
+      }
+    }
+  }
+}
 
 class ScalarFloatMinMax : public LegacyMinMaxInstruction {};
 

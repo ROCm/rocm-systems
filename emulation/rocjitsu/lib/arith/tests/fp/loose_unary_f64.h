@@ -23,19 +23,23 @@ namespace rocjitsu::arith::test {
 // Exercise the common FP64 unary contract, including exact modes rejected on RDNA3,
 // modifiers, EXEC, aliasing, and untouched FP status. The caller supplies
 // the entry point and an independent scalar reference expression.
+// RDNA OMOD checks for models whose scaling stages are tested separately.
 template <int Lanes, typename Call, typename Reference>
-void check_loose_unary_f64(Call call, Reference reference, bool gfx12) {
+void check_loose_unary_f64(Call call, Reference reference, bool gfx12, bool check_omod = true,
+                           bool accepts_exact = true) {
   static_assert(Lanes == 32 || Lanes == 64);
   using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
   using Registers = rocjitsu::arith::test::Registers<10, Lanes>;
   Registers input = make_fp_inputs<64, Lanes>();
   Registers witness;
   write_fp(witness.v, 0, 64, 0x3ff8000000000000ULL); // A positive, nonintegral finite input.
-  check_fp64_omod<Lanes>(
-      [&](uint64_t flags, uint64_t modifier, uint32_t *const *d) {
-        return call(flags, Mask(1), modifier, d, witness.v, nullptr);
-      },
-      reference(1.5), gfx12);
+  if (check_omod) {
+    check_fp64_omod<Lanes>(
+        [&](uint64_t flags, uint64_t modifier, uint32_t *const *d) {
+          return call(flags, Mask(1), modifier, d, witness.v, nullptr);
+        },
+        reference(1.5), gfx12);
+  }
 
   auto invalid_request = [&](uint64_t flags, uint64_t mode) {
     Registers r = input;
@@ -70,6 +74,13 @@ void check_loose_unary_f64(Call call, Reference reference, bool gfx12) {
             int result = call(flags, exec_mask, mode, r.v + aliasing_offset, r.v, &fp_status);
             if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
               EXPECT_EQ(result, RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
+              r.expect_preserved(input, 0, 0);
+              EXPECT_EQ(fp_status, 0x80000000U);
+              continue;
+            }
+            if (!accepts_exact &&
+                semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+              EXPECT_EQ(result, RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
               r.expect_preserved(input, 0, 0);
               EXPECT_EQ(fp_status, 0x80000000U);
               continue;

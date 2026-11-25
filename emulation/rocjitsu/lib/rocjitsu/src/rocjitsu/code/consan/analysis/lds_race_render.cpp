@@ -34,13 +34,28 @@ void write_json_string(std::ostream &out, std::string_view value) {
   out << '"';
 }
 
+std::string_view access_name(AccessKind access) {
+  switch (access) {
+  case AccessKind::Read:
+    return "read";
+  case AccessKind::Write:
+    return "write";
+  case AccessKind::Atomic:
+    return "atomic";
+  }
+  return "unknown";
+}
+
 void write_participant(std::ostream &out, const LdsRaceParticipant &value) {
   out << "{\"workgroup_x\":" << value.workgroup << ",\"wave\":" << value.wave
-      << ",\"site\":" << value.site << ",\"phase\":" << value.phase
-      << ",\"sequence\":" << value.sequence << ",\"mask\":" << value.mask
-      << ",\"offset\":" << value.offset << ",\"width\":" << value.width
-      << ",\"original_offset\":" << value.original_offset << ",\"access\":\""
-      << (value.access == AccessKind::Write ? "write" : "read") << "\"}";
+      << ",\"site\":" << value.site << ",\"range_id\":" << value.range_id
+      << ",\"phase\":" << value.phase << ",\"sequence\":" << value.sequence
+      << ",\"mask\":" << value.mask << ",\"offset\":" << value.offset
+      << ",\"width\":" << value.width << ",\"original_offset\":" << value.original_offset
+      << ",\"access\":\"" << access_name(value.access) << '"';
+  if (value.transpose_exec)
+    out << ",\"mask_role\":\"transpose_source_lanes\",\"anchor_exec\":" << *value.transpose_exec;
+  out << '}';
 }
 
 void write_examples(std::ostream &out, const std::vector<LdsRaceFinding> &findings) {
@@ -68,7 +83,7 @@ void write_examples(std::ostream &out, const std::vector<LdsRaceFinding> &findin
     }
     out << ",\"first\":";
     write_participant(out, finding.first);
-    if (finding.kind == LdsRaceFindingKind::CrossWave) {
+    if (finding.kind == LdsRaceFindingKind::CrossWave || finding.second.mask != 0) {
       out << ",\"second\":";
       write_participant(out, finding.second);
     }
@@ -86,9 +101,10 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
   out << "{\"verdict\":\""
       << (result.cross_wave_pairs || result.collision_groups ? "findings" : "no_observed_findings")
       << "\",\"scope\":\""
-      << (result.scope != ScopeKind::NativeLdsNoSynchronization
-              ? "native_lds_single_range_epoch_workgroup_barriers"
-              : "native_lds_single_range_no_sync_bounded_1d")
+      << (result.has_dual_ranges ? "native_lds_multi_range_" : "native_lds_single_range_")
+      << (result.has_transpose ? "transpose_" : "")
+      << (result.scope != ScopeKind::NativeLdsNoSynchronization ? "epoch_workgroup_barriers"
+                                                                : "no_sync_bounded_1d")
       << "\"" << ",\"run_identity\":\"" << hex_bytes(result.run_identity)
       << "\",\"original_sha256\":\"" << hex_bytes(result.original.sha256)
       << "\",\"original_bytes\":" << result.original.bytes << ",\"selection_profile\":\""

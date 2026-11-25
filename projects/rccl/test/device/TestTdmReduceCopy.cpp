@@ -47,7 +47,7 @@ __global__ void __launch_bounds__(kBlockThreads)
   __shared__ void* srcPtrs[NSrcs];
   __shared__ void* dstPtrs[NDsts];
   if (threadIdx.x == 0) {
-#if ENABLE_TDM_SIMPLE && defined(__HIP_DEVICE_COMPILE__)
+#if ENABLE_TDM_SIMPLE
     ncclShmem.comm.tdmSimpleEnable = tdmCopy;
     ncclShmem.comm.tdmSimpleReduceEnable = tdmReduce;
 #endif
@@ -69,7 +69,7 @@ __global__ void __launch_bounds__(kBlockThreads)
   __shared__ void* srcPtrs[NSrcs];
   __shared__ void* dstPtrs[NDsts];
   if (threadIdx.x == 0) {
-#if ENABLE_TDM_SIMPLE && defined(__HIP_DEVICE_COMPILE__)
+#if ENABLE_TDM_SIMPLE
     ncclShmem.comm.tdmSimpleEnable = tdmCopy;
     ncclShmem.comm.tdmSimpleReduceEnable = tdmReduce;
 #endif

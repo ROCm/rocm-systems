@@ -119,9 +119,9 @@ void add_program_points(Instrumentor &instrumentor, const InputProgram &program,
     point.probe_obj = &probes;
     point.probe_symbol = symbol;
     point.probe_args = std::move(args);
-    // Scalar barriers complete even at guest EXEC=0. Enable every callback lane
-    // so lane zero can publish; access probes use the saved guest mask argument,
-    // rather than callback EXEC, to decide which lanes actually accessed LDS.
+    // Lane zero publishes even at empty guest EXEC. A full-wave callback also
+    // preserves every address needed by CDNA5 transpose reads. Each access
+    // callback receives the original EXEC separately from its own execution mask.
     point.force_full_exec = true;
     instrumentor.add_point(point);
   };
@@ -137,8 +137,9 @@ void add_program_points(Instrumentor &instrumentor, const InputProgram &program,
                                            : probe_arg_imm(0));
     args.push_back(probe_arg_imm(access.width));
     args.push_back(probe_arg_imm(program.repeated));
-    add(access.original_offset, InstrumentationKind::BeforeInst, "rj_consan_access",
-        std::move(args));
+    const char *symbol =
+        is_transpose(access.lds_ranges.shape) ? "rj_consan_transpose" : "rj_consan_access";
+    add(access.original_offset, InstrumentationKind::BeforeInst, symbol, std::move(args));
   }
   // Advance phase only after the unchanged guest wait completes. Recording at
   // the signal or before the wait could certify ordering before synchronization.
@@ -170,6 +171,7 @@ Result append_program_facts(const InputProgram &program, const std::vector<Instr
                               .analysis = AnalysisKind::LdsRaceDetection,
                               .access = access.kind,
                               .width = access.width,
+                              .lds_ranges = access.lds_ranges,
                               .original_offset = access.original_offset,
                               .original_size = 8,
                               .prepared_guest_offset = mapping->guest_offset,
