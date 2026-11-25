@@ -2186,7 +2186,7 @@ rsmi_status_t rsmi_dev_compute_partition_count_get(uint32_t dv_ind, uint32_t* co
   int value;
   uint32_t values = 0;
   while (iss >> value) ++values;
-  if (values == 0) {
+  if (values == 0 || !iss.eof()) {
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
   *count = values;

@@ -4398,9 +4398,16 @@ rsmi_status_t rsmi_dev_process_isolation_get(uint32_t dv_ind, uint32_t* pisolate
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[in, out] count the number of compute partitions
+ *  @param[in, out] count the number of compute partitions.
+ *  If this parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided
+ *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
+ *  provided arguments.
  *
- *  @return ::RSMI_STATUS_SUCCESS is returned upon successful call, non-zero on fail
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED enforce_isolation does not exist for the device
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::RSMI_STATUS_UNEXPECTED_DATA enforce_isolation is not a list of integers
  */
 rsmi_status_t rsmi_dev_compute_partition_count_get(uint32_t dv_ind, uint32_t* count);
 

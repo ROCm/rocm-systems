@@ -7,14 +7,18 @@
 // saw no mode. Runs the real discovery over a fake KFD, DRM and PCI tree, with no GPU.
 
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_test_overrides.h"
+#include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_main.h"
 #include "test_fixture_utils.h"
 
 namespace {
@@ -91,6 +95,19 @@ TEST(GpuUnit, SecondaryPartitionReportsTheModeOfItsGpu) {
   char nps[16] = {};
   ASSERT_EQ(amdsmi_get_gpu_memory_partition(handle, nps, sizeof(nps)), AMDSMI_STATUS_SUCCESS);
   EXPECT_STREQ(nps, "NPS1");
+  amdsmi_memory_partition_config_t memory_config{};
+  ASSERT_EQ(amdsmi_get_gpu_memory_partition_config(handle, &memory_config), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(memory_config.mp_mode, AMDSMI_MEMORY_PARTITION_NPS1);
+  EXPECT_EQ(memory_config.partition_caps.nps_flags.nps4_cap, 1u);
+  uint32_t isolation = 1;
+  ASSERT_EQ(amdsmi_get_gpu_process_isolation(handle, &isolation), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(isolation, 0u);
+  // The support probe agrees with the read.
+  EXPECT_EQ(amdsmi_get_gpu_process_isolation(handle, nullptr), AMDSMI_STATUS_INVAL);
+  // A direct rsmi getter reads only the partition's own files, and its probe agrees.
+  uint32_t own_isolation = 0;
+  EXPECT_EQ(rsmi_dev_process_isolation_get(0, nullptr), RSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(rsmi_dev_process_isolation_get(0, &own_isolation), RSMI_STATUS_NOT_SUPPORTED);
 }
 
 // CPX has no fixed partition count. Without gpu_metrics, the count is the number of per-partition
@@ -109,36 +126,56 @@ TEST(GpuUnit, SecondaryCpxPartitionCountsThePartitionsOfItsGpu) {
       AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(profile.profile_type, AMDSMI_ACCELERATOR_PARTITION_CPX);
   EXPECT_EQ(profile.num_partitions, 8u);
+
+  // A single value or a partly numeric line is not a per-partition list.
+  for (const char* isolation : {"0", "0 0 x 0"}) {
+    tree.WriteFile(std::string(kParent) + "enforce_isolation", std::string(isolation) + "\n");
+    profile = {};
+    ASSERT_EQ(amdsmi_get_gpu_accelerator_partition_profile(topology.handle(kNode), &profile,
+                                                           partition_id),
+              AMDSMI_STATUS_SUCCESS);
+    EXPECT_EQ(profile.num_partitions, std::numeric_limits<uint32_t>::max()) << isolation;
+  }
 }
 
-// A set on a secondary partition returns what it returned before the partition read the attributes
-// of its GPU, also for the GPU's current mode, and does not write the GPU's attributes.
+// A set on a secondary partition, through amd_smi or rsmi, and the profile config getter that tries
+// a set per profile, return what they returned before the partition read the attributes of its GPU,
+// also for the GPU's current mode, and do not write the GPU's attributes.
 TEST(GpuUnit, SecondaryPartitionSetsFailAsBefore) {
+  if (geteuid() != 0) {
+    GTEST_SKIP() << "the partition setters require root";
+  }
   FakeSysfsTree tree;
   WriteSecondaryPartition(tree);
   WriteParent(tree, "DPX", "0 0");
   FakeKfdTopology topology(tree);
   const amdsmi_processor_handle handle = topology.handle(kNode);
+  ASSERT_EQ(amd::smi::RocmSMI::getInstance().devices().size(), 1u);
   const auto set_all = [handle] {
-    return std::vector<amdsmi_status_t>{
+    amdsmi_accelerator_partition_profile_config_t config{};
+    return std::vector<int>{
+        amdsmi_get_gpu_accelerator_partition_profile_config(handle, &config),
         amdsmi_set_gpu_compute_partition(handle, AMDSMI_COMPUTE_PARTITION_DPX),
         amdsmi_set_gpu_compute_partition(handle, AMDSMI_COMPUTE_PARTITION_SPX),
         amdsmi_set_gpu_accelerator_partition_profile(handle, 1),
         amdsmi_set_gpu_memory_partition_mode(handle, AMDSMI_MEMORY_PARTITION_NPS1),
         amdsmi_set_gpu_process_isolation(handle, 1),
+        rsmi_dev_compute_partition_set(0, RSMI_COMPUTE_PARTITION_DPX),
+        rsmi_dev_memory_partition_set(0, RSMI_MEMORY_PARTITION_NPS1),
+        rsmi_dev_process_isolation_set(0, 1),
     };
   };
 
-  std::vector<amdsmi_status_t> without_gpu_files;
+  std::vector<int> without_gpu_files;
   {
     PciRoot no_pci(tree, "no_pci");
     without_gpu_files = set_all();
   }
   PciRoot pci(tree);
-  const std::vector<amdsmi_status_t> with_gpu_files = set_all();
+  const std::vector<int> with_gpu_files = set_all();
 
   EXPECT_EQ(with_gpu_files, without_gpu_files);
-  for (const amdsmi_status_t status : with_gpu_files) {
+  for (const int status : with_gpu_files) {
     EXPECT_NE(status, AMDSMI_STATUS_SUCCESS);
   }
   EXPECT_EQ(tree.ReadFile(std::string(kParent) + "current_compute_partition"), "DPX");
