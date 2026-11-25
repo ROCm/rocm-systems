@@ -519,6 +519,11 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
         error, InputErrorCode::UnsupportedEntry,
         "barrier profile requires a maximum workgroup size permitting two waves");
   }
+  if (program.required_workgroup_size[0] != 0 &&
+      program.required_workgroup_size[0] <= program.wave_size) {
+    return reject_instruction(error, InputErrorCode::UnsupportedEntry,
+                              "required workgroup size must permit two waves for barrier profile");
+  }
   if (members != (split ? 2u : 1u) * program.barriers.size() || program.barriers.empty() ||
       program.barriers.size() > kSyncCapacity) {
     return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,

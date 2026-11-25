@@ -827,6 +827,96 @@ void expect_scoped_multi_entry_image(const char *fixture, ScopeKind expected_sco
 #endif
 
 #ifdef CONSAN_MULTI_ENTRY_BARRIER_FIXTURE
+TEST(ConSanPrepareImageScopes, RequiredBarrierWorkgroupMustPermitTwoWavesBeforePreparation) {
+  const std::filesystem::path abi_path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_BARRIER_FIXTURE).parent_path() /
+      "multi-entry-abi.hsaco";
+  const std::vector<uint8_t> original = test::read_fixture(abi_path);
+  const std::vector<uint8_t> barrier_image = test::read_fixture(CONSAN_MULTI_ENTRY_BARRIER_FIXTURE);
+  ASSERT_FALSE(original.empty());
+  ASSERT_FALSE(barrier_image.empty());
+  const TargetProfile &target = *target_profile("gfx1250");
+  InputError error;
+  const FailureOr<InputProgram> no_sync =
+      build_image_entry_program(original, target, "mk_a", error);
+  ASSERT_TRUE(no_sync.succeeded()) << error.message;
+  ASSERT_EQ(no_sync.value().wave_size, 32u);
+  ASSERT_EQ(no_sync.value().accesses.size(), 2u);
+  const FailureOr<InputProgram> barrier =
+      build_image_entry_program(barrier_image, target, "mk_a", error);
+  ASSERT_TRUE(barrier.succeeded()) << error.message;
+  ASSERT_EQ(barrier.value().barriers.size(), 1u);
+  const BarrierFacts &group = barrier.value().barriers.front();
+  ASSERT_EQ(group.original_signal, group.original_drain + 4);
+  ASSERT_EQ(group.original_wait, group.original_drain + 8);
+  ASSERT_GE(no_sync.value().accesses.back().original_offset, 12u);
+  const uint64_t wait_offset =
+      no_sync.value().text_file_offset + no_sync.value().accesses.back().original_offset - 12;
+  struct Requirement {
+    bool barrier;
+    uint32_t required;
+    uint32_t maximum;
+  };
+  const std::array<Requirement, 6> requirements = {{
+      {.barrier = true, .required = 16, .maximum = 64},
+      {.barrier = true, .required = 32, .maximum = 64},
+      {.barrier = true, .required = 33, .maximum = 64},
+      {.barrier = true, .required = 64, .maximum = 64},
+      {.barrier = true, .required = 32, .maximum = 32},
+      {.barrier = false, .required = 32, .maximum = 64},
+  }};
+  for (const Requirement &requirement : requirements) {
+    SCOPED_TRACE(requirement.barrier);
+    SCOPED_TRACE(requirement.required);
+    SCOPED_TRACE(requirement.maximum);
+    std::vector<uint8_t> image = original;
+    // Replace the fixture's three wait words after the write with a canonical
+    // drain/signal/wait group, retaining the argument note's required shape.
+    if (requirement.barrier)
+      std::copy_n(barrier_image.begin() + barrier.value().text_file_offset + group.original_drain,
+                  12, image.begin() + wait_offset);
+    const FailureOr<amdhsa::MetadataDocument> metadata = amdhsa::MetadataDocument::parse(image);
+    ASSERT_TRUE(metadata.succeeded());
+    const amdhsa::MetadataValue *entries = metadata.value().root().field("amdhsa.kernels");
+    ASSERT_NE(entries, nullptr);
+    const amdhsa::MetadataValue &entry = entries->array.front();
+    const amdhsa::MetadataValue *shape = entry.field(".reqd_workgroup_size");
+    const amdhsa::MetadataValue *maximum = entry.field(".max_flat_workgroup_size");
+    ASSERT_NE(shape, nullptr);
+    ASSERT_NE(maximum, nullptr);
+    ASSERT_EQ(shape->array.size(), 3u);
+    ASSERT_EQ(shape->array.front().integer_bytes, 0u);
+    ASSERT_EQ(maximum->integer_bytes, 0u);
+    const size_t payload_offset = metadata.value().payload().data() - image.data();
+    image[payload_offset + shape->array.front().offset] =
+        static_cast<uint8_t>(requirement.required);
+    image[payload_offset + maximum->offset] = static_cast<uint8_t>(requirement.maximum);
+    const std::array<std::string_view, 1> selected = {"mk_a"};
+    const FailureOr<PreparedImageArtifact> artifact = prepare_image(image, target, selected, error);
+    if (requirement.barrier && requirement.required <= no_sync.value().wave_size) {
+      EXPECT_TRUE(artifact.failed());
+      EXPECT_EQ(error.code, InputErrorCode::UnsupportedEntry);
+      const char *diagnostic =
+          requirement.maximum <= no_sync.value().wave_size
+              ? "barrier profile requires a maximum workgroup size permitting two waves"
+              : "required workgroup size must permit two waves for barrier profile";
+      EXPECT_EQ(error.message, diagnostic);
+      continue;
+    }
+    ASSERT_TRUE(artifact.succeeded()) << error.message;
+    ASSERT_TRUE(artifact.value().facts.entries.front().selected);
+    const Manifest &manifest = *artifact.value().facts.entries.front().selected;
+    EXPECT_EQ(manifest.entry.required_workgroup_size,
+              (std::array<uint32_t, 3>{requirement.required, 1, 1}));
+    EXPECT_EQ(manifest.scope, requirement.barrier ? ScopeKind::NativeLdsWorkgroupBarrier
+                                                  : ScopeKind::NativeLdsNoSynchronization);
+    EXPECT_EQ(manifest.barriers.size(), requirement.barrier ? 1u : 0u);
+    EXPECT_TRUE(plan_launch(manifest, {{requirement.required, 1, 1}, {requirement.required, 1, 1}},
+                            manifest.entry.original_group_bytes, 0)
+                    .succeeded());
+  }
+}
+
 TEST(ConSanPrepareImageScopes, WholeImageKeepsPerEntryBarrierCompletionAndWorkgroupFacts) {
   ASSERT_NO_FATAL_FAILURE(expect_scoped_multi_entry_image(
       CONSAN_MULTI_ENTRY_BARRIER_FIXTURE, ScopeKind::NativeLdsWorkgroupBarrier, false));
