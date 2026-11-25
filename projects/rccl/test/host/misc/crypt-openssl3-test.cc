@@ -80,8 +80,9 @@ class CryptPskHandshakeTest : public ::testing::Test {
 
   void TearDown() override {
     ncclCryptFree(client_.crypto);
-    for (int fd : fds_)
+    for (int fd : fds_) {
       if (fd >= 0) close(fd);
+    }
     ncclSetEncryption(nullptr);
     if (libssl_ != nullptr) dlclose(libssl_);
   }
