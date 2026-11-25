@@ -26,6 +26,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <memory>
+
 #if !defined(NCCL_TLS_BACKEND_OPENSSL3)
 #error "crypt-openssl3-test.cc needs NCCL_TLS_BACKEND_OPENSSL3 (configure with TLS_BACKEND=OPENSSL3)"
 #endif
@@ -138,32 +140,30 @@ class CryptImpostorTest : public CryptPskHandshakeTest {
 #undef CRYPT_TEST_LOAD
 #undef CRYPT_TEST_SYMBOLS
     if (clientSkipsVerification) SSL_set_verify(client_.crypto->ssl, SSL_VERIFY_NONE, nullptr);
-    EVP_PKEY* key = EVP_PKEY_Q_keygen(nullptr, nullptr, "EC", "P-256");
-    X509* cert = X509_new();
-    SSL_CTX* ctx = SSL_CTX_new(TLS_server_method());
+    std::unique_ptr<EVP_PKEY, decltype(EVP_PKEY_free)> key(EVP_PKEY_Q_keygen(nullptr, nullptr, "EC", "P-256"),
+                                                          EVP_PKEY_free);
+    std::unique_ptr<X509, decltype(X509_free)> cert(X509_new(), X509_free);
+    std::unique_ptr<SSL_CTX, decltype(SSL_CTX_free)> ctx(SSL_CTX_new(TLS_server_method()), SSL_CTX_free);
     ASSERT_TRUE(key && cert && ctx);
     // Without validity times the certificate does not parse and no client would accept it.
-    ASN1_INTEGER_set(X509_get_serialNumber(cert), 1);
-    X509_gmtime_adj(X509_getm_notBefore(cert), 0);
-    X509_gmtime_adj(X509_getm_notAfter(cert), 3600);
-    ASSERT_EQ(1, X509_set_pubkey(cert, key));
-    ASSERT_GT(X509_sign(cert, key, EVP_sha256()), 0);
-    ASSERT_EQ(1, SSL_CTX_use_certificate(ctx, cert));
-    ASSERT_EQ(1, SSL_CTX_use_PrivateKey(ctx, key));
-    SSL* impostor = SSL_new(ctx);
+    ASN1_INTEGER_set(X509_get_serialNumber(cert.get()), 1);
+    X509_gmtime_adj(X509_getm_notBefore(cert.get()), 0);
+    X509_gmtime_adj(X509_getm_notAfter(cert.get()), 3600);
+    ASSERT_EQ(1, X509_set_pubkey(cert.get(), key.get()));
+    ASSERT_GT(X509_sign(cert.get(), key.get(), EVP_sha256()), 0);
+    ASSERT_EQ(1, SSL_CTX_use_certificate(ctx.get(), cert.get()));
+    ASSERT_EQ(1, SSL_CTX_use_PrivateKey(ctx.get(), key.get()));
+    std::unique_ptr<SSL, decltype(SSL_free)> impostor(SSL_new(ctx.get()), SSL_free);
+    ASSERT_TRUE(impostor);
     ASSERT_EQ(0, fcntl(fds_[1], F_SETFL, O_NONBLOCK));
-    ASSERT_EQ(1, SSL_set_fd(impostor, fds_[1]));
+    ASSERT_EQ(1, SSL_set_fd(impostor.get(), fds_[1]));
 
     for (int i = 0; i < kMaxSteps && !out->impostorHandshakeDone; i++) {
       if (out->clientRes == ncclInProgress) out->clientRes = ncclCryptConnectHello(&client_);
-      out->impostorHandshakeDone = SSL_accept(impostor) == 1;
+      out->impostorHandshakeDone = SSL_accept(impostor.get()) == 1;
     }
     char hello[NCCL_SOCKET_PLAIN_HELLO_BYTES];
-    out->leaked = SSL_read(impostor, hello, sizeof(hello));
-    SSL_free(impostor);
-    SSL_CTX_free(ctx);
-    X509_free(cert);
-    EVP_PKEY_free(key);
+    out->leaked = SSL_read(impostor.get(), hello, sizeof(hello));
   }
 };
 
