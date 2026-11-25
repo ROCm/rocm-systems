@@ -52,10 +52,11 @@ constexpr bool kForceOff = false;
 
 __global__ void noOp() {}
 
-// Writes the device-side RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS and whether the toolchain offers the b128 builtins.
+// Writes the device-side RCCL_HAVE_SYS_B128 and whether the toolchain offers either family of b128 builtins.
 __global__ void reportReReadPath(int* out) {
-  out[0] = RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS;
-#if __has_builtin(__builtin_amdgcn_global_load_b128) && __has_builtin(__builtin_amdgcn_global_store_b128)
+  out[0] = RCCL_HAVE_SYS_B128;
+#if (__has_builtin(__builtin_amdgcn_av_load_b128) && __has_builtin(__builtin_amdgcn_av_store_b128)) || \
+  (__has_builtin(__builtin_amdgcn_global_load_b128) && __has_builtin(__builtin_amdgcn_global_store_b128))
   out[1] = 1;
 #else
   out[1] = 0;

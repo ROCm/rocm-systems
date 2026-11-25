@@ -24,7 +24,7 @@ NCCL_DEVICE_INLINE uint64_t ncclFlowLLLoad(ncclLLFifoLine* src, uint32_t flag, u
     // [RCCL] Same FIFO-line read as Primitives<ProtoLL>::readLL (src/device/prims_ll.h).
     ncclLLFifoLine line;
 #if RCCL_LL_FIFO_SYS_SCOPE
-    line.v4u = __builtin_amdgcn_global_load_b128((v4u_gptr)&src->v4u, RCCL_SYSTEM_SYNCSCOPE);
+    line.v4u = RCCL_LOAD_B128_SYS(&src->v4u);
 #elif defined(__GFX11__)
     asm volatile("global_load_b128 %0, %1, off glc slc dlc\n"
                  "s_waitcnt vmcnt(0)\n"
@@ -58,7 +58,7 @@ NCCL_DEVICE_INLINE void ncclFlowLLStore(ncclLLFifoLine* dst, uint64_t data, uint
   line.data2 = (uint32_t)(data >> 32);
   line.flag2 = flag;
 #if RCCL_LL_FIFO_SYS_SCOPE
-  __builtin_amdgcn_global_store_b128((v4u_gptr)&dst->v4u, line.v4u, RCCL_SYSTEM_SYNCSCOPE);
+  RCCL_STORE_B128_SYS(&dst->v4u, line.v4u);
 #elif !RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__gfx1200__) || defined(__gfx1201__))
   __scoped_atomic_store_n((u64_gptr)dst->v, line.v[0], __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   __scoped_atomic_store_n((u64_gptr)dst->v + 1, line.v[1], __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
@@ -99,7 +99,7 @@ NCCL_DEVICE_INLINE T ncclFlowLLLoadData(T* src) {
   } value;
 #if defined(__HIP_PLATFORM_AMD__)
   // [RCCL] Same user-buffer read as Primitives<ProtoLL>::load (src/device/prims_ll.h).
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_SYS_B128
   if (sizeof(T) == 1) value.u1 = __scoped_atomic_load_n((u8_gptr)src, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   else if (sizeof(T) == 2) value.u2 = __scoped_atomic_load_n((u16_gptr)src, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   else if (sizeof(T) == 4) value.u4 = __scoped_atomic_load_n((u32_gptr)src, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);

@@ -48,7 +48,7 @@ union alignas(16) TestLLLine {
 // Both are evaluated in the device pass, avoiding the host/device macro mismatch.
 __global__ void kernelSysScopeEnabled(int* out, bool isGfx1250Device) {
   out[0] = RCCL_LL_FIFO_SYS_SCOPE;
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_SYS_B128
   out[1] = isGfx1250Device ? 1 : 0;
 #else
   out[1] = 0;  // builtins disabled at build time
@@ -69,8 +69,8 @@ __global__ void kernelFifoLineRoundtrip(TestLLLine* line, uint32_t data, uint32_
   st.w[1] = flag;
   st.w[2] = data;
   st.w[3] = flag;
-  __builtin_amdgcn_global_store_b128((v4u_gptr)line, st.v, RCCL_SYSTEM_SYNCSCOPE);
-  ld.v = __builtin_amdgcn_global_load_b128((v4u_gptr)line, RCCL_SYSTEM_SYNCSCOPE);
+  RCCL_STORE_B128_SYS(line, st.v);
+  ld.v = RCCL_LOAD_B128_SYS(line);
   *ok = (ld.w[0] == data && ld.w[1] == flag && ld.w[2] == data && ld.w[3] == flag) ? 1 : 0;
 #else
   line->v[0] = (uint64_t)data | ((uint64_t)flag << 32);

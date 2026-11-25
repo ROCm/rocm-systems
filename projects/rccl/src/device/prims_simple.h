@@ -134,7 +134,7 @@ class Primitives<T, RedOp, Fan, Direct,
 #if defined(__gfx950__)
     // A proxy or copy-engine published step needs a sys-scope acquire, else the payload reads after it can be stale.
     // Relaxed suffices for a peer kernel's step only because the payload loads are then sys-scope (DWORDX4 builtins).
-    if (sysAcquire || !RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS) {
+    if (sysAcquire || !RCCL_HAVE_SYS_B128) {
       return ld_acquire_sys_global(ptr);
     }
     uint64_t value = ld_relaxed_sys_global(ptr);

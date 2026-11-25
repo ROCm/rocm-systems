@@ -50,22 +50,6 @@ using u8_gptr = __attribute__((address_space(1))) uint8_t*;
 #define RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS 0
 #endif
 
-// skip_fence for Simple post-send. Without the builtins, only an
-// unregistered collective (registeredOrP2p == false) may use the cheap fence.
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-#define RCCL_USE_CHEAP_POST_SEND_FENCE(cheapOff, registeredOrP2p) (!(cheapOff))
-#else
-#define RCCL_USE_CHEAP_POST_SEND_FENCE(cheapOff, registeredOrP2p) (!(cheapOff) && !(registeredOrP2p))
-#endif
-
-// Point-to-point has no collective work. Registered IPC/NVLS (regUsed) and
-// network (netRegUsed) buffers are cacheable, so both keep the full fence
-// when the builtins are absent. prims_simple.h passes ncclDevWorkColl*.
-template <typename CollWork>
-__host__ __device__ inline bool rcclSimplePostSendRegisteredOrP2p(const CollWork* collWork) {
-  return collWork == nullptr || collWork->regUsed || collWork->netRegUsed;
-}
-
 #ifdef __HIP_DEVICE_COMPILE__
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && \
   __has_builtin(__builtin_amdgcn_cooperative_atomic_load_8x16B) && \
@@ -91,12 +75,51 @@ typedef __attribute__((address_space(1))) v4i* v4i_gptr;
 // "" means system scope.
 #define RCCL_SYSTEM_SYNCSCOPE ""
 
+// System-scope 128-bit load/store, defined if RCCL_HAVE_SYS_B128. Prefer the av builtins: upstream LLVM (e.g.
+// Triton) lacks the AMD-only global_{load,store}_b128 intrinsics. Both lower to the same instructions.
+#ifdef __HIP_DEVICE_COMPILE__
+#if (defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))) && \
+  __has_builtin(__builtin_amdgcn_av_load_b128) && __has_builtin(__builtin_amdgcn_av_store_b128) && \
+  !defined(DWORDX4_INTRINSICS_FORCE_OFF)
+#define RCCL_HAVE_AV_B128_BUILTINS 1
+#else
+#define RCCL_HAVE_AV_B128_BUILTINS 0
+#endif
+#else
+#define RCCL_HAVE_AV_B128_BUILTINS 0
+#endif
+
+#define RCCL_HAVE_SYS_B128 (RCCL_HAVE_AV_B128_BUILTINS || RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS)
+#if RCCL_HAVE_AV_B128_BUILTINS
+#define RCCL_STORE_B128_SYS(ptr, vec) __builtin_amdgcn_av_store_b128((v4u_gptr)(ptr), (vec), __MEMORY_SCOPE_SYSTEM)
+#define RCCL_LOAD_B128_SYS(ptr) __builtin_amdgcn_av_load_b128((v4u_gptr)(ptr), __MEMORY_SCOPE_SYSTEM)
+#elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#define RCCL_STORE_B128_SYS(ptr, vec) __builtin_amdgcn_global_store_b128((v4u_gptr)(ptr), (vec), RCCL_SYSTEM_SYNCSCOPE)
+#define RCCL_LOAD_B128_SYS(ptr) __builtin_amdgcn_global_load_b128((v4u_gptr)(ptr), RCCL_SYSTEM_SYNCSCOPE)
+#endif
+
+// skip_fence for Simple post-send. Without the builtins, only an
+// unregistered collective (registeredOrP2p == false) may use the cheap fence.
+#if RCCL_HAVE_SYS_B128
+#define RCCL_USE_CHEAP_POST_SEND_FENCE(cheapOff, registeredOrP2p) (!(cheapOff))
+#else
+#define RCCL_USE_CHEAP_POST_SEND_FENCE(cheapOff, registeredOrP2p) (!(cheapOff) && !(registeredOrP2p))
+#endif
+
+// Point-to-point has no collective work. Registered IPC/NVLS (regUsed) and
+// network (netRegUsed) buffers are cacheable, so both keep the full fence
+// when the builtins are absent. prims_simple.h passes ncclDevWorkColl*.
+template <typename CollWork>
+__host__ __device__ inline bool rcclSimplePostSendRegisteredOrP2p(const CollWork* collWork) {
+  return collWork == nullptr || collWork->regUsed || collWork->netRegUsed;
+}
+
 // Observed on gfx1250: sibling DPX P2P into a cacheable comm FIFO is not
 // coherent under plain/nontemporal load or store. Default hipMalloc and
 // cuMem/VMM hung; uncached (hipDeviceMallocUncached) did not. System-scope
 // b128 load *and* store both observe the peer. Restricted to gfx1250, the
 // only arch measured. Following up with HIP/compilers.
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__gfx1250__) || defined(__gfx1250_strict__))
+#if RCCL_HAVE_SYS_B128 && (defined(__gfx1250__) || defined(__gfx1250_strict__))
 #define RCCL_LL_FIFO_SYS_SCOPE 1
 #else
 #define RCCL_LL_FIFO_SYS_SCOPE 0

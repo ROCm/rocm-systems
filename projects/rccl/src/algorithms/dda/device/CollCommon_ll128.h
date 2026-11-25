@@ -169,8 +169,8 @@ __device__ __forceinline__ void ddaLL128Store16B(uint64_t* dst, uint64_t lo, uin
   } u;
   u.w[0] = lo;
   u.w[1] = hi;
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  __builtin_amdgcn_global_store_b128((v4u_gptr)dst, u.v, RCCL_SYSTEM_SYNCSCOPE);
+#if RCCL_HAVE_SYS_B128
+  RCCL_STORE_B128_SYS(dst, u.v);
 #else
   __builtin_nontemporal_store(u.v, (v4u_gptr)dst);
 #endif
@@ -181,8 +181,8 @@ __device__ __forceinline__ void ddaLL128Load16B(const uint64_t* src, uint64_t& l
     v4u v;
     uint64_t w[2];
   } u;
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  u.v = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
+#if RCCL_HAVE_SYS_B128
+  u.v = RCCL_LOAD_B128_SYS(src);
 #else
   u.v = __builtin_nontemporal_load((v4u_gptr)src);
 #endif

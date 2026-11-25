@@ -13,12 +13,12 @@
 #include "rccl_ptr.h"
 
 inline __device__ void load128(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_SYS_B128
   union {
     v4u v;
     uint64_t u64[2];
   } u;
-  u.v = __builtin_amdgcn_global_load_b128((v4u_gptr)ptr, RCCL_SYSTEM_SYNCSCOPE);
+  u.v = RCCL_LOAD_B128_SYS(ptr);
   v0 = u.u64[0];
   v1 = u.u64[1];
 #else
@@ -28,14 +28,14 @@ inline __device__ void load128(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) 
 }
 
 inline __device__ void store128(uint64_t* ptr, uint64_t v0, uint64_t v1) {
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_SYS_B128
   union {
     v4u v;
     uint64_t u64[2];
   } u;
   u.u64[0] = v0;
   u.u64[1] = v1;
-  __builtin_amdgcn_global_store_b128((v4u_gptr)ptr, u.v, RCCL_SYSTEM_SYNCSCOPE);
+  RCCL_STORE_B128_SYS(ptr, u.v);
 #else
   *((u64_gptr)ptr) = v0;
   *((u64_gptr)ptr + 1) = v1;
@@ -320,7 +320,7 @@ __device__ __forceinline__ void st_global<0>(uintptr_t addr, BytePack<0> value) 
     __builtin_nontemporal_store(value.native, (__attribute__((address_space(1))) data_cxx_ty*)addr); \
   }
 
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_SYS_B128
 #define DEFINE_ld_st__size_space(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, addr_reg_ty) \
   DEFINE_ld_st__size_space_scoped_atomic(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, addr_reg_ty)
 #else
@@ -364,9 +364,9 @@ DEFINE_ld_st__size(1, uint8_t, b8, r) DEFINE_ld_st__size(2, uint16_t, b16, h) DE
 #undef DEFINE_ld_st__size
 
     __device__ __forceinline__ void store16global(uintptr_t addr, BytePack<16> value) {
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_SYS_B128
   // System scope store that bypasses the hardware caches, should generate global_store_dwordx4 instruction with sc0 and sc1 bits set to 1 on gfx942/gfx950/gfx1250.
-  __builtin_amdgcn_global_store_b128((v4u_gptr)addr, value.v4u, RCCL_SYSTEM_SYNCSCOPE);
+  RCCL_STORE_B128_SYS(addr, value.v4u);
 #elif defined(__gfx950__)
   *(v4u_gptr)addr = value.v4u;
 #else
@@ -381,7 +381,7 @@ DEFINE_ld_st__size(1, uint8_t, b8, r) DEFINE_ld_st__size(2, uint16_t, b16, h) DE
 
 // gfx1250 waits s_wait_xcnt 0 before each atomic store. reduceCopy's plain data stores use buffer stores instead:
 // a replayed store rewrites the same value.
-#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && \
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && RCCL_HAVE_SYS_B128 && \
   !defined(RCCL_DISABLE_SIMPLE_BUFFER_STORE) && __has_builtin(__builtin_amdgcn_raw_buffer_store_b128) && \
   __has_builtin(__builtin_amdgcn_make_buffer_rsrc)
 #define RCCL_SIMPLE_BUFFER_STORE 1
@@ -418,9 +418,9 @@ __device__ __forceinline__ void waveStore16(WaveStore16 const& w, uint32_t ioff,
 
 __device__ __forceinline__ BytePack<16> load16global(uintptr_t addr) {
   BytePack<16> ans;
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_SYS_B128
   // System scope load that bypasses the hardware caches, should generate global_load_dwordx4 instruction with sc0 and sc1 bits set to 1 on gfx942/gfx950/gfx1250.
-  ans.v4u = __builtin_amdgcn_global_load_b128((v4u_gptr)addr, RCCL_SYSTEM_SYNCSCOPE);
+  ans.v4u = RCCL_LOAD_B128_SYS(addr);
 #else
   const uint64_t* ptr = reinterpret_cast<const uint64_t*>(addr);
   ans.u64[0] = __builtin_nontemporal_load(ptr);
