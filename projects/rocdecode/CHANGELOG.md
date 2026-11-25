@@ -20,6 +20,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Fixed `rocDecGetDecoderCaps` reporting every codec as unsupported when no VA decode profile could be probed. It now returns `ROCDEC_NOT_INITIALIZED` in that case, and the `videoDecodeCaps` sample exits with code 1. `RocVideoDecoder::CodecSupported()` now throws on a failed capability query instead of returning `false`.
 * Fixed the samples and the negative API tests building with no GPU targets when `AMDGPU_TARGETS` or `GPU_ARCHS` is set in the environment but empty. An empty value is now treated the same as an unset one and the default target list applies, so the `videoDecodeRGB` sample no longer fails with `hipErrorInvalidImage`.
 * Fixed the `RocVideoDecoder` utility returning skipped, repeated or corrupt frames after a decoder reconfigure in the `OUT_SURFACE_MEM_DEV_COPIED` and `OUT_SURFACE_MEM_HOST_COPIED` output modes, which affected HEVC streams with a repeated sequence header and VP9 streams with resolution changes.
+* Fixed HEVC long-term reference pictures signalled with `delta_poc_msb_present_flag` equal to 1 matching a decoded picture buffer slot that no longer holds a picture, which could pass the decoder a reference frame that is the picture currently being decoded. Both long-term reference picture set derivation branches now require the matching slot to still hold a picture, as the short-term branches already did.
 
 ## rocDecode 1.12.0 for ROCm 10.2.0
 
