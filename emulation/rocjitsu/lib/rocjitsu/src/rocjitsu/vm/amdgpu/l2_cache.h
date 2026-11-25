@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "rocjitsu/vm/amdgpu/device_cache_line.h"
+
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
@@ -87,7 +89,7 @@ class PreparedCanonicalWriteback;
 /// reconciliation mutex. See L2MaintenanceMutex for admission and publication.
 class L2Cache : public simdojo::Component {
 public:
-  static constexpr uint32_t LINE_SIZE_BITS = 7;
+  static constexpr uint32_t LINE_SIZE_BITS = kDeviceCacheLineBits;
   static constexpr uint32_t NUM_SETS = 2048;
   static constexpr uint32_t ASSOCIATIVITY = 16;
 

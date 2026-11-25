@@ -531,7 +531,7 @@ add_executable(
     gpu_vm_service_test.cpp
     gpu_vm_translation_test.cpp
     fabric_endpoint_test.cpp
-    canonical_line_freshness_test.cpp
+    backing_line_versions_test.cpp
     legacy_page_table_cache_test.cpp
     config_test.cpp
     rj_vm_config_test.cpp

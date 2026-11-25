@@ -1129,7 +1129,7 @@ TEST(GpuVmPipeline, NonlegacySystemReadsProbeBeforeBackingAndAfterStampedComplet
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto memory =
       std::make_shared<rocjitsu::test::AsyncVmMemory>(*owner_sim.owner, 0x400, 0x100, 0x140);
-  memory->backing->read_freshness = std::make_shared<CanonicalLineFreshness>();
+  memory->backing->read_freshness = std::make_shared<simdojo::BackingLineVersions>(128, 4096);
   memory->backing->read_backing_id = 17;
   const auto address_space = sim.soc->gpu_vm().register_address_space(77, memory, memory);
   ASSERT_TRUE(address_space);

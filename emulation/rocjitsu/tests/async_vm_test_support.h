@@ -7,7 +7,7 @@
 #pragma once
 
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
-#include "rocjitsu/vm/canonical_line_freshness.h"
+#include "simdojo/components/backing_line_versions.h"
 #include "simdojo/sim/simulation.h"
 
 #include <algorithm>
@@ -52,7 +52,7 @@ public:
   std::function<void()> submit_probe;
   // Optional synthetic stamp for serialized cache-probe tests. Tests using
   // concurrent writers must provide their own writer authority.
-  std::shared_ptr<CanonicalLineFreshness> read_freshness;
+  std::shared_ptr<simdojo::BackingLineVersions> read_freshness;
   uint64_t read_backing_id = 0;
 };
 
@@ -66,7 +66,7 @@ struct AsyncVmRequest {
   std::vector<std::byte> response;
   std::atomic<Phase> phase{Phase::Queued};
   VmAccessOutcome outcome = VmAccessOutcome::Unavailable;
-  std::optional<CanonicalLineFreshness::ReadStamp> read_stamp;
+  std::optional<simdojo::BackingLineVersions::ReadStamp> read_stamp;
   std::atomic<bool> cancelled{false};
 };
 
@@ -183,7 +183,7 @@ public:
     return request_->outcome;
   }
 
-  [[nodiscard]] std::optional<CanonicalLineFreshness::ReadStamp>
+  [[nodiscard]] std::optional<simdojo::BackingLineVersions::ReadStamp>
   completed_read_stamp() const override {
     return request_->read_stamp;
   }

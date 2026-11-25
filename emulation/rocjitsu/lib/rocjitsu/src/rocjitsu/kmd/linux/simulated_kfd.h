@@ -16,8 +16,8 @@
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 #include "rocjitsu/vm/amdgpu/prepared_canonical_writeback.h"
-#include "rocjitsu/vm/canonical_line_freshness.h"
 #include "rocjitsu/vm/soc.h"
+#include "simdojo/components/backing_line_versions.h"
 
 #include "simdojo/sim/simulation.h"
 
@@ -664,7 +664,7 @@ public:
   [[nodiscard]] bool try_gpu_peer_cache_read(uint32_t process_id, uint32_t gpu_id,
                                              const amdgpu::GpuVmAccess &expected, uint64_t address,
                                              std::span<std::byte> bytes,
-                                             const CanonicalLineFreshness::ReadStamp *stamp,
+                                             const simdojo::BackingLineVersions::ReadStamp *stamp,
                                              amdgpu::ComputeUnitCore &cu, SoC &soc, bool scalar);
   /// @brief Prepare retained local or canonical dirty writeback before cache locks.
   /// @details The requested range is expanded to 128-byte cache lines. Every

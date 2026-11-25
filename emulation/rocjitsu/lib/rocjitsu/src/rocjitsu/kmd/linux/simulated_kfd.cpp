@@ -2475,7 +2475,7 @@ SimulatedKfd::admit_private_uc_gtt_copy_source(uint32_t process_id, uint32_t gpu
 bool SimulatedKfd::try_gpu_peer_cache_read(uint32_t process_id, uint32_t gpu_id,
                                            const amdgpu::GpuVmAccess &expected, uint64_t address,
                                            std::span<std::byte> bytes,
-                                           const CanonicalLineFreshness::ReadStamp *stamp,
+                                           const simdojo::BackingLineVersions::ReadStamp *stamp,
                                            amdgpu::ComputeUnitCore &cu, SoC &soc, bool scalar) {
   constexpr uint64_t kLineBytes = amdgpu::L2Cache::LINE_SIZE;
   if (bytes.empty() || bytes.size() > kLineBytes - (address & (kLineBytes - 1)) ||
@@ -2579,7 +2579,7 @@ bool SimulatedKfd::try_gpu_peer_cache_read(uint32_t process_id, uint32_t gpu_id,
   std::span<uint8_t> data(reinterpret_cast<uint8_t *>(bytes.data()), bytes.size());
   const uint64_t cache_identity = live->cache_identity();
   if (stamp) {
-    CanonicalLineFreshness::FillAuthority fill = stamp->try_acquire_fill(
+    simdojo::BackingLineVersions::FillAuthority fill = stamp->try_acquire_fill(
         granted.backing.backing_id(), granted.backing.file_offset(), bytes.size());
     if (!fill) {
       return false;

@@ -1678,7 +1678,7 @@ TEST(DecodedInstructionCacheTest, RetirementReleasesVmAndImageOwnersBeforeAnothe
 TEST(DecodedInstructionCacheTest, RetirementClearsCompletedTransferToken) {
   rocjitsu::test::AsyncVmHarness sim;
   auto memory = std::make_shared<rocjitsu::test::AsyncVmMemory>(*sim.owner, 64, 0, 64);
-  memory->backing->read_freshness = std::make_shared<rocjitsu::CanonicalLineFreshness>();
+  memory->backing->read_freshness = std::make_shared<simdojo::BackingLineVersions>(128, 4096);
   memory->backing->read_backing_id = 17;
   GpuVm vm;
   const auto access = vm.snapshot(vm.register_translated(7, memory, memory));

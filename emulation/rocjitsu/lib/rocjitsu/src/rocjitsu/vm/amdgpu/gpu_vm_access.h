@@ -10,7 +10,7 @@
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/prt_residency.h"
 #include "rocjitsu/vm/amdgpu/vm_mutation_epoch.h"
-#include "rocjitsu/vm/canonical_line_freshness.h"
+#include "simdojo/components/backing_line_versions.h"
 #include "util/intrusive_shared_ptr.h"
 #include "util/result.h"
 
@@ -305,7 +305,7 @@ public:
 
 /// @brief One completed read stamp and whether the read used a VFIO peer route.
 struct VmCompletedRead {
-  CanonicalLineFreshness::ReadStamp stamp;
+  simdojo::BackingLineVersions::ReadStamp stamp;
   bool peer_origin = false;
 };
 
@@ -406,7 +406,7 @@ public:
   [[nodiscard]] virtual VmAccessOutcome reconcile_revocation(std::span<std::byte> read_result) = 0;
   /// Owned canonical line versions for a completed deferred read, when the
   /// provider can prove them. Valid only after poll or reconciliation completes.
-  [[nodiscard]] virtual std::optional<CanonicalLineFreshness::ReadStamp>
+  [[nodiscard]] virtual std::optional<simdojo::BackingLineVersions::ReadStamp>
   completed_read_stamp() const {
     return std::nullopt;
   }

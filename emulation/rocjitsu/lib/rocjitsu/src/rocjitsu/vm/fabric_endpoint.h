@@ -8,9 +8,10 @@
 
 #include "rocjitsu/config/system_graph.h"
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
+#include "rocjitsu/vm/amdgpu/device_cache_line.h"
 #include "rocjitsu/vm/amdgpu/gpu_backing_range.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
-#include "rocjitsu/vm/canonical_line_freshness.h"
+#include "simdojo/components/backing_line_versions.h"
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
@@ -232,7 +233,7 @@ private:
   std::vector<std::shared_ptr<amdgpu::DeviceCacheCoherence>> coherence_domains_;
   std::vector<amdgpu::DeviceCacheDomain> prepared_domains_;
   amdgpu::PreparedWritebackResolver resolve_cache_writeback_;
-  CanonicalLineFreshness line_freshness_;
+  simdojo::BackingLineVersions line_freshness_{amdgpu::kDeviceCacheLineBytes, 4096};
   std::shared_ptr<State> state_;
   simdojo::Event inbox_event_{this, simdojo::EventType::TIMER_CALLBACK};
   std::function<void()> effect_probe_for_testing_;
