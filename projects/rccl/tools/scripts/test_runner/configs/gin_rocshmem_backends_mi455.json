@@ -1,0 +1,88 @@
+{
+  "system_configurations": {
+    "name": "RCCL-GIN-rocSHMEM-Backends-MI455X",
+    "description": "GIN Anvil SDMA reach across hosts on MI455X: MixedBackends_TwoNodeUnsetType on a rocSHMEM-GIN build, with and without the fabric pod opt-ins."
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-$HOME/ompi}"
+  },
+  "env_variables": {
+    "NCCL_DEBUG": "INFO",
+    "NCCL_MNNVL_ENABLE": "1",
+    "RCCL_USE_AMD_SMI_LIB": "0",
+    "NCCL_CUMEM_ENABLE": "1",
+    "HSA_NO_SCRATCH_RECLAIM": "1"
+  },
+  "mpi_args": [
+    "--mca pml ob1",
+    "--mca btl ^openib",
+    "--mca rmaps_base_oversubscribe 1",
+    "--bind-to none",
+    "--mca accelerator ^rocm"
+  ],
+  "build_configuration": {
+    "install_flags": [
+      "-l",
+      "--debug",
+      "-t",
+      "--enable-mpi-tests",
+      "--enable-code-coverage",
+      "--rocshmem-gin",
+      "--prefix",
+      "${WORKDIR}/install"
+    ],
+    "parallel_jobs": 64
+  },
+  "test_configurations": {
+    "default": {
+      "env_variables": {},
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      }
+    },
+
+    "gin_devmpi_pod_2node": {
+      "extends": "default",
+      "description": "AICOMRCCL-3444: 2 hosts, NCCL_GIN_TYPE unset (not empty), no pod opt-ins. Anvil SDMA must be removed at the host boundary.",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none",
+        "NCCL_DMABUF_ENABLE": "1"
+      },
+      "tests": [
+        { "name": "MixedBackends_TwoNodeUnsetType", "description": "Anvil SDMA reach on a 2-host comm: removed without the pod opt-ins, kept inside one pod with both", "test_filter": "GinMPIDeviceTests.MixedBackends_TwoNodeUnsetType" }
+      ]
+    },
+    "gin_devmpi_pod_2node_optin": {
+      "extends": "gin_devmpi_pod_2node",
+      "description": "AICOMRCCL-3444: as gin_devmpi_pod_2node with both pod opt-ins. Inside one pod Anvil SDMA must stay and carry the put/signal.",
+      "env_variables": {
+        "RCCL_GIN_ANVIL_FABRIC_POD": "1",
+        "RCCL_GIN_ANVIL_FABRIC_MEM": "1"
+      }
+    }
+  },
+  "test_suites": [
+    {
+      "name": "GIN Device MPI Tests - MI450 pod, no opt-ins (2 nodes, type unset)",
+      "description": "NCCL_GIN_TYPE unset, pod opt-ins unset: Anvil SDMA is removed and PROXY is the default",
+      "config": "gin_devmpi_pod_2node",
+      "enabled": true
+    },
+    {
+      "name": "GIN Device MPI Tests - MI450 pod, both opt-ins (2 nodes, type unset)",
+      "description": "NCCL_GIN_TYPE unset, RCCL_GIN_ANVIL_FABRIC_POD=1 and RCCL_GIN_ANVIL_FABRIC_MEM=1: Anvil SDMA stays across the 2 hosts",
+      "config": "gin_devmpi_pod_2node_optin",
+      "enabled": true
+    }
+  ]
+}

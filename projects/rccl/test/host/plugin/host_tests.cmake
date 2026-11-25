@@ -53,6 +53,7 @@ endmacro()
 
 rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginGinPluginInit gin-plugin-init-test.cc
   SOURCES
+    fakes/bootstrap_stubs.cc            # bootstrapAllGather, for the Anvil SDMA pod vote
     fakes/env_fakes.cc
     fakes/nccl_fakes.cc)
 

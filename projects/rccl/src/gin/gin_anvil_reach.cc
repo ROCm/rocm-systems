@@ -8,10 +8,13 @@
 
 #include "archinfo.h"
 #include "comm.h"
+#include "graph/topo.h"
 #include "param.h"
 
 // Off by default until fabric registration is measured on MI455 silicon.
 RCCL_PARAM(GinAnvilFabricMem, "GIN_ANVIL_FABRIC_MEM", 0);
+// Off by default until cross-host SDMA is measured in an MI455 pod.
+RCCL_PARAM(GinAnvilFabricPod, "GIN_ANVIL_FABRIC_POD", 0);
 
 // comm->cuMemSupport, not ncclCuMemEnable(): cuMem is a per-process setting,
 // and a caller may run a collective only where this is true, so every rank must
@@ -26,4 +29,23 @@ bool ginAnvilFabricMemCapable(struct ncclComm* comm) { return ginAnvilFabricMemP
 
 bool ginAnvilUseFabricMem(struct ncclComm* comm) {
   return ginAnvilFabricMemPredicate(comm, rcclParamGinAnvilFabricMem() != 0);
+}
+
+bool ginAnvilCrossNic(struct ncclComm* comm) {
+  if (comm == nullptr || comm->peerInfo == nullptr) return false;
+  for (int r = 0; r < comm->nRanks; r++) {
+    if (!comm->peerInfo[r].crossNicSupport) return false;
+  }
+  return true;
+}
+
+GinAnvilSdmaReach ginAnvilSdmaReachCapable(struct ncclComm* comm) {
+  if (comm == nullptr || comm->topo == nullptr) return GinAnvilSdmaReach::None;
+  return ginAnvilSdmaReachPredicate(comm->topo->nHosts, comm->nRanks, ginAnvilFabricMemCapable(comm),
+                                    ginAnvilCrossNic(comm));
+}
+
+bool ginAnvilUseFabricPod(struct ncclComm* comm) {
+  return ginAnvilSdmaReachCapable(comm) == GinAnvilSdmaReach::FabricPod && rcclParamGinAnvilFabricPod() != 0 &&
+         ginAnvilUseFabricMem(comm);
 }
