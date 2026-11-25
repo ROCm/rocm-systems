@@ -8,7 +8,10 @@ import sys
 import types
 from typing import List
 
+from ml_api_tracing.inject_roctx import marker_ranges
 from ml_api_tracing.inject_roctx.backends import jax as jax_backend
+
+FAKE_JAX_PACKAGE_INIT = "/opt/fake/jax/__init__.py"
 
 
 class FindSpecWithout:
@@ -24,8 +27,64 @@ class FindSpecWithout:
         return self.real_find_spec(name, *args, **kwargs)
 
 
+def fake_compiled_type():
+    class FakeCompiled:
+        def __init__(self, name, body=None):
+            self.__name__ = name
+            self.body = body
+
+        def __call__(self, *args, **kwargs):
+            if self.body is not None:
+                return self.body(*args, **kwargs)
+            return None
+
+    return FakeCompiled
+
+
+def install_fake_jax(monkeypatch, jax_package_init=FAKE_JAX_PACKAGE_INIT):
+    compiled_type = fake_compiled_type()
+
+    def fake_jit(fun, *args, **kwargs):
+        name = getattr(fun, "__name__", "<unknown>")
+        return compiled_type(name, body=fun)
+
+    jax_mod = types.ModuleType("jax")
+    jax_mod.__file__ = jax_package_init
+    jax_mod.jit = fake_jit
+    jax_mod.pmap = None
+    jax_mod.shard_map = None
+    monkeypatch.setitem(sys.modules, "jax", jax_mod)
+    monkeypatch.setattr(
+        jax_backend.importlib.util,
+        "find_spec",
+        lambda name, package=None: types.SimpleNamespace() if name == "jax" else None,
+    )
+    return jax_mod, compiled_type
+
+
 def reset_jax_core_state():
     jax_backend._CoreState = jax_backend._JaxState()
+    jax_backend._jax_thread_local.depth = 0
+
+
+def install_jax_backend(monkeypatch, python_tier=True):
+    reset_jax_core_state()
+    jax_mod, compiled_type = install_fake_jax(monkeypatch)
+    monkeypatch.setattr(marker_ranges, "ensure_python_tier", lambda: python_tier)
+    monkeypatch.setattr(marker_ranges, "add_framework_root", lambda path: None)
+    jax_backend.JaxBackend().install()
+    return jax_mod, compiled_type
+
+
+def record_scopes(monkeypatch):
+    pushes = []
+
+    def push(marker, location, backend="", args="n/a"):
+        pushes.append({"marker": marker, "backend": backend, "location": location})
+
+    monkeypatch.setattr(marker_ranges, "push_scope", push)
+    monkeypatch.setattr(marker_ranges, "pop_scope", lambda: None)
+    return pushes
 
 
 def test_jax_backend_skips_when_jax_missing(monkeypatch):
@@ -99,3 +158,65 @@ def test_jax_backend_registers_framework_root(monkeypatch):
 
     jax_backend.JaxBackend().install()
     assert roots == ["/opt/fake/jax"]
+
+
+def test_jax_jit_call_emits_jit_marker(monkeypatch):
+    jax_mod, compiled_type = install_jax_backend(monkeypatch)
+    pushes = record_scopes(monkeypatch)
+
+    def train_step(value):
+        return value
+
+    compiled = jax_mod.jit(train_step)
+    assert isinstance(compiled, compiled_type)
+    assert compiled(1) == 1
+    assert [item["marker"] for item in pushes] == ["jax.jit.train_step"]
+    assert pushes[0]["backend"] == "jax"
+
+
+def test_compiled_function_name_falls_back_to_wrapped_then_unknown():
+    wrapped = types.SimpleNamespace(
+        __name__=None, __wrapped__=types.SimpleNamespace(__name__="inner")
+    )
+    assert jax_backend._compiled_function_name(wrapped) == "inner"
+    assert jax_backend._compiled_function_name(types.SimpleNamespace()) == "<unknown>"
+
+
+def test_jax_jit_wrap_is_idempotent(monkeypatch):
+    jax_mod, compiled_type = install_jax_backend(monkeypatch)
+    wrapped_once = compiled_type.__call__
+    jax_backend.patch_jax_entry_points()
+    assert compiled_type.__call__ is wrapped_once
+
+    pushes = record_scopes(monkeypatch)
+
+    def train_step(value):
+        return value
+
+    assert jax_mod.jit(train_step)(1) == 1
+    assert [item["marker"] for item in pushes] == ["jax.jit.train_step"]
+
+
+def test_jax_inner_jit_skips_second_marker(monkeypatch):
+    _jax_mod, compiled_type = install_jax_backend(monkeypatch)
+    pushes = record_scopes(monkeypatch)
+    inner = compiled_type("matmul_relu")
+    outer = compiled_type("train_step", body=lambda *args, **kwargs: inner())
+    outer()
+    assert [item["marker"] for item in pushes] == ["jax.jit.train_step"]
+
+
+def test_jax_range_restores_depth_after_exception(monkeypatch):
+    _jax_mod, compiled_type = install_jax_backend(monkeypatch)
+    pushes = record_scopes(monkeypatch)
+
+    def boom(*args, **kwargs):
+        raise ValueError("jit failed")
+
+    try:
+        compiled_type("boom", body=boom)()
+    except ValueError:
+        pass
+    pushes.clear()
+    assert compiled_type("ok", body=lambda *args, **kwargs: 1)() == 1
+    assert [item["marker"] for item in pushes] == ["jax.jit.ok"]

@@ -8,19 +8,21 @@ handles. Wraps those entry points with ROCTX ranges.
 """
 
 import importlib.util
+import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ml_api_tracing.inject_roctx import marker_ranges
 from ml_api_tracing.inject_roctx.backend_contract import register
 from utils.logger import console_log, console_warning
 
 _BACKEND_NAME = "jax"
+_jax_thread_local = threading.local()
 
 
 def patch_jax_entry_points() -> None:
     """Wrap JAX compiled-call and primitive-dispatch entry points."""
-    pass
+    _wrap_jit_compiled_call()
 
 
 def _resolve_jax() -> bool:
@@ -68,6 +70,81 @@ def _register_framework_root() -> None:
         )
 
 
+def _identity(value: object) -> object:
+    """Return value unchanged so jax.jit can produce a compiled type at install."""
+    return value
+
+
+def _compiled_function_name(compiled: object) -> str:
+    """Name for a jax.jit, jax.pmap, or jax.shard_map marker from the callable."""
+    name = getattr(compiled, "__name__", None)
+    if isinstance(name, str) and name:
+        return name
+    wrapped = getattr(compiled, "__wrapped__", None)
+    wrapped_name = getattr(wrapped, "__name__", None)
+    if isinstance(wrapped_name, str) and wrapped_name:
+        return wrapped_name
+    return "<unknown>"
+
+
+def _run_with_jax_range(
+    marker: str,
+    original: Callable[..., Any],
+    *args: Any,
+    **kwargs: Any,
+) -> object:
+    """Run original inside a JAX ROCTX range, or bare if one is already open."""
+    depth = getattr(_jax_thread_local, "depth", 0)
+    if depth > 0:
+        return original(*args, **kwargs)
+    location = marker_ranges.resolve_user_caller_location()
+    marker_ranges.push_scope(marker, location, backend=_BACKEND_NAME)
+    _jax_thread_local.depth = depth + 1
+    try:
+        return original(*args, **kwargs)
+    finally:
+        _jax_thread_local.depth = depth
+        marker_ranges.pop_scope()
+
+
+def _roctx_compiled_call(compiled: object, *args: Any, **kwargs: Any) -> object:
+    """Run the compiled call under jax.jit.<fn>, skipping a nested JAX range."""
+    marker = f"jax.jit.{_compiled_function_name(compiled)}"
+    return _run_with_jax_range(
+        marker, _CoreState.compiled_call, compiled, *args, **kwargs
+    )
+
+
+_roctx_compiled_call._roctx_wrapped = True
+
+
+def _wrap_jit_compiled_call() -> None:
+    """Replace PjitFunction.__call__ with _roctx_compiled_call."""
+    jit = _CoreState.jit
+    if jit is None:
+        console_warning(
+            "ml api trace",
+            "jax.jit is not available; skipping jit instrumentation.",
+        )
+        return
+    try:
+        compiled_type = type(jit(_identity))
+        if getattr(compiled_type.__call__, "_roctx_wrapped", False):
+            return
+        _CoreState.compiled_call = compiled_type.__call__
+        compiled_type.__call__ = _roctx_compiled_call
+    except Exception as exc:
+        console_warning(
+            "ml api trace",
+            f"Could not patch jax.jit compiled __call__: {exc}",
+        )
+        return
+    console_log(
+        "ml api trace",
+        "Wrapped jax.jit compiled calls with ROCTX markers",
+    )
+
+
 class _JaxState:
     """Resolved JAX entry-point handles, populated by _resolve_jax()."""
 
@@ -76,6 +153,7 @@ class _JaxState:
         self.pmap: Any = None
         self.shard_map: Any = None
         self.primitive: Any = None
+        self.compiled_call: Any = None
 
 
 _CoreState = _JaxState()
