@@ -16,16 +16,19 @@ inline constexpr uint32_t kInexact = 1u << 5;
 
 template <typename Fmt> uint32_t input_causes(uint32_t bits, uint32_t denorm) {
   const uint32_t magnitude = bits & Fmt::kMagnitude;
-  if (magnitude > Fmt::kInfinity && !(bits & Fmt::kQuiet))
+  if (magnitude > Fmt::kInfinity && !(bits & Fmt::kQuiet)) {
     return kInvalid;
-  if ((denorm & 1u) && magnitude && magnitude < Fmt::kMinNormal)
+  }
+  if ((denorm & 1u) && magnitude && magnitude < Fmt::kMinNormal) {
     return kInputDenorm;
+  }
   return 0;
 }
 
 template <typename Fmt> double value(uint32_t bits) {
-  if constexpr (std::is_same_v<Fmt, fp_format::F16>)
+  if constexpr (std::is_same_v<Fmt, fp_format::F16>) {
     return double(util::f16_to_f32(uint16_t(bits)));
+  }
   return double(std::bit_cast<float>(bits));
 }
 
@@ -33,8 +36,9 @@ template <typename Fmt> double value(uint32_t bits) {
 // Round-to-odd retains the side of an F16/F32 rounding boundary even when the
 // exact sum requires more than the 53 bits available in a double.
 template <typename Fmt> uint32_t result_causes(double exact, uint32_t result, uint32_t round) {
-  if (exact == value<Fmt>(result))
+  if (exact == value<Fmt>(result)) {
     return 0;
+  }
   const double magnitude = std::fabs(exact);
   const double limit = std::ldexp(1.0, Fmt::kBias + 1);
   const double ulp = std::ldexp(1.0, Fmt::kBias - int(Fmt::kMantissaBits));
@@ -42,8 +46,9 @@ template <typename Fmt> uint32_t result_causes(double exact, uint32_t result, ui
   const bool exceeds = round == 0 ? magnitude >= limit - ulp / 2
                        : outward  ? magnitude > limit - ulp
                                   : magnitude >= limit;
-  if (exceeds)
+  if (exceeds) {
     return kOverflow | kInexact;
+  }
   return kInexact | ((result & Fmt::kMagnitude) < Fmt::kMinNormal ? kUnderflow : 0);
 }
 
@@ -62,10 +67,10 @@ uint32_t fma(uint32_t a, uint32_t b, uint32_t c, uint32_t result, uint32_t round
   const bool opposite_infinities = (x == Fmt::kInfinity || y == Fmt::kInfinity) &&
                                    x <= Fmt::kInfinity && y <= Fmt::kInfinity &&
                                    z == Fmt::kInfinity && ((a ^ b ^ c) & Fmt::kSign);
-  if (invalid_product || opposite_infinities)
+  if (invalid_product || opposite_infinities) {
     causes |= kInvalid;
+  }
   if (x < Fmt::kInfinity && y < Fmt::kInfinity && z < Fmt::kInfinity) {
-    fp_mode::ScopedEnvironment nearest(0);
     const double product = value<Fmt>(a) * value<Fmt>(b);
     const double exact =
         fp_mode::detail::round_to_odd(fp_mode::detail::add_exact(product, value<Fmt>(c)));

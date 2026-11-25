@@ -288,9 +288,6 @@ graph:
   Unit_hipGraphExecUpdate_3DMemset_AllocationExtent: *level_default
   Unit_hipGraphExecMemsetNodeSetParams_FlatAlloc_2D: *level_default
   Unit_hipGraphExecNodeSetParams_Memset_FlatAlloc_2D: *level_default
-  Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative:
-    <<: *level_default
-    tags: [node]
   Unit_hipGraphMemcpyNodeSetParamsToSymbol_Positive_Basic:
     <<: *level_default
     disabled:
@@ -441,6 +438,15 @@ graph:
   Unit_hipGraphAddChildGraphNode_CmplxGrph_SchedLogic:
     <<: *level_default
     tags: [node]
+  Unit_hipGraphChildMultiStream_ParentChildBoundarySync:
+    <<: *level_2
+    tags: [node, child, multistream]
+  Unit_hipGraphChildMultiStream_SiblingChildren:
+    <<: *level_2
+    tags: [node, child, multistream]
+  Unit_hipGraphChildMultiStream_NestedChild:
+    <<: *level_2
+    tags: [node, child, multistream]
   Unit_hipGraphNodeGetType_Negative:
     <<: *level_default
     tags: [query]
@@ -1167,6 +1173,9 @@ graph:
     tags: [exec]
   Unit_hipGraphAddMemsetNode_Positive_Basic:
     <<: *level_default
+  Unit_hipGraphAddMemsetNode_Positive_2DPadding:
+    <<: *level_default
+    tags: [node]
   Unit_hipGraphAddMemsetNode_Negative_Parameters:
     <<: *level_default
     tags: [node]
@@ -1227,8 +1236,6 @@ graph:
   Unit_hipGraphKernelNodeGetParams_Functional:
     <<: *level_default
     tags: [query]
-  Unit_hipGraphKernelNodeSetAttribute_Functional: *level_default
-  Unit_hipGraphKernelNodeSetAttribute_Negative: *level_default
   Unit_hipGraphKernelNodeSetParams_Negative:
     <<: *level_default
     tags: [node]

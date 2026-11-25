@@ -46,15 +46,18 @@ protected:
     wave->set_exec(5);
     wave->set_vcc(0x1234);
     wave->write_scc(1);
-    for (uint32_t reg = 0; reg < 128; ++reg)
-      for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+    for (uint32_t reg = 0; reg < 128; ++reg) {
+      for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
         cu->write_vgpr(wave->vgpr_alloc().base + reg, lane,
                        reg < 64 ? 0 : 0xdead0000u + reg * 64 + lane);
+      }
+    }
   }
 
   void TearDown() override {
-    if (wave && !wave->is_halted())
+    if (wave && !wave->is_halted()) {
       wave->halt();
+    }
   }
 
   void expect_rejected(Instruction &instruction) {
@@ -74,9 +77,11 @@ protected:
 
   std::vector<uint32_t> read_vgprs() const {
     std::vector<uint32_t> words;
-    for (uint32_t reg = 0; reg < 128; ++reg)
-      for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+    for (uint32_t reg = 0; reg < 128; ++reg) {
+      for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
         words.push_back(cu->read_vgpr(wave->vgpr_alloc().base + reg, lane));
+      }
+    }
     return words;
   }
 
@@ -213,9 +218,11 @@ TEST_F(MatrixExecutionErrorTest, MixedMatricesDistinguishInlineMinusOneFromRegis
     const auto lanes = wave->wf_size();
     wave->set_exec(~uint64_t{0} >> (64 - lanes));
     // Both factors are zero. C in v48 is 3.0, while inline integer -1 is a NaN as F32.
-    for (uint32_t reg = 48; reg < 64; ++reg)
-      for (uint32_t lane = 0; lane < lanes; ++lane)
+    for (uint32_t reg = 48; reg < 64; ++reg) {
+      for (uint32_t lane = 0; lane < lanes; ++lane) {
         cu->write_vgpr(base + reg, lane, std::bit_cast<uint32_t>(3.0f));
+      }
+    }
     for (const uint32_t src2 : {193u, 256u + 48u}) {
       for (const bool scaled : {false, true}) {
         const auto words =

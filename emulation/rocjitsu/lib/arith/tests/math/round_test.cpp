@@ -3,6 +3,10 @@
 
 // Tests for rounding to integral values and rounding-related FP status.
 
+#include "common/cpu.h"
+#include "common/semantics.h"
+#include "common/wave.h"
+#include "math/older_half_unary_test.h"
 #include "math/unary_test.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 #include "rj_arith/detail/rj_arith_math.h"
@@ -217,12 +221,13 @@ TEST(MathOutputControls, OverflowAndSignalingNan) {
       }
     }
     for (auto call : {rj_arith_v_fract_f32_w32, rj_arith_v_fract_f16_w32}) {
-      const bool half = call == rj_arith_v_fract_f16_w32;
-      a[0] = half ? 0x7c01 : 0x7f800001;
-      d[0] = 0;
-      ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, 1, 0, destination, source, &status),
-                0);
-      EXPECT_EQ(d[0], a[0]);
+      for (auto semantics : hardware_semantics()) {
+        const bool half = call == rj_arith_v_fract_f16_w32;
+        a[0] = half ? 0x7c01 : 0x7f800001;
+        d[0] = 0;
+        ASSERT_EQ(call(cpu | semantics, 1, 0, destination, source, &status), 0);
+        EXPECT_EQ(d[0], a[0]);
+      }
     }
     a[0] = 0x813c;
     d[0] = 0;
@@ -362,4 +367,16 @@ TEST(MathFloorF32W32Gfx942, Arithmetic) {
 // Share the arithmetic contract while checking the CDNA NaN-policy difference.
 TEST(MathFloorF32W64Gfx942, Arithmetic) {
   rocjitsu::arith::test::check_cdna_integral_unary<64, false>(rj_arith_v_floor_f32_w64_gfx942, 3);
+}
+
+// Every older-profile unary entry point shares arithmetic, aliases, masks and qualification.
+TEST(MathOlderHalfRound, Arithmetic) {
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_trunc_f16_w32_gfx908, 0);
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_ceil_f16_w32_gfx908, 1);
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_rndne_f16_w32_gfx908, 2);
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_floor_f16_w32_gfx908, 3);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_trunc_f16_w64_gfx908, 0);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_ceil_f16_w64_gfx908, 1);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_rndne_f16_w64_gfx908, 2);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_floor_f16_w64_gfx908, 3);
 }

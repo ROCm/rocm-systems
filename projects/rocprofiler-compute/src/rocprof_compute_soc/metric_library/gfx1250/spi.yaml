@@ -135,7 +135,7 @@ spi.thread_dispatch_rate:
   description: Average threads launched per busy cycle.
 spi.util:
   name: SPI Utilization
-  formula: 100 * SUM(SPI_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $se_per_gpu)
+  formula: 100 * SUM(SPI_BUSY_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $se_per_gpu)
   unit: Percent
   description: Percentage of GPU-busy cycles the SPI is dispatching workgroups.
 spi.wavefront_dispatch_fifo_full_rate:

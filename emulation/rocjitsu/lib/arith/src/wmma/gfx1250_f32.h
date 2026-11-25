@@ -5,6 +5,7 @@
 #pragma once
 #include "wmma/gfx1250_half.h"
 #if defined(__AVX2__)
+#include "wmma/x86_64/gfx1250_f32_direct.h"
 #include "wmma/x86_64/gfx1250_reduction.h"
 #endif
 
@@ -12,6 +13,12 @@ namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 // Compute the complete result before publishing any destination, permitting operand overlap.
 inline void wmma_gfx1250_f32_kernel(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
                                     const uint32_t *const *b, const uint32_t *const *c) {
+#if defined(__AVX2__)
+  // The multiplicands can compete for NaN priority only when both contain nonfinite values.
+  if (gfx1250_f32_all_finite(a) || gfx1250_f32_all_finite(b)) {
+    return gfx1250_f32_direct(controls, d, a, b, c);
+  }
+#endif
   alignas(64) float rows[16][4], columns[4][16], result[16][16];
   for (int i = 0; i < 16; ++i) {
     for (int k = 0; k < 4; ++k) {

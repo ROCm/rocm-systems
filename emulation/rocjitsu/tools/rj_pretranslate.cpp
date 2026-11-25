@@ -41,8 +41,9 @@ constexpr uint64_t kMaxInputBytes = 4ull << 30;
 
 [[nodiscard]] bool read_file(const char *path, std::vector<uint8_t> &out) {
   const int fd = open(path, O_RDONLY | O_CLOEXEC);
-  if (fd < 0)
+  if (fd < 0) {
     return false;
+  }
   struct stat info {};
   if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode) ||
       static_cast<uint64_t>(info.st_size) > kMaxInputBytes) {
@@ -160,12 +161,14 @@ int main(int argc, char **argv) {
   if (command
           .add_flags("Translation store", {root_flag, force_flag, portable, fail_flag}, diagnostic)
           .failed() ||
-      command.add_flag(help, diagnostic).failed())
+      command.add_flag(help, diagnostic).failed()) {
     return 2;
+  }
   std::vector<std::string_view> arguments(argv + 1, argv + argc);
   auto parsed = parse(command, arguments, diagnostic);
-  if (parsed.failed())
+  if (parsed.failed()) {
     return 2;
+  }
   const auto usage = [&] {
     std::fprintf(
         stderr,
@@ -183,8 +186,9 @@ int main(int argc, char **argv) {
   }
   std::string root = root_flag->value();
 
-  if (root.empty())
+  if (root.empty()) {
     root = rocjitsu::shared_translation_root(rocjitsu::gfx1250_b0_a0_translator_anchor());
+  }
   if (root.empty()) {
     std::fprintf(stderr, "cannot locate the translator's install prefix; pass --store-root\n");
     return 1;

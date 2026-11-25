@@ -150,8 +150,8 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     if (task->acc != nullptr) symAvailable = false;
     // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call
     // algSelection for any function it forced.
-    uint64_t effAlgMask = symTaskHasForcedTuning(comm, task->func) ? 0 : task->algMask;
-    bool cfgAllowsSymk = (effAlgMask == 0) || ((effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS) != 0);
+    rcclTuningMask effAlgMask = symTaskHasForcedTuning(comm, task->func) ? rcclTuningMask() : task->algMask;
+    bool cfgAllowsSymk = effAlgMask.none() || (effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS).any();
 
     bool wantSym = symAvailable && cfgAllowsSymk;
     if (wantSym) {
@@ -234,16 +234,16 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       input.tuningMask = NCCL_TUNING_MASK_SYM_KERNELS;
       // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call
       // algSelection for any function it forced.
-      uint64_t effAlgMask = symTaskHasForcedTuning(comm, headTask->func) ? 0 : headTask->algMask;
-      if (effAlgMask != 0) {
-        uint64_t symkMask = effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS;
-        if (symkMask != 0) input.tuningMask = symkMask;
+      rcclTuningMask effAlgMask = symTaskHasForcedTuning(comm, headTask->func) ? rcclTuningMask() : headTask->algMask;
+      if (effAlgMask.any()) {
+        rcclTuningMask symkMask = effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS;
+        if (symkMask.any()) input.tuningMask = symkMask;
       }
       // [RCCL] The selector admitted this task for its TDM kernel, so offer only TDM kernels,
       // unless the caller's algSelection leaves them out.
       if (headTask->symkExtract == RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY) {
-        const uint64_t tdmMask = (uint64_t)(uint32_t)ncclSymkTmaKernelMask() << NCCL_TUNING_SYM_KERNEL_ID_OFFSET;
-        if (input.tuningMask & tdmMask) input.tuningMask &= tdmMask;
+        const rcclTuningMask tdmMask = rcclTuningMaskFromSymk(ncclSymkTmaKernelMask());
+        if ((input.tuningMask & tdmMask).any()) input.tuningMask &= tdmMask;
       }
       input.func = headTask->func;
       input.redOp = headTask->opHost;
@@ -292,13 +292,13 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       task = headTask;
       // Hard-error only when the selection was symmetric-only (no general algorithm to fall
       // back to) and force is on; otherwise let the legacy fallback below run.
-      if (kernelId == ncclSymkKernelId_Count && effAlgMask != 0 && (effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS) != 0 &&
-          (effAlgMask & NCCL_TUNING_MASK_GENERAL_KERNELS) == 0 && headTask->forceAlgSelection) {
+      if (kernelId == ncclSymkKernelId_Count && effAlgMask.any() && (effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS).any() &&
+          (effAlgMask & NCCL_TUNING_MASK_GENERAL_KERNELS).none() && headTask->forceAlgSelection) {
         WARN("algSelection names only symmetric kernel(s) that are unavailable for %s",
              ncclFuncToString(headTask->func));
         return ncclInvalidArgument;
       }
-      if (effAlgMask != 0 && kernelId != ncclSymkKernelId_Count) {
+      if (effAlgMask.any() && kernelId != ncclSymkKernelId_Count) {
         INFO(NCCL_TUNING, "algSelection: %s picked within the selected set", ncclAlgNameForSymk(kernelId));
       }
       // Override needFallback when buffers are registered but VAs contain sysmem segments.

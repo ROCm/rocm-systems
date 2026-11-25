@@ -53,8 +53,9 @@ template <typename T> void append_pod(std::vector<uint8_t> &out, const T &value)
 
 template <typename T>
 [[nodiscard]] bool read_pod(std::span<const uint8_t> bytes, size_t offset, T &value) {
-  if (offset > bytes.size() || sizeof(T) > bytes.size() - offset)
+  if (offset > bytes.size() || sizeof(T) > bytes.size() - offset) {
     return false;
+  }
   std::memcpy(&value, bytes.data() + offset, sizeof(T));
   return true;
 }
@@ -73,8 +74,9 @@ template <typename T>
 
 [[nodiscard]] bool read_string(std::span<const uint8_t> strings, uint32_t offset, uint32_t size,
                                std::string &value) {
-  if (offset > strings.size() || size > strings.size() - offset)
+  if (offset > strings.size() || size > strings.size() - offset) {
     return false;
+  }
   value.assign(reinterpret_cast<const char *>(strings.data() + offset), size);
   return true;
 }
@@ -129,10 +131,12 @@ serialize_kernarg_extension_metadata(std::span<const KernargExtensionMetadata> e
   out.reserve(sizeof(header) + extension_records.size() * sizeof(ExtensionRecord) +
               payload_records.size() * sizeof(PayloadRecord) + strings.size());
   append_pod(out, header);
-  for (const ExtensionRecord &record : extension_records)
+  for (const ExtensionRecord &record : extension_records) {
     append_pod(out, record);
-  for (const PayloadRecord &record : payload_records)
+  }
+  for (const PayloadRecord &record : payload_records) {
     append_pod(out, record);
+  }
   out.insert(out.end(), strings.begin(), strings.end());
   return out;
 }
@@ -140,10 +144,12 @@ serialize_kernarg_extension_metadata(std::span<const KernargExtensionMetadata> e
 std::optional<std::vector<KernargExtensionMetadata>>
 parse_kernarg_extension_metadata(std::span<const uint8_t> bytes) {
   MetadataHeader header{};
-  if (!read_pod(bytes, 0, header))
+  if (!read_pod(bytes, 0, header)) {
     return std::nullopt;
-  if (header.magic != kMetadataMagic || header.version != kMetadataVersion)
+  }
+  if (header.magic != kMetadataMagic || header.version != kMetadataVersion) {
     return std::nullopt;
+  }
 
   const uint64_t extension_bytes =
       static_cast<uint64_t>(header.extension_count) * sizeof(ExtensionRecord);
@@ -183,14 +189,16 @@ parse_kernarg_extension_metadata(std::span<const uint8_t> bytes) {
       PayloadRecord payload_record{};
       const size_t offset = static_cast<size_t>(payload_offset) +
                             static_cast<size_t>(record.first_payload + j) * sizeof(PayloadRecord);
-      if (!read_pod(bytes, offset, payload_record))
+      if (!read_pod(bytes, offset, payload_record)) {
         return std::nullopt;
+      }
 
       // A non-power-of-two alignment would make the wrapper layout math (which
       // masks with alignment-1) produce garbage offsets, so reject it at parse
       // instead of trusting the on-disk value downstream.
-      if (!std::has_single_bit(payload_record.alignment))
+      if (!std::has_single_bit(payload_record.alignment)) {
         return std::nullopt;
+      }
 
       KernargExtensionPayloadMetadata payload{};
       if (!read_string(strings, payload_record.name_offset, payload_record.name_size,

@@ -19,10 +19,12 @@ namespace rocjitsu::amdgpu::source_modifier {
 /// @brief Apply ABS then NEG to one source.
 template <typename Fmt, typename V> constexpr V apply(V bits, bool absolute, bool negate) {
   static_assert(fp_format::is_lane_v<Fmt, V>);
-  if (absolute)
+  if (absolute) {
     bits = bits & Fmt::kMagnitude;
-  if (negate)
+  }
+  if (negate) {
     bits = bits ^ Fmt::kSign;
+  }
   return bits;
 }
 

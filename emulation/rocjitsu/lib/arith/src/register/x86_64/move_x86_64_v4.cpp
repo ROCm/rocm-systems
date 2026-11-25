@@ -1,16 +1,44 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// AVX-512 SIMD halfword moves and swaps.
+// AVX-512 whole-word/halfword moves and halfword swaps.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
+#include "common/compiler.h"
 #include "common/simd.h"
+#include "register/move.h"
+#include "register/swap.h"
 #include "rj_arith/detail/rj_arith_common.h"
 
 #include <immintrin.h>
 #include <stdint.h>
 
 namespace rocjitsu::arith {
+
+// Copy active words, preserving inactive lanes and all bits except requested signs.
+void move_words_x86_64_v4(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a) {
+  auto keep = _mm512_set1_epi32(mode & RJ_ARITH_ALU_ABS_A ? 0x7fffffffU : 0xffffffffU);
+  auto sign = _mm512_set1_epi32(mode & RJ_ARITH_ALU_NEG_A ? 0x80000000U : 0);
+  RJ_ARITH_UNROLL(2)
+  for (int lane = 0; lane < 32; lane += 16) {
+    auto value = _mm512_loadu_si512(a + lane);
+    value = _mm512_xor_si512(_mm512_and_si512(value, keep), sign);
+    _mm512_mask_storeu_epi32(d + lane, __mmask16(exec_mask >> lane), value);
+  }
+}
+
+// Exchange active Wave32 words, preserving inactive lanes and coincident operands.
+void swap_words_x86_64_v4(uint32_t exec_mask, uint32_t *d, uint32_t *a) {
+  RJ_ARITH_UNROLL(2)
+  for (int lane = 0; lane < 32; lane += 16) {
+    // Load both operands before either store, including D == A.
+    auto old_a = _mm512_loadu_si512(a + lane);
+    auto old_d = _mm512_loadu_si512(d + lane);
+    const __mmask16 active = __mmask16(exec_mask >> lane);
+    _mm512_mask_storeu_epi32(d + lane, active, old_a);
+    _mm512_mask_storeu_epi32(a + lane, active, old_d);
+  }
+}
 
 // Evaluate move half for the caller-selected operation. Preserve destination lanes outside
 // exec_mask.
