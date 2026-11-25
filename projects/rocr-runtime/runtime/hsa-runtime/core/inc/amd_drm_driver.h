@@ -169,6 +169,13 @@ public:
   hsa_status_t SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
                               const void* buffer_base, uint64_t buffer_base_size) const override;
 
+  /// @brief Select XNACK mode for a node's render GPUVM via the DRM VM ioctl.
+  /// Reads the user's XNACK flag (like KfdDriver::BindXnackMode()); when XNACK is
+  /// requested, issues AMDGPU_VM_OP_STALLING_FAULT (XNACK+). The op is enable-only,
+  /// so a disabled/unset preference is a no-op (default XNACK-). Issued per node
+  /// before queues are created.
+  hsa_status_t BindXnackMode(uint32_t node_id) const override;
+
   // Legacy DestroyQueue signature for backward compatibility
   hsa_status_t DestroyQueue(HSA_QUEUEID queue_id) const override;
 

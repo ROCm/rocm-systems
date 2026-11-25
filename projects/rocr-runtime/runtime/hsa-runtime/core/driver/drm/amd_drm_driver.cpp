@@ -20,6 +20,16 @@
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/exceptions.h"
 
+// TODO(AILIROCR-565): temporary fallback. Remove once the vendored
+// hsakmt/drm/amdgpu_drm.h is synced to the UKI kernel, which defines this
+// opcode (VM op 3, "xnack control"). The #ifndef makes this a no-op once the
+// synced header provides it. NOTE: the current vendored header uses VM op 3 for
+// AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE -- the op-3 collision is tracked
+// separately for kernel/header reconciliation.
+#ifndef AMDGPU_VM_OP_STALLING_FAULT
+#define AMDGPU_VM_OP_STALLING_FAULT 3
+#endif
+
 namespace rocr {
 namespace AMD {
 
@@ -105,6 +115,19 @@ int DrmUserqFree(amdgpu_device_handle dev, uint32_t queue_id) {
 int DrmCwsrSetL2Trap(amdgpu_device_handle dev, uint64_t tba_va, uint32_t tba_sz,
                      uint64_t tma_va, uint32_t tma_sz) {
   return amdgpu_vm_set_l2_trap(dev, tba_va, tba_sz, tma_va, tma_sz);
+}
+
+// Enable XNACK+ (recoverable page faults) for this device's render GPUVM via the
+// DRM VM ioctl. The kernel op is an enable-only latch (no flags, no disable): it
+// waits for the VM to be idle, then switches it into XNACK+ mode. Must be issued
+// before any queue is created on the VM. Returns 0 on success, or -1 with errno
+// set (drmIoctl semantics).
+int DrmVmSetStallingFault(amdgpu_device_handle dev) {
+  if (dev == nullptr) return -EINVAL;
+  union drm_amdgpu_vm args;
+  memset(&args, 0, sizeof(args));
+  args.in.op = AMDGPU_VM_OP_STALLING_FAULT;
+  return drmIoctl(amdgpu_device_get_fd(dev), DRM_IOCTL_AMDGPU_VM, &args);
 }
 
 int DrmQueryInfo(amdgpu_device_handle dev, uint32_t query, uint32_t hw_ip_type,
@@ -626,6 +649,37 @@ hsa_status_t DrmDriver::SetTrapHandler(uint32_t node_id, const void* base, uint6
     return HSA_STATUS_SUCCESS;
   }
   debug_print("DrmCwsrSetL2Trap failed: %d (errno %d)\n", result, err);
+  return HSA_STATUS_ERROR;
+}
+
+hsa_status_t DrmDriver::BindXnackMode(uint32_t node_id) const {
+  // Decide the XNACK mode from the user's flag, mirroring KfdDriver::BindXnackMode()
+  // so the DRM path owns its decision rather than depending on the KFD path having
+  // set Runtime::XnackEnabled(). The kernel VM op is an enable-only latch: XNACK- is
+  // the GPUVM default and there is no per-VM query or disable op, so STALLING_FAULT
+  // is issued only when the user requested a non-disabled mode. An unset preference
+  // (XNACK_UNCHANGED) leaves the default XNACK-.
+  const HSAint32 mode = core::Runtime::runtime_singleton_->flag().xnack();
+  const bool enable = (mode != Flag::XNACK_REQUEST::XNACK_UNCHANGED) &&
+                      (mode != Flag::XNACK_DISABLE);
+  if (!enable) return HSA_STATUS_SUCCESS;
+
+  core::Agent* agent = core::Runtime::runtime_singleton_->agent_by_nodeid(node_id);
+  if (agent == nullptr || agent->device_type() != core::Agent::kAmdGpuDevice) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+  GpuAgent* gpuAgent = static_cast<GpuAgent*>(agent);
+  amdgpu_device_handle dev = gpuAgent->libDrmDev();
+
+  if (DrmVmSetStallingFault(dev) == 0) return HSA_STATUS_SUCCESS;
+
+  // Non-fatal: a kernel that lacks the opcode (older UKI/dev kernel) leaves the
+  // VM in default XNACK-. Surface it once and continue rather than failing agent
+  // init -- XNACK selection is a best-effort, kernel-dependent feature.
+  const int err = errno;
+  debug_print("DrmDriver::BindXnackMode: DRM_IOCTL_AMDGPU_VM STALLING_FAULT on node %u "
+              "failed (errno %d); GPUVM stays in default XNACK- mode\n",
+              node_id, err);
   return HSA_STATUS_ERROR;
 }
 

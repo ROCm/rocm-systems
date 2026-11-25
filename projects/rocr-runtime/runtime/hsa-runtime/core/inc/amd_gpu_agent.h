@@ -643,6 +643,12 @@ class GpuAgent : public GpuAgentInt {
   // @brief Binds the second-level trap handler to this node.
   void BindTrapHandler();
 
+  // @brief Selects this node's XNACK mode via driver().BindXnackMode(). On the
+  // DRM/UKI path the driver reads the XNACK flag and, when enabled, issues the
+  // per-GPUVM STALLING_FAULT ioctl before queues are created; on the KFD path the
+  // driver call is a no-op (KFD selected XNACK globally in its own BindXnackMode()).
+  void BindXnack();
+
   // @brief Override from core::Agent.
   hsa_status_t EnableDmaProfiling(bool enable) override;
 

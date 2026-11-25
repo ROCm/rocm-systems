@@ -1249,6 +1249,7 @@ hsa_status_t GpuAgent::PostToolsInit() {
   InitAllocators();
   InitScratchPool();
   BindTrapHandler();
+  BindXnack();
   InitDma();
 
   const auto& flag = core::Runtime::runtime_singleton_->flag();
@@ -3700,6 +3701,17 @@ void GpuAgent::BindTrapHandler() {
   [[maybe_unused]] hsa_status_t trap_err =
       driver().SetTrapHandler(node_id(), trap_code_buf_, trap_code_buf_size_, tma_addr, tma_size);
   assert(trap_err == HSA_STATUS_SUCCESS && "SetTrapHandler() failed");
+}
+
+void GpuAgent::BindXnack() {
+  // The driver decides and applies the XNACK mode: DrmDriver::BindXnackMode() reads
+  // the user's XNACK flag and, when enabled, issues the per-GPUVM STALLING_FAULT
+  // latch on this node's render VM -- which is why this runs per-agent, after the
+  // render fd exists and before any queue is created. On the KFD path the driver
+  // call is a no-op (KFD selected XNACK globally in its own BindXnackMode()).
+  // Best-effort: a failure (e.g. a kernel without the opcode) leaves the GPUVM in
+  // default XNACK- and is already logged by the driver; do not fail agent init.
+  driver().BindXnackMode(node_id());
 }
 
 void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
