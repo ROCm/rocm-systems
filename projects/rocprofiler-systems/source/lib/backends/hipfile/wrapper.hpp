@@ -175,8 +175,10 @@ public:
      * @param out [out] caller-owned buffer; populated on success. The caller
      *            value-initializes it (see backend::query) so this wrapper does not
      *            memset the ~5 KB Level-3 struct a second time.
-     * @return true on success. False means the target never initialized hipFile stats -
-     *         it performed no hipFile I/O, or HIPFILE_STATS_LEVEL is disabled.
+     * @return true when hipFile filled @p out. A true result with @c num_gpus == 0
+     *         is still not a measurement: hipFile returns success and zeros both
+     *         before any GPU has performed hipFile I/O and when HIPFILE_STATS_LEVEL
+     *         disables recording. False means the stats API could not be called.
      */
     static bool get_stats_l3(stats_l3_t* out) noexcept
     {

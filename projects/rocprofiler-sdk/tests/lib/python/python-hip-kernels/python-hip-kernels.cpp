@@ -65,6 +65,7 @@ constexpr int blocks   = (elements + threads - 1) / threads;
 // Copy buffers are deliberately large: HIP routes tiny copies through an inline
 // synchronous path that bypasses hsa_amd_memory_async_copy (so MEMORY_COPY tracing sees
 // nothing). A multi-MB copy goes through the async DMA path that is traced.
+// Changing this requires updating --copy-bytes in the anytime-tool-config tests.
 constexpr int copy_elements = 4 * 1024 * 1024;  // 16 MiB of float
 
 struct stream_state_t

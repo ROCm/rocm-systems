@@ -29,7 +29,4 @@ get_cpu_info();
 size_t
 device_count();
 
-void
-query_cpu_agents();
-
 }  // namespace rocprofsys::cpu

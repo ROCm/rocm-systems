@@ -335,6 +335,26 @@ jobs:
                 )
               }}
             '
+      # Build the examples the package installed, standalone, against the
+      # installed hipFile, the way a user would. The package installs into
+      # the build's CMAKE_INSTALL_PREFIX.
+      - name: Build the installed hipFile examples (${{ inputs.cxx_compiler }})
+        run: |
+          docker exec \
+            -e "_AIS_INPUT_CXX_COMPILER=${AIS_INPUT_CXX_COMPILER}" \
+            -t \
+            -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              prefix="$(sed -n "s/^CMAKE_INSTALL_PREFIX:PATH=//p" CMakeCache.txt)"
+              ../../rocm-systems/projects/hipfile/util/ci-build-installed-examples.sh \
+                ../../rocm-systems/projects/hipfile/examples \
+                "${prefix}/share/doc/hipfile/examples" \
+                /ais/build/hipfile-installed-examples \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_CXX_COMPILER="${_AIS_INPUT_CXX_COMPILER}" \
+                -DCMAKE_PREFIX_PATH="${prefix}"
+            '
       - name: Copy hipFile packages out of the container
         if: ${{ inputs.upload_artifacts }}
         run: |
@@ -399,7 +419,7 @@ jobs:
             -w /ais/build \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              rm -rf hipfile hipfile-release
+              rm -rf hipfile hipfile-release hipfile-installed-examples
             '
       - name: Cleanup & Stop the Docker container
         if: ${{ always() }}

@@ -16,6 +16,7 @@
 #include <format>
 #include <memory>
 #include <optional>
+#include <string>
 
 namespace rocjitsu::amdgpu {
 class ComputeUnitCore;
@@ -37,12 +38,13 @@ public:
   uint64_t retired_mma = 0;
   ~Stats() { flush(); }
   void flush() {
-    if (windows)
+    if (windows) {
       util::Logger::vm([&](auto &os) {
         os << std::format("RJ_ASYNC windows={} mma={} inline_overlap={} hazards={} "
                           "boundaries={} full={} retired_mma={}",
                           windows, mma, inline_overlap, hazards, boundaries, full, retired_mma);
       });
+    }
     windows = mma = inline_overlap = hazards = boundaries = full = retired_mma = 0;
   }
 };
@@ -57,25 +59,43 @@ public:
   using Access = async_execution::Access;
   using Pool = matrix_coexecution::SharedPool;
   explicit AsyncInstructionQueue(Pool &pool) : pool_(pool) {}
-  ~AsyncInstructionQueue() { assert(empty()); }
+  ~AsyncInstructionQueue() {
+    // Issuer unwinding can bypass the normal drain. Join accepted jobs before
+    // destroying their instructions, without reporting errors during teardown.
+    for (size_t index = 0; index != count_; ++index) {
+      (void)pool_.finish(entries_[index].ticket);
+    }
+  }
   bool empty() const { return count_ == 0; }
   size_t size() const { return count_; }
-  /// Transfer ownership only when a helper accepts the instruction.
-  bool submit(std::unique_ptr<Instruction> &inst, void *context, const Access &access) {
-    if (count_ == entries_.size())
+  /// @brief The first helper failure and its originating guest instruction.
+  /// @details The issuer reports unavailable inherited helpers after fork.
+  struct Failure {
+    uint64_t pc = 0;
+    std::string mnemonic;
+  };
+
+  /// @brief Submit an instruction together with its issuing guest PC.
+  /// @details Ownership transfers only when a helper accepts the instruction.
+  bool submit(std::unique_ptr<Instruction> &inst, void *context, const Access &access,
+              uint64_t pc) {
+    if (count_ == entries_.size()) {
       return false;
+    }
     auto ticket = pool_.submit(*inst, context);
-    if (!ticket)
+    if (!ticket) {
       return false;
-    entries_[count_++] = {std::move(inst), ticket, access};
+    }
+    entries_[count_++] = {std::move(inst), ticket, access, pc};
     return true;
   }
   void poll() {
     for (size_t i = 0; i != count_;) {
-      if (Pool::ready(entries_[i].ticket))
+      if (Pool::ready(entries_[i].ticket)) {
         retire(i);
-      else
+      } else {
         ++i;
+      }
     }
   }
   bool wait_conflicts(const Access &access) {
@@ -84,38 +104,43 @@ public:
       if (entries_[i].access.conflicts(access)) {
         waited = true;
         retire(i);
-      } else
+      } else {
         ++i;
+      }
     }
     return waited;
   }
   void drain() {
-    while (!empty())
+    while (!empty()) {
       retire(0);
+    }
   }
-  std::exception_ptr take_error() { return std::exchange(error_, {}); }
+  std::optional<Failure> take_error() { return std::exchange(error_, std::nullopt); }
 
 private:
   struct Entry {
     std::unique_ptr<Instruction> inst;
     Pool::Ticket ticket;
     Access access;
+    uint64_t pc = 0;
   };
   void retire(size_t index) {
     auto &entry = entries_[index];
-    auto error = pool_.finish(entry.ticket);
+    const util::Result result = pool_.finish(entry.ticket);
+    if (result.failed() && !error_) {
+      error_ = Failure{entry.pc, std::string(entry.inst->mnemonic())};
+    }
     entry.inst.reset();
     ++async_execution::stats.retired_mma;
-    if (error && !error_)
-      error_ = error;
-    for (size_t i = index + 1; i != count_; ++i)
+    for (size_t i = index + 1; i != count_; ++i) {
       entries_[i - 1] = std::move(entries_[i]);
+    }
     entries_[--count_] = {};
   }
   Pool &pool_;
   std::array<Entry, async_execution::kMaxPendingMma> entries_{};
   size_t count_ = 0;
-  std::exception_ptr error_;
+  std::optional<Failure> error_;
 };
 
 /// @brief A bounded same-wave execution window.
@@ -130,57 +155,75 @@ public:
   bool stopped() const { return stopped_; }
   void reserve_issuer(uint64_t pc) { issuer_pc_ = std::min(issuer_pc_, pc); }
   bool take_issuer(uint64_t pc) {
-    if (issuer_pc_ != pc)
+    if (issuer_pc_ != pc) {
       return false;
+    }
     issuer_pc_ = ~uint64_t{0};
     return true;
   }
 
   void before(const Instruction &inst) {
     poll();
-    if (!pending())
+    if (!pending()) {
       return;
+    }
     auto access = async_execution::footprint(inst, wf_.num_vgprs(), has_accvgprs_);
     if (!async_execution::safe_inline(inst) || !access) {
-      if (pending())
+      if (pending()) {
         ++async_execution::stats.boundaries;
+      }
 
       drain();
       stopped_ = true;
       return;
     }
-    if (arithmetic_ && arithmetic_->wait_conflicts(*access))
+    if (arithmetic_ && arithmetic_->wait_conflicts(*access)) {
       ++async_execution::stats.hazards;
+    }
     check_errors();
-    if (pending() && !matrix_coexecution::async_candidate(inst.mnemonic()) && !inst.is_memory_op())
+    if (pending() && !matrix_coexecution::async_candidate(inst) && !inst.is_memory_op()) {
       ++async_execution::stats.inline_overlap;
+    }
   }
 
+  // Admission requires production decoding to have rejected every operand or
+  // format that can reach report_instruction_execution_error() in a candidate.
+  // Helpers must not report through the shared Wavefront error field: that
+  // would race the issuer clearing it for subsequent instructions.
+  // Keep new candidates synchronous unless their decode checks establish this
+  // invariant (including any execution-state checks), and cover those checks.
+  // Test/custom callbacks submitted here must obey the same restriction.
   bool submit_mma(std::unique_ptr<Instruction> &inst) {
-    if (stopped_ || !matrix_coexecution::async_candidate(inst->mnemonic()))
+    if (stopped_ || !matrix_coexecution::async_candidate(*inst)) {
       return false;
+    }
     auto access = async_execution::footprint(*inst, wf_.num_vgprs(), has_accvgprs_);
     const int sources = inst->num_src_operands();
-    if (!access || inst->num_dst_operands() != 1 || (sources != 3 && sources != 5))
+    if (!access || inst->num_dst_operands() != 1 || (sources != 3 && sources != 5)) {
       return false;
+    }
     for (int i = 0; i <= sources; ++i) {
       const auto *operand = i == sources ? inst->dst_operand(0) : inst->src_operand(i);
       const auto ref = operand->to_register_ref();
-      if (ref && (ref->cls == RegClass::VGPR || (has_accvgprs_ && ref->cls == RegClass::ACC_VGPR)))
+      if (ref &&
+          (ref->cls == RegClass::VGPR || (has_accvgprs_ && ref->cls == RegClass::ACC_VGPR))) {
         continue;
+      }
       // Inline accumulator/scale constants are immutable. SGPRs and special
       // registers are not covered by the vector-register scoreboard.
-      if (i == sources || !operand->const_value())
+      if (i < 2 || i == sources || !operand->const_value()) {
         return false;
+      }
     }
     if (!pool_.available()) {
       ++async_execution::stats.full;
       return false;
     }
     materialize();
-    if (!arithmetic_)
+    if (!arithmetic_) {
       arithmetic_.emplace(pool_);
-    if (arithmetic_->submit(inst, &wf_, *access)) {
+    }
+    if (arithmetic_->submit(inst, &wf_, *access, wf_.pc)) {
       ++async_execution::stats.mma;
       started();
       return true;
@@ -192,20 +235,16 @@ public:
   }
 
   void poll() {
-    if (arithmetic_)
+    if (arithmetic_) {
       arithmetic_->poll();
+    }
     check_errors();
   }
   void drain() {
-    if (arithmetic_)
+    if (arithmetic_) {
       arithmetic_->drain();
-    check_errors();
-  }
-  void abandon() noexcept {
-    try {
-      drain();
-    } catch (...) {
     }
+    check_errors();
   }
 
 private:
@@ -216,13 +255,7 @@ private:
     }
   }
   void materialize();
-  void check_errors() {
-    auto error = arithmetic_ ? arithmetic_->take_error() : std::exception_ptr{};
-    if (error) {
-      abandon();
-      std::rethrow_exception(error);
-    }
-  }
+  void check_errors();
   ComputeUnitCore &cu_;
   Wavefront &wf_;
   matrix_coexecution::SharedPool &pool_;

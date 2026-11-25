@@ -21,7 +21,7 @@
 
 namespace hrr_cap {
 
-// 128-bit hash (FNV-1a variant) — return type of write_blob / write_code_object
+// 128-bit content hash — return type of write_blob / write_code_object.
 struct Hash128 {
   uint64_t lo;
   uint64_t hi;
@@ -34,7 +34,7 @@ struct Hash128 {
 // ---------------------------------------------------------------------------
 
 // Check if capture is enabled (HIP_HRR_CAPTURE_OUTPUT env var set and not empty or blank,
-// and the process not started in secure-execution mode)
+// the process not started in secure-execution mode, and the user's consent given)
 bool hip_capture_enabled();
 
 // Return the output directory from the env var

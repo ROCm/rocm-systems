@@ -280,17 +280,15 @@ TEST_F(GinAnvilIpcDeviceTest, AnvilCtxValid_AndSignalPtr) {
   EXPECT_TRUE(sig[4]);  // remoteSignalAddr null
 }
 
-__global__ void kernelFencePaths(bool sdmaPath, bool hasCounter) {
+__global__ void kernelFencePaths(bool sdmaPath) {
   if (threadIdx.x != 0) return;
-  fenceBeforeSignal(nullptr, sdmaPath, nullptr, hasCounter);
+  fenceBeforeSignal(sdmaPath, nullptr);
 }
 
 TEST_F(GinAnvilIpcDeviceTest, FenceBeforeSignal_CompilesAllPaths) {
   for (bool sdma : {false, true}) {
-    for (bool ctr : {false, true}) {
-      kernelFencePaths<<<1, 1>>>(sdma, ctr);
-      syncAndCheck();
-    }
+    kernelFencePaths<<<1, 1>>>(sdma);
+    syncAndCheck();
   }
 }
 

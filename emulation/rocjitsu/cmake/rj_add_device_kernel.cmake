@@ -71,7 +71,14 @@ endfunction()
 # ${KERNEL_OUTPUT_DIR}/${output_name}.hsaco.
 function(rj_add_probe_object name offload_arch)
     set(oneValueArgs OUTPUT_NAME)
-    cmake_parse_arguments(RJ_PROBE "" "${oneValueArgs}" "" ${ARGN})
+    set(multiValueArgs COMPILE_OPTIONS DEPENDS)
+    cmake_parse_arguments(
+        RJ_PROBE
+        ""
+        "${oneValueArgs}"
+        "${multiValueArgs}"
+        ${ARGN}
+    )
 
     set(output_name "${name}")
     if(RJ_PROBE_OUTPUT_NAME)
@@ -86,11 +93,14 @@ function(rj_add_probe_object name offload_arch)
     add_custom_command(
         OUTPUT ${bundle}
         COMMAND
-            ${AMDCXX} -x hip --offload-arch=${offload_arch}
-            --rocm-path=${ROCM_PATH} --cuda-device-only -O2 -o ${bundle} ${src}
-        DEPENDS ${src} ${AMDCXX}
+            ${CMAKE_CXX_COMPILER_LAUNCHER} ${AMDCXX} -x hip
+            --offload-arch=${offload_arch} --rocm-path=${ROCM_PATH}
+            --cuda-device-only -O2 ${RJ_PROBE_COMPILE_OPTIONS} -o ${bundle}
+            ${src}
+        DEPENDS ${src} ${AMDCXX} ${RJ_PROBE_DEPENDS}
         COMMENT
             "Compiling probe object (device-only): ${output_name} (${offload_arch})"
+        VERBATIM
     )
 
     # Step 2: unbundle the device code object into a raw device ELF. The bundler
@@ -103,6 +113,7 @@ function(rj_add_probe_object name offload_arch)
             --output=${hsaco}
         DEPENDS ${bundle} ${CLANG_OFFLOAD_BUNDLER}
         COMMENT "Unbundling probe object: ${output_name} (${offload_arch})"
+        VERBATIM
     )
 
     add_custom_target(probe_${output_name} DEPENDS ${hsaco})

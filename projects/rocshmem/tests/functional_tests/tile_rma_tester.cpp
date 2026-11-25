@@ -132,6 +132,10 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
   int wf_id = t_id / wf_size;
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
+  // Without an LDS-staged build (USE_LDS_STAGE/USE_TDM) this returns 0.
+  extern __shared__ uint8_t tdm_lds[];
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
+
   __shared__ long long int wf_start_time[32];
 
   // Calculate base offset for this thread/wave/wg's data region.
@@ -766,7 +770,7 @@ void TileRMATester::resetBuffers(uint64_t size) {
 
 void TileRMATester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                                  uint64_t size) {
-  size_t shared_bytes = 0;
+  size_t shared_bytes = rocshmem_query_lds_stage_bytes();
 
   // Derive tile dimensions for this iteration from the current message size so
   // that the reported bandwidth matches the actual bytes transferred.

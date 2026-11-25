@@ -113,7 +113,7 @@ template <typename T, typename __hip_internal::enable_if<
                           __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void tex2DLayered(T* ptr, hipTextureObject_t textureObject,
                                                     float x, float y, int layer) {
-  *ptr = tex1DLayered<T>(textureObject, x, y, layer);
+  *ptr = tex2DLayered<T>(textureObject, x, y, layer);
 }
 
 template <typename T, typename __hip_internal::enable_if<
@@ -157,22 +157,23 @@ static __device__ __hip_img_chk__ T tex2Dgather(hipTextureObject_t textureObject
   TEXTURE_OBJECT_PARAMETERS_INIT
   float2 coords{x, y};
   switch (comp) {
-    case 1: {
+    case 0:
+    default: {
       auto tmp = __ockl_image_gather4r_2D(i, s, get_native_vector(coords));
       return __hipMapFrom<T>(tmp);
       break;
     }
-    case 2: {
+    case 1: {
       auto tmp = __ockl_image_gather4g_2D(i, s, get_native_vector(coords));
       return __hipMapFrom<T>(tmp);
       break;
     }
-    case 3: {
+    case 2: {
       auto tmp = __ockl_image_gather4b_2D(i, s, get_native_vector(coords));
       return __hipMapFrom<T>(tmp);
       break;
     }
-    default: {
+    case 3: {
       auto tmp = __ockl_image_gather4a_2D(i, s, get_native_vector(coords));
       return __hipMapFrom<T>(tmp);
       break;
@@ -185,7 +186,7 @@ template <typename T, typename __hip_internal::enable_if<
                           __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void tex2Dgather(T* ptr, hipTextureObject_t textureObject,
                                                    float x, float y, int comp = 0) {
-  *ptr = texCubemapLayered<T>(textureObject, x, y, comp);
+  *ptr = tex2Dgather<T>(textureObject, x, y, comp);
 }
 
 template <typename T, typename __hip_internal::enable_if<
@@ -243,9 +244,8 @@ template <typename T, typename __hip_internal::enable_if<
 static __device__ __hip_img_chk__ T tex1DLayeredLod(hipTextureObject_t textureObject, float x,
                                                     int layer, float level) {
   TEXTURE_OBJECT_PARAMETERS_INIT;
-  (void)level;
   float2 coords{x, layer};
-  auto tmp = __ockl_image_sample_1Da(i, s, get_native_vector(coords));
+  auto tmp = __ockl_image_sample_lod_1Da(i, s, get_native_vector(coords), level);
   return __hipMapFrom<T>(tmp);
 }
 
@@ -261,9 +261,8 @@ template <typename T, typename __hip_internal::enable_if<
 static __device__ __hip_img_chk__ T tex2DLayeredLod(hipTextureObject_t textureObject, float x,
                                                     float y, int layer, float level) {
   TEXTURE_OBJECT_PARAMETERS_INIT;
-  (void)level;
   float4 coords{x, y, layer, 0.0f};
-  auto tmp = __ockl_image_sample_2Da(i, s, get_native_vector(coords));
+  auto tmp = __ockl_image_sample_lod_2Da(i, s, get_native_vector(coords), level);
   return __hipMapFrom<T>(tmp);
 }
 
@@ -374,9 +373,8 @@ template <typename T, typename __hip_internal::enable_if<
 static __device__ __hip_img_chk__ T tex3DGrad(hipTextureObject_t textureObject, float x, float y,
                                               float z, float4 dPdx, float4 dPdy) {
   TEXTURE_OBJECT_PARAMETERS_INIT;
-  (void)dPdx;
   float4 coords{x, y, z, 0.0f};
-  float4 gradx{dPdy.x, dPdy.y, dPdy.z, 0.0f};
+  float4 gradx{dPdx.x, dPdx.y, dPdx.z, 0.0f};
   float4 grady{dPdy.x, dPdy.y, dPdy.z, 0.0f};
   auto tmp = __ockl_image_sample_grad_3D(i, s, get_native_vector(coords), get_native_vector(gradx),
                                          get_native_vector(grady));

@@ -2,84 +2,143 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna1/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna2/register_destinations.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/branch_stack.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx1150_compare_input.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
+#include "rocjitsu/vm/amdgpu/buffer_format.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
+#include "rocjitsu/vm/amdgpu/ordered_count.h"
 
 #include <algorithm>
 #include <bit>
+#include <limits>
 
 namespace rocjitsu::amdgpu {
 
 std::optional<uint32_t> RegisterAccess::scalar_control_value(uint32_t selector) const {
   const auto &wf = wavefront();
   const auto m0 = scalar_m0_selector(wf.cu().arch());
-  if (!can_resolve_src_scalar(selector, m0))
+  if (!can_resolve_src_scalar(selector, wf.cu().arch())) {
     return std::nullopt;
+  }
   // Preserve invalid-backing rejection for address planning. Constants and
   // computed aliases have no storage range and use the shared value decoder.
-  if (selector < 128 && !resolve_scalar_register_range(wf, selector, 1))
+  if (selector < 128 && !resolve_scalar_register_range(wf, selector, 1)) {
     return std::nullopt;
+  }
   return resolve_src_scalar_value<[](const Wavefront &wave, uint32_t reg) {
     return RegisterAccess(wave).cu_->read_sgpr_storage(wave.sgpr_alloc().base + reg);
   },
                                   [](const Wavefront &wave, uint32_t reg) {
-                                    return wave.ttmp(reg);
+                                    return RegisterAccess::shader_can_access_ttmp(wave)
+                                               ? wave.ttmp(reg)
+                                               : 0u;
                                   }>(wf, selector, m0);
 }
 
 std::optional<uint64_t> RegisterAccess::vector_control_value(RegisterRef reg, unsigned lane) const {
   const auto &wf = wavefront();
-  if (reg.cls != RegClass::VGPR || !reg.width || reg.width > 2 || lane >= wf.wf_size())
+  if (reg.cls != RegClass::VGPR || !reg.width || reg.width > 2 || lane >= wf.wf_size()) {
     return std::nullopt;
+  }
   const auto base = wf.vgpr_alloc().base + reg.index;
-  if (!cu_->owns_vgpr_range(wf, base, reg.width))
+  if (!cu_->owns_vgpr_range(wf, base, reg.width)) {
     return std::nullopt;
+  }
   uint64_t value = cu_->read_vgpr_storage(base, lane);
-  if (reg.width == 2)
+  if (reg.width == 2) {
     value |= uint64_t{cu_->read_vgpr_storage(base + 1, lane)} << 32;
+  }
   return value;
 }
 
 std::optional<RegisterRef> RegisterAccess::source_register(const Operand &op, bool wordwise) const {
-  if (!op.reads_value() || op.size_bits() == 0)
+  if (!op.reads_value() || op.size_bits() == 0) {
     return std::nullopt;
+  }
   const auto &wf = wavefront();
   auto width = static_cast<uint8_t>(std::max(1, op.size_bits() / 32));
   // Immediate encodings can overlap the numeric VGPR selector range.
   if (auto base = op.is_vgpr() ? op.simd_vgpr_base(wf) : std::nullopt) {
+    if (auto mapped = remapped_valu_source(op, *base, width)) {
+      // GFX11.5 selects the base of the whole operand. CDNA1 can substitute
+      // individual words of a pair, which the per-word scanner handles.
+      if (cu_->arch() == rocjitsu::IsaFamily::Rdna3_5 ||
+          (width == 2 && mapped->hi == mapped->lo + 1)) {
+        return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(mapped->lo - wf.vgpr_alloc().base),
+                           width};
+      }
+      if (width == 1 || mapped->lo == mapped->hi) {
+        return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(mapped->lo - wf.vgpr_alloc().base),
+                           1};
+      }
+    }
     // Qualified memory bodies acquire source dwords independently. Preserve a
     // backed prefix when a later word lies beyond this wave's ownership block.
-    if (wordwise)
-      while (width && !cu_->owns_vgpr_range(wf, *base, width))
+    if (wordwise) {
+      while (width && !cu_->owns_vgpr_range(wf, *base, width)) {
         --width;
-    if (!width || !cu_->owns_vgpr_range(wf, *base, width))
+      }
+    }
+    if (!width || !cu_->owns_vgpr_range(wf, *base, width)) {
       return std::nullopt;
+    }
     return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(*base - wf.vgpr_alloc().base), width};
   }
-  if (op.const_value())
+  if (op.const_value()) {
     return std::nullopt;
-  if (auto reg = op.to_register_ref())
+  }
+  if (auto reg = op.to_register_ref()) {
+    if (reg->cls == RegClass::TTMP && !wf.shader_can_access_ttmp()) {
+      return std::nullopt;
+    }
     return reg;
-  if (auto special = op.to_special_reg_class())
+  }
+  if (auto special = op.to_special_reg_class()) {
     return RegisterRef{*special, 0, width};
+  }
   if (op.has_register_selector()) {
     const auto selector = op.encoding_value();
-    if (auto range = resolve_scalar_register_range(wf, selector, width))
+    if (auto range = resolve_scalar_register_range(wf, selector, width)) {
       return range->register_ref();
-    if (selector == 251 || selector == 252)
+    }
+    if (selector == 251 || selector == 252) {
       return RegisterRef{selector == 251 ? RegClass::VCC : RegClass::EXEC, 0,
                          static_cast<uint8_t>(wf.wf_size() / 32)};
-    if (selector == 253)
+    }
+    if (selector == 253) {
       return RegisterRef{RegClass::SCC, 0, 1};
+    }
   }
   return std::nullopt;
+}
+
+std::optional<RegisterRef> RegisterAccess::gfx10_valu_source_vgpr(const Operand &op) const {
+  const auto &wf = wavefront();
+  const auto &allocation = wf.vgpr_alloc();
+  if (!op.reads_value() || !op.size_bits() || !allocation.count) {
+    return std::nullopt;
+  }
+  const auto base = op.simd_vgpr_base(wf);
+  if (!base) {
+    return std::nullopt;
+  }
+  const uint32_t first = gfx10_source_word(*base);
+  const uint32_t index = first - allocation.base;
+  const uint32_t width =
+      first == *base ? std::min<uint32_t>(op.vgpr_count(), allocation.count - index) : 1;
+  return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(index), static_cast<uint8_t>(width)};
 }
 
 std::array<std::optional<RegisterRef>, 4>
@@ -88,12 +147,15 @@ RegisterAccess::buffer_resource_registers(const Operand &op, unsigned scalar_wor
   const auto &wf = wavefront();
   const auto selector = op.encoding_value();
   if (scalar_words ? !resolve_scalar_register_range(wf, selector, 2)
-                   : !addr_calc::buffer_resource_range_is_backed(wf, selector))
+                   : !addr_calc::buffer_resource_range_is_backed(wf, selector)) {
     return result;
+  }
   const unsigned words = scalar_words ? scalar_words : 4;
-  for (unsigned word = 0; word < words; ++word)
-    if (const auto range = resolve_scalar_register_range(wf, selector + word, 1))
+  for (unsigned word = 0; word < words; ++word) {
+    if (const auto range = resolve_scalar_register_range(wf, selector + word, 1)) {
       result[word] = range->register_ref();
+    }
+  }
   return result;
 }
 
@@ -102,18 +164,25 @@ std::optional<RegisterRef> RegisterAccess::block_data_register(const Operand &op
   assert(word < kBlockDwordCount);
   const auto &wf = wavefront();
   const auto base = write ? op.simd_vgpr_base_mut(mutable_wavefront()) : op.simd_vgpr_base(wf);
-  if (!base)
+  if (!base) {
     return std::nullopt;
+  }
   const uint32_t physical = write ? *base + word : block_store_source_vgpr(*base + word);
-  if (!owns_vgpr_range(physical, 1))
+  if (!owns_vgpr_range(physical, 1)) {
     return std::nullopt;
+  }
   return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(physical - wf.vgpr_alloc().base), 1};
 }
 
 bool MemoryWaitScoreboard::result_is_written(const Instruction &inst, Wavefront &wf) {
-  if (inst.mnemonic() == "lds_direct_load" || inst.mnemonic() == "ds_direct_load")
+  const Operation operation = inst.amdgpu_operation();
+  if (operation == Operation::LDS_DIRECT_LOAD || operation == Operation::DS_DIRECT_LOAD) {
     return valid_lds_direct_operand(wf.m0());
-  if (inst.mnemonic() == "s_barrier_signal_isfirst") {
+  }
+  if (operation == Operation::S_BARRIER_SIGNAL_ISFIRST) {
+    if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna4) {
+      return wf.cu().in_multiwave_workgroup();
+    }
     const auto &source = *inst.src_operand(0);
     const auto constant = source.const_value();
     const auto value =
@@ -127,34 +196,70 @@ bool MemoryWaitScoreboard::result_is_written(const Instruction &inst, Wavefront 
 }
 
 uint64_t MemoryWaitScoreboard::result_lanes(const Instruction &inst, Wavefront &wf) {
+  return memory_lanes(inst, wf).result;
+}
+
+static bool gfx11_rejects_buffer_load(const Instruction &inst, const Wavefront &wave) {
+  const auto arch = wave.cu().arch();
+  if (arch != rocjitsu::IsaFamily::Rdna3 && arch != rocjitsu::IsaFamily::Rdna3_5) {
+    return false;
+  }
+  const auto name = inst.mnemonic();
+  return (name.starts_with("buffer_load_") || name.starts_with("tbuffer_load_")) &&
+         !RegisterAccess(wave).vgpr_results_fit_allocation(inst);
+}
+
+MemoryWaitScoreboard::MemoryLanes MemoryWaitScoreboard::memory_lanes(const Instruction &inst,
+                                                                     Wavefront &wf) {
+  if (gfx11_rejects_buffer_load(inst, wf)) {
+    return {wf.exec(), 0};
+  }
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna2 &&
+      !RegisterAccess(wf).vgpr_results_fit_allocation(inst)) {
+    return {};
+  }
+  if (inst.is_memory_op() && wf.memory_destination_out_of_range(inst)) {
+    return {};
+  }
   const auto *issue = inst.amdgpu_memory_issue_info();
-  uint64_t lanes = issue && !issue->exec_masked
+  if (const auto ordered = decoded_ordered_count_lanes(inst, wf)) {
+    return {ordered->result, ordered->result};
+  }
+  uint64_t lanes = issue && !issue->exec_masked && !(inst.flags() & FIRST_ACTIVE_MEMORY_LANE)
                        ? (wf.wf_size() == 64 ? ~uint64_t{0} : uint64_t{0xffffffff})
-                       : wf.exec();
-  if (!(inst.flags() & CONDITIONAL_MEMORY_LANES))
-    return lanes;
+                       : wf.memory_exec(inst);
+  if (!(inst.flags() & CONDITIONAL_MEMORY_LANES)) {
+    return {lanes, lanes};
+  }
   RegisterModifiers modifiers;
   inst.amdgpu_register_modifiers(modifiers);
-  if (modifiers.exec_all_if_nonzero)
+  if (modifiers.exec_all_if_nonzero) {
     lanes = wave32_exec_all_if_nonzero(lanes);
-  if (modifiers.exec_whole_quads)
-    lanes = result_is_written(inst, wf) ? whole_active_quads(lanes) : 0;
-  if (lanes && wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 && modifiers.buffer_resource &&
-      !modifiers.scalar_buffer_words) {
-    const auto selector = modifiers.buffer_resource->encoding_value();
-    if (addr_calc::buffer_resource_range_is_backed(wf, selector))
-      if (const auto word3 = RegisterAccess(wf).scalar_control_value(selector + 3))
-        if (cdna5::decode_buffer_resource(0, 0, 0, *word3).type != 0)
-          return 0;
   }
-  return lanes;
+  if (modifiers.exec_whole_quads) {
+    lanes = result_is_written(inst, wf) ? whole_active_quads(lanes) : 0;
+  }
+  if (lanes && modifiers.buffer_resource && !modifiers.scalar_buffer_words) {
+    const auto selector = modifiers.buffer_resource->encoding_value();
+    if (addr_calc::buffer_resource_range_is_backed(wf, selector)) {
+      const auto word3 = RegisterAccess(wf).scalar_control_value(selector + 3);
+      // A non-buffer descriptor consumes the counter position but writes no VGPR lanes.
+      if (word3 && (*word3 >> 30)) {
+        return {lanes, 0};
+      }
+    }
+  }
+  return {lanes, lanes};
 }
 
 MemoryWaitScoreboard::FlatLanes MemoryWaitScoreboard::flat_lanes(const Instruction &inst,
                                                                  Wavefront &wf,
                                                                  uint64_t shared_base,
                                                                  uint64_t shared_limit) {
-  FlatLanes result{wf.exec(), 0};
+  if (wf.memory_destination_out_of_range(inst)) {
+    return {};
+  }
+  FlatLanes result{wf.memory_exec(inst), 0};
   RegisterModifiers modifiers;
   inst.amdgpu_register_modifiers(modifiers);
   assert(modifiers.flat_address);
@@ -162,109 +267,665 @@ MemoryWaitScoreboard::FlatLanes MemoryWaitScoreboard::flat_lanes(const Instructi
   uint64_t scalar = 0;
   if (const auto *operand = modifiers.flat_scalar_address) {
     const unsigned selector = operand->encoding_value();
-    if (!resolve_scalar_register_range(wf, selector, 2))
+    if (!resolve_scalar_register_range(wf, selector, 2)) {
       return {0, 0};
+    }
     const auto lo = registers.scalar_control_value(selector);
     const auto hi = registers.scalar_control_value(selector + 1);
-    if (!lo || !hi)
+    if (!lo || !hi) {
       return {0, 0};
+    }
     scalar = *lo | (uint64_t{*hi} << 32);
   }
-  if (!shared_base || !result.requests)
+  if (!result.requests || (!shared_base && wf.cu().arch() != rocjitsu::IsaFamily::Rdna1 &&
+                           wf.cu().arch() != rocjitsu::IsaFamily::Rdna2)) {
     return result;
+  }
   const auto arch = wf.cu().arch();
-  const auto layout = arch == ROCJITSU_CODE_ARCH_CDNA5 ? FlatPrivateLayout::EncodedLane
-                      : arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-                              arch == ROCJITSU_CODE_ARCH_RDNA4
-                          ? FlatPrivateLayout::Linear
-                      : arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2
-                          ? FlatPrivateLayout::None
-                          : FlatPrivateLayout::Interleaved;
-  const auto address = registers.source_register(*modifiers.flat_address);
+  const auto layout = flat_private_layout(arch);
+  const int32_t segment_offset =
+      flat_selects_segment_before_offset(arch) ? modifiers.flat_offset : 0;
+  const bool vector_pointer32 = wf.flat_pointer32() && !modifiers.flat_scalar_address;
+  const auto address = vector_pointer32
+                           ? registers.block_data_register(*modifiers.flat_address, 0, false)
+                           : registers.source_register(*modifiers.flat_address);
   uint64_t remaining = result.requests;
   while (remaining) {
     const unsigned lane = std::countr_zero(remaining);
     remaining &= remaining - 1;
     const uint64_t vector =
         address ? registers.vector_control_value(*address, lane).value_or(0) : 0;
-    const uint64_t value =
+    uint64_t value =
         scalar +
         flat_vector_offset(vector,
-                           modifiers.flat_scalar_address && arch == ROCJITSU_CODE_ARCH_CDNA5,
+                           modifiers.flat_scalar_address && arch == rocjitsu::IsaFamily::Cdna5,
                            modifiers.flat_scale) +
         modifiers.flat_offset;
-    const auto translated = translate_flat_address(wf, value, lane, layout);
-    if (!translated.swizzled && translated.value >= shared_base && translated.value <= shared_limit)
+    if (vector_pointer32) {
+      value = static_cast<uint32_t>(value);
+    }
+    const uint64_t aperture_pointer = value - segment_offset;
+    const auto translated =
+        translate_flat_address(wf, aperture_pointer, lane, layout, segment_offset);
+    // GFX10.3 retains any complete element of a partial private tuple.
+    // Its decoded width is the first element; GFX10.1 requires the complete transfer.
+    if ((arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2) &&
+        translated.private_address && translated.swizzled &&
+        uint64_t{translated.private_offset} + modifiers.flat_access_bytes >
+            wf.scratch_lane_size()) {
+      result.requests &= ~(uint64_t{1} << lane);
+      continue;
+    }
+    if (!translated.swizzled &&
+        flat_in_shared_aperture(aperture_pointer, shared_base, shared_limit)) {
       result.shared |= uint64_t{1} << lane;
+    }
   }
   return result;
 }
 
+static bool needs_buffer_payload_lanes(const Instruction &inst, rocjitsu::IsaFamily arch) {
+  const auto name = inst.mnemonic();
+  if (arch == rocjitsu::IsaFamily::Cdna5) {
+    return name.starts_with("buffer_store_") || name.starts_with("buffer_atomic_");
+  }
+  return (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+          arch == rocjitsu::IsaFamily::Rdna4) &&
+         (name.starts_with("buffer_store_") || name.starts_with("tbuffer_store_")) &&
+         name.find("_format_") != std::string_view::npos;
+}
+
+bool MemoryWaitScoreboard::needs_prepared_payload_lanes(const Instruction &inst,
+                                                        rocjitsu::IsaFamily arch) {
+  if (arch == rocjitsu::IsaFamily::Rdna4 && inst.mnemonic().starts_with("image_atomic_")) {
+    RegisterModifiers modifiers;
+    inst.amdgpu_register_modifiers(modifiers);
+    return modifiers.image_atomic_data != nullptr;
+  }
+  return needs_buffer_payload_lanes(inst, arch);
+}
+
+void MemoryWaitScoreboard::check_image_atomic_payload(const Instruction &inst,
+                                                      const Operand &payload, const Wavefront &wf,
+                                                      uint64_t lanes) {
+  // Bound GFX11 image atomics read VDATA for all EXEC lanes. GFX12 fetches the
+  // payload only for in-bounds lanes selected during address preparation.
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna4) {
+    if (!inst.data()) {
+      return;
+    }
+    lanes = inst.data_as<VectorMemState>()->lane_mask;
+  }
+  for (unsigned word = 0; word < static_cast<unsigned>(payload.size_bits()) / 32; ++word) {
+    const auto reg = gfx115_source_vgpr(payload.encoding_value() + word, wf.num_vgprs());
+    access({RegClass::VGPR, reg, 1}, lanes, 0xf, false);
+  }
+}
+
+void MemoryWaitScoreboard::check_image_store_payload(const Instruction &inst, const Wavefront &wf) {
+  const auto &data = *inst.data_as<VectorMemState>();
+  RegisterModifiers modifiers;
+  inst.amdgpu_register_modifiers(modifiers);
+  assert(modifiers.image_store_data);
+  const uint32_t first = modifiers.image_store_data->encoding_value();
+  const uint32_t words =
+      data.buffer_d16 ? (data.buffer_components + 1) / 2 : data.buffer_components;
+  for (uint32_t word = 0; word < words; ++word) {
+    const auto reg = gfx115_source_vgpr(first + word, wf.num_vgprs());
+    const bool half = data.buffer_d16 && 2 * word + 1 == data.buffer_components;
+    access({RegClass::VGPR, reg, 1}, data.lane_mask, half ? 0x3 : 0xf, false);
+  }
+}
+
 void MemoryWaitScoreboard::check_instruction(const Instruction &inst, Wavefront &wf) {
-  if (empty())
+  if (empty() || inst.is_empty_global_transpose(wf.exec())) {
     return;
+  }
+  const bool is_cdna2 = wf.cu().arch() == rocjitsu::IsaFamily::Cdna2;
+  const bool cdna2_valu = is_cdna2 && (inst.flags() & VALU);
+  if ((cdna2_valu && !cdna2::valu_destinations_in_range(inst, wf)) ||
+      (inst.is_memory_op() && wf.memory_destination_out_of_range(inst))) {
+    return;
+  }
   // A clear register byte proves independence for every lane and byte mask.
   // Only a possible overlap needs the precise instruction-specific footprints.
   if (!pending_scalar_ && (inst.flags() & DIRECT_REGISTER_ACCESSES) && !wf.gpr_idx_en()) {
     auto pending = [&](const Operand &op) {
       const auto reg = op.decoded_vgpr();
-      if (!reg)
+      if (!reg) {
         return op.is_fieldless() && op.is_vgpr();
-      const unsigned index =
-          reg->index +
-          (reg->index < ACC_VGPR_OFFSET ? wf.vgpr_msb_for_role(op.vgpr_msb_role()) << 8 : 0);
-      if (index + reg->width > wf.vgpr_alloc().count || index + reg->width > REGISTER_SET_MAX_VGPRS)
+      }
+      unsigned index = reg->index;
+      if (cdna2_valu) {
+        index = apply_gpr_idx(wf, index, op.vgpr_msb_role());
+      } else if (index < ACC_VGPR_OFFSET) {
+        index += wf.vgpr_msb_for_role(op.vgpr_msb_role()) << 8;
+      }
+      if (index + reg->width > wf.vgpr_alloc().count ||
+          index + reg->width > REGISTER_SET_MAX_VGPRS) {
         return true;
+      }
       return pending_.pending_vgpr(static_cast<uint16_t>(index), reg->width);
     };
     bool hit = false;
-    for (int i = 0; i < inst.num_src_operands(); ++i)
+    for (int i = 0; i < inst.num_src_operands(); ++i) {
+      if (!inst.tracks_explicit_source(i)) {
+        // The instruction's implicit uses replace this decoded placeholder, so
+        // the explicit-only prefilter cannot prove that the instruction misses.
+        hit = true;
+        continue;
+      }
       hit |= pending(*inst.src_operand(i));
-    for (int i = 0; i < inst.num_dst_operands(); ++i)
+    }
+    for (int i = 0; i < inst.num_dst_operands(); ++i) {
       hit |= pending(*inst.dst_operand(i));
-    if (!hit)
+    }
+    if (!hit) {
       return;
+    }
   }
-  if (!pending_scalar_ && inst.mnemonic().starts_with("s_"))
+  if (!pending_scalar_ && (inst.flags() & (SALU | SMEM))) {
     return;
+  }
   check_instruction_pending(inst, wf);
 }
 
+namespace {
+bool is_ds_src2(Operation operation) {
+  switch (operation) {
+  case Operation::DS_ADD_SRC2_F32:
+  case Operation::DS_ADD_SRC2_U32:
+  case Operation::DS_ADD_SRC2_U64:
+  case Operation::DS_AND_SRC2_B32:
+  case Operation::DS_AND_SRC2_B64:
+  case Operation::DS_DEC_SRC2_U32:
+  case Operation::DS_DEC_SRC2_U64:
+  case Operation::DS_INC_SRC2_U32:
+  case Operation::DS_INC_SRC2_U64:
+  case Operation::DS_MAX_SRC2_F32:
+  case Operation::DS_MAX_SRC2_F64:
+  case Operation::DS_MAX_SRC2_I32:
+  case Operation::DS_MAX_SRC2_I64:
+  case Operation::DS_MAX_SRC2_U32:
+  case Operation::DS_MAX_SRC2_U64:
+  case Operation::DS_MIN_SRC2_F32:
+  case Operation::DS_MIN_SRC2_F64:
+  case Operation::DS_MIN_SRC2_I32:
+  case Operation::DS_MIN_SRC2_I64:
+  case Operation::DS_MIN_SRC2_U32:
+  case Operation::DS_MIN_SRC2_U64:
+  case Operation::DS_OR_SRC2_B32:
+  case Operation::DS_OR_SRC2_B64:
+  case Operation::DS_RSUB_SRC2_U32:
+  case Operation::DS_RSUB_SRC2_U64:
+  case Operation::DS_SUB_SRC2_U32:
+  case Operation::DS_SUB_SRC2_U64:
+  case Operation::DS_WRITE_SRC2_B32:
+  case Operation::DS_WRITE_SRC2_B64:
+  case Operation::DS_XOR_SRC2_B32:
+  case Operation::DS_XOR_SRC2_B64:
+    return true;
+  default:
+    return false;
+  }
+}
+
+struct ImageSourceBytes {
+  uint8_t active = 0;
+  uint8_t quad = 0;
+};
+
+/// Return the byte masks for the active and helper lanes of each sampler input.
+template <typename Read>
+std::array<ImageSourceBytes, 12> image_sample_source_bytes(const RegisterModifiers &modifiers,
+                                                           const Wavefront &wf, Read read) {
+  std::array<ImageSourceBytes, 12> result{};
+  const auto &sample = *modifiers.image_sample_sources;
+  const auto backed = [&](uint32_t reg, uint32_t words) {
+    return scalar_selector_range_is_backed(wf, reg, words);
+  };
+  if (!backed(sample.sampler, 4)) {
+    return result;
+  }
+  const uint32_t resource = modifiers.image_resource->encoding_value();
+  const uint32_t word3 = read(resource + 3);
+  const auto arch = wf.cu().arch();
+  const bool gfx11 = arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5;
+  if (has_gfx11_plus_image_operands(arch) &&
+      has_unimplemented_image_sampler_controls(
+          read_image_sampler_controls(arch, sample.sampler, read))) {
+    return result;
+  }
+  const bool volume = (word3 >> 28) == kImage3d;
+  if (gfx11 && volume && sample.gather) {
+    return result;
+  }
+  const bool native_texture =
+      !sample.query && uses_native_2d_sampler(arch, resource, sample.sampler, sample.dim,
+                                              sample.unorm, read, backed);
+  const bool native_filter = sample.linear_candidate && native_texture;
+  const uint32_t filter = read(sample.sampler + 2);
+  const uint32_t word1 = read(resource + 1);
+  const bool compute_feedback =
+      sample.filtered_feedback_candidate &&
+      (sample.texel_fault || sample.lod_warning ||
+       rdna_image_lod_warning_threshold(arch, read(resource + 5))) &&
+      use_linear_image_path(arch, resource, sample.sampler, sample.dim, true, read, backed, true) &&
+      compute_filtered_image_feedback(arch, sample.dim, word3, word1, filter, sample.mode,
+                                      sample.offset, sample.compare);
+  const bool linear =
+      !native_filter &&
+      (compute_feedback || (volume && !sample.query) ||
+       ((!gfx11 && arch != rocjitsu::IsaFamily::Rdna4) ||
+        (sample.linear_candidate &&
+         use_linear_image_path(arch, resource, sample.sampler, sample.dim, true, read, backed))));
+  const bool gradients =
+      sample.mode == ImageSampleMode::Derivatives || sample.mode == ImageSampleMode::Derivatives16;
+  const auto mip = rdna_image_mip_range(arch, word1, word3);
+  const bool needs_gradients =
+      linear
+          ? gradients || linear_image_needs_implicit_lod(filter, mip.first, mip.last, sample.gather)
+          : graphics_image_needs_gradients(
+                sample.query,
+                graphics_sample_has_fixed_lod(sample.query, sample.lod_warning, filter,
+                                              native_texture)
+                    ? 0u
+                : arch == rocjitsu::IsaFamily::Rdna4 ? (word1 >> 12) & 31u
+                                                     : (word1 >> 16) & 15u,
+                sample.dim, sample.gather, filter);
+  const bool quad = needs_gradients && (sample.mode == ImageSampleMode::Implicit ||
+                                        sample.mode == ImageSampleMode::Bias);
+  const bool a16 = modifiers.image_a16;
+  const bool bias = sample.mode == ImageSampleMode::Bias;
+  const unsigned gradient_start =
+      unsigned(sample.offset) + unsigned(bias) + unsigned(sample.compare);
+  const uint32_t gradient_components = sample.mode == ImageSampleMode::Derivatives16
+                                           ? image_derivative_component_count(sample.dim)
+                                           : 0;
+  const uint16_t low16_words =
+      image_prefix_low16_words(gradient_start, gradient_components, a16, bias, sample.offset);
+  const unsigned prefix = modifiers.image_prefix_words;
+  for (unsigned word = 0; word < prefix; ++word) {
+    uint8_t bytes = image_prefix_word_bytes(word, low16_words);
+    if (!linear && sample.offset && word == 0 && sample.dim == kImageDimCube) {
+      bytes = 0;
+    }
+    if (bias && word == unsigned(sample.offset)) {
+      bytes = linear || needs_gradients ? (a16 ? 0x3 : 0xf) : 0;
+    }
+    if (gradients && word >= gradient_start) {
+      if (!needs_gradients) {
+        bytes = 0;
+      } else if (sample.mode == ImageSampleMode::Derivatives16 &&
+                 image_derivative_component_count(sample.dim) == 1) {
+        bytes = 0x3; // dx and dy each start in the low half of a separate word.
+      }
+    }
+    result[word].active = bytes;
+  }
+  // Cube unfolding and GFX10's same-face check read the derivative lanes' face selectors.
+  const bool gfx10 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
+  const unsigned spatial = sample.dim == kImageDimCube && (!linear || gfx10)
+                               ? 3u
+                               : image_derivative_component_count(sample.dim);
+  const bool array = sample.dim == kImageDim1dArray || sample.dim == kImageDim2dArray;
+  const unsigned count = sample.query && array ? spatial : modifiers.image_coordinate_count;
+  for (unsigned component = 0; component < count; ++component) {
+    auto &word = result[prefix + (a16 ? component / 2 : component)];
+    const uint8_t bytes = a16 ? (component % 2 ? 0xc : 0x3) : 0xf;
+    word.active |= bytes;
+    if (quad && component < spatial) {
+      word.quad |= bytes;
+    }
+  }
+  return result;
+}
+} // namespace
+
 void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wavefront &wf) {
-  const auto name = inst.mnemonic();
-  const bool vector = name.starts_with("v_") || name.starts_with("ds_") ||
-                      name.starts_with("lds_") || (inst.is_memory_op() && !name.starts_with("s_"));
-  const bool scalar_lane_read = name.starts_with("v_readlane_b32");
-  const bool scalar_lane_write = name.starts_with("v_writelane_b32");
-  const bool first_lane = name.starts_with("v_readfirstlane_b32");
+  // These VGPR-returning loads reject the entire tuple, including TFE, before address preparation.
+  if (gfx11_rejects_buffer_load(inst, wf)) {
+    return;
+  }
+  // GFX10 checks synchronous EXEC destinations after successful execution. Static
+  // liveness includes untaken conditional moves and control-flow paths.
+  auto access = [&](RegisterRef reg, uint64_t lanes, uint8_t bytes, bool write) {
+    if (write && reg.cls == RegClass::EXEC && checks_gds_source_lifetime(wf.cu().arch())) {
+      return;
+    }
+    this->access(reg, lanes, bytes, write);
+  };
+  RegisterModifiers modifiers;
+  inst.amdgpu_register_modifiers(modifiers);
+  // Routed image instructions validate their descriptors even with no result lanes.
+  // Other RDNA2 memory returns, DS permutations and GET_RESINFO skip their sources
+  // when the decoded destination tuple crosses the allocation.
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna2 && inst.is_memory_wait_producer() &&
+      (!inst.is_memory_op() || !modifiers.image_address) &&
+      !RegisterAccess(wf).vgpr_results_fit_allocation(inst)) {
+    return;
+  }
+  if (wf.discards_valu_result(inst)) {
+    return;
+  }
+  // VOPD only executes its two operations in a wave32.
+  if (wf.wf_size() != 32 && inst.amdgpu_secondary_operation() != Operation::Unknown) {
+    return;
+  }
+  const bool gfx10 =
+      wf.cu().arch() == rocjitsu::IsaFamily::Rdna1 || wf.cu().arch() == rocjitsu::IsaFamily::Rdna2;
+  const bool gfx10_valu = gfx10 && (inst.flags() & VALU);
+  const Operation operation = inst.amdgpu_operation();
+  const MemoryAddressing addressing = inst.amdgpu_memory_addressing();
+  const bool vector =
+      (inst.flags() & (VALU | LDS)) || (inst.is_memory_op() && !(inst.flags() & (SALU | SMEM)));
+  const bool scalar_lane_read = operation == Operation::V_READLANE_B32;
+  const bool scalar_lane_write = operation == Operation::V_WRITELANE_B32;
+  const bool first_lane = operation == Operation::V_READFIRSTLANE_B32;
   const bool selected_lane = scalar_lane_read || scalar_lane_write || first_lane;
   const bool matrix = inst.flags() & MATRIX_REGISTER_ACCESSES;
   const auto *memory_issue = inst.amdgpu_memory_issue_info();
   const bool ignores_exec = (inst.flags() & IGNORES_EXEC) || matrix || scalar_lane_read ||
                             scalar_lane_write || (memory_issue && !memory_issue->exec_masked);
   const uint64_t all_lanes = wf.wf_size() == 64 ? ~uint64_t{0} : uint64_t{0xffffffff};
-  uint64_t lanes = ignores_exec ? all_lanes : wf.exec();
-  if (vector && !ignores_exec)
+  const auto ordered = decoded_ordered_count_lanes(inst, wf);
+  uint64_t lanes = ordered ? ordered->contribution
+                   : ignores_exec && !(inst.flags() & FIRST_ACTIVE_MEMORY_LANE)
+                       ? all_lanes
+                       : wf.memory_exec(inst);
+  if ((wf.cu().arch() == rocjitsu::IsaFamily::Rdna1 ||
+       wf.cu().arch() == rocjitsu::IsaFamily::Rdna2) &&
+      (operation == Operation::DS_GWS_BARRIER || operation == Operation::DS_GWS_INIT ||
+       operation == Operation::DS_GWS_SEMA_BR || operation == Operation::DS_GWS_SEMA_P ||
+       operation == Operation::DS_GWS_SEMA_RELEASE_ALL || operation == Operation::DS_GWS_SEMA_V)) {
+    lanes = RegisterAccess(wf).gds_source_lanes(inst);
+  } else if (!ordered && wf.cu().arch() == rocjitsu::IsaFamily::Rdna2 && inst.is_memory_op()) {
+    lanes = result_lanes(inst, wf);
+  }
+  if (const auto &output = modifiers.gfx10_export) {
+    if ((wf.status_raw() & (1u << 18)) || !output->valid() || !wf.cu().shader_export_ready()) {
+      return;
+    }
     access({RegClass::EXEC, 0, static_cast<uint8_t>(wf.wf_size() / 32)}, ~uint64_t{0}, 0xf, false);
-  RegisterModifiers modifiers;
-  inst.amdgpu_register_modifiers(modifiers);
+    output->for_each_source(wf.num_vgprs(), [&](unsigned, uint16_t reg) {
+      access({RegClass::VGPR, reg, 1}, wf.exec(), 0xf, false);
+    });
+    return;
+  }
+  if (vector && (!ignores_exec || (ordered && ordered->result))) {
+    access({RegClass::EXEC, 0, static_cast<uint8_t>(wf.wf_size() / 32)}, ~uint64_t{0}, 0xf, false);
+  }
   const RegisterAccess registers(wf);
-  if (modifiers.exec_all_if_nonzero)
+  if (const auto &output = modifiers.shader_export) {
+    if (wf.shader_export_issue(*output) != ShaderExportIssue::Accept) {
+      return;
+    }
+    access({RegClass::EXEC, 0, static_cast<uint8_t>(wf.wf_size() / 32)}, ~uint64_t{0}, 0xf, false);
+    if (output->row_from_m0) {
+      access({RegClass::M0, 0, 1}, ~uint64_t{0}, 0xf, false);
+    }
+    const uint64_t exported = output->source_lanes(wf.exec());
+    output->for_each_source(wf.num_vgprs(), [&](unsigned, uint16_t reg) {
+      access({RegClass::VGPR, reg, 1}, exported, 0xf, false);
+    });
+    return;
+  }
+  const bool gfx11 = wf.cu().arch() == rocjitsu::IsaFamily::Rdna3 ||
+                     wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5;
+  const bool gfx12_image_atomic =
+      wf.cu().arch() == rocjitsu::IsaFamily::Rdna4 && modifiers.image_atomic_data;
+  const bool gfx11_or_gfx12_sample = (gfx11 || wf.cu().arch() == rocjitsu::IsaFamily::Rdna4) &&
+                                     modifiers.image_sample_sources &&
+                                     !modifiers.image_sample_sources->query;
+  const bool check_image_result = modifiers.gfx10_lod_query_quad ||
+                                  (gfx11 && modifiers.image_address) || gfx12_image_atomic ||
+                                  gfx11_or_gfx12_sample || modifiers.image_resource_info;
+  if (check_image_result) {
+    for (int i = 0; i < inst.num_dst_operands(); ++i) {
+      const auto &dst = *inst.dst_operand(i);
+      if (dst.decoded_vgpr() && !registers.destination_register(
+                                    dst, true, bool(inst.flags() & RESERVES_UNWRITTEN_VGPR))) {
+        if (!gfx12_image_atomic && !modifiers.bvh_resource) {
+          return;
+        }
+        // GFX11 BVH and GFX12 atomics read the scalar descriptor before suppressing vector work.
+        lanes = 0;
+        break;
+      }
+    }
+  }
+  // Dropped and unbound texture operations do not acquire coordinate or payload VGPRs.
+  bool read_image_inputs = modifiers.image_reads_address;
+  if (const auto *resource = modifiers.image_resource; resource && read_image_inputs) {
+    const auto shape = registers.scalar_control_value(resource->encoding_value() + 3);
+    const auto format = registers.scalar_control_value(resource->encoding_value() + 1);
+    read_image_inputs =
+        shape && format && !image_descriptor_is_unbound(wf.cu().arch(), *format, *shape);
+    const auto arch = wf.cu().arch();
+    const auto &sample = modifiers.image_sample_sources;
+    if (read_image_inputs && has_gfx11_plus_image_operands(arch) &&
+        !modifiers.image_resource_info && !(sample && sample->query)) {
+      const uint32_t selector = resource->encoding_value();
+      const uint32_t words = resource->size_bits() / 32;
+      std::array<uint32_t, 8> descriptor{};
+      if (!scalar_selector_range_is_backed(wf, selector, words)) {
+        read_image_inputs = false;
+      } else {
+        for (uint32_t i = 0; i < words; ++i) {
+          descriptor[i] = registers.scalar_control_value(selector + i).value_or(0);
+        }
+        const auto image = decode_image_resource(descriptor, arch, words == 4);
+        const bool resident_mip =
+            sample && image.min_lod && !sample->compare && !sample->offset && !sample->clamp &&
+            scalar_selector_range_is_backed(wf, sample->sampler, 4) &&
+            image.supports_resident_mip(
+                sample->dim, sample->mode, sample->gather,
+                registers.scalar_control_value(sample->sampler + 2).value_or(0));
+        read_image_inputs =
+            !image.uav3d &&
+            !(sample && image.has_unqualified_sample_controls(arch, resident_mip)) &&
+            !(resident_mip && image.min_lod > image.last_level * 256);
+        if (words == 8 && image.uses_linear_transfer_pitch() &&
+            !native_block_filter(image.data_format)) {
+          const auto bytes =
+              buffer_format_bytes(image_srgb_storage_format(image.data_format, false));
+          if (bytes.succeeded()) {
+            read_image_inputs &= image.supports_linear_pitch(
+                arch, sample && sample->dim == kImageDim2d, bytes.value());
+          }
+        }
+      }
+    }
+  }
+  if (modifiers.image_atomic_data && read_image_inputs) {
+    check_image_atomic_payload(inst, *modifiers.image_atomic_data, wf, lanes);
+  }
+  if (modifiers.image_sample_sources && read_image_inputs) {
+    const auto inputs = image_sample_source_bytes(modifiers, wf, [&](uint32_t selector) {
+      return registers.scalar_control_value(selector).value_or(0);
+    });
+    const uint64_t helpers = ImageDerivativeQuad::source_lanes(lanes) & ~lanes;
+    for (unsigned index = 0; index < inputs.size(); ++index) {
+      const auto bytes = inputs[index];
+      if (!bytes.active) {
+        continue;
+      }
+      auto selector = modifiers.image_coordinates[index];
+      if (has_gfx11_plus_image_operands(wf.cu().arch())) {
+        selector = gfx115_source_vgpr(selector, wf.num_vgprs());
+      } else if (selector >= wf.num_vgprs()) {
+        continue;
+      }
+      const RegisterRef reg{RegClass::VGPR, static_cast<uint16_t>(selector), 1};
+      if (bytes.quad == bytes.active) {
+        access(reg, lanes | helpers, bytes.active, false);
+      } else {
+        access(reg, lanes, bytes.active, false);
+        access(reg, helpers, bytes.quad, false);
+      }
+    }
+  } else if (modifiers.image_address && read_image_inputs) {
+    auto check_coordinate = [&](uint16_t reg, uint8_t bytes, uint64_t readers) {
+      if (has_gfx11_plus_image_operands(wf.cu().arch())) {
+        reg = gfx115_source_vgpr(reg, wf.num_vgprs());
+      }
+      if (reg < wf.num_vgprs()) {
+        access({RegClass::VGPR, reg, 1}, readers, bytes, false);
+      }
+    };
+    uint32_t components = modifiers.image_coordinate_count;
+    uint32_t prefix = modifiers.image_prefix_words;
+    if (const auto dim = modifiers.image_transfer_dim) {
+      const uint32_t resource = modifiers.image_resource->encoding_value();
+      const auto read = [&](uint32_t index) {
+        return registers.scalar_control_value(index).value_or(0);
+      };
+      const auto backed = [&](uint32_t index, uint32_t count) {
+        return scalar_selector_range_is_backed(wf, index, count);
+      };
+      if (!gfx11 || use_linear_image_path(wf.cu().arch(), resource, 0, *dim, false, read, backed)) {
+        const uint32_t type = read(resource + 3) >> 28;
+        const auto shape = image_coordinate_shape(type, true);
+        const uint32_t slice = image_transfer_slice_coordinate(type, *dim, false, shape.has_y);
+        components = image_transfer_coordinate_count(
+            type, shape.has_y, shape.has_slice || type == kImage2dMsaaArray, slice);
+      }
+    }
+    const RegisterModifiers::Gfx9ImageTuple &tuple = modifiers.gfx9_image_tuple;
+    if (tuple.resource_selector != ~0u) {
+      const std::optional<uint32_t> descriptor =
+          registers.scalar_control_value(tuple.resource_selector + 3);
+      const ImageCoordinateShape shape =
+          image_coordinate_shape(descriptor.value_or(0) >> 28, tuple.image_array);
+      components = shape.coordinates() + tuple.mip;
+      const uint32_t dimensions = shape.spatial_dimensions();
+      prefix =
+          tuple.derivatives ? 2 * (modifiers.image_a16 ? (dimensions + 1) / 2 : dimensions) : 0;
+    }
+    for (uint32_t word = 0; word < prefix; ++word) {
+      const uint16_t reg = modifiers.image_coordinates[word];
+      check_coordinate(reg, image_prefix_word_bytes(word, modifiers.image_prefix_low16_words),
+                       lanes);
+    }
+    const uint64_t coordinate_lanes =
+        modifiers.gfx10_lod_query_quad ? ImageDerivativeQuad::source_lanes(lanes) : lanes;
+    uint64_t ray_lanes = coordinate_lanes;
+    if (const auto resource = modifiers.bvh_resource) {
+      const auto word2 = registers.scalar_control_value(*resource + 2);
+      const auto word3 = registers.scalar_control_value(*resource + 3);
+      const auto last_node = word2 && word3 ? gfx11_bvh_last_node(*word2, *word3) : std::nullopt;
+      if (!last_node) {
+        ray_lanes = 0;
+      } else {
+        const bool pointer_flags = gfx11_bvh_pointer_flags_enabled(*word3);
+        for (uint64_t pending = coordinate_lanes; pending; pending &= pending - 1) {
+          const uint32_t lane = std::countr_zero(pending);
+          const auto pointer_word = [&](unsigned i) {
+            const auto index = gfx115_source_vgpr(modifiers.image_coordinates[i], wf.num_vgprs());
+            return wf.debug_read_vgpr(index, lane);
+          };
+          uint64_t pointer = pointer_word(0);
+          if (modifiers.bvh_pointer_words == 2) {
+            pointer |= uint64_t{pointer_word(1)} << 32;
+          }
+          if (!bvh_node_can_load(pointer, *last_node, pointer_flags)) {
+            ray_lanes &= ~(uint64_t{1} << lane);
+          }
+        }
+      }
+    }
+    for (uint32_t component = 0; component < components; ++component) {
+      const uint32_t word = prefix + (modifiers.image_a16 ? component / 2 : component);
+      uint16_t reg = modifiers.image_coordinates[word];
+      if (modifiers.gfx10_lod_query_quad && reg >= wf.num_vgprs()) {
+        reg = 0;
+      }
+      check_coordinate(reg, modifiers.image_a16 ? (component % 2 ? 0xc : 0x3) : 0xf,
+                       component < modifiers.bvh_pointer_words ? coordinate_lanes : ray_lanes);
+    }
+  }
+  if (modifiers.exec_all_if_nonzero) {
     lanes = wave32_exec_all_if_nonzero(lanes);
-  if (modifiers.exec_whole_quads)
+  }
+  if (modifiers.exec_whole_quads) {
     lanes = result_is_written(inst, wf) ? whole_active_quads(lanes) : 0;
+  }
+  bool read_buffer_address = true;
+  bool read_buffer_offset = true;
+  bool cdna5_type_mismatch = false;
   if (const auto *resource = modifiers.buffer_resource) {
-    for (const auto reg :
-         registers.buffer_resource_registers(*resource, modifiers.scalar_buffer_words))
-      if (reg)
-        access(*reg, ~uint64_t{0}, 0xf, false);
+    const auto arch = wf.cu().arch();
+    const bool gfx12 = arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
+    unsigned first_resource_word = 0;
+    if ((gfx11 || gfx12) && !modifiers.scalar_buffer_words) {
+      const auto selector = resource->encoding_value();
+      std::optional<uint32_t> control;
+      if (addr_calc::buffer_resource_range_is_backed(wf, selector)) {
+        control = registers.scalar_control_value(selector + 3);
+      }
+      const bool rdna4 = arch == rocjitsu::IsaFamily::Rdna4;
+      const auto name = inst.mnemonic();
+      const bool typed = addressing == MemoryAddressing::TypedBuffer;
+      const bool formatted = typed || name.find("_format_") != std::string_view::npos;
+      if (!control) {
+        first_resource_word = 4;
+        read_buffer_offset = read_buffer_address = false;
+      } else {
+        const bool non_buffer = (*control >> 30) != 0;
+        cdna5_type_mismatch = arch == rocjitsu::IsaFamily::Cdna5 && non_buffer;
+        const unsigned format = addr_calc::rdna_buffer_resource_format(arch, *control);
+        if (formatted && (non_buffer || !format || (typed && !modifiers.encoded_buffer_format))) {
+          // Format preparation reads only the descriptor's control word.
+          first_resource_word = 3;
+          read_buffer_offset = read_buffer_address = false;
+        } else if (non_buffer || (rdna4 && !format)) {
+          // RDNA4 reads the stride, bounds and control before fetching the base.
+          first_resource_word = rdna4 ? 1 : 0;
+          read_buffer_offset = read_buffer_address = false;
+        } else if (gfx11 && !typed && !format) {
+          // GFX11 raw address calculation has already consumed SOFFSET here.
+          read_buffer_address = false;
+        }
+      }
+      if (read_buffer_address && modifiers.buffer_offset) {
+        const uint32_t offset = modifiers.buffer_offset->encoding_value();
+        // MUBUF/MTBUF accept inline constants. VBUFFER uses a 7-bit register
+        // selector, and CDNA5 stops before VADDR for encodings above M0.
+        read_buffer_address =
+            (gfx11 && resolve_src_scalar_statically(offset).has_value()) ||
+            ((arch != rocjitsu::IsaFamily::Cdna5 || offset <= kModernM0Selector) &&
+             resolve_scalar_register_range(wf, offset, 1).has_value());
+      }
+    }
+    const auto words =
+        registers.buffer_resource_registers(*resource, modifiers.scalar_buffer_words);
+    for (unsigned word = first_resource_word; word < words.size(); ++word) {
+      if (words[word]) {
+        access(*words[word], ~uint64_t{0}, 0xf, false);
+      }
+    }
   }
   // FLAT's result ordering depends on its planned memory domains. The issuer
   // checks those results after checking address sources, still before execution.
-  if (inst.is_memory_wait_producer() && !name.starts_with("flat_"))
-    check_memory_result(inst, wf,
-                        (inst.flags() & CONDITIONAL_MEMORY_LANES) ? result_lanes(inst, wf) : lanes,
-                        modifiers);
+  if (inst.is_memory_wait_producer() && addressing != MemoryAddressing::Flat) {
+    const uint64_t results = ordered                                     ? ordered->result
+                             : (inst.flags() & CONDITIONAL_MEMORY_LANES) ? result_lanes(inst, wf)
+                                                                         : lanes;
+    check_memory_result(inst, wf, results, modifiers);
+  }
+  // SUBREV permutes VSRC1, unlike other integer DPP instructions.
+  const bool reverse_dpp =
+      (operation == Operation::V_SUBREV_U32 || operation == Operation::V_SUBREV_CO_U32 ||
+       operation == Operation::V_SUBREV_NC_U32 || operation == Operation::V_SUBREV_CO_CI_U32) &&
+      (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3 ||
+       wf.cu().arch() == rocjitsu::IsaFamily::Rdna4);
+  const Operand *routed_source = reverse_dpp ? inst.src_operand(1) : modifiers.src0;
+  // Floating DOT4 filters its non-routed source observations with its destinations.
+  const bool filtered_dot4 =
+      wf.cu().arch() == rocjitsu::IsaFamily::Rdna4 &&
+      (operation == Operation::V_DOT4_F32_BF8_BF8 || operation == Operation::V_DOT4_F32_BF8_FP8 ||
+       operation == Operation::V_DOT4_F32_FP8_BF8 || operation == Operation::V_DOT4_F32_FP8_FP8);
+  uint64_t source_lanes = lanes;
   uint64_t src0_lanes = lanes;
   uint64_t destination_lanes = lanes;
   if (modifiers.dpp || modifiers.dpp8) {
@@ -274,19 +935,24 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
                                  modifiers.bank_mask, modifiers.bound_ctrl, modifiers.fi, wf.exec(),
                                  modifiers.inactive_uses_bound_ctrl)
             : dpp::make_dpp8_plan(wf.wf_size(), modifiers.control, modifiers.fi, wf.exec());
-    src0_lanes = dpp::dpp_physical_source_mask(plan, lanes, wf.wf_size());
     destination_lanes &= plan.row_bank_mask & plan.source_write_mask;
+    if (filtered_dot4) {
+      source_lanes = destination_lanes;
+    }
+    src0_lanes = dpp::dpp_physical_source_mask(plan, lanes, wf.wf_size());
   }
   if (modifiers.ds_permutation != DsPermutation::None) {
     std::optional<RegisterRef> address;
     if (modifiers.src1) {
       address = registers.source_register(*modifiers.src1);
-      if (address)
+      if (address) {
         access(*address, lanes, 0xf, false);
+      }
     }
     const auto data = registers.source_register(*modifiers.src0);
-    if (!data || !pending_.pending(*data))
+    if (!data || !pending_.pending(*data)) {
       return;
+    }
     uint64_t source_lanes = 0;
     if (modifiers.ds_permutation == DsPermutation::Permute) {
       source_lanes = lanes;
@@ -304,69 +970,156 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
                           address ? registers.vector_control_value(*address, lane).value_or(0) : 0,
                           modifiers.ds_offset, group_width);
         if (modifiers.ds_permutation == DsPermutation::BpermuteFi ||
-            (lanes & (uint64_t{1} << source)))
+            (lanes & (uint64_t{1} << source))) {
           source_lanes |= uint64_t{1} << source;
+        }
       }
     }
     access(*data, source_lanes, 0xf, false);
     return;
   }
-  if (!pending_scalar_ && inst.is_memory_op() && name.starts_with("ds_")) {
-    for (int i = 0; i < inst.num_src_operands(); ++i)
-      if (const auto *op = inst.src_operand(i); op && op->is_vgpr())
-        if (auto reg = registers.source_register(*op, op == modifiers.wordwise_source0 ||
-                                                          op == modifiers.wordwise_source1))
-          access(*reg, lanes, op->register_byte_mask(), false);
+  // SRC2 has one register input beyond EXEC (checked above). Its other
+  // operand comes from the data share. Both pending-state paths use the
+  // address register selected by execution, including its VGPR0 fallback.
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Cdna1 && is_ds_src2(operation)) {
+    const auto reg = cdna1::ds_src2_address_register(inst.src_operand(0)->encoding_value(),
+                                                     wf.vgpr_alloc().count);
+    access({RegClass::VGPR, reg, 1}, lanes, 0xf, false);
     return;
   }
-  const bool hwreg_read = name == "s_getreg_b32";
-  const bool hwreg_write = name == "s_setreg_b32" || name == "s_setreg_imm32_b32";
+  const bool ds = inst.is_memory_op() &&
+                  (addressing == MemoryAddressing::Lds || addressing == MemoryAddressing::Gds ||
+                   addressing == MemoryAddressing::DirectLds);
+  const bool ds_vgpr0 = ds && wf.cu().arch() == rocjitsu::IsaFamily::Rdna2 &&
+                        RegisterAccess::ds_sources_use_vgpr0(inst);
+  const auto check_ds_source = [&](const Operand &operand) {
+    registers.for_each_ds_source_range(operand, true, [&](RegisterRef reg) {
+      access(reg, lanes, operand.register_byte_mask(), false);
+    });
+  };
+  if (!pending_scalar_ && ds) {
+    for (int i = 0; i < inst.num_src_operands(); ++i) {
+      if (!inst.tracks_explicit_source(i)) {
+        continue;
+      }
+      if (const auto *op = inst.src_operand(i); op && op->is_vgpr()) {
+        if (ds_vgpr0) {
+          check_ds_source(*op);
+        } else if (auto reg = registers.source_register(
+                       *op, op == modifiers.wordwise_source0 || op == modifiers.wordwise_source1)) {
+          access(*reg, lanes, op->register_byte_mask(), false);
+        }
+      }
+    }
+    return;
+  }
+  const bool hwreg_read = operation == Operation::S_GETREG_B32;
+  const bool hwreg_write =
+      operation == Operation::S_SETREG_B32 || operation == Operation::S_SETREG_IMM32_B32;
   const Operand *hwreg = hwreg_read    ? inst.src_operand(0)
                          : hwreg_write ? inst.dst_operand(0)
                                        : nullptr;
-  if (hwreg && hwreg_accesses_scc(wf, hwreg->encoding_value(), hwreg_write))
+  if (hwreg && hwreg_accesses_scc(wf, hwreg->encoding_value(), hwreg_write)) {
     access({RegClass::SCC, 0, 1}, ~uint64_t{0}, 0xf, hwreg_write);
-  if (name.starts_with("v_dual_") && name.find("cndmask") != std::string_view::npos && lanes)
-    access({RegClass::VCC, 0, 1}, ~uint64_t{0}, 0xf, false);
+  }
+  auto scalar_register = [&](uint32_t selector, uint8_t width,
+                             bool write) -> std::optional<RegisterRef> {
+    if (width == 2 && scalar_pair_crosses_register_region(wf, selector)) {
+      return std::nullopt;
+    }
+    const auto base = scalar_register_for_selector(wf, selector);
+    if (base && base->storage == ScalarRegisterStorage::SGPR &&
+        scalar_gpr_out_of_range(wf, selector, width)) {
+      if (write) {
+        return std::nullopt;
+      }
+      selector = 0;
+    }
+    const auto range = write ? resolve_scalar_destination_range(wf, selector, width)
+                             : resolve_scalar_register_range(wf, selector, width);
+    return range ? range->register_ref() : std::nullopt;
+  };
   auto resolve = [&](const Operand &op, bool write) -> std::optional<RegisterRef> {
+    if (write && (inst.flags() & COND_BRANCH) && &op == inst.dst_operand(0) &&
+        (operation == Operation::S_SUBVECTOR_LOOP_BEGIN ||
+         operation == Operation::S_SUBVECTOR_LOOP_END) &&
+        gfx10) {
+      // BEGIN skips its scratch write on empty raw EXEC. END reads scratch on
+      // every path and overwrites it only to start the high pass.
+      const auto selector = op.encoding_value();
+      const bool writes_scratch =
+          operation == Operation::S_SUBVECTOR_LOOP_BEGIN
+              ? wf.exec_raw() != 0
+              : (wf.exec_raw() >> 32) == 0 &&
+                    registers.scalar_control_value(selector).value_or(0) != 0;
+      if (!writes_scratch) {
+        return std::nullopt;
+      }
+      const auto range = resolve_scalar_destination_range(wf, selector, 1);
+      return range ? range->register_ref() : std::nullopt;
+    }
     // MMA execution applies GPR_IDX only to ordinary VGPRs, never its
     // separate accumulator bank. Keep that bank's decoded identity intact.
-    if (matrix)
+    if (matrix && wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5) {
+      if (auto reg = registers.gfx115_wmma_register(op, write)) {
+        return reg;
+      }
+    }
+    if (matrix) {
       if (auto reg = op.to_register_ref(); reg && reg->cls == RegClass::ACC_VGPR) {
         reg->cls = RegClass::VGPR;
         reg->index += ACC_VGPR_OFFSET;
         return reg;
       }
+    }
     // Explicit vector mask operands use the wave width before range validation:
     // a wave32 mask may occupy VCC_HI without also accessing the next selector.
     const bool wave_mask = vector && !op.is_vgpr() && op.size_bits() == 64 &&
                            (write || (modifiers.src2_is_wave_mask && &op == inst.src_operand(2)));
     if (wave_mask && op.has_register_selector() && !op.const_value()) {
-      const auto range = resolve_scalar_register_range(wf, op.encoding_value(), wf.wf_size() / 32);
-      return range ? std::optional(range->register_ref()) : std::nullopt;
+      return scalar_register(op.encoding_value(), wf.wf_size() / 32, write);
+    }
+    if (gfx10_valu && !write && op.is_vgpr()) {
+      return registers.gfx10_valu_source_vgpr(op);
+    }
+    if (!write && wf.flat_pointer32() && &op == modifiers.flat_address &&
+        !modifiers.flat_scalar_address) {
+      return registers.block_data_register(op, 0, false);
     }
     auto reg = write ? registers.destination_register(op)
                      : registers.source_register(op, &op == modifiers.wordwise_source0 ||
                                                          &op == modifiers.wordwise_source1);
-    if (!reg)
-      if (auto special = op.to_special_reg_class())
+    if (!reg) {
+      if (auto special = op.to_special_reg_class()) {
         reg =
             RegisterRef{*special, 0, static_cast<uint8_t>(std::max(1, (op.size_bits() + 31) / 32))};
+      }
+    }
     if (op.has_register_selector() && op.size_bits() && !op.const_value() &&
         (!reg || is_special_reg_class(reg->cls))) {
       if (auto range = resolve_scalar_register_range(wf, op.encoding_value(),
-                                                     std::max(1, (op.size_bits() + 31) / 32)))
+                                                     std::max(1, (op.size_bits() + 31) / 32))) {
         reg = range->register_ref();
-      else if (!write && op.encoding_value() == 253)
+      } else if (!write && op.encoding_value() == 253) {
         reg = RegisterRef{RegClass::SCC, 0, 1};
+      }
     }
-    if (!reg)
+    if (!reg) {
       return std::nullopt;
-    if (wave_mask)
+    }
+    if (reg->cls == RegClass::SGPR) {
+      return scalar_register(reg->index, reg->width, write);
+    }
+    if (reg->cls == RegClass::TTMP) {
+      return scalar_register(kTtmpSelectorFirst + reg->index, reg->width, write);
+    }
+    if (wave_mask) {
       reg->width = static_cast<uint8_t>(wf.wf_size() / 32);
-    if (op.is_fieldless() && (vector || name.starts_with("s_cbranch")) &&
-        (reg->cls == RegClass::EXEC || reg->cls == RegClass::VCC))
+    }
+    if (op.is_fieldless() && (vector || (inst.flags() & (COND_BRANCH | BRANCH_STACK))) &&
+        (reg->cls == RegClass::EXEC || reg->cls == RegClass::VCC)) {
       reg->width = static_cast<uint8_t>(wf.wf_size() / 32);
+    }
     return reg;
   };
   if (modifiers.valu_permutation != ValuPermutation::None) {
@@ -377,10 +1130,12 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       const auto upper = valu_swap_write_lanes(lanes, wf.wf_size(), stride, true);
       for (unsigned i = 0; i < 2; ++i) {
         const auto &operand = *inst.dst_operand(i);
-        if (const auto reg = resolve(operand, false))
+        if (const auto reg = resolve(operand, false)) {
           access(*reg, i ? upper >> stride : lower << stride, 0xf, false);
-        if (const auto reg = resolve(operand, true))
+        }
+        if (const auto reg = resolve(operand, true)) {
           access(*reg, i ? lower : upper, 0xf, true);
+        }
       }
       return;
     }
@@ -389,112 +1144,111 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     const auto *selector = kind == ValuPermutation::Perm64 ? nullptr : inst.src_operand(1);
     const auto *group = kind == ValuPermutation::Perm64 || variable ? nullptr : inst.src_operand(2);
     auto check_control = [&](const Operand *operand, uint64_t used_lanes, bool per_lane) {
-      if (operand && used_lanes)
-        if (const auto reg = resolve(*operand, false))
+      if (operand && used_lanes) {
+        if (const auto reg = resolve(*operand, false)) {
           access(*reg, reg->cls == RegClass::VGPR ? (per_lane ? used_lanes : 1) : ~uint64_t{0}, 0xf,
                  false);
+        }
+      }
     };
     check_control(selector, row16 && !variable ? lanes & 0x00ff00ff00ff00ffull : lanes, variable);
     check_control(group, row16 ? lanes & 0xff00ff00ff00ff00ull : lanes, false);
     auto control = [&](const Operand *operand, unsigned lane) -> uint32_t {
-      if (!operand)
+      if (!operand) {
         return 0;
-      if (const auto value = operand->const_value())
+      }
+      if (const auto value = operand->const_value()) {
         return *value;
-      if (const auto reg = registers.source_register(*operand); reg && reg->cls == RegClass::VGPR)
+      }
+      if (const auto reg = resolve(*operand, false); reg && reg->cls == RegClass::VGPR) {
         return registers.vector_control_value(*reg, lane).value_or(0);
+      }
       return registers.scalar_control_value(operand->encoding_value()).value_or(0);
     };
     const uint32_t low = variable ? 0 : control(selector, 0);
     const uint32_t high = control(group, 0);
-    uint64_t read_lanes = 0, write_lanes = 0;
-    uint64_t remaining = lanes;
-    while (remaining) {
-      const unsigned lane = std::countr_zero(remaining);
-      remaining &= remaining - 1;
-      const uint32_t selection = variable ? control(selector, lane)
-                                 : row16 ? (((lane & 15) < 8 ? low : high) >> ((lane & 7) * 4)) & 15
-                                         : low;
-      const unsigned source = valu_permutation_source(kind, lane, selection, high, wf.wf_size());
-      if (source >= wf.wf_size()) {
-        if (!row16 && kind != ValuPermutation::Perm64)
-          write_lanes |= uint64_t{1} << lane;
-        continue;
-      }
-      if (row16 && !modifiers.fi && !(lanes & (uint64_t{1} << source))) {
-        if (modifiers.bound_ctrl)
-          write_lanes |= uint64_t{1} << lane;
-        continue;
-      }
-      read_lanes |= uint64_t{1} << source;
-      write_lanes |= uint64_t{1} << lane;
-    }
-    if (read_lanes)
-      if (const auto reg = resolve(*inst.src_operand(0), false))
+    const auto permutation = valu_permutation_lanes(
+        kind, lanes, wf.wf_size(), high, row16, modifiers.fi, modifiers.bound_ctrl,
+        [&](unsigned lane) {
+          return variable ? control(selector, lane)
+                 : row16  ? (((lane & 15) < 8 ? low : high) >> ((lane & 7) * 4)) & 15
+                          : low;
+        });
+    const auto [read_lanes, write_lanes] = permutation;
+    if (read_lanes) {
+      if (const auto reg = resolve(*inst.src_operand(0), false)) {
         access(*reg, reg->cls == RegClass::VGPR ? read_lanes : ~uint64_t{0}, 0xf, false);
-    if (const auto reg = resolve(*inst.dst_operand(0), true))
+      }
+    }
+    if (const auto reg = resolve(*inst.dst_operand(0), true)) {
       access(*reg, write_lanes, 0xf, true);
+    }
     return;
   }
-  if (name.starts_with("s_movrel")) {
+  if (inst.flags() & (RELATIVE_SGPR_SOURCE | RELATIVE_SGPR_DESTINATION)) {
     access({RegClass::M0, 0, 1}, ~uint64_t{0}, 0xf, false);
-    const bool split = name.starts_with("s_movrelsd_2");
-    const bool source_relative = name.starts_with("s_movrels");
-    const bool destination_relative = split || name.starts_with("s_movreld");
+    const bool split = operation == Operation::S_MOVRELSD_2_B32;
+    const bool source_relative = inst.flags() & RELATIVE_SGPR_SOURCE;
+    const bool destination_relative = inst.flags() & RELATIVE_SGPR_DESTINATION;
     const auto &destination = *inst.dst_operand(0);
     if (destination_relative &&
         !relative_scalar_selector(wf, destination.encoding_value(), wf.m0(),
-                                  std::max(1, destination.size_bits() / 32), true, split))
+                                  std::max(1, destination.size_bits() / 32), true, split)) {
       return;
+    }
     auto check_relative = [&](const Operand &operand, bool relative, bool write) {
       if (!relative) {
-        if (auto reg = resolve(operand, write))
+        if (auto reg = resolve(operand, write)) {
           access(*reg, ~uint64_t{0}, 0xf, write);
+        }
         return;
       }
       const unsigned width = std::max(1, operand.size_bits() / 32);
       const auto selector =
           relative_scalar_selector(wf, operand.encoding_value(), wf.m0(), width, write, split)
               .value_or(0);
-      if (auto range = resolve_scalar_register_range(wf, selector, width))
-        if (auto reg = range->register_ref())
-          access(*reg, ~uint64_t{0}, 0xf, write);
+      if (const auto reg = scalar_register(selector, width, write)) {
+        access(*reg, ~uint64_t{0}, 0xf, write);
+      }
     };
     check_relative(*inst.src_operand(0), source_relative, false);
     check_relative(*inst.dst_operand(0), destination_relative, true);
     return;
   }
-  if (name.starts_with("v_movrel") || name.starts_with("v_swaprel")) {
+  if (inst.flags() & (RELATIVE_VGPR_SOURCE | RELATIVE_VGPR_DESTINATION)) {
     access({RegClass::M0, 0, 1}, ~uint64_t{0}, 0xf, false);
-    const bool swap = name.starts_with("v_swaprel");
-    const bool source_relative = swap || name.starts_with("v_movrels");
-    const bool destination_relative =
-        swap || name.starts_with("v_movreld") || name.starts_with("v_movrelsd");
-    const bool split = swap || name.starts_with("v_movrelsd_2");
+    const bool swap = operation == Operation::V_SWAPREL_B32;
+    const bool source_relative = inst.flags() & RELATIVE_VGPR_SOURCE;
+    const bool destination_relative = inst.flags() & RELATIVE_VGPR_DESTINATION;
+    const bool split = swap || operation == Operation::V_MOVRELSD_2_B32;
     const auto *source = swap ? inst.dst_operand(1) : inst.src_operand(0);
     const auto *destination = inst.dst_operand(0);
     auto relative = [&](const Operand &operand, uint32_t offset) -> std::optional<RegisterRef> {
       const auto reg = operand.to_register_ref();
       std::optional<uint32_t> base;
-      if (reg && reg->cls == RegClass::VGPR)
+      if (reg && reg->cls == RegClass::VGPR) {
         base = reg->index + (wf.vgpr_msb_for_role(operand.vgpr_msb_role()) << 8);
-      const auto index =
-          relative_vgpr_index(base, offset, operand.vgpr_count(), wf.vgpr_alloc().count);
-      if (!index)
+      }
+      const auto index = relative_vgpr_index(base, offset, operand.vgpr_count(),
+                                             wf.vgpr_alloc().count, wf.cu().arch());
+      if (!index) {
         return std::nullopt;
+      }
       return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(*index),
                          static_cast<uint8_t>(operand.vgpr_count())};
     };
     auto dst = destination_relative
                    ? relative(*destination, split ? (wf.m0() >> 16) & 0x3ffu : wf.m0())
                    : resolve(*destination, true);
-    if (destination_relative && !dst)
+    if (destination_relative && !dst) {
       return;
+    }
     auto src = source_relative ? relative(*source, split ? wf.m0() & 0x3ffu : wf.m0())
                                : resolve(*source, false);
     if (source_relative && !src) {
-      if (swap)
+      if (swap) {
         return;
+      }
       // MOVREL's invalid relative source uses the executor's v0 fallback.
       src = RegisterRef{RegClass::VGPR, 0, static_cast<uint8_t>(source->vgpr_count())};
     }
@@ -503,10 +1257,12 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     const auto destination_bytes =
         modifiers.sdwa ? sdwa::sdwa_dst_byte_mask(modifiers.dst_selection, modifiers.dst_unused)
                        : 0xf;
-    if (src && lanes)
+    if (src && lanes) {
       access(*src, src->cls == RegClass::VGPR ? src0_lanes : ~uint64_t{0}, source_bytes, false);
-    if (dst)
+    }
+    if (dst) {
       access(*dst, destination_lanes, destination_bytes, true);
+    }
     if (swap) {
       access(*dst, lanes, 0xf, false);
       access(*src, lanes, 0xf, true);
@@ -515,9 +1271,15 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   }
   if (selected_lane) {
     const auto *selector = first_lane ? nullptr : inst.src_operand(inst.num_src_operands() - 1);
-    if (selector)
-      if (auto reg = resolve(*selector, false))
+    // WRITELANE's tied VDST precedes SRC0 on older targets and follows SRC1 on newer ones.
+    if (scalar_lane_write && selector == inst.dst_operand(0)) {
+      selector = inst.src_operand(inst.num_src_operands() - 2);
+    }
+    if (selector) {
+      if (auto reg = resolve(*selector, false)) {
         access(*reg, ~uint64_t{0}, 0xf, false);
+      }
+    }
     const auto immediate_lane = selector ? selector->const_value() : std::nullopt;
     const unsigned lane =
         first_lane
@@ -527,60 +1289,218 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
                    : registers.scalar_control_value(selector->encoding_value()).value_or(0)) &
                   (wf.wf_size() - 1);
     for (int i = 0; i < inst.num_src_operands(); ++i) {
-      const auto *op = inst.src_operand(i);
-      if (op == selector || (scalar_lane_write && op == inst.dst_operand(0)))
+      if (!inst.tracks_explicit_source(i)) {
         continue;
-      if (auto reg = resolve(*op, false))
+      }
+      const auto *op = inst.src_operand(i);
+      if (op == selector || (scalar_lane_write && op == inst.dst_operand(0))) {
+        continue;
+      }
+      if (auto reg = resolve(*op, false)) {
         access(*reg, reg->cls == RegClass::VGPR ? uint64_t{1} << lane : ~uint64_t{0}, 0xf, false);
+      }
     }
-    for (int i = 0; i < inst.num_dst_operands(); ++i)
-      if (auto reg = resolve(*inst.dst_operand(i), true))
+    for (int i = 0; i < inst.num_dst_operands(); ++i) {
+      if (auto reg = resolve(*inst.dst_operand(i), true)) {
         access(*reg, reg->cls == RegClass::VGPR ? uint64_t{1} << lane : ~uint64_t{0}, 0xf, true);
+      }
+    }
     return;
   }
+  std::optional<uint64_t> selection;
+  if ((operation == Operation::V_CNDMASK_B16 || operation == Operation::V_CNDMASK_B32) && lanes) {
+    // Check the condition dependency before using its current value to select sources.
+    const auto *condition = inst.num_src_operands() > 2 ? inst.src_operand(2) : nullptr;
+    if (!condition || condition->is_fieldless()) {
+      if (lanes & 0xffffffffu) {
+        access({RegClass::VCC, 0, 1}, ~uint64_t{0}, 0xf, false);
+      }
+      if (lanes >> 32) {
+        access({RegClass::VCC, 1, 1}, ~uint64_t{0}, 0xf, false);
+      }
+      selection = wf.vcc_mask();
+    } else {
+      if (auto reg = resolve(*condition, false)) {
+        access(*reg, ~uint64_t{0}, 0xf, false);
+      }
+      if (condition->encoding_value() == 124) {
+        // NULL denotes zero for the whole mask, not a NULL/M0 register pair.
+        selection = 0;
+      } else if (auto value = condition->const_value()) {
+        selection = *value;
+      } else if (auto lo = registers.scalar_control_value(condition->encoding_value())) {
+        selection = *lo;
+        if (wf.wf_size() == 64) {
+          const auto selector = condition->encoding_value();
+          if (selector == 251 || selector == 106) {
+            selection = wf.vcc_mask();
+          } else if (selector == 252 || selector == 126) {
+            selection = wf.exec();
+          } else if (auto hi = registers.scalar_control_value(selector + 1)) {
+            *selection |= uint64_t{*hi} << 32;
+          } else {
+            selection.reset();
+          }
+        }
+      }
+    }
+  }
+  const Operand *buffer_payload =
+      needs_buffer_payload_lanes(inst, wf.cu().arch()) ? inst.src_operand(0) : nullptr;
+  const bool reads_buffer_payload =
+      wf.cu().arch() == rocjitsu::IsaFamily::Cdna5 ? !cdna5_type_mismatch : read_buffer_address;
   auto check_operand = [&](const Operand *op, bool write) {
-    const bool mix_preservation = !write && op == inst.dst_operand(0) &&
-                                  (name.find("mixlo_") != std::string_view::npos ||
-                                   name.find("mixhi_") != std::string_view::npos);
+    const bool mix_preservation =
+        !write && op == inst.dst_operand(0) &&
+        (operation == Operation::V_MAD_MIXLO_F16 || operation == Operation::V_MAD_MIXHI_F16 ||
+         operation == Operation::V_FMA_MIXLO_F16 || operation == Operation::V_FMA_MIXHI_F16 ||
+         operation == Operation::V_FMA_MIXLO_BF16 || operation == Operation::V_FMA_MIXHI_BF16);
     if (mix_preservation || !op || op == hwreg || op == modifiers.buffer_resource ||
-        (!pending_scalar_ && !op->is_vgpr()))
-      return;
-    if (op == modifiers.block_data) {
-      for (uint32_t word = 0; word < kBlockDwordCount; ++word)
-        if (block_dword_enabled(wf.m0(), word))
-          if (const auto reg = registers.block_data_register(*op, word, write))
-            access(*reg, lanes, 0xf, write);
+        (!write && op == modifiers.buffer_address && !read_buffer_address) ||
+        (!write && op == buffer_payload && !reads_buffer_payload) ||
+        (!write && op == modifiers.buffer_offset && !read_buffer_offset) ||
+        (!write && gfx11_or_gfx12_sample && !modifiers.image_reads_address && !op->is_vgpr()) ||
+        op == modifiers.image_address || op == modifiers.image_atomic_data ||
+        op == modifiers.image_store_data || (!pending_scalar_ && !op->is_vgpr())) {
       return;
     }
-    const auto reg = resolve(*op, write);
-    if (!reg || reg->cls == RegClass::ACC_VGPR)
+    if (!write && ds_vgpr0 && op->decoded_vgpr()) {
+      check_ds_source(*op);
       return;
-    const uint64_t accessed_lanes = reg->cls != RegClass::VGPR ? ~uint64_t{0}
-                                    : write                    ? destination_lanes
-                                    : op == modifiers.src0     ? src0_lanes
-                                                               : lanes;
-    if (vector && !lanes && !write && !inst.is_memory_op())
+    }
+    if (op == modifiers.block_data) {
+      for (uint32_t word = 0; word < kBlockDwordCount; ++word) {
+        if (block_dword_enabled(wf.m0(), word)) {
+          if (const auto reg = registers.block_data_register(*op, word, write)) {
+            access(*reg, lanes, 0xf, write);
+          }
+        }
+      }
       return;
+    }
+    auto reg = resolve(*op, write);
+    if (!reg || reg->cls == RegClass::ACC_VGPR) {
+      return;
+    }
+    // gfx1201 DPP8/DPP16 SUBREV substitutes zero for a scalar/inline SRC1.
+    if (!write && reverse_dpp && (modifiers.dpp || modifiers.dpp8) && op == routed_source &&
+        reg->cls != RegClass::VGPR && wf.cu().arch() == rocjitsu::IsaFamily::Rdna4) {
+      return;
+    }
+    uint64_t accessed_lanes = reg->cls != RegClass::VGPR ? ~uint64_t{0}
+                              : write                    ? destination_lanes
+                              : op == routed_source      ? src0_lanes
+                                                         : source_lanes;
+    if (!write && op == buffer_payload && inst.data() && inst.data()->tag() == GLOBAL_MEM) {
+      const auto &data = *inst.data_as<VectorMemState>();
+      accessed_lanes =
+          wf.cu().arch() == rocjitsu::IsaFamily::Cdna5 ? data.exec_mask : data.lane_mask;
+    }
+    if (!write && !destination_lanes && modifiers.dpp && reg->cls != RegClass::VGPR &&
+        wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5 && operation == Operation::V_ADD_F32 &&
+        op == inst.src_operand(1)) {
+      return;
+    }
+    if (!write && op == modifiers.dpp_masked_compare_rhs) {
+      if (!destination_lanes) {
+        return;
+      }
+      if (reg->cls == RegClass::VGPR) {
+        accessed_lanes &= destination_lanes;
+      }
+    }
+    if (!write && reg->cls == RegClass::VGPR && (inst.flags() & COMPACT_WAVE64_MEMORY_RESULT)) {
+      accessed_lanes &= UINT32_MAX;
+    }
+    if (!write && modifiers.cvt_scale && op == inst.src_operand(1) && reg->cls == RegClass::VGPR) {
+      // Each data half-wave reads its selected byte, including from inactive lanes.
+      const CvtScaleSelection &scale = *modifiers.cvt_scale;
+      for (unsigned base = 0; base < wf.wf_size(); base += 16) {
+        const uint64_t consumers = (accessed_lanes >> base) & 0xffff;
+        if (consumers) {
+          access(*reg, consumers << scale.lane(base), 1u << scale.byte(base), false);
+        }
+      }
+      return;
+    }
+    // Interpolation coefficients are quad broadcasts, including inactive lanes.
+    if (!write && reg->cls == RegClass::VGPR && inst.is_interpolation() &&
+        (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3 ||
+         wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5 ||
+         wf.cu().arch() == rocjitsu::IsaFamily::Rdna4)) {
+      const uint64_t quads =
+          (lanes | (lanes >> 1) | (lanes >> 2) | (lanes >> 3)) & 0x1111111111111111ULL;
+      const bool p2 = operation == Operation::V_INTERP_P2_F32 ||
+                      operation == Operation::V_INTERP_P2_F16_F32 ||
+                      operation == Operation::V_INTERP_P2_RTZ_F16_F32;
+      if (op == inst.src_operand(0)) {
+        accessed_lanes = quads << (p2 ? 2 : 1);
+      } else if (op == inst.src_operand(2) && !p2) {
+        accessed_lanes = quads;
+      }
+    }
+    if (selection && !write && reg->cls == RegClass::VGPR) {
+      if (op == inst.src_operand(1)) {
+        accessed_lanes &= *selection;
+      } else if (op == inst.src_operand(0) && !modifiers.dpp && !modifiers.dpp8) {
+        accessed_lanes &= ~*selection;
+      }
+    }
+    if (vector && !lanes && !write && !inst.is_memory_op()) {
+      return;
+    }
     uint8_t bytes = op->register_byte_mask();
+    if (!write && op == modifiers.packed_store_data && reg->width == (op->size_bits() + 31) / 32) {
+      const RegisterRef tail{reg->cls, static_cast<uint16_t>(reg->index + reg->width - 1), 1};
+      if (--reg->width) {
+        access(*reg, accessed_lanes, bytes, false);
+      }
+      access(tail, accessed_lanes, 0x3, false);
+      return;
+    }
     if (modifiers.sdwa && reg->cls == RegClass::VGPR) {
-      if (write)
+      if (write) {
         bytes = sdwa::sdwa_dst_byte_mask(modifiers.dst_selection, modifiers.dst_unused);
-      else if (op == modifiers.src0)
+      } else if (op == modifiers.src0) {
         bytes = sdwa::sdwa_src_byte_mask(modifiers.src0_selection);
-      else if (op == modifiers.src1)
+      } else if (op == modifiers.src1) {
         bytes = sdwa::sdwa_src_byte_mask(modifiers.src1_selection);
+      }
     }
     if (reg->cls == RegClass::VCC && vector && !write && op->is_fieldless()) {
-      if (lanes & 0xffffffffu)
+      if (lanes & 0xffffffffu) {
         access({RegClass::VCC, 0, 1}, ~uint64_t{0}, bytes, false);
-      if (lanes >> 32)
+      }
+      if (lanes >> 32) {
         access({RegClass::VCC, 1, 1}, ~uint64_t{0}, bytes, false);
+      }
     } else {
+      if (!write && reg->cls == RegClass::VGPR && reg->width == 2) {
+        const auto base = wf.vgpr_alloc().base;
+        if (auto mapped = registers.remapped_valu_source(*op, base + reg->index, 2)) {
+          for (const auto source : {mapped->lo, mapped->hi}) {
+            access({RegClass::VGPR, static_cast<uint16_t>(source - base), 1}, accessed_lanes, bytes,
+                   false);
+          }
+          return;
+        }
+      }
       access(*reg, accessed_lanes, bytes, write);
+      if (gfx10_valu && !write && reg->cls == RegClass::VGPR && reg->index != 0 &&
+          reg->width < op->vgpr_count()) {
+        access({RegClass::VGPR, 0, 1}, accessed_lanes, bytes, false);
+      }
     }
   };
-  for (int i = 0; i < inst.num_src_operands(); ++i)
-    check_operand(inst.src_operand(i), false);
+  if (!modifiers.constant_float_compare ||
+      gfx1150_constant_compare_reads_inputs(wf.cu().arithmetic_flags(), wf.dx10_clamp())) {
+    for (int i = 0; i < inst.num_src_operands(); ++i) {
+      if (!inst.tracks_explicit_source(i)) {
+        continue;
+      }
+      check_operand(inst.src_operand(i), false);
+    }
+  }
   const bool partial_destination =
       inst.dst_operand(0) && inst.dst_operand(0)->register_byte_mask() != 0xf;
   // Liveness models preservation as a use; preserving an untouched byte or
@@ -589,18 +1509,21 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
                                      modifiers.memory_result_bytes != 0xf ||
                                      modifiers.memory_result_last_bytes != 0xf;
   std::vector<const Operand *> implicit_operands;
-  if (!preserves_destination)
+  if (!preserves_destination) {
     inst.implicit_use_operands(implicit_operands);
-  for (const Operand *op : implicit_operands)
+  }
+  for (const Operand *op : implicit_operands) {
     check_operand(op, false);
+  }
   // Legacy FLAT selects scratch backing from the active lanes' addresses.
   // Compute that predicate once and check the backing register outside the loop.
   const RegisterRef scratch{RegClass::FLAT_SCRATCH, 0, 2};
   if (lanes && pending_.pending(scratch) && inst.raw_encoding() &&
-      (name.starts_with("flat_") || name.starts_with("scratch_"))) {
+      (addressing == MemoryAddressing::Flat ||
+       (addressing == MemoryAddressing::Scratch && (inst.flags() & VMEM)))) {
     const auto arch = wf.cu().arch();
-    if (arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-        arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    if (arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2 ||
+        arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4) {
       const unsigned segment = (inst.raw_encoding()[0] >> 14) & 3;
       bool uses_scratch = segment == 1;
       const uint32_t private_hi = wf.private_aperture_base() >> 32;
@@ -611,64 +1534,135 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
         while (remaining && !uses_scratch) {
           const unsigned lane = std::countr_zero(remaining);
           remaining &= remaining - 1;
-          if (address)
+          if (address) {
             uses_scratch =
                 (registers.vector_control_value(*address, lane).value_or(0) + offset) >> 32 ==
                 private_hi;
+          }
         }
       }
-      if (uses_scratch)
+      if (uses_scratch) {
         access(scratch, ~uint64_t{0}, 0xf, false);
+      }
     }
   }
-  RegisterSet implicit;
-  if (!preserves_destination)
+  // A fork or join touches at most one branch stack entry, chosen by MODE.CSP at
+  // run time. Its implicit registers are the static superset of every entry, kept
+  // for liveness; checking them all would report unrelated pending SGPRs.
+  const bool branch_stack = inst.flags() & BRANCH_STACK;
+  std::optional<BranchStackAccess> stack_access;
+  if (branch_stack && inst.src_operand(0)) {
+    const Operand &src0 = *inst.src_operand(0);
+    stack_access = operation == Operation::S_CBRANCH_JOIN
+                       ? join_stack_access(wf, registers.read_scalar(src0))
+                       : fork_stack_access(wf, registers.read_scalar64(src0));
+  }
+  const auto stack_entry = [&]() {
+    return RegisterRef{RegClass::SGPR, static_cast<uint16_t>(stack_access->first_wave_sgpr), 4};
+  };
+  RegisterSet implicit, preservation_uses;
+  const bool distinguishes_preservation = inst.implicit_preservation_uses(preservation_uses);
+  // Legacy partial-destination hooks do not distinguish preservation from
+  // genuine hidden reads. Instructions that do provide the distinction retain
+  // their real implicit dependencies while dropping only preservation uses.
+  if (!branch_stack && (!preserves_destination || distinguishes_preservation)) {
     inst.implicit_uses(implicit);
+    implicit -= preservation_uses;
+  }
+  // Image coordinates were checked above with their A16 byte masks. Their
+  // register-level liveness uses must not turn a packed half into a full read.
+  if (modifiers.image_address) {
+    RegisterSet coordinate_uses;
+    for (uint32_t selector : modifiers.image_coordinates) {
+      coordinate_uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(selector), 1});
+    }
+    implicit -= coordinate_uses;
+  }
   implicit.for_each([&](RegisterRef reg) {
     // Operand-derived reads preserve their bank roles above.
-    if (reg.cls == RegClass::VGPR && !implicit_operands.empty())
+    if (reg.cls == RegClass::VGPR && !implicit_operands.empty()) {
       return;
-    if (vector && !lanes)
+    }
+    if (vector && !lanes) {
       return;
+    }
     access(reg, reg.cls == RegClass::VGPR ? lanes : ~uint64_t{0}, 0xf, false);
   });
+  if (stack_access && !stack_access->write) {
+    access(stack_entry(), ~uint64_t{0}, 0xf, false);
+  }
   if (!inst.is_memory_wait_producer()) {
-    for (int i = 0; i < inst.num_dst_operands(); ++i)
+    for (int i = 0; i < inst.num_dst_operands(); ++i) {
       check_operand(inst.dst_operand(i), true);
+    }
     implicit = RegisterSet{};
-    inst.implicit_defs(implicit);
+    if (!branch_stack) {
+      inst.implicit_defs(implicit);
+    }
     implicit.for_each([&](RegisterRef reg) {
       access(reg, reg.cls == RegClass::VGPR ? lanes : ~uint64_t{0}, 0xf, true);
     });
+    if (stack_access && stack_access->write) {
+      access(stack_entry(), ~uint64_t{0}, 0xf, true);
+    }
   }
 }
+
+namespace {
+// Whether loads producing this event write their results to registers in issue
+// order within their order class, so overwriting a pending result of the same
+// class does not require a wait.
+bool has_ordered_writeback(const waitcheck_detail::ClassifiedEvent &event,
+                           rocjitsu::IsaFamily arch) {
+  using namespace waitcheck_detail;
+  switch (event.counter) {
+  case WaitCounterKind::Load:
+    return has_ordered_vmem_writeback(arch);
+  case WaitCounterKind::Ds:
+    // LDS writeback is in-order on all targets.
+    return event.kind == WaitEventKind::Ds ||
+           (event.kind == WaitEventKind::Gds && has_ordered_gds_writeback(arch));
+  case WaitCounterKind::Exp:
+    // LDS direct and parameter loads use EXP independently of exports and
+    // indexed LDS accesses.
+    return event.kind == WaitEventKind::LdsDirect && has_ordered_lds_direct_writeback(arch);
+  default:
+    return false;
+  }
+}
+} // namespace
 
 void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefront &wf,
                                                uint64_t vector_lanes,
                                                const RegisterModifiers &modifiers) {
   using namespace waitcheck_detail;
   const RegisterAccess registers(wf);
-  if (!result_is_written(inst, wf))
+  if (!result_is_written(inst, wf)) {
     return;
+  }
   std::array<RegisterRef, kBlockDwordCount> results{};
   unsigned count = 0;
   bool pending = false;
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const auto &operand = *inst.dst_operand(i);
     if (&operand == modifiers.block_data) {
-      for (uint32_t word = 0; word < kBlockDwordCount; ++word)
-        if (block_dword_enabled(wf.m0(), word))
+      for (uint32_t word = 0; word < kBlockDwordCount; ++word) {
+        if (block_dword_enabled(wf.m0(), word)) {
           if (const auto reg = registers.block_data_register(operand, word, /*write=*/true)) {
             assert(count < results.size());
             results[count++] = *reg;
             pending |= pending_.pending(*reg, true);
           }
+        }
+      }
       continue;
     }
-    auto reg = registers.destination_register(operand);
-    if (!reg && operand.is_fieldless())
-      if (auto special = operand.to_special_reg_class())
+    auto reg = registers.memory_destination_register(inst, operand);
+    if (!reg && operand.is_fieldless()) {
+      if (auto special = operand.to_special_reg_class()) {
         reg = RegisterRef{*special, 0, 1};
+      }
+    }
     if (!operand.is_vgpr() && operand.has_register_selector()) {
       const auto range = resolve_scalar_register_range(wf, operand.encoding_value(),
                                                        std::max(1, operand.size_bits() / 32));
@@ -676,32 +1670,36 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
     }
     // Completion validates every vector destination together, including the
     // independent pointer word returned by LDS stack operations.
-    if (operand.decoded_vgpr() && !reg)
+    if (reg && reg->cls == RegClass::TTMP && !wf.shader_can_write_ttmp()) {
+      continue;
+    }
+    if (operand.decoded_vgpr() && !reg) {
       return;
+    }
     if (reg) {
       assert(count < results.size());
       results[count++] = *reg;
       pending |= pending_.pending(*reg, true);
     }
   }
-  if (!pending)
+  if (!pending) {
     return;
-  const auto classified = WaitcheckTarget::classify_events(inst, wf.cu().arch());
-  if (classified.failed())
+  }
+  auto &classified = classification_scratch_;
+  if (WaitcheckTarget::classify_events_into(inst, wf.cu().arch(), classified).failed()) {
     return;
-  const auto xevent =
-      std::ranges::find(classified.value(), WaitCounterKind::X, &ClassifiedEvent::counter);
-  const bool replay = outstanding(WaitCounterKind::X) != 0 && xevent != classified.value().end();
-  if (replay)
+  }
+  const auto xevent = std::ranges::find(classified, WaitCounterKind::X, &ClassifiedEvent::counter);
+  const bool replay = outstanding(WaitCounterKind::X) != 0 && xevent != classified.end();
+  if (replay) {
     xcnt_group(xevent->kind == WaitEventKind::Smem);
-  const auto defs = std::ranges::find(classified.value(), TrackedRegisterSource::Defs,
-                                      &ClassifiedEvent::registers);
-  const auto model = waitcnt_model(wf.cu().arch());
-  const uint16_t order = model.succeeded() && uses_legacy_waitcnt(model.value()) &&
-                                 defs != classified.value().end() &&
-                                 defs->counter == WaitCounterKind::Load
-                             ? ordered_write_order(*defs, wf.cu().arch())
-                             : kUnordered;
+  }
+  const auto defs =
+      std::ranges::find(classified, TrackedRegisterSource::Defs, &ClassifiedEvent::registers);
+  const bool has_defs = defs != classified.end();
+  const auto order = has_defs && has_ordered_writeback(*defs, wf.cu().arch())
+                         ? ordered_write_order(*defs, wf.cu().arch())
+                         : kUnordered;
   const bool vector_replay =
       replay && xevent->kind != WaitEventKind::Smem && (wf.mode_raw() & (1u << 25));
   for (unsigned i = 0; i < count; ++i) {
@@ -710,29 +1708,31 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
       access(reg, ~uint64_t{0}, 0xf, true);
       continue;
     }
-    if (defs == classified.value().end())
+    if (!has_defs) {
       continue;
+    }
     auto check = [&](RegisterRef range, uint8_t bytes) {
-      if (vector_replay)
+      if (inst.data() && inst.data()->tag() == GLOBAL_MEM) {
+        const auto &d = *inst.data_as<VectorMemState>();
+        if (d.is_load && (inst.flags() & CONDITIONAL_LAST_VGPR_DEF) &&
+            uint32_t{range.index} + range.width - 1 ==
+                d.dst_reg_base - wf.vgpr_alloc().base + d.destination_vgpr_count() &&
+            !--range.width) {
+          return;
+        }
+      }
+      if (vector_replay) {
         xcnt_ordered_write(range, vector_lanes, bytes);
+      }
       access(range, vector_lanes, bytes, true, order);
     };
-    const uint8_t bytes = wf.cu().sram_ecc() ? 0xf : modifiers.memory_result_bytes;
-    const uint8_t tail = wf.cu().sram_ecc() ? 0xf : modifiers.memory_result_last_bytes;
-    if (bytes == tail) {
-      check(reg, bytes);
-    } else {
-      const RegisterRef last{reg.cls, static_cast<uint16_t>(reg.index + reg.width - 1), 1};
-      --reg.width;
-      if (reg.width)
-        check(reg, bytes);
-      check(last, tail);
-    }
+    for_each_memory_result_range(reg, modifiers, wf.cu().sram_ecc(), check);
   }
 }
 
 void MemoryWaitScoreboard::clear() {
   events_.clear();
+  superseded_.clear();
   pending_scalar_ = false;
   may_overlap_ = false;
   pending_.reset();
@@ -746,10 +1746,91 @@ void MemoryWaitScoreboard::clear() {
   translations_.clear();
 }
 
+bool MemoryWaitScoreboard::cancel_last_issue(uint64_t pc, std::span<const WaitCounterType> counters,
+                                             rocjitsu::IsaFamily arch, bool xcnt) {
+  const auto model = waitcnt_model(arch);
+  if (model.failed()) {
+    return false;
+  }
+  std::array<uint32_t, kCounters> units{};
+  for (const auto counter : counters) {
+    ++units[static_cast<size_t>(canonical_wait_counter(counter, model.value()))];
+  }
+  if (xcnt) {
+    units[static_cast<size_t>(WaitCounterKind::X)] = 1;
+  }
+  return cancel_issue_units(pc, units);
+}
+
+bool MemoryWaitScoreboard::cancel_last_issue(uint64_t pc, const IssueSnapshot &before) {
+  std::array<uint32_t, kCounters> units{};
+  for (size_t i = 0; i < kCounters; ++i) {
+    if (before[i] > issued_[i] || issued_[i] - before[i] > std::numeric_limits<uint32_t>::max()) {
+      return false;
+    }
+    units[i] = static_cast<uint32_t>(issued_[i] - before[i]);
+  }
+  return cancel_issue_units(pc, units);
+}
+
+bool MemoryWaitScoreboard::cancel_issue_units(uint64_t pc,
+                                              const std::array<uint32_t, kCounters> &units) {
+  const auto sequences = issued_;
+  for (size_t i = 0; i < kCounters; ++i) {
+    if (units[i] > issued_[i] - retired_[i]) {
+      return false;
+    }
+  }
+
+  std::erase_if(events_, [&](const Event &event) {
+    const auto i = static_cast<size_t>(event.counter);
+    return units[i] && event.pc == pc && event.sequence == sequences[i];
+  });
+  for (size_t i = 0; i < kCounters; ++i) {
+    if (!units[i]) {
+      continue;
+    }
+    issued_[i] -= units[i];
+    if (last_order_[i] != kUnordered) {
+      orders_[last_order_[i]].issued -= units[i];
+    }
+    if (issued_[i] == retired_[i]) {
+      unordered_[i] = false;
+      ordering_kinds_[i] = 0;
+    }
+  }
+  std::erase_if(translations_, [&](const auto &entry) {
+    const auto xcounter = static_cast<size_t>(WaitCounterKind::X);
+    return units[xcounter] && entry.sequence == sequences[xcounter];
+  });
+  std::erase_if(superseded_, [&](const auto &old) {
+    const auto i = static_cast<size_t>(old.replacement_counter);
+    if (!units[i] || old.replacement_sequence != sequences[i] || old.replacement_pc != pc) {
+      return false;
+    }
+    const auto &event = old.event;
+    if (!completed(event.counter, event.sequence, event.order, event.order_sequence)) {
+      events_.push_back(event);
+    }
+    return true;
+  });
+  // Rebuild all shadow bytes so overlapping, unrelated producers survive.
+  pending_.reset();
+  pending_scalar_ = false;
+  may_overlap_ = false;
+  for (const auto &event : events_) {
+    pending_scalar_ |= event.reg.cls != RegClass::VGPR;
+    may_overlap_ |= pending_.mark(event.reg, event.shadow_kind());
+  }
+  return true;
+}
+
 uint64_t MemoryWaitScoreboard::issue(WaitCounterKind counter, bool unordered,
                                      uint32_t ordering_kind, uint32_t units,
                                      bool backpressure_ordered) {
   auto i = static_cast<size_t>(counter);
+  std::erase_if(superseded_,
+                [counter](const auto &event) { return event.replacement_counter == counter; });
   ordering_kinds_[i] |= ordering_kind;
   unordered_[i] |= unordered || std::popcount(ordering_kinds_[i]) > 1;
   issued_[i] += units;
@@ -759,8 +1840,10 @@ uint64_t MemoryWaitScoreboard::issue(WaitCounterKind counter, bool unordered,
       return order.counter == counter && order.kind == ordering_kind;
     });
     const auto slot = static_cast<uint16_t>(it - orders_.begin());
-    if (it == orders_.end())
-      orders_.push_back({counter, ordering_kind});
+    if (it == orders_.end()) {
+      orders_.push_back({counter, VmemWriteback::Ordinary, ordering_kind});
+    }
+    orders_[slot].last_writeback = VmemWriteback::Ordinary;
     orders_[slot].issued += units;
     last_order_[i] = slot;
   }
@@ -768,90 +1851,104 @@ uint64_t MemoryWaitScoreboard::issue(WaitCounterKind counter, bool unordered,
 }
 
 namespace {
+VmemWriteback vmem_writeback(const waitcheck_detail::ClassifiedEvent &event,
+                             rocjitsu::IsaFamily arch) {
+  using namespace waitcheck_detail;
+  if (has_ordered_vmem_reads(arch) && event.counter == WaitCounterKind::Load) {
+    if (event.kind == WaitEventKind::Sample) {
+      return event.point_sample_accel ? VmemWriteback::PointSample : VmemWriteback::Sample;
+    }
+    if (event.kind == WaitEventKind::Bvh) {
+      return VmemWriteback::Bvh;
+    }
+  }
+  return VmemWriteback::Ordinary;
+}
+
 std::optional<uint32_t> completion_order_kind(const waitcheck_detail::ClassifiedEvent &event,
-                                              rj_code_arch_t arch) {
+                                              rocjitsu::IsaFamily arch) {
   using namespace waitcheck_detail;
   const auto model = waitcnt_model(arch).value();
   const bool legacy_flat =
       model == WaitcntModel::LegacyNoVscnt &&
       (event.kind == WaitEventKind::FlatLoad || event.kind == WaitEventKind::FlatStore);
-  if (legacy_flat || event.kind == WaitEventKind::Smem || event.kind == WaitEventKind::Gds ||
-      event.kind == WaitEventKind::Export || event.kind == WaitEventKind::SqMessage ||
-      event.kind == WaitEventKind::SccWrite || event.kind == WaitEventKind::GlobalInv ||
-      event.kind == WaitEventKind::Unknown)
+  if (event.kind == WaitEventKind::Gds) {
+    if (event.counter == WaitCounterKind::Ds && has_ordered_gds_writeback(arch)) {
+      return uint32_t{1} << static_cast<unsigned>(WaitEventKind::Gds);
+    }
     return std::nullopt;
+  }
+  if (legacy_flat || event.kind == WaitEventKind::Smem || event.kind == WaitEventKind::Export ||
+      event.kind == WaitEventKind::SqMessage || event.kind == WaitEventKind::SccWrite ||
+      event.kind == WaitEventKind::GlobalInv || event.kind == WaitEventKind::Unknown) {
+    return std::nullopt;
+  }
   uint32_t kind = 0;
-  if (!(model == WaitcntModel::LegacyNoVscnt && event.counter == WaitCounterKind::Load))
+  if (!(model == WaitcntModel::LegacyNoVscnt && event.counter == WaitCounterKind::Load)) {
     if (auto normalized =
-            WaitcheckTarget::normalized_hardware_event_kind(event.counter, event.kind, model))
+            WaitcheckTarget::normalized_hardware_event_kind(event.counter, event.kind, model)) {
       kind = uint32_t{1} << static_cast<unsigned>(*normalized);
+    }
+  }
   // ASYNC loads and stores share a counter but return done out of order with
   // respect to each other (CDNA5 ISA 10.8). Barrier arrive orders with loads.
-  if (event.counter == WaitCounterKind::Async)
+  if (event.counter == WaitCounterKind::Async) {
     kind = uint32_t{1} << static_cast<unsigned>(event.kind == WaitEventKind::AsyncLdsStore
                                                     ? WaitEventKind::AsyncLdsStore
                                                     : WaitEventKind::AsyncLdsLoad);
-  // Older RDNA samples and BVH operations share VMcnt, not a completion FIFO.
-  if (model == WaitcntModel::LegacyVscnt && event.counter == WaitCounterKind::Load &&
-      (event.kind == WaitEventKind::Sample || event.kind == WaitEventKind::Bvh))
-    kind = uint32_t{1} << static_cast<unsigned>(event.kind);
+  }
   return kind;
 }
 } // namespace
 
 uint64_t MemoryWaitScoreboard::issue(const waitcheck_detail::ClassifiedEvent &event,
-                                     rj_code_arch_t arch, uint32_t units) {
+                                     rocjitsu::IsaFamily arch, uint32_t units) {
   const auto kind = completion_order_kind(event, arch);
-  return issue(event.counter, !kind, kind.value_or(0), units);
+  const auto sequence = issue(event.counter, !kind, kind.value_or(0), units);
+  const auto fifo = last_order_[static_cast<size_t>(event.counter)];
+  if (fifo != kUnordered) {
+    orders_[fifo].last_writeback = vmem_writeback(event, arch);
+  }
+  return sequence;
 }
 
 uint32_t MemoryWaitScoreboard::issue_units(const Instruction &inst,
                                            const waitcheck_detail::ClassifiedEvent &event,
-                                           rj_code_arch_t arch) {
+                                           rocjitsu::IsaFamily arch) {
   using namespace waitcheck_detail;
   const auto model = waitcnt_model(arch).value();
-  const auto counter_kind = [model](WaitCounterType counter) {
-    switch (counter) {
-    case WaitCounterType::VMCNT:
-    case WaitCounterType::LOADCNT:
-      return WaitCounterKind::Load;
-    case WaitCounterType::VSCNT:
-    case WaitCounterType::STORECNT:
-      return vmem_store_wait_counter(model);
-    case WaitCounterType::LGKMCNT:
-    case WaitCounterType::DSCNT:
-      return WaitCounterKind::Ds;
-    case WaitCounterType::KMCNT:
-      return smem_wait_counter(model);
-    case WaitCounterType::EXPCNT:
-      return WaitCounterKind::Exp;
-    case WaitCounterType::ASYNCCNT:
-      return WaitCounterKind::Async;
-    case WaitCounterType::TENSORCNT:
-      return WaitCounterKind::Tensor;
-    }
-    return WaitCounterKind::Count;
-  };
-  if (const auto *info = inst.amdgpu_memory_issue_info())
-    for (const auto &obligation : info->counter_obligations())
-      if (counter_kind(obligation.wait_counter_type()) == event.counter)
+
+  if (const auto *info = inst.amdgpu_memory_issue_info()) {
+    for (const auto &obligation : info->counter_obligations()) {
+      if (canonical_wait_counter(obligation.wait_counter_type(), model) == event.counter) {
         return obligation.counter_increment();
+      }
+    }
+  }
   // Inline message returns are outside the memory-pipeline metadata: one
   // completion acknowledges the send, the other the returned register value.
-  if (event.kind == WaitEventKind::SqMessage && inst.mnemonic().starts_with("s_sendmsg_rtn_"))
+  if (event.kind == WaitEventKind::SqMessage &&
+      (inst.amdgpu_operation() == Operation::S_SENDMSG_RTN_B32 ||
+       inst.amdgpu_operation() == Operation::S_SENDMSG_RTN_B64)) {
     return 2;
+  }
   return 1;
 }
 
-uint16_t MemoryWaitScoreboard::ordered_write_order(const waitcheck_detail::ClassifiedEvent &event,
-                                                   rj_code_arch_t arch) const {
+MemoryWaitScoreboard::WriteOrder
+MemoryWaitScoreboard::ordered_write_order(const waitcheck_detail::ClassifiedEvent &event,
+                                          rocjitsu::IsaFamily arch) const {
   const auto kind = completion_order_kind(event, arch);
-  if (!kind)
+  if (!kind) {
     return kUnordered;
+  }
   const auto it = std::ranges::find_if(orders_, [&](const Order &order) {
     return order.counter == event.counter && order.kind == *kind;
   });
-  return it == orders_.end() ? kUnordered : static_cast<uint16_t>(it - orders_.begin());
+  if (it == orders_.end()) {
+    return kUnordered;
+  }
+  return {static_cast<uint16_t>(it - orders_.begin()), vmem_writeback(event, arch)};
 }
 
 bool MemoryWaitScoreboard::completed(WaitCounterKind counter, uint64_t sequence, uint16_t order,
@@ -866,17 +1963,26 @@ void MemoryWaitScoreboard::backpressure(WaitCounterKind counter, uint32_t capaci
   const auto remaining = capacity - incoming_units;
   bool changed = false;
   for (auto &order : orders_) {
-    if (order.counter != counter || order.issued <= remaining)
+    if (order.counter != counter || order.issued <= remaining) {
       continue;
+    }
     // Even an unordered incoming operation must reserve all its counter units.
     // At most remaining units from any old ordered class can still be pending
     // when the incoming instruction is admitted to read its operands.
+    // If this FIFO accounts for every outstanding unit, its progress also
+    // proves a prefix of the whole counter sequence (including empty issues).
+    const auto i = static_cast<size_t>(counter);
+    if (!unordered_[i] && order.issued - order.retired == issued_[i] - retired_[i] &&
+        issued_[i] - retired_[i] > remaining) {
+      retired_[i] = issued_[i] - remaining;
+    }
     const auto through = order.issued - remaining;
     changed |= through > order.retired;
     order.retired = std::max(order.retired, through);
   }
-  if (changed)
+  if (changed) {
     retire_completed();
+  }
 }
 
 void MemoryWaitScoreboard::stamp_order(Event &event) const {
@@ -884,6 +1990,7 @@ void MemoryWaitScoreboard::stamp_order(Event &event) const {
   if (event.sequence == issued_[counter] && last_order_[counter] != kUnordered) {
     event.order = last_order_[counter];
     event.order_sequence = orders_[event.order].issued;
+    event.writeback = orders_[event.order].last_writeback;
   }
 }
 
@@ -896,30 +2003,98 @@ uint32_t MemoryWaitScoreboard::required_wait(const Event &event) const {
   return static_cast<uint32_t>(std::min<uint64_t>(required, UINT32_MAX));
 }
 
-void MemoryWaitScoreboard::add(Event event) {
-  if (!event.lanes || !event.bytes || !event.reg.width)
+// GFX11 FLAT tracks each lane under both counters. A native, ordered overwrite
+// replaces the result on its own pipeline and drops the other counter's register
+// dependency on those bytes. Both counters retain their original issue positions.
+void MemoryWaitScoreboard::supersede_flat_result(const Event &replacement) {
+  const auto other_counter =
+      replacement.counter == WaitCounterKind::Ds ? WaitCounterKind::Load : WaitCounterKind::Ds;
+  for (size_t i = 0, count = events_.size(); i < count; ++i) {
+    const auto &candidate = events_[i];
+    if (candidate.counter != other_counter || candidate.reg.cls != RegClass::VGPR ||
+        candidate.writeback_lanes == ~uint64_t{0}) {
+      continue;
+    }
+    const auto old = candidate;
+    const uint64_t lanes = replacement.lanes & old.lanes & ~old.writeback_lanes;
+    const uint8_t bytes = replacement.bytes & old.bytes;
+    const unsigned first = std::max(old.reg.index, replacement.reg.index);
+    const unsigned end =
+        std::min(old.reg.index + old.reg.width, replacement.reg.index + replacement.reg.width);
+    if (!lanes || !bytes || first >= end) {
+      continue;
+    }
+
+    events_[i].lanes &= ~lanes;
+    auto part = old;
+    part.lanes = lanes;
+    const auto retain = [&](unsigned start, unsigned stop, uint8_t mask) {
+      if (start < stop && mask) {
+        part.reg.index = static_cast<uint16_t>(start);
+        part.reg.width = static_cast<uint8_t>(stop - start);
+        part.bytes = mask;
+        events_.push_back(part);
+      }
+    };
+    retain(old.reg.index, first, old.bytes);
+    retain(end, old.reg.index + old.reg.width, old.bytes);
+    retain(first, end, old.bytes & ~bytes);
+    part.reg.index = static_cast<uint16_t>(first);
+    part.reg.width = static_cast<uint8_t>(end - first);
+    part.bytes = bytes;
+    superseded_.push_back({part, replacement.counter, replacement.sequence, replacement.pc});
+  }
+}
+
+void MemoryWaitScoreboard::add(Event event, bool ordered_native_result) {
+  if (!event.lanes || !event.bytes || !event.reg.width) {
     return;
+  }
+  event.reg = pending_.canonical(event.reg);
   stamp_order(event);
   // A newer result covering the entire old destination is the stronger
-  // dependency within the same FIFO class. Discard the superseded record rather
+  // dependency within the same VGPR writeback class. Discard the superseded record rather
   // than growing with a loop that repeatedly loads an unused destination.
-  const bool overlap =
-      pending_.mark(event.reg, event.counter == WaitCounterKind::X ? MemoryWaitShadow::kReplaySource
-                                                                   : MemoryWaitShadow::kResult);
+  const bool overlap = pending_.mark(event.reg, event.shadow_kind());
   may_overlap_ |= overlap;
-  if (overlap)
+  if (overlap && ordered_native_result && event.reg.cls == RegClass::VGPR &&
+      event.order != kUnordered) {
+    supersede_flat_result(event);
+  }
+  if (overlap) {
     std::erase_if(events_, [&](const Event &old) {
+      if (!old.lanes) {
+        return true;
+      }
       const bool ordered = event.order != kUnordered && old.order == event.order &&
+                           ordered_vmem_writebacks(old.writeback, event.writeback) &&
                            old.order_sequence <= event.order_sequence;
       // Scalar replay sources have a different proof: every sufficient wait
       // drains their entire X group, so its newest covering source is enough.
       const bool scalar_replay =
           xcnt_scalar_ && old.counter == WaitCounterKind::X && event.counter == WaitCounterKind::X;
-      return (ordered || scalar_replay) && old.reg.cls == event.reg.cls &&
-             event.reg.index <= old.reg.index &&
-             event.reg.index + event.reg.width >= old.reg.index + old.reg.width &&
-             (event.lanes & old.lanes) == old.lanes && (event.bytes & old.bytes) == old.bytes;
+      // Multiple enabled export channels may select the same physical source.
+      const bool same_export =
+          event.export_source && old.export_source && old.sequence == event.sequence;
+      const bool superseded =
+          (ordered || scalar_replay || same_export ||
+           (event.gds_source_lock && old.gds_source_lock)) &&
+          old.holds_source() == event.holds_source() && old.reg.cls == event.reg.cls &&
+          event.reg.index <= old.reg.index &&
+          event.reg.index + event.reg.width >= old.reg.index + old.reg.width &&
+          (event.lanes & old.lanes) == old.lanes &&
+          (event.writeback_lanes & old.writeback_lanes) == old.writeback_lanes &&
+          (event.bytes & old.bytes) == old.bytes;
+      if (superseded && old.sequence < event.sequence) {
+        std::erase_if(superseded_, [&](const auto &saved) {
+          return saved.replacement_counter == event.counter &&
+                 saved.replacement_sequence != event.sequence;
+        });
+        superseded_.push_back({old, event.counter, event.sequence, event.pc});
+      }
+      return superseded;
     });
+  }
   events_.push_back(event);
   pending_scalar_ |= event.reg.cls != RegClass::VGPR;
 }
@@ -927,23 +2102,27 @@ void MemoryWaitScoreboard::add(Event event) {
 void MemoryWaitScoreboard::clear_destination(const Event &event) { pending_.clear(event.reg); }
 
 void MemoryWaitScoreboard::rebuild_mask() {
-  if (pending_scalar_)
+  if (pending_scalar_) {
     pending_scalar_ = std::ranges::any_of(
         events_, [](const Event &event) { return event.reg.cls != RegClass::VGPR; });
-  if (events_.empty())
+  }
+  if (events_.empty()) {
     may_overlap_ = false;
-  if (!may_overlap_)
+  }
+  if (!may_overlap_) {
     return;
+  }
   // Erasing a record cleared its destinations. Restore any overlapping records
   // that remain; unrelated shadow bytes already have the right value.
-  for (const auto &event : events_)
-    pending_.mark(event.reg, event.counter == WaitCounterKind::X ? MemoryWaitShadow::kReplaySource
-                                                                 : MemoryWaitShadow::kResult);
+  for (const auto &event : events_) {
+    pending_.mark(event.reg, event.shadow_kind());
+  }
 }
 
 void MemoryWaitScoreboard::wait(WaitCounterKind counter, uint32_t threshold) {
-  if (apply_wait(counter, threshold))
+  if (apply_wait(counter, threshold)) {
     retire_completed();
+  }
 }
 
 bool MemoryWaitScoreboard::apply_wait(WaitCounterKind counter, uint32_t threshold) {
@@ -958,18 +2137,21 @@ bool MemoryWaitScoreboard::apply_wait(WaitCounterKind counter, uint32_t threshol
   }
   // A mixed counter still bounds every ordered class independently. It does
   // not prove readiness of an unordered result such as SMEM.
-  for (auto &order : orders_)
+  for (auto &order : orders_) {
     if (order.counter == counter && order.issued > threshold &&
         order.issued - threshold > order.retired) {
       order.retired = order.issued - threshold;
       changed = true;
     }
+  }
   if (!threshold) {
     unordered_[i] = false;
     ordering_kinds_[i] = 0;
-    for (auto &order : orders_)
-      if (order.counter == counter)
+    for (auto &order : orders_) {
+      if (order.counter == counter) {
         order.retired = order.issued;
+      }
+    }
   }
   if (counter == WaitCounterKind::X) {
     std::erase_if(translations_, [&](const auto &entry) { return entry.sequence <= through; });
@@ -983,28 +2165,35 @@ void MemoryWaitScoreboard::retire_completed() {
   const auto size = events_.size();
   std::erase_if(events_, [&](const Event &event) {
     const bool retire = completed(event.counter, event.sequence, event.order, event.order_sequence);
-    if (retire)
+    if (retire) {
       clear_destination(event);
+    }
     return retire;
   });
-  if (size != events_.size())
+  if (size != events_.size()) {
     rebuild_mask();
+  }
   if (!xcnt_scalar_ && outstanding(WaitCounterKind::X)) {
     // Completion proves translation. Map the waited counter position back
     // into the ordered X queue; counts from mixed families are not X ages.
     uint64_t translated = 0;
-    for (const auto &entry : translations_)
-      if (completed(entry.completion, entry.completion_sequence, entry.order, entry.order_sequence))
+    for (const auto &entry : translations_) {
+      if (completed(entry.completion, entry.completion_sequence, entry.order,
+                    entry.order_sequence)) {
         translated = std::max(translated, entry.sequence);
-    if (translated > retired_[static_cast<size_t>(WaitCounterKind::X)])
+      }
+    }
+    if (translated > retired_[static_cast<size_t>(WaitCounterKind::X)]) {
       wait(WaitCounterKind::X,
            static_cast<uint32_t>(issued_[static_cast<size_t>(WaitCounterKind::X)] - translated));
+    }
   }
 }
 
 void MemoryWaitScoreboard::xcnt_group(bool scalar) {
-  if (xcnt_scalar_ != scalar && outstanding(WaitCounterKind::X))
+  if (xcnt_scalar_ != scalar && outstanding(WaitCounterKind::X)) {
     wait(WaitCounterKind::X, 0);
+  }
   xcnt_scalar_ = scalar;
 }
 
@@ -1020,20 +2209,25 @@ uint64_t MemoryWaitScoreboard::issue_xcnt(std::optional<WaitCounterKind> complet
 }
 
 void MemoryWaitScoreboard::xcnt_ordered_write(RegisterRef reg, uint64_t lanes, uint8_t bytes) {
-  if (xcnt_scalar_ || !pending_.pending(reg, true))
+  if (xcnt_scalar_ || !pending_.pending(reg, true)) {
     return;
+  }
+  reg = pending_.canonical(reg);
   uint64_t through = 0;
-  for (const auto &event : events_)
+  for (const auto &event : events_) {
     if (event.counter == WaitCounterKind::X && event.reg.cls == reg.cls && (event.lanes & lanes) &&
         (event.bytes & bytes) && reg.index < event.reg.index + event.reg.width &&
-        event.reg.index < reg.index + reg.width)
+        event.reg.index < reg.index + reg.width) {
       through = std::max(through, event.sequence);
-  if (through)
+    }
+  }
+  if (through) {
     wait(WaitCounterKind::X,
          static_cast<uint32_t>(issued_[static_cast<size_t>(WaitCounterKind::X)] - through));
+  }
 }
 
-void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) {
+void MemoryWaitScoreboard::before(const Instruction &inst, rocjitsu::IsaFamily arch) {
   using namespace waitcheck_detail;
   // Most kernels wait well before a queue is full. Avoid classifying the
   // incoming instruction twice unless some ordered class can force progress.
@@ -1041,73 +2235,140 @@ void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) 
   const bool full =
       inst.is_memory_wait_producer() && model.succeeded() &&
       std::ranges::any_of(orders_, [&](const Order &order) {
-        const auto maximum = WaitcheckTarget::maximum_dependency_wait(model.value(), order.counter);
+        const auto maximum =
+            WaitCounterPolicy::maximum_dependency_wait(model.value(), order.counter);
         return order.issued - order.retired + MemoryCounterObligation::MAX_COUNTER_INCREMENT >
                maximum + 1;
       });
   if (full) {
-    const auto events = WaitcheckTarget::classify_events(inst, arch);
-    if (events.succeeded())
-      for (const auto &event : events.value()) {
-        // FLAT may not use either memory domain. Its resolved requests apply
-        // the corresponding capacity constraint after address calculation.
-        if (inst.mnemonic().starts_with("flat_") &&
+    auto &events = classification_scratch_;
+    if (WaitcheckTarget::classify_events_into(inst, arch, events).succeeded()) {
+      for (const auto &event : events) {
+        // Fixed-domain FLAT reserves both counter slots before reading its address.
+        // Targets with address-dependent counters apply capacity after routing.
+        if (!flat_issues_both_counter_domains(arch) &&
+            inst.amdgpu_memory_addressing() == MemoryAddressing::Flat &&
             (event.counter == WaitCounterKind::Load || event.counter == WaitCounterKind::Store ||
-             event.counter == WaitCounterKind::Ds))
+             event.counter == WaitCounterKind::Ds)) {
           continue;
+        }
         if (event.counter == WaitCounterKind::VmVsrc || event.counter == WaitCounterKind::VaVdst ||
-            event.counter == WaitCounterKind::Depctr)
+            event.counter == WaitCounterKind::Depctr) {
           continue;
-        const auto maximum = WaitcheckTarget::maximum_dependency_wait(arch, event.counter);
-        if (maximum.succeeded())
+        }
+        const auto maximum = WaitCounterPolicy::maximum_dependency_wait(arch, event.counter);
+        if (maximum.succeeded()) {
           backpressure(event.counter, maximum.value() + 1, issue_units(inst, event, arch));
+        }
       }
+    }
   }
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && outstanding(WaitCounterKind::X) &&
-      WaitcheckTarget::is_xcnt_drain(inst))
+  if (arch == rocjitsu::IsaFamily::Cdna5 && outstanding(WaitCounterKind::X) &&
+      WaitcheckTarget::is_xcnt_drain(inst)) {
     wait(WaitCounterKind::X, 0);
-  if (!inst.is_waitcnt() && !inst.has_embedded_memory_wait())
+  }
+  if (!inst.is_waitcnt() && !inst.has_embedded_memory_wait()) {
     return;
-  const auto fields = inst.is_waitcnt() ? WaitcheckTarget::explicit_wait_fields(inst, arch)
+  }
+  const auto fields = inst.is_waitcnt() ? WaitCounterPolicy::explicit_wait_fields(inst, arch)
                                         : WaitcheckTarget::embedded_wait_fields(inst, arch);
-  if (fields.failed() || !fields.value())
-    return;
+  if (fields.succeeded() && fields.value()) {
+    wait(*fields.value());
+  }
+}
+
+void MemoryWaitScoreboard::wait(const WaitFields &fields) {
   bool changed = false;
   for (auto counter :
        {WaitCounterKind::Load, WaitCounterKind::Store, WaitCounterKind::Ds, WaitCounterKind::Km,
         WaitCounterKind::Exp, WaitCounterKind::Sample, WaitCounterKind::Bvh, WaitCounterKind::Async,
-        WaitCounterKind::Tensor, WaitCounterKind::X})
-    if (const auto value = (*fields.value())[static_cast<size_t>(counter)])
+        WaitCounterKind::Tensor, WaitCounterKind::X}) {
+    if (const auto value = fields[static_cast<size_t>(counter)]) {
       changed |= apply_wait(counter, *value);
-  if (changed)
+    }
+  }
+  if (changed) {
     retire_completed();
+  }
+}
+
+std::unique_ptr<MemoryWaitScoreboard::DeferredWrite>
+MemoryWaitScoreboard::defer_write(RegisterRef reg) const {
+  auto write = std::make_unique<DeferredWrite>();
+  if (!pending_.pending(reg, true)) {
+    return write;
+  }
+  reg = pending_.canonical(reg);
+  for (const auto &event : events_) {
+    if (reg.cls == event.reg.cls && reg.index < event.reg.index + event.reg.width &&
+        event.reg.index < reg.index + reg.width) {
+      write->producers.push_back({event.counter, event.sequence, required_wait(event)});
+    }
+  }
+  return write;
+}
+
+void MemoryWaitScoreboard::complete_deferred_write(DeferredWrite &write, uint64_t lanes) {
+  auto &result = write.result;
+  result.lanes &= lanes;
+  if (result.lanes && !write.producers.empty()) {
+    check_pending(pending_.canonical(result.reg), result.lanes, result.bytes, true,
+                  {result.order, result.writeback}, &write);
+  }
+  add(result, write.ordered_native_result);
 }
 
 void MemoryWaitScoreboard::access_pending(RegisterRef reg, uint64_t lanes, uint8_t bytes,
-                                          bool write, uint16_t ordered_write_order) {
+                                          bool write, WriteOrder ordered_write_order) {
+  check_pending(reg, lanes, bytes, write, ordered_write_order, nullptr);
+}
+
+void MemoryWaitScoreboard::check_pending(RegisterRef reg, uint64_t lanes, uint8_t bytes, bool write,
+                                         WriteOrder ordered_write_order,
+                                         const DeferredWrite *deferred) {
   for (auto &event : events_) {
     // Sharing a counter does not prove ordered writeback. The old result and
-    // incoming write must belong to the same FIFO class, even in a mixed queue.
-    if (event.reported || (!write && event.counter == WaitCounterKind::X) ||
-        (write && ordered_write_order != kUnordered && event.order == ordered_write_order) ||
+    // incoming write must also share their VGPR writeback class.
+    if (event.reported || (!write && event.holds_source()) ||
+        (write && ordered_write_order.fifo != kUnordered && !(event.writeback_lanes & lanes)) ||
+        (write && ordered_write_order.fifo != kUnordered &&
+         event.order == ordered_write_order.fifo &&
+         ordered_vmem_writebacks(event.writeback, ordered_write_order.writeback) &&
+         event.ordered_overwrite) ||
         event.reg.cls != reg.cls || !(event.lanes & lanes) || !(event.bytes & bytes) ||
-        reg.index >= event.reg.index + event.reg.width || event.reg.index >= reg.index + reg.width)
+        reg.index >= event.reg.index + event.reg.width ||
+        event.reg.index >= reg.index + reg.width) {
       continue;
+    }
+    uint32_t threshold;
+    if (deferred) {
+      const auto it = std::ranges::find_if(deferred->producers, [&](const auto &producer) {
+        return producer.counter == event.counter && producer.sequence == event.sequence;
+      });
+      if (it == deferred->producers.end()) {
+        continue;
+      }
+      threshold = it->required;
+    } else {
+      threshold = required_wait(event);
+    }
     event.reported = true;
     if (reporter_) {
       const auto first = std::max(reg.index, event.reg.index);
       const auto end = std::min(reg.index + reg.width, event.reg.index + event.reg.width);
       const RegisterRef overlap{reg.cls, first, static_cast<uint8_t>(end - first)};
-      reporter_(context_, {event, pc_, overlap, write, required_wait(event)});
+      reporter_(context_, {event, deferred ? deferred->result.pc : pc_, overlap, write, threshold});
     }
   }
   const auto size = events_.size();
   std::erase_if(events_, [&](const Event &event) {
-    if (event.reported)
+    if (event.reported) {
       clear_destination(event);
+    }
     return event.reported;
   });
-  if (size != events_.size())
+  if (size != events_.size()) {
     rebuild_mask();
+  }
 }
 } // namespace rocjitsu::amdgpu

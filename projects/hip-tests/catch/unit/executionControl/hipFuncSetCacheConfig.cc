@@ -76,9 +76,9 @@ HIP_TEST_CASE(Unit_hipFuncSetCacheConfig_Negative_Parameters) {
  *  - Verifies that hipFuncSetCacheConfig maps cache config hints to the
  *    expected preferredShmemCarveout percentages:
  *    -# hipFuncCachePreferShared  -> 100%
- *    -# hipFuncCachePreferL1      -> 1%
+ *    -# hipFuncCachePreferL1      -> 0%
  *    -# hipFuncCachePreferEqual   -> 50%
- *    -# hipFuncCachePreferNone    -> 0% (no preference)
+ *    -# hipFuncCachePreferNone    -> -1 (no preference)
  * Test source
  * ------------------------
  *  - unit/executionControl/hipFuncSetCacheConfig.cc
@@ -92,9 +92,9 @@ HIP_TEST_CASE(Unit_hipFuncSetCacheConfig_Positive_VerifyCarveoutMapping) {
     hipFuncCache_t config;
     int expectedCarveout;
   } testCases[] = {
-      {hipFuncCachePreferNone, 0},
+      {hipFuncCachePreferNone, -1},
       {hipFuncCachePreferShared, 100},
-      {hipFuncCachePreferL1, 1},
+      {hipFuncCachePreferL1, 0},
       {hipFuncCachePreferEqual, 50},
   };
 

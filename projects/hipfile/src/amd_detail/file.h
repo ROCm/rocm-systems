@@ -95,6 +95,7 @@ public:
     virtual bool               isRegularFile() const noexcept  = 0;
     virtual bool               onExt4Ordered() const noexcept  = 0;
     virtual bool               onXfs() const noexcept          = 0;
+    virtual bool               onNfsRdma() const noexcept      = 0;
 };
 
 class FileMap;
@@ -154,6 +155,10 @@ public:
     /// @return True if the file is on an xfs filesystem, false otherwise
     virtual bool onXfs() const noexcept override;
 
+    /// @brief Whether this file is on NFS using RDMA. Returns false if mountinfo is unavailable.
+    /// @return True if the file is on an NFS filesystem with proto=rdma or proto=rdma6, false otherwise
+    virtual bool onNfsRdma() const noexcept override;
+
     /// @brief Construct a registered file
     /// @param uf An unregistered file
     /// @param k  Key class instance (see passkey.h)
@@ -188,6 +193,9 @@ private:
 
     /// @brief Whether the file is on an xfs filesystem
     bool m_on_xfs;
+
+    /// @brief Whether the file is on an NFS filesystem using RDMA
+    bool m_on_nfs_rdma;
 };
 
 class FileMap {
@@ -195,17 +203,17 @@ public:
     virtual ~FileMap();
 
     /// @brief Registers a file. Files must be registered before they can be used with hipFile IO APIs
-    /// @attention A unique_lock on HipFileMutex must be held
+    /// @attention A unique_lock on DriverState::state_mutex must be held
     /// @param uf An unregistered file
     virtual hipFileHandle_t registerFile(UnregisteredFile &&uf);
 
     /// @brief Deregisters the file associated with the provided file handle
-    /// @attention A unique_lock on HipFileMutex must be held
+    /// @attention A unique_lock on DriverState::state_mutex must be held
     /// @param fh The handle of the file to deregister
     virtual void deregisterFile(hipFileHandle_t fh);
 
     /// @brief Look up a file given a hipFileHandle_t
-    /// @attention A shared_lock on HipFileMutex must be held
+    /// @attention A shared_lock on DriverState::state_mutex must be held
     /// @param fh The file handle to lookup the file with
     /// @return If file handle is valid, return a shared pointer to the file, otherwise throw NotRegistered.
     virtual std::shared_ptr<IFile> getFile(hipFileHandle_t fh);
@@ -213,7 +221,7 @@ public:
     virtual void clear();
 
 private:
-    /// File lookup tables.
+    /// File lookup tables. Protected by DriverState::state_mutex
     std::unordered_map<int, std::shared_ptr<IFile>>             from_fd;
     std::unordered_map<hipFileHandle_t, std::shared_ptr<IFile>> from_fh;
 };

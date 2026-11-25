@@ -170,7 +170,7 @@ static int create_buffer(struct workload *w, struct buffer *buffer,
   create.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
   create.access_count = 1;
   create.accesses = &access;
-  CALL(w->api->memory_create(w->scope, &create, &buffer->memory));
+  CALL(w->api->memory_create(w->scope, &create, &buffer->memory, NULL));
 
   amdf_memory_map_info_t map;
   INIT(map, AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO);

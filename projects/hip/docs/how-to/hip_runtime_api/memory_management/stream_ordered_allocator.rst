@@ -1,48 +1,49 @@
 .. meta::
-  :description:
-  :keywords: stream, memory allocation, SOMA, stream ordered memory allocator
+  :description: Use the HIP stream-ordered memory allocator (SOMA) to allocate
+                and free memory in stream order and to manage memory pools.
+  :keywords: stream, memory allocation, SOMA, stream-ordered memory allocator
 
 .. _stream_ordered_memory_allocator_how-to:
 
 *******************************************************************************
-Stream Ordered Memory Allocator
+Stream-ordered memory allocator
 *******************************************************************************
 
-The Stream Ordered Memory Allocator (SOMA) is part of the HIP runtime API. SOMA provides an asynchronous memory allocation mechanism with stream-ordering semantics. You can use SOMA to allocate and free memory in stream order, which ensures that all asynchronous accesses occur between the stream executions of allocation and deallocation. Compliance with stream order prevents use-before-allocation or use-after-free errors, which helps to avoid an undefined behavior.
+The stream-ordered memory allocator (SOMA) is part of the HIP runtime API. SOMA provides an asynchronous memory allocation mechanism with stream-ordering semantics. You can use SOMA to allocate and free memory in stream order, which ensures that all asynchronous accesses occur between the stream executions of allocation and deallocation. Compliance with stream order prevents use-before-allocation or use-after-free errors, which avoids undefined behavior.
 
 Advantages of SOMA:
 
 - Efficient reuse: Enables efficient memory reuse across streams, which reduces unnecessary allocation overhead.
 - Fine-grained control: Allows you to set attributes and control caching behavior for memory pools.
 - Inter-process sharing: Enables secure sharing of allocations between processes.
-- Optimizations: Allows driver to optimize based on its awareness of SOMA and other stream management APIs.
+- Optimizations: Allows the driver to optimize based on its awareness of SOMA and other stream management APIs.
 
 Disadvantages of SOMA:
 
 - Temporal constraints: Requires you to adhere strictly to stream order to avoid errors.
 - Complexity: Involves memory management in stream order, which can be intricate.
-- Learning curve: Requires you to put additional efforts to understand and utilize SOMA effectively.
+- Learning curve: Requires additional effort to understand and use SOMA effectively.
 
 Using SOMA
 =====================================
 
-You can allocate memory using ``hipMallocAsync()`` with stream-ordered
-semantics. This restricts the asynchronous access to the memory between the stream executions of the allocation and deallocation. Accessing
-memory if the compliant memory accesses won't overlap
-temporally. ``hipFreeAsync()`` frees memory from the pool with stream-ordered
+Use ``hipMallocAsync()`` to allocate memory with stream-ordered semantics. Access
+the memory only between the allocation and the deallocation in stream order.
+Use ``hipFreeAsync()`` to return the memory to the pool with stream-ordered
 semantics.
 
-Here is how to use stream ordered memory allocation:
+The following examples compare stream-ordered memory allocation with ordinary
+allocation:
 
 .. tab-set::
-  .. tab-item:: Stream Ordered Memory Allocation
+  .. tab-item:: Stream-ordered memory allocation
 
     .. literalinclude:: ../../../tools/example_codes/stream_ordered_memory_allocation.hip
         :start-after: // [sphinx-start]
         :end-before: // [sphinx-end]
         :language: cpp
 
-  .. tab-item:: Ordinary Allocation
+  .. tab-item:: Ordinary allocation
 
     .. literalinclude:: ../../../tools/example_codes/ordinary_memory_allocation.hip
         :start-after: // [sphinx-start]
@@ -54,14 +55,43 @@ For more details, see :ref:`stream_ordered_memory_allocator_reference`.
 Memory pools
 ============
 
-Memory pools provide a way to manage memory with stream-ordered behavior while ensuring proper synchronization and avoiding memory access errors. Division of a single memory system into separate pools facilitates querying the access path properties for each partition. Memory pools are used for host memory, device memory, and unified memory.
+Memory pools manage memory with stream-ordered behavior while ensuring proper
+synchronization and avoiding memory access errors. Dividing a single memory
+system into separate pools lets you query the access path properties of each
+partition. A memory pool lives on a device and holds either device memory
+(``hipMemAllocationTypePinned``) or managed memory
+(``hipMemAllocationTypeManaged``).
+
+Default pools
+-------------
+
+Each device has a default memory pool. ``hipMallocAsync()`` allocates from the
+current memory pool of the stream's device, which is the default pool unless
+you set another pool with ``hipDeviceSetMemPool()``. The stream's device is the
+device the stream was created on, not the calling thread's current device. For
+the null stream, it's the calling thread's current device.
+
+Use :cpp:func:`hipMemGetDefaultMemPool` to get the default pool for a memory
+location and allocation type. Set ``location.type`` to
+``hipMemLocationTypeDevice`` and ``location.id`` to the device ID. The
+allocation type selects the pool:
+
+* ``hipMemAllocationTypePinned``: the default device memory pool, the same pool
+  that ``hipDeviceGetDefaultMemPool()`` returns.
+* ``hipMemAllocationTypeManaged``: the default managed memory pool.
+
+Other location types and allocation types return ``hipErrorInvalidValue``.
 
 Set pools
 ---------
 
-The ``hipMallocAsync()`` function uses the current memory pool and also provides the opportunity to create and access different pools using ``hipMemPoolCreate()`` and ``hipMallocFromPoolAsync()`` functions respectively.
+``hipMallocAsync()`` allocates from the current memory pool. To use a different
+pool, create it with ``hipMemPoolCreate()`` and allocate from it with
+``hipMallocFromPoolAsync()``.
 
-Unlike NVIDIA CUDA, where stream-ordered memory allocation can be implicit, ROCm HIP is explicit. This requires managing memory allocation for each stream in HIP while ensuring precise control over memory usage and synchronization.
+Unlike NVIDIA CUDA, where stream-ordered memory allocation can be implicit,
+HIP on AMD requires explicit stream management for each allocation, ensuring
+precise control over memory usage and synchronization.
 
 .. literalinclude:: ../../../tools/example_codes/memory_pool.hip
     :start-after: // [sphinx-start]
@@ -71,7 +101,8 @@ Unlike NVIDIA CUDA, where stream-ordered memory allocation can be implicit, ROCm
 Trim pools
 ----------
 
-The memory allocator allows you to allocate and free memory in stream order. To control memory usage, set the release threshold attribute using ``hipMemPoolAttrReleaseThreshold``.  This threshold specifies the amount of reserved memory in bytes to hold onto.
+To control memory usage, set the ``hipMemPoolAttrReleaseThreshold`` attribute.
+The threshold is the amount of reserved memory, in bytes, that the pool keeps.
 
 .. literalinclude:: ../../../tools/example_codes/memory_pool_threshold.hip
     :start-after: // [sphinx-start]
@@ -80,7 +111,8 @@ The memory allocator allows you to allocate and free memory in stream order. To 
 
 When the amount of memory held in the memory pool exceeds the threshold, the allocator tries to release memory back to the operating system during the next call to stream, event, or context synchronization.
 
-To improve performance, it is a good practice to adjust the memory pool size using ``hipMemPoolTrimTo()``. It helps to reclaim memory from an excessive memory pool, which optimizes memory usage for your application.
+Use ``hipMemPoolTrimTo()`` to release unused memory from a pool back to the
+system and reduce your application's memory footprint.
 
 .. literalinclude:: ../../../tools/example_codes/memory_pool_trim.cpp
     :start-after: // [sphinx-start]
@@ -90,14 +122,15 @@ To improve performance, it is a good practice to adjust the memory pool size usi
 Resource usage statistics
 -------------------------
 
-Resource usage statistics help in optimization. Here is the list of pool attributes used to query memory usage:
+To monitor memory usage, query the following pool attributes:
 
 - ``hipMemPoolAttrReservedMemCurrent``: Returns the total physical GPU memory currently held in the pool.
 - ``hipMemPoolAttrUsedMemCurrent``: Returns the total size of all the memory allocated from the pool.
-- ``hipMemPoolAttrReservedMemHigh``: Returns the total physical GPU memory held in the pool since the last reset.
-- ``hipMemPoolAttrUsedMemHigh``: Returns the total size of all the memory allocated from the pool since the last reset.
+- ``hipMemPoolAttrReservedMemHigh``: Returns the highest amount of physical GPU memory the pool has held since the last reset.
+- ``hipMemPoolAttrUsedMemHigh``: Returns the highest amount of memory allocated from the pool since the last reset.
 
-To reset these attributes to the current value, use ``hipMemPoolSetAttribute()``.
+To reset the high watermarks, set ``hipMemPoolAttrReservedMemHigh`` or
+``hipMemPoolAttrUsedMemHigh`` to zero with ``hipMemPoolSetAttribute()``.
 
 .. literalinclude:: ../../../tools/example_codes/memory_pool_resource_usage_statistics.cpp
     :start-after: // [sphinx-start]
@@ -107,28 +140,33 @@ To reset these attributes to the current value, use ``hipMemPoolSetAttribute()``
 Memory reuse policies
 ---------------------
 
-The allocator might reallocate memory as long as the compliant memory accesses will not to overlap temporally. To optimize the memory usage, disable or enable the following memory pool reuse policy attribute flags:
+The allocator can reuse memory as long as compliant memory accesses don't overlap
+in time. To tune memory reuse, enable or disable the following memory pool
+attributes:
 
 - ``hipMemPoolReuseFollowEventDependencies``: Checks event dependencies before allocating additional GPU memory.
-- ``hipMemPoolReuseAllowOpportunistic``: Checks freed allocations to determine if the stream order semantic indicated by the free operation has been met.
-- ``hipMemPoolReuseAllowInternalDependencies``: Manages reuse based on internal dependencies in runtime. If the driver fails to allocate and map additional physical memory, it searches for memory waiting for another stream's progress and reuses it.
+- ``hipMemPoolReuseAllowOpportunistic``: Checks freed allocations to determine if the stream-order semantics indicated by the free operation has been met.
+- ``hipMemPoolReuseAllowInternalDependencies``: Manages reuse based on internal dependencies in the runtime. If the driver fails to allocate and map additional physical memory, it searches for memory waiting for another stream's progress and reuses it.
 
 Device accessibility for multi-GPU support
 ------------------------------------------
 
-Allocations are initially accessible from the device where they reside.
+Allocations are initially accessible from the device where they reside. To make a
+pool's allocations accessible from other devices, use ``hipMemPoolSetAccess()``.
 
 Interprocess memory handling
 =============================
 
-.. attention::
-    IPC API calls are only supported on systems with an active ``amdgpu-dkms`` driver. Please refer to the
-    `AMDGPU documentation <https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/index.html>`__ for information
-    on how to install ``amdgpu-dkms``.
+.. note::
 
-Interprocess capable (IPC) memory pools facilitate efficient and secure sharing of GPU memory between processes.
+    Interprocess communication (IPC) API calls are only supported on systems with
+    an active ``amdgpu-dkms`` driver. See the
+    `AMDGPU documentation <https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/index.html>`__
+    to install ``amdgpu-dkms``.
 
-To achieve interprocess memory sharing, you can use either a :ref:`device pointer <device-pointer>` or a :ref:`shareable handle <shareable-handle>`. Both provide allocator (export) and consumer (import) interfaces. Use a device pointer to share a specific allocation; use a shareable handle when the importing process needs to allocate from the shared pool independently.
+IPC-capable memory pools share GPU memory between processes.
+
+To achieve interprocess memory sharing, you can use either a :ref:`device pointer <device-pointer>` or a :ref:`shareable handle <shareable-handle>`. Both provide allocator (export) and consumer (import) interfaces. Use a device pointer to share a specific allocation. Use a shareable handle when the importing process needs to allocate from the shared pool independently.
 
 .. _device-pointer:
 
@@ -137,8 +175,8 @@ Device pointer
 
 To export a memory pool allocation for access by another process, use
 ``hipMemPoolExportPointer()``. It produces a serializable ``hipMemPoolPtrExportData``
-struct that can be written to any IPC channel, such as a named pipe (FIFO), and then 
-read by the importing process.
+struct. Write it to any IPC channel, such as a named pipe (FIFO), and read it in
+the importing process.
 
 Here is the exporter:
 
@@ -173,7 +211,7 @@ Here is the exporter:
     :end-before: // [sphinx-exporter-end]
     :language: cpp
 
-To import a memory pool from a shareable handle received via ``SCM_RIGHTS``, use
+To import a memory pool from a shareable handle received through ``SCM_RIGHTS``, use
 ``hipMemPoolImportFromShareableHandle()``. The importing process can then allocate
 GPU memory from the imported pool independently.
 

@@ -5,24 +5,249 @@
 //!
 //! These types describe implementation-neutral profiling operations. Native
 //! registration state remains privately owned by the selected platform driver.
+//! A retained sampling registration cannot restart after session retirement;
+//! stopping, destroying, and relinquishing registrations remain available.
 
 use crate::Error;
 use crate::device::gpu::GpuDevice;
+use crate::driver::{self, Driver, PcSamplingResource};
+use crate::memory::storage::{Owned, Shared};
+#[cfg(target_os = "linux")]
+pub mod linux;
 
-/// Correlated device and system clocks returned by the native driver.
+/// Optional native system-clock domain, separate from the host profiling clock.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SystemClockDomain {
+    /// Boot time including suspended intervals; Linux KFD's auxiliary sample.
+    BootTime,
+}
+
+/// Native auxiliary sample with an explicitly identified domain and rate.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SystemClockSample {
+    /// Meaning of the native counter; frequency equality does not equate epochs.
+    pub domain: SystemClockDomain,
+    /// Counter value in the stated domain.
+    pub ticks: u64,
+    /// Counter rate and known width.
+    pub info: crate::host::clock::ClockInfo,
+}
+
+/// One fresh correlation in the originating activated device's clock domain.
+///
+/// The primary host sample must use exactly [`crate::host::clock`]'s epoch and
+/// units; providers convert their native host representation before publication.
+/// The device source is scoped to the originating owner, never inferred from
+/// equal frequencies. These samples retain no calibration across suspend,
+/// reset, loss, or source restart. Deadlines use `std::time::Instant`, not these
+/// profiling counters. Sampling itself establishes no completion or ordering.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ClockCounters {
+    /// GPU timestamp, in the same native domain as this owner's queue timestamps.
+    pub gpu: u64,
+    /// Device counter rate and width (zero width means unknown).
+    pub gpu_info: crate::host::clock::ClockInfo,
+    /// Normalized host profiling clock sample taken with the device counter.
+    pub host: u64,
+    /// Optional auxiliary native system sample. Absence is not a zero counter.
+    pub system: Option<SystemClockSample>,
+}
+
+impl ClockCounters {
+    /// Converts a device tick from this uninterrupted epoch to host profiling
+    /// units. For a known width, the caller must establish that the tick is
+    /// less than half a counter period from this sample; this helper cannot
+    /// determine its age. Unknown widths do not guess wrap; ties are rejected.
+    ///
+    /// # Errors
+    /// Reports invalid or unknown rates, ambiguous intervals, and overflow.
+    pub fn to_host(self, tick: u64) -> Result<u64, Error> {
+        let delta = self.gpu_info.tick_delta(self.gpu, tick)?;
+        let magnitude = u64::try_from(delta.unsigned_abs()).map_err(|_| Error::Operation {
+            kind: crate::ErrorKind::InvalidData,
+            detail: "device clock interval overflow",
+        })?;
+        let scaled = self
+            .gpu_info
+            .scale_interval(magnitude, crate::host::clock::info().frequency_hz)?;
+        (if delta >= 0 {
+            self.host.checked_add(scaled)
+        } else {
+            self.host.checked_sub(scaled)
+        })
+        .ok_or(Error::Operation {
+            kind: crate::ErrorKind::InvalidData,
+            detail: "host clock correlation overflow",
+        })
+    }
+}
+
+/// Scalar progress reported by an SPM destination update, including on error.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct ClockCounters {
-    /// GPU timestamp counter.
-    pub gpu: u64,
-    /// Host timestamp counter sampled by the native driver.
-    pub host: u64,
-    /// System timestamp counter sampled with the GPU counter.
-    pub system: u64,
-    /// System timestamp frequency in hertz.
-    pub system_frequency: u64,
-    /// GPU timestamp frequency in hertz reported by the native device.
-    pub gpu_frequency: u64,
+pub struct SpmDestinationReport {
+    /// Remaining timeout in milliseconds after the update.
+    pub remaining_timeout_milliseconds: u32,
+    /// Bytes copied into the previous destination before replacing it.
+    pub previous_destination_bytes_copied: u32,
+    /// Whether the provider observed dropped samples.
+    pub data_loss: bool,
+}
+
+/// Native failure together with progress reported by the provider.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct SpmDestinationFailure {
+    /// Native or process-state failure.
+    pub error: Error,
+    /// Output values available even though the update failed.
+    pub report: SpmDestinationReport,
+}
+
+/// PC sampling mechanism available on an activated GPU.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PcSamplingMethod {
+    /// Wave trap handler records program counters.
+    HostTrap,
+    /// Hardware periodically snapshots program counters.
+    Stochastic,
+}
+
+/// Unit used for a PC sampling interval.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PcSamplingIntervalUnit {
+    /// Wall-clock microseconds.
+    Microseconds,
+    /// GPU clock cycles.
+    ClockCycles,
+    /// Issued instructions.
+    Instructions,
+}
+
+/// Constraint on the interval, separate from its unit and numeric bounds.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PcSamplingIntervalRestriction {
+    /// Every nonzero interval within the bounds is permitted.
+    Any,
+    /// The interval must also be a power of two.
+    PowerOfTwo,
+}
+
+impl PcSamplingIntervalRestriction {
+    /// Checks the semantic restriction independently of native flag values.
+    #[must_use]
+    pub const fn permits(self, interval: u64) -> bool {
+        interval != 0 && (matches!(self, Self::Any) || interval.is_power_of_two())
+    }
+}
+
+/// Native PC sampling capability reported for one method and interval unit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PcSamplingConfiguration {
+    /// Sampling mechanism.
+    pub method: PcSamplingMethod,
+    /// Unit in which the interval bounds are expressed.
+    pub unit: PcSamplingIntervalUnit,
+    /// Smallest interval accepted by the driver.
+    pub minimum_interval: u64,
+    /// Largest interval accepted by the driver.
+    pub maximum_interval: u64,
+    /// Additional permitted-interval restriction.
+    pub restriction: PcSamplingIntervalRestriction,
+}
+
+/// Selects immutable driver support or configurations available right now.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PcSamplingConfigurationSet {
+    /// All configurations supported by the driver and device.
+    Supported,
+    /// Configurations allowed alongside existing native registrations.
+    Available,
+}
+
+/// A requested native PC sampling method and interval.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PcSamplingRequest {
+    /// Sampling mechanism.
+    pub method: PcSamplingMethod,
+    /// Unit in which `interval` is expressed.
+    pub unit: PcSamplingIntervalUnit,
+    /// Nonzero sampling interval.
+    pub interval: u64,
+}
+
+/// Retains the exact driver instance alongside a native PC sampling owner.
+pub(crate) struct DriverPcSampling<D: Driver, P: PcSamplingResource> {
+    /// Native registration dropped before its creating driver.
+    inner: Owned<P>,
+    /// Exact driver instance retained through cleanup.
+    driver: Shared<D>,
+}
+
+impl<D: Driver, P: PcSamplingResource> DriverPcSampling<D, P> {
+    pub(crate) fn new(driver: Shared<D>, inner: Owned<P>) -> Self {
+        Self { inner, driver }
+    }
+
+    pub(crate) fn start(&mut self) -> Result<(), Error> {
+        let _operation = self.driver.admission().enter()?;
+        self.inner.start()
+    }
+
+    pub(crate) fn stop(&mut self) -> Result<(), Error> {
+        self.inner.stop()
+    }
+
+    pub(crate) fn destroy(&mut self) -> Result<(), Error> {
+        self.inner.destroy()
+    }
+
+    pub(crate) fn relinquish_adopted(&mut self) -> Result<(), Error> {
+        self.inner.relinquish_adopted()
+    }
+}
+
+/// Owned PC sampling registration with explicit, retryable native teardown.
+pub struct PcSampling {
+    /// Concrete registration and retryable native cleanup state.
+    pub(crate) inner: driver::PcSamplingState,
+}
+
+impl PcSampling {
+    /// Starts sampling after the caller has installed the required trap and
+    /// sample buffer resources for this method.
+    ///
+    /// # Errors
+    /// Reports native setup failure or device loss. An ambiguous result keeps
+    /// this owner and its native context alive for explicit recovery.
+    pub fn start(&mut self) -> Result<(), Error> {
+        self.inner.start()
+    }
+
+    /// Stops a started sampling registration.
+    ///
+    /// # Errors
+    /// Reports a native stop failure while retaining the registration.
+    pub fn stop(&mut self) -> Result<(), Error> {
+        self.inner.stop()
+    }
+
+    /// Unregisters the native session. A failed operation retains its owner
+    /// for a later retry or process teardown.
+    ///
+    /// # Errors
+    /// Reports native stop or destroy failure.
+    pub fn destroy(&mut self) -> Result<(), Error> {
+        self.inner.destroy()
+    }
+
+    /// Gives an unstarted adopted trace back to its original owner when an
+    /// adapter cannot complete setup after adoption.
+    #[doc(hidden)]
+    pub fn relinquish_adopted(&mut self) -> Result<(), Error> {
+        self.inner.relinquish_adopted()
+    }
 }
 
 impl GpuDevice<'_> {
@@ -30,6 +255,33 @@ impl GpuDevice<'_> {
     #[doc(hidden)]
     pub fn clock_counters(&self) -> Result<ClockCounters, Error> {
         self.driver.clock_counters()
+    }
+
+    /// Queries PC sampling configurations supported by the GPU driver or
+    /// currently available alongside native registrations. An empty result
+    /// means the driver offered no usable method in the selected set.
+    ///
+    /// # Errors
+    /// Returns `Unsupported` on an older KFD, or the native query failure.
+    #[doc(hidden)]
+    pub fn pc_sampling_configurations(
+        &self,
+        set: PcSamplingConfigurationSet,
+    ) -> Result<Vec<PcSamplingConfiguration>, Error> {
+        self.driver.pc_sampling_configurations(set)
+    }
+
+    /// Registers a native PC sampler. The caller must install and retain the
+    /// matching trap handler and GPU-visible sample buffers before `start`.
+    ///
+    /// # Errors
+    /// Rejects an invalid interval or unavailable method and reports native
+    /// registration failure.
+    #[doc(hidden)]
+    pub fn create_pc_sampling(&self, request: PcSamplingRequest) -> Result<PcSampling, Error> {
+        Ok(PcSampling {
+            inner: self.driver.create_pc_sampling(request)?,
+        })
     }
 
     /// Replaces this device's process-level second-stage trap handler.
@@ -40,8 +292,9 @@ impl GpuDevice<'_> {
     /// valid trap instructions, and a nonzero memory address must refer to the
     /// writable argument record required by those instructions. The caller
     /// must keep both allocations live and unchanged while the handler can
-    /// run, including after an ambiguous native result, until a successful
-    /// removal or conclusive device teardown.
+    /// run, including after an ambiguous native result. Successful removal
+    /// prevents future entry but does not retire waves already in the handler;
+    /// those waves must also finish before backing is reclaimed.
     #[doc(hidden)]
     #[allow(unsafe_code)]
     pub unsafe fn set_trap_handler(
@@ -50,7 +303,7 @@ impl GpuDevice<'_> {
         memory_address: u64,
     ) -> Result<(), Error> {
         // SAFETY: The public caller retains the handler code and argument
-        // storage until successful removal or conclusive device teardown.
+        // storage until removal and retirement of all handler users.
         unsafe {
             self.driver
                 .set_trap_handler(handler_address, memory_address)
@@ -74,28 +327,104 @@ impl GpuDevice<'_> {
     ///
     /// # Safety
     /// When `destination` is `Some`, it must address at least `size` writable
-    /// bytes that KFD can access. The caller must retain that backing and
+    /// bytes the provider can access. The caller must retain that backing and
     /// exclude conflicting CPU or device access until a later replacement or
     /// unset has completed successfully, or until the SPM and device are
     /// conclusively torn down. A failed call may leave either the previous or
-    /// the new destination reachable by KFD, so both must be retained until
+    /// the new destination reachable by the provider, so both must be retained until
     /// that uncertainty is resolved. The address must not be derived from a
-    /// short lived borrow because KFD writes after this call returns.
+    /// short lived borrow because the provider writes after this call returns.
     #[doc(hidden)]
     #[allow(unsafe_code)]
     pub unsafe fn spm_set_destination(
         &self,
         size: u32,
-        timeout: &mut u32,
-        bytes_copied: &mut u32,
+        timeout_milliseconds: u32,
         destination: Option<usize>,
-        data_loss: &mut bool,
-    ) -> Result<(), Error> {
+    ) -> Result<SpmDestinationReport, SpmDestinationFailure> {
         // SAFETY: The public caller retains both potentially reachable
         // destinations until a successful unset or conclusive teardown.
         unsafe {
             self.driver
-                .spm_set_destination(size, timeout, bytes_copied, destination, data_loss)
+                .spm_set_destination(size, timeout_milliseconds, destination)
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::ErrorKind;
+
+    #[test]
+    fn retirement_blocks_sampling_restart_but_preserves_stop_and_destroy() {
+        use crate::driver::test_driver::TestDriver;
+        use crate::session::DriverContextLifetime;
+        use crate::topology::EndpointKind;
+        use std::sync::{Arc, Mutex};
+
+        struct NativeSampling(Arc<Mutex<Vec<&'static str>>>);
+        impl PcSamplingResource for NativeSampling {
+            fn start(&mut self) -> Result<(), Error> {
+                self.0.lock().unwrap().push("start");
+                Ok(())
+            }
+            fn stop(&mut self) -> Result<(), Error> {
+                self.0.lock().unwrap().push("stop");
+                Ok(())
+            }
+            fn destroy(&mut self) -> Result<(), Error> {
+                self.0.lock().unwrap().push("destroy");
+                Ok(())
+            }
+            fn relinquish_adopted(&mut self) -> Result<(), Error> {
+                self.0.lock().unwrap().push("relinquish");
+                Ok(())
+            }
+        }
+
+        let driver = Shared::new(TestDriver::new(
+            [1; 16],
+            EndpointKind::Npu,
+            DriverContextLifetime::Session,
+        ))
+        .unwrap();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mut sampling = DriverPcSampling::new(
+            driver.clone(),
+            Owned::new(NativeSampling(calls.clone())).unwrap(),
+        );
+        sampling.start().unwrap();
+        driver.admission().begin_retirement().unwrap();
+        assert_eq!(sampling.start().unwrap_err().kind(), ErrorKind::Unsupported);
+        sampling.stop().unwrap();
+        sampling.destroy().unwrap();
+        assert_eq!(*calls.lock().unwrap(), ["start", "stop", "destroy"]);
+    }
+
+    #[test]
+    fn correlation_uses_primary_host_domain_without_an_auxiliary_clock() {
+        let sample = ClockCounters {
+            gpu: 250,
+            host: 1000,
+            system: None,
+            gpu_info: crate::host::clock::ClockInfo {
+                frequency_hz: 100_000_000,
+                counter_bit_count: 8,
+            },
+        };
+        assert_eq!(sample.to_host(3).unwrap(), 1090);
+        assert_eq!(sample.to_host(240).unwrap(), 900);
+        assert!(sample.to_host(122).is_err());
+        assert!(
+            ClockCounters {
+                host: u64::MAX,
+                ..sample
+            }
+            .to_host(3)
+            .is_err()
+        );
+        assert!(ClockCounters { host: 0, ..sample }.to_host(240).is_err());
     }
 }

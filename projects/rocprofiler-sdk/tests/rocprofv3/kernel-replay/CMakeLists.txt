@@ -12,18 +12,11 @@ find_package(rocprofiler-sdk REQUIRED)
 find_package(Python3 REQUIRED)
 
 set(rocprofv3-generate-env
-    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
     "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     )
 
-set(rocprofv3-validate-env
-    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
-    "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
-    )
-
-rocprofiler_configure_pytest_files(
-    CONFIG pytest.ini COPY conftest.py validate.py validate_perf.py
-                           test_kernel_replay_cli.py)
+rocprofiler_configure_pytest_files(COPY test_kernel_replay_cli.py
+                                        test_kernel_replay_validate.py validate.py)
 
 # Unit test for the rocprofv3 kernel-replay CLI logic. Imports rocprofv3.py directly, so
 # it needs no GPU, no application run and no fixtures -- it guards which services replay
@@ -40,210 +33,282 @@ set_tests_properties(
     PROPERTIES TIMEOUT 60 LABELS "unit-tests;kernel-replay" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
+# Unit test for validate.py: feeds it synthetic replay JSON for gfx1201, gfx1250, gfx942
+# and mixed agents, and checks which common sanity counters it skips. Needs no GPU.
+add_test(NAME rocprofv3-test-kernel-replay-validate-unit
+         COMMAND ${Python3_EXECUTABLE}
+                 ${CMAKE_CURRENT_BINARY_DIR}/test_kernel_replay_validate.py)
+
+set_tests_properties(
+    rocprofv3-test-kernel-replay-validate-unit
+    PROPERTIES TIMEOUT 60 LABELS "unit-tests;kernel-replay" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
 # Collect counters via in-process kernel replay. The number of --pmc groups drives the
 # number of replay passes (one batch per pass), with device memory restored between
 # passes. Each group shares SQ_WAVES and SQ_INSTS_VALU (the sanity counters that must be
 # constant across a kernel's passes) plus one unique counter (so the batches are genuinely
 # distinct). The kernel-replay app verifies its own results, so a broken restore fails
-# this generate step.
+# this generate step. The execute helper serializes GPU work so other tests cannot
+# contaminate the per-pass counters or performance baseline.
 set(REPLAY_PASSES 5)
 
-add_test(
-    NAME rocprofv3-test-kernel-replay-generate
+# The untracked-memory app issues three host-pinned saxpy launches and, when supported,
+# three fine-grained device launches. Each runs once despite two --pmc groups. The app
+# records the expected launch counts after checking device support and application
+# results.
+set(REPLAY_UNTRACKED_PASS_COUNTS_FILE
+    "${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-untracked-memory-pass-counts.txt")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-kernel-replay-generate
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU GRBM_COUNT
         --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --pmc SQ_WAVES SQ_INSTS_VALU
         SQ_INSTS_SALU --pmc SQ_WAVES SQ_INSTS_VALU SQ_INSTS_SMEM --pmc SQ_WAVES
         SQ_INSTS_VALU SQ_INSTS_LDS --replay-mode kernel --kernel-replay-beta-enabled
-        --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay -o out --
-        $<TARGET_FILE:kernel-replay> 1048576 1)
-
-set_tests_properties(
-    rocprofv3-test-kernel-replay-generate
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;kernel-replay"
-               ENVIRONMENT
-               "${rocprofv3-generate-env}"
-               RESOURCE_LOCK
-               rocprofiler_kernel_replay
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               FIXTURES_SETUP
-               rocprofv3-test-kernel-replay-data)
+        --output-format csv json rocpd -d ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay -o out
+        -- $<TARGET_FILE:kernel-replay> 1048576 1
+    DEPENDS kernel-replay
+    TIMEOUT 120
+    LABELS "kernel-replay"
+    ENVIRONMENT "${rocprofv3-generate-env}"
+    FIXTURES_SETUP rocprofv3-test-kernel-replay-data)
 
 # Validate replay structure: each dispatch replayed REPLAY_PASSES times, the shared sanity
-# counters (SQ_WAVES, SQ_INSTS_VALU) are constant across a dispatch's passes, and the
-# kernels are present.
-add_test(
-    NAME rocprofv3-test-kernel-replay-validate
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay/out_results.json --passes
-        ${REPLAY_PASSES} --common-counters SQ_WAVES SQ_INSTS_VALU)
-
-set_tests_properties(
-    rocprofv3-test-kernel-replay-validate
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;kernel-replay"
-               ENVIRONMENT
-               "${rocprofv3-validate-env}"
-               FIXTURES_REQUIRED
-               rocprofv3-test-kernel-replay-data
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+# counters (SQ_WAVES, SQ_INSTS_VALU) are constant across a dispatch's passes, the kernels
+# are present, and rocpd's counters_collection averages the shared counters over the
+# passes rather than summing them. A sanity counter the agent does not report is skipped.
+# A counter that reads zero for every dispatch is skipped only on gfx1200 and gfx1201; on
+# other targets, including gfx1250, that is a failure. The validator stops at the first
+# failure (-x).
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-kernel-replay-validate BUNDLE_TESTS
+    TEST_PATHS validate.py
+    COPY conftest.py
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay/out_results.json
+         --passes
+         ${REPLAY_PASSES}
+         --common-counters
+         SQ_WAVES
+         SQ_INSTS_VALU
+         --rocpd-input
+         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay/out_results.db
+         -x
+    TIMEOUT 120
+    LABELS "kernel-replay"
+    PYTHON_PATH
+        "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    FIXTURES_REQUIRED rocprofv3-test-kernel-replay-data)
 
 # Regression test: replay must ignore ROCPROF_COUNTER_GROUPS_INTERVAL (which only paces
 # the non-replay round-robin). With it set to 2, a replay path that reused that rotation
 # would skip/duplicate groups. replay must still collect every group exactly once per
 # dispatch.
-add_test(
-    NAME rocprofv3-test-kernel-replay-interval-generate
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-kernel-replay-interval-generate
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU GRBM_COUNT
         --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --pmc SQ_WAVES SQ_INSTS_VALU
         SQ_INSTS_SALU --pmc SQ_WAVES SQ_INSTS_VALU SQ_INSTS_SMEM --pmc SQ_WAVES
         SQ_INSTS_VALU SQ_INSTS_LDS --replay-mode kernel --kernel-replay-beta-enabled
-        --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-interval -o
-        out -- $<TARGET_FILE:kernel-replay> 1048576 1)
+        --output-format csv json rocpd -d
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-interval -o out --
+        $<TARGET_FILE:kernel-replay> 1048576 1
+    DEPENDS kernel-replay
+    TIMEOUT 120
+    LABELS "kernel-replay"
+    ENVIRONMENT "${rocprofv3-generate-env};ROCPROF_COUNTER_GROUPS_INTERVAL=2"
+    FIXTURES_SETUP rocprofv3-test-kernel-replay-interval-data)
 
-set_tests_properties(
-    rocprofv3-test-kernel-replay-interval-generate
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;kernel-replay"
-               ENVIRONMENT
-               "${rocprofv3-generate-env};ROCPROF_COUNTER_GROUPS_INTERVAL=2"
-               RESOURCE_LOCK
-               rocprofiler_kernel_replay
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               FIXTURES_SETUP
-               rocprofv3-test-kernel-replay-interval-data)
-
-add_test(
-    NAME rocprofv3-test-kernel-replay-interval-validate
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-interval/out_results.json --passes
-        ${REPLAY_PASSES} --common-counters SQ_WAVES SQ_INSTS_VALU)
-
-set_tests_properties(
-    rocprofv3-test-kernel-replay-interval-validate
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;kernel-replay"
-               ENVIRONMENT
-               "${rocprofv3-validate-env}"
-               FIXTURES_REQUIRED
-               rocprofv3-test-kernel-replay-interval-data
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-kernel-replay-interval-validate BUNDLE_TESTS
+    TEST_PATHS validate.py
+    COPY conftest.py
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-interval/out_results.json
+         --passes
+         ${REPLAY_PASSES}
+         --common-counters
+         SQ_WAVES
+         SQ_INSTS_VALU
+         --rocpd-input
+         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-interval/out_results.db
+         -x
+    TIMEOUT 120
+    LABELS "kernel-replay"
+    PYTHON_PATH
+        "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    FIXTURES_REQUIRED rocprofv3-test-kernel-replay-interval-data)
 
 # Regression test for AIPROFSDK-1130: --kernel-iteration-range selects logical launches,
 # so replay passes must not consume iterations. With four launches, range 2-3, and two
 # counter groups, exactly two logical dispatches must survive and each must carry passes
 # [0, 1]. This exercises rejecting launch 1, accepting launches 2 and 3, rejecting launch
 # 4, and resetting the cached decision between dispatches.
-add_test(
-    NAME rocprofv3-test-kernel-replay-iteration-range-generate
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-kernel-replay-iteration-range-generate
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU GRBM_COUNT
         --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --replay-mode kernel
-        --kernel-replay-beta-enabled --kernel-include-regex saxpy
-        --kernel-iteration-range "2-3" --output-format json -d
+        --kernel-replay-beta-enabled --kernel-include-regex saxpy --kernel-iteration-range
+        "2-3" --kernel-trace --output-format json -d
         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-iteration-range -o out --
-        $<TARGET_FILE:kernel-replay> 65536 4)
-
-set_tests_properties(
-    rocprofv3-test-kernel-replay-iteration-range-generate
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;kernel-replay"
-               ENVIRONMENT
-               "${rocprofv3-generate-env}"
-               RESOURCE_LOCK
-               rocprofiler_kernel_replay
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               FIXTURES_SETUP
-               rocprofv3-test-kernel-replay-iteration-range-data)
+        $<TARGET_FILE:kernel-replay> 65536 4
+    DEPENDS kernel-replay
+    TIMEOUT 120
+    LABELS "kernel-replay"
+    ENVIRONMENT "${rocprofv3-generate-env}"
+    FIXTURES_SETUP rocprofv3-test-kernel-replay-iteration-range-data)
 
 # Validate the exact ticket invariant: two selected logical dispatches, each carrying two
-# distinct counter-group passes. Numeric dispatch IDs are deliberately not pinned.
-add_test(
-    NAME rocprofv3-test-kernel-replay-iteration-range-validate
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-iteration-range/out_results.json
-        --passes 2 --expected-dispatch-count 2 --common-counters SQ_WAVES SQ_INSTS_VALU
-        -k
-        "dispatch_id_constant_across_replay_passes or expected_logical_dispatch_count or each_pass_collects_distinct_batch"
-    )
+# distinct counter-group passes, which are the second and third saxpy launches. Numeric
+# dispatch IDs are deliberately not pinned.
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-kernel-replay-iteration-range-validate BUNDLE_TESTS
+    TEST_PATHS validate.py
+    COPY conftest.py
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-iteration-range/out_results.json
+         --passes
+         2
+         --expected-dispatch-count
+         2
+         --common-counters
+         SQ_WAVES
+         SQ_INSTS_VALU
+         --selected-kernel
+         saxpy
+         --selected-launches
+         2
+         3
+         -k
+         "dispatch_id_constant_across_replay_passes or expected_logical_dispatch_count or each_pass_collects_distinct_batch or unselected_dispatches_run_once or iteration_range_selects_launches"
+    TIMEOUT 120
+    LABELS "kernel-replay"
+    PYTHON_PATH
+        "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    FIXTURES_REQUIRED rocprofv3-test-kernel-replay-iteration-range-data)
 
-set_tests_properties(
-    rocprofv3-test-kernel-replay-iteration-range-validate
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;kernel-replay"
-               ENVIRONMENT
-               "${rocprofv3-validate-env}"
-               FIXTURES_REQUIRED
-               rocprofv3-test-kernel-replay-iteration-range-data
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+# Under --selected-regions only the launches inside a region are profiled, so only they
+# count toward --kernel-iteration-range, with replay as without it. The application
+# launches saxpy 3 times before the region, 5 times inside it and twice after it, so range
+# 2-3 must replay the second and third launches inside the region.
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-kernel-replay-selected-regions-generate
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --selected-regions --pmc SQ_WAVES
+        SQ_INSTS_VALU GRBM_COUNT --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE
+        --replay-mode kernel --kernel-replay-beta-enabled --kernel-include-regex saxpy
+        --kernel-iteration-range "2-3" --kernel-trace --output-format json -d
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-selected-regions -o out --
+        $<TARGET_FILE:kernel-replay-regions> 65536 3 5 2
+    DEPENDS kernel-replay-regions
+    TIMEOUT 120
+    LABELS "kernel-replay;selected-regions"
+    ENVIRONMENT "${rocprofv3-generate-env}"
+    FIXTURES_SETUP rocprofv3-test-kernel-replay-selected-regions-data)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-kernel-replay-selected-regions-validate BUNDLE_TESTS
+    TEST_PATHS validate.py
+    COPY conftest.py
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-selected-regions/out_results.json
+         --passes
+         2
+         --expected-dispatch-count
+         2
+         --common-counters
+         SQ_WAVES
+         SQ_INSTS_VALU
+         --selected-kernel
+         saxpy
+         --selected-launches
+         2
+         3
+         -k
+         "dispatch_id_constant_across_replay_passes or expected_logical_dispatch_count or each_pass_collects_distinct_batch or unselected_dispatches_run_once or iteration_range_selects_launches"
+    TIMEOUT 120
+    LABELS "kernel-replay;selected-regions"
+    PYTHON_PATH
+        "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    FIXTURES_REQUIRED rocprofv3-test-kernel-replay-selected-regions-data)
+
+# The app checks that host-pinned and fine-grained device saxpy launches each apply their
+# update once. Pass counts also verify replay was declined: correct output alone cannot
+# distinguish a run-once dispatch from one replayed with restored inputs. Numeric dispatch
+# ids are not pinned.
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-kernel-replay-untracked-memory-generate
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU GRBM_COUNT
+        --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --replay-mode kernel
+        --kernel-include-regex saxpy --kernel-replay-beta-enabled --output-format json -d
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-untracked-memory -o out --
+        $<TARGET_FILE:kernel-replay> 65536 1 untracked
+        ${REPLAY_UNTRACKED_PASS_COUNTS_FILE}
+    DEPENDS kernel-replay
+    TIMEOUT 120
+    LABELS "kernel-replay"
+    ENVIRONMENT "${rocprofv3-generate-env}"
+    FIXTURES_SETUP rocprofv3-test-kernel-replay-untracked-memory-data)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-kernel-replay-untracked-memory-validate BUNDLE_TESTS
+    TEST_PATHS validate.py
+    COPY conftest.py
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-untracked-memory/out_results.json
+         --passes
+         2
+         --expected-pass-counts-file
+         ${REPLAY_UNTRACKED_PASS_COUNTS_FILE}
+         --common-counters
+         SQ_WAVES
+         SQ_INSTS_VALU
+         -k
+         "pass_counts_per_dispatch"
+    TIMEOUT 120
+    LABELS "kernel-replay"
+    PYTHON_PATH
+        "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    FIXTURES_REQUIRED rocprofv3-test-kernel-replay-untracked-memory-data)
 
 # One-pass baseline for performance scaling checks (same workload, single --pmc group).
-add_test(
-    NAME rocprofv3-test-kernel-replay-baseline-generate
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-kernel-replay-baseline-generate
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU
         --replay-mode kernel --kernel-replay-beta-enabled --output-format json -d
         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-baseline -o out --
-        $<TARGET_FILE:kernel-replay> 1048576 1)
-
-set_tests_properties(
-    rocprofv3-test-kernel-replay-baseline-generate
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;kernel-replay;kernel-replay-perf"
-               ENVIRONMENT
-               "${rocprofv3-generate-env}"
-               RESOURCE_LOCK
-               rocprofiler_kernel_replay
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               FIXTURES_SETUP
-               rocprofv3-test-kernel-replay-perf-data)
+        $<TARGET_FILE:kernel-replay> 1048576 1
+    DEPENDS kernel-replay
+    TIMEOUT 120
+    LABELS "kernel-replay;kernel-replay-perf"
+    ENVIRONMENT "${rocprofv3-generate-env}"
+    FIXTURES_SETUP rocprofv3-test-kernel-replay-perf-data)
 
 # Performance regression: total tool duration and per-pass spans must stay within the
 # Figure 5 cost-model ceiling; 5-pass run must not blow up vs the 1-pass baseline.
-add_test(
-    NAME rocprofv3-test-kernel-replay-perf-validate
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate_perf.py --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay/out_results.json --passes
-        ${REPLAY_PASSES} --n-elems 1048576 --baseline-json
-        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-baseline/out_results.json
-        --max-scaling-ratio 10.0)
-
-set_tests_properties(
-    rocprofv3-test-kernel-replay-perf-validate
-    PROPERTIES TIMEOUT
-               60
-               LABELS
-               "integration-tests;kernel-replay;kernel-replay-perf"
-               ENVIRONMENT
-               "${rocprofv3-validate-env}"
-               FIXTURES_REQUIRED
-               "rocprofv3-test-kernel-replay-data;rocprofv3-test-kernel-replay-perf-data"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-kernel-replay-perf-validate BUNDLE_TESTS
+    TEST_PATHS validate_perf.py
+    COPY conftest.py
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay/out_results.json
+         --passes
+         ${REPLAY_PASSES}
+         --n-elems
+         1048576
+         --baseline-json
+         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-baseline/out_results.json
+         --max-scaling-ratio
+         10.0
+    TIMEOUT 60
+    LABELS "kernel-replay;kernel-replay-perf"
+    PYTHON_PATH
+        "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    FIXTURES_REQUIRED rocprofv3-test-kernel-replay-data
+                      rocprofv3-test-kernel-replay-perf-data)

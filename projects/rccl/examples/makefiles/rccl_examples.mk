@@ -61,5 +61,11 @@ else
 	$(CXX) $(CXXFLAGS) -x hip $(INCLUDES) -c $< -o $@
 endif
 
+# Quoted #includes in hipified sources search HIPIFY_DIR first, so this HIP copy
+# shadows the CUDA header. Needs a vpath to the header's directory.
+$(HIPIFY_DIR)/%.cuh: %.cuh
+	@mkdir -p $(dir $@)
+	$(HIPIFY) -experimental -quiet-warnings $< -o $@.tmp && mv -f $@.tmp $@
+
 # Keep the hipified source so it is not deleted as a make intermediate.
-.PRECIOUS: $(HIPIFY_DIR)/%.cu.cpp
+.PRECIOUS: $(HIPIFY_DIR)/%.cu.cpp $(HIPIFY_DIR)/%.cuh

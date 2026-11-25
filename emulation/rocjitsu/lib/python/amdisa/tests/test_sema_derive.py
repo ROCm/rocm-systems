@@ -25,14 +25,13 @@ from amdisa.codegen.execute.sema_lower import (
     RegClass,
     lower_sema_block,
 )
-from amdisa.codegen.execute.packed import gen_pk_binop, gen_pk_mov_b32, gen_pk_ternary
+from amdisa.codegen.execute.packed import gen_pk_binop, gen_pk_ternary
 from amdisa.codegen.execute.vector_special import (
-    gen_cvt_scalef32,
     gen_cvt_fp8,
     gen_vector_cvt_pk,
-    gen_vector_cvt_scale,
 )
 from amdisa.sema_fingerprint import fingerprint
+from amdisa.sema_properties import InstructionProperty, derive_properties
 
 
 class _FakeSem:
@@ -773,7 +772,7 @@ class TestDeriveScalarSplitBarrier:
             ('S_BARRIER_SIGNAL_ISFIRST', 'scalar_barrier_signal', 'signal_isfirst'),
             ('S_BARRIER_INIT', 'scalar_barrier_init', None),
             ('S_BARRIER_JOIN', 'scalar_barrier_join', None),
-            ('S_WAKEUP_BARRIER', 'true_nop', None),
+            ('S_WAKEUP_BARRIER', 'scalar_barrier_wakeup', None),
         ],
     )
     def test_named_barrier_ops_derive_execution_model(
@@ -835,52 +834,80 @@ class TestDeriveVectorUnary:
             assert len(cpp) > 0
 
     @pytest.mark.parametrize(
-        ('name', 'enc', 'op', 'scale'),
+        ('dtype', 'mode'), [('F16', 'f16_f64'), ('F32', 'f32'), ('F64', 'f16_f64')]
+    )
+    def test_fract_writes_the_shared_raw_result(self, dtype, mode):
+        sem = derive_semantics(f'V_FRACT_{dtype}', 'ENC_VOP1')
+        cpp = lower_sema_block(derive_sema_block(sem))
+        policy = (
+            f'amdgpu::fract::Policy::make(wf.fp_denorm_mode_{mode}(), '
+            f'wf.fp_round_mode_{mode}())'
+        )
+        assert f'const auto fract_policy = {policy};' in cpp
+        assert 'std::floor' not in cpp and 'f32_to_f16' not in cpp
+        # Result bits are written directly; an SDWA store applies OMOD to them.
+        assert f'amdgpu::fract::evaluate<amdgpu::fp_format::{dtype}>(' in cpp
+        assert 'sdwa::output_modifier' not in cpp
+
+    @pytest.mark.parametrize('dtype', ['F16', 'F32', 'F64'])
+    def test_fract_vop3_applies_shared_modifiers(self, dtype):
+        sem = derive_semantics(f'V_FRACT_{dtype}', 'ENC_VOP3')
+        fields = frozenset({'abs', 'neg', 'clamp', 'omod'})
+        cpp = lower_sema_block(
+            enrich_block(derive_sema_block(sem), enc_field_names=fields)
+        )
+        assert f'amdgpu::floating_operation::apply<amdgpu::fp_format::{dtype}>(' in cpp
+        assert (
+            'amdgpu::floating_operation::SourceModifiers{inst_.abs & 1u, inst_.neg & 1u}'
+            in cpp
+        )
+        assert (
+            f'amdgpu::output_modifier_policy<amdgpu::fp_format::{dtype}>'
+            '(wf, inst_.omod, inst_.clamp)' in cpp
+        )
+        assert 'apply_omod' not in cpp and 'clamp_floating_result' not in cpp
+
+    @pytest.mark.parametrize(
+        ('dtype', 'operation'),
         [
-            ('V_CVT_NORM_I16_F16', 'ENC_VOP1', 'cvt_norm_i16_f16', '32767.0'),
-            ('V_CVT_NORM_I16_F16', 'ENC_VOP3', 'cvt_norm_i16_f16', '32767.0'),
-            ('V_CVT_NORM_U16_F16', 'ENC_VOP1', 'cvt_norm_u16_f16', '65535.0'),
-            ('V_CVT_NORM_U16_F16', 'ENC_VOP3', 'cvt_norm_u16_f16', '65535.0'),
+            ('F16', 'Operation<amdgpu::fp_format::F16>'),
+            ('F32', 'Operation<amdgpu::fp_format::F32>'),
+            ('F64', 'Operation<amdgpu::fp_format::F64, 32>'),
         ],
     )
-    def test_cvt_norm_i16_u16_f16_lowers_to_scaled_saturating_convert(
-        self, name, enc, op, scale
-    ):
+    def test_ldexp_vop3_modifies_only_the_value(self, dtype, operation):
+        sem = derive_semantics(f'V_LDEXP_{dtype}', 'ENC_VOP3')
+        fields = frozenset({'abs', 'neg', 'clamp', 'omod'})
+        cpp = lower_sema_block(
+            enrich_block(derive_sema_block(sem), enc_field_names=fields)
+        )
+        assert f'amdgpu::floating_operation::apply<amdgpu::fp_format::{dtype}>(' in cpp
+        assert f'amdgpu::ldexp::{operation}{{ldexp_policy}}' in cpp
+        assert (
+            'amdgpu::floating_operation::SourceModifiers{inst_.abs & 1u, inst_.neg & 1u}'
+            in cpp
+        )
+        assert (
+            f'amdgpu::output_modifier_policy<amdgpu::fp_format::{dtype}>'
+            '(wf, inst_.omod, inst_.clamp)' in cpp
+        )
+        assert 'ldexp_float' not in cpp and 'div_apply_omod' not in cpp
+
+    @pytest.mark.parametrize(
+        'name, op',
+        [
+            ('V_CVT_NORM_I16_F16', 'cvt_norm_i16_f16'),
+            ('V_CVT_NORM_U16_F16', 'cvt_norm_u16_f16'),
+        ],
+    )
+    @pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
+    def test_cvt_norm_f16_retains_semantic_metadata(self, name, op, enc):
         sem = derive_semantics(name, enc)
         assert sem is not None
         assert sem.semantic_class == 'vector_unary'
         assert sem.operation == op
         assert sem.data_type == 'f16'
-
-        block = derive_sema_block(sem)
-        cpp = lower_sema_block(block)
-        assert op not in cpp
-        assert 'util::f16_to_f32' in cpp
-        assert 'std::isnan' in cpp
-        assert 'std::clamp' in cpp
-        assert scale in cpp
-        assert 'util::rndne_scalar' in cpp
-        assert 'static_cast<double>(s)' in cpp
-        assert '-32768' not in cpp
-
-    @pytest.mark.parametrize('suffix', ['I16', 'U16'])
-    @pytest.mark.parametrize('has_abs', [False, True])
-    def test_cvt_norm_i16_u16_f16_modifiers_precede_rounding(self, suffix, has_abs):
-        sem = derive_semantics(f'V_CVT_NORM_{suffix}_F16', 'ENC_VOP3')
-        # The generator withholds CLAMP/OMOD from integer results.
-        fields = {'neg'}
-        if has_abs:
-            fields.add('abs')
-        block = enrich_block(derive_sema_block(sem), enc_field_names=frozenset(fields))
-        cpp = lower_sema_block(block)
-        assert cpp.index('util::f16_to_f32') < cpp.index(
-            'source_modifier::apply_to_float(sv'
-        )
-        assert cpp.index('source_modifier::apply_to_float(sv') < cpp.index(
-            'util::rndne_scalar'
-        )
-        assert ('inst_.abs' in cpp) == has_abs
-        assert 'inst_.neg' in cpp
+        assert derive_sema_block(sem) is not None
 
     @pytest.mark.parametrize('suffix', ['I16', 'U16', 'F32'])
     @pytest.mark.parametrize('has_abs', [False, True])
@@ -890,6 +917,10 @@ class TestDeriveVectorUnary:
         if has_abs:
             fields.add('abs')
         block = enrich_block(derive_sema_block(sem), enc_field_names=frozenset(fields))
+        if suffix == 'F32':
+            with pytest.raises(ValueError, match='require rj-arith lowering'):
+                lower_sema_block(block)
+            return
         cpp = lower_sema_block(block)
         # F32_F16 flushes the raw half before widening it; the modifiers apply
         # to the widened value. The integer forms keep their own source read.
@@ -915,6 +946,45 @@ class TestDeriveVectorUnary:
             assert 'inst_.omod' not in cpp
             assert 'inst_.clamp' not in cpp
             assert cpp.index(modifier) < cpp.index('std::isnan(s)')
+
+    def test_cvt_f64_f32_modifiers_reach_the_shared_conversion(self):
+        sem = derive_semantics('V_CVT_F64_F32', 'ENC_VOP3')
+        block = enrich_block(
+            derive_sema_block(sem),
+            enc_field_names=frozenset({'abs', 'neg', 'omod', 'clamp'}),
+        )
+        cpp = lower_sema_block(block)
+
+        # The stage object carries all four fields; see shared/conversion.h.
+        assert (
+            'amdgpu::conversion_to_float<amdgpu::fp_format::F32, '
+            'amdgpu::fp_format::F64>(wf, inst_.abs, inst_.neg, inst_.omod, '
+            'inst_.clamp)' in cpp
+        )
+        assert 'static_cast<double>' not in cpp
+
+    @pytest.mark.parametrize('suffix', ['I32', 'U32'])
+    @pytest.mark.parametrize('has_abs', [False, True])
+    def test_cvt_i32_u32_f64_modifiers_precede_conversion(self, suffix, has_abs):
+        sem = derive_semantics(f'V_CVT_{suffix}_F64', 'ENC_VOP3')
+        fields = {'neg'}
+        if has_abs:
+            fields.add('abs')
+        block = enrich_block(derive_sema_block(sem), enc_field_names=frozenset(fields))
+        cpp = lower_sema_block(block)
+        modifier = 'source_modifier::apply_to_float(sv, 0'
+        assert 'double sv = std::bit_cast<double>' in cpp
+        assert cpp.index(modifier) < cpp.index('std::isnan(s)')
+        assert ('inst_.abs' in cpp) == has_abs
+        assert 'inst_.neg' in cpp
+
+    @pytest.mark.parametrize('name', ['V_CVT_FLOOR_I32_F32', 'V_CVT_NEAREST_I32_F32'])
+    @pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
+    def test_cvt_floor_nearest_require_arithmetic_lowering(self, name, enc):
+        # All target profiles use rj-arith; do not regenerate retired C++ helpers.
+        block = derive_sema_block(derive_semantics(name, enc))
+        with pytest.raises(ValueError, match='require rj-arith lowering'):
+            lower_sema_block(block)
 
     @pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
     def test_cos_bf16_lowers_through_shared_transcendental(self, enc):
@@ -967,7 +1037,7 @@ class TestDeriveVectorUnary:
         assert 'UnimplementedInst' not in cpp
 
     @pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
-    def test_cvt_off_f32_i4_lowers_to_signed_nibble_table(self, enc):
+    def test_cvt_off_f32_i4_requires_arith_lowering(self, enc):
         sem = derive_semantics('V_CVT_OFF_F32_I4', enc)
         assert sem is not None
         assert sem.semantic_class == 'vector_unary'
@@ -975,11 +1045,10 @@ class TestDeriveVectorUnary:
         assert sem.data_type == 'f32'
 
         block = derive_sema_block(sem)
-        cpp = lower_sema_block(block)
-        assert '& 0xfu' in cpp
-        assert 'nibble -= 16' in cpp
-        assert '* 0.0625f' in cpp
-        assert 'cvt_off_f32_i4(' not in cpp
+        with pytest.raises(
+            ValueError, match='Byte conversions require rj-arith lowering'
+        ):
+            lower_sema_block(block)
 
     @pytest.mark.parametrize(
         ('name', 'helper'),
@@ -1116,6 +1185,16 @@ class TestDeriveVectorUnary:
         assert ('util::f32_to_f16_mode(lo, wf.fp16_ovfl())' in cpp) == needs_f16
         assert ('util::f32_to_f16_mode(hi, wf.fp16_ovfl())' in cpp) == needs_f16
         assert 'src1' not in cpp
+        if not needs_f16:
+            # RDNA4 decodes F32 results' OCP bytes through shared/conversion.h.
+            rdna4 = gen_vector_cvt_pk(
+                ['vdst'], ['src0'], sem.semantic_class, sem.operation, arch_name='rdna4'
+            )
+            layout = 'Fp8' if op.endswith('fp8') else 'Bf8'
+            decode = f'amdgpu::conversion::decode_fp8<amdgpu::conversion::{layout}>'
+            assert f'{decode}(half)' in rdna4
+            assert f'{decode}(half >> 8)' in rdna4
+            assert helper not in rdna4
 
     @pytest.mark.parametrize(
         ('name', 'op', 'helper', 'needs_src1', 'needs_f16', 'uses_fp16_ovfl'),
@@ -1168,6 +1247,15 @@ class TestDeriveVectorUnary:
             assert f'{helper}(s0, wf.fp16_ovfl())' in cpp
             assert f'{helper}(s1, wf.fp16_ovfl())' in cpp
             assert 'wf.fp16_ovfl()' in cpp
+            # RDNA4 F32 sources use the shared OCP stages, which read FP16_OVFL.
+            rdna4 = gen_vector_cvt_pk(
+                ['vdst'], src, sem.semantic_class, sem.operation, arch_name='rdna4'
+            )
+            layout = 'Fp8' if op.startswith('fp8') else 'Bf8'
+            stages = f'amdgpu::conversion_to_fp8<amdgpu::conversion::{layout}>(wf)'
+            assert f'const auto conversion = {stages};' in rdna4
+            assert 'uint32_t packed = conversion(s0, s1);' in rdna4
+            assert helper not in rdna4
         else:
             assert f'{helper}(s0)' in cpp
             assert f'{helper}(s1)' in cpp
@@ -1186,11 +1274,15 @@ class TestDeriveVectorUnary:
             'fp8_f32',
             opsel='inst_.opsel',
             fp8_format_select='inst_.clamp',
+            arch_name='cdna5',
         )
 
         assert 'inst_.clamp' in cpp
-        assert 'util::f32_to_fp8_e5m3_rne_mode(s0, wf.fp16_ovfl())' in cpp
-        assert 'util::f32_to_fp8_e4m3_rne_mode(s0, wf.fp16_ovfl())' in cpp
+        assert (
+            'util::f32_to_fp8_e5m3_rne_mode(std::bit_cast<float>(s0), wf.fp16_ovfl())'
+            in cpp
+        )
+        assert 'packed = conversion(s0, s1);' in cpp
         assert 'inst_.opsel' in cpp
 
     def test_gfx1250_cvt_pk_fp8_f16_clamp_selects_e5m3_without_fp16_ovfl(self):
@@ -1215,6 +1307,7 @@ class TestDeriveVectorUnary:
             dst_ops=['vdst'],
             src_ops=['src0', 'src1'],
             is_vop3=True,
+            has_abs=True,
             enc_field_names={'opsel'},
             encoding_map=None,
             enc_name='',
@@ -1224,8 +1317,11 @@ class TestDeriveVectorUnary:
         cpp = gen_cvt_fp8(ctx)
 
         assert 'inst_.clamp' in cpp
-        assert 'util::f32_to_fp8_e5m3_sr_mode(s0, seed, wf.fp16_ovfl())' in cpp
-        assert 'util::f32_to_fp8_e4m3_sr_mode(s0, seed, wf.fp16_ovfl())' in cpp
+        assert (
+            'util::f32_to_fp8_e5m3_sr_mode(std::bit_cast<float>(s0), seed, wf.fp16_ovfl())'
+            in cpp
+        )
+        assert 'conversion.stochastic(s0, seed)' in cpp
         assert 'inst_.opsel' in cpp
 
     def test_gfx1250_cvt_sr_fp8_f16_clamp_selects_e5m3_encoder(self):
@@ -1280,31 +1376,30 @@ class TestDeriveVectorUnary:
         assert 'util::f32_to_f16_mode(s0, wf.fp16_ovfl())' in cpp
         assert 'util::f32_to_f16_mode(s1, wf.fp16_ovfl())' in cpp
 
-    def test_cvt_f16_f32_lowering_threads_fp16_ovfl(self):
+    def test_cvt_f16_f32_lowers_to_shared_conversion(self):
         sem = derive_semantics('V_CVT_F16_F32', 'ENC_VOP3')
         assert sem is not None
         assert sem.operation == 'cvt'
         assert sem.data_type == 'f16_f32'
 
         block = derive_sema_block(sem)
-        cpp = lower_sema_block(block)
-        assert 'util::f32_to_f16_mode' in cpp
-        assert 'wf.fp16_ovfl()' in cpp
-        assert 'util::f32_to_f16(std::bit_cast<float>' not in cpp
+        with pytest.raises(ValueError, match='require rj-arith lowering'):
+            lower_sema_block(block)
 
-    def test_cvt_sr_pk_f16_bf16_f32_threads_fp16_ovfl(self):
-        for name, helper in (
-            ('V_CVT_SR_PK_F16_F32', 'util::f32_to_f16_sr_mode'),
-            ('V_CVT_SR_PK_BF16_F32', 'util::f32_to_bf16_sr_mode'),
-        ):
+    def test_cvt_sr_pk_f16_bf16_f32_splits_seed_and_threads_fp16_ovfl(self):
+        for name in ('V_CVT_SR_PK_F16_F32', 'V_CVT_SR_PK_BF16_F32'):
             sem = derive_semantics(name, 'ENC_VOP3')
             assert sem is not None
 
             cpp = gen_vector_cvt_pk(
                 ['vdst'], ['src0', 'src1', 'src2'], sem.semantic_class, sem.operation
             )
-            assert f'{helper}(s0, seed_lo, wf.fp16_ovfl())' in cpp
-            assert f'{helper}(s1, seed_hi, wf.fp16_ovfl())' in cpp
+            helper = f'amdgpu::fp_mode::{name.lower().removeprefix("v_")}'
+            assert f'{helper}(s0, static_cast<uint16_t>(seed), wf.fp16_ovfl())' in cpp
+            assert (
+                f'{helper}(s1, static_cast<uint16_t>(seed >> 16), wf.fp16_ovfl())'
+                in cpp
+            )
 
     def test_cvt_sr_f16_bf16_f32_reads_seed_and_threads_fp16_ovfl(self):
         for name, helper in (
@@ -1326,257 +1421,64 @@ class TestDeriveVectorUnary:
             assert 'write_lane(vdst, lane, static_cast<uint32_t>' not in cpp
 
     @pytest.mark.parametrize(
-        ('name', 'op', 'decode_helper', 'encode_helper'),
+        ('name', 'op'),
         [
-            (
-                'V_CVT_SCALE_PK16_BF16_BF6',
-                'unpack_pk16_bf16_bf6',
-                'util::bf6_e3m2_to_f32',
-                'util::f32_to_bf16_rne_mode',
-            ),
-            (
-                'V_CVT_SCALE_PK8_F32_FP4',
-                'unpack_pk8_f32_fp4',
-                'util::fp4_e2m1_to_f32',
-                'std::bit_cast<uint32_t>',
-            ),
+            ('V_CVT_SCALE_PK16_BF16_BF6', 'unpack_pk16_bf16_bf6'),
+            ('V_CVT_SCALE_PK8_F32_FP4', 'unpack_pk8_f32_fp4'),
         ],
     )
-    def test_cvt_scale_unpack_conversions_use_scaled_generator(
-        self, name, op, decode_helper, encode_helper
-    ):
+    def test_cvt_scale_unpack_semantics(self, name, op):
         sem = derive_semantics(name, 'ENC_VOP3')
         assert sem is not None
         assert sem.semantic_class == 'vector_cvt_scale'
         assert sem.operation == op
 
-        cpp = gen_vector_cvt_scale(
-            ['vdst'], ['src0', 'src1'], sem.semantic_class, sem.operation
-        )
-        assert decode_helper in cpp
-        if encode_helper.endswith('_mode'):
-            assert (
-                f'{encode_helper}(read_scaled_src(index) * scale, wf.fp16_ovfl())'
-                in cpp
-            )
-        else:
-            assert encode_helper in cpp
-        assert 'util::e8m0_to_f32' in cpp
-        assert '((inst_.opsel & 0x3u) * 8u)' in cpp
-        assert (
-            'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane))'
-            not in cpp
-        )
-        assert 'read_scaled_src(index) * scale' in cpp
-        assert 'Isa::resolved_vgpr_offset' in cpp
-        assert 'write_vgpr_region' in cpp
-        assert 'dst_region.set_lane' in cpp
-
     @pytest.mark.parametrize(
-        ('name', 'op', 'read_helper', 'encode_helper'),
+        ('name', 'op'),
         [
-            (
-                'V_CVT_SCALEF32_PK16_BF6_BF16',
-                'pack_pk16_bf6_bf16',
-                'util::bf16_to_f32',
-                'util::f32_to_bf6_e3m2_rne',
-            ),
-            (
-                'V_CVT_SCALEF32_PK8_FP4_F32',
-                'pack_pk8_fp4_f32',
-                'std::bit_cast<float>',
-                'util::f32_to_fp4_e2m1_rne',
-            ),
-            (
-                'V_CVT_SCALEF32_PK8_FP8_F32',
-                'pack_pk8_fp8_f32',
-                'std::bit_cast<float>',
-                'util::f32_to_fp8_e4m3_rne_mode',
-            ),
-            (
-                'V_CVT_SCALEF32_PK8_BF8_F32',
-                'pack_pk8_bf8_f32',
-                'std::bit_cast<float>',
-                'util::f32_to_bf8_e5m2_rne_mode',
-            ),
+            ('V_CVT_SCALEF32_PK16_BF6_BF16', 'pack_pk16_bf6_bf16'),
+            ('V_CVT_SCALEF32_PK8_FP4_F32', 'pack_pk8_fp4_f32'),
+            ('V_CVT_SCALEF32_PK8_FP8_F32', 'pack_pk8_fp8_f32'),
+            ('V_CVT_SCALEF32_PK8_BF8_F32', 'pack_pk8_bf8_f32'),
         ],
     )
-    def test_cvt_scalef32_pack_conversions_use_scaled_generator(
-        self, name, op, read_helper, encode_helper
-    ):
+    def test_cvt_scale_pack_semantics(self, name, op):
         sem = derive_semantics(name, 'ENC_VOP3')
         assert sem is not None
         assert sem.semantic_class == 'vector_cvt_scale'
         assert sem.operation == op
 
-        cpp = gen_vector_cvt_scale(
-            ['vdst'], ['src0', 'src1'], sem.semantic_class, sem.operation
-        )
-        assert read_helper in cpp
-        if encode_helper.endswith('_mode'):
-            assert f'{encode_helper}(value, wf.fp16_ovfl())' in cpp
-        else:
-            assert encode_helper in cpp
-        assert (
-            'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane))'
-            in cpp
-        )
-        assert 'util::e8m0_to_f32' not in cpp
-        assert 'pack_scaled_dst(index' in cpp
-        assert 'read_scaled_input(index) / scale' in cpp
-        assert 'Isa::resolved_vgpr_offset' in cpp
-        assert 'read_vgpr_region' in cpp
-        assert 'write_vgpr_region' in cpp
-
     @pytest.mark.parametrize(
-        ('name', 'op', 'read_helper', 'encode_helper'),
+        ('name', 'op'),
         [
-            (
-                'V_CVT_SCALEF32_SR_PK8_FP8_F32',
-                'sr_pack_pk8_fp8_f32',
-                'std::bit_cast<float>(src_words[index])',
-                'util::f32_to_fp8_e4m3_sr_mode',
-            ),
-            (
-                'V_CVT_SCALEF32_SR_PK8_FP8_F16',
-                'sr_pack_pk8_fp8_f16',
-                'util::f16_to_f32',
-                'util::f32_to_fp8_e4m3_sr_mode',
-            ),
-            (
-                'V_CVT_SCALEF32_SR_PK8_FP8_BF16',
-                'sr_pack_pk8_fp8_bf16',
-                'util::bf16_to_f32',
-                'util::f32_to_fp8_e4m3_sr_mode',
-            ),
-            (
-                'V_CVT_SCALEF32_SR_PK8_BF8_F32',
-                'sr_pack_pk8_bf8_f32',
-                'std::bit_cast<float>(src_words[index])',
-                'util::f32_to_bf8_e5m2_sr_mode',
-            ),
-            (
-                'V_CVT_SCALEF32_SR_PK8_BF8_F16',
-                'sr_pack_pk8_bf8_f16',
-                'util::f16_to_f32',
-                'util::f32_to_bf8_e5m2_sr_mode',
-            ),
-            (
-                'V_CVT_SCALEF32_SR_PK8_BF8_BF16',
-                'sr_pack_pk8_bf8_bf16',
-                'util::bf16_to_f32',
-                'util::f32_to_bf8_e5m2_sr_mode',
-            ),
+            ('V_CVT_SCALEF32_SR_PK8_FP8_F32', 'sr_pack_pk8_fp8_f32'),
+            ('V_CVT_SCALEF32_SR_PK8_FP8_F16', 'sr_pack_pk8_fp8_f16'),
+            ('V_CVT_SCALEF32_SR_PK8_FP8_BF16', 'sr_pack_pk8_fp8_bf16'),
+            ('V_CVT_SCALEF32_SR_PK8_BF8_F32', 'sr_pack_pk8_bf8_f32'),
+            ('V_CVT_SCALEF32_SR_PK8_BF8_F16', 'sr_pack_pk8_bf8_f16'),
+            ('V_CVT_SCALEF32_SR_PK8_BF8_BF16', 'sr_pack_pk8_bf8_bf16'),
         ],
     )
-    def test_cvt_scalef32_sr_pack_fp8_bf8_threads_fp16_ovfl(
-        self, name, op, read_helper, encode_helper
-    ):
+    def test_cvt_scalef32_sr_pack_fp8_bf8_semantics(self, name, op):
         sem = derive_semantics(name, 'ENC_VOP3')
         assert sem is not None
         assert sem.semantic_class == 'vector_cvt_scale'
         assert sem.operation == op
 
-        cpp = gen_vector_cvt_scale(
-            ['vdst'], ['src0', 'src1', 'src2'], sem.semantic_class, sem.operation
-        )
-        assert read_helper in cpp
-        assert f'{encode_helper}(value, seed, wf.fp16_ovfl())' in cpp
-        assert 'seed = util::prng_advance(seed)' in cpp
-        assert 'read_scaled_input(index) / scale' in cpp
-
     @pytest.mark.parametrize(
-        ('name', 'op', 'read_helper', 'encode_helper'),
+        ('name', 'op'),
         [
-            (
-                'V_CVT_SCALEF32_SR_FP8_F16',
-                'sr_fp8_f16',
-                'util::f16_to_f32',
-                'util::f32_to_fp8_e4m3_sr_mode',
-            ),
-            (
-                'V_CVT_SCALEF32_SR_FP8_BF16',
-                'sr_fp8_bf16',
-                'util::bf16_to_f32',
-                'util::f32_to_fp8_e4m3_sr_mode',
-            ),
-            (
-                'V_CVT_SCALEF32_SR_BF8_F16',
-                'sr_bf8_f16',
-                'util::f16_to_f32',
-                'util::f32_to_bf8_e5m2_sr_mode',
-            ),
-            (
-                'V_CVT_SCALEF32_SR_BF8_BF16',
-                'sr_bf8_bf16',
-                'util::bf16_to_f32',
-                'util::f32_to_bf8_e5m2_sr_mode',
-            ),
+            ('V_CVT_SCALEF32_SR_FP8_F16', 'sr_fp8_f16'),
+            ('V_CVT_SCALEF32_SR_FP8_BF16', 'sr_fp8_bf16'),
+            ('V_CVT_SCALEF32_SR_BF8_F16', 'sr_bf8_f16'),
+            ('V_CVT_SCALEF32_SR_BF8_BF16', 'sr_bf8_bf16'),
         ],
     )
-    def test_cvt_scalef32_sr_single_fp8_bf8_threads_fp16_ovfl(
-        self, name, op, read_helper, encode_helper
-    ):
+    def test_cvt_scalef32_sr_single_fp8_bf8_semantics(self, name, op):
         sem = derive_semantics(name, 'ENC_VOP3')
         assert sem is not None
         assert sem.semantic_class == 'cvt_scalef32'
         assert sem.operation == op
-
-        cpp = gen_cvt_scalef32(
-            SimpleNamespace(
-                op=op,
-                dst_ops=['vdst'],
-                src_ops=['src0', 'src1', 'src2'],
-                arch_name='cdna4',
-            )
-        )
-
-        assert read_helper in cpp
-        assert f'{encode_helper}(scaled, seed, wf.fp16_ovfl())' in cpp
-        assert 'uint32_t seed = amdgpu::RegisterAccess(wf).read_lane(src1, lane)' in cpp
-        assert (
-            'double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127)' in cpp
-        )
-        assert 'uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3' in cpp
-
-    def test_gfx1250_cvt_scalef32_pack_fp8_threads_fp16_ovfl(self):
-        sem = derive_semantics('V_CVT_SCALEF32_PK8_FP8_F32', 'ENC_VOP3')
-        assert sem is not None
-
-        cpp = gen_vector_cvt_scale(
-            ['vdst'],
-            ['src0', 'src1'],
-            sem.semantic_class,
-            sem.operation,
-            arch_name='cdna5',
-        )
-        assert 'util::f32_to_fp8_e4m3_rne_mode(value, wf.fp16_ovfl())' in cpp
-
-    @pytest.mark.parametrize(
-        ('op', 'helper'),
-        [
-            ('f16_fp8', 'util::f32_to_f16_mode'),
-            ('pk_bf16_fp8', 'util::f32_to_bf16_rne_mode'),
-            ('pk32_f16_fp6', 'util::f32_to_f16_mode'),
-            ('pk32_bf16_fp6', 'util::f32_to_bf16_rne_mode'),
-        ],
-    )
-    def test_cvt_scalef32_widen_f16_bf16_destinations_thread_fp16_ovfl(
-        self, op, helper
-    ):
-        cpp = gen_cvt_scalef32(
-            SimpleNamespace(
-                op=op,
-                dst_ops=['vdst'],
-                src_ops=['src0', 'src1'],
-                arch_name='cdna4',
-            )
-        )
-
-        assert helper in cpp
-        assert 'wf.fp16_ovfl()' in cpp
-        if helper == 'util::f32_to_bf16_rne_mode':
-            assert 'util::f32_to_bf16(' not in cpp
 
 
 class TestDerivePseudoScalarUnary:
@@ -1632,6 +1534,37 @@ class TestDeriveVectorBinop:
         block = derive_sema_block(sem)
         all_kinds = {n.kind for n in block.body.walk()}
         assert SemaNodeKind.SUB in all_kinds
+
+    @pytest.mark.parametrize('dtype', ['f16', 'f32'])
+    @pytest.mark.parametrize(
+        ('op', 'negated'), [('sub', 1), ('subrev', 0), ('rsub', 0)]
+    )
+    def test_float_subtraction_adds_negated_subtrahend(
+        self, dtype: str, op: str, negated: int
+    ):
+        sem = _FakeSem(f'V_{op.upper()}_{dtype.upper()}', 'vector_binop', op, dtype)
+        block = derive_sema_block(sem)
+        assert block is not None
+
+        # Sources stay in operand order, so two NaNs return src0's, as for ADD.
+        rhs = block.body.children[1]
+        assert rhs.kind == SemaNodeKind.ADD
+        assert SemaNodeKind.SUB not in {n.kind for n in rhs.walk()}
+        assert [c.kind == SemaNodeKind.UMINUS for c in rhs.children] == [
+            i == negated for i in range(2)
+        ]
+        operands = [
+            c.children[0] if c.kind == SemaNodeKind.UMINUS else c for c in rhs.children
+        ]
+        assert [c.children[0].children[1].lit_value for c in operands] == ['0', '1']
+
+        cpp = lower_sema_block(block)
+        assert 'Arithmetic::ADD' in cpp
+        assert 'Arithmetic::SUB' not in cpp
+        # An F16 subtrahend is flushed as a half before it is widened and negated.
+        if dtype == 'f16':
+            assert '(-util::f16_to_f32(static_cast<uint16_t>(' in cpp
+            assert cpp.count('flush_input<amdgpu::fp_format::F16>(') == 2
 
     def test_signed_add_sub_use_unsigned_operands_to_avoid_ub(self):
         ops = [
@@ -1742,7 +1675,7 @@ class TestDeriveVectorBinop:
             call_names = [
                 n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
             ]
-            assert f'std::f{op}' in call_names
+            assert f'float_minmax_legacy_{op}' in call_names
         for op in ['min', 'max']:
             sem = _FakeSem(f'V_{op.upper()}_I32', 'vector_binop', op, 'i32')
             block = derive_sema_block(sem)
@@ -1822,7 +1755,7 @@ class TestDeriveVectorTernary:
             select_max = 'true' if clamp_fn == 'std::max' else 'false'
             assert f'vop3_integer_add_minmax<' in cpp
             assert f', {select_max}>' in cpp
-            assert 'inst_.clamp' not in cpp
+            assert 'inst_.clamp' in cpp
 
     def test_ashr_pk_i8_u8_i32_packs_shifted_saturated_bytes(self):
         cases = [
@@ -2176,6 +2109,70 @@ class TestDeriveSmemHints:
         block = derive_sema_block(sem)
         assert block is not None
         assert block.is_empty
+
+
+_SCALAR_ATOMIC_OPS = (
+    'SWAP',
+    'CMPSWAP',
+    'ADD',
+    'SUB',
+    'SMIN',
+    'UMIN',
+    'SMAX',
+    'UMAX',
+    'AND',
+    'OR',
+    'XOR',
+    'INC',
+    'DEC',
+)
+
+
+# Compare-swap carries its compare value after the source, doubling its data.
+_IMPLEMENTED_SCALAR_ATOMICS = {
+    f'{prefix}{op}{width}': (
+        op.lower(),
+        elem_size,
+        2 * num_elems if op == 'CMPSWAP' else num_elems,
+    )
+    for prefix in ('S_ATOMIC_', 'S_BUFFER_ATOMIC_')
+    for op in _SCALAR_ATOMIC_OPS
+    for width, elem_size, num_elems in (('', 4, 1), ('_X2', 8, 2))
+}
+
+
+class TestDeriveSmemAtomic:
+    @pytest.mark.parametrize('name', sorted(_IMPLEMENTED_SCALAR_ATOMICS))
+    def test_implemented_scalar_atomics_derive_operation_and_widths(self, name):
+        operation, elem_size, num_elems = _IMPLEMENTED_SCALAR_ATOMICS[name]
+        sem = derive_semantics(name, 'ENC_SMEM')
+        assert sem is not None
+        assert sem.semantic_class == 'smem_atomic'
+        assert sem.operation == operation
+        assert sem.elem_size == elem_size
+        assert sem.num_elems == num_elems
+
+    # No CDNA ISA defines these. They pin that scalar support comes from the
+    # allowlist: the flat atomic tables know most of these operations, SUB_F32
+    # strips to an allowlisted SUB, and ADD_U16 ends in a narrow load suffix.
+    @pytest.mark.parametrize(
+        'name',
+        [
+            'S_ATOMIC_ADD_F32',
+            'S_ATOMIC_FMIN',
+            'S_ATOMIC_PK_ADD_F16',
+            'S_ATOMIC_CSUB',
+            'S_ATOMIC_COND_SUB_U32',
+            'S_BUFFER_ATOMIC_ADD_F32',
+            'S_BUFFER_ATOMIC_FMIN',
+            'S_BUFFER_ATOMIC_SUB_F32',
+            'S_BUFFER_ATOMIC_ADD_U16',
+        ],
+    )
+    def test_scalar_atomic_operations_outside_allowlist_stay_nop(self, name):
+        sem = derive_semantics(name, 'ENC_SMEM')
+        assert sem is not None
+        assert sem.semantic_class == 'nop'
 
 
 class TestDeriveBufferLoad:
@@ -2686,29 +2683,6 @@ class TestDerivePacked:
             assert cpp.count('wf.fp16_ovfl()') == 2
         assert 'util::f32_to_f16' not in cpp
 
-    @pytest.mark.parametrize(
-        ('operation', 'data_type', 'helper'),
-        [
-            ('add', 'i16', 'vop3_integer_add<int16_t>'),
-            ('sub', 'i16', 'vop3_integer_sub<int16_t>'),
-            ('add', 'u16', 'vop3_integer_add<uint16_t>'),
-            ('sub', 'u16', 'vop3_integer_sub<uint16_t>'),
-        ],
-    )
-    def test_pk_integer_add_sub_clamps_each_selected_half(
-        self, operation, data_type, helper
-    ):
-        cpp = gen_pk_binop(
-            ['vdst'],
-            ['src0', 'src1'],
-            operation,
-            data_type,
-            ('inst_.opsel', 'inst_.opsel_hi'),
-        )
-
-        assert cpp.count(helper) == 2
-        assert cpp.count('inst_.clamp') == 2
-
     def test_pk_ternary_bf16_generator_uses_fma_and_bf16_helpers(self):
         cpp = gen_pk_ternary(
             ['vdst'],
@@ -2744,30 +2718,6 @@ class TestDerivePacked:
         assert sem.semantic_class == 'pk_ternary'
         assert sem.operation == operation
         assert sem.data_type == data_type
-
-    def test_pk_ternary_i16_min3_uses_component_min(self):
-        cpp = gen_pk_ternary(
-            ['vdst'],
-            ['src0', 'src1', 'src2'],
-            'min3',
-            'i16',
-            '((inst_.opsel_hi >> 2) & 1)',
-            ('inst_.opsel', 'inst_.opsel_hi'),
-        )
-        assert 'std::min(std::min(a_lo, b_lo), c_lo)' in cpp
-        assert 'a_lo * b_lo + c_lo' not in cpp
-
-    def test_pk_ternary_u16_max3_uses_component_max(self):
-        cpp = gen_pk_ternary(
-            ['vdst'],
-            ['src0', 'src1', 'src2'],
-            'max3',
-            'u16',
-            '((inst_.opsel_hi >> 2) & 1)',
-            ('inst_.opsel', 'inst_.opsel_hi'),
-        )
-        assert 'std::max(std::max(a_lo, b_lo), c_lo)' in cpp
-        assert 'a_lo * b_lo + c_lo' not in cpp
 
     def test_pk_ternary(self):
         sem = _FakeSem('V_PK_FMA_F16', 'pk_ternary', 'fma', 'f16')
@@ -2827,26 +2777,6 @@ class TestDerivePacked:
         sem = _FakeSem('V_PK_MOV_B32', 'pk_mov_b32')
         block = derive_sema_block(sem)
         assert block is not None
-
-    def test_pk_mov_b32_generator_uses_op_sel_for_both_outputs(self):
-        cpp = gen_pk_mov_b32(
-            ['inst.vdst'],
-            ['inst.src0', 'inst.src1'],
-            opsel_exprs=('inst.inst_.op_sel', 'inst.inst_.op_sel_hi'),
-        )
-
-        assert 'uint32_t lo = (inst.inst_.op_sel & 1)' in cpp
-        assert 'uint32_t hi = (inst.inst_.op_sel & 2)' in cpp
-        assert 'uint32_t hi = (inst.inst_.op_sel_hi & 2)' not in cpp
-        assert (
-            'uint64_t s0_pair_w = amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane)'
-            in cpp
-        )
-        assert (
-            'uint64_t s1_pair_w = amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane)'
-            in cpp
-        )
-        assert 'encoding_value_ >= 256' not in cpp
 
 
 class TestDeriveDot:
@@ -2992,9 +2922,8 @@ class TestDeriveSpecialScalar:
         cpp = lower_sema_block(block)
         assert 'write_scalar' in cpp
         if dtype == 'b32':
-            assert 'wf.exec()' in cpp
-            assert 'wf.set_exec(' in cpp
-            assert 'wf.exec_raw()' not in cpp
+            assert 'static_cast<uint32_t>(wf.exec_raw())' in cpp
+            assert 'wf.write_exec_lo(' in cpp
         else:
             assert 'wf.exec_raw()' in cpp
             assert 'wf.write_exec(' in cpp
@@ -3062,7 +2991,7 @@ class TestDeriveSpecialScalar:
                 'amdgpu::RegisterAccess(wf).write_scalar(inst.dst0, '
                 'static_cast<uint32_t>(result));'
             ) in cpp
-            assert 'wf.set_exec(result);' in cpp
+            assert 'wf.write_exec_lo(result);' in cpp
         else:
             assert (
                 'amdgpu::RegisterAccess(wf).write_scalar(inst.dst0, '
@@ -3116,6 +3045,30 @@ class TestDeriveControlFlow:
         block = derive_sema_block(sem)
         assert block is not None
         assert block.pragma == ExecModel.BRANCH
+
+    @pytest.mark.parametrize(
+        ('name', 'enc_name', 'semantic_class', 'operation'),
+        [
+            ('S_CBRANCH_G_FORK', 'ENC_SOP2', 'cbranch_fork', 'indirect'),
+            ('S_CBRANCH_I_FORK', 'ENC_SOPK', 'cbranch_fork', 'direct'),
+            ('S_CBRANCH_JOIN', 'ENC_SOP1', 'cbranch_join', None),
+        ],
+    )
+    def test_fork_and_join_branch_regardless_of_exec_and_rewrite_it(
+        self, name, enc_name, semantic_class, operation
+    ):
+        sem = derive_semantics(name, enc_name)
+        assert sem is not None
+        assert sem.semantic_class == semantic_class
+        assert sem.operation == operation
+        block = derive_sema_block(sem)
+        assert block is not None
+        assert block.pragma == ExecModel.BRANCH
+        props = derive_properties(block)
+        assert InstructionProperty.IS_BRANCH in props
+        assert InstructionProperty.IGNORES_EXEC in props
+        assert InstructionProperty.WRITES_EXEC in props
+        assert InstructionProperty.WRITES_SCC not in props
 
     def test_endpgm(self):
         sem = _FakeSem('S_ENDPGM', 'endpgm')

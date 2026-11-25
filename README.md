@@ -50,7 +50,7 @@ This table provides the current status of the migration of specific ROCm systems
 
 Note TheRock CI performs multi-component testing on top of builds leveraging [TheRock](https://github.com/ROCm/TheRock) build system.
 
-[![The Rock CI](https://github.com/ROCm/rocm-systems/actions/workflows/therock-ci.yml/badge.svg?branch%3Adevelop+event%3Apush)](https://github.com/ROCm/rocm-systems/actions/workflows/therock-ci.yml?query=branch%3Adevelop+event%3Apush)
+[![The Rock CI](https://github.com/ROCm/rocm-systems/actions/workflows/therock-multi-arch-ci.yml/badge.svg?branch%3Adevelop+event%3Apush)](https://github.com/ROCm/rocm-systems/actions/workflows/therock-multi-arch-ci.yml?query=branch%3Adevelop+event%3Apush)
 
 ---
 

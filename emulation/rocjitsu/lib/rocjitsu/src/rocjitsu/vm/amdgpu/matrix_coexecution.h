@@ -8,19 +8,18 @@
 
 #include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/isa/instruction.h"
+#include "util/host_target.h"
+#include "util/result.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <bit>
-#include <cfenv>
 #include <cstddef>
 #include <cstdint>
-#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -35,16 +34,16 @@ inline constexpr unsigned spin_count() { return 512; }
 inline constexpr unsigned idle_spin_count() { return spin_count(); }
 inline constexpr unsigned completion_spin_count() { return spin_count(); }
 inline void relax_cpu() {
-#if defined(__x86_64__) || defined(__i386__)
+#if RJ_HOST_HAS_GNU_X86_PAUSE_BUILTIN
   __builtin_ia32_pause();
-#elif defined(__aarch64__)
+#elif RJ_HOST_ARCH_AARCH64
   asm volatile("yield");
 #else
   std::atomic_signal_fence(std::memory_order_seq_cst);
 #endif
 }
 
-inline bool async_candidate(std::string_view name) { return async_mma_policy::candidate(name); }
+inline bool async_candidate(const Instruction &inst) { return async_mma_policy::candidate(inst); }
 
 // A fork child has none of the parent's helper threads. Disable offload there
 // with a load, avoiding a getpid syscall on every issue. Register before the
@@ -53,17 +52,20 @@ inline constinit std::atomic<bool> helpers_disabled{false};
 static_assert(std::atomic<bool>::is_always_lock_free);
 inline bool helpers_enabled() { return !helpers_disabled.load(std::memory_order_relaxed); }
 inline void register_helper_fork_guard() {
-  if (!helpers_enabled())
+  if (!helpers_enabled()) {
     return;
+  }
 #if defined(__linux__)
   static const int status = pthread_atfork(
       nullptr, nullptr, [] { helpers_disabled.store(true, std::memory_order_relaxed); });
-  if (status != 0)
+  if (status != 0) {
     helpers_disabled.store(true, std::memory_order_relaxed);
+  }
 #endif
 }
 
 // Persistent helpers belong to a VM-owned pool, constructed lazily.
+// Callbacks must return normally; admitted guest errors are rejected before publication.
 // Instructions remain allocated and destroyed by the original decoder thread.
 // The caller validates disjoint register accesses and materializes destinations
 // before publication. All jobs complete before the CU can be rescheduled.
@@ -79,15 +81,13 @@ public:
   void submit(Instruction &instruction, void *wave) {
     instruction_ = &instruction;
     wave_ = wave;
-    error_ = nullptr;
-    std::fegetenv(&environment_);
     publish(1);
   }
 
-  std::exception_ptr wait() {
-    while (state_.load(std::memory_order_acquire) != 0)
+  void wait() {
+    while (state_.load(std::memory_order_acquire) != 0) {
       wait_while(1);
-    return error_;
+    }
   }
 
   bool ready() const { return state_.load(std::memory_order_acquire) == 0; }
@@ -109,8 +109,9 @@ private:
   void wait_while(int expected) {
     const unsigned spins = expected == 0 ? idle_spin_count() : completion_spin_count();
     for (unsigned i = 0; i != spins; ++i) {
-      if (state_.load(std::memory_order_acquire) != expected)
+      if (state_.load(std::memory_order_acquire) != expected) {
         return;
+      }
       relax_cpu();
     }
     // There is one waiter per helper: the issuer during execution, or the
@@ -121,18 +122,14 @@ private:
   void work() {
     for (;;) {
       int state = state_.load(std::memory_order_acquire);
-      if (state == -1)
+      if (state == -1) {
         return;
+      }
       if (state == 0) {
         wait_while(0);
         continue;
       }
-      std::fesetenv(&environment_);
-      try {
-        instruction_->execute(*instruction_, wave_);
-      } catch (...) {
-        error_ = std::current_exception();
-      }
+      instruction_->execute(*instruction_, wave_);
       publish(0);
     }
   }
@@ -140,8 +137,6 @@ private:
   alignas(64) std::atomic<int> state_{0};
   alignas(64) Instruction *instruction_ = nullptr;
   void *wave_ = nullptr;
-  std::fenv_t environment_{};
-  std::exception_ptr error_;
   std::thread thread_;
 };
 
@@ -176,22 +171,26 @@ public:
   /// A true result permits finish() without waiting for the helper.
   static bool ready(Ticket ticket) { return !helpers_enabled() || ticket.slot->helper.ready(); }
   /// Join a claimed job and release its slot; consume each ticket exactly once.
-  std::exception_ptr finish(Ticket ticket) {
-    if (!helpers_enabled())
-      return std::make_exception_ptr(std::runtime_error("MMA helper unavailable after fork"));
-    auto error = ticket.slot->helper.wait();
+  /// Returns failure in a fork child where the inherited helper no longer exists.
+  util::Result finish(Ticket ticket) {
+    if (!helpers_enabled()) {
+      return util::Result::failure();
+    }
+    ticket.slot->helper.wait();
     release(ticket.slot);
-    return error;
+    return util::Result::success();
   }
 
   explicit SharedPool(unsigned count) {
     assert(count <= 128);
     register_helper_fork_guard();
-    if (!helpers_enabled())
+    if (!helpers_enabled()) {
       count = 0;
+    }
     slots_.reserve(count);
-    for (unsigned i = 0; i != count; ++i)
+    for (unsigned i = 0; i != count; ++i) {
       slots_.push_back(std::make_unique<Slot>(i));
+    }
     for (unsigned word = 0; word != 2; ++word) {
       const unsigned bits = count > word * 64 ? std::min(64u, count - word * 64) : 0;
       free_[word].store(bits == 64 ? ~uint64_t{0} : (uint64_t{1} << bits) - 1,
@@ -202,23 +201,27 @@ public:
   ~SharedPool() {
     // Inherited std::thread objects cannot be joined or destroyed in the child.
     // Leave their storage to process teardown; the parent's ownership is intact.
-    if (!helpers_enabled())
-      for (auto &slot : slots_)
+    if (!helpers_enabled()) {
+      for (auto &slot : slots_) {
         (void)slot.release();
+      }
+    }
   }
 
   /// Cheap advisory capacity check. A following submit() may still lose a race.
   bool available() const {
-    if (!helpers_enabled())
+    if (!helpers_enabled()) {
       return false;
+    }
     return free_[0].load(std::memory_order_relaxed) != 0 ||
            (slots_.size() > 64 && free_[1].load(std::memory_order_relaxed) != 0);
   }
 
 private:
   Slot *try_submit(Instruction &instruction, void *wave) {
-    if (!helpers_enabled())
+    if (!helpers_enabled()) {
       return nullptr;
+    }
     // A stable preference may reuse a still-awake helper without pinning or a
     // per-job cursor. Single-issuer counters support lower sleep/wakeup costs,
     // but neither this preference nor more complex allocation policies gave
@@ -242,8 +245,9 @@ private:
         const unsigned bit = (std::countr_zero(std::rotr(free, int(start))) + start) & 63;
         if (!free_[word].compare_exchange_strong(free, free & ~(uint64_t{1} << bit),
                                                  std::memory_order_acquire,
-                                                 std::memory_order_relaxed))
+                                                 std::memory_order_relaxed)) {
           continue;
+        }
         auto *slot = slots_[word * 64 + bit].get();
         slot->helper.submit(instruction, wave);
         return slot;

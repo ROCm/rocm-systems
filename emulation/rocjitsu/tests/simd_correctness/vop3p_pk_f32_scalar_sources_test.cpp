@@ -1,7 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
 
@@ -46,8 +48,9 @@ constexpr std::array<uint32_t, 8> kScalarBits = {0x3fc00000, 0x40a00000, 0x40800
 constexpr uint32_t kSentinel = 0xdeadbeef;
 
 uint32_t initial_vgpr(uint32_t reg, uint32_t lane) {
-  if (reg >= 6)
+  if (reg >= 6) {
     return kSentinel;
+  }
   return std::bit_cast<uint32_t>(static_cast<float>(2 + reg + lane % 3));
 }
 
@@ -58,25 +61,28 @@ protected:
     saved_force_scalar_ = util::force_scalar();
     // Reference computations include SCC=1, the smallest positive FP32 subnormal.
     ASSERT_EQ(std::fesetenv(FE_DFL_ENV), 0);
-    if (!std::get<2>(GetParam()) && !util::has_stdx_simd)
+    if (!std::get<2>(GetParam()) && !util::has_stdx_simd) {
       GTEST_SKIP() << "SIMD execution is unavailable";
+    }
 
     amdgpu::ComputeUnitCore::Config config{};
-    config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    config.arch = rocjitsu::IsaFamily::Cdna5;
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
     cache_.set_backing_memory(&memory_);
-    cu_ = amdgpu::ComputeUnitCore::create("packed_f32_scalar_sources", config, &memory_, &cache_);
-    decoder_ = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(
+        cu_, "packed_f32_scalar_sources", config, &memory_, &cache_));
+    decoder_ = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     wave_ = cu_->dispatch_wf(0, 0, 106, 256);
     ASSERT_NE(wave_, nullptr);
   }
 
   void TearDown() override {
-    if (wave_)
+    if (wave_) {
       wave_->halt();
+    }
     util::set_force_scalar_for_testing(saved_force_scalar_);
     std::fesetenv(&saved_environment_);
   }
@@ -116,9 +122,11 @@ protected:
     }
 
     const uint32_t base = wave_->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
-      for (uint32_t reg = 0; reg < 8; ++reg)
+    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
+      for (uint32_t reg = 0; reg < 8; ++reg) {
         cu_->write_vgpr(base + reg, lane, initial_vgpr(reg, lane));
+      }
+    }
     wave_->debug_write_sgpr(8, kScalarBits[static_cast<unsigned>(SourceKind::Sgpr)]);
     wave_->debug_write_sgpr(9, 0xc0e00000); // -7.0 must never be selected from s9.
     wave_->set_ttmp(2, kScalarBits[static_cast<unsigned>(SourceKind::Ttmp)]);
@@ -143,8 +151,9 @@ protected:
                                       ? kScalarBits[kind]
                                       : initial_vgpr(2 * source + selected_half, lane);
             values[source] = std::bit_cast<float>(bits);
-            if ((half ? neg_hi : neg) & (1u << source))
+            if ((half ? neg_hi : neg) & (1u << source)) {
               values[source] = -values[source];
+            }
           }
           // Small binary fractions give exact arithmetic, apart from SCC's tiny
           // contribution to a normal sum. None is a rounding-boundary case.
@@ -172,22 +181,29 @@ private:
 
 TEST_P(Cdna5PackedF32ScalarSources, AllSourcePositionsAndSelectors) {
   const uint8_t selections = 1u << source_count();
-  for (unsigned source = 0; source < source_count(); ++source)
-    for (uint8_t lo = 0; lo < selections; ++lo)
-      for (uint8_t hi = 0; hi < selections; ++hi)
+  for (unsigned source = 0; source < source_count(); ++source) {
+    for (uint8_t lo = 0; lo < selections; ++lo) {
+      for (uint8_t hi = 0; hi < selections; ++hi) {
         // Zero scalar selectors are assembler-supported controls. Raw encodings
         // also exercise the manual's ignored scalar OPSEL bits; assemblers can
         // reject those otherwise redundant high-half selections.
         check(source, lo, hi, 0, 0);
+      }
+    }
+  }
 }
 
 TEST_P(Cdna5PackedF32ScalarSources, PerHalfNegationAliasingAndExec) {
   const uint8_t mask = (1u << source_count()) - 1;
-  for (unsigned source = 0; source < source_count(); ++source)
-    for (uint8_t neg = 0; neg <= mask; ++neg)
-      for (uint8_t dst : {0, 2, 4, 6})
-        for (uint64_t exec : {uint64_t{0}, uint64_t{0xa5c30f69}, ~uint64_t{0}})
+  for (unsigned source = 0; source < source_count(); ++source) {
+    for (uint8_t neg = 0; neg <= mask; ++neg) {
+      for (uint8_t dst : {0, 2, 4, 6}) {
+        for (uint64_t exec : {uint64_t{0}, uint64_t{0xa5c30f69}, ~uint64_t{0}}) {
           check(source, 5 & mask, 2 & mask, neg, neg ^ mask, dst, exec);
+        }
+      }
+    }
+  }
 }
 
 std::string parameter_name(const testing::TestParamInfo<Parameters> &info) {

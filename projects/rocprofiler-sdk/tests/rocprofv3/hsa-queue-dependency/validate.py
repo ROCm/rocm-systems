@@ -44,16 +44,14 @@ def test_hsa_api_trace(hsa_trace_input_data):
 
     correlation_ids = sorted(list(set(correlation_ids)))
 
-    # deterministic call counts
+    # exact counts of calls the app issues
     num_queue_create_calls = 2
     num_queue_destroy_calls = 2
     num_hsa_mem_free_calls = 2
 
-    # signal create/destroy calls
-    # although the app explicitly only creates 3 signals
-    # but hsa_init() internally calls hsa_signal_create
-    num_hsa_signal_create_calls = 4
-    num_hsa_signal_destroy_calls = 4
+    # The app creates 3 signals; ROCr adds an unspecified number. This floor does
+    # not cover internal-origin calls -- rocprofv3/tracing-hip-in-libraries does.
+    num_app_signal_calls = 3
 
     # all correlation ids are unique
     assert len(correlation_ids) == len(hsa_trace_input_data)
@@ -63,8 +61,14 @@ def test_hsa_api_trace(hsa_trace_input_data):
     assert functions.count("hsa_queue_create") == num_queue_create_calls
     assert functions.count("hsa_queue_destroy") == num_queue_destroy_calls
     assert functions.count("hsa_memory_free") == num_hsa_mem_free_calls
-    assert functions.count("hsa_signal_create") == num_hsa_signal_create_calls
-    assert functions.count("hsa_signal_destroy") == num_hsa_signal_destroy_calls
+    signal_creates = functions.count("hsa_signal_create")
+    signal_destroys = functions.count("hsa_signal_destroy")
+    assert (
+        signal_creates == signal_destroys
+    ), f"{signal_creates} signals created but {signal_destroys} destroyed"
+    assert (
+        signal_creates >= num_app_signal_calls
+    ), f"{signal_creates} signals created, fewer than the app's {num_app_signal_calls}"
 
 
 def test_kernel_trace(kernel_trace_input_data):
@@ -153,16 +157,14 @@ def test_hsa_api_trace_json(json_data):
 
     correlation_ids = sorted(list(set(correlation_ids)))
 
-    # deterministic call counts
+    # exact counts of calls the app issues
     num_queue_create_calls = 2
     num_queue_destroy_calls = 2
     num_hsa_mem_free_calls = 2
 
-    # signal create/destroy calls
-    # although the app explicitly only creates 3 signals
-    # but hsa_init() internally calls hsa_signal_create
-    num_hsa_signal_create_calls = 4
-    num_hsa_signal_destroy_calls = 4
+    # The app creates 3 signals; ROCr adds an unspecified number. This floor does
+    # not cover internal-origin calls -- rocprofv3/tracing-hip-in-libraries does.
+    num_app_signal_calls = 3
 
     # all correlation ids are unique
     assert len(correlation_ids) == len(hsa_api_data)
@@ -172,8 +174,14 @@ def test_hsa_api_trace_json(json_data):
     assert functions.count("hsa_queue_create") == num_queue_create_calls
     assert functions.count("hsa_queue_destroy") == num_queue_destroy_calls
     assert functions.count("hsa_memory_free") == num_hsa_mem_free_calls
-    assert functions.count("hsa_signal_create") == num_hsa_signal_create_calls
-    assert functions.count("hsa_signal_destroy") == num_hsa_signal_destroy_calls
+    signal_creates = functions.count("hsa_signal_create")
+    signal_destroys = functions.count("hsa_signal_destroy")
+    assert (
+        signal_creates == signal_destroys
+    ), f"{signal_creates} signals created but {signal_destroys} destroyed"
+    assert (
+        signal_creates >= num_app_signal_calls
+    ), f"{signal_creates} signals created, fewer than the app's {num_app_signal_calls}"
 
 
 def test_perfetto_data(pftrace_data, json_data):

@@ -22,6 +22,7 @@
 
 import json
 import os
+import sqlite3
 
 import pytest
 
@@ -32,6 +33,12 @@ def pytest_addoption(parser):
         action="store",
         required=True,
         help="rocprofv3 results JSON produced by a --replay-mode kernel --kernel-replay-beta-enabled run",
+    )
+    parser.addoption(
+        "--rocpd-input",
+        action="store",
+        default=None,
+        help="rocpd database written by the same run as --json-input",
     )
     parser.addoption(
         "--passes",
@@ -45,7 +52,9 @@ def pytest_addoption(parser):
         action="store",
         nargs="+",
         default=["SQ_WAVES", "SQ_INSTS_VALU"],
-        help="counters shared by every --pmc group; must be constant across a kernel's passes",
+        help="counters shared by every --pmc group; each one the agent implements must be "
+        "constant across a kernel's passes. A counter that is zero for every dispatch is "
+        "skipped only when every replayed agent is gfx1200 or gfx1201",
     )
     parser.addoption(
         "--expected-dispatch-count",
@@ -54,6 +63,43 @@ def pytest_addoption(parser):
         default=None,
         help="optional exact number of logical dispatches expected in the counter records",
     )
+    parser.addoption(
+        "--selected-kernel",
+        action="store",
+        default=None,
+        help="part of the kernel name whose launches --selected-launches counts",
+    )
+    parser.addoption(
+        "--selected-launches",
+        action="store",
+        nargs="+",
+        type=int,
+        default=None,
+        help="1-based launches of --selected-kernel, among those in the kernel trace, that the kernel filters must select",
+    )
+    parser.addoption(
+        "--expected-pass-counts",
+        action="store",
+        default=None,
+        help="comma-separated number of passes per dispatch, in dispatch_id order, for runs "
+        "where some dispatches are not replayed and so carry fewer passes",
+    )
+    parser.addoption(
+        "--expected-pass-counts-file",
+        action="store",
+        default=None,
+        help="file containing comma-separated per-dispatch pass counts for capability-dependent launches",
+    )
+    parser.addoption("--n-elems", type=int, default=1048576)
+    parser.addoption("--baseline-json", help="optional 1-pass baseline JSON for scaling")
+    parser.addoption("--max-scaling-ratio", type=float, default=10.0)
+
+
+def pytest_generate_tests(metafunc):
+    if "common_counter" in metafunc.fixturenames:
+        metafunc.parametrize(
+            "common_counter", metafunc.config.getoption("--common-counters")
+        )
 
 
 @pytest.fixture
@@ -62,6 +108,17 @@ def json_data(request):
     assert os.path.isfile(path), f"missing JSON input: {path}"
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+@pytest.fixture
+def rocpd_db(request):
+    path = request.config.getoption("--rocpd-input")
+    if path is None:
+        pytest.skip("no --rocpd-input given")
+    assert os.path.isfile(path), f"missing rocpd input: {path}"
+    connection = sqlite3.connect(path)
+    yield connection
+    connection.close()
 
 
 @pytest.fixture
@@ -75,5 +132,32 @@ def expected_dispatch_count(request):
 
 
 @pytest.fixture
+def expected_pass_counts(request):
+    raw = request.config.getoption("--expected-pass-counts")
+    path = request.config.getoption("--expected-pass-counts-file")
+    assert (
+        raw is None or path is None
+    ), "specify pass counts directly or by file, not both"
+    if path is not None:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = f.read()
+    if raw is None:
+        return None
+    counts = [int(field) for field in raw.split(",") if field.strip() != ""]
+    assert counts and all(count > 0 for count in counts), "expected positive pass counts"
+    return counts
+
+
+@pytest.fixture
 def common_counters(request):
     return list(request.config.getoption("--common-counters"))
+
+
+@pytest.fixture
+def selected_kernel(request):
+    return request.config.getoption("--selected-kernel")
+
+
+@pytest.fixture
+def selected_launches(request):
+    return request.config.getoption("--selected-launches")

@@ -20,7 +20,9 @@
 /// The ExecutionPluginGroup owns the sink configuration. When a plugin is
 /// added to a group via add(), the group constructs a sink for that plugin
 /// (combining shared sinks like stderr with per-plugin file sinks) and
-/// assigns it. Plugins access their sink via sink().write("message").
+/// assigns it. Loader-created groups defer opening files until onInit(), after
+/// the outgoing group has shut down and been destroyed. File-only candidates
+/// discard output until then. Plugins access their sink via sink().write("message").
 ///
 /// If a plugin is used without a group (unusual), it falls back to a
 /// static StderrSink so output is never silently lost.
@@ -52,6 +54,8 @@
 namespace rocjitsu {
 
 /// @brief Abstract base for plugin output destinations.
+/// @details Sink callbacks must not throw. Output is best effort; sink failures
+/// must not replace or suppress an execution failure.
 class PluginSink {
 public:
   virtual ~PluginSink() = default;
@@ -79,13 +83,15 @@ public:
 class FileSink : public PluginSink {
 public:
   explicit FileSink(const std::string &path) : file_(std::fopen(path.c_str(), "w")) {
-    if (!file_)
+    if (!file_) {
       util::Logger::warn("cannot open plugin sink '", path, "': ", std::strerror(errno));
+    }
   }
 
   ~FileSink() override {
-    if (file_)
+    if (file_) {
       std::fclose(file_);
+    }
   }
 
   FileSink(const FileSink &) = delete;

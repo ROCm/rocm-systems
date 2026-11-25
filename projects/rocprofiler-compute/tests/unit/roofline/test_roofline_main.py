@@ -11,18 +11,17 @@ import json
 import math
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Tuple
+from typing import Dict, List, Tuple
 
 import plotly.graph_objects as go
 import pytest
 
 import roofline.roofline_html as roofline_html
 from roofline.roofline_frame import FRAME_X_MIN, canonical_frame
-from roofline.roofline_hover import wrap_hover_name
+from roofline.roofline_hover import truncate_kernel_name, wrap_hover_name
 from roofline.roofline_html import RooflineViewModel, build_interactive_document
-
-if TYPE_CHECKING:
-    from roofline.roofline_main import Roofline
+from roofline.roofline_main import Roofline, _default_precisions
+from utils.html_report.report_shell import DARK_THEME_CLASS, read_asset
 
 _ASSETS = Path(roofline_html.__file__).parent / "assets"
 
@@ -36,18 +35,13 @@ class MockMspec:
     gpu_arch = "gfx90a"
 
 
-def make_roofline(datatypes: List[str], **run_parameters: object) -> "Roofline":
+def make_roofline(**run_parameters: object) -> Roofline:
     """A Roofline for the unit tests. It never reads its ``args`` on the
-    cli_generate_plot / generate_plot paths, so a bare Namespace suffices."""
-    from roofline.roofline_main import Roofline
-
+    generate_plot path, so a bare Namespace suffices."""
     parameters: Dict[str, object] = {
         "workload_dir": "",
         "device_id": 0,
-        "sort_type": "kernels",
-        "mem_level": "ALL",
         "is_standalone": True,
-        "roofline_data_type": datatypes,
     }
     parameters.update(run_parameters)
     return Roofline(argparse.Namespace(), MockMspec(), parameters)
@@ -56,8 +50,7 @@ def make_roofline(datatypes: List[str], **run_parameters: object) -> "Roofline":
 @pytest.fixture
 def benchmarked_roofline(tmp_path: Path):
     """Build a Roofline over MI210 benchmark data: bandwidth for every memory
-    level, a scalar FP64 peak, and MFMA peaks. Takes the datatypes to stack,
-    which is what the figure the tests read back off differs by.
+    level, a scalar FP64 peak, and MFMA peaks.
     """
     header = (
         "device,LDSBw,HBMBw,L1Bw,L2Bw,FP64Flops,MFMAF16Flops,MFMABF16Flops,MFMAF64Flops"
@@ -65,13 +58,13 @@ def benchmarked_roofline(tmp_path: Path):
     row = "0,500,500,500,500,3000,10000,11000,12000"
     (tmp_path / "roofline.csv").write_text(f"{header}\n{row}\n", encoding="utf-8")
 
-    def build(datatypes: List[str], **run_parameters: object):
+    def build(**run_parameters: object):
         parameters = {
             "workload_dir": str(tmp_path),
             "matrix_ops_type": "MFMA",
         }
         parameters.update(run_parameters)
-        return make_roofline(datatypes, **parameters)
+        return make_roofline(**parameters)
 
     return build
 
@@ -113,13 +106,6 @@ def is_whole_decade(value: float) -> bool:
     return math.isclose(exponent, round(exponent))
 
 
-@pytest.mark.parametrize("dtype", ["FP32", "INVALID_DATATYPE"])
-def test_cli_generate_plot_returns_nothing_without_usable_input(dtype: str) -> None:
-    """A datatype this arch cannot be profiled for, and a datatype with no AI
-    data, are both declined rather than half-plotted."""
-    assert make_roofline(["FP32"]).cli_generate_plot(dtype, ai_data={}) is None
-
-
 @pytest.mark.parametrize(
     "dtype, drawn, not_drawn",
     [
@@ -133,28 +119,11 @@ def test_generate_plot_draws_the_roofs_the_datatype_reaches(
     """Each datatype gets one compute roof per op class it reaches on this arch:
     BF16 is matrix-only where FP64 is dual-path. On CDNA the matrix roofs are
     labeled MFMA, never WMMA."""
-    fig = benchmarked_roofline(["FP64", "BF16"]).generate_plot(dtype, fig=go.Figure())
+    fig = benchmarked_roofline().generate_plot(dtype, fig=go.Figure())
 
     names = {trace.name for trace in fig.data}
     assert names.issuperset(drawn)
     assert names.isdisjoint(not_drawn)
-
-
-def test_generate_plot_filters_bandwidth_roofs_by_mem_level(
-    benchmarked_roofline,
-) -> None:
-    """The selected memory level reaches both the figure and client model."""
-    roofline = benchmarked_roofline(["FP64"], mem_level=["HBM"])
-    fig = roofline.generate_plot("FP64", fig=go.Figure())
-
-    bandwidth_levels = {"LDS", "L1", "L2", "HBM"}
-    drawn_bandwidth_levels = {
-        trace.name for trace in fig.data if trace.name in bandwidth_levels
-    }
-    assert drawn_bandwidth_levels == {"HBM"}
-
-    view_model = roofline._Roofline__view_models["FLOP"]
-    assert {roof["level"] for roof in view_model.roofline_traces} == {"HBM"}
 
 
 CEILING = {"hbm": [[0.01, 1.0], [1.0, 1500.0], 1500.0]}
@@ -181,21 +150,25 @@ def pct_roof(kernel: dict, point_index: int = 0) -> float:
     return float(kernel["points"][point_index]["hoverCells"][1])
 
 
-def test_kernel_traces_score_against_the_tallest_drawn_ceiling() -> None:
-    """A stacked figure caps points at the tallest compute roof drawn, so the
-    reported peak and limiter do not depend on the order datatypes were
-    stacked."""
+def test_kernel_traces_stacked_compute_peaks__limiter_names_binding_one() -> None:
     ai_data = {"ai_hbm": [[100.0], [50000.0]], "kernelNames": ["kA"]}
 
-    matrix_traces, matrix_capped = kernel_traces(make_roofline(["FP32"]), ai_data)
-    valu_traces, valu_capped = kernel_traces(
-        make_roofline(["FP32"]), ai_data, compute_peaks=[("FP32 VALU", 9000.0)]
+    traces, _ = kernel_traces(
+        make_roofline(),
+        ai_data,
+        compute_peaks=[("FP32 MFMA", 90000.0), ("FP16 MFMA", 180000.0)],
     )
 
-    assert pct_roof(matrix_capped[0]) < 100.0
-    assert pct_roof(valu_capped[0]) > 100.0
-    assert "Performance limiter: FP32 MFMA" in matrix_traces[0].hovertemplate
-    assert "Performance limiter: FP32 VALU" in valu_traces[0].hovertemplate
+    assert "Limited by Compute: FP32 MFMA" in traces[0].hovertemplate
+
+
+def test_kernel_traces_exceeded_memory_roof__falls_back_to_compute_peak() -> None:
+    traces, _ = kernel_traces(
+        make_roofline(),
+        {"ai_hbm": [[1.0], [5000.0]], "kernelNames": ["kA"]},
+    )
+
+    assert "Limited by Compute: FP32 VALU" in traces[0].hovertemplate
 
 
 def test_kernel_traces_name_the_roof_that_binds() -> None:
@@ -203,7 +176,7 @@ def test_kernel_traces_name_the_roof_that_binds() -> None:
     memory level, and falls back to Unknown when the ceiling data holds no roof
     for that level at all. Levels with no positive AI are not plotted."""
     traces, model = kernel_traces(
-        make_roofline(["FP32"]),
+        make_roofline(),
         {
             "ai_hbm": [[1.0], [900.0]],
             "ai_l2": [[0.0], [0.0]],
@@ -213,27 +186,128 @@ def test_kernel_traces_name_the_roof_that_binds() -> None:
     )
     assert [kernel["name"] for kernel in model] == ["kA"]
     assert [point["peak"] for point in model[0]["points"]] == ["HBM"]
-    assert "Performance limiter: HBM" in traces[0].hovertemplate
+    assert "Limited by Memory: HBM" in traces[0].hovertemplate
 
     unroofed_traces, unroofed = kernel_traces(
-        make_roofline(["FP32"]),
+        make_roofline(),
         {"ai_hbm": [[1.0], [900.0]], "kernelNames": ["kA"]},
         ceiling_data={},
         compute_peaks=[],
     )
-    assert "Performance limiter: Unknown" in unroofed_traces[0].hovertemplate
-    assert unroofed[0]["points"][0]["hoverCells"] == ["N/A", "N/A"]
+    assert "Limited by Unknown: Unknown" in unroofed_traces[0].hovertemplate
+    assert unroofed[0]["points"][0]["hoverCells"] == [
+        "N/A",
+        "N/A",
+        "Bandwidth:<br>\u2003HBM: N/A% (900.000 / N/A GB/s)",
+    ]
 
 
-def test_kernel_hover_carries_the_whole_name() -> None:
-    """A long demangled name reaches the tooltip whole. It is wrapped onto as
-    many lines as it takes, but nothing is dropped: two instantiations of the
-    same function are told apart by template arguments that run to the very end
-    of the name."""
-    name = "Cijk_Alik_Bljk_" + "SB_MT256x256x16_MI32x32x2x1_" * 40
+def test_kernel_traces_expose_the_limiting_peak_for_a_memory_bound_kernel() -> None:
+    traces, model = kernel_traces(
+        make_roofline(),
+        {"ai_hbm": [[1.0], [900.0]], "kernelNames": ["kA"]},
+        sanitized_cache_hierarchy=["HBM", "L2"],
+    )
+
+    assert "Limited by Memory: HBM" in traces[0].hovertemplate
+    assert model[0]["limitingPeak"] == "HBM"
+
+
+def test_kernel_traces_expose_the_leftmost_peak_for_a_compute_bound_kernel() -> None:
+    """A compute-bound kernel's limiter names a datatype/op-path (e.g. 'FP32
+    VALU'), not a cache level, so no point.peak matches it directly.
+    limitingPeak falls back to the peak of the kernel's own lowest-AI point
+    (L2's AI of 0.5 sits left of HBM's AI of 2.0) so the client still has a
+    single point to show without guessing which one."""
+    _, model = kernel_traces(
+        make_roofline(),
+        {
+            "ai_hbm": [[2.0], [1000.0]],
+            "ai_l2": [[0.5], [1000.0]],
+            "kernelNames": ["kA"],
+        },
+        sanitized_cache_hierarchy=["HBM", "L2"],
+        ceiling_data={},
+    )
+
+    assert model[0]["limitingPeak"] == "L2"
+
+
+def test_kernel_traces_expose_the_leftmost_peak_when_the_limiter_is_unknown() -> None:
+    """No ceiling data and no compute peaks leaves no candidate roof at all, so
+    the limiter falls back to Unknown -- and, same as the compute-bound case,
+    limitingPeak falls back to the kernel's own lowest-AI point (L2 at 0.5,
+    left of HBM's 2.0)."""
+    traces, model = kernel_traces(
+        make_roofline(),
+        {
+            "ai_hbm": [[2.0], [1000.0]],
+            "ai_l2": [[0.5], [1000.0]],
+            "kernelNames": ["kA"],
+        },
+        sanitized_cache_hierarchy=["HBM", "L2"],
+        ceiling_data={},
+        compute_peaks=[],
+    )
+
+    assert "Limited by Unknown: Unknown" in traces[0].hovertemplate
+    assert model[0]["limitingPeak"] == "L2"
+
+
+def test_kernel_traces_differing_bandwidths__points_share_binding_roof_pct() -> None:
+    ceiling = {
+        "hbm": [[0.01, 1.0], [1.0, 2000.0], 2000.0],
+        "l2": [[0.01, 1.0], [1.0, 3000.0], 3000.0],
+    }
+
+    _, model = kernel_traces(
+        make_roofline(),
+        {
+            "ai_hbm": [[2.0], [1000.0]],
+            "ai_l2": [[0.5], [1000.0]],
+            "kernelNames": ["kA"],
+        },
+        sanitized_cache_hierarchy=["HBM", "L2"],
+        ceiling_data=ceiling,
+        compute_peaks=[],
+    )
+
+    points = {point["peak"]: point for point in model[0]["points"]}
+    assert points["HBM"]["hoverCells"][:2] == ["1,500", "66.67"]
+    assert points["L2"]["hoverCells"][:2] == ["1,500", "66.67"]
+
+
+def test_bandwidth_hover_no_traffic_level__still_lists_at_zero() -> None:
+    ceiling = dict(CEILING, lds=[[0.01, 1.0], [1.0, 800.0], 800.0])
+    _, model = kernel_traces(
+        make_roofline(),
+        {
+            "ai_hbm": [[1.0], [900.0]],
+            "ai_l2": [[0.0], [0.0]],
+            "ai_lds": [[0.0], [0.0]],
+            "kernelNames": ["kA"],
+        },
+        sanitized_cache_hierarchy=["HBM", "L2", "LDS"],
+        ceiling_data=ceiling,
+    )
+    bandwidth_html = model[0]["points"][0]["hoverCells"][2]
+    lines = bandwidth_html.split("<br>")
+
+    lds_line = next(line for line in lines if "LDS" in line)
+    assert "0.000" in lds_line
+
+    l2_line = next(line for line in lines if "L2" in line)
+    assert "0.000" in l2_line
+
+    hbm_line = next(line for line in lines if "HBM" in line)
+    assert "900" in hbm_line
+
+
+def test_kernel_hover_given_a_name_under_the_length_cap__wraps_it_whole() -> None:
+    name = "Cijk_Alik_Bljk_" + "SB_MT256x256x16_MI32x32x2x1_" * 6
 
     traces, _ = kernel_traces(
-        make_roofline(["FP32"]),
+        make_roofline(),
         {"ai_hbm": [[1.0], [900.0]], "kernelNames": [name]},
     )
 
@@ -244,6 +318,37 @@ def test_kernel_hover_carries_the_whole_name() -> None:
     assert lines.endswith(suffix)
     lines = lines[: -len(suffix)]
     assert lines.replace("<br>", "") == name
+
+
+def test_truncate_kernel_name_caps_pathologically_long_names() -> None:
+    """A pathologically long demangled name is capped at 200 characters, ending
+    in an ellipsis, so it can't blow up the tooltip. Names within the cap are
+    untouched."""
+    name = "Cijk_Alik_Bljk_" + "SB_MT256x256x16_MI32x32x2x1_" * 40
+
+    truncated = truncate_kernel_name(name)
+
+    assert len(truncated) == 200
+    assert truncated == name[:197] + "..."
+    assert truncate_kernel_name("short_name") == "short_name"
+
+
+def test_kernel_hover_truncates_names_beyond_two_hundred_characters() -> None:
+    """The kernel trace hover wraps the truncated name, not the raw one, so a
+    pathologically long demangled name can't blow up the tooltip."""
+    name = "Cijk_Alik_Bljk_" + "SB_MT256x256x16_MI32x32x2x1_" * 40
+
+    traces, _ = kernel_traces(
+        make_roofline(),
+        {"ai_hbm": [[1.0], [900.0]], "kernelNames": [name]},
+    )
+
+    wrapped = wrap_hover_name(truncate_kernel_name(name))
+    assert wrapped in traces[0].hovertemplate
+    lines = wrapped.split(">", 1)[1].removesuffix("</span>")
+    flattened = lines.replace("<br>", "")
+    assert len(flattened) == 200
+    assert flattened.endswith("...")
 
 
 def test_canonical_frame_bounds_are_whole_decades() -> None:
@@ -339,9 +444,9 @@ def drawn_roof_knees(fig: go.Figure) -> Dict[str, Tuple[float, float]]:
     }
 
 
-def stacked_figure(benchmarked_roofline, datatypes: List[str]):
-    """The figure and Roofline for these datatypes stacked onto one axis."""
-    roofline = benchmarked_roofline(datatypes)
+def figure_with_precisions(benchmarked_roofline, datatypes: List[str]):
+    """The figure and Roofline object for the given set of precisions."""
+    roofline = benchmarked_roofline()
     fig = None
     for dtype in datatypes:
         fig = roofline.generate_plot(dtype, fig=fig)
@@ -354,7 +459,7 @@ def test_the_figure_uses_the_machine_frame_while_preserving_roof_knees(
 ) -> None:
     """The viewport comes from all machine ceilings, while drawn knees still
     reflect the tallest compute ceiling in the stacked figure."""
-    _, fig = stacked_figure(benchmarked_roofline, datatypes)
+    _, fig = figure_with_precisions(benchmarked_roofline, datatypes)
 
     x_lo, x_hi = (10**bound for bound in fig.layout.xaxis.range)
     y_lo, y_hi = (10**bound for bound in fig.layout.yaxis.range)
@@ -378,10 +483,10 @@ def test_kernel_under_the_frame_is_not_clamped(benchmarked_roofline) -> None:
     }
     inside_only = {"ai_hbm": [[1.0], [500.0]], "kernelNames": ["framed"]}
 
-    _, figure, _, _ = benchmarked_roofline(["FP64"]).construct_plotly_figures(
+    _, figure, _, _ = benchmarked_roofline().construct_plotly_figures(
         ai_data, datatypes=["FP64"]
     )
-    _, reference, _, _ = benchmarked_roofline(["FP64"]).construct_plotly_figures(
+    _, reference, _, _ = benchmarked_roofline().construct_plotly_figures(
         inside_only, datatypes=["FP64"]
     )
 
@@ -396,10 +501,10 @@ def test_kernel_data_does_not_change_machine_axis_ranges(benchmarked_roofline) -
     slow = {"ai_hbm": [[0.5], [2000.0]], "kernelNames": ["slow"]}
     fast = {"ai_hbm": [[40.0], [20000.0]], "kernelNames": ["fast"]}
 
-    _, slow_figure, _, _ = benchmarked_roofline(["FP64"]).construct_plotly_figures(
+    _, slow_figure, _, _ = benchmarked_roofline().construct_plotly_figures(
         slow, datatypes=["FP64"]
     )
-    _, fast_figure, _, _ = benchmarked_roofline(["FP64"]).construct_plotly_figures(
+    _, fast_figure, _, _ = benchmarked_roofline().construct_plotly_figures(
         fast, datatypes=["FP64"]
     )
 
@@ -409,7 +514,7 @@ def test_kernel_data_does_not_change_machine_axis_ranges(benchmarked_roofline) -
 def test_combined_document_embeds_the_plotly_frame(benchmarked_roofline) -> None:
     """The standalone model ships the same data-coordinate frame Plotly uses."""
     figure, document = interactive_document(
-        benchmarked_roofline(["FP64"]),
+        benchmarked_roofline(),
         {"ai_hbm": [[0.5], [2000.0]], "kernelNames": ["slow"]},
     )
 
@@ -419,10 +524,25 @@ def test_combined_document_embeds_the_plotly_frame(benchmarked_roofline) -> None
     assert embedded_frame["y"] == pytest.approx(layout_frame[1])
 
 
+def test_save_html_files_returns_the_written_path(
+    benchmarked_roofline, tmp_path: Path
+) -> None:
+    """The returned path is the HTML document written into the workload dir."""
+    roofline = benchmarked_roofline()
+    figures = roofline.construct_plotly_figures(
+        {"ai_hbm": [[0.5], [2000.0]], "kernelNames": ["slow"]}, datatypes=["FP64"]
+    )
+
+    path = roofline.save_html_files(*figures)
+
+    assert path == f"{tmp_path}/empirRoof_gpu-0.html"
+    assert Path(path).is_file()
+
+
 @pytest.mark.parametrize("source_key", ["FLOP", "OP"])
 def test_combined_model_copies_either_source_frame(source_key: str) -> None:
     """The combined model retains the frame from either available figure class."""
-    roofline = make_roofline(["FP64"])
+    roofline = make_roofline()
     source_frame = {"x": [1e-2, 1e2], "y": [1e1, 1e6]}
     # No public API exists for pre-seeding the per-figure view models.
     roofline._Roofline__view_models = {
@@ -442,11 +562,11 @@ def test_combined_model_copies_either_source_frame(source_key: str) -> None:
 def test_kernel_sets_ship_identical_embedded_frames(benchmarked_roofline) -> None:
     """Changing only kernel coordinates cannot alter the browser's reset frame."""
     _, slow_document = interactive_document(
-        benchmarked_roofline(["FP64"]),
+        benchmarked_roofline(),
         {"ai_hbm": [[0.5], [2000.0]], "kernelNames": ["slow"]},
     )
     _, fast_document = interactive_document(
-        benchmarked_roofline(["FP64"]),
+        benchmarked_roofline(),
         {"ai_hbm": [[40.0], [20000.0]], "kernelNames": ["fast"]},
     )
 
@@ -459,7 +579,7 @@ def test_title_names_the_stable_frame_across_precisions_and_combining(
     benchmarked_roofline,
 ) -> None:
     """Stacking precision roofs and combining figures preserves one frame title."""
-    roofline, figure = stacked_figure(benchmarked_roofline, ["FP64", "BF16"])
+    roofline, figure = figure_with_precisions(benchmarked_roofline, ["FP64", "BF16"])
     expected_title = (
         "Empirical Roofline Analysis<br><sup>Axes fixed to this GPU - "
         "AI 1e-2 to 1e2 - performance 1e0 to 1e5</sup>"
@@ -474,7 +594,7 @@ def test_fallback_frame_has_truthful_subtitle(
     benchmarked_roofline, monkeypatch
 ) -> None:
     """Fallback ranges identify their source in the subtitle."""
-    roofline = benchmarked_roofline(["FP64"])
+    roofline = benchmarked_roofline()
     machine_figure = roofline.generate_plot("FP64")
     assert "Axes fixed to this GPU" in machine_figure.layout.title.text
 
@@ -501,7 +621,7 @@ def test_view_model_carries_the_drawn_knee(benchmarked_roofline) -> None:
     """The client frames on the knees the model ships, so each one has to be the
     knee that figure really draws: capped at its tallest ceiling, including the
     ceilings a stacked datatype brought with it."""
-    roofline, fig = stacked_figure(benchmarked_roofline, ["FP64", "BF16"])
+    roofline, fig = figure_with_precisions(benchmarked_roofline, ["FP64", "BF16"])
     view_model = roofline._Roofline__view_models["FLOP"]
 
     knees = drawn_roof_knees(fig)
@@ -515,7 +635,9 @@ def test_view_model_carries_the_drawn_knee(benchmarked_roofline) -> None:
 def standalone_with_unselected_precision(benchmarked_roofline):
     """The combined document for a run whose opening precision is not its
     tallest, so the default selection is observable in what gets drawn."""
-    roofline, flops_figure = stacked_figure(benchmarked_roofline, ["BF16", "FP64"])
+    roofline, flops_figure = figure_with_precisions(
+        benchmarked_roofline, ["BF16", "FP64"]
+    )
     figure, view_model = roofline._combined_html_figure(None, flops_figure)
     assert figure is not None
     assert view_model.default_precisions == ["BF16"]
@@ -569,7 +691,9 @@ def test_standalone_roofs_open_at_the_selected_cap(benchmarked_roofline) -> None
 def test_dash_figures_keep_every_ceiling(benchmarked_roofline) -> None:
     """The WebUI has no precision selector, so narrowing the standalone document
     must not reach back into the figures Dash renders."""
-    roofline, flops_figure = stacked_figure(benchmarked_roofline, ["BF16", "FP64"])
+    roofline, flops_figure = figure_with_precisions(
+        benchmarked_roofline, ["BF16", "FP64"]
+    )
     source_model = roofline._Roofline__view_models["FLOP"]
     ceiling_indices = [trace["traceIndex"] for trace in source_model.compute_traces]
     roof_extents = drawn_roof_knees(flops_figure)
@@ -580,12 +704,25 @@ def test_dash_figures_keep_every_ceiling(benchmarked_roofline) -> None:
     assert drawn_roof_knees(flops_figure) == roof_extents
 
 
-def test_construct_plotly_figures_all_datatypes_ignores_cli_selection(
+def test_default_precisions_fp32_fp16_fp8_present__orders_fp32_first() -> None:
+    assert _default_precisions(["FP16", "FP32", "FP8", "FP64"]) == [
+        "FP32",
+        "FP16",
+        "FP8",
+    ]
+    assert _default_precisions(["FP8"]) == ["FP8"]
+
+
+def test_default_precisions_no_preferred__falls_back_to_first_datatype() -> None:
+    assert _default_precisions(["FP64", "BF16"]) == ["FP64"]
+
+
+def test_construct_plotly_figures_defaults_to_every_supported_datatype(
     benchmarked_roofline,
 ) -> None:
-    """GUI-style generation attempts all supported architecture datatypes even
-    when the shared analyze arguments selected only one terminal datatype."""
-    roofline = benchmarked_roofline(["FP64"])
+    """With no datatypes given, construct_plotly_figures draws every datatype
+    the architecture supports."""
+    roofline = benchmarked_roofline()
 
     ops_figure, flops_figure, _, _ = roofline.construct_plotly_figures(
         {"kernelNames": []}, datatypes=None
@@ -598,22 +735,12 @@ def test_construct_plotly_figures_all_datatypes_ignores_cli_selection(
     assert "Peak VALU-FP64" in trace_names
 
 
-def test_view_model_to_json_escapes_script_close() -> None:
-    """Serialized model text cannot close its embedding script element."""
-    model = RooflineViewModel(kernels=[{"name": "evil</script>", "points": []}])
-
-    serialized = model.to_json()
-
-    assert "</script>" not in serialized, "must not allow a script element to close"
-    assert json.loads(serialized)["kernels"][0]["name"] == "evil</script>"
-
-
 def test_the_controller_looks_up_controls_the_page_renders() -> None:
     """Every control the controller reaches for by id has to be one the document
     renders. Nothing would report the two drifting apart: the control would
     simply stop working."""
     controller = (_ASSETS / "roofline_plot.js").read_text(encoding="utf-8")
-    page_template = roofline_html._read_asset("roofline_plot.html")
+    page_template = read_asset(_ASSETS, "roofline_plot.html")
 
     looked_up = set(re.findall(r'getElementById\("([^"]+)"\)', controller))
     assert looked_up, "expected the controller to find its controls by id"
@@ -625,7 +752,7 @@ def test_the_controller_looks_up_controls_the_page_renders() -> None:
 
 def test_browser_exposes_fixed_reset_fit_and_offplot_controls() -> None:
     """The page labels fixed reset separately from one-shot data fitting."""
-    page_template = roofline_html._read_asset("roofline_plot.html")
+    page_template = read_asset(_ASSETS, "roofline_plot.html")
 
     assert 'id="roofline-reset-view"' in page_template
     assert "Return to the fixed opening axes" in page_template
@@ -669,15 +796,8 @@ def test_precision_controller_remains_single_and_does_not_reset_view() -> None:
     assert "resetView" not in apply_precision
 
 
-def test_the_dark_theme_is_named_the_same_in_every_asset() -> None:
-    """The page sets this class before its first paint, the stylesheet colors it,
-    and the toggle flips it. One name in three files, or a reader's theme silently
-    stops following either of them."""
-    dark_class = "roofline-theme-dark"
-    page_template = roofline_html._read_asset("roofline_plot.html")
+def test_roofline_stylesheet_uses_shared_dark_theme_class() -> None:
+    """The stylesheet colors the dark theme selected by the shared shell."""
     css = (_ASSETS / "roofline_plot.css").read_text(encoding="utf-8")
-    controller = (_ASSETS / "roofline_plot.js").read_text(encoding="utf-8")
 
-    assert f'classList.add("{dark_class}")' in page_template
-    assert f":root.{dark_class}" in css
-    assert f'"{dark_class}"' in controller
+    assert f":root.{DARK_THEME_CLASS}" in css

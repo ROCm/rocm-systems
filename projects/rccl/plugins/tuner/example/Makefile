@@ -5,7 +5,7 @@
 # See LICENSE.txt for license information
 #
 
-.DEFAULT_GOAL: build
+.DEFAULT_GOAL := build
 PLUGIN_SO:=librccl-tuner-example.so
 SRCDIR   ?= $(abspath ../../..)
 BUILDDIR ?= .

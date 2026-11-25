@@ -1,7 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
@@ -14,7 +16,7 @@
 
 namespace rocjitsu {
 namespace {
-class ScalarBufferStore : public testing::TestWithParam<rj_code_arch_t> {
+class ScalarBufferStore : public testing::TestWithParam<rocjitsu::IsaFamily> {
 protected:
   void SetUp() override {
     l2_.set_backing_memory(&memory_);
@@ -24,7 +26,8 @@ protected:
     config.sgprs_per_wf = 102;
     config.vgprs_per_wf = 16;
     config.lds_size_kb = 64;
-    cu_ = amdgpu::ComputeUnitCore::create("scalar_buffer_store", config, &memory_, &l2_);
+    ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(cu_, "scalar_buffer_store",
+                                                                    config, &memory_, &l2_));
     wave_ = cu_->dispatch_wf(0, 0, 102, 16);
     ASSERT_NE(wave_, nullptr);
     // Scalar memory instructions execute even with no active vector lanes.
@@ -32,8 +35,9 @@ protected:
     decoder_ = Decoder::create(GetParam());
   }
   void TearDown() override {
-    if (wave_)
+    if (wave_) {
       wave_->halt();
+    }
   }
   void put(unsigned reg, uint32_t value) { cu_->write_sgpr(wave_->sgpr_alloc().base + reg, value); }
   void base(uint32_t records = 0xffffffff, uint32_t stride = 0) {
@@ -76,8 +80,20 @@ TEST_P(ScalarBufferStore, BufferStoresRespectPerDwordBounds) {
   EXPECT_EQ(memory_.read32(0x400c), 10u);
 }
 
+// gfx90a: a DWORD only partly inside the buffer is not written.
+TEST_P(ScalarBufferStore, BufferStoreSkipsDwordThatEndsPastTheBuffer) {
+  for (uint32_t records : {13u, 16u}) {
+    SCOPED_TRACE(records);
+    base(records);
+    memory_.write32(0x400c, 10);
+    put(32, 100);
+    ASSERT_NO_FATAL_FAILURE(issue(24, true, 12)); // S_BUFFER_STORE_DWORD at offset 12.
+    EXPECT_EQ(memory_.read32(0x400c), records == 16 ? 100u : 10u);
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(Cdna, ScalarBufferStore,
-                         testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                         ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4));
+                         testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                         rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4));
 } // namespace
 } // namespace rocjitsu

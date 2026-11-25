@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -9,7 +10,6 @@
 #include "rocjitsu/refcount.h"
 
 #include <memory>
-#include <new>
 
 using namespace rocjitsu;
 
@@ -20,87 +20,91 @@ struct rj_code_decoder_t : RefCounted {
 namespace {
 
 template <typename Factory>
-rj_status_t create_decoder_handle(Factory &&factory, rj_code_decoder_t **decoder) {
-  try {
-    auto implementation = factory();
-    if (!implementation)
-      return ROCJITSU_STATUS_ERROR;
-
-    auto handle = std::make_unique<rj_code_decoder_t>();
-    handle->decoder = std::move(implementation);
-    *decoder = handle.release();
-    return ROCJITSU_STATUS_SUCCESS;
-  } catch (const std::bad_alloc &) {
-    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
-  } catch (...) {
+rj_status_t create_decoder_handle(Factory &&factory, rj_code_decoder_t **decoder) noexcept {
+  auto implementation = factory();
+  if (!implementation) {
     return ROCJITSU_STATUS_ERROR;
   }
+
+  auto handle = std::make_unique<rj_code_decoder_t>();
+  handle->decoder = std::move(implementation);
+  *decoder = handle.release();
+  return ROCJITSU_STATUS_SUCCESS;
 }
 
 } // namespace
 
-rj_status_t rj_code_decoder_create(rj_code_arch_t arch, rj_code_decoder_t **decoder) {
-  if (!decoder)
+rj_status_t rj_code_decoder_create(rj_code_target_id_t target, rj_code_decoder_t **decoder) {
+  if (!decoder) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  }
   *decoder = nullptr;
-  if (arch < ROCJITSU_CODE_ARCH_CDNA1 || arch >= ROCJITSU_CODE_ARCH_NUM_ARCHS)
+  if (target < ROCJITSU_CODE_TARGET_GFX90A || target >= ROCJITSU_CODE_TARGET_NUM_TARGETS) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  }
 
-  return create_decoder_handle([arch] { return Decoder::create(arch); }, decoder);
+  return create_decoder_handle(
+      [target] { return Decoder::create(default_isa_target_registry(), target); }, decoder);
 }
 
 rj_status_t rj_code_decoder_create_for_target(const char *target_id, rj_code_decoder_t **decoder) {
-  if (decoder == nullptr)
+  if (decoder == nullptr) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  }
   *decoder = nullptr;
-  if (target_id == nullptr || target_id[0] == '\0')
+  if (target_id == nullptr || target_id[0] == '\0') {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  }
 
   return create_decoder_handle(
       [target_id] { return Decoder::create(default_isa_target_registry(), target_id); }, decoder);
 }
 
 void rj_code_decoder_retain(rj_code_decoder_t *decoder) {
-  if (decoder)
+  if (decoder) {
     decoder->retain();
+  }
 }
 
 void rj_code_decoder_release(rj_code_decoder_t *decoder) {
-  if (!decoder)
+  if (!decoder) {
     return;
-  if (decoder->release())
+  }
+  if (decoder->release()) {
     delete decoder;
+  }
 }
 
 void rj_code_decoder_destroy(rj_code_decoder_t *decoder) {
-  if (!decoder)
+  if (!decoder) {
     return;
-  if (decoder->destroy())
+  }
+  if (decoder->destroy()) {
     delete decoder;
+  }
 }
 
 rj_status_t rj_code_decoder_decode(rj_code_decoder_t *decoder,
                                    const rj_code_binary_inst_t *binary_inst,
                                    rj_code_inst_t **inst) {
-  if (!inst)
+  if (!inst) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  }
   *inst = nullptr;
-  if (!decoder || !decoder->decoder || !binary_inst)
+  if (!decoder || !decoder->decoder || !binary_inst) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  }
 
-  try {
+  return [&]() noexcept -> rj_status_t {
     Instruction::ScopedHeapAllocation heap_allocation;
     DecodeResult decoded = decoder->decoder->decode(binary_inst);
-    if (decoded.failed())
+    if (decoded.failed()) {
       return ROCJITSU_STATUS_ERROR;
+    }
 
     *inst = reinterpret_cast<rj_code_inst_t *>(decoded.value().release());
     return ROCJITSU_STATUS_SUCCESS;
-  } catch (const std::bad_alloc &) {
-    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
-  } catch (...) {
-    return ROCJITSU_STATUS_ERROR;
-  }
+  }();
 }
 
 void rj_code_inst_destroy(rj_code_inst_t *inst) {

@@ -6,8 +6,10 @@ NIC tests.
 """
 
 from __future__ import annotations
-import pytest
+
 import shutil
+
+import pytest
 from conftest import RocprofsysTest
 
 pytestmark = [pytest.mark.nic, pytest.mark.network]
@@ -26,7 +28,7 @@ def nic_perf_env(rocprof_config) -> dict[str, str]:
         "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
         "ROCPROFSYS_SAMPLING_FREQ": "50",
         "ROCPROFSYS_SAMPLING_CPUS": "none",
-        "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,papi_array,network_stats",
+        "ROCPROFSYS_TIMEMORY_COMPONENTS": "papi_array,network_stats",
         "ROCPROFSYS_NETWORK_INTERFACE": f"{rocprof_config.capabilities.default_nic}",
         "ROCPROFSYS_PAPI_EVENTS": f"{rocprof_config.capabilities.papi_nic_events}",
         "ROCPROFSYS_SAMPLING_DELAY": "0.05",
@@ -54,8 +56,8 @@ def nic_perf_download_url_2() -> str:
 class TestNIC(RocprofsysTest):
     """Tests for NIC performance."""
 
-    PERFETTO_PASS_REGEX = [r"perfetto-trace\.pftrace validated"]
-    PERFETTO_FAIL_REGEX = [r"Failure validating.*perfetto-trace\.pftrace"]
+    PERFETTO_PASS_REGEX = (r"perfetto-trace\.pftrace validated",)
+    PERFETTO_FAIL_REGEX = (r"Failure validating.*perfetto-trace\.pftrace",)
 
     def test_performance(
         self,

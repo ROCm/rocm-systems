@@ -15,7 +15,9 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
+#include "rocjitsu/result.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 
 #include <cstdint>
@@ -33,6 +35,23 @@ class ExecMaskAnalysis;
 class Gfx1250VgprMsbAnalysis;
 class Instruction;
 
+/// @brief Whether an instruction may enable displaced VGPR addressing.
+/// @details Returns false for unrelated instructions or a MODE write proven to
+/// clear GPR_IDX_EN, and true for an enabling or unknown write. Missing required
+/// operands or literal bytes return true. Text is the entire .text section;
+/// instruction_offset is its byte offset, defaulting to inst.src_loc(). Direct
+/// decoder callers must supply the offset when src_loc() does not describe text.
+[[nodiscard]] bool
+may_enable_gpr_indexing(const Instruction &inst, std::span<const uint8_t> text,
+                        rocjitsu::IsaFamily arch,
+                        std::optional<uint64_t> instruction_offset = std::nullopt);
+
+/// @brief Whether an instruction may enable vector-instruction suppression.
+/// @details The result and .text offset convention match may_enable_gpr_indexing.
+[[nodiscard]] bool may_enable_vskip(const Instruction &inst, std::span<const uint8_t> text,
+                                    rocjitsu::IsaFamily arch,
+                                    std::optional<uint64_t> instruction_offset = std::nullopt);
+
 /// @brief The basic blocks reachable from one kernel entry.
 using KernelBlockScope = std::span<BasicBlock *const>;
 
@@ -45,6 +64,14 @@ using KernelBlockScope = std::span<BasicBlock *const>;
 struct ScopedCfgEdge {
   BasicBlock *from = nullptr;
   BasicBlock *to = nullptr;
+};
+
+/// @brief Caller-supplied ordinary-register reads around an instruction.
+struct AdditionalRegisterUse {
+  const Instruction *instruction = nullptr;
+  RegisterSet registers;
+  /// False reads the input value; true reads the result after the instruction.
+  bool after_instruction = false;
 };
 
 /// @brief Block-level dataflow state for one kernel scope.
@@ -71,7 +98,7 @@ struct LivenessAnalysisOptions {
   /// @details INVALID preserves the legacy ISA-independent behavior. DBT sets
   /// this to gfx1250 together with entry_block so VGPR_MSB state can resolve
   /// encoded vector operands to physical VGPRs.
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Invalid;
 
   /// @brief Concrete decoding target whose shared-instruction behavior applies.
   ///
@@ -82,13 +109,21 @@ struct LivenessAnalysisOptions {
   /// @brief Kernel entry block where architectural VGPR_MSB state is zero.
   BasicBlock *entry_block = nullptr;
 
-  /// @brief Further blocks entered with the same architectural state as entry_block.
+  /// @brief Further blocks entered with the ABI's VGPR_MSB bank-zero state.
   ///
   /// @details These are address-taken device functions adopted into this scope. They are reached
   /// by a call through a pointer rather than by a decoded edge, so without seeding their blocks
-  /// stay unreachable and every VGPR_MSB query over them answers nullopt. The state to seed them
-  /// with is the ABI's, which is the same one entry_block gets.
+  /// stay unreachable and every VGPR_MSB query over them answers nullopt. The VGPR-bank ABI
+  /// seeds them with bank zero, as for entry_block. This option supplies no VSKIP-clear proof:
+  /// Incoming VSKIP is unknown unless the block is also listed in vskip_clear_entry_blocks.
   std::span<BasicBlock *const> additional_entry_blocks;
+
+  /// @brief Entries whose incoming VSKIP is proven clear, such as dispatch roots.
+  /// @details Other entries have unknown VSKIP. These seeds are merged with
+  /// backedges; they do not override state from an earlier loop iteration.
+  /// Construction copies the span. This proof is independent of EXEC fullness
+  /// and of entry_block's VGPR-bank contract.
+  std::span<const BasicBlock *const> vskip_clear_entry_blocks = {};
 
   /// @brief Lowest VGPR index that a VGPR scratch query may return.
   ///
@@ -121,7 +156,8 @@ struct LivenessAnalysisOptions {
   ///
   /// An ExecMaskAnalysis, if supplied, takes precedence — where it reports
   /// `Unknown` the result is the conservative one, so do not supply one
-  /// alongside this flag.
+  /// alongside this flag. This option does not override VSKIP suppression;
+  /// affected definitions still require VSKIP to be proven clear.
   bool exec_masked_defs_kill = false;
 
   /// @brief Restrict instruction-level live-before materialization to selected instructions.
@@ -145,11 +181,21 @@ struct LivenessAnalysisOptions {
 
   /// @brief Raw .text image for the analyzed kernel scope.
   ///
-  /// @details Forwarded to the gfx1250 VGPR_MSB analysis so it can read
-  /// S_SETREG_IMM32_B32 literals safely from the instruction stream (at
-  /// src_loc()+4) instead of indexing past a decoded instruction's encoding word.
-  /// Empty is tolerated: such writes then mark the affected banks ambiguous.
+  /// @details Used for VGPR_MSB and VSKIP effects of S_SETREG_IMM32_B32.
+  /// Literal-dependent effects are captured at construction, so deferred
+  /// liveness does not borrow this span. Missing literals leave state unknown.
   std::span<const uint8_t> text = {};
+
+  /// @brief Additional ordinary-register reads around the specified instructions.
+  ///
+  /// @details Before reads precede the instruction's definitions. After reads
+  /// follow them and can be satisfied by that instruction's proven full write.
+  /// Both placements participate in eager global usage and full CFG dataflow,
+  /// independently of snapshot filtering. Construction copies the sets, merges
+  /// duplicate entries at the same instruction and placement, projects out
+  /// special registers and ignores instructions outside the analyzed scope.
+  /// The option span need not outlive construction.
+  std::span<const AdditionalRegisterUse> additional_uses = {};
 };
 
 /// @brief Reverse-post-order traversal of one kernel's implicit CFG.
@@ -161,25 +207,28 @@ struct LivenessAnalysisOptions {
 [[nodiscard]] std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks);
 
 /// @brief One past the highest ordinary SGPR named by an explicit operand in
-///        @p blocks, counting operand width, or 0 if the scope names none.
+///        @p blocks, counting wave-adjusted operand width, or 0 if the scope
+///        names none.
 ///
 /// @details An allocation floor for callers placing new scalar storage, computed
-/// without dataflow or a LivenessAnalysis instance. Implicit operands are
-/// excluded: an ordinary SGPR reached implicitly is also named explicitly
-/// (FLAT/GLOBAL `saddr` is both), so only special state would come in, which is
-/// not allocatable. Indices at or past REGISTER_SET_ALLOCATABLE_SGPRS are
-/// excluded as unreachable by any caller bound.
+/// without dataflow or a LivenessAnalysis instance. A wave-mask SGPR operand
+/// counts as one register at Wave32; otherwise its decoded width is preserved
+/// (see @ref wave_sized_register). Implicit operands are excluded: an ordinary
+/// SGPR reached implicitly is also named explicitly (FLAT/GLOBAL `saddr` is
+/// both), so only special state would come in, which is not allocatable. Indices
+/// at or past REGISTER_SET_ALLOCATABLE_SGPRS are excluded as unreachable by any
+/// caller bound.
 ///
 /// A partial scope understates the result and the gap it reports may hold
 /// registers the kernel is using.
-[[nodiscard]] uint32_t explicit_ordinary_sgpr_bound(KernelBlockScope blocks);
+[[nodiscard]] uint32_t explicit_ordinary_sgpr_bound(KernelBlockScope blocks, uint8_t wave_size);
 
 /// @brief Whether any instruction in @p blocks is an `s_movrel*` form.
 ///
-/// @details M0 displaces the encoded SGPR index at runtime, so the operand names
-/// one register and the hardware accesses another. Neither
-/// @ref explicit_ordinary_sgpr_bound nor LivenessAnalysis models that, so a
-/// caller relying on either for SGPR usage must reject a scope where this holds.
+/// @details M0 displaces the encoded SGPR index at runtime. LivenessAnalysis
+/// detects these instructions and marks global SGPR usage incomplete because
+/// the physical register depends on M0. Callers using
+/// @ref explicit_ordinary_sgpr_bound must check for these instructions separately.
 ///
 /// Matches by prefix: that covers the load, the store (`s_movreld_*`) and the
 /// RDNA `s_movrelsd_2_b32` pair form. Any other scalar indirection would need
@@ -192,7 +241,10 @@ struct LivenessAnalysisOptions {
 /// register usage. The backward CFG fixed point and live-before snapshots are
 /// materialized on the first query that needs them. Queries on one analysis
 /// object are not thread-safe because const query methods may populate that
-/// deferred cache.
+/// deferred cache. All FailureOr query methods return failure when analysis was
+/// intentionally omitted. A successful false or nullopt is an ordinary query
+/// answer, not an unavailable-analysis error. Borrowed query results remain valid
+/// for the lifetime of the analysis.
 class LivenessAnalysis {
 public:
   /// @brief Prepare register analysis for one kernel's block set.
@@ -203,12 +255,17 @@ public:
   /// object. The pointed-to BasicBlocks and their Instructions must outlive this
   /// analysis because deferred CFG queries retain and later dereference them.
   /// @param blocks Blocks in one kernel CFG scope.
+  /// @param wave_size Wave width in lanes the scope executes at, 32 or 64.
+  /// Forwarded to @ref InstDefUse. A Wave32 RDNA scope analyzed at 64 can report a
+  /// live SGPR dead.
   /// @param exec Optional program-point EXEC-state analysis over the same
-  /// @p blocks scope; lets EXEC-masked vector defs count as kills where EXEC is
-  /// provably full. Ownership is moved into the analysis. Defaults to null: with
-  /// no EXEC analysis every EXEC-masked vector def is treated as `Unknown`, so
-  /// the conservative behavior (never promote such a def to a kill) is preserved.
-  LivenessAnalysis(KernelBlockScope blocks, std::unique_ptr<ExecMaskAnalysis> exec = nullptr,
+  /// @p blocks scope and @p wave_size; lets EXEC-masked vector defs count as
+  /// kills where EXEC is provably full. Ownership is moved into the analysis.
+  /// Defaults to null: with no EXEC analysis every EXEC-masked vector def is
+  /// treated as `Unknown`, so the conservative behavior (never promote such a
+  /// def to a kill) is preserved.
+  LivenessAnalysis(KernelBlockScope blocks, uint8_t wave_size,
+                   std::unique_ptr<ExecMaskAnalysis> exec = nullptr,
                    LivenessAnalysisOptions options = {},
                    std::span<const ScopedCfgEdge> extra_edges = {});
   ~LivenessAnalysis();
@@ -221,9 +278,9 @@ public:
   /// @brief Create a fail-closed sentinel for a scope that does not need liveness.
   ///
   /// @details BinaryTranslator uses this when every matching semantic expansion
-  /// rule is marked liveness-free. Any query on the returned object throws
-  /// std::logic_error so an incorrectly classified rule cannot silently use
-  /// missing liveness data.
+  /// rule is marked liveness-free. Guarded queries return failure so an incorrectly
+  /// classified rule cannot silently use missing liveness data. Successful
+  /// false or nullopt results retain their ordinary query-specific meaning.
   [[nodiscard]] static LivenessAnalysis unavailable();
 
   /// @brief Whether a query has materialized the deferred backward CFG state.
@@ -233,28 +290,31 @@ public:
   [[nodiscard]] bool has_materialized_cfg_liveness() const { return analyzed_; }
 
   /// @brief Block liveness by block object.
-  [[nodiscard]] const BlockLiveness &block_liveness(const BasicBlock &block) const;
+  /// @pre @p block must be one of the BasicBlock objects passed to the constructor.
+  /// @details Passing a block outside that scope violates an internal contract
+  /// and is asserted in assertion-enabled builds. Returns failure when
+  /// the analysis is unavailable, matching live_before().
+  FailureOr<const BlockLiveness *> block_liveness(const BasicBlock &block) const;
 
   /// @brief Whether a live-before snapshot was materialized for @p inst.
   /// @details Returns false when @p inst was not part of the analyzed scope.
-  ///          Throws std::logic_error when the analysis is unavailable,
+  ///          Returns failure when the analysis is unavailable,
   ///          matching live_before().
-  [[nodiscard]] bool has_live_before(const Instruction &inst) const;
+  FailureOr<bool> has_live_before(const Instruction &inst) const;
 
   /// @brief Registers live immediately before @p inst executes.
   ///
   /// @details Ordinary registers only. Special singletons (EXEC/M0/PC/...) are
   /// deliberately excluded: implicit special uses are not yet fully modeled, so
-  /// this analysis does not answer special-register liveness.
-  [[nodiscard]] const RegisterSet &live_before(const Instruction &inst) const;
+  /// this analysis does not answer special-register liveness. Returns failure
+  /// when the analysis is unavailable.
+  FailureOr<const RegisterSet *> live_before(const Instruction &inst) const;
 
   /// @brief Convenience predicate for one register reference. Only meaningful
   /// for ordinary classes; special-register liveness is not tracked (see
   /// live_before()).
-  [[nodiscard]] bool is_live_before(const Instruction &inst, RegisterRef ref) const;
+  FailureOr<bool> is_live_before(const Instruction &inst, RegisterRef ref) const;
 
-  /// @brief gfx1250 VGPR bank selected for @p role before @p inst.
-  /// @returns nullopt when this is not a gfx1250 analysis or the state is ambiguous.
   /// @brief The VGPR_MSB analysis this liveness owns, or nullptr when it has none.
   ///
   /// @details Exposed so a caller that needs the same dataflow does not build a second one over
@@ -264,15 +324,42 @@ public:
     return gfx1250_vgpr_msb_.get();
   }
 
-  [[nodiscard]] std::optional<uint8_t> vgpr_msb_bank_before(const Instruction &inst,
-                                                            amdgpu::VgprMsbRole role) const;
+  /// @brief gfx1250 VGPR bank selected for @p role before @p inst.
+  /// @returns Failure when unavailable; successful nullopt when this is not a
+  /// gfx1250 analysis or the state is ambiguous.
+  FailureOr<std::optional<uint8_t>> vgpr_msb_bank_before(const Instruction &inst,
+                                                         amdgpu::VgprMsbRole role) const;
 
   /// @brief Whether statically decoded operands cover every VGPR access in the scope.
   ///
+  /// @returns Failure when analysis is unavailable; successful false when
+  /// decoded VGPR usage is incomplete. Callers must reject both before relying
+  /// on physical VGPR ranges.
   /// @details False when relative addressing or runtime GPR indexing can redirect
   /// an encoded VGPR operand. Transformations that compare or reuse physical
   /// VGPR ranges must fail closed when this query returns false.
-  [[nodiscard]] bool global_vgpr_usage_is_complete() const;
+  FailureOr<bool> global_vgpr_usage_is_complete() const;
+
+  /// @brief Whether explicit operands cover SGPR usage in the decoded scope.
+  /// @returns Failure if analysis is unavailable, or false if an `s_movrel*`
+  /// instruction can redirect an SGPR access through M0. A whole-kernel
+  /// conclusion requires a scope that includes all reachable callees.
+  FailureOr<bool> global_sgpr_usage_is_complete() const;
+
+  /// @brief Whether VSKIP is proven clear immediately before an instruction.
+  /// @details Unknown state or an instruction outside the scope answers false;
+  /// unavailable analysis returns failure. Calls invalidate the proof.
+  FailureOr<bool> vskip_clear_before(const Instruction &inst) const;
+
+  /// @brief Find an even ordinary SGPR pair unused throughout the decoded scope.
+  /// @details The scope must include reachable callees. The search spans
+  /// REGISTER_SET_ALLOCATABLE_SGPRS. Callers using a pair beyond the current
+  /// kernel descriptor allocation must grow it with require_sgprs(). The query
+  /// does not reserve the pair. Repeated queries may return the same registers.
+  /// @returns Failure if analysis is unavailable. A successful empty result
+  /// means SGPR usage is incomplete, @p inst is outside the scope (or null),
+  /// or no pair is free.
+  FailureOr<std::optional<uint16_t>> find_globally_unused_sgpr_pair(const Instruction *inst) const;
 
   /// @brief Find a VGPR tuple that no instruction in the kernel reads or writes.
   ///
@@ -293,7 +380,7 @@ public:
   /// @param base_alignment Required tuple-base alignment.
   /// @param available_count Exclusive upper bound imposed by the current
   ///        descriptor allocation.
-  [[nodiscard]] std::optional<uint16_t> find_globally_unused_vgpr_run(
+  FailureOr<std::optional<uint16_t>> find_globally_unused_vgpr_run(
       const Instruction *inst, uint16_t count, uint16_t search_start = 0,
       uint16_t base_alignment = 1,
       uint16_t available_count = static_cast<uint16_t>(REGISTER_SET_MAX_VGPRS)) const;
@@ -308,20 +395,20 @@ public:
   /// liveness for a power-of-two-aligned dead run that is also encodable for
   /// the target instruction. Runs wider than a RegisterRef can name (255) fail
   /// closed, since the search tests a candidate run as one RegisterRef.
-  [[nodiscard]] std::optional<uint16_t> find_free_run(const Instruction *inst, uint16_t count,
-                                                      uint16_t search_start = 0,
-                                                      uint16_t base_alignment = 1) const;
+  FailureOr<std::optional<uint16_t>> find_free_run(const Instruction *inst, uint16_t count,
+                                                   uint16_t search_start = 0,
+                                                   uint16_t base_alignment = 1) const;
 
   /// @brief Find an even-aligned dead SGPR pair immediately before an instruction.
   ///
   /// @details Even alignment is required for pair operations such as saving EXEC
   /// with an s_mov_b64-style scalar move.
-  [[nodiscard]] std::optional<uint16_t> find_free_sgpr_pair(const Instruction *inst,
-                                                            uint16_t search_start = 0) const;
+  FailureOr<std::optional<uint16_t>> find_free_sgpr_pair(const Instruction *inst,
+                                                         uint16_t search_start = 0) const;
 
   /// @brief Find one dead SGPR immediately before an instruction.
-  [[nodiscard]] std::optional<uint16_t> find_free_sgpr(const Instruction *inst,
-                                                       uint16_t search_start = 0) const;
+  FailureOr<std::optional<uint16_t>> find_free_sgpr(const Instruction *inst,
+                                                    uint16_t search_start = 0) const;
 
 private:
   /// @brief Tag selecting the unavailable sentinel constructor.
@@ -331,15 +418,16 @@ private:
   explicit LivenessAnalysis(UnavailableTag);
 
   /// @brief Reject a query when this object is the unavailable sentinel.
-  /// @throws std::logic_error if liveness data was intentionally not built.
-  void require_available() const;
+  /// @returns Failure if liveness data was intentionally not built.
+  Result require_available() const;
 
   /// @brief Materialize CFG live-before state on the first query that needs it.
-  void ensure_analyzed() const;
+  Result ensure_analyzed() const;
 
   /// @brief Collect whole-kernel register use without running backward dataflow.
   void collect_global_register_usage(KernelBlockScope blocks, std::span<const uint8_t> text,
-                                     rj_code_arch_t arch);
+                                     rocjitsu::IsaFamily arch,
+                                     std::span<const AdditionalRegisterUse> additional_uses);
 
   void analyze(KernelBlockScope blocks, bool restrict_live_before_to_instructions,
                std::span<const Instruction *const> live_before_instructions,
@@ -348,15 +436,26 @@ private:
   bool available_ = true;
   mutable bool analyzed_ = false;
   bool exec_masked_defs_kill_ = false;
+  bool tracks_vskip_ = false;
   bool global_vgpr_usage_is_complete_ = true;
+  bool global_sgpr_usage_is_complete_ = true;
   uint16_t min_free_vgpr_ = 0;
   uint16_t max_free_vgpr_ = 0;
+  uint8_t wave_size_ = 0;
   std::unique_ptr<Gfx1250VgprMsbAnalysis> gfx1250_vgpr_msb_;
   // EXEC-state analysis over the same scope, captured at construction so the
   // deferred backward dataflow can treat an EXEC-masked vector def as a kill
   // where EXEC is provably full.
   std::unique_ptr<ExecMaskAnalysis> exec_;
   RegisterSet globally_used_registers_;
+  std::unordered_map<const Instruction *, RegisterSet> additional_uses_before_;
+  std::unordered_map<const Instruction *, RegisterSet> additional_uses_after_;
+  // Only state-changing instructions are stored: true means possibly set,
+  // false means proven clear. Capture literal-dependent effects before deferral.
+  std::unordered_map<const Instruction *, bool> vskip_writes_;
+  std::unordered_set<const BasicBlock *> vskip_clear_entry_blocks_;
+  std::unordered_set<const BasicBlock *> vskip_entry_blocks_;
+  mutable std::unordered_set<const Instruction *> vskip_clear_before_;
   std::vector<BasicBlock *> deferred_blocks_;
   std::unordered_set<const BasicBlock *> scoped_blocks_;
   bool deferred_restrict_live_before_to_instructions_ = false;

@@ -30,9 +30,6 @@
 
 namespace dda::common {
 
-// LL is for small-message, so the full payload is well under the staging cap.
-constexpr size_t kDdaLLA2ASlotStridePkts = kDdaLLMaxBytes / sizeof(LLPacket16);
-
 // LL all-to-all kernel. 2D grid: grid.x == nRanks selects the peer (column b
 // owns peer b); grid.y == blocksPerPeer splits that peer's packets into gridDim.y
 // contiguous chunks (chunk == blockIdx.y). grid.y == 1 is one block per peer.
@@ -50,7 +47,9 @@ __launch_bounds__(512)
                                       size_t perChunkBytes,                  // per-peer chunk payload; multiple of 16
                                       int selfRank, int nRanksRt,
                                       uint32_t* __restrict__ epochDev,       // per-block LL epoch cells
-                                      int epochLen) {                        // number of cells in epochDev
+                                      int epochLen,                          // number of cells in epochDev
+                                      size_t bankSize,                       // scratch bank size (from host)
+                                      DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int peer = blockIdx.x;             // grid.x == nRanks: one column/peer
@@ -60,13 +59,13 @@ __launch_bounds__(512)
   const int tid = threadIdx.x;
   const int nthreads = blockDim.x;
   const size_t nPk = perChunkBytes >> 3;   // 8 payload bytes per packet
-  const size_t slot = kDdaLLA2ASlotStridePkts;
+  const size_t slot = ddaLLPeerSlotPkts(bankSize, nRanks);
 
-  // On-device, graph-safe flag/bank derivation. bank = flag & 1.
+  // On-device, graph-safe flag/bank derivation. bank = flag & 1, and bank 1 starts at bankSize.
   const int flatBlockId = blockIdx.x * gridDim.y + blockIdx.y;
   const int total = gridDim.x * gridDim.y;
   const uint32_t flag = ddaGetLLEpochInc(epochDev, flatBlockId, 1);
-  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (size_t)nRanks * slot;
+  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (bankSize / sizeof(LLPacket16));
 
   // This block's packet range [pkBegin, pkEnd); [0, nPk) when nChunks == 1.
   const size_t pkPerChunk = (nPk + (size_t)nChunks - 1) / (size_t)nChunks;
@@ -112,9 +111,9 @@ __launch_bounds__(512)
     uint32_t* out = reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(recvbuff) + (size_t)peer * perChunkBytes);
     for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
       uint32_t d0, f0, d1, f1;
-      do {
-        ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
-      } while (f0 != flag || f1 != flag);
+      if (!ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1)) {
+        break; // poll is the outermost loop; the ddaSetLLEpoch below still runs
+      }
       out[2 * pk] = d0;
       out[2 * pk + 1] = d1;
     }

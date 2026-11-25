@@ -6,7 +6,7 @@
 #
 # See LICENSE.txt for more license information
 #
-.DEFAULT_GOAL: build
+.DEFAULT_GOAL := build
 BUILDDIR ?= .
 NCCLDIR  := $(BUILDDIR)
 

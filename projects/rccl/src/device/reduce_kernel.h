@@ -477,6 +477,13 @@ SPECIALIZE_REDUCE(FuncSum, rccl_bfloat8, 2, fp8x2_storage_t, hadd2_b(x, y))
 SPECIALIZE_REDUCE(FuncProd, rccl_bfloat8, 1, rccl_bfloat8, rccl_bfloat8(float(x) * float(y)))
 SPECIALIZE_REDUCE(FuncMinMax, rccl_bfloat8, 1, rccl_bfloat8,
                   rccl_bfloat8(fn.isMinNotMax ? fminf(float(x), float(y)) : fmaxf(float(x), float(y))))
+
+#if defined(RCCL_FP8_HAS_PK8)
+// gfx1250 converts 8 fp8 lanes per instruction, so reduce a whole BytePack<8>
+// at once instead of letting Apply_Reduce recurse down to pairs.
+SPECIALIZE_REDUCE(FuncSum, rccl_float8, 8, fp8x8_storage_t, hadd8(x, y))
+SPECIALIZE_REDUCE(FuncSum, rccl_bfloat8, 8, fp8x8_storage_t, hadd8_b(x, y))
+#endif
 #endif
 #endif
 

@@ -28,6 +28,7 @@
    ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
    DEALINGS WITH THE SOFTWARE.  */
 
+#include "agent_utils.h"
 #include "code_object.h"
 #include "debug.h"
 #include "logging.h"
@@ -136,72 +137,30 @@ code_object_t::open ()
 {
   agent_assert (!is_open () && "code object is already opened");
 
-  const std::string protocol_delim{ "://" };
-
-  size_t protocol_end = m_uri.find (protocol_delim);
-  std::string protocol = m_uri.substr (0, protocol_end);
-  protocol_end += protocol_delim.length ();
-
-  std::transform (protocol.begin (), protocol.end (), protocol.begin (),
-                  [] (unsigned char c) { return std::tolower (c); });
-
-  std::string path;
-  size_t path_end = m_uri.find_first_of ("#?", protocol_end);
-  if (path_end != std::string::npos)
-    path = m_uri.substr (protocol_end, path_end++ - protocol_end);
-  else
-    path = m_uri.substr (protocol_end);
-
-  /* %-decode the string.  */
-  std::string decoded_path;
-  decoded_path.reserve (path.length ());
-  for (size_t i = 0; i < path.length (); ++i)
-    if (path[i] == '%' && std::isxdigit (path[i + 1])
-        && std::isxdigit (path[i + 2]))
-      {
-        decoded_path += std::stoi (path.substr (i + 1, 2), 0, 16);
-        i += 2;
-      }
-    else
-      decoded_path += path[i];
-
-  /* Tokenize the query/fragment.  */
-  std::vector<std::string> tokens;
-  size_t pos, last = path_end;
-  while ((pos = m_uri.find ('&', last)) != std::string::npos)
-    {
-      tokens.emplace_back (m_uri.substr (last, pos - last));
-      last = pos + 1;
-    }
-  if (last != std::string::npos)
-    tokens.emplace_back (m_uri.substr (last));
-
-  /* Create a tag-value map from the tokenized query/fragment.  */
-  std::unordered_map<std::string, std::string> params;
-  std::for_each (tokens.begin (), tokens.end (), [&] (std::string &token) {
-    size_t delim = token.find ('=');
-    if (delim != std::string::npos)
-      params.emplace (token.substr (0, delim), token.substr (delim + 1));
-  });
+  auto parsed = parse_code_object_uri (m_uri);
 
   std::vector<char> buffer;
   try
     {
       size_t offset{ 0 }, size{ 0 };
 
-      if (auto offset_it = params.find ("offset"); offset_it != params.end ())
+      if (auto offset_it = parsed.params.find ("offset");
+          offset_it != parsed.params.end ())
         offset = std::stoul (offset_it->second, nullptr, 0);
 
-      if (auto size_it = params.find ("size"); size_it != params.end ())
+      if (auto size_it = parsed.params.find ("size");
+          size_it != parsed.params.end ())
         if (!(size = std::stoul (size_it->second, nullptr, 0)))
           return false;
 
-      if (protocol == "file")
+      if (parsed.protocol == "file")
         {
-          std::ifstream file (decoded_path, std::ios::in | std::ios::binary);
+          std::ifstream file (parsed.decoded_path,
+                              std::ios::in | std::ios::binary);
           if (!file)
             {
-              agent_warning ("could not open `%s'", decoded_path.c_str ());
+              agent_warning ("could not open `%s'",
+                             parsed.decoded_path.c_str ());
               return false;
             }
 
@@ -214,7 +173,7 @@ code_object_t::open ()
               if (bytes < offset)
                 {
                   agent_warning ("invalid uri `%s' (file size < offset)",
-                                 decoded_path.c_str ());
+                                 parsed.decoded_path.c_str ());
                   return false;
                 }
               size = bytes - offset;
@@ -224,7 +183,7 @@ code_object_t::open ()
           buffer.resize (size);
           file.read (&buffer[0], size);
         }
-      else if (protocol == "memory")
+      else if (parsed.protocol == "memory")
         {
           if (!offset || !size)
             {
@@ -252,7 +211,8 @@ code_object_t::open ()
         }
       else
         {
-          agent_warning ("\"%s\" protocol not supported", protocol.c_str ());
+          agent_warning ("\"%s\" protocol not supported",
+                         parsed.protocol.c_str ());
           return false;
         }
     }
@@ -574,13 +534,13 @@ code_object_t::disassemble (amd_dbgapi_architecture_id_t architecture_id,
 
   auto symbol = find_symbol (pc);
 
-  agent_out << std::endl << "Disassembly";
+  agent_out () << std::endl << "Disassembly";
   if (symbol)
-    agent_out << " for function " << symbol->m_name;
-  agent_out << ":" << std::endl;
+    agent_out () << " for function " << symbol->m_name;
+  agent_out () << ":" << std::endl;
 
-  agent_out << "    code object: " << m_uri << std::endl;
-  agent_out << "    loaded at: "
+  agent_out () << "    code object: " << m_uri << std::endl;
+  agent_out () << "    loaded at: "
             << "[0x" << std::hex << m_load_address << "-"
             << "0x" << std::hex << (m_load_address + m_mem_size) << "]"
             << std::endl;
@@ -627,10 +587,10 @@ code_object_t::disassemble (amd_dbgapi_architecture_id_t architecture_id,
           size_t line_number = it->second.second;
 
           if (file_name != prev_file_name || line_number != prev_line_number)
-            agent_out << std::endl;
+            agent_out () << std::endl;
 
           if (file_name != prev_file_name)
-            agent_out << file_name << ":" << std::endl;
+            agent_out () << file_name << ":" << std::endl;
 
           /* If the source line for `addr` is a different line than the
              previous one printed, then print it.  If the previous line printed
@@ -674,15 +634,15 @@ code_object_t::disassemble (amd_dbgapi_architecture_id_t architecture_id,
 
               for (size_t line = first_line; line <= last_line; ++line)
                 {
-                  agent_out << std::setfill (' ') << std::setw (8) << std::left
-                            << std::dec << line;
+                  agent_out () << std::setfill (' ') << std::setw (8)
+                               << std::left << std::dec << line;
 
                   if (auto lines = get_source_file_index (file_name); !lines)
-                    agent_out << file_name << ": No such file or directory.";
+                    agent_out () << file_name << ": No such file or directory.";
                   else if (line && line <= lines->get ().size ())
-                    agent_out << lines->get ()[line - 1];
+                    agent_out () << lines->get ()[line - 1];
 
-                  agent_out << std::endl;
+                  agent_out () << std::endl;
                 }
             }
 
@@ -693,7 +653,7 @@ code_object_t::disassemble (amd_dbgapi_architecture_id_t architecture_id,
              block, then print ... to show that the following instruction is
              not the first in the block.  */
           if (addr == start_pc && start_pc != saved_start_pc)
-            agent_out << "    ..." << std::endl;
+            agent_out () << "    ..." << std::endl;
         }
 
       std::vector<uint8_t> buffer (largest_instruction_size);
@@ -704,8 +664,8 @@ code_object_t::disassemble (amd_dbgapi_architecture_id_t architecture_id,
               AMD_DBGAPI_ADDRESS_SPACE_GLOBAL, addr, &size, buffer.data ())
           != AMD_DBGAPI_STATUS_SUCCESS)
         {
-          agent_out << "Cannot access memory at address 0x" << std::hex << addr
-                    << std::endl;
+          agent_out () << "Cannot access memory at address 0x" << std::hex
+                       << addr << std::endl;
           break;
         }
 
@@ -738,20 +698,20 @@ code_object_t::disassemble (amd_dbgapi_architecture_id_t architecture_id,
       std::string instruction (value);
       free (value);
 
-      agent_out << ((addr == pc) ? " => " : "    ");
+      agent_out () << ((addr == pc) ? " => " : "    ");
 
-      agent_out << "0x" << std::hex << addr;
+      agent_out () << "0x" << std::hex << addr;
       if (symbol)
         {
-          agent_out << " <";
+          agent_out () << " <";
           if (addr >= symbol->m_value)
-            agent_out << "+" << std::dec << (addr - symbol->m_value);
+            agent_out () << "+" << std::dec << (addr - symbol->m_value);
           else
-            agent_out << "-" << std::dec << (symbol->m_value - addr);
-          agent_out << ">";
+            agent_out () << "-" << std::dec << (symbol->m_value - addr);
+          agent_out () << ">";
         }
 
-      agent_out << ":    " << instruction << std::endl;
+      agent_out () << ":    " << instruction << std::endl;
 
       addr += size;
     }
@@ -762,9 +722,9 @@ code_object_t::disassemble (amd_dbgapi_architecture_id_t architecture_id,
      printed.  */
   if (auto it = m_line_number_map->find (addr);
       it == m_line_number_map->end ())
-    agent_out << "    ..." << std::endl;
+    agent_out () << "    ..." << std::endl;
 
-  agent_out << std::endl << "End of disassembly." << std::endl;
+  agent_out () << std::endl << "End of disassembly." << std::endl;
 }
 
 bool
@@ -772,11 +732,8 @@ code_object_t::save (const std::string &directory) const
 {
   agent_assert (is_open () && "code object is not opened");
 
-  std::string name{ std::to_string (m_code_object_id.handle) + "_" + m_uri };
-
-  size_t pos{};
-  while ((pos = name.find_first_of (":/#?&="), pos) != std::string::npos)
-    name[pos] = '_';
+  std::string name{ sanitize_uri_for_filename (
+    std::to_string (m_code_object_id.handle) + "_" + m_uri) };
 
   std::string file_path = directory + '/' + name;
   std::ofstream file (file_path, std::ios::out | std::ios::binary);

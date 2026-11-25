@@ -8,6 +8,8 @@
 #ifndef NCCL_GROUP_H_
 #define NCCL_GROUP_H_
 
+#include <mutex>
+
 #include "nccl.h"
 #include "comm.h"
 #include "allocator.h"
@@ -22,6 +24,7 @@ void ncclGroupCommPreconnect(struct ncclComm* comm);
 ncclResult_t ncclGroupCommLeave(struct ncclComm* comm);
 ncclResult_t ncclGroupJobAbort(struct ncclGroupJob* groupJob);
 ncclResult_t ncclGroupJobComplete(struct ncclGroupJob* groupJob);
+int64_t ncclParamSingleProcMemRegEnable();
 
 typedef ncclResult_t (*ncclInitFunc_t)(ncclComm_t* newcomm, int ndev, ncclUniqueId commId, int myrank, int cudaDev);
 
@@ -33,7 +36,14 @@ ncclResult_t ncclAsyncLaunch(struct ncclAsyncJob* job, ncclResult_t (*func)(stru
 
 struct ncclGroupJob {
   struct ncclAsyncJob base;
+  // Number of owners: ncclGroupEndInternal while it publishes, plus one per
+  // comm->groupJob link it publishes. Whoever drops it to zero destroys the job.
   int groupRefCount;
+  // Both written by ncclGroupEndInternal under launchMutex, read by
+  // ncclGroupJobComplete/Abort under the same mutex. Taking it is what makes
+  // "base.thread exists and is joinable" visible to a thread that claimed a
+  // comm link while the links were still being published.
+  std::mutex launchMutex;
   bool nonBlockingInit;
   bool joined;
   struct ncclComm* groupCommHead[ncclGroupTaskTypeNum];

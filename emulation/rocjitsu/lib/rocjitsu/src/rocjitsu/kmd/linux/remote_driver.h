@@ -8,23 +8,30 @@
 /// @brief Client-side RPC stub that forwards KFD ioctls to the rocjitsu daemon.
 ///
 /// @details Implements the Driver interface by serializing ioctl requests over
-/// a Unix domain socket to the daemon process. GPU memory is shared via memfds
-/// passed through SCM_RIGHTS. The client mmaps these memfds locally at the
-/// addresses ROCR's FMM expects.
+/// a Unix domain socket to the daemon process. GPU memory is shared via backings
+/// passed through SCM_RIGHTS. The client maps them locally through the backing
+/// adapter at the addresses ROCR's FMM expects.
 
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "rocjitsu/vm/driver.h"
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <sys/types.h>
+#include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
+
+class LinuxKfd;
 
 /// @brief What Yama's ptrace_scope implies for the daemon's cross-process reads.
 /// @details Only one of these states makes the grant both necessary and
@@ -87,7 +94,10 @@ enum class PtracerGrantVerdict {
 class RemoteDriver : public Driver {
 public:
   /// @brief Construct from an already-connected Unix socket fd.
-  explicit RemoteDriver(int sock_fd);
+  /// @param on_disconnect Optional terminal-error handler, called on a monitor
+  /// thread if the peer disconnects after a successful open(). It must not throw,
+  /// reenter this driver, or destroy it. Graceful close() does not call it.
+  explicit RemoteDriver(int sock_fd, std::function<void()> on_disconnect = {});
 
   ~RemoteDriver() override;
 
@@ -99,8 +109,12 @@ public:
 
   /// @brief Get GPU metadata received from the daemon handshake.
   [[nodiscard]] const Sysfs::GpuInfo *gpu_info() const {
-    return has_gpu_info_ ? &gpu_info_ : nullptr;
+    return gpu_infos_.empty() ? nullptr : &gpu_infos_.front();
   }
+  /// @brief Match a configured minor, except for legacy one-GPU compatibility.
+  /// @details Manifest sessions never claim an unrelated host render node.
+  [[nodiscard]] const Sysfs::GpuInfo *gpu_info_for_render_minor(uint32_t minor) const;
+  [[nodiscard]] bool handles_drm_render_minor(uint32_t minor) const;
 
   /// @brief What the last open() decided about authorizing its peer.
   /// @details Reported because the decision is otherwise invisible: a refusal
@@ -112,30 +126,30 @@ public:
     return ptracer_verdict_;
   }
 
-  /// @brief Outcome of find_memfd_for_addr(): distinguishes "no matching range"
-  /// from "range matched but the memfd dup failed".
+  /// @brief Outcome of find_backing_for_addr(): distinguishes "no matching range"
+  /// from "range matched but the backing descriptor dup failed".
   /// @details The caller must treat these differently: kNotFound means fall back
   /// to the normal (anonymous) mapping; kDupFailed means a daemon-shared range
   /// DID cover the address but we could not hand out a descriptor for it (e.g.
   /// EMFILE/ENFILE), so falling back to an anonymous mapping would silently break
   /// the shared-memory invariant — the caller should fail the mmap instead.
-  enum class MemfdLookup { kNotFound, kFound, kDupFailed };
+  enum class BackingLookup { kNotFound, kFound, kDupFailed };
 
-  /// @brief Find a stored memfd that covers the given GPUVM address.
+  /// @brief Find a stored backing descriptor that covers the given GPUVM address.
   /// @details Used by the interposer to intercept anonymous MAP_FIXED at
-  /// addresses that have daemon-shared memfd mappings.
+  /// addresses that already map daemon-shared memory.
   /// @param addr The target address to look up.
   /// @param length The mapping length.
-  /// @param[out] memfd_out On kFound, a NEWLY DUP'd memfd covering this address.
+  /// @param[out] backing_out On kFound, a NEWLY DUP'd backing descriptor covering this address.
   ///             The caller OWNS this descriptor and MUST close() it after use;
   ///             it is a dup (taken under the RPC lock) so its lifetime is
   ///             independent of this RemoteDriver and a concurrent close() cannot
   ///             invalidate it mid-use.
-  /// @param[out] memfd_offset On kFound, the offset within the memfd.
+  /// @param[out] backing_offset On kFound, the offset within the backing.
   /// @returns kFound if a range matched and the dup succeeded; kDupFailed if a
   ///          range matched but the dup failed; kNotFound if no range matched.
-  [[nodiscard]] MemfdLookup find_memfd_for_addr(void *addr, size_t length, int *memfd_out,
-                                                off_t *memfd_offset);
+  [[nodiscard]] BackingLookup find_backing_for_addr(void *addr, size_t length, int *backing_out,
+                                                    off_t *backing_offset);
 
   /// @brief Perform the RPC handshake with the daemon.
   /// @details Sends RPC_HANDSHAKE, receives the topology path and gpu_id,
@@ -152,9 +166,10 @@ public:
   /// @retval >=0 A new synthetic KFD fd. @retval -1 eventfd creation failed.
   [[nodiscard]] int reissue_synthetic_kfd_fd();
 
-  /// @brief Send RPC_CLOSE to the daemon.
-  /// @retval 0 Success.
-  /// @retval -1 Socket error.
+  /// @brief Send RPC_CLOSE, receive its result, and release local RPC resources.
+  /// @retval 0 Daemon close completed, or this driver was already closed.
+  /// @retval -errno Daemon close or RPC transport failed. The socket is still
+  /// released; the daemon owns any retryable pending process close.
   int close() override;
 
   /// @brief Forward a KFD ioctl to the daemon via RPC_IOCTL.
@@ -166,6 +181,22 @@ public:
   /// @retval negative Negative errno from the daemon's ioctl dispatch, or from
   /// the transport when the request never reached the wire.
   int ioctl(unsigned long request, void *arg) override;
+  int ioctl(unsigned long request, void *arg,
+            const std::function<std::shared_ptr<LinuxKfd>()> &current_local_driver,
+            uint32_t *export_mapping_flags = nullptr);
+
+  /// @brief Install a GEM backing in this connection's daemon GPU page table.
+  /// @details The backing fd is transferred through SCM_RIGHTS and retained by
+  /// the daemon mapping until an unmap or process close. @p with_backing_fd
+  /// must keep the descriptor stable while its sender runs; it is called only
+  /// for the sendmsg, after the RPC lock has been acquired.
+  using WithBackingFd = std::function<ssize_t(const std::function<ssize_t(int)> &)>;
+  int gem_va_preflight(uint64_t drm_file_id, uint64_t va_address, uint64_t map_size);
+  int gem_va_map(const WithBackingFd &with_backing_fd, uint64_t drm_file_id, uint64_t va_address,
+                 uint64_t offset_in_bo, uint64_t map_size, uint32_t alloc_flags, bool replace);
+  int gem_va_unmap(uint64_t drm_file_id, uint64_t va_address, uint64_t map_size);
+  /// Return the daemon's PTE MTYPE for this client's VA, or a negative errno.
+  int query_mtype_for_testing(uint64_t va_address);
 
   /// @brief Forward an mmap request to the daemon via RPC_MMAP.
   /// @param addr Requested mapping address (may include MAP_FIXED).
@@ -177,6 +208,9 @@ public:
   /// @retval MAP_FAILED Mapping failed; errno is set, and is EPROTO when the RPC
   /// stream has been made terminal by a framing failure.
   void *mmap(void *addr, size_t length, int prot, int flags, off_t offset) override;
+  /// @brief Also retire a live local simulator policy for a replaced client VMA.
+  void *mmap(void *addr, size_t length, int prot, int flags, off_t offset,
+             const std::function<std::shared_ptr<LinuxKfd>()> &current_local_driver);
 
   /// @brief Forward a munmap request to the daemon via RPC_MUNMAP.
   /// @param addr Address of the mapping to unmap.
@@ -188,10 +222,37 @@ public:
   /// @retval negative Negative transport errno when the request never reached
   /// the wire.
   int munmap(void *addr, size_t length) override;
+  int munmap(void *addr, size_t length,
+             const std::function<std::shared_ptr<LinuxKfd>()> &current_local_driver);
+
+  /// @brief Order a bare client VMA change and its SVM cleanup with KFD ioctls.
+  /// @details The callback holds host_mapping_lock only during the syscall.
+  /// Report a successful replacement when it overlaps a range that could
+  /// still carry daemon SVM policy; the range index is conservative.
+  void run_host_vma_replacement(std::span<const std::pair<uint64_t, uint64_t>> ranges,
+                                const std::function<bool()> &bare_mapping_change);
 
 private:
-  int send_ioctl(unsigned long request, void *arg);
+  void watch_disconnect(int socket);
+  void request_close();
+  int send_ioctl(unsigned long request, void *arg,
+                 const std::function<std::shared_ptr<LinuxKfd>()> &current_local_driver = {},
+                 uint32_t *export_mapping_flags = nullptr);
   int send_mmap(void *addr, size_t length, int prot, int flags, off_t offset, int *memfd_out);
+  int send_gem_va(uint32_t operation, const WithBackingFd *with_backing_fd, uint64_t drm_file_id,
+                  uint64_t va_address, uint64_t offset_in_bo, uint64_t map_size,
+                  uint32_t alloc_flags);
+  /// @pre The caller holds rpc_mutex_.
+  int send_host_vma_replaced_locked(uint64_t address, uint64_t length,
+                                    uint64_t preserve_userptr_handle = 0);
+  /// @brief Conservatively remember a host address that can acquire SVM policy.
+  /// @pre The caller holds rpc_mutex_.
+  void remember_host_svm_range_locked(uint64_t address, uint64_t length) noexcept;
+  /// @brief Decide whether a replacement may need daemon SVM cleanup.
+  /// @details A true result may reflect a remembered range or the unbounded
+  /// fallback after range tracking failed; it does not prove live policy.
+  /// @pre The caller holds rpc_mutex_.
+  [[nodiscard]] bool may_have_host_svm_policy_locked(uint64_t address, uint64_t length) const;
 
   /// @brief Mark the RPC stream unusable and make the connection terminal.
   /// @details Called from every framing failure — a half-written request, a
@@ -206,12 +267,12 @@ private:
   /// @note Must be called with rpc_mutex_ held.
   int poison_stream();
 
-  int sock_ = -1;             ///< Unix socket connection to the daemon.
-  uint32_t next_id_ = 0;      ///< Monotonic request ID counter (for debugging).
-  std::string topology_path_; ///< Daemon's sysfs topology directory path.
-  std::string drm_path_;      ///< Daemon's DRM sysfs directory path.
-  Sysfs::GpuInfo gpu_info_{}; ///< GPU metadata received from daemon handshake.
-  bool has_gpu_info_ = false; ///< True when gpu_info_ is valid.
+  int sock_ = -1;                         ///< Unix socket connection to the daemon.
+  uint32_t next_id_ = 0;                  ///< Monotonic request ID counter (for debugging).
+  std::string topology_path_;             ///< Daemon's sysfs topology directory path.
+  std::string drm_path_;                  ///< Daemon's DRM sysfs directory path.
+  std::vector<Sysfs::GpuInfo> gpu_infos_; ///< Node-local metadata from the daemon handshake.
+  bool strict_render_minor_ = false;      ///< Manifest minors must match exactly.
   std::optional<PtracerGrantVerdict> ptracer_verdict_; ///< Last open()'s trust decision.
   std::atomic<bool> closing_{false}; ///< Set by close() to break WAIT_EVENTS loops.
   /// @brief Set when the RPC stream is known to be unusable.
@@ -222,7 +283,10 @@ private:
   /// is set the connection is terminal and further ioctl/mmap/munmap calls fail
   /// with -EPROTO rather than returning bogus results from a poisoned stream.
   std::atomic<bool> protocol_failed_{false};
-  int shutdown_efd_ = -1;      ///< eventfd written by close() to wake WAIT_EVENTS pollers.
+  int shutdown_efd_ = -1; ///< eventfd written by close() to wake WAIT_EVENTS pollers.
+  const std::function<void()> on_disconnect_;
+  /// Joined before closing sock_ or shutdown_efd_; never consumes RPC bytes.
+  std::thread disconnect_monitor_;
   void *kfd_marker_ = nullptr; ///< Non-readable mapping identifying /dev/kfd in proc maps.
   size_t kfd_marker_size_ = 0;
 
@@ -230,18 +294,22 @@ private:
   /// @details ROCR is multithreaded — concurrent ioctl/mmap calls interleave
   /// socket writes without this lock, corrupting the RPC stream.
   std::mutex rpc_mutex_;
+  // Sorted, merged end-exclusive ranges. A failed update sets the unbounded
+  // fallback so skipping a cleanup RPC can never leave daemon policy stale.
+  std::vector<std::pair<uint64_t, uint64_t>> potential_host_svm_ranges_;
+  bool unbounded_host_svm_policy_ = false;
 
-  /// @brief Memfds received from the daemon during ALLOC_MEMORY, keyed by handle.
-  std::unordered_map<uint64_t, int> handle_memfds_;
+  /// @brief Backing descriptors received during ALLOC_MEMORY, keyed by handle.
+  std::unordered_map<uint64_t, int> handle_backings_;
 
-  /// @brief Maps GPUVM addresses to allocation memfds for anonymous MAP_FIXED
+  /// @brief Maps GPUVM addresses to allocation backings for anonymous MAP_FIXED
   /// interception. When ROCR's FMM does anonymous MAP_FIXED at a GPUVM address
-  /// that already has a daemon-shared memfd, we use the memfd instead to
-  /// preserve cross-process sharing. Keyed by alloc va_addr, value is memfd.
+  /// that already has daemon-shared memory, we map its backing to preserve
+  /// cross-process sharing. Keyed by allocation VA.
   struct AllocRange {
     uint64_t va;
     uint64_t size;
-    int memfd;
+    int backing_fd;
   };
   std::vector<AllocRange> alloc_ranges_;
 };

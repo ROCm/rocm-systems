@@ -176,6 +176,9 @@ public:
 
   virtual void* SegmentAlloc(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent, size_t size, size_t align, bool zero) = 0;
 
+  virtual hsa_status_t SegmentAllocAt(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent,
+                                      size_t size, void* address, void** seg) = 0;
+
   virtual bool SegmentCopy(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent, void* dst, size_t offset, const void* src, size_t size) = 0;
 
   virtual void SegmentFree(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent, void* seg, size_t size) = 0;
@@ -361,13 +364,11 @@ public:
     const std::string &uri,
     hsa_loaded_code_object_t *loaded_code_object = nullptr) = 0;
 
-  virtual hsa_status_t LoadCodeObject(
-    hsa_agent_t agent,
-    hsa_code_object_t code_object,
-    size_t code_object_size,
-    const char *options,
-    const std::string &uri,
-    hsa_loaded_code_object_t *loaded_code_object = nullptr) = 0;
+  virtual hsa_status_t LoadCodeObject(hsa_agent_t agent, hsa_code_object_t code_object,
+                                      size_t code_object_size, const char* options,
+                                      const std::string& uri,
+                                      hsa_loaded_code_object_t* loaded_code_object = nullptr,
+                                      void* load_address = nullptr, size_t load_limit = 0) = 0;
 
   virtual hsa_status_t Freeze(const char *options) = 0;
 
@@ -452,6 +453,10 @@ public:
   ///
   /// @param[in] loader AMD HSA Loader to destroy. Must not be null.
   static void Destroy(Loader *loader);
+
+  /// @brief Stores in @p load_size the number of bytes of device memory that
+  /// loading the @p size byte code object at @p code_object occupies.
+  static hsa_status_t CodeObjectLoadSize(const void* code_object, size_t size, size_t* load_size);
 
   /// @returns Context associated with Loader.
   virtual Context* GetContext() const = 0;

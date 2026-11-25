@@ -418,12 +418,15 @@ public:
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
-    if (inst->soffset != OPR_SMEM_OFFSET_NULL && inst->soffset != 0x7f && inst->offset)
+    if (inst->soffset != OPR_SMEM_OFFSET_NULL && inst->soffset != 0x7f && inst->offset) {
       out += " offset:" + std::to_string(inst->offset);
-    if (inst->glc)
+    }
+    if (inst->glc) {
       out += " glc";
-    if (inst->dlc)
+    }
+    if (inst->dlc) {
       out += " dlc";
+    }
   }
   using OpEncoding = SmemMachineInst;
   const OpEncoding inst_;
@@ -458,14 +461,30 @@ public:
   }
   bool has_encoded_literal32() const;
   void build_modifiers(std::string &out) const override {
-    if (has_encoded_dpp())
+    if (has_encoded_dpp()) {
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,
                                             amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
-    if (has_encoded_dpp8())
+    }
+    if (has_encoded_dpp8()) {
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    const bool dpp = has_encoded_dpp() && index < 2;
+    const bool absolute = dpp && ((dpp_modifiers_.absolute >> index) & 1);
+    if (dpp && ((dpp_modifiers_.negate >> index) & 1)) {
+      out += "-";
+    }
+    if (absolute) {
+      out += "|";
+    }
+    Instruction::append_src_operand(out, index);
+    if (absolute) {
+      out += "|";
+    }
+  }
   bool default_encoding();
   bool has_lit();
   bool has_dpp8();
@@ -522,12 +541,28 @@ public:
   }
   bool has_encoded_literal32() const;
   void build_modifiers(std::string &out) const override {
-    if (has_encoded_dpp())
+    if (has_encoded_dpp()) {
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,
                                             amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
-    if (has_encoded_dpp8())
+    }
+    if (has_encoded_dpp8()) {
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+    }
+  }
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    const bool dpp = has_encoded_dpp() && index < 2;
+    const bool absolute = dpp && ((dpp_modifiers_.absolute >> index) & 1);
+    if (dpp && ((dpp_modifiers_.negate >> index) & 1)) {
+      out += "-";
+    }
+    if (absolute) {
+      out += "|";
+    }
+    Instruction::append_src_operand(out, index);
+    if (absolute) {
+      out += "|";
+    }
   }
   bool default_encoding();
   bool has_lit();
@@ -584,14 +619,30 @@ public:
   }
   bool has_encoded_literal32() const;
   void build_modifiers(std::string &out) const override {
-    if (has_encoded_dpp())
+    if (has_encoded_dpp()) {
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,
                                             amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
-    if (has_encoded_dpp8())
+    }
+    if (has_encoded_dpp8()) {
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    const bool dpp = has_encoded_dpp() && index < 2;
+    const bool absolute = dpp && ((dpp_modifiers_.absolute >> index) & 1);
+    if (dpp && ((dpp_modifiers_.negate >> index) & 1)) {
+      out += "-";
+    }
+    if (absolute) {
+      out += "|";
+    }
+    Instruction::append_src_operand(out, index);
+    if (absolute) {
+      out += "|";
+    }
+  }
   bool default_encoding();
   bool has_lit();
   bool has_dpp8();
@@ -657,8 +708,9 @@ public:
                                   const util::DiagnosticEmitter &emit_error) {
     const auto &inst_ = *inst;
     if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
-        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
+        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]] {
       return emit_error.emit() << "DPP and literal operands cannot be combined";
+    }
     return Result::success();
   }
   void build_modifiers(std::string &out) const override {
@@ -666,12 +718,14 @@ public:
     (void)inst;
     amdgpu::vop::append_vop3_disassembly(out, inst->op_sel, inst->clamp, inst->omod,
                                          vop3_encoded_source_count(), displays_vop3_op_sel());
-    if (has_encoded_dpp())
+    if (has_encoded_dpp()) {
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,
                                             amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
-    if (has_encoded_dpp8())
+    }
+    if (has_encoded_dpp8()) {
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   void append_src_operand(std::string &out, uint8_t operand_index) const override {
@@ -750,8 +804,9 @@ public:
                                   const util::DiagnosticEmitter &emit_error) {
     const auto &inst_ = *inst;
     if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
-        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
+        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]] {
       return emit_error.emit() << "DPP and literal operands cannot be combined";
+    }
     return Result::success();
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override {
@@ -760,11 +815,13 @@ public:
       Instruction::append_src_operand(out, operand_index);
       return;
     }
-    if ((inst_.neg >> operand_index) & 1u)
+    if ((inst_.neg >> operand_index) & 1u) {
       out += '-';
+    }
     const bool absolute = ((inst_.neg_hi >> operand_index) & 1u) != 0;
-    if (absolute)
+    if (absolute) {
       out += '|';
+    }
     const uint32_t selector =
         operand_index == 0 ? inst_.src0 : (operand_index == 1 ? inst_.src1 : inst_.src2);
     if (selector == 255) {
@@ -774,8 +831,9 @@ public:
     } else {
       out += operand->name();
     }
-    if (absolute)
+    if (absolute) {
       out += '|';
+    }
   }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
@@ -786,12 +844,14 @@ public:
         uses_vop3p_absolute_source_syntax() ? 0 : inst->neg_hi, inst->clamp,
         uses_vop3p_absolute_source_syntax() ? 3 : (vop3p_encoded_source_count()),
         uses_vop3p_absolute_source_syntax() ? false : (inst_.op <= 19 || inst_.op == 26));
-    if (has_encoded_dpp())
+    if (has_encoded_dpp()) {
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,
                                             amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
-    if (has_encoded_dpp8())
+    }
+    if (has_encoded_dpp8()) {
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
@@ -838,17 +898,21 @@ public:
     auto *inst = &inst_;
     (void)inst;
     if (uses_split_ds_offsets()) {
-      if (inst->offset0)
+      if (inst->offset0) {
         out += " offset0:" + std::to_string(inst->offset0);
-      if (inst->offset1)
+      }
+      if (inst->offset1) {
         out += " offset1:" + std::to_string(inst->offset1);
+      }
     } else {
       const uint32_t offset = inst->offset0 | (inst->offset1 << 8);
-      if (offset)
+      if (offset) {
         out += " offset:" + std::to_string(offset);
+      }
     }
-    if (inst->gds)
+    if (inst->gds) {
       out += " gds";
+    }
   }
   using OpEncoding = DsMachineInst;
   const OpEncoding inst_;
@@ -860,18 +924,27 @@ public:
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
-    if (inst->offen)
+    if (inst->offen) {
       out += " offen";
-    if (inst->idxen)
+    }
+    if (inst->idxen) {
       out += " idxen";
-    if (inst->offset)
+    }
+    if (inst->offset) {
       out += " offset:" + std::to_string(inst->offset);
-    if (inst->glc)
+    }
+    if (inst->glc) {
       out += " glc";
-    if (inst->dlc)
+    }
+    if (inst->dlc) {
       out += " dlc";
-    if (inst->slc)
+    }
+    if (inst->slc) {
       out += " slc";
+    }
+    if (inst->tfe && (flags_ & CONDITIONAL_LAST_VGPR_DEF)) {
+      out += " tfe";
+    }
   }
   using OpEncoding = MubufMachineInst;
   const OpEncoding inst_;
@@ -883,16 +956,24 @@ public:
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
-    if (inst->offen)
+    if (inst->offen) {
       out += " offen";
-    if (inst->offset)
+    }
+    if (inst->offset) {
       out += " offset:" + std::to_string(inst->offset);
-    if (inst->glc)
+    }
+    if (inst->glc) {
       out += " glc";
-    if (inst->dlc)
+    }
+    if (inst->dlc) {
       out += " dlc";
-    if (inst->slc)
+    }
+    if (inst->slc) {
       out += " slc";
+    }
+    if (inst->tfe && (flags_ & CONDITIONAL_LAST_VGPR_DEF)) {
+      out += " tfe";
+    }
   }
   using OpEncoding = MtbufMachineInst;
   const OpEncoding inst_;
@@ -903,21 +984,44 @@ public:
   Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn);
   bool omits_gfx11_mimg_dim_dmask() const;
   uint32_t gfx11_mimg_nsa_group_width(uint32_t index, uint32_t vaddr_words) const;
+  std::string full_image_resource_name() const;
   bool should_print_dst_operand(uint8_t operand_index) const override {
     // Image atomics have one encoded VDATA tuple, printed as a source.
-    return !mnemonic_.starts_with("image_atomic_") &&
+    return amdgpu_memory_kind() != amdgpu::MemoryKind::Atomic &&
            Instruction::should_print_dst_operand(operand_index);
   }
   void capture_nsa_words(const MachineInst *inst, const Operand *vaddr);
+  std::string image_vdata_name(int bits) const;
+  bool should_print_src_operand(uint8_t index) const override {
+    // Keep the encoded VDATA operand visible for an illegal zero mask.
+    return (index == 0 && mnemonic_.starts_with("image_atomic_")) ||
+           Instruction::should_print_src_operand(index);
+  }
+  void append_dst_operand(std::string &out, uint8_t index) const override {
+    const auto *operand = dst_operands_[index];
+    const bool status = flags_ & (CONDITIONAL_LAST_VGPR_DEF | INCLUDES_UNWRITTEN_LAST_VGPR);
+    if (operand->is_vgpr() && !omits_gfx11_mimg_dim_dmask() && status != bool(inst_.tfe)) {
+      out += image_vdata_name(operand->size_bits() + 32 * (int(inst_.tfe) - int(status)));
+    } else {
+      Instruction::append_dst_operand(out, index);
+    }
+  }
   void append_src_operand(std::string &out, uint8_t operand_index) const override {
     const ::rocjitsu::Operand *operand = src_operands_[operand_index];
-    if (operand_index == 0 && inst_.tfe && mnemonic_.starts_with("image_atomic_")) {
-      // VDATA is the first source. Assembly includes the status slot;
-      // the source dependency includes only the atomic payload.
-      const auto first = operand->encoding_value();
-      const auto last = first + operand->size_bits() / 32;
-      out += first == last ? "v" + std::to_string(first)
-                           : "v[" + std::to_string(first) + ":" + std::to_string(last) + "]";
+    if (operand_index == 0 && !operand->size_bits() && mnemonic_.starts_with("image_atomic_")) {
+      // LLVM spells at least two registers for CMPSWAP or a TFE tuple.
+      out += image_vdata_name(inst_.tfe || mnemonic_ == "image_atomic_cmpswap" ? 64 : 32);
+      return;
+    }
+    if (inst_.tfe && operand_index == 0 && operand->is_vgpr() && operand != nsa_vaddr_operand_) {
+      // Store and atomic payloads never consume the spelled TFE slot.
+      out += image_vdata_name(operand->size_bits() + 32);
+      return;
+    }
+    // LLVM spells regular T# operands with eight SGPRs even in R128 mode.
+    if (inst_.r128 && !omits_gfx11_mimg_dim_dmask() && operand_index &&
+        src_operands_[operand_index - 1] == nsa_vaddr_operand_) {
+      out += full_image_resource_name();
       return;
     }
     if (!inst_.nsa || operand != nsa_vaddr_operand_) {
@@ -929,10 +1033,12 @@ public:
     uint32_t consumed_words = 0;
     for (uint32_t index = 0; index < 5 && consumed_words < vaddr_words; ++index) {
       const uint32_t group_words = gfx11_mimg_nsa_group_width(index, vaddr_words);
-      if (group_words == 0)
+      if (group_words == 0) {
         break;
-      if (index != 0)
+      }
+      if (index != 0) {
         out += ", ";
+      }
       const uint32_t selector =
           index == 0 ? inst_.vaddr : (raw_words_[2] >> ((index - 1) * 8)) & 0xffu;
       if (group_words > 1) {
@@ -959,32 +1065,41 @@ public:
       out += dims[inst->dim & 7u];
     }
     if (!omits_gfx11_mimg_dim_dmask()) {
-      if (inst->unorm)
+      if (inst->unorm) {
         out += " unorm";
-      if (inst->glc)
+      }
+      if (inst->glc) {
         out += " glc";
-      if (inst->slc)
+      }
+      if (inst->slc) {
         out += " slc";
-      if (inst->dlc)
+      }
+      if (inst->dlc) {
         out += " dlc";
-      if (inst->r128)
+      }
+      if (inst->r128) {
         out += " r128";
+      }
     }
-    if (inst->a16)
+    if (inst->a16) {
       out += " a16";
+    }
     if (!omits_gfx11_mimg_dim_dmask()) {
-      if (inst->tfe)
+      if (inst->tfe) {
         out += " tfe";
-      if (inst->lwe)
+      }
+      if (inst->lwe) {
         out += " lwe";
-      if (inst->d16)
+      }
+      if (inst->d16) {
         out += " d16";
+      }
     }
   }
   bool has_nsa();
   using OpEncoding = MimgMachineInst;
   const OpEncoding inst_;
-  std::array<uint32_t, 5> raw_words_{};
+  std::array<uint32_t, 3> raw_words_{};
   const Operand *nsa_vaddr_operand_ = nullptr;
 };
 
@@ -998,17 +1113,36 @@ public:
 class Flat : public IsaInstruction<Isa> {
 public:
   Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exec_fn);
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const FlatMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    static constexpr uint8_t segment_masks[128] = {
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 0, 0, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5,
+        5, 5, 5, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+        0, 0, 5, 5, 5, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    if (!(segment_masks[inst_.op] & (1u << inst_.seg))) [[unlikely]] {
+      return emit_error.emit() << mnemonic << " has an invalid segment";
+    }
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
-    if (inst->offset)
+    if (inst->offset) {
       out += " offset:" + std::to_string(inst->offset);
-    if (inst->glc)
+    }
+    if (inst->glc) {
       out += " glc";
-    if (inst->dlc)
+    }
+    if (inst->dlc) {
       out += " dlc";
-    if (inst->slc)
+    }
+    if (inst->slc) {
       out += " slc";
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   using OpEncoding = FlatMachineInst;
@@ -1051,8 +1185,9 @@ public:
                                   const util::DiagnosticEmitter &emit_error) {
     const auto &inst_ = *inst;
     if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
-        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
+        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]] {
       return emit_error.emit() << "DPP and literal operands cannot be combined";
+    }
     return Result::success();
   }
   void build_modifiers(std::string &out) const override {
@@ -1060,12 +1195,14 @@ public:
     (void)inst;
     amdgpu::vop::append_vop3_disassembly(out, 0, inst->clamp, inst->omod,
                                          vop3_encoded_source_count(), false);
-    if (has_encoded_dpp())
+    if (has_encoded_dpp()) {
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,
                                             amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
-    if (has_encoded_dpp8())
+    }
+    if (has_encoded_dpp8()) {
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   void append_src_operand(std::string &out, uint8_t operand_index) const override {

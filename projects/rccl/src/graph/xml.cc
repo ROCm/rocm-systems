@@ -54,6 +54,15 @@ static ncclResult_t ncclTopoXmlAddXgmiPeerGpu(struct ncclXml* xml, struct ncclXm
   if (createdOut) *createdOut = created;
   return ncclSuccess;
 }
+
+#ifdef USE_AMDSMI
+// RCCL: stamp the platform's per-GPU fabric bandwidth (GB/s per direction) on an xgmi entry, none when unreported.
+static ncclResult_t rcclTopoXmlSetFabricBandwidth(struct ncclXmlNode* xgmi, const amdsmiFabricDeviceInfo& dev) {
+  if (dev.bandwidth == 0) return ncclSuccess;
+  NCCLCHECK(xmlSetAttrFloat(xgmi, "fabric_bw_gbps", dev.bandwidth / kAmdSmiFabricMBpsPerGBps));
+  return ncclSuccess;
+}
+#endif
 #endif
 
 /*******************/
@@ -310,6 +319,10 @@ ncclResult_t ncclTopoDumpXmlRec(int indent, FILE* file, struct ncclXmlNode* node
   fprintf(file, "<%s", node->name);
 
   for (int a = 0; a < node->nAttrs; a++) {
+    // Skip NCCL-generated rail/plane IDs
+    if (strcmp(node->attrs[a].key, "rail") == 0 || strcmp(node->attrs[a].key, "plane") == 0) {
+      if (strtol(node->attrs[a].value, NULL, 0) & NCCL_TOPO_UNDEF_BIT) continue;
+    }
     fprintf(file, " %s=\"%s\"", node->attrs[a].key, node->attrs[a].value);
   }
   if (node->nSubs == 0) {
@@ -326,14 +339,16 @@ ncclResult_t ncclTopoDumpXmlRec(int indent, FILE* file, struct ncclXmlNode* node
 }
 
 ncclResult_t ncclTopoDumpXmlToFile(const char* xmlTopoFile, struct ncclXml* xml) {
+  ncclResult_t ret = ncclSuccess;
   FILE* file = fopen(xmlTopoFile, "w");
   if (file == NULL) {
     INFO(NCCL_GRAPH | NCCL_ENV, "Unable to open %s, not dumping topology.", xmlTopoFile);
     return ncclSuccess;
   }
-  NCCLCHECK(ncclTopoDumpXmlRec(0, file, xml->nodes));
+  NCCLCHECKGOTO(ncclTopoDumpXmlRec(0, file, xml->nodes), ret, exit);
+exit:
   fclose(file);
-  return ncclSuccess;
+  return ret;
 }
 
 static ncclResult_t xmlTopoFuseXmlRecursive(struct ncclXml* dst, struct ncclXmlNode* dstParent,
@@ -356,7 +371,7 @@ ncclResult_t ncclTopoFuseXml(struct ncclXml* dst, struct ncclXml* src) {
   NCCLCHECK(xmlFindTag(dst, "system", &topNodeDst));
 
   if (topNodeDst == NULL) {
-    xmlAddTree(dst, NULL, src->nodes);
+    NCCLCHECK(xmlAddTree(dst, NULL, src->nodes));
     return ncclSuccess;
   }
 
@@ -450,6 +465,7 @@ ncclResult_t ncclTopoXmlLoadSystem(FILE* file, struct ncclXml* xml, struct ncclX
 
 ncclResult_t ncclTopoGetXmlFromFile(const char* xmlTopoFile, struct ncclXml* xml, int warn) {
 #if NCCL_OS_LINUX
+  ncclResult_t ret = ncclSuccess;
   FILE* file = fopen(xmlTopoFile, "r");
   if (file == NULL) {
     if (warn) {
@@ -460,14 +476,16 @@ ncclResult_t ncclTopoGetXmlFromFile(const char* xmlTopoFile, struct ncclXml* xml
   INFO(NCCL_GRAPH, "Loading topology file %s", xmlTopoFile);
   struct xmlHandler handlers[] = {{"system", ncclTopoXmlLoadSystem}};
   xml->maxIndex = 0;
-  NCCLCHECK(xmlLoadSub(file, xml, NULL, handlers, 1));
+  NCCLCHECKGOTO(xmlLoadSub(file, xml, NULL, handlers, 1), ret, exit);
+exit:
   fclose(file);
+  return ret;
 #elif NCCL_OS_WINDOWS
   (void)xmlTopoFile;
   (void)xml;
   (void)warn;
-#endif
   return ncclSuccess;
+#endif
 }
 
 /**********************/
@@ -534,7 +552,7 @@ ncclResult_t ncclTopoGetXmlFromCpu(struct ncclXmlNode* cpuNode, struct ncclXml* 
     // Fill CPU type / vendor / model
 #if defined(__PPC__)
     NCCLCHECK(xmlSetAttr(cpuNode, "arch", "ppc64"));
-#elif defined(__aarch64__)
+#elif defined(__aarch64__) || defined(_M_ARM64)
     NCCLCHECK(xmlSetAttr(cpuNode, "arch", "arm64"));
 #elif defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)
     NCCLCHECK(xmlSetAttr(cpuNode, "arch", "x86_64"));
@@ -1086,10 +1104,10 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t hipDev,
           // Either path stamps accelerator tclass: HIP bus IDs need not exist on
           // the physical PCI bus, so sysfs class at that BDF is not the peer GPU.
           int created;
-          // count=1: amd-smi does not yet report UALoE link count.
-          // TODO: Update amd_smi_getLinkInfo to return the number of links for UALoE.
+          // amd-smi has no UALoE link count; count=1 is one local fabric peer.
           NCCLCHECK(ncclTopoXmlAddXgmiPeerGpu(xml, gpuNode, lowerId, 1, &nvlNode, &created));
           if (created) {
+            NCCLCHECK(rcclTopoXmlSetFabricBandwidth(nvlNode, fabInfo_dev));
             uint64_t uuidHigh = 0;
             uint64_t uuidLow = 0;
             memcpy(&uuidHigh, fabInfo.clusterUuid, sizeof(uuidHigh));
@@ -1585,6 +1603,7 @@ ncclResult_t ncclTopoXmlGraphLoadGraphs(FILE* file, struct ncclXml* xmlGraph, st
 }
 
 ncclResult_t ncclTopoGetXmlGraphFromFile(const char* xmlGraphFile, struct ncclXml* xml) {
+  ncclResult_t ret = ncclSuccess;
   FILE* file = fopen(xmlGraphFile, "r");
   if (file == NULL) {
     WARN("Could not open XML graph file %s : %s", xmlGraphFile, strerror(errno));
@@ -1592,9 +1611,10 @@ ncclResult_t ncclTopoGetXmlGraphFromFile(const char* xmlGraphFile, struct ncclXm
   }
   struct xmlHandler handlers[] = {{"graphs", ncclTopoXmlGraphLoadGraphs}};
   xml->maxIndex = 0;
-  NCCLCHECK(xmlLoadSub(file, xml, NULL, handlers, 1));
+  NCCLCHECKGOTO(xmlLoadSub(file, xml, NULL, handlers, 1), ret, exit);
+exit:
   fclose(file);
-  return ncclSuccess;
+  return ret;
 }
 
 #elif NCCL_OS_WINDOWS

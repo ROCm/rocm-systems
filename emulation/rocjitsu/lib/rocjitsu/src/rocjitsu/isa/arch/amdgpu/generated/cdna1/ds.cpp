@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/ds.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
 #include <memory>
@@ -35,14 +36,18 @@ DsAddU32Ds::DsAddU32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsAddU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_add_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAddU32Ds>(opcode);
 }
 } // namespace detail
@@ -70,14 +75,18 @@ DsSubU32Ds::DsSubU32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SUB_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsSubU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_sub_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsSubU32Ds>(opcode);
 }
 } // namespace detail
@@ -105,14 +114,18 @@ DsRsubU32Ds::DsRsubU32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_RSUB_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsRsubU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_rsub_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsRsubU32Ds>(opcode);
 }
 } // namespace detail
@@ -140,14 +153,18 @@ DsIncU32Ds::DsIncU32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_INC_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsIncU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_inc_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsIncU32Ds>(opcode);
 }
 } // namespace detail
@@ -175,14 +192,18 @@ DsDecU32Ds::DsDecU32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_DEC_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsDecU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_dec_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsDecU32Ds>(opcode);
 }
 } // namespace detail
@@ -210,14 +231,18 @@ DsMinI32Ds::DsMinI32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_I32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMinI32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_min_i32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinI32Ds>(opcode);
 }
 } // namespace detail
@@ -245,14 +270,18 @@ DsMaxI32Ds::DsMaxI32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_I32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMaxI32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_max_i32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxI32Ds>(opcode);
 }
 } // namespace detail
@@ -280,14 +309,18 @@ DsMinU32Ds::DsMinU32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMinU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_min_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinU32Ds>(opcode);
 }
 } // namespace detail
@@ -315,14 +348,18 @@ DsMaxU32Ds::DsMaxU32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMaxU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_max_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxU32Ds>(opcode);
 }
 } // namespace detail
@@ -350,14 +387,18 @@ DsAndB32Ds::DsAndB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_AND_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsAndB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_and_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAndB32Ds>(opcode);
 }
 } // namespace detail
@@ -385,14 +426,18 @@ DsOrB32Ds::DsOrB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_OR_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsOrB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_or_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsOrB32Ds>(opcode);
 }
 } // namespace detail
@@ -420,14 +465,18 @@ DsXorB32Ds::DsXorB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_XOR_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsXorB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_xor_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsXorB32Ds>(opcode);
 }
 } // namespace detail
@@ -457,14 +506,18 @@ DsMskorB32Ds::DsMskorB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MSKOR_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMskorB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_mskor_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMskorB32Ds>(opcode);
 }
 } // namespace detail
@@ -490,14 +543,18 @@ DsWriteB32Ds::DsWriteB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRITE_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
 DecodeResult decodeDsWriteB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_write_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWriteB32Ds>(opcode);
 }
 } // namespace detail
@@ -525,14 +582,18 @@ DsWrite2B32Ds::DsWrite2B32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRITE2_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
 DecodeResult decodeDsWrite2B32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_write2_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWrite2B32Ds>(opcode);
 }
 } // namespace detail
@@ -560,6 +621,9 @@ DsWrite2st64B32Ds::DsWrite2st64B32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRITE2ST64_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -567,8 +631,9 @@ DecodeResult decodeDsWrite2st64B32Ds(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_write2st64_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWrite2st64B32Ds>(opcode);
 }
 } // namespace detail
@@ -598,14 +663,18 @@ DsCmpstB32Ds::DsCmpstB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CMPST_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsCmpstB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_cmpst_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsCmpstB32Ds>(opcode);
 }
 } // namespace detail
@@ -635,14 +704,18 @@ DsCmpstF32Ds::DsCmpstF32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CMPST_F32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsCmpstF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_cmpst_f32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsCmpstF32Ds>(opcode);
 }
 } // namespace detail
@@ -670,14 +743,18 @@ DsMinF32Ds::DsMinF32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_F32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMinF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_min_f32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinF32Ds>(opcode);
 }
 } // namespace detail
@@ -705,14 +782,18 @@ DsMaxF32Ds::DsMaxF32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_F32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMaxF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_max_f32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxF32Ds>(opcode);
 }
 } // namespace detail
@@ -723,14 +804,18 @@ DsNopDs::DsNopDs(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_NOP);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
 DecodeResult decodeDsNopDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation =
       Ds::validate_encoding("ds_nop", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsNopDs>(opcode);
 }
 } // namespace detail
@@ -758,14 +843,18 @@ DsAddF32Ds::DsAddF32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_F32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsAddF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_add_f32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAddF32Ds>(opcode);
 }
 } // namespace detail
@@ -791,6 +880,9 @@ DsWriteAddtidB32Ds::DsWriteAddtidB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRITE_ADDTID_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -798,8 +890,9 @@ DecodeResult decodeDsWriteAddtidB32Ds(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_write_addtid_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWriteAddtidB32Ds>(opcode);
 }
 } // namespace detail
@@ -826,14 +919,18 @@ DsWriteB8Ds::DsWriteB8Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRITE_B8);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
 DecodeResult decodeDsWriteB8Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_write_b8", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWriteB8Ds>(opcode);
 }
 } // namespace detail
@@ -860,14 +957,18 @@ DsWriteB16Ds::DsWriteB16Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRITE_B16);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
 DecodeResult decodeDsWriteB16Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_write_b16", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWriteB16Ds>(opcode);
 }
 } // namespace detail
@@ -897,14 +998,18 @@ DsAddRtnU32Ds::DsAddRtnU32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_RTN_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsAddRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_add_rtn_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAddRtnU32Ds>(opcode);
 }
 } // namespace detail
@@ -934,14 +1039,18 @@ DsSubRtnU32Ds::DsSubRtnU32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SUB_RTN_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsSubRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_sub_rtn_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsSubRtnU32Ds>(opcode);
 }
 } // namespace detail
@@ -971,14 +1080,18 @@ DsRsubRtnU32Ds::DsRsubRtnU32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_RSUB_RTN_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsRsubRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_rsub_rtn_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsRsubRtnU32Ds>(opcode);
 }
 } // namespace detail
@@ -1008,14 +1121,18 @@ DsIncRtnU32Ds::DsIncRtnU32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_INC_RTN_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsIncRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_inc_rtn_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsIncRtnU32Ds>(opcode);
 }
 } // namespace detail
@@ -1045,14 +1162,18 @@ DsDecRtnU32Ds::DsDecRtnU32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_DEC_RTN_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsDecRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_dec_rtn_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsDecRtnU32Ds>(opcode);
 }
 } // namespace detail
@@ -1082,14 +1203,18 @@ DsMinRtnI32Ds::DsMinRtnI32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_RTN_I32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMinRtnI32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_min_rtn_i32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinRtnI32Ds>(opcode);
 }
 } // namespace detail
@@ -1119,14 +1244,18 @@ DsMaxRtnI32Ds::DsMaxRtnI32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_RTN_I32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMaxRtnI32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_max_rtn_i32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxRtnI32Ds>(opcode);
 }
 } // namespace detail
@@ -1156,14 +1285,18 @@ DsMinRtnU32Ds::DsMinRtnU32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_RTN_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMinRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_min_rtn_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinRtnU32Ds>(opcode);
 }
 } // namespace detail
@@ -1193,14 +1326,18 @@ DsMaxRtnU32Ds::DsMaxRtnU32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_RTN_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMaxRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_max_rtn_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxRtnU32Ds>(opcode);
 }
 } // namespace detail
@@ -1230,14 +1367,18 @@ DsAndRtnB32Ds::DsAndRtnB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_AND_RTN_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsAndRtnB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_and_rtn_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAndRtnB32Ds>(opcode);
 }
 } // namespace detail
@@ -1267,14 +1408,18 @@ DsOrRtnB32Ds::DsOrRtnB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_OR_RTN_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsOrRtnB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_or_rtn_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsOrRtnB32Ds>(opcode);
 }
 } // namespace detail
@@ -1304,14 +1449,18 @@ DsXorRtnB32Ds::DsXorRtnB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_XOR_RTN_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsXorRtnB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_xor_rtn_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsXorRtnB32Ds>(opcode);
 }
 } // namespace detail
@@ -1343,6 +1492,9 @@ DsMskorRtnB32Ds::DsMskorRtnB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MSKOR_RTN_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1350,8 +1502,9 @@ DecodeResult decodeDsMskorRtnB32Ds(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_mskor_rtn_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMskorRtnB32Ds>(opcode);
 }
 } // namespace detail
@@ -1381,6 +1534,9 @@ DsWrxchgRtnB32Ds::DsWrxchgRtnB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRXCHG_RTN_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1388,8 +1544,9 @@ DecodeResult decodeDsWrxchgRtnB32Ds(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_wrxchg_rtn_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWrxchgRtnB32Ds>(opcode);
 }
 } // namespace detail
@@ -1421,6 +1578,9 @@ DsWrxchg2RtnB32Ds::DsWrxchg2RtnB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRXCHG2_RTN_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1428,8 +1588,9 @@ DecodeResult decodeDsWrxchg2RtnB32Ds(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_wrxchg2_rtn_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWrxchg2RtnB32Ds>(opcode);
 }
 } // namespace detail
@@ -1461,6 +1622,9 @@ DsWrxchg2st64RtnB32Ds::DsWrxchg2st64RtnB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRXCHG2ST64_RTN_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1468,8 +1632,9 @@ DecodeResult decodeDsWrxchg2st64RtnB32Ds(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_wrxchg2st64_rtn_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWrxchg2st64RtnB32Ds>(opcode);
 }
 } // namespace detail
@@ -1501,6 +1666,9 @@ DsCmpstRtnB32Ds::DsCmpstRtnB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CMPST_RTN_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1508,8 +1676,9 @@ DecodeResult decodeDsCmpstRtnB32Ds(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_cmpst_rtn_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsCmpstRtnB32Ds>(opcode);
 }
 } // namespace detail
@@ -1541,6 +1710,9 @@ DsCmpstRtnF32Ds::DsCmpstRtnF32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CMPST_RTN_F32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1548,8 +1720,9 @@ DecodeResult decodeDsCmpstRtnF32Ds(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_cmpst_rtn_f32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsCmpstRtnF32Ds>(opcode);
 }
 } // namespace detail
@@ -1579,14 +1752,18 @@ DsMinRtnF32Ds::DsMinRtnF32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_RTN_F32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMinRtnF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_min_rtn_f32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinRtnF32Ds>(opcode);
 }
 } // namespace detail
@@ -1616,14 +1793,18 @@ DsMaxRtnF32Ds::DsMaxRtnF32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_RTN_F32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMaxRtnF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_max_rtn_f32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxRtnF32Ds>(opcode);
 }
 } // namespace detail
@@ -1655,14 +1836,18 @@ DsWrapRtnB32Ds::DsWrapRtnB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRAP_RTN_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsWrapRtnB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_wrap_rtn_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWrapRtnB32Ds>(opcode);
 }
 } // namespace detail
@@ -1692,14 +1877,18 @@ DsAddRtnF32Ds::DsAddRtnF32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_RTN_F32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsAddRtnF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_add_rtn_f32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAddRtnF32Ds>(opcode);
 }
 } // namespace detail
@@ -1717,8 +1906,9 @@ DsReadB32Ds::DsReadB32Ds(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (!inst_.gds)
+  if (!inst_.gds) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info(
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                        (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
@@ -1727,14 +1917,18 @@ DsReadB32Ds::DsReadB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_READ_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
 DecodeResult decodeDsReadB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_read_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsReadB32Ds>(opcode);
 }
 } // namespace detail
@@ -1760,14 +1954,18 @@ DsRead2B32Ds::DsRead2B32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_READ2_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
 DecodeResult decodeDsRead2B32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_read2_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsRead2B32Ds>(opcode);
 }
 } // namespace detail
@@ -1793,6 +1991,9 @@ DsRead2st64B32Ds::DsRead2st64B32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_READ2ST64_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -1800,8 +2001,9 @@ DecodeResult decodeDsRead2st64B32Ds(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_read2st64_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsRead2st64B32Ds>(opcode);
 }
 } // namespace detail
@@ -1819,8 +2021,9 @@ DsReadI8Ds::DsReadI8Ds(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (!inst_.gds)
+  if (!inst_.gds) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info(
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                        (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
@@ -1829,14 +2032,18 @@ DsReadI8Ds::DsReadI8Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_READ_I8);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
 DecodeResult decodeDsReadI8Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_read_i8", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsReadI8Ds>(opcode);
 }
 } // namespace detail
@@ -1854,8 +2061,9 @@ DsReadU8Ds::DsReadU8Ds(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (!inst_.gds)
+  if (!inst_.gds) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info(
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                        (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
@@ -1864,14 +2072,18 @@ DsReadU8Ds::DsReadU8Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_READ_U8);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
 DecodeResult decodeDsReadU8Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_read_u8", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsReadU8Ds>(opcode);
 }
 } // namespace detail
@@ -1889,8 +2101,9 @@ DsReadI16Ds::DsReadI16Ds(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (!inst_.gds)
+  if (!inst_.gds) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info(
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                        (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
@@ -1899,14 +2112,18 @@ DsReadI16Ds::DsReadI16Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_READ_I16);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
 DecodeResult decodeDsReadI16Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_read_i16", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsReadI16Ds>(opcode);
 }
 } // namespace detail
@@ -1924,8 +2141,9 @@ DsReadU16Ds::DsReadU16Ds(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (!inst_.gds)
+  if (!inst_.gds) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info(
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                        (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
@@ -1934,14 +2152,18 @@ DsReadU16Ds::DsReadU16Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_READ_U16);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
 DecodeResult decodeDsReadU16Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_read_u16", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsReadU16Ds>(opcode);
 }
 } // namespace detail
@@ -1957,14 +2179,18 @@ DsSwizzleB32Ds::DsSwizzleB32Ds(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SWIZZLE_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
 DecodeResult decodeDsSwizzleB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_swizzle_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsSwizzleB32Ds>(opcode);
 }
 } // namespace detail
@@ -1982,14 +2208,18 @@ DsPermuteB32Ds::DsPermuteB32Ds(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_PERMUTE_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
 DecodeResult decodeDsPermuteB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_permute_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsPermuteB32Ds>(opcode);
 }
 } // namespace detail
@@ -2007,6 +2237,9 @@ DsBpermuteB32Ds::DsBpermuteB32Ds(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_BPERMUTE_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
@@ -2014,8 +2247,9 @@ DecodeResult decodeDsBpermuteB32Ds(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_bpermute_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsBpermuteB32Ds>(opcode);
 }
 } // namespace detail
@@ -2043,14 +2277,18 @@ DsAddU64Ds::DsAddU64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsAddU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_add_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAddU64Ds>(opcode);
 }
 } // namespace detail
@@ -2078,14 +2316,18 @@ DsSubU64Ds::DsSubU64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SUB_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsSubU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_sub_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsSubU64Ds>(opcode);
 }
 } // namespace detail
@@ -2113,14 +2355,18 @@ DsRsubU64Ds::DsRsubU64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_RSUB_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsRsubU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_rsub_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsRsubU64Ds>(opcode);
 }
 } // namespace detail
@@ -2148,14 +2394,18 @@ DsIncU64Ds::DsIncU64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_INC_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsIncU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_inc_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsIncU64Ds>(opcode);
 }
 } // namespace detail
@@ -2183,14 +2433,18 @@ DsDecU64Ds::DsDecU64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_DEC_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsDecU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_dec_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsDecU64Ds>(opcode);
 }
 } // namespace detail
@@ -2218,14 +2472,18 @@ DsMinI64Ds::DsMinI64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_I64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMinI64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_min_i64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinI64Ds>(opcode);
 }
 } // namespace detail
@@ -2253,14 +2511,18 @@ DsMaxI64Ds::DsMaxI64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_I64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMaxI64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_max_i64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxI64Ds>(opcode);
 }
 } // namespace detail
@@ -2288,14 +2550,18 @@ DsMinU64Ds::DsMinU64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMinU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_min_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinU64Ds>(opcode);
 }
 } // namespace detail
@@ -2323,14 +2589,18 @@ DsMaxU64Ds::DsMaxU64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMaxU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_max_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxU64Ds>(opcode);
 }
 } // namespace detail
@@ -2358,14 +2628,18 @@ DsAndB64Ds::DsAndB64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_AND_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsAndB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_and_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAndB64Ds>(opcode);
 }
 } // namespace detail
@@ -2393,14 +2667,18 @@ DsOrB64Ds::DsOrB64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_OR_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsOrB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_or_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsOrB64Ds>(opcode);
 }
 } // namespace detail
@@ -2428,14 +2706,18 @@ DsXorB64Ds::DsXorB64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_XOR_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsXorB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_xor_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsXorB64Ds>(opcode);
 }
 } // namespace detail
@@ -2465,14 +2747,18 @@ DsMskorB64Ds::DsMskorB64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MSKOR_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMskorB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_mskor_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMskorB64Ds>(opcode);
 }
 } // namespace detail
@@ -2498,14 +2784,18 @@ DsWriteB64Ds::DsWriteB64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRITE_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
 DecodeResult decodeDsWriteB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_write_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWriteB64Ds>(opcode);
 }
 } // namespace detail
@@ -2533,14 +2823,18 @@ DsWrite2B64Ds::DsWrite2B64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRITE2_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
 DecodeResult decodeDsWrite2B64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_write2_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWrite2B64Ds>(opcode);
 }
 } // namespace detail
@@ -2568,6 +2862,9 @@ DsWrite2st64B64Ds::DsWrite2st64B64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRITE2ST64_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -2575,8 +2872,9 @@ DecodeResult decodeDsWrite2st64B64Ds(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_write2st64_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWrite2st64B64Ds>(opcode);
 }
 } // namespace detail
@@ -2606,14 +2904,18 @@ DsCmpstB64Ds::DsCmpstB64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CMPST_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsCmpstB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_cmpst_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsCmpstB64Ds>(opcode);
 }
 } // namespace detail
@@ -2643,14 +2945,18 @@ DsCmpstF64Ds::DsCmpstF64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CMPST_F64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsCmpstF64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_cmpst_f64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsCmpstF64Ds>(opcode);
 }
 } // namespace detail
@@ -2678,14 +2984,18 @@ DsMinF64Ds::DsMinF64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_F64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMinF64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_min_f64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinF64Ds>(opcode);
 }
 } // namespace detail
@@ -2713,14 +3023,18 @@ DsMaxF64Ds::DsMaxF64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_F64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMaxF64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_max_f64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxF64Ds>(opcode);
 }
 } // namespace detail
@@ -2747,6 +3061,10 @@ DsWriteB8D16HiDs::DsWriteB8D16HiDs(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRITE_B8_D16_HI);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -2754,8 +3072,9 @@ DecodeResult decodeDsWriteB8D16HiDs(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_write_b8_d16_hi", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWriteB8D16HiDs>(opcode);
 }
 } // namespace detail
@@ -2782,6 +3101,10 @@ DsWriteB16D16HiDs::DsWriteB16D16HiDs(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRITE_B16_D16_HI);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -2789,8 +3112,9 @@ DecodeResult decodeDsWriteB16D16HiDs(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_write_b16_d16_hi", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWriteB16D16HiDs>(opcode);
 }
 } // namespace detail
@@ -2816,22 +3140,28 @@ DsReadU8D16Ds::DsReadU8D16Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_READ_U8_D16);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
 DecodeResult decodeDsReadU8D16Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_read_u8_d16", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsReadU8D16Ds>(opcode);
 }
 } // namespace detail
 
 void DsReadU8D16Ds::implicit_uses(RegisterSet &uses) const {
   Ds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 DsReadU8D16HiDs::DsReadU8D16HiDs(const MachineInst *inst)
@@ -2855,6 +3185,10 @@ DsReadU8D16HiDs::DsReadU8D16HiDs(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_READ_U8_D16_HI);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -2862,16 +3196,18 @@ DecodeResult decodeDsReadU8D16HiDs(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_read_u8_d16_hi", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsReadU8D16HiDs>(opcode);
 }
 } // namespace detail
 
 void DsReadU8D16HiDs::implicit_uses(RegisterSet &uses) const {
   Ds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 DsReadI8D16Ds::DsReadI8D16Ds(const MachineInst *inst)
@@ -2895,22 +3231,28 @@ DsReadI8D16Ds::DsReadI8D16Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_READ_I8_D16);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
 DecodeResult decodeDsReadI8D16Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_read_i8_d16", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsReadI8D16Ds>(opcode);
 }
 } // namespace detail
 
 void DsReadI8D16Ds::implicit_uses(RegisterSet &uses) const {
   Ds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 DsReadI8D16HiDs::DsReadI8D16HiDs(const MachineInst *inst)
@@ -2934,6 +3276,10 @@ DsReadI8D16HiDs::DsReadI8D16HiDs(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_READ_I8_D16_HI);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -2941,16 +3287,18 @@ DecodeResult decodeDsReadI8D16HiDs(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_read_i8_d16_hi", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsReadI8D16HiDs>(opcode);
 }
 } // namespace detail
 
 void DsReadI8D16HiDs::implicit_uses(RegisterSet &uses) const {
   Ds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 DsReadU16D16Ds::DsReadU16D16Ds(const MachineInst *inst)
@@ -2974,22 +3322,28 @@ DsReadU16D16Ds::DsReadU16D16Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_READ_U16_D16);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
 DecodeResult decodeDsReadU16D16Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_read_u16_d16", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsReadU16D16Ds>(opcode);
 }
 } // namespace detail
 
 void DsReadU16D16Ds::implicit_uses(RegisterSet &uses) const {
   Ds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 DsReadU16D16HiDs::DsReadU16D16HiDs(const MachineInst *inst)
@@ -3013,6 +3367,10 @@ DsReadU16D16HiDs::DsReadU16D16HiDs(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_READ_U16_D16_HI);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3020,16 +3378,18 @@ DecodeResult decodeDsReadU16D16HiDs(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_read_u16_d16_hi", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsReadU16D16HiDs>(opcode);
 }
 } // namespace detail
 
 void DsReadU16D16HiDs::implicit_uses(RegisterSet &uses) const {
   Ds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 DsAddRtnU64Ds::DsAddRtnU64Ds(const MachineInst *inst)
@@ -3057,14 +3417,18 @@ DsAddRtnU64Ds::DsAddRtnU64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_RTN_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsAddRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_add_rtn_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAddRtnU64Ds>(opcode);
 }
 } // namespace detail
@@ -3094,14 +3458,18 @@ DsSubRtnU64Ds::DsSubRtnU64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SUB_RTN_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsSubRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_sub_rtn_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsSubRtnU64Ds>(opcode);
 }
 } // namespace detail
@@ -3131,14 +3499,18 @@ DsRsubRtnU64Ds::DsRsubRtnU64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_RSUB_RTN_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsRsubRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_rsub_rtn_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsRsubRtnU64Ds>(opcode);
 }
 } // namespace detail
@@ -3168,14 +3540,18 @@ DsIncRtnU64Ds::DsIncRtnU64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_INC_RTN_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsIncRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_inc_rtn_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsIncRtnU64Ds>(opcode);
 }
 } // namespace detail
@@ -3205,14 +3581,18 @@ DsDecRtnU64Ds::DsDecRtnU64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_DEC_RTN_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsDecRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_dec_rtn_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsDecRtnU64Ds>(opcode);
 }
 } // namespace detail
@@ -3242,14 +3622,18 @@ DsMinRtnI64Ds::DsMinRtnI64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_RTN_I64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMinRtnI64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_min_rtn_i64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinRtnI64Ds>(opcode);
 }
 } // namespace detail
@@ -3279,14 +3663,18 @@ DsMaxRtnI64Ds::DsMaxRtnI64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_RTN_I64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMaxRtnI64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_max_rtn_i64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxRtnI64Ds>(opcode);
 }
 } // namespace detail
@@ -3316,14 +3704,18 @@ DsMinRtnU64Ds::DsMinRtnU64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_RTN_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMinRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_min_rtn_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinRtnU64Ds>(opcode);
 }
 } // namespace detail
@@ -3353,14 +3745,18 @@ DsMaxRtnU64Ds::DsMaxRtnU64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_RTN_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMaxRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_max_rtn_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxRtnU64Ds>(opcode);
 }
 } // namespace detail
@@ -3390,14 +3786,18 @@ DsAndRtnB64Ds::DsAndRtnB64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_AND_RTN_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsAndRtnB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_and_rtn_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAndRtnB64Ds>(opcode);
 }
 } // namespace detail
@@ -3427,14 +3827,18 @@ DsOrRtnB64Ds::DsOrRtnB64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_OR_RTN_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsOrRtnB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_or_rtn_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsOrRtnB64Ds>(opcode);
 }
 } // namespace detail
@@ -3464,14 +3868,18 @@ DsXorRtnB64Ds::DsXorRtnB64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_XOR_RTN_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsXorRtnB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_xor_rtn_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsXorRtnB64Ds>(opcode);
 }
 } // namespace detail
@@ -3503,6 +3911,9 @@ DsMskorRtnB64Ds::DsMskorRtnB64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MSKOR_RTN_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3510,8 +3921,9 @@ DecodeResult decodeDsMskorRtnB64Ds(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_mskor_rtn_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMskorRtnB64Ds>(opcode);
 }
 } // namespace detail
@@ -3541,6 +3953,9 @@ DsWrxchgRtnB64Ds::DsWrxchgRtnB64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRXCHG_RTN_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3548,8 +3963,9 @@ DecodeResult decodeDsWrxchgRtnB64Ds(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_wrxchg_rtn_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWrxchgRtnB64Ds>(opcode);
 }
 } // namespace detail
@@ -3581,6 +3997,9 @@ DsWrxchg2RtnB64Ds::DsWrxchg2RtnB64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRXCHG2_RTN_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3588,8 +4007,9 @@ DecodeResult decodeDsWrxchg2RtnB64Ds(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_wrxchg2_rtn_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWrxchg2RtnB64Ds>(opcode);
 }
 } // namespace detail
@@ -3621,6 +4041,9 @@ DsWrxchg2st64RtnB64Ds::DsWrxchg2st64RtnB64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRXCHG2ST64_RTN_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3628,8 +4051,9 @@ DecodeResult decodeDsWrxchg2st64RtnB64Ds(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_wrxchg2st64_rtn_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWrxchg2st64RtnB64Ds>(opcode);
 }
 } // namespace detail
@@ -3661,6 +4085,9 @@ DsCmpstRtnB64Ds::DsCmpstRtnB64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CMPST_RTN_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3668,8 +4095,9 @@ DecodeResult decodeDsCmpstRtnB64Ds(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_cmpst_rtn_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsCmpstRtnB64Ds>(opcode);
 }
 } // namespace detail
@@ -3701,6 +4129,9 @@ DsCmpstRtnF64Ds::DsCmpstRtnF64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CMPST_RTN_F64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3708,8 +4139,9 @@ DecodeResult decodeDsCmpstRtnF64Ds(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_cmpst_rtn_f64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsCmpstRtnF64Ds>(opcode);
 }
 } // namespace detail
@@ -3739,14 +4171,18 @@ DsMinRtnF64Ds::DsMinRtnF64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_RTN_F64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMinRtnF64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_min_rtn_f64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMinRtnF64Ds>(opcode);
 }
 } // namespace detail
@@ -3776,14 +4212,18 @@ DsMaxRtnF64Ds::DsMaxRtnF64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_RTN_F64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsMaxRtnF64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_max_rtn_f64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsMaxRtnF64Ds>(opcode);
 }
 } // namespace detail
@@ -3801,8 +4241,9 @@ DsReadB64Ds::DsReadB64Ds(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (!inst_.gds)
+  if (!inst_.gds) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info(
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                        (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
@@ -3811,14 +4252,18 @@ DsReadB64Ds::DsReadB64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_READ_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
 DecodeResult decodeDsReadB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_read_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsReadB64Ds>(opcode);
 }
 } // namespace detail
@@ -3844,14 +4289,18 @@ DsRead2B64Ds::DsRead2B64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_READ2_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
 DecodeResult decodeDsRead2B64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_read2_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsRead2B64Ds>(opcode);
 }
 } // namespace detail
@@ -3877,6 +4326,9 @@ DsRead2st64B64Ds::DsRead2st64B64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_READ2ST64_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -3884,8 +4336,9 @@ DecodeResult decodeDsRead2st64B64Ds(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_read2st64_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsRead2st64B64Ds>(opcode);
 }
 } // namespace detail
@@ -3915,6 +4368,9 @@ DsCondxchg32RtnB64Ds::DsCondxchg32RtnB64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CONDXCHG32_RTN_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3922,8 +4378,9 @@ DecodeResult decodeDsCondxchg32RtnB64Ds(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_condxchg32_rtn_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsCondxchg32RtnB64Ds>(opcode);
 }
 } // namespace detail
@@ -3942,6 +4399,8 @@ DsGwsSemaReleaseAllDs::DsGwsSemaReleaseAllDs(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{})},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_GWS_SEMA_RELEASE_ALL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Gds, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
@@ -3949,8 +4408,9 @@ DecodeResult decodeDsGwsSemaReleaseAllDs(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_gws_sema_release_all", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsGwsSemaReleaseAllDs>(opcode);
 }
 } // namespace detail
@@ -3971,14 +4431,17 @@ DsGwsInitDs::DsGwsInitDs(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{})},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_GWS_INIT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Gds, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
 DecodeResult decodeDsGwsInitDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_gws_init", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsGwsInitDs>(opcode);
 }
 } // namespace detail
@@ -3997,14 +4460,17 @@ DsGwsSemaVDs::DsGwsSemaVDs(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{})},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_GWS_SEMA_V);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Gds, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
 DecodeResult decodeDsGwsSemaVDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_gws_sema_v", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsGwsSemaVDs>(opcode);
 }
 } // namespace detail
@@ -4025,14 +4491,17 @@ DsGwsSemaBrDs::DsGwsSemaBrDs(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{})},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_GWS_SEMA_BR);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Gds, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
 DecodeResult decodeDsGwsSemaBrDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_gws_sema_br", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsGwsSemaBrDs>(opcode);
 }
 } // namespace detail
@@ -4051,14 +4520,17 @@ DsGwsSemaPDs::DsGwsSemaPDs(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{})},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_GWS_SEMA_P);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Gds, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
 DecodeResult decodeDsGwsSemaPDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_gws_sema_p", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsGwsSemaPDs>(opcode);
 }
 } // namespace detail
@@ -4079,14 +4551,17 @@ DsGwsBarrierDs::DsGwsBarrierDs(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{})},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_GWS_BARRIER);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Gds, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
 DecodeResult decodeDsGwsBarrierDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_gws_barrier", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsGwsBarrierDs>(opcode);
 }
 } // namespace detail
@@ -4112,6 +4587,9 @@ DsReadAddtidB32Ds::DsReadAddtidB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_READ_ADDTID_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -4119,8 +4597,9 @@ DecodeResult decodeDsReadAddtidB32Ds(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_read_addtid_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsReadAddtidB32Ds>(opcode);
 }
 } // namespace detail
@@ -4146,14 +4625,18 @@ DsConsumeDs::DsConsumeDs(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CONSUME);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsConsumeDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_consume", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsConsumeDs>(opcode);
 }
 } // namespace detail
@@ -4179,14 +4662,18 @@ DsAppendDs::DsAppendDs(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_APPEND);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeDsAppendDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_append", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsAppendDs>(opcode);
 }
 } // namespace detail
@@ -4209,6 +4696,8 @@ DsOrderedCountDs::DsOrderedCountDs(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ORDERED_COUNT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Gds, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
@@ -4216,8 +4705,9 @@ DecodeResult decodeDsOrderedCountDs(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_ordered_count", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsOrderedCountDs>(opcode);
 }
 } // namespace detail
@@ -4243,14 +4733,18 @@ DsWriteB96Ds::DsWriteB96Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRITE_B96);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
 DecodeResult decodeDsWriteB96Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_write_b96", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWriteB96Ds>(opcode);
 }
 } // namespace detail
@@ -4276,14 +4770,18 @@ DsWriteB128Ds::DsWriteB128Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRITE_B128);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
 DecodeResult decodeDsWriteB128Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_write_b128", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsWriteB128Ds>(opcode);
 }
 } // namespace detail
@@ -4301,8 +4799,9 @@ DsReadB96Ds::DsReadB96Ds(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (!inst_.gds)
+  if (!inst_.gds) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info(
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                        (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
@@ -4311,14 +4810,18 @@ DsReadB96Ds::DsReadB96Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_READ_B96);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
 DecodeResult decodeDsReadB96Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_read_b96", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsReadB96Ds>(opcode);
 }
 } // namespace detail
@@ -4336,8 +4839,9 @@ DsReadB128Ds::DsReadB128Ds(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (!inst_.gds)
+  if (!inst_.gds) {
     flags_ |= SIMPLE_MEMORY_RESULT;
+  }
   set_memory_issue_info(
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                        (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
@@ -4346,15 +4850,1257 @@ DsReadB128Ds::DsReadB128Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_READ_B128);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
 DecodeResult decodeDsReadB128Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Ds::validate_encoding(
       "ds_read_b128", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsReadB128Ds>(opcode);
+}
+} // namespace detail
+
+DsAddSrc2U32Ds::DsAddSrc2U32Ds(const MachineInst *inst)
+    : Ds("ds_add_src2_u32", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsAddSrc2U32Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_out(32, OperandType::OPR_DSMEM, 0),
+      dsmem_in(32, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_SRC2_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsAddSrc2U32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_add_src2_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsAddSrc2U32Ds>(opcode);
+}
+} // namespace detail
+
+DsSubSrc2U32Ds::DsSubSrc2U32Ds(const MachineInst *inst)
+    : Ds("ds_sub_src2_u32", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsSubSrc2U32Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_out(32, OperandType::OPR_DSMEM, 0),
+      dsmem_in(32, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SUB_SRC2_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsSubSrc2U32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_sub_src2_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsSubSrc2U32Ds>(opcode);
+}
+} // namespace detail
+
+DsRsubSrc2U32Ds::DsRsubSrc2U32Ds(const MachineInst *inst)
+    : Ds("ds_rsub_src2_u32", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsRsubSrc2U32Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_out(32, OperandType::OPR_DSMEM, 0),
+      dsmem_in(32, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_RSUB_SRC2_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsRsubSrc2U32Ds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_rsub_src2_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsRsubSrc2U32Ds>(opcode);
+}
+} // namespace detail
+
+DsIncSrc2U32Ds::DsIncSrc2U32Ds(const MachineInst *inst)
+    : Ds("ds_inc_src2_u32", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsIncSrc2U32Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_out(32, OperandType::OPR_DSMEM, 0),
+      dsmem_in(32, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_INC_SRC2_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsIncSrc2U32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_inc_src2_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsIncSrc2U32Ds>(opcode);
+}
+} // namespace detail
+
+DsDecSrc2U32Ds::DsDecSrc2U32Ds(const MachineInst *inst)
+    : Ds("ds_dec_src2_u32", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsDecSrc2U32Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_out(32, OperandType::OPR_DSMEM, 0),
+      dsmem_in(32, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_DEC_SRC2_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsDecSrc2U32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_dec_src2_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsDecSrc2U32Ds>(opcode);
+}
+} // namespace detail
+
+DsMinSrc2I32Ds::DsMinSrc2I32Ds(const MachineInst *inst)
+    : Ds("ds_min_src2_i32", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsMinSrc2I32Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_out(32, OperandType::OPR_DSMEM, 0),
+      dsmem_in(32, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_SRC2_I32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsMinSrc2I32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_min_src2_i32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsMinSrc2I32Ds>(opcode);
+}
+} // namespace detail
+
+DsMaxSrc2I32Ds::DsMaxSrc2I32Ds(const MachineInst *inst)
+    : Ds("ds_max_src2_i32", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsMaxSrc2I32Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_out(32, OperandType::OPR_DSMEM, 0),
+      dsmem_in(32, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_SRC2_I32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsMaxSrc2I32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_max_src2_i32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsMaxSrc2I32Ds>(opcode);
+}
+} // namespace detail
+
+DsMinSrc2U32Ds::DsMinSrc2U32Ds(const MachineInst *inst)
+    : Ds("ds_min_src2_u32", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsMinSrc2U32Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_out(32, OperandType::OPR_DSMEM, 0),
+      dsmem_in(32, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_SRC2_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsMinSrc2U32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_min_src2_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsMinSrc2U32Ds>(opcode);
+}
+} // namespace detail
+
+DsMaxSrc2U32Ds::DsMaxSrc2U32Ds(const MachineInst *inst)
+    : Ds("ds_max_src2_u32", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsMaxSrc2U32Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_out(32, OperandType::OPR_DSMEM, 0),
+      dsmem_in(32, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_SRC2_U32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsMaxSrc2U32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_max_src2_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsMaxSrc2U32Ds>(opcode);
+}
+} // namespace detail
+
+DsAndSrc2B32Ds::DsAndSrc2B32Ds(const MachineInst *inst)
+    : Ds("ds_and_src2_b32", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsAndSrc2B32Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_out(32, OperandType::OPR_DSMEM, 0),
+      dsmem_in(32, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_AND_SRC2_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsAndSrc2B32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_and_src2_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsAndSrc2B32Ds>(opcode);
+}
+} // namespace detail
+
+DsOrSrc2B32Ds::DsOrSrc2B32Ds(const MachineInst *inst)
+    : Ds("ds_or_src2_b32", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsOrSrc2B32Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_out(32, OperandType::OPR_DSMEM, 0),
+      dsmem_in(32, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_OR_SRC2_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsOrSrc2B32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_or_src2_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsOrSrc2B32Ds>(opcode);
+}
+} // namespace detail
+
+DsXorSrc2B32Ds::DsXorSrc2B32Ds(const MachineInst *inst)
+    : Ds("ds_xor_src2_b32", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsXorSrc2B32Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_out(32, OperandType::OPR_DSMEM, 0),
+      dsmem_in(32, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_XOR_SRC2_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsXorSrc2B32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_xor_src2_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsXorSrc2B32Ds>(opcode);
+}
+} // namespace detail
+
+DsWriteSrc2B32Ds::DsWriteSrc2B32Ds(const MachineInst *inst)
+    : Ds("ds_write_src2_b32", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsWriteSrc2B32Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_out(32, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  num_src_ = 2;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRITE_SRC2_B32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsWriteSrc2B32Ds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_write_src2_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsWriteSrc2B32Ds>(opcode);
+}
+} // namespace detail
+
+DsMinSrc2F32Ds::DsMinSrc2F32Ds(const MachineInst *inst)
+    : Ds("ds_min_src2_f32", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsMinSrc2F32Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_out(32, OperandType::OPR_DSMEM, 0),
+      dsmem_in(32, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_SRC2_F32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsMinSrc2F32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_min_src2_f32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsMinSrc2F32Ds>(opcode);
+}
+} // namespace detail
+
+DsMaxSrc2F32Ds::DsMaxSrc2F32Ds(const MachineInst *inst)
+    : Ds("ds_max_src2_f32", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsMaxSrc2F32Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_out(32, OperandType::OPR_DSMEM, 0),
+      dsmem_in(32, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_SRC2_F32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsMaxSrc2F32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_max_src2_f32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsMaxSrc2F32Ds>(opcode);
+}
+} // namespace detail
+
+DsAddSrc2F32Ds::DsAddSrc2F32Ds(const MachineInst *inst)
+    : Ds("ds_add_src2_f32", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsAddSrc2F32Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_out(32, OperandType::OPR_DSMEM, 0),
+      dsmem_in(32, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_SRC2_F32);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsAddSrc2F32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_add_src2_f32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsAddSrc2F32Ds>(opcode);
+}
+} // namespace detail
+
+DsAddSrc2U64Ds::DsAddSrc2U64Ds(const MachineInst *inst)
+    : Ds("ds_add_src2_u64", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsAddSrc2U64Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_out(64, OperandType::OPR_DSMEM, 0),
+      dsmem_in(64, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_SRC2_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsAddSrc2U64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_add_src2_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsAddSrc2U64Ds>(opcode);
+}
+} // namespace detail
+
+DsSubSrc2U64Ds::DsSubSrc2U64Ds(const MachineInst *inst)
+    : Ds("ds_sub_src2_u64", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsSubSrc2U64Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_out(64, OperandType::OPR_DSMEM, 0),
+      dsmem_in(64, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SUB_SRC2_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsSubSrc2U64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_sub_src2_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsSubSrc2U64Ds>(opcode);
+}
+} // namespace detail
+
+DsRsubSrc2U64Ds::DsRsubSrc2U64Ds(const MachineInst *inst)
+    : Ds("ds_rsub_src2_u64", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsRsubSrc2U64Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_out(64, OperandType::OPR_DSMEM, 0),
+      dsmem_in(64, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_RSUB_SRC2_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsRsubSrc2U64Ds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_rsub_src2_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsRsubSrc2U64Ds>(opcode);
+}
+} // namespace detail
+
+DsIncSrc2U64Ds::DsIncSrc2U64Ds(const MachineInst *inst)
+    : Ds("ds_inc_src2_u64", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsIncSrc2U64Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_out(64, OperandType::OPR_DSMEM, 0),
+      dsmem_in(64, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_INC_SRC2_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsIncSrc2U64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_inc_src2_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsIncSrc2U64Ds>(opcode);
+}
+} // namespace detail
+
+DsDecSrc2U64Ds::DsDecSrc2U64Ds(const MachineInst *inst)
+    : Ds("ds_dec_src2_u64", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsDecSrc2U64Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_out(64, OperandType::OPR_DSMEM, 0),
+      dsmem_in(64, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_DEC_SRC2_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsDecSrc2U64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_dec_src2_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsDecSrc2U64Ds>(opcode);
+}
+} // namespace detail
+
+DsMinSrc2I64Ds::DsMinSrc2I64Ds(const MachineInst *inst)
+    : Ds("ds_min_src2_i64", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsMinSrc2I64Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_out(64, OperandType::OPR_DSMEM, 0),
+      dsmem_in(64, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_SRC2_I64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsMinSrc2I64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_min_src2_i64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsMinSrc2I64Ds>(opcode);
+}
+} // namespace detail
+
+DsMaxSrc2I64Ds::DsMaxSrc2I64Ds(const MachineInst *inst)
+    : Ds("ds_max_src2_i64", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsMaxSrc2I64Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_out(64, OperandType::OPR_DSMEM, 0),
+      dsmem_in(64, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_SRC2_I64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsMaxSrc2I64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_max_src2_i64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsMaxSrc2I64Ds>(opcode);
+}
+} // namespace detail
+
+DsMinSrc2U64Ds::DsMinSrc2U64Ds(const MachineInst *inst)
+    : Ds("ds_min_src2_u64", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsMinSrc2U64Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_out(64, OperandType::OPR_DSMEM, 0),
+      dsmem_in(64, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_SRC2_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsMinSrc2U64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_min_src2_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsMinSrc2U64Ds>(opcode);
+}
+} // namespace detail
+
+DsMaxSrc2U64Ds::DsMaxSrc2U64Ds(const MachineInst *inst)
+    : Ds("ds_max_src2_u64", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsMaxSrc2U64Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_out(64, OperandType::OPR_DSMEM, 0),
+      dsmem_in(64, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_SRC2_U64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsMaxSrc2U64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_max_src2_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsMaxSrc2U64Ds>(opcode);
+}
+} // namespace detail
+
+DsAndSrc2B64Ds::DsAndSrc2B64Ds(const MachineInst *inst)
+    : Ds("ds_and_src2_b64", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsAndSrc2B64Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_out(64, OperandType::OPR_DSMEM, 0),
+      dsmem_in(64, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_AND_SRC2_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsAndSrc2B64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_and_src2_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsAndSrc2B64Ds>(opcode);
+}
+} // namespace detail
+
+DsOrSrc2B64Ds::DsOrSrc2B64Ds(const MachineInst *inst)
+    : Ds("ds_or_src2_b64", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsOrSrc2B64Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_out(64, OperandType::OPR_DSMEM, 0),
+      dsmem_in(64, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_OR_SRC2_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsOrSrc2B64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_or_src2_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsOrSrc2B64Ds>(opcode);
+}
+} // namespace detail
+
+DsXorSrc2B64Ds::DsXorSrc2B64Ds(const MachineInst *inst)
+    : Ds("ds_xor_src2_b64", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsXorSrc2B64Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_out(64, OperandType::OPR_DSMEM, 0),
+      dsmem_in(64, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_XOR_SRC2_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsXorSrc2B64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_xor_src2_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsXorSrc2B64Ds>(opcode);
+}
+} // namespace detail
+
+DsWriteSrc2B64Ds::DsWriteSrc2B64Ds(const MachineInst *inst)
+    : Ds("ds_write_src2_b64", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsWriteSrc2B64Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_out(64, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  num_src_ = 2;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_WRITE_SRC2_B64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsWriteSrc2B64Ds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_write_src2_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsWriteSrc2B64Ds>(opcode);
+}
+} // namespace detail
+
+DsMinSrc2F64Ds::DsMinSrc2F64Ds(const MachineInst *inst)
+    : Ds("ds_min_src2_f64", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsMinSrc2F64Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_out(64, OperandType::OPR_DSMEM, 0),
+      dsmem_in(64, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_SRC2_F64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsMinSrc2F64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_min_src2_f64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsMinSrc2F64Ds>(opcode);
+}
+} // namespace detail
+
+DsMaxSrc2F64Ds::DsMaxSrc2F64Ds(const MachineInst *inst)
+    : Ds("ds_max_src2_f64", reinterpret_cast<const OpEncoding *>(inst),
+         selected_exec_fn(InstructionExecutionId::DsMaxSrc2F64Ds)),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_out(64, OperandType::OPR_DSMEM, 0),
+      dsmem_in(64, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  dst_operands_[0] = &dsmem_out;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_out.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_SRC2_F64);
+  set_amdgpu_memory(inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds,
+                    amdgpu::MemoryKind::Atomic);
+}
+
+namespace detail {
+DecodeResult decodeDsMaxSrc2F64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_max_src2_f64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]] {
+    return Result::failure();
+  }
+  return std::make_unique<DsMaxSrc2F64Ds>(opcode);
 }
 } // namespace detail
 

@@ -45,6 +45,7 @@
 #include "putmem_on_stream_tester.hpp"
 #include "putmem_signal_on_stream_tester.hpp"
 #include "signal_wait_until_on_stream_tester.hpp"
+#include "signal_ops_on_stream_tester.hpp"
 #include "ping_all_tester.hpp"
 #include "ping_pong_tester.hpp"
 #include "primitive_tester.hpp"
@@ -80,6 +81,7 @@
 #include "tile_broadcast_tester.hpp"
 #include "tile_allgather_tester.hpp"
 #include "tile_reduce_tester.hpp"
+#include "tile_nd_rma_tester.hpp"
 #include "reduce_on_stream_tester.hpp"
 #include "host_ctx_create_tester.hpp"
 #include "team_split_2d_tester.hpp"
@@ -167,7 +169,9 @@ Tester::Tester(TesterArguments args) : args(args) {
       case WGPutSignalTestType:
       case WGPutSignalNBITestType:
       case QpPutNbiTestType:
+      case QpPutNbiPollTestType:
       case SdmaPutNbiTestType:
+      case SdmaPutNbiPollTestType:
         max_msg_size = args.max_volume_size / args.num_wgs;
         break;
       case PingPongTestType:
@@ -444,22 +448,36 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case HostPutmemTestType:
       test_name = "Host_Putmem";
-      if (BackendType::IPC_BACKEND == backend_type)
+      if (BackendType::IPC_BACKEND == backend_type ||
+          BackendType::GDA_BACKEND == backend_type)
         testers.push_back(new HostRmaTester(args));
       break;
     case HostGetmemTestType:
       test_name = "Host_Getmem";
-      if (BackendType::IPC_BACKEND == backend_type)
+      if (BackendType::IPC_BACKEND == backend_type ||
+          BackendType::GDA_BACKEND == backend_type)
         testers.push_back(new HostRmaTester(args));
       break;
     case HostAmoFAddTestType:
       test_name = "Host_Amo_FAdd";
-      if (BackendType::IPC_BACKEND == backend_type)
+      if (BackendType::IPC_BACKEND == backend_type ||
+          BackendType::GDA_BACKEND == backend_type)
         testers.push_back(new HostRmaTester(args));
       break;
     case HostAmoFCswapTestType:
       test_name = "Host_Amo_FCswap";
-      if (BackendType::IPC_BACKEND == backend_type)
+      if (BackendType::IPC_BACKEND == backend_type ||
+          BackendType::GDA_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostPutmemSignalTestType:
+      test_name = "Host_Putmem_Signal";
+      if (BackendType::GDA_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostPutmemSignalAddTestType:
+      test_name = "Host_Putmem_Signal_Add";
+      if (BackendType::GDA_BACKEND == backend_type)
         testers.push_back(new HostRmaTester(args));
       break;
     case HostCtxPutmemTestType:
@@ -559,6 +577,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case SignalWaitUntilOnStreamTestType:
       test_name = "Signal_Wait_Until_On_Stream";
       testers.push_back(new SignalWaitUntilOnStreamTester(args));
+      break;
+    case SignalOpsOnStreamTestType:
+      test_name = "Signal_Ops_On_Stream";
+      testers.push_back(new SignalOpsOnStreamTester(args));
       break;
     case TeamFCollectTestType:
       test_name = "Fcollect Test";
@@ -1009,6 +1031,102 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Tile Get WG Row-Major (non-zero start_coord)";
       testers.push_back(new TileRMATester(args));
       break;
+    case TilePut3DTestType:
+      test_name = "Tile Put 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGet3DTestType:
+      test_name = "Tile Get 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePutWG3DTestType:
+      test_name = "Tile Put WG 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWG3DTestType:
+      test_name = "Tile Get WG 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePut4DTestType:
+      test_name = "Tile Put 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGet4DTestType:
+      test_name = "Tile Get 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePutWG4DTestType:
+      test_name = "Tile Put WG 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWG4DTestType:
+      test_name = "Tile Get WG 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePutWave3DTestType:
+      test_name = "Tile Put Wave 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWave3DTestType:
+      test_name = "Tile Get Wave 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePutWave4DTestType:
+      test_name = "Tile Put Wave 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWave4DTestType:
+      test_name = "Tile Get Wave 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePut3DStridedTestType:
+      test_name = "Tile Put 3D Strided";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGet3DStridedTestType:
+      test_name = "Tile Get 3D Strided";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePutWG3DStridedTestType:
+      test_name = "Tile Put WG 3D Strided";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWG3DStridedTestType:
+      test_name = "Tile Get WG 3D Strided";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePutWave3DStridedTestType:
+      test_name = "Tile Put Wave 3D Strided";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWave3DStridedTestType:
+      test_name = "Tile Get Wave 3D Strided";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePut4DStridedTestType:
+      test_name = "Tile Put 4D Strided";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGet4DStridedTestType:
+      test_name = "Tile Get 4D Strided";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePutWG4DStridedTestType:
+      test_name = "Tile Put WG 4D Strided";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWG4DStridedTestType:
+      test_name = "Tile Get WG 4D Strided";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePutWave4DStridedTestType:
+      test_name = "Tile Put Wave 4D Strided";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWave4DStridedTestType:
+      test_name = "Tile Get Wave 4D Strided";
+      testers.push_back(new TileNDRMATester(args));
+      break;
     case HostTeamSyncBarrierTestType:
       test_name = "Host Team Sync/Barrier";
       testers.push_back(new HostTeamSyncBarrierTester(args));
@@ -1120,6 +1238,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "QP-Direct Put NBI";
       testers.push_back(new QpPutNbiTester(args));
       break;
+    case QpPutNbiPollTestType:
+      test_name = "QP-Direct Put NBI Poll";
+      testers.push_back(new QpPutNbiTester(args));
+      break;
 #endif
 #if defined(USE_SDMA)
     case SdmaPingPongTestType:
@@ -1129,6 +1251,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case SdmaPutNbiTestType:
       test_name = "SDMA-Direct Put NBI";
+      testers.push_back(new SdmaPutNbiTester(args));
+      break;
+    case SdmaPutNbiPollTestType:
+      test_name = "SDMA-Direct Put NBI Poll";
       testers.push_back(new SdmaPutNbiTester(args));
       break;
 #endif
@@ -1276,6 +1402,7 @@ bool Tester::peLaunchesKernel() {
     case PutmemOnStreamTestType:
     case PutmemSignalOnStreamTestType:
     case SignalWaitUntilOnStreamTestType:
+    case SignalOpsOnStreamTestType:
     case SignalAddTestType:
     case SignalSetTestType:
     case SignalWaitUntilTestType:
@@ -1308,6 +1435,11 @@ bool Tester::peLaunchesKernel() {
     case TileReduceWGTestType:
     case QpPingPongTestType:
     case SdmaPingPongTestType:
+    // Host put-with-signal: PE 1 must run launchKernel too, to spin in
+    // signal_wait_until concurrently with PE 0's put_signal (genuine race, no
+    // barrier masking the arrival).
+    case HostPutmemSignalTestType:
+    case HostPutmemSignalAddTestType:
       is_launcher = true;
       break;
     case HostPutmemTestType:
@@ -1359,7 +1491,7 @@ void Tester::print(uint64_t size) {
 
   double msg_rate = num_timed_msgs / time_s;
 
-  double bandwidth_gbs =
+  double bandwidth_gibs =
       static_cast<double>(bw_factor * total_size) / time_s / pow(2, 30);
 
   float total_kern_time_ms;
@@ -1375,7 +1507,7 @@ void Tester::print(uint64_t size) {
            15, "Msg Size (B)",
            15, "# of timed Msgs",
            field_width, "Latency (us)",
-           field_width, "Bandwidth (GB/s)",
+           field_width, "Bandwidth (GiB/s)",
            field_width + 1, "Msg Rate (Msg/s)\n");
     _print_header = 0;
   }
@@ -1385,7 +1517,7 @@ void Tester::print(uint64_t size) {
          15, size,
          15, num_timed_msgs,
          field_width, float_precision, latency,
-         field_width, float_precision, bandwidth_gbs,
+         field_width, float_precision, bandwidth_gibs,
          field_width, float_precision, msg_rate);
 
   fflush(stdout);

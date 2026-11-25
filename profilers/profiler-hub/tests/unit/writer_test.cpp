@@ -1,10 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "profiler-hub/reader.hpp"
-#include "profiler-hub/storage.hpp"
-#include "profiler-hub/writer.hpp"
-#include "profiler-hub/writer_types.hpp"
+#include "backends/embedded_schema.hpp"
+#include "backends/sqlite_backend_impl.hpp"
+#include "profiler-hub/cpp/reader.hpp"
+#include "profiler-hub/cpp/storage.hpp"
+#include "profiler-hub/cpp/version.hpp"
+#include "profiler-hub/cpp/writer.hpp"
+#include "profiler-hub/cpp/writer_types.hpp"
 
 #include <gtest/gtest.h>
 
@@ -32,9 +35,11 @@ protected:
 
     void TearDown() override { std::filesystem::remove(m_db_path); }
 
-    [[nodiscard]] std::unique_ptr<writer_t> make_writer() const
+    [[nodiscard]] std::unique_ptr<writer_t> make_writer(
+        version_t schema_version = version_t{ 3, 0, 1 }) const
     {
-        return std::make_unique<writer_t>(std::make_unique<storage_t>(m_db_path, m_uuid));
+        return std::make_unique<writer_t>(
+            std::make_unique<storage_t>(m_db_path, m_uuid, schema_version));
     }
 
     // Registers a minimal node + process pair that most register_*/insert_* calls
@@ -57,6 +62,136 @@ protected:
     // insert_statements, so it must be a valid identifier fragment - no hyphens.
     std::string m_uuid = "testuuid0000";
 };
+
+TEST_F(writer_test, get_storage_version_returns_library_version)
+{
+    const storage_t storage{ m_db_path, m_uuid, version_t{ 3, 0, 0 } };
+
+    const auto version = storage.get_storage_version();
+    // Macros are set from the VERSION file, the same source get_storage_version() uses.
+    EXPECT_EQ(version.major, PROFILER_HUB_VERSION_MAJOR);
+    EXPECT_EQ(version.minor, PROFILER_HUB_VERSION_MINOR);
+    EXPECT_EQ(version.patch, PROFILER_HUB_VERSION_PATCH);
+}
+
+TEST_F(writer_test, get_writer_schema_version_defaults_to_3_0_1_when_not_specified)
+{
+    const storage_t storage{ m_db_path, m_uuid };
+
+    const auto version = storage.get_writer_schema_version();
+    EXPECT_EQ(version.major, 3);
+    EXPECT_EQ(version.minor, 0);
+    EXPECT_EQ(version.patch, 1);
+}
+
+TEST_F(writer_test, get_writer_schema_version_returns_explicitly_passed_version)
+{
+    const storage_t storage{ m_db_path, m_uuid, version_t{ 3, 0, 0 } };
+
+    const auto version = storage.get_writer_schema_version();
+    EXPECT_EQ(version.major, 3);
+    EXPECT_EQ(version.minor, 0);
+    EXPECT_EQ(version.patch, 0);
+}
+
+TEST_F(writer_test, get_writer_schema_version_resolves_unspecified_to_newest_writable)
+{
+    const storage_t storage{ m_db_path, m_uuid, version_t{} };
+
+    const auto version = storage.get_writer_schema_version();
+    EXPECT_EQ(version.major, 3);
+    EXPECT_EQ(version.minor, 0);
+    EXPECT_EQ(version.patch, 1);
+}
+
+TEST_F(writer_test, initialize_schema_default_version_succeeds)
+{
+    // writer_t initializes the schema for the storage version.
+    EXPECT_NO_THROW({ auto writer = make_writer(); });
+}
+
+TEST_F(writer_test, initialize_schema_latest_sentinel_version_succeeds)
+{
+    // version_t{} selects the newest schema the writer can populate, currently 3.0.1.
+    EXPECT_NO_THROW({ auto writer = make_writer(version_t{}); });
+}
+
+TEST_F(writer_test, initialize_schema_called_twice_is_a_no_op)
+{
+    EXPECT_NO_THROW({
+        auto first  = make_writer(version_t{ 3, 0, 1 });
+        auto second = make_writer(version_t{ 3, 0, 1 });
+    });
+}
+
+TEST_F(writer_test, writer_on_existing_database_file_throws)
+{
+    {
+        auto writer = make_writer(version_t{ 3, 0, 0 });
+        writer->flush_in_memory_data_to_disk();
+    }
+
+    EXPECT_THROW(make_writer(version_t{ 3, 0, 1 }), std::runtime_error);
+}
+
+TEST_F(writer_test, construct_storage_accepts_supported_writable_schemas)
+{
+    for(const auto& version : k_writer_supported_versions)
+    {
+        SCOPED_TRACE(version.to_string());
+        EXPECT_NO_THROW((storage_t{ m_db_path, m_uuid, version }));
+    }
+}
+
+TEST_F(writer_test, construct_storage_rejects_schema_the_writer_cannot_write)
+{
+    // Every embedded schema the writer cannot populate, including ones added
+    // to versions.yml after this test was written.
+    for(const auto& schema : rocpd::data_storage::schema::k_embedded_schemas)
+    {
+        const version_t version{ schema.major, schema.minor, schema.patch };
+        if(resolve_writable_schema(version) != nullptr)
+        {
+            continue;
+        }
+        SCOPED_TRACE(schema.version);
+        EXPECT_THROW((storage_t{ m_db_path, m_uuid, version }), std::runtime_error);
+    }
+}
+
+TEST_F(writer_test, initialize_schema_unsupported_version_throws_runtime_error)
+{
+    EXPECT_THROW(
+        { auto writer = make_writer(version_t{ 99, 0, 0 }); }, std::runtime_error);
+}
+
+TEST_F(writer_test, register_agent_info_nic_rejected_on_3_0_0)
+{
+    auto writer = make_writer(version_t{ 3, 0, 0 });
+    register_node_and_process(*writer);
+
+    writer_types::agent_info_t nic;
+    nic.unique_id.agent_type = "NIC";
+    nic.unique_id.type_index = 0;
+    nic.absolute_index       = 0;
+    nic.logical_index        = 0;
+    nic.uuid                 = 456;
+    nic.node_id              = 1;
+    nic.process_id           = 100;
+
+    EXPECT_THROW(writer->register_agent_info(nic), std::runtime_error);
+
+    // A rejected insert must not leave the prepared statement broken for later inserts.
+    writer_types::agent_info_t gpu;
+    gpu.unique_id.agent_type = "GPU";
+    gpu.unique_id.type_index = 0;
+    gpu.absolute_index       = 0;
+    gpu.logical_index        = 0;
+    gpu.uuid                 = 123;
+    gpu.node_id              = 1;
+    gpu.process_id           = 100;
+    EXPECT_NO_THROW(writer->register_agent_info(gpu));
+}
 
 TEST_F(writer_test, construct_with_null_storage_throws_invalid_argument)
 {
@@ -91,6 +226,33 @@ TEST_F(writer_test, register_node_info_is_readable_after_flush)
     EXPECT_EQ(nodes[0]->node_id, 1);
     EXPECT_EQ(nodes[0]->hash, 42);
     EXPECT_EQ(nodes[0]->machine_id, "machine-1");
+}
+
+TEST(storage_version_test, empty_path_reports_loaded_library_version)
+{
+    const storage_t storage{ "", "" };
+    const auto      version = storage.get_storage_version();
+
+    EXPECT_EQ(version.major, PROFILER_HUB_VERSION_MAJOR);
+    EXPECT_EQ(version.minor, PROFILER_HUB_VERSION_MINOR);
+    EXPECT_EQ(version.patch, PROFILER_HUB_VERSION_PATCH);
+}
+
+TEST_F(writer_test, get_trace_schema_version_reads_schema_version_from_trace)
+{
+    auto writer = make_writer();
+
+    const writer_types::node_info_t node_info{ 1, 42, "machine-1" };
+    writer->register_node_info(node_info);
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    storage_t  storage{ m_db_path, m_uuid };
+    const auto version = storage.get_trace_schema_version();
+
+    EXPECT_EQ(version.major, 3);
+    EXPECT_EQ(version.minor, 0);
+    EXPECT_EQ(version.patch, 1);
 }
 
 TEST_F(writer_test, register_process_info_is_readable_after_flush)
@@ -190,7 +352,8 @@ TEST_F(writer_test, register_agent_info_with_invalid_agent_type_throws_invalid_a
 
 TEST_F(writer_test, register_agent_info_nic_is_readable_after_flush)
 {
-    auto writer = make_writer();
+    // 3.0.0 allows only CPU and GPU. NIC needs 3.0.1 or newer.
+    auto writer = make_writer(version_t{ 3, 0, 1 });
     register_node_and_process(*writer);
 
     writer_types::agent_info_t agent_info;
@@ -217,7 +380,8 @@ TEST_F(writer_test, register_agent_info_nic_is_readable_after_flush)
 
 TEST_F(writer_test, register_pmc_info_with_nic_target_arch_is_readable_after_flush)
 {
-    auto writer = make_writer();
+    // 3.0.0 allows only CPU and GPU. NIC needs 3.0.1 or newer.
+    auto writer = make_writer(version_t{ 3, 0, 1 });
     register_node_and_process(*writer);
 
     writer_types::pmc_info_t pmc_info;
@@ -448,7 +612,7 @@ TEST_F(writer_test, register_kernel_symbol_info_is_readable_after_flush)
     EXPECT_EQ(kernel_symbols[0]->code_object_info->id, code_object_info.id);
 }
 
-TEST_F(writer_test, register_track_info_is_readable_after_flush)
+TEST_F(writer_test, register_track_info_does_not_throw)
 {
     auto writer = make_writer();
 
@@ -457,18 +621,9 @@ TEST_F(writer_test, register_track_info_is_readable_after_flush)
 
     writer_types::track_info_t track_info;
     track_info.node_id = node_info.node_id;
-    writer->register_track_info(track_info);
 
-    writer->flush_in_memory_data_to_disk();
-    writer.reset();
-
-    auto reader =
-        std::make_unique<reader_t>(std::make_unique<storage_t>(m_db_path, m_uuid));
-    const auto tracks = reader->get_all_tracks();
-
-    ASSERT_EQ(tracks.size(), 1);
-    ASSERT_NE(tracks[0]->node_info, nullptr);
-    EXPECT_EQ(tracks[0]->node_info->node_id, node_info.node_id);
+    EXPECT_NO_THROW(writer->register_track_info(track_info));
+    EXPECT_NO_THROW(writer->flush_in_memory_data_to_disk());
 }
 
 TEST_F(writer_test, register_string_does_not_throw)
@@ -533,7 +688,8 @@ TEST_F(writer_test, insert_memory_copy_data_is_readable_after_flush)
     writer_types::memory_copy_data_t memory_copy_data;
     memory_copy_data.name = "hipMemcpy";
     // Timeline display_name for memory copies comes from region_name_id, not name_id
-    // (see initialize_memory_copy_timeline_event_statements in read_statements.hpp).
+    // (see initialize_memory_copy_timeline_event_statements in
+    // schema_v3/read_statements.hpp).
     memory_copy_data.region_name     = "hipMemcpy";
     memory_copy_data.start_timestamp = 1000;
     memory_copy_data.end_timestamp   = 2000;

@@ -7,6 +7,8 @@
 #pragma once
 
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
+#include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
@@ -17,7 +19,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <optional>
 #include <queue>
+#include <span>
 #include <utility>
 
 namespace rocjitsu {
@@ -28,12 +33,24 @@ class L1VectorCache;
 class L2Cache;
 class Lds;
 
+/// Capture an ordered-count operand before the owning wave can be suspended.
+bool prepare_ordered_count(Wavefront &wf, VectorMemState &state, uint32_t offset0, uint32_t offset1,
+                           uint32_t addr, uint32_t vdst);
+
+/// An unaligned native GFX12 LDS atomic faults before any active lane accesses bytes.
+bool native_ds_atomic_misaligned(const VectorMemState &state, rocjitsu::IsaFamily arch,
+                                 uint64_t request_lanes);
+
 enum class [[nodiscard]] MemoryAccessCompletion {
   Complete,
   Deferred,
+  Failed,
 };
 
 using MemoryAccessDeferredCompletion = std::function<void()>;
+/// Borrowed during complete_access(). A deferred backend takes an owning
+/// completion from this factory before submitting or completing the writeback.
+using MemoryAccessCompletionFactory = std::function<MemoryAccessDeferredCompletion()>;
 
 /// @brief Base class for a memory pipeline stage (scalar, global, or local).
 ///
@@ -47,7 +64,19 @@ using MemoryAccessDeferredCompletion = std::function<void()>;
 /// in a single tick() and then complete on the next tick().
 class MemoryPipeline {
 public:
-  using FaultHandler = std::function<void(Wavefront &, VmAccessOutcome)>;
+  using FaultHandler = std::function<void(Wavefront &, VmAccessOutcome, uint64_t issue_pc)>;
+  /// @brief Admit local memory effects for one process and VM snapshot.
+  /// @details The spans identify the virtual addresses and access kinds this
+  /// issue attempt may touch. A non-Complete outcome prevents the local effect;
+  /// a returned permit keeps admitted ingress live until the effect ends.
+  using IngressHandler = std::function<MemoryIngressAdmission(uint32_t, const GpuVmAccess &,
+                                                              std::span<const MemoryIngressSpan>)>;
+  /// Optional cache-only translated System read. A null completion probes
+  /// resident bytes; a completion carries returned bytes' stamp and origin.
+  /// The handler must independently prove current alias, translation, and
+  /// writer authority before returning a hit or installing a line.
+  using PeerCacheReadHandler = std::function<bool(uint32_t, const GpuVmAccess &, uint64_t,
+                                                  std::span<std::byte>, const VmCompletedRead *)>;
   static constexpr std::size_t MAX_WAIT_COUNTER_TOKENS =
       MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS * MemoryCounterObligation::MAX_COUNTER_INCREMENT;
 
@@ -64,6 +93,8 @@ public:
     Wavefront *wf;
     WaitCounterTokens counters;
     uint64_t wave_generation;
+    uint64_t issue_pc;
+    bool routing_observed = false;
   };
 
   /// @brief Issue a memory instruction to this pipeline.
@@ -79,52 +110,113 @@ public:
   /// @details Returning Complete means the pipeline accepted ownership, whether
   /// the backing completed synchronously or the request was queued. Permanent
   /// failures are returned synchronously and leave no retained instruction.
-  VmAccessOutcome issue_deferred(Instruction *inst, Wavefront &wf);
+  VmAccessOutcome issue_deferred(Instruction *inst, Wavefront &wf, bool routing_observed = false);
+
+  /// @brief Issue an instruction and preserve ownership after synchronous completion.
+  /// @details A non-null instruction on return has completed writeback and released
+  /// its counters for the same wave-slot occupant. Retry and deferred completion
+  /// transfer ownership to the pipeline; failures and stale generations destroy it.
+  VmAccessOutcome issue_deferred(std::unique_ptr<Instruction> &inst, Wavefront &wf,
+                                 bool routing_observed = false);
 
   /// @brief Retry every request that was unavailable on its preceding attempt.
   void tick();
+
+  /// @brief Retry only one queue's retained work without requesting an engine yield.
+  /// @details The caller holds the CU wave-state lock and owns this queue's pause.
+  void retry_for_queue(uint32_t process_id, uint32_t queue_id);
 
   bool empty() const { return issued_.empty() && returned_.empty(); }
 
   WaitCounterType counter_type() const { return counter_type_; }
   void set_fault_handler(FaultHandler handler) { fault_handler_ = std::move(handler); }
+  /// @brief Install local-effect admission for this pipeline.
+  /// @details With no handler, local access is admitted without a permit.
+  /// The handler receives the issuing process ID, its VM snapshot, and the
+  /// spans to check; any returned permit protects the ensuing local effect.
+  void set_ingress_handler(IngressHandler handler) { ingress_handler_ = std::move(handler); }
+  void set_peer_cache_read_handler(PeerCacheReadHandler handler) {
+    peer_cache_read_handler_ = std::move(handler);
+  }
 
   /// @brief Retain an operation whose first access attempt already returned Unavailable.
   void defer_unavailable(Instruction *inst, Wavefront &wf);
+
+  /// @brief Cancel one unavailable side-effect-free load and rewind its issuing PC.
+  /// @details Used by debugger suspension so an unresolved load can be saved and
+  /// re-issued after restore. Stores, atomics and LDS-destination loads are retained.
+  bool rewind_unavailable_load(Wavefront &wf);
 
   /// @brief Cancel every retained operation belonging to one wave-slot occupant.
   void cancel(Wavefront &wf);
 
 protected:
   virtual VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) = 0;
-  /// Return Complete and do not call complete, or return Deferred and call it
-  /// exactly once after the memory response is ready for architectural writeback.
-  virtual MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
-                                                 MemoryAccessDeferredCompletion complete) = 0;
+  /// Synchronous writeback returns Complete. A backend submitting deferred work
+  /// takes one callback and invokes it exactly once when the response is ready,
+  /// possibly inline. A failed submission discards the callback and returns
+  /// Failed. Earlier lane writes may remain.
+  virtual MemoryAccessCompletion
+  complete_access(Instruction &inst, Wavefront &wf,
+                  const MemoryAccessCompletionFactory &take_completion) = 0;
 
-  VmAccessOutcome issue_impl(Instruction *inst, Wavefront &wf, bool retain_unavailable);
+  void retry_entries(bool all_queues, uint32_t process_id, uint32_t queue_id);
+  VmAccessOutcome issue_impl(std::unique_ptr<Instruction> &inst, Wavefront &wf,
+                             bool retain_unavailable, bool routing_observed);
   [[nodiscard]] WaitCounterTokens issue_counters(const Instruction &inst) const;
   void acquire_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
   void release_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
-  void complete_entry(PipelineEntry entry);
+  bool cancel_wait_check_issue(const PipelineEntry &entry);
+  VmAccessOutcome complete_entry(PipelineEntry entry, std::unique_ptr<Instruction> &inst);
 
-  void finish_completed_access(Instruction *inst, Wavefront &wf, const WaitCounterTokens &counters,
-                               uint64_t wave_generation) {
+  void finish_completed_access(std::unique_ptr<Instruction> &inst, Wavefront &wf,
+                               const WaitCounterTokens &counters, uint64_t wave_generation) {
     if (wf.dispatch_generation() != wave_generation) {
-      delete inst;
+      inst.reset();
       return;
     }
+    const auto *state = inst->data();
+    if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM) &&
+        inst->data_as<VectorMemState>()->address_range_violation_lanes) {
+      wf.record_rdna2_memory_violation();
+    }
     release_wait_counters(wf, counters);
-    if (wf.state() == WfState::VM_RETRY)
+    // Releasing the final counter can retire an ENDING wave. A replacement
+    // dispatch must not receive the completed instruction's ownership.
+    if (wf.dispatch_generation() != wave_generation) {
+      inst.reset();
+      return;
+    }
+    if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM) &&
+        inst->data_as<VectorMemState>()->flat_memory_violation) {
+      wf.complete_flat_memory_violation();
+    }
+    if (wf.state() == WfState::VM_RETRY) {
       wf.set_state(WfState::RUNNING);
-    delete inst;
+    }
   }
+
+  [[nodiscard]] MemoryIngressAdmission
+  admit_ingress(uint32_t process_id, const GpuVmAccess &access,
+                std::span<const MemoryIngressSpan> spans) const {
+    return ingress_handler_ ? ingress_handler_(process_id, access, spans)
+                            : MemoryIngressAdmission{};
+  }
+  [[nodiscard]] bool has_ingress_handler() const { return static_cast<bool>(ingress_handler_); }
 
   WaitCounterType counter_type_;
   std::queue<PipelineEntry> issued_;
   std::queue<PipelineEntry> returned_;
   FaultHandler fault_handler_;
+  IngressHandler ingress_handler_;
+  PeerCacheReadHandler peer_cache_read_handler_;
 };
+
+/// Remove sparse texel misses from the request using the instruction's VM snapshot.
+VmAccessOutcome qualify_image_feedback(VectorMemState &state, const GpuVmAccess &vm);
+
+/// Suppress only buffer TFE elements inside published nonresident PRT ranges.
+void qualify_buffer_residency(VectorMemState &state, const GpuVmAccess &vm);
 
 /// @brief Scalar memory pipeline for SMEM instructions.
 ///
@@ -138,8 +230,9 @@ public:
 
 protected:
   VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) override;
-  MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
-                                         MemoryAccessDeferredCompletion complete) override;
+  MemoryAccessCompletion
+  complete_access(Instruction &inst, Wavefront &wf,
+                  const MemoryAccessCompletionFactory &take_completion) override;
 
 private:
   L1ScalarCache *l1_;
@@ -148,30 +241,61 @@ private:
 /// @brief Global memory pipeline (V$ → L2 → HBM).
 class GlobalMemPipeline : public MemoryPipeline {
 public:
+  // May conservatively admit the bounding interval of a vector operation.
+  // Declining leaves exact per-lane classification and ingress to the caller.
+  using LocalRangeHandler = std::function<std::optional<MemoryIngressAdmission>(
+      uint32_t, const GpuVmAccess &, MemoryIngressSpan)>;
+  void set_local_range_handler(LocalRangeHandler handler) {
+    local_range_handler_ = std::move(handler);
+  }
+  using PreparedAtomicBoundaryHandler =
+      std::function<std::optional<DeviceCacheMaintenanceLease>(uint32_t vmid)>;
+
   GlobalMemPipeline(L1VectorCache *l1, L2Cache *l2)
       : MemoryPipeline(WaitCounterType::VMCNT), l1_(l1), l2_(l2) {}
 
   void set_l2(L2Cache *l2) { l2_ = l2; }
+  /// @brief Use KFD's owning-GPU prepared boundary for local vector atomics.
+  /// @details A retired frontend may decline VMID-zero work so the standalone
+  /// boundary remains usable after KFD teardown.
+  void set_prepared_atomic_boundary_handler(PreparedAtomicBoundaryHandler handler) {
+    prepared_atomic_boundary_handler_ = std::move(handler);
+  }
 
 protected:
   VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) override;
-  MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
-                                         MemoryAccessDeferredCompletion complete) override;
+  MemoryAccessCompletion
+  complete_access(Instruction &inst, Wavefront &wf,
+                  const MemoryAccessCompletionFactory &take_completion) override;
 
 private:
+  VmAccessOutcome initiate_global_access(VectorMemState &state, Wavefront &wf,
+                                         uint64_t request_lanes);
+  // Per-request mutable state lives only in per_lane_addr, response_data and
+  // translated; sampling swaps each tap's versions around this call. The other
+  // request fields must be shared by every tap. Translation may refresh an
+  // unready request snapshot, so each tap retains its own translation progress.
+  VmAccessOutcome initiate_image_metadata_access(VectorMemState &d, Wavefront &wf);
+  VmAccessOutcome initiate_texel_access(VectorMemState &state, Wavefront &wf,
+                                        uint64_t request_lanes);
   L1VectorCache *l1_;
   L2Cache *l2_;
+  PreparedAtomicBoundaryHandler prepared_atomic_boundary_handler_;
+  LocalRangeHandler local_range_handler_;
 };
 
 /// @brief Local memory pipeline (LDS).
 class LocalMemPipeline : public MemoryPipeline {
 public:
   LocalMemPipeline() : MemoryPipeline(WaitCounterType::LGKMCNT) {}
+  /// Capture synchronous indexed GDS errors before its source locks are registered.
+  static void capture_gds_violations(VectorMemState &data, const Wavefront &wf);
 
 protected:
   VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) override;
-  MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
-                                         MemoryAccessDeferredCompletion complete) override;
+  MemoryAccessCompletion
+  complete_access(Instruction &inst, Wavefront &wf,
+                  const MemoryAccessCompletionFactory &take_completion) override;
 };
 
 /// @brief Retry queue for CDNA5 tensor DMA operations prepared by ISA execution.
@@ -181,8 +305,9 @@ public:
 
 protected:
   VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) override;
-  MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
-                                         MemoryAccessDeferredCompletion complete) override;
+  MemoryAccessCompletion
+  complete_access(Instruction &inst, Wavefront &wf,
+                  const MemoryAccessCompletionFactory &take_completion) override;
 };
 
 } // namespace amdgpu

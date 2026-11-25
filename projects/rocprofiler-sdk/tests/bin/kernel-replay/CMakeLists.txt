@@ -39,3 +39,12 @@ target_link_libraries(kernel-replay PRIVATE rocprofiler-sdk::tests-build-flags)
 
 find_package(Threads REQUIRED)
 target_link_libraries(kernel-replay PRIVATE Threads::Threads)
+
+set_source_files_properties(kernel_replay_regions.cpp PROPERTIES LANGUAGE HIP)
+add_executable(kernel-replay-regions)
+target_sources(kernel-replay-regions PRIVATE kernel_replay_regions.cpp)
+
+find_package(rocprofiler-sdk-roctx REQUIRED)
+target_link_libraries(
+    kernel-replay-regions PRIVATE rocprofiler-sdk::tests-build-flags
+                                  rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)

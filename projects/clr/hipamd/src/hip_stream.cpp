@@ -53,7 +53,18 @@ Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
 
 // ================================================================================================
 // Out of line so that captureGraph_'s deleter is instantiated where hip::Graph is complete.
-Stream::~Stream() = default;
+Stream::~Stream() { device().ReleaseGlobalSignal(blocked_on_signal_.load()); }
+
+// ================================================================================================
+bool Stream::IsBlockedOn(void* signal) const {
+  return signal != nullptr && signal == blocked_on_signal_.load(std::memory_order_acquire);
+}
+
+// ================================================================================================
+void Stream::SetBlockedOn(void* signal) {
+  device().RetainGlobalSignal(signal);
+  device().ReleaseGlobalSignal(blocked_on_signal_.exchange(signal, std::memory_order_acq_rel));
+}
 
 // ================================================================================================
 void Stream::InvalidateCapture() {
@@ -280,7 +291,9 @@ bool Stream::StreamCaptureOngoing(hipStream_t hStream) {
   if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeRelaxed) {
     return false;
   }
-  // Global mode — invalidate all capturing streams in any thread.
+  // Global mode — invalidate all capturing streams in any thread regardless of
+  // stream flags. StreamCaptureOngoing guards APIs (hipStreamSynchronize, etc.)
+  // where the capture mode alone determines interference, not stream flags.
   if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal) {
     amd::ScopedLock lock(g_captureStreamsLock);
     if (!g_captureStreams.empty()) {
@@ -525,6 +538,9 @@ hipError_t hipStreamDestroy(hipStream_t stream) {
   if (stream == hipStreamPerThread || stream == hipStreamLegacy) {
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorInvalidHandle);
+  }
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   if (s->GetCaptureStatus() != hipStreamCaptureStatusNone) {
     if (s->IsOriginStream()) {
@@ -565,7 +581,6 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
   }
   getStreamPerThread(stream);
   CHECK_STREAM_DETACHED(stream);
-  hip::Stream* waitStream = hip::getStream(stream);
   hip::Event* e = reinterpret_cast<hip::Event*>(event);
   auto eventStreamHandle = reinterpret_cast<hipStream_t>(e->GetCaptureStream());
   // The stream associated with the device might have been destroyed.
@@ -575,6 +590,17 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
   }
 
   hip::Stream* eventStream = reinterpret_cast<hip::Stream*>(eventStreamHandle);
+
+  // The legacy stream can never record into a graph. This is decided before
+  // hip::getStream resolves the handle, because resolving the null stream synchronises it
+  // against every active blocking stream on the device.
+  if ((stream == nullptr || stream == hipStreamLegacy) && eventStream != nullptr &&
+      eventStream->IsEventCaptured(event)) {
+    eventStream->InvalidateCapture();
+    return hipErrorStreamCaptureImplicit;
+  }
+
+  hip::Stream* waitStream = hip::getStream(stream);
 
   // External-event wait: add a graph node and return immediately.
   if (flags == hipEventWaitExternal) {

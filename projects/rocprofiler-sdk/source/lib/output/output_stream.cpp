@@ -40,49 +40,67 @@ namespace
 {
 const auto stdout_names = std::unordered_set<std::string_view>{"stdout", "STDOUT"};
 const auto stderr_names = std::unordered_set<std::string_view>{"stderr", "STDERR"};
-}  // namespace
 
-std::string
-get_output_filename(const output_config& cfg, std::string_view fname, std::string_view ext)
+// the file name and every directory that has to exist to write it. The prefix
+// may contain a subdirectory, so that is not always the output path itself
+struct resolved_output
 {
-    auto cfg_output_path = tool::format_path(cfg.output_path);
+    std::string             filename    = {};
+    std::array<fs::path, 2> directories = {};
+};
 
+resolved_output
+resolve_output(const output_config& cfg, std::string_view fname, std::string_view ext)
+{
     // add a period to provided file extension if necessary
     constexpr auto period   = std::string_view{"."};
     constexpr auto noperiod = std::string_view{};
     const auto     _ext =
         fmt::format("{}{}", (!ext.empty() && ext.find('.') != 0) ? period : noperiod, ext);
 
-    auto output_path   = fs::path{cfg_output_path};
+    auto output_path   = fs::path{tool::format_path(cfg.output_path)};
     auto output_prefix = tool::format_path(cfg.output_file);
-
-    if(fs::exists(output_path) && !fs::is_directory(fs::status(output_path)))
-    {
-        ROCP_FATAL << fmt::format(
-            "ROCPROFILER_OUTPUT_PATH ({}) already exists and is not a directory",
-            output_path.string());
-    }
-    else if(!fs::exists(output_path))
-    {
-        fs::create_directories(output_path);
-    }
-
     auto _ofname =
         tool::format_path(output_path / fmt::format("{}_{}{}", output_prefix, fname, _ext));
 
-    // the prefix may contain a subdirectory
-    if(auto _ofname_path = fs::path{_ofname}.parent_path(); !fs::exists(_ofname_path))
+    return resolved_output{_ofname, {output_path, fs::path{_ofname}.parent_path()}};
+}
+
+std::optional<std::string>
+invalid_directory(const resolved_output& resolved)
+{
+    for(const auto& itr : resolved.directories)
     {
-        fs::create_directories(_ofname_path);
-    }
-    else if(fs::exists(_ofname_path) && !fs::is_directory(fs::status(_ofname_path)))
-    {
-        ROCP_FATAL << fmt::format(
-            "ROCPROFILER_OUTPUT_PATH ({}) already exists and is not a directory",
-            output_path.string());
+        if(fs::exists(itr) && !fs::is_directory(fs::status(itr))) return itr.string();
     }
 
-    return _ofname;
+    return std::nullopt;
+}
+}  // namespace
+
+std::optional<std::string>
+check_output_path(const output_config& cfg, std::string_view fname, std::string_view ext)
+{
+    return invalid_directory(resolve_output(cfg, fname, ext));
+}
+
+std::string
+get_output_filename(const output_config& cfg, std::string_view fname, std::string_view ext)
+{
+    auto resolved = resolve_output(cfg, fname, ext);
+
+    if(auto invalid = invalid_directory(resolved))
+    {
+        ROCP_FATAL << fmt::format(
+            "ROCPROFILER_OUTPUT_PATH ({}) already exists and is not a directory", *invalid);
+    }
+
+    for(const auto& itr : resolved.directories)
+    {
+        if(!fs::exists(itr)) fs::create_directories(itr);
+    }
+
+    return resolved.filename;
 }
 
 output_stream

@@ -1,0 +1,458 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+"""Check physical registrations and run required ConSan coverage without skips."""
+
+import argparse
+import json
+from pathlib import Path
+import re
+import subprocess
+import xml.etree.ElementTree as ET
+
+MODES = (
+    ('gfx942', 64),
+    ('gfx950', 64),
+    ('gfx1100', 32),
+    ('gfx1100', 64),
+    ('gfx1201', 32),
+    ('gfx1201', 64),
+    ('gfx1250', 32),
+)
+
+
+RUNTIME_CASES = (
+    'race',
+    'disjoint',
+    'read_read',
+    'collision',
+    'single_lane',
+    'repeat',
+    'alias',
+    'immediate',
+    'four_ranges',
+    'exhausted',
+    'empty',
+    'branched',
+    'wrong-artifact',
+    'bad-geometry',
+    'profiling',
+    'reused-signal',
+)
+ANALYSIS_CASES = (*RUNTIME_CASES, 'repeat_race', 'utf8_entry')
+CORE_WIDTH_CASES = (
+    'wide_u8',
+    'wide_i8_alias_high',
+    'wide_d16_u8',
+    'wide_d16_i8_high',
+    'wide_d16_u16',
+    'wide_d16_overlap',
+    'wide_d16_adjacent',
+    'wide_b8_overlap',
+    'wide_b8_adjacent',
+    'wide_b8_disjoint',
+    'wide_u16',
+    'wide_i16',
+    'wide_b64',
+    *(
+        f'wide_dual_b{bits}_{spacing}_{scenario}'
+        for bits in (32, 64)
+        for spacing in ('normal', 'stride64')
+        for scenario in ('values_high', 'overlap', 'gap')
+    ),
+    'wide_b96',
+    'wide_b96_alias_high',
+    'wide_b96_overlap',
+    'wide_b96_adjacent',
+    'wide_b96_disjoint',
+    'wide_b128',
+)
+GFX1250_WIDTH_CASES = (
+    *CORE_WIDTH_CASES,
+    'wide_u16_high',
+    'wide_i16_high',
+    'wide_b64_high',
+    'wide_b128_high',
+    'wide_alias',
+    'wide_collision',
+    'mixed_overlap',
+    'mixed_b16',
+    'mixed_disjoint',
+    'mixed_read_read',
+)
+
+
+BARRIER_CASES = (
+    'barrier',
+    'barrier_empty',
+    'barrier_high',
+    'barrier_separated',
+    'barrier_multiple',
+    'barrier_missing_second',
+)
+LOOP_CASES = (
+    'loop_zero',
+    'loop_one',
+    'loop_three',
+    'loop_access_loss',
+    'loop_sync_loss',
+    'loop_no_b0',
+    'loop_no_b0_full_journal',
+    'loop_no_b0_sync_loss',
+    'loop_no_b1',
+    'loop_late',
+)
+
+
+def required_names():
+    names = {
+        'ConSanConfigure.EnvironmentOnlySdk',
+        'ConSanRuntimeIntegration.Guards',
+        'ConSanRuntime.SymbolBoundary',
+        'ConSanHsaPlugin.RuntimeConfigurationRequiresPathsAndIndependentProfile',
+        'ConSanHsaPlugin.AmdSignalsCompleteAdmittedDispatches',
+        'ConSanHsaPlugin.AmdSignalCreationPreservesArgumentsAndFailedOutputsRemainUntracked',
+        'ConSanHsaPlugin.RejectedAmdDispatchNotifiesItsCompletion',
+        'ConSanHsaPlugin.RejectedBatchesNotifyAmdDispatchAndBarrierCompletions',
+        'ConSanHsaPlugin.AmdBarriersAfterADispatchRejectionReceiveFailureNotifications',
+        'ConSanHsaPlugin.RejectedAmdBarrierCannotOverwritePendingDispatchCompletion',
+        'ConSanHsaPlugin.UntrackedBarriersAfterARejectionRetainTheirSignalsWithoutPublication',
+        'ConSanHsaPlugin.MissingAmdSignalCreationKeepsCoreSignalSupportAvailable',
+        'ConSanSimProductionE2E.gfx1250.wave32.assembly.mixed_barrier',
+        'ConSanSimProductionE2E.gfx1250.wave32.assembly.missing-statistics',
+        'ConSanBootstrapSim.TransposeIssuesOnceAndRoutesPhysicalSourceLanes',
+        'ConSanNativeWidthsStatic.TransposeMappingsRequireTheDecodedFormAndLegalRegisterTuple',
+        'ConSanContract.TargetWaveFactsRoundTripAndRowsFollowActualGeometry',
+        'ConSanAnalysis.Wave64HighLanesAndFullMasksRetainExactLanePairCounts',
+        'ConSanAnalysis.InvalidUtf8EntryNamesAreAnalysisInputErrorsAfterBinaryRoundTrip',
+        'ConSanAnalysis.Utf8ScalarBoundariesRetainTheirBytesInJson',
+        'ConSanHsaPluginDeathTest.FinishDuringFreezePreventsWorkerStartupAndUnloadsNormally',
+        'ConSanHsaPluginDeathTest.DestroyDuringFreezeInvalidatesTheAdmittedModule',
+        'ConSanHsaPlugin.RejectedBatchNotifiesEveryDiscardedDispatch',
+        'ConSanHsaPlugin.RejectedBatchPreservesSignalsForAlreadyPendingWork',
+        'ConSanPrepare.EntryNamesMustBeUsableByTheShippedJsonAnalyzer',
+        'ConSanInput.MissingEntryAndAdditionalKernelHaveDistinctDiagnostics',
+        'ConSanSimProductionE2E.gfx1250.wave32.assembly.batch-barrier-and',
+        'ConSanSimProductionE2E.gfx1250.wave32.assembly.batch-barrier-or',
+        'ConSanHsaPlugin.RejectedBatchNotifiesBarrierWaitersOfFailure',
+        'ConSanHsaPlugin.BarrierOnlyBatchPreservesOrderAndDoesNotFailCapture',
+        'ConSanHsaPlugin.RejectedUnsupportedPacketNotifiesItsNeighboringBarrierOfFailure',
+        'ConSanHsaPlugin.BarrierBatchWithoutCompletionSignalsStillPassesThrough',
+        'ConSanHsaPlugin.RejectedBatchPreservesPendingWorkWhenNotifyingBarrierFailure',
+        'ConSanHsaPlugin.RejectedBarrierCannotOverwritePendingDispatchCompletion',
+        'ConSanHsaPlugin.BarriersAfterADispatchRejectionReceiveFailureNotifications',
+        'ConSanSimProductionE2E.gfx1250.wave32.assembly.late-barrier-and',
+        'ConSanSimProductionE2E.gfx1250.wave32.assembly.late-barrier-or',
+        'ConSanHsaPlugin.RejectedNonDispatchPacketDoesNotModifyATrackedSignal',
+        'ConSanHsaPlugin.IndividualBarriersStillPassThroughWithoutDispatchAdmission',
+        'ConSanHsaPlugin.CompleteWorkgroupsPublishAllRowsAndCaptureTheirFullExtent',
+        'ConSanBoundedLaunch.AllNativeTargetsKeepBoundedWorkgroupRowsAndAdmission',
+        'ConSanAnalysis.EveryTargetKeepsNoSyncConflictsAndReadReadExclusionLocalToWorkgroups',
+        'ConSanAnalysis.EveryTargetNeverJoinsIdenticalLdsOffsetsAcrossWorkgroups',
+        'ConSanAnalysis.Wave64WorkgroupsKeepHighLanesAndRejectOnlyInvalidPartialWaveMasks',
+    }
+    for gpu, wave_size in MODES:
+        for case in (*BARRIER_CASES, *LOOP_CASES):
+            names.add(f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.{case}')
+        for groups in (1, 4, 16):
+            for case in ('grouped_barrier', 'grouped_empty'):
+                names.add(
+                    f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.{case}.groups{groups}'
+                )
+        for groups in (1, 4, 16):
+            names.add(
+                f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.grouped_disjoint.groups{groups}'
+            )
+        for groups in (4, 16):
+            for case in ('grouped_race', 'grouped_read_read', 'grouped_isolation'):
+                names.add(
+                    f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.{case}.groups{groups}'
+                )
+        for case, groups in (
+            ('grouped_repeat', 4),
+            ('grouped_oversized', 17),
+            ('grouped_edge', 4),
+            ('grouped_missing_id', 4),
+        ):
+            names.add(
+                f'ConSanSimE2E.{gpu}.wave{wave_size}.assembly.{case}.groups{groups}'
+            )
+        names.add(
+            f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.single_missing_id.groups1'
+        )
+        if gpu in ('gfx950', 'gfx1250'):
+            for bits in (4, 6, 8, 16):
+                for scenario in (
+                    'full',
+                    'empty',
+                    'partial',
+                    'overlap',
+                    'adjacent',
+                    'short',
+                ):
+                    if scenario == 'short' and gpu != 'gfx1250':
+                        continue
+                    names.add(
+                        f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.transpose_{bits}_{scenario}'
+                    )
+        suffix = f'{gpu}Wave{wave_size}'
+        width_cases = GFX1250_WIDTH_CASES if gpu == 'gfx1250' else CORE_WIDTH_CASES
+        for case in width_cases:
+            names.add(f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.{case}')
+        for case in RUNTIME_CASES:
+            names.add(
+                f'ConSanSimRuntimeE2E.{gpu}.wave{wave_size}.named-assembly.{case}'
+            )
+        for case in ANALYSIS_CASES:
+            names.add(f'ConSanSimE2E.{gpu}.wave{wave_size}.named-assembly.{case}')
+        kind = 'assembly' if gpu == 'gfx1250' else 'hip'
+        names.add(f'ConSanSimE2E.{gpu}.wave{wave_size}.{kind}.partial')
+        for case in (
+            'missing-statistics',
+            'batch-barrier-and',
+            'batch-barrier-or',
+            'late-barrier-and',
+            'late-barrier-or',
+            'amd-signals',
+            'amd-late-barrier-and',
+            'amd-late-barrier-or',
+        ):
+            names.add(f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.{kind}.{case}')
+        for case in (
+            'EquivalentMetadataEnvironmentsPreserveTargetAndAbiValidation',
+            'AssemblyLoweringPreservesConcreteIdentityAndLoadableImages',
+            'PreparedCdnaDescriptorMustAllocateItsDeclaredOrdinarySgprs',
+            'UnreachableEntryOrDenseSitesFailBeforeArtifactPublication',
+            'HipWorkloadsMustContainQualifiedNativeLdsSites',
+            'GdsAndAccumulatorAliasingAreRejectedAtTheirActualBoundaries',
+            'QualifySingleRangeFormsWithExactDataWidths',
+            'BoundedWorkgroupFixturesRetainQualifiedLdsSites',
+        ):
+            names.add(f'ConSanTargets/ConSanTargetStatic.{case}/{suffix}')
+        for case in (
+            'AssemblyAliasPreservesAllGuestRegistersAndPublishesBothWaves',
+            'HighLaneMasksAndEmptyExecHaveRealPublicationEvidence',
+            'ThreeWavesAndPartialTailUseDistinctRows',
+            'NativeWidthsPreserveEveryWordAndAllGuestState',
+            'ByteAccessPreservesNeighborBytesAndExtendsOnlyActiveLanes',
+            'D16AccessesSelectSubwordsAndExecuteEachGuestFormOnce',
+            'PublicationBarrierBlocksAnEarlyConsumer',
+            'BarrierPreservesOutputAndGuestStateAtEmptyExecAndHighLanes',
+            'RepeatedBarrierLoopsPreserveStateAndRetainIndependentSites',
+            'RepeatedBarrierLoopsRetainHighLaneMasks',
+            'ThreeBarrierGroupsRetainEachOccurrenceWithoutChangingGuestState',
+            'RemovingLoopPublicationOrReuseBarrierRetainsConfirmedEndpoints',
+            'SeededNearLimitLoopCountersSaturateWithoutStoppingGuest',
+            'RepeatedAddressGroupExhaustionIsSeparateFromOccupiedBanks',
+        ):
+            names.add(f'ConSanTargets/ConSanTargetSim.{case}/{suffix}')
+        names.add(f'ConSanSimE2E.{gpu}.wave{wave_size}.assembly.high_lane')
+        kind = 'assembly' if gpu == 'gfx1250' else 'hip'
+        names.add(f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.{kind}.disjoint')
+        for case in ('race', 'disjoint', 'read_read'):
+            names.add(f'ConSanSimE2E.{gpu}.wave{wave_size}.{kind}.{case}')
+        if kind == 'hip':
+            names.add(
+                f'ConSanTargets/ConSanHipSim.CompiledHipRaceDisjointAndReadReadExecuteTheirNativeSites/{suffix}'
+            )
+    for gpu, wave_size in MODES:
+        names.add(
+            'ConSanTargets/ConSanTargetStatic.'
+            f'CallableArtifactsPreserveStaticSitesAndPrivateFrameAdmission/{gpu}Wave{wave_size}'
+        )
+        names.add(
+            'ConSanProbeModes/ConSanCallableProbe.'
+            f'CompiledBodiesAreSelfContainedAndUseOnlyTheirArguments/{gpu}Wave{wave_size}'
+        )
+    return names
+
+
+def validate_selected(tests):
+    missing = required_names() - {test['name'] for test in tests}
+    if missing:
+        raise ValueError(
+            'Required ConSan registrations missing:\n' + '\n'.join(sorted(missing))
+        )
+    for test in tests:
+        validate_workgroup_count(test)
+
+
+def validate_workgroup_count(test):
+    suffix = re.search(r'\.groups([0-9]+)$', test['name'])
+    if suffix is None:
+        return
+    expected = int(suffix.group(1))
+    parser = argparse.ArgumentParser(add_help=False, exit_on_error=False)
+    parser.add_argument('--workgroups', type=int, default=1)
+    try:
+        args, _ = parser.parse_known_args(test.get('command', []))
+    except argparse.ArgumentError as error:
+        raise ValueError(f"{test['name']}: invalid --workgroups: {error}") from error
+    if args.workgroups != expected:
+        raise ValueError(
+            f"{test['name']}: effective --workgroups {args.workgroups} "
+            f'does not match .groups{expected}'
+        )
+
+
+def physical_names():
+    return {
+        name.replace('ConSanSim', 'ConSanPhysical', 1)
+        for name in required_names()
+        if name.startswith('ConSanSim')
+        and not re.search(
+            r'\.gfx950\.wave64\.assembly\.transpose_(4|6|8|16)_partial$', name
+        )
+    }
+
+
+def simulator_application_command(test):
+    command = list(test.get('command', []))
+    for option, count in (('--launcher', 2), ('--config', 2), ('--require-agent', 1)):
+        if command.count(option) != 1:
+            raise ValueError(f"{test['name']}: expected one {option}")
+        index = command.index(option)
+        if index + count > len(command):
+            raise ValueError(f"{test['name']}: missing {option} value")
+        del command[index : index + count]
+    return command
+
+
+def validate_physical_registrations(tests):
+    available = {test['name']: test for test in tests}
+    expected = physical_names()
+    missing = expected - available.keys()
+    if missing:
+        raise ValueError(
+            'Physical ConSan registrations missing:\n' + '\n'.join(sorted(missing))
+        )
+    physical = {
+        test['name']
+        for test in tests
+        if 'physical-gpu'
+        in next(
+            (
+                item['value']
+                for item in test.get('properties', [])
+                if item['name'] == 'LABELS'
+            ),
+            [],
+        )
+        or test['name'].startswith('ConSanPhysical')
+    }
+    for name in sorted(expected | physical):
+        test = available[name]
+        if not name.startswith('ConSanPhysical'):
+            raise ValueError(f'{name}: physical test has no simulator twin')
+        gpu = name.split('.')[1]
+        properties = {
+            item['name']: item['value'] for item in test.get('properties', [])
+        }
+        labels = properties.get('LABELS', [])
+        if (
+            'physical-gpu' not in labels
+            or 'simulator' in labels
+            or properties.get('DISABLED', False)
+            or properties.get('SKIP_RETURN_CODE') != 77
+            or properties.get('RESOURCE_LOCK') != [f'consan-{gpu}']
+        ):
+            raise ValueError(f'{name}: invalid physical execution properties')
+        command = test.get('command', [])
+        if any(
+            option in command
+            for option in ('--launcher', '--config', '--require-agent')
+        ):
+            raise ValueError(f'{name}: physical test requests simulator execution')
+        twin_name = name.replace('ConSanPhysical', 'ConSanSim', 1)
+        if twin_name not in available:
+            raise ValueError(f'{name}: required simulator twin missing')
+        twin = available[twin_name]
+        twin_properties = {
+            item['name']: item['value'] for item in twin.get('properties', [])
+        }
+        twin_labels = twin_properties.get('LABELS', [])
+        if (
+            'simulator' not in twin_labels
+            or 'required-consan' not in twin_labels
+            or 'physical-gpu' in twin_labels
+            or twin_properties.get('DISABLED', False)
+            or 'SKIP_RETURN_CODE' in twin_properties
+        ):
+            raise ValueError(f'{twin_name}: invalid required simulator properties')
+        if command != simulator_application_command(twin):
+            raise ValueError(
+                f'{name}: command differs from required simulator twin {twin_name}'
+            )
+        validate_workgroup_count(test)
+        validate_workgroup_count(twin)
+
+
+def validate_results(root):
+    cases = root.findall('.//testcase')
+    missing = required_names() - {case.attrib['name'] for case in cases}
+    skipped = [
+        case.attrib['name'] for case in cases if case.find('skipped') is not None
+    ]
+    if missing or skipped:
+        raise ValueError(
+            f'Required coverage missing: {sorted(missing)}; skipped: {skipped}'
+        )
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--build', type=Path, required=True)
+    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--jobs', type=int, default=4)
+    args = parser.parse_args()
+    args.output.mkdir(parents=True, exist_ok=True)
+    registrations = subprocess.run(
+        [
+            'ctest',
+            '--test-dir',
+            str(args.build),
+            '-R',
+            '^ConSan',
+            '--show-only=json-v1',
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    (args.output / 'registrations.json').write_text(registrations.stdout)
+    validate_physical_registrations(json.loads(registrations.stdout)['tests'])
+    selection = [
+        'ctest',
+        '--test-dir',
+        str(args.build),
+        '-R',
+        '^ConSan',
+        '-LE',
+        'physical-gpu',
+        '--no-tests=error',
+    ]
+    listed = subprocess.run(
+        [*selection, '--show-only=json-v1'], capture_output=True, text=True, check=True
+    )
+    (args.output / 'selection.json').write_text(listed.stdout)
+    validate_selected(json.loads(listed.stdout)['tests'])
+    junit = (args.output / 'results.xml').resolve()
+    result = subprocess.run(
+        [
+            *selection,
+            '--output-on-failure',
+            '-j',
+            str(args.jobs),
+            '--output-junit',
+            str(junit),
+        ],
+        check=False,
+    )
+    if result.returncode:
+        return result.returncode
+    validate_results(ET.parse(junit).getroot())
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

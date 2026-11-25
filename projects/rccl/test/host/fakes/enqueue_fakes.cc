@@ -15,9 +15,10 @@
 #include "sym_kernels.h"
 #include "tuning.h"
 
+#include "fail_loud.h"
 #include "signature-drift.h"
 
-#include "channel.h"            // rcclEffectiveP2pBatchEnable
+#include "channel.h"            // rcclEffectiveP2pBatchEnable, rcclP2pTaskParts
 #include "enqueue_fakes.h"
 #include "nccl_fakes.h"         // g_loadParam, for the NCCL_PARAM body this file stands in for
 #include "sym_kernels_fakes.h"  // g_symkAvailable and the sym_kernels.cc seams below's canonical home
@@ -31,6 +32,13 @@ ASSERT_HOOK_MATCHES_PROD(g_addProxyOpIfNeeded, ncclAddProxyOpIfNeeded);
 ASSERT_HOOK_MATCHES_PROD(g_getCollNetSupport, ncclGetCollNetSupport);
 ASSERT_HOOK_MATCHES_PROD(g_getRegBuff, ncclGetRegBuff);
 ASSERT_HOOK_MATCHES_PROD(g_rcclEffectiveP2pBatchEnable, rcclEffectiveP2pBatchEnable);
+ASSERT_HOOK_MATCHES_PROD(g_rcclP2pTaskParts, rcclP2pTaskParts);
+ASSERT_HOOK_MATCHES_PROD(g_rcclP2pTaskUsesCe, rcclP2pTaskUsesCe);
+ASSERT_HOOK_MATCHES_PROD(g_rcclP2pTaskConnIndex, rcclP2pTaskConnIndex);
+ASSERT_HOOK_MATCHES_PROD(g_enqueueCheck, ncclEnqueueCheck);
+ASSERT_HOOK_MATCHES_PROD(g_rcclLogCollInfo, rcclLogCollInfo);
+ASSERT_HOOK_MATCHES_PROD(g_rcclAddonLaunchBegin, rcclAddonLaunchBegin);
+ASSERT_HOOK_MATCHES_PROD(g_rcclAddonLaunchEnd, rcclAddonLaunchEnd);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 // Generous default: a deny-everything default would make even a single small task look over budget.
@@ -75,6 +83,14 @@ std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, struct nccl
 static int DefaultEffectiveP2pBatchEnable(struct ncclComm*) { return 0; }
 std::function<int(struct ncclComm*)> g_rcclEffectiveP2pBatchEnable = DefaultEffectiveP2pBatchEnable;
 
+// enqueue.cc's answer for every task outside multi-node AINIC Scatter.
+static int DefaultP2pTaskParts(struct ncclComm* comm, ncclFunc_t, int) { return comm->p2pnChannelsPerPeer; }
+std::function<int(struct ncclComm*, ncclFunc_t, int)> g_rcclP2pTaskParts = DefaultP2pTaskParts;
+static bool DefaultP2pTaskUsesCe(struct ncclComm*, ncclFunc_t, int) { return false; }
+std::function<bool(struct ncclComm*, ncclFunc_t, int)> g_rcclP2pTaskUsesCe = DefaultP2pTaskUsesCe;
+static int DefaultP2pTaskConnIndex(struct ncclComm*, ncclFunc_t, int) { return 1; }
+std::function<int(struct ncclComm*, ncclFunc_t, int)> g_rcclP2pTaskConnIndex = DefaultP2pTaskConnIndex;
+
 // enqueue.cc:437-441 splits the default on ROCm version; mirrored rather than pinned to one arm.
 #if ROCM_VERSION >= 71200
 int64_t ncclParamGraphRegister() { return g_loadParam("GRAPH_REGISTER", 1); }
@@ -95,6 +111,22 @@ static ncclResult_t DefaultGetRegBuff(struct ncclComm*, struct ncclTaskColl*, in
 }
 std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)> g_getRegBuff = DefaultGetRegBuff;
 
+static ncclResult_t DefaultEnqueueCheck(struct ncclInfo*) { FailLoudUnfaked("enqueue_fakes", "ncclEnqueueCheck"); }
+std::function<ncclResult_t(struct ncclInfo*)> g_enqueueCheck = DefaultEnqueueCheck;
+static void DefaultLogCollInfo(const struct ncclInfo&) { FailLoudUnfaked("enqueue_fakes", "rcclLogCollInfo"); }
+std::function<void(const struct ncclInfo&)> g_rcclLogCollInfo = DefaultLogCollInfo;
+static ncclResult_t DefaultAddonLaunchBegin(struct ncclComm*, hipStream_t, struct rcclAddonLaunchState*) {
+  FailLoudUnfaked("enqueue_fakes", "rcclAddonLaunchBegin");
+}
+std::function<ncclResult_t(struct ncclComm*, hipStream_t, struct rcclAddonLaunchState*)> g_rcclAddonLaunchBegin =
+    DefaultAddonLaunchBegin;
+static ncclResult_t DefaultAddonLaunchEnd(struct ncclComm*, hipStream_t, const struct rcclAddonLaunchState&,
+                                          ncclResult_t) {
+  FailLoudUnfaked("enqueue_fakes", "rcclAddonLaunchEnd");
+}
+std::function<ncclResult_t(struct ncclComm*, hipStream_t, const struct rcclAddonLaunchState&, ncclResult_t)>
+    g_rcclAddonLaunchEnd = DefaultAddonLaunchEnd;
+
 void ResetEnqueueFakes() {
   g_testBudget = DefaultTestBudget;
   g_testBudgetCalls = 0;
@@ -105,10 +137,29 @@ void ResetEnqueueFakes() {
   g_getCollNetSupport = DefaultGetCollNetSupport;
   g_getRegBuff = DefaultGetRegBuff;
   g_rcclEffectiveP2pBatchEnable = DefaultEffectiveP2pBatchEnable;
+  g_rcclP2pTaskParts = DefaultP2pTaskParts;
+  g_rcclP2pTaskUsesCe = DefaultP2pTaskUsesCe;
+  g_rcclP2pTaskConnIndex = DefaultP2pTaskConnIndex;
+  g_enqueueCheck = DefaultEnqueueCheck;
+  g_rcclLogCollInfo = DefaultLogCollInfo;
+  g_rcclAddonLaunchBegin = DefaultAddonLaunchBegin;
+  g_rcclAddonLaunchEnd = DefaultAddonLaunchEnd;
 }
 
 int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
   return g_rcclEffectiveP2pBatchEnable(comm);
+}
+int rcclP2pTaskParts(struct ncclComm* comm, ncclFunc_t collAPI, int peer) {
+  return g_rcclP2pTaskParts(comm, collAPI, peer);
+}
+bool rcclP2pDirectApi(ncclFunc_t collAPI) {
+  return collAPI == ncclFuncSend || collAPI == ncclFuncRecv || collAPI == ncclFuncSendRecv;
+}
+bool rcclP2pTaskUsesCe(struct ncclComm* comm, ncclFunc_t collAPI, int peer) {
+  return g_rcclP2pTaskUsesCe(comm, collAPI, peer);
+}
+int rcclP2pTaskConnIndex(struct ncclComm* comm, ncclFunc_t collAPI, int peer) {
+  return g_rcclP2pTaskConnIndex(comm, collAPI, peer);
 }
 
 // src/enqueue/enqueue.cc
@@ -133,6 +184,17 @@ ncclResult_t ncclGetCollNetSupport(struct ncclComm* comm, struct ncclTaskColl* t
 }
 ncclResult_t ncclGetRegBuff(struct ncclComm* comm, struct ncclTaskColl* task, int* out) {
   return g_getRegBuff(comm, task, out);
+}
+
+ncclResult_t ncclEnqueueCommCheck(struct ncclComm*, const char*) { return ncclSuccess; }
+ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) { return g_enqueueCheck(info); }
+void rcclLogCollInfo(const struct ncclInfo& info) { g_rcclLogCollInfo(info); }
+ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, hipStream_t stream, struct rcclAddonLaunchState* state) {
+  return g_rcclAddonLaunchBegin(comm, stream, state);
+}
+ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, hipStream_t stream, const struct rcclAddonLaunchState& state,
+                                ncclResult_t launchRes) {
+  return g_rcclAddonLaunchEnd(comm, stream, state, launchRes);
 }
 
 // src/tuning/tuning.cc's ncclTuningCompute is defined in tuning_fakes.cc.

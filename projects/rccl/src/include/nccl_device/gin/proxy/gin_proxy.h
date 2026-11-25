@@ -38,15 +38,6 @@ struct ncclGinCpuProxyRequest {
 static_assert(sizeof(ncclGinCpuProxyRequest) <= sizeof(ncclGinRequest_t),
               "ncclGinCpuProxyRequest must fit in ncclGinRequest_t");
 
-// Clang's CUDA mode skips sm_32_intrinsics.hpp; clang <= 20 has no __stwt
-// declarations.
-#if defined(__clang__) && defined(__CUDA__) && (__clang_major__ < 21)
-NCCL_DEVICE_INLINE void __stwt(uint4* addr, const uint4& val) {
-  asm("st.global.wt.v4.u32 [%0], {%1,%2,%3,%4};" ::"l"(addr), "r"(val.x), "r"(val.y), "r"(val.z), "r"(val.w)
-      : "memory");
-}
-#endif
-
 namespace nccl {
 namespace gin {
 namespace proxy {
@@ -93,7 +84,9 @@ template <bool HasTimeout>
 NCCL_DEVICE_INLINE ncclResult_t flushCore(ncclGinProxyGpuCtx_t* proxyCtx, uint32_t pe, cuda::memory_order ord,
                                           uint32_t* abortFlag, uint64_t startCycle, uint64_t timeoutCycles) {
   using nccl::utility::loadConst;
-  cuda::atomic_ref<uint32_t, cuda::thread_scope_system> pi(loadConst(&proxyCtx->pis)[pe]);
+  uint32_t* gpuQueueIndices = loadConst(&proxyCtx->pis);
+  int const nRanks = loadConst(&proxyCtx->nranks);
+  cuda::atomic_ref<uint32_t, cuda::thread_scope_system> pi(gpuQueueIndices[ncclGinProxyGpuPeerQueuePi * nRanks + pe]);
   uint32_t p = pi.load(cuda::memory_order_relaxed);
   return waitForGfdCompleteCore<HasTimeout>(proxyCtx, pe, p, ord, abortFlag, startCycle, timeoutCycles);
 }
@@ -108,44 +101,66 @@ NCCL_DEVICE_INLINE ncclResult_t flush(ncclGinProxyGpuCtx_t* proxyCtx, uint32_t p
   return flushCore</*HasTimeout=*/true>(proxyCtx, pe, ord, abortFlag, startCycle, timeoutCycles);
 }
 
-template <typename Coop>
-NCCL_DEVICE_INLINE void postGfd(Coop coop, ncclGinProxyGpuCtx_t* proxyCtx, ncclGinProxyGfd_t* gfd, uint32_t pe,
-                                bool isGet = false) {
+// Store one 16-byte chunk of a GFD into the host-mapped queue so the CPU proxy sees it without a
+// __threadfence_system(). UseDwordx4 picks the HIP store flavour explicitly so tests can exercise the fallback in
+// any build; it is ignored on NVIDIA and without the b128 builtins, where the u64 fallback is always used.
+template <bool UseDwordx4>
+NCCL_DEVICE_INLINE void storeGfdChunk(uint4* dst, const uint4* src) {
+#if defined(__HIP_PLATFORM_AMD__)
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  if constexpr (UseDwordx4) {
+    union {
+      v4u vec;
+      uint4 u;
+    } pkt;
+    pkt.u = *src;
+    __builtin_amdgcn_global_store_b128((v4u_gptr)dst, pkt.vec, RCCL_SYSTEM_SYNCSCOPE);
+    return;
+  }
+#endif
+  uint64_t* p64 = reinterpret_cast<uint64_t*>(dst);
+  const uint64_t* g64 = reinterpret_cast<const uint64_t*>(src);
+  // Fallback: system-scope relaxed u64 stores. __builtin_nontemporal_store is only a cache hint: the line can stay
+  // in L2 until kernel exit, so a same-kernel flush() (or put + wait-for-reply) hangs. Each qword carries its own
+  // flag bit and proxyGinPollGfd validates them individually, so only visibility is needed, not ordering.
+  __scoped_atomic_store_n((u64_gptr)(p64 + 0), g64[0], __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+  __scoped_atomic_store_n((u64_gptr)(p64 + 1), g64[1], __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+#else
+  __stwt(dst, *src);
+#endif
+}
+
+template <bool UseDwordx4, typename Coop>
+NCCL_DEVICE_INLINE void postGfdImpl(Coop coop, ncclGinProxyGpuCtx_t* proxyCtx, ncclGinProxyGfdShort_t* gfd,
+                                    uint32_t pe, bool isGet = false) {
   using nccl::utility::loadConst;
-  cuda::atomic_ref<uint32_t, cuda::thread_scope_system> pi(loadConst(&proxyCtx->pis)[pe]);
+  uint32_t* gpuQueueIndices = loadConst(&proxyCtx->pis);
+  int const nRanks = loadConst(&proxyCtx->nranks);
+  cuda::atomic_ref<uint32_t, cuda::thread_scope_system> pi(gpuQueueIndices[ncclGinProxyGpuPeerQueuePi * nRanks + pe]);
+  cuda::atomic_ref<uint32_t, cuda::thread_scope_device> cachedCi(
+    gpuQueueIndices[ncclGinProxyGpuPeerQueueCachedCi * nRanks + pe]);
   cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ci(loadConst(&proxyCtx->cis)[pe]);
   ncclGinProxyGfd_t* q = &loadConst(&proxyCtx->queues)[pe * proxyCtx->queueSize];
   uint32_t queueSize = loadConst(&proxyCtx->queueSize);
   if (coop.thread_rank() == 0) {
     // claim a slot in the gfd queue
     uint32_t idx = pi.fetch_add(1, cuda::memory_order_relaxed);
-    // wait for credits
-    while (queueSize <= idx - ci.load(cuda::memory_order_relaxed)) {
+    // Read the host-updated indices only after exhausting cached credits.
+    uint32_t consumed = cachedCi.load(cuda::memory_order_acquire);
+    if (queueSize <= idx - consumed) {
+      do {
+        consumed = ci.load(cuda::memory_order_acquire);
+      } while (queueSize <= idx - consumed);
+      cachedCi.store(consumed, cuda::memory_order_release);
     }
     uint32_t gfdIdx = idx & (queueSize - 1);
-    // 16-byte (uint4) stores, one per uint4 in the GFD, with a write-through cache hint.
-    // Cache-bypassing into the host-mapped queue: __stwt on NVIDIA,
-    // system-scope dwordx4 (or NT-store fallback) on HIP - avoids a costly __threadfence_system().
-    // ncclGinProxyGfd_t is __attribute__((packed, aligned(16))) so the uint4 casts are legal.
+    // 16-byte (uint4) stores, one per uint4 in the short GFD, written so the CPU proxy sees them without a
+    // __threadfence_system(): __stwt on NVIDIA, system-scope dwordx4 or u64 atomic stores on HIP.
+    // Both descriptor types are declared __attribute__((packed, aligned(16))) in gin_proxy_device_host_common.h,
+    // so the uint4 casts are legal.
     NVCC_PRAGMA_UNROLL_AUTO
-    for (uint8_t i = 0; i < sizeof(ncclGinProxyGfd_t) / sizeof(uint4); i++) {
-#if defined(__HIP_PLATFORM_AMD__)
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-      union {
-        v4u vec;
-        uint4 u;
-      } pkt;
-      pkt.u = ((uint4*)gfd)[i];
-      __builtin_amdgcn_global_store_b128((v4u_gptr)((uint4*)&q[gfdIdx] + i), pkt.vec, RCCL_SYSTEM_SYNCSCOPE);
-#else
-      uint64_t* p64 = reinterpret_cast<uint64_t*>((uint4*)&q[gfdIdx] + i);
-      const uint64_t* g64 = reinterpret_cast<const uint64_t*>((uint4*)gfd + i);
-      __builtin_nontemporal_store(g64[0], (u64_gptr)(p64 + 0));
-      __builtin_nontemporal_store(g64[1], (u64_gptr)(p64 + 1));
-#endif
-#else
-      __stwt((uint4*)&q[gfdIdx] + i, ((uint4*)gfd)[i]);
-#endif
+    for (uint8_t i = 0; i < sizeof(ncclGinProxyGfdShort_t) / sizeof(uint4); i++) {
+      storeGfdChunk<UseDwordx4>((uint4*)&q[gfdIdx] + i, (uint4*)gfd + i);
     }
     if (isGet) {
       // Atomic max with rolling logic.
@@ -162,15 +177,22 @@ NCCL_DEVICE_INLINE void postGfd(Coop coop, ncclGinProxyGpuCtx_t* proxyCtx, ncclG
   }
 }
 
+template <typename Coop>
+NCCL_DEVICE_INLINE void postGfd(Coop coop, ncclGinProxyGpuCtx_t* proxyCtx, ncclGinProxyGfdShort_t* gfd, uint32_t pe,
+                                bool isGet = false) {
+  // storeGfdChunk ignores UseDwordx4 on NVIDIA and without the b128 builtins, so one condition is enough here.
+  postGfdImpl</*UseDwordx4=*/(RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS != 0)>(coop, proxyCtx, gfd, pe, isGet);
+}
+
 template <typename T>
 // Descriptor must be at least GWQ_GFD_SIZE bytes and it should be aligned
 // Assumes little-endian, which is okay.
-__device__ __forceinline__ void buildGfd(ncclGinProxyGfd_t* gfd, ncclGinProxyOp_t op, T srcVal, bool hasInline,
+__device__ __forceinline__ void buildGfd(ncclGinProxyGfdShort_t* gfd, ncclGinProxyOp_t op, T srcVal, bool hasInline,
                                          size_t srcOff, ncclGinWindow_t srcHandle, size_t dstOff,
                                          ncclGinWindow_t dstHandle, size_t size, ncclGinCounter_t counterId,
                                          ncclGinSignal_t signalId, uint64_t signalVal, ncclGinWindow_t signalWindow,
                                          size_t signalOff, bool isStrongSignal = false) {
-  for (int i = 0; i < ncclGinProxyGfdQwords; i++) {
+  for (int i = 0; i < ncclGinProxyGfdShortQwords; i++) {
     gfd->qword[i].flag.v = 1;
   }
 
@@ -251,7 +273,7 @@ __device__ __forceinline__ void constructProxyOp(ncclGinProxyOp_t& op, bool isGe
 template <typename Coop>
 NCCL_DEVICE_INLINE void get(Coop coop, ncclGinProxyGpuCtx_t* proxyCtx, int peer, ncclGinWindow_t remoteWnd,
                             size_t remoteOff, ncclGinWindow_t localWnd, size_t localOff, size_t bytes,
-                            ncclGinProxyGfd_t* desc) {
+                            ncclGinProxyGfdShort_t* desc) {
   using nccl::gin::proxy::DataChunkSize;
   while (bytes > 0) {
     size_t sendSize = min(bytes, DataChunkSize);
@@ -269,7 +291,7 @@ NCCL_DEVICE_INLINE void get(Coop coop, ncclGinProxyGpuCtx_t* proxyCtx, int peer,
 }
 
 template <typename Coop, typename T>
-NCCL_DEVICE_INLINE void put(Coop coop, ncclGinProxyGfd_t* gfd, ncclGinProxyGpuCtx_t* proxyCtx, int peer,
+NCCL_DEVICE_INLINE void put(Coop coop, ncclGinProxyGfdShort_t* gfd, ncclGinProxyGpuCtx_t* proxyCtx, int peer,
                             ncclGinWindow_t dstWnd, size_t dstOff, T srcVal, bool hasInline, ncclGinWindow_t srcWnd,
                             size_t srcOff, size_t bytes, ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp,
                             uint64_t signalVal, bool hasCounter, ncclGinCounter_t counterId,
@@ -362,7 +384,7 @@ NCCL_DEVICE_INLINE static ncclResult_t waitImplCore(ncclGinCtx ctx, ncclGinReque
   cuda::atomic_ref<uint32_t, cuda::thread_scope_device> lastVisibleGet(visibleGets[req.peer]);
   uint32_t visible = lastVisibleGet.load(cuda::memory_order_relaxed);
   if (rollingLessThan<uint32_t>(visible, req.lastIssuedGet)) {
-    ncclGinProxyGfd_t gfd;
+    ncclGinProxyGfdShort_t gfd;
     ncclGinProxyOp_t op;
     nccl::gin::proxy::constructProxyOp(op, /*isGet*/ false, /*isFlush*/ true, /*hasInline*/ false,
                                        NCCL_GIN_SIGNAL_TYPE_NONE, ncclGinSignalInc, /*hasCounter*/ false);
@@ -391,8 +413,8 @@ struct ncclGinApi_Get<NCCL_NET_DEVICE_GIN_PROXY> {
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, int peer, ncclGinWindow_t remoteWin, size_t remoteOff,
                                       ncclGinWindow_t localWin, size_t localOff, size_t bytes, bool hasDescriptor,
                                       ncclGinDescriptorSmem* descriptor, uint32_t optFlags) {
-    ncclGinProxyGfd_t tmpDesc;
-    ncclGinProxyGfd_t* desc = hasDescriptor ? (ncclGinProxyGfd_t*)descriptor : &tmpDesc;
+    ncclGinProxyGfdShort_t tmpDesc;
+    ncclGinProxyGfdShort_t* desc = hasDescriptor ? (ncclGinProxyGfdShort_t*)descriptor : &tmpDesc;
     ncclGinProxyGpuCtx_t* proxyCtx = &((ncclGinProxyGpuCtx_t*)ctx.handle)[ctx.contextId];
     nccl::gin::proxy::get<Coop>(coop, proxyCtx, peer, remoteWin, remoteOff, localWin, localOff, bytes, desc);
   }
@@ -412,7 +434,10 @@ struct ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_PROXY> {
     // Must be before pi is loaded in case of concurrent gets
     req->lastIssuedGet = lastIssuedGet.load(cuda::memory_order_acquire);
 
-    cuda::atomic_ref<uint32_t, cuda::thread_scope_system> pi(loadConst(&proxyCtx->pis)[peer]);
+    uint32_t* gpuQueueIndices = loadConst(&proxyCtx->pis);
+    int const nRanks = loadConst(&proxyCtx->nranks);
+    cuda::atomic_ref<uint32_t, cuda::thread_scope_system> pi(
+      gpuQueueIndices[ncclGinProxyGpuPeerQueuePi * nRanks + peer]);
     req->nextGfdIdx = pi.load(cuda::memory_order_relaxed);
   }
 };
@@ -477,6 +502,13 @@ struct ncclGinApi_FlushesAllPutsOnAnySignal<NCCL_NET_DEVICE_GIN_PROXY> {
 };
 
 template <>
+struct ncclGinApi_BarrierOptions<NCCL_NET_DEVICE_GIN_PROXY> {
+  NCCL_DEVICE_INLINE static ncclGinBarrierOptions_t call(ncclGinCtx) {
+    return NCCL_GIN_BARRIER_DEFAULT;
+  }
+};
+
+template <>
 struct ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_PROXY> {
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, ncclGinSignalDescriptor signal) {
     ncclGinProxyGpuCtx_t* proxyCtx = &((ncclGinProxyGpuCtx_t*)ctx.handle)[ctx.contextId];
@@ -533,8 +565,8 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_PROXY> {
                                       bool hasCounter, ncclGinCounter_t counterId, bool hasDescriptor,
                                       ncclGinDescriptorSmem* descriptor, cuda::thread_scope required,
                                       cuda::thread_scope given, uint32_t optFlags = ncclGinOptFlagsDefault) {
-    ncclGinProxyGfd_t tmpDesc;
-    ncclGinProxyGfd_t* desc = hasDescriptor ? (ncclGinProxyGfd_t*)descriptor : &tmpDesc;
+    ncclGinProxyGfdShort_t tmpDesc;
+    ncclGinProxyGfdShort_t* desc = hasDescriptor ? (ncclGinProxyGfdShort_t*)descriptor : &tmpDesc;
     ncclGinProxyGpuCtx_t* proxyCtx = &((ncclGinProxyGpuCtx_t*)ctx.handle)[ctx.contextId];
     nccl::gin::proxy::put<Coop, uint64_t>(coop, desc, proxyCtx, peer, dstWin, dstOff, 0, false, srcWin, srcOff, bytes,
                                           signal, signalOp, signalOpArg, hasCounter, counterId, required, given);
@@ -549,8 +581,8 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_PROXY> {
                                       uint64_t signalOpArg, bool hasDescriptor, ncclGinDescriptorSmem* descriptor,
                                       cuda::thread_scope required, cuda::thread_scope given,
                                       uint32_t optFlags = ncclGinOptFlagsDefault) {
-    ncclGinProxyGfd_t tmpDesc;
-    ncclGinProxyGfd_t* desc = hasDescriptor ? (ncclGinProxyGfd_t*)descriptor : &tmpDesc;
+    ncclGinProxyGfdShort_t tmpDesc;
+    ncclGinProxyGfdShort_t* desc = hasDescriptor ? (ncclGinProxyGfdShort_t*)descriptor : &tmpDesc;
     ncclGinProxyGpuCtx_t* proxyCtx = &((ncclGinProxyGpuCtx_t*)ctx.handle)[ctx.contextId];
     nccl::gin::proxy::put<Coop, T>(coop, desc, proxyCtx, peer, dstWin, dstOff, srcVal, true, nullptr, 0, sizeof(T),
                                    signal, signalOp, signalOpArg, false, 0, required, given);

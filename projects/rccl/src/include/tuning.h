@@ -13,16 +13,36 @@
 #include "nccl_tuner.h"
 #include "sym_kernels.h"
 #include "ce_coll.h"
+#include "tuning_mask.h"
 
 #define NCCL_TUNING_SYM_KERNEL_ID_OFFSET (NCCL_NUM_ALGORITHMS * NCCL_NUM_PROTOCOLS)
 #define NCCL_TUNING_CE_METHOD_ID_OFFSET (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_Count)
 #define NCCL_TUNING_COUNT (NCCL_TUNING_CE_METHOD_ID_OFFSET + ncclCeMethodId_Count)
 
-#define NCCL_TUNING_MASK_GENERAL_KERNELS ((1ULL << NCCL_TUNING_SYM_KERNEL_ID_OFFSET) - 1ULL)
+// The general collective tables cover the five functions in NCCL_NUM_FUNCTIONS.
+// Symmetric tuning additionally supports AlltoAll without changing that global
+// count, which is also used by unrelated operation counters and plugin tables.
+#define NCCL_NUM_TUNING_FUNCTIONS (NCCL_NUM_FUNCTIONS + 1)
+
+static inline int ncclTuningFuncIndex(ncclFunc_t func) {
+  if ((unsigned)func < NCCL_NUM_FUNCTIONS) return (int)func;
+  return func == ncclFuncAlltoAll ? NCCL_NUM_FUNCTIONS : -1;
+}
+
+#define NCCL_TUNING_MASK_GENERAL_KERNELS rcclTuningMask::range(0, NCCL_TUNING_SYM_KERNEL_ID_OFFSET)
 #define NCCL_TUNING_MASK_SYM_KERNELS \
-  ((1ULL << NCCL_TUNING_CE_METHOD_ID_OFFSET) - 1ULL - NCCL_TUNING_MASK_GENERAL_KERNELS)
-#define NCCL_TUNING_MASK_CE ((1ULL << NCCL_TUNING_COUNT) - (1ULL << NCCL_TUNING_CE_METHOD_ID_OFFSET))
-#define NCCL_TUNING_MASK_ALL ((1ULL << NCCL_TUNING_COUNT) - 1ULL)
+  rcclTuningMask::range(NCCL_TUNING_SYM_KERNEL_ID_OFFSET, NCCL_TUNING_CE_METHOD_ID_OFFSET)
+#define NCCL_TUNING_MASK_CE rcclTuningMask::range(NCCL_TUNING_CE_METHOD_ID_OFFSET, NCCL_TUNING_COUNT)
+#define NCCL_TUNING_MASK_ALL rcclTuningMask::range(0, NCCL_TUNING_COUNT)
+static_assert(NCCL_TUNING_COUNT <= rcclTuningMask::kBits, "Tuning masks cannot represent every tuning entry");
+
+static inline constexpr rcclTuningMask rcclTuningMaskFromSymk(ncclSymkKernelMask kernels) {
+  return rcclTuningMask::fromWord(kernels, NCCL_TUNING_SYM_KERNEL_ID_OFFSET);
+}
+// Only the symmetric kernel ids of t: general and CE tuning ids are dropped.
+static inline constexpr ncclSymkKernelMask rcclSymkMaskFromTuning(rcclTuningMask t) {
+  return (t & NCCL_TUNING_MASK_SYM_KERNELS).word(NCCL_TUNING_SYM_KERNEL_ID_OFFSET);
+}
 
 #define NCCL_TUNING_ENTRY_INIT_VALUE -1
 #define NCCL_TUNING_RESULT_INIT \
@@ -37,6 +57,7 @@
    /*.nChannels =*/NCCL_TUNING_ENTRY_INIT_VALUE, \
    /*.maxChannels =*/NCCL_TUNING_ENTRY_INIT_VALUE, \
    /*.nWarps =*/NCCL_TUNING_ENTRY_INIT_VALUE, \
+   /*.minChunkPayloadBytes =*/NCCL_TUNING_ENTRY_INIT_VALUE, \
    /*.forced =*/0}
 
 struct ncclTuningResult_t {
@@ -51,12 +72,13 @@ struct ncclTuningResult_t {
   int nChannels;
   int maxChannels;
   int nWarps;
+  int minChunkPayloadBytes;
   int forced;
 };
 
 struct ncclTuningInput_t {
   struct ncclComm* comm;
-  uint64_t tuningMask;
+  rcclTuningMask tuningMask;
   ncclFunc_t func;
   ncclRedOp_t redOp;
   ncclDevRedOp_t devRedOp;
@@ -71,11 +93,18 @@ struct ncclTuningInput_t {
   int collNetSupport;
   int nvlsSupport;
   bool symAligned16B; // Check for TMA eligibility in sym scheduler
+  // A user window was left without GIN segments. Symk GIN kernels must not run.
+  bool ginWindowsUnregistered;
   int captured;
   int inPlace;
   int minCTAs;  // resolved lower CTA bound (env > per-call > comm)
   int maxCTAs;  // resolved upper CTA bound (env > per-call > comm)
   int CTAPolicy;   // resolved effective CTAPolicy (per-call)
+  int chunkSteps;
+  int sliceSteps;
+  // [RCCL] Cached ncclSymkMask() result; set once per ncclTuningCompute() invocation.
+  // Zero means uncached; ncclTuningSymkModelSim falls back to a direct call.
+  ncclSymkKernelMask symkMaskCache;
 };
 
 struct ncclTuningContext_t {
@@ -83,9 +112,9 @@ struct ncclTuningContext_t {
   ncclTunerConstants_t tuningConstants;
   // State of the tuning models
   // Forced function is set via env var
-  int forced[NCCL_NUM_FUNCTIONS];
+  int forced[NCCL_NUM_TUNING_FUNCTIONS];
   // Disabled tuning models are not execute and excluded from implemetation selection.
-  int enabled[NCCL_TUNING_COUNT][NCCL_NUM_FUNCTIONS];
+  int enabled[NCCL_TUNING_COUNT][NCCL_NUM_TUNING_FUNCTIONS];
   // Store of model contexts per communicator.
   float generalLatencies[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
   float generalBandwidths[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
@@ -106,5 +135,7 @@ void ncclTuningGetBusMulReduceScatterRailA2A(struct ncclComm* comm, bool ldmc, d
                                              double* out_ginMul);
 double ncclTuningGetSmLatReduceScatterRailA2A(struct ncclComm* comm, bool ldmc);
 int ncclTuningCalcSatBlocksReduceScatterRailA2A(struct ncclComm* comm, bool ldmc);
+
+int64_t ncclParamSymNoWinEnable();
 
 #endif

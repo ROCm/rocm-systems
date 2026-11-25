@@ -1,13 +1,13 @@
 ---
 myst:
     html_meta:
-        "description": "How to regenerate ISA simulation and DBT source files from AMD Machine-Readable ISA XML using the rocJITsu amdisa Python library."
-        "keywords": "rocJITsu, ROCm, ISA, codegen, DBT, amdisa, regenerate, code generation"
+        "description": "How to regenerate ISA simulation and DBT source files from AMD Machine-Readable ISA XML using the rocjitsu amdisa Python library."
+        "keywords": "rocjitsu, ROCm, ISA, codegen, DBT, amdisa, regenerate, code generation"
 ---
 
 # Regenerate ISA and DBT source files
 
-rocJITsu generates instruction decoders, execution bodies, legalization tables,
+rocjitsu generates instruction decoders, execution bodies, legalization tables,
 and encoding translators from the
 [AMD Machine-Readable ISA (MR ISA)](https://gpuopen.com/machine-readable-isa/)
 XML specification using the `amdisa` Python library in `lib/python/amdisa/`.
@@ -25,7 +25,7 @@ pulling updated MR ISA XML files.
   ```
 
 - MR ISA XML files at `../../shared/machine-readable-isa/isa/` relative to
-  the rocJITsu project root (in the `rocm-systems` repository)
+  the rocjitsu project root (in the `rocm-systems` repository)
 - `clang-format` on `PATH` for formatting generated output
 
 ## Generated file locations
@@ -36,6 +36,18 @@ pulling updated MR ISA XML files.
 | Shared execute templates | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/shared/` | `codegen.py` |
 | Cross-ISA legalization tables | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `legalization_codegen.py` |
 | Encoding decode/encode functions | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `encoding_translator_codegen.py` |
+| Matrix lane-conversion catalog (`matrix_conversions.h`) | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `codegen/dbt/rule_gen.py` |
+
+The matrix header is regenerated during DBT generation from the explicit
+`_MATRIX_CONVERSION_PAIRS` inventory in `rule_gen.py` and the lane-layout formulas
+in `layout_catalog.py`. This catalog describes layout permutations; adding an
+entry does not implement a new instruction translation or establish its ISA
+availability.
+The preserved I8 destination, `V_WMMA_I32_16X16X32_I8`, is a historical
+layout-only placeholder absent from the pinned RDNA4 XML. The current
+`cdna4_to_rdna4.cpp` consumer selects by source mnemonic and emits a fixed F16
+WMMA instruction without validating the catalog's destination names. See
+[`docs/codegen.md`](../../codegen.md) for the catalog and output-helper details.
 
 Hand-written files (`isa.h`, `insts.h`, `mma_exec.h`, `addr_calc.h/.cpp`) are
 not overwritten by the generator.
@@ -56,7 +68,7 @@ python -m amdisa [--isa-additions NAME:XML]
 | `--isa-additions NAME:XML` | Apply an ISA additions XML file to the named ISA. May be repeated. |
 | `--isa-variants NAME:JSON` | Attach one target-feature and legality manifest to the named ISA. |
 | `--gen-isas` | Generate ISA C++ files (decoders, encodings, execute bodies). Enabled by default. |
-| `--gen-dbt` | Generate DBT legalization tables and encoding translators. Enabled by default. |
+| `--gen-dbt` | Generate DBT legalization tables, matrix layout conversions, and encoding translators. Enabled by default. |
 | `--isa-output DIR` | Output path for generated ISA C++ files. |
 | `--include-root DIR` | Compiler include root used to spell relocatable generated includes. |
 | `--dbt-output DIR` | Output directory for DBT tables. Defaults to `--isa-output`. |

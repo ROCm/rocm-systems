@@ -9,23 +9,50 @@
 
 use super::error;
 use super::imported_system::DrmImportedSystem;
-use super::memory::{self, DeviceVm, KfdAllocation};
+use super::memory::{self, DeviceVm, KfdAllocation, KfdHostAlias, KfdRegisteredHost};
 use super::registered_host::DrmRegisteredHost;
 use crate::memory::host::HostBackingLease;
 use crate::memory::interop::linux::{AisFileOperation, AisFileResult, DmaBuf, KfdIpcMemoryHandle};
 use crate::memory::storage::{Owned, Shared};
-use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess};
+use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess, HostMappingPolicy};
 use crate::{Error, ErrorKind};
 
+/// Allocation ownership selected by the native backing and import path.
 pub(crate) enum LinuxAllocation {
+    /// KFD allocation with its retained VM mappings.
     Kfd(Owned<KfdAllocation>),
+    /// Borrow of a mapped KFD BO's CPU range without another USERPTR BO.
+    KfdHostAlias(Owned<KfdHostAlias>),
+    /// Process-context host pages granted through the SVM interface.
+    SvmRegisteredHost(Owned<KfdRegisteredHost>),
+    /// Borrowed or runtime-owned host pages registered through DRM USERPTR.
     DrmRegisteredHost(Owned<DrmRegisteredHost>),
+    /// Imported system-memory DMA-BUF mapped through the render VM.
     DrmImportedSystem(Owned<DrmImportedSystem>),
 }
 
 impl LinuxAllocation {
-    fn from_kfd(allocation: Owned<KfdAllocation>) -> Result<Owned<Self>, Error> {
+    pub(super) fn from_kfd(allocation: Owned<KfdAllocation>) -> Result<Owned<Self>, Error> {
         Ok(Owned::new(Self::Kfd(allocation))?)
+    }
+
+    pub(super) fn from_host_alias(alias: Owned<KfdHostAlias>) -> Result<Owned<Self>, Error> {
+        Ok(Owned::new(Self::KfdHostAlias(alias))?)
+    }
+
+    pub(super) fn create_svm_registered_host(
+        vm: Shared<DeviceVm>,
+        peers: impl ExactSizeIterator<Item = Shared<DeviceVm>>,
+        desc: AllocationDesc,
+        address: usize,
+        policy: HostMappingPolicy,
+        permissions: DeviceAccess,
+        backing: Option<HostBackingLease>,
+    ) -> Result<Owned<Self>, Error> {
+        let owner = Owned::try_new_uninit()?;
+        let registration =
+            KfdRegisteredHost::create(vm, peers, desc, address, policy, permissions, backing)?;
+        Ok(owner.write(Self::SvmRegisteredHost(registration)))
     }
 
     pub(super) fn create_scratch(
@@ -98,6 +125,7 @@ impl LinuxAllocation {
 
     pub(super) fn import_system_dma_buf(
         vm: Shared<DeviceVm>,
+        peers: impl ExactSizeIterator<Item = Shared<DeviceVm>>,
         descriptor: i32,
         source_offset: u64,
         byte_length: u64,
@@ -107,6 +135,7 @@ impl LinuxAllocation {
         let owner = Owned::try_new_uninit()?;
         let imported = DrmImportedSystem::create(
             vm,
+            peers,
             descriptor,
             source_offset,
             byte_length,
@@ -139,21 +168,60 @@ impl LinuxAllocation {
     pub(crate) fn cached_info(&self) -> AllocationInfo {
         match self {
             Self::Kfd(allocation) => allocation.cached_info(),
+            Self::KfdHostAlias(alias) => alias.cached_info(),
+            Self::SvmRegisteredHost(allocation) => allocation.cached_info(),
             Self::DrmRegisteredHost(allocation) => allocation.cached_info(),
             Self::DrmImportedSystem(allocation) => allocation.cached_info(),
+        }
+    }
+
+    pub(crate) fn host_alias_source_offset(&self) -> Option<u64> {
+        match self {
+            Self::KfdHostAlias(alias) => Some(alias.source_offset()),
+            Self::Kfd(_)
+            | Self::SvmRegisteredHost(_)
+            | Self::DrmRegisteredHost(_)
+            | Self::DrmImportedSystem(_) => None,
+        }
+    }
+
+    pub(crate) fn set_host_alias_identity(&self, identity: [u64; 2]) -> Result<(), Error> {
+        match self {
+            Self::Kfd(allocation) => allocation.set_host_alias_identity(identity),
+            Self::KfdHostAlias(_)
+            | Self::SvmRegisteredHost(_)
+            | Self::DrmRegisteredHost(_)
+            | Self::DrmImportedSystem(_) => Ok(()),
         }
     }
 
     pub(crate) fn metadata(&self) -> &[u8] {
         match self {
             Self::Kfd(allocation) => allocation.metadata(),
-            Self::DrmRegisteredHost(_) | Self::DrmImportedSystem(_) => &[],
+            Self::KfdHostAlias(_)
+            | Self::SvmRegisteredHost(_)
+            | Self::DrmRegisteredHost(_)
+            | Self::DrmImportedSystem(_) => &[],
+        }
+    }
+
+    pub(crate) fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        match self {
+            Self::Kfd(allocation) => allocation.diagnostic_memory(),
+            Self::KfdHostAlias(alias) => alias.diagnostic_memory(),
+            Self::SvmRegisteredHost(allocation) => allocation.diagnostic_memory(),
+            Self::DrmRegisteredHost(allocation) => allocation.diagnostic_memory(),
+            Self::DrmImportedSystem(allocation) => allocation.diagnostic_memory(),
         }
     }
 
     pub(super) fn check(&self) -> Result<(), Error> {
         match self {
             Self::Kfd(allocation) => allocation.check(),
+            Self::KfdHostAlias(alias) => alias.check(),
+            Self::SvmRegisteredHost(allocation) => allocation.check(),
             Self::DrmRegisteredHost(allocation) => allocation.check(),
             Self::DrmImportedSystem(allocation) => allocation.check(),
         }
@@ -162,14 +230,19 @@ impl LinuxAllocation {
     pub(super) fn is_device_local(&self) -> bool {
         match self {
             Self::Kfd(allocation) => allocation.is_device_local(),
-            Self::DrmRegisteredHost(_) | Self::DrmImportedSystem(_) => false,
+            Self::KfdHostAlias(_)
+            | Self::SvmRegisteredHost(_)
+            | Self::DrmRegisteredHost(_)
+            | Self::DrmImportedSystem(_) => false,
         }
     }
 
     pub(super) fn set_access(&mut self, devices: &[&Shared<DeviceVm>]) -> Result<(), Error> {
         match self {
             Self::Kfd(allocation) => allocation.set_access(devices),
-            Self::DrmRegisteredHost(_) | Self::DrmImportedSystem(_) => Err(error(
+            Self::DrmImportedSystem(allocation) => allocation.set_access(devices),
+            Self::SvmRegisteredHost(allocation) => allocation.set_access(devices),
+            Self::KfdHostAlias(_) | Self::DrmRegisteredHost(_) => Err(error(
                 ErrorKind::Unsupported,
                 "this allocation cannot change its native device mappings",
             )),
@@ -179,6 +252,8 @@ impl LinuxAllocation {
     pub(super) fn device_address(&self, device: &Shared<DeviceVm>) -> Result<u64, Error> {
         match self {
             Self::Kfd(allocation) => allocation.device_address(device),
+            Self::KfdHostAlias(alias) => alias.device_address(device),
+            Self::SvmRegisteredHost(allocation) => allocation.device_address(device),
             Self::DrmRegisteredHost(allocation) => allocation.device_address(device),
             Self::DrmImportedSystem(allocation) => allocation.device_address(device),
         }
@@ -187,6 +262,8 @@ impl LinuxAllocation {
     pub(super) fn is_owned_by(&self, device: &Shared<DeviceVm>) -> bool {
         match self {
             Self::Kfd(allocation) => allocation.is_owned_by(device),
+            Self::KfdHostAlias(alias) => alias.is_owned_by(device),
+            Self::SvmRegisteredHost(allocation) => allocation.is_owned_by(device),
             Self::DrmRegisteredHost(allocation) => allocation.is_owned_by(device),
             Self::DrmImportedSystem(allocation) => allocation.is_owned_by(device),
         }
@@ -195,18 +272,35 @@ impl LinuxAllocation {
     pub(super) fn free(&mut self) -> Result<(), Error> {
         match self {
             Self::Kfd(allocation) => allocation.free(),
+            Self::KfdHostAlias(alias) => {
+                alias.free();
+                Ok(())
+            }
+            Self::SvmRegisteredHost(allocation) => allocation.free(),
             Self::DrmRegisteredHost(allocation) => allocation.free(),
             Self::DrmImportedSystem(allocation) => allocation.free(),
+        }
+    }
+
+    pub(crate) fn remaining_backing_byte_length(&self) -> u64 {
+        match self {
+            Self::Kfd(allocation) => allocation.remaining_backing_byte_length(),
+            Self::KfdHostAlias(_)
+            | Self::SvmRegisteredHost(_)
+            | Self::DrmRegisteredHost(_)
+            | Self::DrmImportedSystem(_) => 0,
         }
     }
 
     pub(super) fn export_dma_buf(&self) -> Result<DmaBuf, Error> {
         match self {
             Self::Kfd(allocation) => allocation.export_dma_buf(),
-            Self::DrmRegisteredHost(_) => Err(error(
-                ErrorKind::Unsupported,
-                "borrowed host pages have no DMA-BUF export",
-            )),
+            Self::KfdHostAlias(_) | Self::SvmRegisteredHost(_) | Self::DrmRegisteredHost(_) => {
+                Err(error(
+                    ErrorKind::Unsupported,
+                    "borrowed host pages have no DMA-BUF export",
+                ))
+            }
             Self::DrmImportedSystem(allocation) => allocation.export_dma_buf(),
         }
     }
@@ -214,10 +308,12 @@ impl LinuxAllocation {
     pub(super) fn export_ipc_memory(&self) -> Result<KfdIpcMemoryHandle, Error> {
         match self {
             Self::Kfd(allocation) => allocation.export_ipc_memory(),
-            Self::DrmRegisteredHost(_) => Err(error(
-                ErrorKind::Unsupported,
-                "borrowed host pages have no KFD IPC export",
-            )),
+            Self::KfdHostAlias(_) | Self::SvmRegisteredHost(_) | Self::DrmRegisteredHost(_) => {
+                Err(error(
+                    ErrorKind::Unsupported,
+                    "borrowed host pages have no KFD IPC export",
+                ))
+            }
             Self::DrmImportedSystem(_) => Err(error(
                 ErrorKind::Unsupported,
                 "DRM-imported storage has no KFD IPC export",
@@ -253,9 +349,13 @@ impl LinuxAllocation {
     pub(super) fn signal_event_page_handle(&self, device: &Shared<DeviceVm>) -> Result<u64, Error> {
         match self {
             Self::Kfd(allocation) => allocation.signal_event_page_handle(device),
-            Self::DrmRegisteredHost(_) => Err(error(
+            Self::KfdHostAlias(_) => Err(error(
                 ErrorKind::InvalidArgument,
-                "DRM registration is not a KFD event page",
+                "host alias is not a KFD event page",
+            )),
+            Self::SvmRegisteredHost(_) | Self::DrmRegisteredHost(_) => Err(error(
+                ErrorKind::InvalidArgument,
+                "host registration is not a KFD event page",
             )),
             Self::DrmImportedSystem(_) => Err(error(
                 ErrorKind::InvalidArgument,
@@ -267,9 +367,13 @@ impl LinuxAllocation {
     pub(super) fn retain_signal_event_page(&mut self) -> Result<(), Error> {
         match self {
             Self::Kfd(allocation) => allocation.retain_signal_event_page(),
-            Self::DrmRegisteredHost(_) => Err(error(
+            Self::KfdHostAlias(_) => Err(error(
                 ErrorKind::InvalidArgument,
-                "DRM registration is not a KFD event page",
+                "host alias is not a KFD event page",
+            )),
+            Self::SvmRegisteredHost(_) | Self::DrmRegisteredHost(_) => Err(error(
+                ErrorKind::InvalidArgument,
+                "host registration is not a KFD event page",
             )),
             Self::DrmImportedSystem(_) => Err(error(
                 ErrorKind::InvalidArgument,

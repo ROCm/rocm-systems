@@ -4,12 +4,14 @@
 #pragma once
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "decode_test_util.h"
 #include "halt_snapshot_plugin.h"
+#include "rocjitsu/isa/isa_family.h"
 
-#include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
@@ -37,18 +39,14 @@
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "rocjitsu/vm/plugins/lds_barrier_arrival_observation.h"
 #include "rocjitsu/vm/soc.h"
 #include "util/except.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
 
 #include "simdojo/sim/simulation.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
@@ -67,7 +65,6 @@ RJ_DIAGNOSTIC_POP
 #include <optional>
 #include <set>
 #include <shared_mutex>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -117,16 +114,18 @@ struct Gfx1250Sim {
   std::shared_ptr<ExecutionPluginGroup> plugin_group;
   test::HaltSnapshotPlugin *snapshot = nullptr;
 
-  Gfx1250Sim() : loaded(config::load_config(kGfx1250ConfigPath, rocjitsu::kEmbeddedSchema)) {
-    build();
+  void initialize() {
+    ASSERT_TRUE(load_valid_config(kGfx1250ConfigPath, loaded));
+    ASSERT_NO_FATAL_FAILURE(build());
   }
 
-  explicit Gfx1250Sim(const std::string &config_json)
-      : loaded(config::load_config_from_string(config_json, rocjitsu::kEmbeddedSchema)) {
-    build();
+  void initialize(const std::string &config_json) {
+    ASSERT_TRUE(load_valid_config_from_string(config_json, loaded));
+    ASSERT_NO_FATAL_FAILURE(build());
   }
 
   void build() {
+    util::StringDiagnostic admission_diagnostic;
     soc = loaded.soc();
     memory = loaded.memory();
     // This fixture drives the engine directly and inspects single-partition
@@ -135,8 +134,10 @@ struct Gfx1250Sim {
     loaded.engine_config.num_threads = 1;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
-    loaded.wire_links(engine->topology());
-    engine->create();
+    ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     // Capture every wavefront's final register state at halt. A wave frees its
     // registers at s_endpgm, so tests that run a kernel to completion read the
     // result from the snapshot rather than the (freed) slot.
@@ -163,28 +164,28 @@ struct Gfx1250Sim {
                         uint32_t kernarg_size = 0, uint32_t kernarg_preload_length = 0,
                         uint32_t kernarg_preload_offset = 0, uint32_t enable_vgpr_workitem_id = 0,
                         uint32_t named_barrier_blocks = 0) {
-    using namespace rocr::llvm::amdhsa;
+    using namespace rocjitsu::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
     kd.kernarg_size = kernarg_size;
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                    ((vgprs / kGfx1250VgprEncodingGranule) - 1));
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                    ((sgprs / 8) - 1));
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT, user_sgprs);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
-                    enable_wg_id_x);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
-                    enable_wg_id_y);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
-                    enable_wg_id_z);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID,
-                    enable_vgpr_workitem_id);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT,
-                    named_barrier_blocks);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                       ((vgprs / kGfx1250VgprEncodingGranule) - 1));
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                       ((sgprs / 8) - 1));
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT, user_sgprs);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+                       enable_wg_id_x);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
+                       enable_wg_id_y);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
+                       enable_wg_id_z);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID,
+                       enable_vgpr_workitem_id);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT,
+                       named_barrier_blocks);
     kd.kernel_code_properties = kernel_code_properties;
-    AMDHSA_BITS_SET(kd.kernarg_preload, KERNARG_PRELOAD_SPEC_LENGTH, kernarg_preload_length);
-    AMDHSA_BITS_SET(kd.kernarg_preload, KERNARG_PRELOAD_SPEC_OFFSET, kernarg_preload_offset);
+    RJ_AMDHSA_BITS_SET(kd.kernarg_preload, KERNARG_PRELOAD_SPEC_LENGTH, kernarg_preload_length);
+    RJ_AMDHSA_BITS_SET(kd.kernarg_preload, KERNARG_PRELOAD_SPEC_OFFSET, kernarg_preload_offset);
 
     memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
     memory->load_image(reinterpret_cast<const uint8_t *>(words), num_words * sizeof(uint32_t),
@@ -199,10 +200,11 @@ inline void step_until_halted(simdojo::SimulationEngine &engine, amdgpu::Compute
                               uint32_t max_steps = 10000) {
   bool saw_work = false;
   for (uint32_t i = 0; i < max_steps && engine.step(); ++i) {
-    if (cu.has_active_wfs())
+    if (cu.has_active_wfs()) {
       saw_work = true;
-    else if (saw_work)
+    } else if (saw_work) {
       return;
+    }
   }
 }
 
@@ -210,9 +212,11 @@ inline void step_until_xcd_halted(Gfx1250Sim &sim, uint32_t max_steps = 10000) {
   auto any_active = [&]() {
     for (uint32_t se_idx = 0; se_idx < sim.xcd()->num_shader_engines(); ++se_idx) {
       auto *se = sim.xcd()->shader_engine(se_idx);
-      for (uint32_t cu_idx = 0; cu_idx < se->num_compute_units(); ++cu_idx)
-        if (se->compute_unit(cu_idx)->has_active_wfs())
+      for (uint32_t cu_idx = 0; cu_idx < se->num_compute_units(); ++cu_idx) {
+        if (se->compute_unit(cu_idx)->has_active_wfs()) {
           return true;
+        }
+      }
     }
     return false;
   };
@@ -223,8 +227,9 @@ inline void step_until_xcd_halted(Gfx1250Sim &sim, uint32_t max_steps = 10000) {
       saw_work = true;
       continue;
     }
-    if (saw_work)
+    if (saw_work) {
       return;
+    }
   }
 }
 
@@ -241,8 +246,9 @@ inline const test::WavefrontSnapshot *dispatch_one_wave(Gfx1250Sim &sim, const u
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch(kernel_object, 32, 32);
   step_until_halted(*sim.engine, *sim.cu());
-  if (sim.snapshot->snapshots().size() == before)
+  if (sim.snapshot->snapshots().size() == before) {
     return nullptr;
+  }
   return &sim.snapshot->snapshots().back();
 }
 
@@ -268,11 +274,15 @@ constexpr uint16_t vopd_src0_vgpr(uint16_t reg) { return 256 + reg; }
 enum class VopdOp : uint16_t {
   FmamkF32 = 2,
   MulF32 = 3,
+  AddF32 = 4,
   MulDx9ZeroF32 = 7,
   MovB32 = 8,
   CndmaskB32 = 9,
   FmaF32 = 19,
   FmaF64 = 32,
+  AddF64 = 33,
+  MaxNumF64 = 35,
+  MinNumF64 = 36,
 };
 
 struct VopdSlot {
@@ -299,8 +309,9 @@ constexpr std::array<uint32_t, 3> make_vopd3_pair(VopdSlot x, VopdSlot y, uint8_
 template <size_t N>
 void append_instruction(std::vector<uint32_t> &code, const std::array<uint32_t, N> &words) {
   // Avoid GCC 13's null-range warning when inserting into an empty vector.
-  for (uint32_t word : words)
+  for (uint32_t word : words) {
     code.push_back(word);
+  }
 }
 
 inline void append_instruction(std::vector<uint32_t> &code, uint32_t word) { code.push_back(word); }
@@ -316,20 +327,22 @@ inline uint32_t read_wave_sgpr(const amdgpu::ComputeUnitCore &cu, const amdgpu::
 }
 
 inline void write_global_u32(amdgpu::GpuMemory &memory, uint64_t addr, uint32_t value) {
-  for (uint32_t byte = 0; byte < 4; ++byte)
+  for (uint32_t byte = 0; byte < 4; ++byte) {
     memory.write8(addr + byte, static_cast<uint8_t>(value >> (byte * 8)));
+  }
 }
 
 inline uint32_t read_global_u32(amdgpu::GpuMemory &memory, uint64_t addr) {
   uint32_t value = 0;
-  for (uint32_t byte = 0; byte < 4; ++byte)
+  for (uint32_t byte = 0; byte < 4; ++byte) {
     value |= static_cast<uint32_t>(memory.read8(addr + byte)) << (byte * 8);
+  }
   return value;
 }
 
 inline std::unique_ptr<Instruction> decode_gfx1250(const std::array<uint32_t, 3> &words,
                                                    std::string_view expected_mnemonic) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   if (!decoder) {
     ADD_FAILURE() << "Decoder::create() returned nullptr for gfx1250";
     return nullptr;
@@ -344,6 +357,79 @@ inline std::unique_ptr<Instruction> decode_gfx1250(const std::array<uint32_t, 3>
   EXPECT_EQ(inst->mnemonic(), expected_mnemonic);
   EXPECT_EQ(inst->size(), static_cast<int>(words.size() * sizeof(words[0])));
   return inst;
+}
+
+/// Records every arrival at an LDS barrier cell, and the order in which it
+/// and the tensor DMA hooks fire.
+class LdsBarrierArrivalRecorder final : public ExecutionPlugin {
+public:
+  explicit LdsBarrierArrivalRecorder(bool wants_hook = true)
+      : ExecutionPlugin("lds_barrier_arrival_recorder"), wants_hook_(wants_hook) {}
+
+  enum class Hook { TensorIssued, Arrived, TensorMemoryAccess };
+
+  struct Arrival {
+    amdgpu::LdsBarrierArrivalObservation observation;
+    const amdgpu::Wavefront *wave = nullptr;
+    /// The state of `wave` when the hook fired.
+    amdgpu::WfState wave_state = amdgpu::WfState::RUNNING;
+
+    bool operator==(const Arrival &) const = default;
+
+    /// Readable GoogleTest failure output.
+    friend void PrintTo(const Arrival &arrival, std::ostream *os) {
+      const auto &observation = arrival.observation;
+      *os << std::format(
+          "{{source {} cell {:#x} {:#x} -> {:#x}{} wave {} state {}}}",
+          static_cast<int>(observation.source), observation.cell_address, observation.old_state,
+          observation.new_state, observation.phase_completed ? " completed" : "",
+          static_cast<const void *>(arrival.wave), static_cast<int>(arrival.wave_state));
+    }
+  };
+
+  bool observes_lds_barrier_arrival() const override { return wants_hook_; }
+  bool observes_tensor_dma_issue() const override { return true; }
+  bool observes_tensor_dma_memory_access() const override { return true; }
+
+  void onAmdgpuLdsBarrierArrived(const amdgpu::LdsBarrierArrivalObservation &arrival,
+                                 const amdgpu::Wavefront &wf) override {
+    arrivals.push_back({.observation = arrival, .wave = &wf, .wave_state = wf.state()});
+    hooks.push_back(Hook::Arrived);
+  }
+
+  void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation &,
+                               const amdgpu::Wavefront &) override {
+    hooks.push_back(Hook::TensorIssued);
+  }
+
+  void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &) override {
+    hooks.push_back(Hook::TensorMemoryAccess);
+  }
+
+  std::vector<Arrival> arrivals;
+  std::vector<Hook> hooks;
+
+private:
+  bool wants_hook_ = true;
+};
+
+/// Add an arrival recorder to `group`, which must already be installed.
+inline LdsBarrierArrivalRecorder &add_lds_barrier_arrival_recorder(ExecutionPluginGroup &group,
+                                                                   bool wants_hook = true) {
+  auto recorder = std::make_unique<LdsBarrierArrivalRecorder>(wants_hook);
+  auto *result = recorder.get();
+  EXPECT_TRUE(group.add(std::move(recorder)));
+  return *result;
+}
+
+/// Replace the simulation's plugins with one arrival recorder.
+inline LdsBarrierArrivalRecorder &install_lds_barrier_arrival_recorder(Gfx1250Sim &sim,
+                                                                       bool wants_hook = true) {
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto &recorder = add_lds_barrier_arrival_recorder(*group, wants_hook);
+  sim.plugin_group = std::move(group);
+  sim.soc->set_plugin_group(sim.plugin_group);
+  return recorder;
 }
 
 } // namespace rocjitsu::test::cdna5

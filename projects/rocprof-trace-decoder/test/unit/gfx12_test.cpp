@@ -262,12 +262,24 @@ TEST(Gfx12OtherSimdMapTest, AtBlockStoreReturnsVmem)
 TEST(Gfx12TokenGeneratorTest, ConstructorThrowsOnNullBuffer)
 {
     EXPECT_THROW(gfx12::TokenGenerator(nullptr, 100, 0, 0), std::exception);
+    EXPECT_THROW(gfx12::TokenGenerator(nullptr, 100, 0, 0, false), std::exception);
 }
 
 TEST(Gfx12TokenGeneratorTest, ConstructorThrowsOnZeroSize)
 {
     uint8_t buffer[16] = {0};
     EXPECT_THROW(gfx12::TokenGenerator(buffer, 0, 0, 0), std::exception);
+    EXPECT_THROW(gfx12::TokenGenerator(buffer, 0, 0, 0, false), std::exception);
+}
+
+TEST(Gfx12TokenGeneratorTest, ConstructorThrowsOnTruncatedHeader)
+{
+    uint8_t buffer[sizeof(header_type)] = {};
+    for (size_t size = 1; size < sizeof(buffer); ++size)
+    {
+        EXPECT_THROW(gfx12::TokenGenerator(buffer, size, 0, 0), std::exception);
+        EXPECT_NO_THROW(gfx12::TokenGenerator(buffer, size, 0, 0, false));
+    }
 }
 
 TEST(Gfx12TokenGeneratorTest, SmallBufferProcessesWithoutCrash)

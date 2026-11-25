@@ -4,6 +4,7 @@
 """CLI entry point: ``python -m amdisa``."""
 
 import argparse
+from pathlib import Path
 import re
 import sys
 from tempfile import TemporaryDirectory
@@ -27,6 +28,13 @@ from amdisa import (
 )
 from amdisa import xml_schema as xs
 from amdisa.cross_isa import CrossIsaAnalyzer
+from amdisa.codegen.dbt.rule_gen import generate_matrix_conversions
+from amdisa.codegen.instruction_metadata import (
+    checkout_operations_header,
+    emit_operations,
+    read_operation_names,
+)
+from amdisa.codegen.async_mma_policy import emit_async_inline_operations
 from amdisa.encoding_translator_codegen import (
     generate_encoding_fields,
     generate_encoding_translators,
@@ -98,7 +106,7 @@ def _group_isa_variant_args(entries: list[str] | None) -> dict[str, str]:
     return grouped
 
 
-def _collect_shared_execute_body_variants(specs, plan):
+def _collect_shared_execute_body_variants(specs, plan, *, config=None):
     """Collect candidate shared execute bodies from each ISA.
 
     The cross-ISA analyzer proves structural compatibility, but the final
@@ -108,7 +116,7 @@ def _collect_shared_execute_body_variants(specs, plan):
     """
     variants: dict[tuple[str, str], dict[str, tuple]] = {}
     with TemporaryDirectory(prefix='amdisa-shared-preflight-') as out_dir:
-        config = CodegenConfig()
+        config = config or CodegenConfig()
         for name, spec, sem in specs:
             code_gen = CodeGenerator(
                 spec, out_dir, sem, config=config, shared_plan=plan
@@ -290,10 +298,38 @@ def _run(args) -> None:
         use_shared_execute_helpers=len(specs) > 1,
     )
 
+    # Only regeneration into the checkout core replaces its catalog by default.
+    # Separate decoders and tables must use the enum included by Instruction.
+    core_header = getattr(args, 'core_operations', None)
+    regenerate = getattr(args, 'regenerate_operations', False)
+    if not core_header and args.gen_isas and args.isa_output:
+        regenerate |= (
+            Path(args.isa_output).resolve() / 'shared/operations.h'
+            == checkout_operations_header().resolve()
+        )
+    if regenerate:
+        if not args.gen_isas:
+            raise ValueError('--regenerate-operations requires ISA generation')
+        operations = emit_operations(args.isa_output, specs)
+    else:
+        header = (
+            Path(core_header).resolve() if core_header else checkout_operations_header()
+        )
+        operations = read_operation_names(header)
+        config.core_operations_header = (
+            header.as_posix()
+            if core_header
+            else CodegenConfig().shared_generated_include('operations.h')
+        )
+    config.operation_names = frozenset(operations)
+
     # Generate per-ISA files, accumulating shared execute bodies.
     if args.gen_isas:
         emit_isa_properties(args.isa_output, specs)
-        body_variants = _collect_shared_execute_body_variants(specs, plan)
+        emit_async_inline_operations(args.isa_output, operations, config=config)
+        body_variants = _collect_shared_execute_body_variants(
+            specs, plan, config=config
+        )
         unshared_keys = _unshared_execute_keys_from_variants(body_variants)
         config.unshared_execute_keys = unshared_keys
         if unshared_keys:
@@ -321,7 +357,7 @@ def _run(args) -> None:
             writer._shared_execute_bodies = all_shared_bodies
             writer._write_shared_execute_templates()
 
-    # DBT legalization tables and encoding translators.
+    # DBT legalization tables, matrix layout conversions and encoding translators.
     if args.gen_dbt:
         if len(specs) < 2:
             print(
@@ -356,6 +392,9 @@ def _run(args) -> None:
                 file=sys.stderr,
             )
         print(f'Generated {len(generated)} files in {dbt_output}', file=sys.stderr)
+
+        matrix_header = generate_matrix_conversions(dbt_output, config=config)
+        print(f'Generated {matrix_header}', file=sys.stderr)
 
         generate_encoding_fields(specs, dbt_output)
         spec_map = {name: (spec, sem) for name, spec, sem in specs}
@@ -408,7 +447,8 @@ def main() -> None:
     arg_parser.add_argument(
         '--gen-dbt',
         action='store_true',
-        help='Generate DBT legalization tables and encoding translators.',
+        help='Generate DBT legalization tables, matrix layout conversions, '
+        'and encoding translators.',
     )
     arg_parser.add_argument(
         '--isa-output', help='Output path for generated ISA C++ files'
@@ -423,11 +463,25 @@ def main() -> None:
         metavar='DIR',
         help='Output directory for DBT tables (defaults to --isa-output).',
     )
+    catalog = arg_parser.add_mutually_exclusive_group()
+    catalog.add_argument(
+        '--core-operations',
+        metavar='HEADER',
+        help='Operation catalog from the consuming C++ core (required outside a checkout).',
+    )
+    catalog.add_argument(
+        '--regenerate-operations',
+        action='store_true',
+        help='Rebuild the core Operation catalog from all supplied ISA inputs.',
+    )
     args = arg_parser.parse_args()
     if not args.gen_isas and not args.gen_dbt:
         args.gen_isas = True
         args.gen_dbt = True
-    _run(args)
+    try:
+        _run(args)
+    except ValueError as error:
+        arg_parser.error(str(error))
 
 
 if __name__ == '__main__':

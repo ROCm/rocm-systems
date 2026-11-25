@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/decoder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "util/bitfield.h"
 
@@ -78,12 +79,11 @@ struct Isa : amdgpu::RdnaIsaBase {
   // operand.cpp; bodies forward to the anonymous-namespace helpers.
   static std::optional<uint32_t> resolved_vgpr_offset(OperandType opr_type, int ev);
   static bool simd_capable_value(OperandType opr_type, int ev);
-  static uint32_t simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type, int ev);
 };
 
 } // namespace rdna3
 
-template <> struct IsaTrait<ROCJITSU_CODE_ARCH_RDNA3> {
+template <> struct IsaTrait<rocjitsu::IsaFamily::Rdna3> {
   using type = rdna3::Isa;
 };
 

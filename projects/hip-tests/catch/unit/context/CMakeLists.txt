@@ -8,6 +8,7 @@ set(TEST_SRC
   hipMemsetD8.cc
   hipCtxNotSupported.cc
   hipCtxActivate.cc
+  hipCtxDestroyUnmatched.cc
 )
 hip_add_exe_to_target(NAME Context
                       TEST_SRC ${TEST_SRC}

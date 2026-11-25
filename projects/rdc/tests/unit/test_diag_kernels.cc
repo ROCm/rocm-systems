@@ -87,15 +87,44 @@ void ExpectKernelsForTarget(const std::string& gfx_name) {
     EXPECT_EQ(data[2], 'L') << path;
     EXPECT_EQ(data[3], 'F') << path;
 
-    // Built for the expected target, e.g. "amdgcn-amd-amdhsa--gfx950".
-    const std::string isa = "amdgcn-amd-amdhsa--" + gfx_name;
-    EXPECT_NE(data.find(isa), std::string::npos)
-        << path << " is not a code object for " << gfx_name;
+    // Built for the expected target. The code object names it as, e.g.,
+    // "amdgcn-amd-amdhsa--gfx950", or for gfx1250 as
+    // "amdgpu12.50-amd-amdhsa-unknown-gfx1250".
+    const bool targeted = data.find("amdgcn-amd-amdhsa--" + gfx_name) != std::string::npos ||
+                          data.find("-amd-amdhsa-unknown-" + gfx_name) != std::string::npos;
+    EXPECT_TRUE(targeted) << path << " is not a code object for " << gfx_name;
+  }
+}
+
+// Assert every diagnostic kernel for gfx_name is a code object v4. The checks
+// fill in the kernel arguments of the v4 layout; a kernel of a later version
+// reads its work-group size from hidden arguments the checks never write, and
+// the System memory check then compares data its kernel never wrote.
+void ExpectCodeObjectV4(const std::string& gfx_name) {
+  const std::string base = RDC_KERNELS_HSACO_DIR;
+  if (!DirExists(base)) {
+    GTEST_SKIP() << "kernel source tree not available at '" << base << "'";
+  }
+
+  for (const char* kernel : kDiagKernels) {
+    const std::string path = base + "/" + gfx_name + "/" + kernel;
+    const std::string data = ReadFile(path);
+    ASSERT_GE(data.size(), 9U) << path;
+    // e_ident[EI_OSABI] is ELFOSABI_AMDGPU_HSA (64) and e_ident[EI_ABIVERSION]
+    // is ELFABIVERSION_AMDGPU_HSA_V4 (2).
+    EXPECT_EQ(static_cast<unsigned char>(data[7]), 64U) << path;
+    EXPECT_EQ(static_cast<unsigned char>(data[8]), 2U) << path << " is not a code object v4";
   }
 }
 
 // Regression guard for the reported gap: gfx950 diagnostic kernels must ship.
 TEST(DiagKernelPackaging, Gfx950KernelsPresentAndTargeted) { ExpectKernelsForTarget("gfx950"); }
+
+// gfx1250 (AMD Instinct MI455X) kernels must ship, as code object v4.
+TEST(DiagKernelPackaging, Gfx1250KernelsPresentAndTargeted) {
+  ExpectKernelsForTarget("gfx1250");
+  ExpectCodeObjectV4("gfx1250");
+}
 
 // A previously shipped target, so a wholesale packaging break is also caught
 // and the checks are exercised against known-good assets.

@@ -138,6 +138,8 @@ enum EINST
     raytrace11,
     raytrace12,
 
+    wmma8 = 108,
+    wmma16,
     lds_dir_load = 110,
     lds_param_load,
     subv_loop_begin,
@@ -230,6 +232,9 @@ static const instruction_table_t& table_map_to_common_type =
     {(int) EINST::raytrace9,          {WaveInstCategory::BVH, 9}             },
     {(int) EINST::raytrace11,         {WaveInstCategory::BVH, 11}            },
     {(int) EINST::raytrace12,         {WaveInstCategory::BVH, 12}            },
+
+    {(int) EINST::wmma8,              {WaveInstCategory::VALU, 8}            },
+    {(int) EINST::wmma16,             {WaveInstCategory::VALU, 16}           },
 
     {(int) EINST::lds_dir_load,       {WaveInstCategory::LDS, 1}             },
     {(int) EINST::lds_param_load,     {WaveInstCategory::LDS, 1}             },

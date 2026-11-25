@@ -6,9 +6,11 @@ Tests for RCCL
 """
 
 from __future__ import annotations
-import pytest
-from conftest import RocprofsysTest
+
 from pathlib import Path
+
+import pytest
+from conftest import RocprofsysTest, assert_resolved_settings
 
 pytestmark = [
     pytest.mark.rccl,
@@ -53,6 +55,25 @@ def rccl_rocpd_rules(validation_rules_dir: Path) -> list[Path]:
 
 
 # RCCL test binaries.
+RCCL_RUN_ARGS = [
+    "-t",
+    "1",
+    "-g",
+    "1",
+    "-i",
+    "10",
+    "-w",
+    "2",
+    "-m",
+    "2",
+    "-p",
+    "-c",
+    "1",
+    "-z",
+    "-s",
+    "1",
+]
+
 RCCL_TARGETS = [
     "all_reduce_perf",
     "all_gather_perf",
@@ -65,52 +86,6 @@ RCCL_TARGETS = [
 
 
 class TestRCCL(RocprofsysTest):
-    BINARY_REWRITE_ARGS = [
-        "-e",
-        "-v",
-        "2",
-        "-i",
-        "8",
-        "--label",
-        "file",
-        "line",
-        "return",
-        "args",
-    ]
-    RUNTIME_INSTRUMENT_ARGS = [
-        "-e",
-        "-v",
-        "1",
-        "-i",
-        "8",
-        "--label",
-        "file",
-        "line",
-        "return",
-        "args",
-        "-ME",
-        "sysdeps",
-        "--log-file",
-        "rccl-test.log",
-    ]
-    RUN_ARGS = [
-        "-t",
-        "1",
-        "-g",
-        "1",
-        "-i",
-        "10",
-        "-w",
-        "2",
-        "-m",
-        "2",
-        "-p",
-        "-c",
-        "1",
-        "-z",
-        "-s",
-        "1",
-    ]
 
     @pytest.mark.parametrize(
         "mode",
@@ -127,13 +102,41 @@ class TestRCCL(RocprofsysTest):
         ids=[t.replace("_", "-") for t in RCCL_TARGETS],
     )
     def test(self, mode, rccl_target, rccl_env, rccl_rocpd_rules):
+        binary_rewrite_args = [
+            "-e",
+            "-v",
+            "2",
+            "-i",
+            "8",
+            "--label",
+            "file",
+            "line",
+            "return",
+            "args",
+        ]
+        runtime_instrument_args = [
+            "-e",
+            "-v",
+            "1",
+            "-i",
+            "8",
+            "--label",
+            "file",
+            "line",
+            "return",
+            "args",
+            "-ME",
+            "sysdeps",
+            "--log-file",
+            "rccl-test.log",
+        ]
         result = self.run_test(
             mode,
             rccl_target,
             env=rccl_env,
-            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
-            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
-            run_args=self.RUN_ARGS,
+            binary_rewrite_args=binary_rewrite_args,
+            runtime_instrument_args=runtime_instrument_args,
+            run_args=RCCL_RUN_ARGS,
             launcher="mpi",
             num_procs=1,
         )
@@ -145,3 +148,26 @@ class TestRCCL(RocprofsysTest):
                 counter_names=["RCCL Comm"],
             )
             self.assert_rocpd(result, rules_files=rccl_rocpd_rules)
+
+    @pytest.mark.timeout(180)
+    @pytest.mark.sys_run
+    @pytest.mark.rocpd("rccl_env")
+    def test_include_backend(self, rccl_env, rccl_rocpd_rules):
+        env = {**rccl_env, "ROCPROFSYS_USE_RCCLP": "OFF"}
+        result = self.run_test(
+            "sys_run",
+            "all_reduce_perf",
+            env=env,
+            sys_run_args=["-I", "rcclp"],
+            run_args=RCCL_RUN_ARGS,
+            launcher="mpi",
+            num_procs=1,
+        )
+        self.assert_regex(result, pass_regex=["ROCPROFSYS_USE_RCCLP=true"])
+        assert_resolved_settings(result, {"ROCPROFSYS_USE_RCCLP": True})
+        self.assert_perfetto(
+            result,
+            categories=["rocm_rccl_api"],
+            counter_names=["RCCL Comm"],
+        )
+        self.assert_rocpd(result, rules_files=rccl_rocpd_rules)

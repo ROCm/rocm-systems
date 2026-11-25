@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
-from typing import Optional
+from typing import List, Optional
 
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import demarcate
@@ -14,10 +14,6 @@ class gfx942_soc(OmniSoC_Base):
     def __init__(self, args: argparse.Namespace, mspec: MachineSpecs) -> None:
         super().__init__(args, mspec)
         self.set_arch("gfx942")
-        self.set_compatible_profilers([
-            "rocprofv3",
-            "rocprofiler-sdk",
-        ])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx942"))
 
@@ -30,7 +26,7 @@ class gfx942_soc(OmniSoC_Base):
     # Required child methods
     # -----------------------
     @demarcate
-    def profiling_setup(self) -> Optional[list[str]]:
+    def profiling_setup(self) -> Optional[List[str]]:
         """Perform any SoC-specific setup prior to profiling."""
         super().profiling_setup()
         # Performance counter filtering

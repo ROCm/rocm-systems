@@ -1,0 +1,12 @@
+# Named formulas that metric formulas use as $name. Analyze computes each one
+# on the first pass that holds all of its counters. A formula with SUM is one
+# value for all dispatches; one without SUM has a value per dispatch.
+# A collectable may use other collectables.
+GRBM_COUNT_PER_XCD: GRBM_COUNT / $num_xcd
+GRBM_GUI_ACTIVE_PER_XCD: GRBM_GUI_ACTIVE / $num_xcd
+GRBM_SPI_BUSY_PER_XCD: GRBM_SPI_BUSY / $num_xcd
+valu_flops: $wave_size * SQ_INSTS_VALU_sum
+gl2_read_bytes: GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128
+gl2_write_bytes: GL1C_GL2_REQ_WRITE_32B_sum * 32 + GL1C_GL2_REQ_WRITE_64B_sum * 64
+gl2_read_bandwidth: SUM($gl2_read_bytes) / SUM(End_Timestamp - Start_Timestamp)
+gl2_write_bandwidth: SUM($gl2_write_bytes) / SUM(End_Timestamp - Start_Timestamp)

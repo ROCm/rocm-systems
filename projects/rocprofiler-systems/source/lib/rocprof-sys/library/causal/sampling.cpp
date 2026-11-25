@@ -4,10 +4,10 @@
 #include "library/causal/sampling.hpp"
 #include "binary/analysis.hpp"
 #include "common/env_vars.hpp"
+#include "common/spin_mutex.hpp"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "library/causal/components/backtrace.hpp"
@@ -189,8 +189,8 @@ causal_offload_buffer(std::int64_t, causal_sampler_buffer_t&& _buf)
 
     if(!_processed.empty())
     {
-        static auto _mutex = locking::atomic_mutex{};
-        auto const  _lk    = locking::atomic_lock{ _mutex };
+        static auto s_mutex = spin_mutex{};
+        auto const  lock    = std::lock_guard{ s_mutex };
         for(const auto& itr : _processed)
         {
             add_samples(itr.first, itr.second);
@@ -302,7 +302,7 @@ configure(bool _setup, std::int64_t _tid)
             backtrace_enabled::set(scope::thread_scope{}, true);
             overflow_enabled::set(false);
             overflow_enabled::set(scope::thread_scope{}, false);
-            _causal->configure(timer{ get_sampling_realtime_signal(), CLOCK_REALTIME,
+            _causal->configure(timer{ get_sampling_realtime_signal(), CLOCK_BOOTTIME,
                                       SIGEV_THREAD_ID, 1000.0, 1.0e-6, _tid,
                                       threading::get_sys_tid() });
             if(_tid == 0)
@@ -451,13 +451,6 @@ block_samples()
 {
     trait::runtime_enabled<causal_sampler_t>::set(false);
     trait::runtime_enabled<causal::component::backtrace>::set(false);
-}
-
-void
-unblock_samples()
-{
-    trait::runtime_enabled<causal::component::backtrace>::set(true);
-    trait::runtime_enabled<causal_sampler_t>::set(true);
 }
 
 void

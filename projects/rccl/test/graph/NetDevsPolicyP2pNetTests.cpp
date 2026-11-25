@@ -37,7 +37,6 @@
 #include <functional>
 #include <set>
 #include <string>
-#include <unistd.h>
 
 #include "comm.h"        // struct ncclComm, struct ncclPeerInfo
 #include "graph.h"       // ncclTopoGetNetDev(), ncclTopoComputePaths(), ncclTopoFree()
@@ -46,10 +45,7 @@
 #include "graph/xml.h"   // struct ncclXml, ncclTopoGetXmlFromFile()
 
 #include "ProcessIsolatedTestRunner.hpp"
-
-#ifndef RCCL_TEST_SOURCE_DIR
-#define RCCL_TEST_SOURCE_DIR "."
-#endif
+#include "../common/TopoFixtures.hpp"
 
 namespace RcclUnitTesting
 {
@@ -68,8 +64,7 @@ constexpr int kPeerRank = 1;
 // 3 NICs (mlx5_0/1/2), shared with the other 3 GPUs on that NUMA node.
 std::string multiNicTopoPath()
 {
-    return std::string(RCCL_TEST_SOURCE_DIR) +
-           "/../tools/topo_expl/models/topo_8p6l_5nic.xml";
+    return topoFixturePath("topo_8p6l_5nic.xml");
 }
 
 struct ncclXml* allocateXml(int maxNodes)
@@ -143,11 +138,7 @@ struct MockComm
 void withTopoComm(const std::function<void(struct ncclComm*)>& body)
 {
     const std::string topoPath = multiNicTopoPath();
-    if(access(topoPath.c_str(), R_OK) != 0)
-    {
-        GTEST_SKIP() << "Topology fixture not found: " << topoPath;
-        return;
-    }
+    ASSERT_TRUE(topoFixtureReadable(topoPath));
 
     struct ncclTopoSystem* system = nullptr;
     ASSERT_EQ(loadTopoSystem(topoPath.c_str(), &system), ncclSuccess);

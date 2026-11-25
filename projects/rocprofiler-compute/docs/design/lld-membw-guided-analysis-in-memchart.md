@@ -71,6 +71,10 @@ Add a `membw_analysis` check in `build_dfs` (`src/utils/parser.py`) to skip pane
 - `src/rocprof_compute_tui/utils/tui_utils.py` line 151 -- unnecessary, same reason
 - `src/rocprof_compute_analyze/analysis_webui.py` -- missing check fixed for free
 
+> **Update:** The TUI and WebUI analyze modes were later removed in
+> https://github.com/ROCm/rocm-systems/pull/12220, so the TUI and WebUI entries
+> above no longer apply.
+
 ---
 
 ## Data Models
@@ -246,7 +250,7 @@ The complete file is shown below. The `thresholds` section defines named values,
 
 ```yaml
 # membw_tree_spec.yaml -- gfx950 bottleneck evaluation tree
-# Location: src/rocprof_compute_analysis/membw/tree_spec/gfx950_membw_tree_spec.yaml
+# Location: src/membw_analysis/tree_spec/gfx950_membw_tree_spec.yaml
 #
 # This is a single file. The GL1, GL2, and EA subtrees are all entries
 # under the top-level `nodes:` key.
@@ -326,7 +330,7 @@ nodes:
     guidance_id: gl1_vmem
 
   # --- GL2: L2 Cache Bottleneck Detection ---
-  # Source metrics: Table 3012 (L2 Bottleneck Detection Indicators) in 3000_mem_bw.yaml
+  # Source metrics: Table 3002 (L2 Bottleneck Detection Indicators) in 3000_mem_bw.yaml
   #
   # GL2 detects L2 cache bottlenecks: back pressure (L2 stalling L1),
   # internal resource pressure (FIFO saturation), memory bandwidth bound
@@ -395,7 +399,7 @@ nodes:
     guidance_id: gl2_remote_pressure
 
   # --- EA: Efficiency Arbiter Bottleneck Detection ---
-  # Source metrics: Table 3018 (EA Bottleneck Detection Indicators) in 3000_mem_bw.yaml
+  # Source metrics: Table 3003 (EA Bottleneck Detection Indicators) in 3000_mem_bw.yaml
   # EA sits between L2 (TCC) and the SoC Data Fabric (HBM, GMI, PCIe)
   #
   # EA detects memory fabric bottlenecks. Primary indicators are HBM credit
@@ -458,7 +462,7 @@ nodes:
 
 ### Metric-to-threshold cross-reference
 
-All bottleneck indicator metrics in `3000_mem_bw.yaml` use `SUM/SUM` aggregation. The `AVG/AVG` pattern appears only in latency metrics (tables 3002, 3008, 3014) which are not referenced by the tree.
+All bottleneck indicator metrics in `3000_mem_bw.yaml` use `SUM/SUM` aggregation.
 
 | Metric key | Table | Denominator | Threshold | Tree node |
 |-----------|-------|-------------|-----------|-----------|
@@ -468,40 +472,32 @@ All bottleneck indicator metrics in `3000_mem_bw.yaml` use `SUM/SUM` aggregation
 | L1 Cache - TCP stalled by TD | 3001 | `TCP_GATE_EN2_sum` | >= 10% | `gl1_tcp_td_stall` |
 | L1 Cache - TCP stalled by L2 | 3001 | `TCP_GATE_EN2_sum` | >= 10% | `gl1_tcp_l2_stall` |
 | L1 Cache - VMEM stalled by L1 Cache | 3001 | `SQ_BUSY_CYCLES` | >= 10% | `gl1_vmem_stall` |
-| L2 Back Pressure Indicator | 3012 | `TCC_BUSY_sum` | >= 10% | `gl2_back_pressure` |
-| L2 Memory BW Bound - Combined Credit Pressure | 3012 | `TCC_BUSY_sum` | >= 10% | `gl2_mem_bw_bound` |
-| L2 Memory BW Bound - Read Credit Pressure | 3012 | `TCC_BUSY_sum` | >= 10% | `gl2_mem_bw_read` |
-| L2 Memory BW Bound - Write Credit Pressure | 3012 | `TCC_BUSY_sum` | >= 10% | `gl2_mem_bw_write` |
-| L2 Internal Resource Pressure - Latency FIFO | 3012 | `TCC_BUSY_sum` | >= 10% | `gl2_internal_resource` |
-| L2 Internal Resource Pressure - Source FIFO | 3012 | `TCC_BUSY_sum` | >= 10% | `gl2_src_fifo` |
-| L2 Cache Efficiency | 3012 | `TCC_HIT + TCC_MISS` | <= 50% | `gl2_cache_efficiency` |
-| L2 Remote Access Pressure (GMI) | 3012 | `TCC_BUSY_sum` | >= 10% | `gl2_remote_pressure` |
-| EA HBM BW Bound - Combined | 3018 | `TCC_BUSY_sum` | >= 10% | `ea_hbm_bw_bound` |
-| EA HBM BW Bound - Read Credit Pressure | 3018 | `TCC_BUSY_sum` | >= 10% | `ea_hbm_read` |
-| EA HBM BW Bound - Write Credit Pressure | 3018 | `TCC_BUSY_sum` | >= 10% | `ea_hbm_write` |
-| EA GMI BW Bound - Combined | 3018 | `TCC_BUSY_sum` | >= 10% | `ea_gmi_bw_bound` |
-| EA IO BW Bound - Combined | 3018 | `TCC_BUSY_sum` | >= 10% | `ea_io_bw_bound` |
-| EA Write Backpressure | 3018 | `TCC_BUSY_sum` | >= 10% | `ea_write_backpressure` |
-| EA HBM Atomic Pressure | 3018 | `TCC_EA0_WRREQ_DRAM_sum` | >= 10% | `ea_atomic_pressure` |
+| L2 Back Pressure Indicator | 3002 | `TCC_BUSY_sum` | >= 10% | `gl2_back_pressure` |
+| L2 Memory BW Bound - Combined Credit Pressure | 3002 | `TCC_BUSY_sum` | >= 10% | `gl2_mem_bw_bound` |
+| L2 Memory BW Bound - Read Credit Pressure | 3002 | `TCC_BUSY_sum` | >= 10% | `gl2_mem_bw_read` |
+| L2 Memory BW Bound - Write Credit Pressure | 3002 | `TCC_BUSY_sum` | >= 10% | `gl2_mem_bw_write` |
+| L2 Internal Resource Pressure - Latency FIFO | 3002 | `TCC_BUSY_sum` | >= 10% | `gl2_internal_resource` |
+| L2 Internal Resource Pressure - Source FIFO | 3002 | `TCC_BUSY_sum` | >= 10% | `gl2_src_fifo` |
+| L2 Cache Efficiency | 3002 | `TCC_HIT + TCC_MISS` | <= 50% | `gl2_cache_efficiency` |
+| L2 Remote Access Pressure (GMI) | 3002 | `TCC_BUSY_sum` | >= 10% | `gl2_remote_pressure` |
+| EA HBM BW Bound - Combined | 3003 | `TCC_BUSY_sum` | >= 10% | `ea_hbm_bw_bound` |
+| EA HBM BW Bound - Read Credit Pressure | 3003 | `TCC_BUSY_sum` | >= 10% | `ea_hbm_read` |
+| EA HBM BW Bound - Write Credit Pressure | 3003 | `TCC_BUSY_sum` | >= 10% | `ea_hbm_write` |
+| EA GMI BW Bound - Combined | 3003 | `TCC_BUSY_sum` | >= 10% | `ea_gmi_bw_bound` |
+| EA IO BW Bound - Combined | 3003 | `TCC_BUSY_sum` | >= 10% | `ea_io_bw_bound` |
+| EA Write Backpressure | 3003 | `TCC_BUSY_sum` | >= 10% | `ea_write_backpressure` |
+| EA HBM Atomic Pressure | 3003 | `TCC_EA0_WRREQ_DRAM_sum` | >= 10% | `ea_atomic_pressure` |
 
 ### Metrics NOT referenced by the tree
 
-The following table 3012/3018 metrics are diagnostic context, not bottleneck gates:
-
-| Metric | Reason not in tree |
-|--------|-------------------|
-| L2 to Memory Traffic Ratio | Diagnostic (cache locality measure), not a stall indicator |
-| EA Read/Write Balance | Diagnostic (traffic characterization), not a bottleneck condition |
-| EA Stall Destination Dominance - HBM/GMI/IO | Informational ranking (which path dominates), not a threshold-gated bottleneck |
-
-These could be included as `supporting` metrics on parent nodes for context without being tree evaluation nodes.
+None. Block 30 holds only the metrics the tree reads.
 
 ---
 
 ## Package Layout
 
 ```
-src/rocprof_compute_analysis/membw/
+src/membw_analysis/
 |-- __init__.py
 |-- models.py          # MemBwAnalysisResult, BottleneckNode, SupportingMetric
 |-- metric_extract.py  # keyed metric values from calc_metrics output
@@ -547,61 +543,48 @@ def extract_membw_metrics(
 
 ## Renderer Changes
 
-> **Dependency:** This section assumes the completion of [PR #8648: redesign gfx9 mem chart with rich layout](https://github.com/ROCm/rocm-systems/pull/8648).
+`src/memory_chart/render.py` draws the memory chart from a JSON layout in `src/memory_chart/layouts/`, one per architecture family. The layout lists the blocks, the metrics in each block, and the arrows between blocks. The renderer has no architecture-specific code. See `src/memory_chart/README.md` for the layout fields.
 
-The gfx9 memory chart renderer uses Rich composable panels and grids (10-column `Table.grid` layout) with shared builders from `mem_chart_common.py`.
+### Where bottleneck annotations go
 
-### Integration points for bottleneck annotations
-
-1. **Cache panel rows:** `build_cache_panel()` accepts a list of `(label, value, unit, color)` tuples. Adding a bottleneck indicator row:
-   ```python
-   # Example: GL1 TCP stall active at 22.4%
-   ("TCP stall", 22.4, "%", COLORS["stall"])
-   # Example: GL2 HBM BW bound active at 15.1%
-   ("HBM BW bound", 15.1, "%", COLORS["stall"])
+1. **Stall rows in blocks:** A block with a `stall_level` (`GL1`, `GL2`, or `EA`) lists the active leaf bottlenecks of that level, below its metrics. Each row shows the node label and the value of its first supporting metric, in the stall color:
+   ```text
+   [!] TCP<-UTCL1 18.7%
    ```
+   On gfx950, VL1D has `GL1`, L2 has `GL2`, and Data Fabric has `EA`. Adding stall rows to another architecture only needs `stall_level` in its layout.
 
-2. **Edge column markup:** Insert annotation lines into edge `Text.from_markup()` lists:
-   ```python
-   # Example: between GL1 and GL2 columns
-   "[red bold][!] TCP<-UTCL1 18.7%[/red bold]"
-   ```
+2. **Stall legend entry:** The legend shows the stall color when the layout has a `stall` metric or any block has a stall row.
 
-3. **Below-chart summary:** Insert after the main grid, before the legend:
-   ```python
-   def _print_bottleneck_summary(console: Console, membw: MemBwAnalysisResult) -> None:
-       # Prints active bottleneck labels and supporting metrics
-       ...
-   ```
+3. **Guidance below the chart:** `tty.py` adds the guidance panel under the chart (see [Guidance renderer](#guidance-renderer)).
 
-4. **BW color coding:** Existing `bw_color()` / `PeakBandwidths` provides utilization-based edge coloring.
+### `plot_mem_chart()` signature
 
-5. **Stall legend entry:** `build_legend(include_stall=True)` enables the stall color key.
+This is the point where block 30 derived data enters the block 3 renderer (see HLD Decision 4: Cross-block data flow for analysis overlay). The `membw` parameter carries a `MemBwAnalysisResult` -- a renderer-agnostic analytical object, not raw block 30 metrics. When it is `None`, the chart has no stall rows. This cross-block dependency is temporary; it disappears when block 30 metrics consolidate into block 3.
 
-### `plot_mem_chart()` signature change
-
-This is the point where block 30 derived data enters the block 3 renderer (see HLD Decision 4: Cross-block data flow for analysis overlay). The `membw` parameter carries a `MemBwAnalysisResult` -- a renderer-agnostic analytical object, not raw block 30 metrics. When `None`, the chart renders exactly as it does today. This cross-block dependency is temporary; it disappears when block 30 metrics consolidate into block 3.
-
-The existing `normal_unit` parameter feeds only the chart heading string (e.g. `"3. Memory Chart (Normalization: per_kernel)"`). It is not passed to the tree evaluator and does not affect bottleneck annotation values. Bottleneck indicator metrics use hardware cycle counter denominators and are independent of `--normal-unit` by construction (see HLD NFR5).
+`tty.py` builds `chart_title` from `--normal-unit` (e.g. `"3. Memory Chart (Normalization: per_kernel)"`) with `format_mem_chart_heading()`. The normalization is not passed to the tree evaluator and does not affect bottleneck annotation values. Bottleneck indicator metrics use hardware cycle counter denominators and are independent of `--normal-unit` by construction (see HLD NFR5).
 
 ```python
 def plot_mem_chart(
-    normal_unit: str,
-    metric_dict: dict[str, Any],
+    metric_dict: dict[str, Any],             # metric name -> value
     *,
-    chart_title: Optional[str] = None,
-    gpu_arch: Optional[str] = None,
-    peak_bw: Optional[PeakBandwidths] = None,
-    membw: MemBwAnalysisResult | None = None,   # NEW (HLD Decision 2)
+    chart_title: str,
+    gpu_arch: str,                           # selects the layout
+    units: dict[str, str],                   # metric name -> config unit
+    membw: Optional[MemBwAnalysisResult] = None,
 ) -> str:
 ```
 
 ### Guidance renderer
 
 ```python
-def render_membw_guidance(membw: MemBwAnalysisResult) -> str:
-    ...  # called by tty.py after plot_mem_chart; concatenated for stdout
+def _render_membw_guidance(
+    membw_result: MemBwAnalysisResult,
+    chart_width: int = 0,
+) -> str:
+    ...  # in tty.py; called after plot_mem_chart, and sized to the chart width
 ```
+
+When no bottleneck is active, it prints a single status line instead of the panel.
 
 > **Demo mockups only -- fake data, for visualization purposes only.** The screenshots below illustrate the rich layout capabilities of the memory chart with bottleneck annotations overlaid. They do not represent real profiling output.
 
@@ -816,8 +799,7 @@ Primary: `sample/membw_analysis_test_suite/` -- existing HIP microbenchmarks tar
 ## References
 
 - `src/rocprof_compute_soc/analysis_configs/gfx950/3000_mem_bw.yaml` -- metric definitions and formulas (tables 3001, 3012, 3018 are primary)
-- `src/utils/mem_chart_gfx9.py` -- memory chart renderer (Rich-based, post-refactor PR #8648)
-- `src/utils/mem_chart_common.py` -- shared chart builders (`build_cache_panel`, `build_bw_edge_column`, etc.)
+- `src/memory_chart/render.py` -- memory chart renderer, drawing the layouts in `src/memory_chart/layouts/`
 - `src/utils/tty.py` -- analyze output orchestration (memory chart branch)
 - `src/utils/parser.py` -- `build_dfs` (target for flag check cleanup)
 - `src/argparser.py` -- `ExperimentalAction` and `--membw-analysis` flag definitions

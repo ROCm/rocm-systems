@@ -5,16 +5,22 @@
 #define AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
 
 #include <dirent.h>
+#include <sys/utsname.h>
 
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <iosfwd>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
@@ -39,11 +45,12 @@ amdsmi_status_t smi_amdgpu_get_bad_page_info(amd::smi::AMDSmiGPUDevice* device, 
 amdsmi_status_t smi_amdgpu_get_bad_page_threshold(amd::smi::AMDSmiGPUDevice* device,
                                                   uint32_t* threshold);
 amdsmi_status_t smi_amdgpu_validate_ras_eeprom(amd::smi::AMDSmiGPUDevice* device);
-amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device,
-                                               amdsmi_error_count_t* err_cnt);
 amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device, int* length,
                                               char* version);
 amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uint32_t* pcie_speed);
+// True when KFD reports the GPU's link to the CPU as xGMI: the GPU has no PCIe host link, and
+// the PCIe link in its config space is emulated. False otherwise, including when the lookup fails.
+bool smi_amdgpu_has_xgmi_host_link(amd::smi::AMDSmiGPUDevice* device);
 // PLX temperature is carried in gpu_metrics rather than hwmon. Reports
 // NOT_SUPPORTED when the reading holds the not-applicable sentinel (an APU has
 // no such sensor), otherwise writes *temperature.
@@ -59,9 +66,7 @@ std::string smi_amdgpu_split_string(std::string str, char delim);
 std::vector<std::string> split_string(const std::string& line, char delim);
 std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus);
 
-uint32_t smi_brcm_get_value_u32(const std::string& folder, const std::string& file_name);
-std::string smi_brcm_get_value_string(const std::string& folder, const std::string& file_name);
-amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string& command, std::string* data);
+std::string smi_read_sysfs_string(const std::string& folder, const std::string& file_name);
 
 amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len, std::string newString);
 
@@ -314,12 +319,6 @@ const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type);
  */
 void init_asic_info_defaults(amdsmi_asic_info_t* info);
 
-inline constexpr auto kAmdgpuDkmsRoot = std::string_view{"/var/lib/dkms/amdgpu"};
-
-auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
-                                      std::string_view package_version, amdsmi_driver_info_t* info)
-    -> amdsmi_status_t;
-
 /**
  *  @brief Format a DRM driver date such as ``20150101`` as ``2015/01/01 00:00``.
  *
@@ -327,6 +326,11 @@ auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
  *  date report.
  */
 auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string;
+
+inline constexpr auto kAmdgpuDkmsRoot = std::string_view{"/var/lib/dkms/amdgpu"};
+inline constexpr auto kRpmPath = std::string_view{"/usr/bin/rpm"};
+inline constexpr auto kRpmQueryTimeout = std::chrono::milliseconds{5000};
+inline constexpr auto kKmodRetryInterval = std::chrono::seconds{5};
 
 /**
  *  @brief Select the DKMS package built for a running kernel.
@@ -339,11 +343,132 @@ auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string;
  *             /var/lib/dkms/amdgpu).
  *  @param[in] release Kernel release from uname, such as 6.8.0-124-generic.
  *  @param[in] machine Hardware name from uname, such as x86_64.
- *  @param[out] active_version Cleared on entry. Set to PACKAGE_VERSION when
- *              the kernel symlink points at a validated package.
+ *  @param[out] active_version Cleared on entry. Set to PACKAGE_VERSION, such as
+ *              6.19.14-2370381.24.04, when the kernel symlink points at a
+ *              validated package.
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS when a package is found.
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED when there is none.
+ *  @retval ::AMDSMI_STATUS_INVAL if @p active_version is null.
  */
 auto smi_amdgpu_get_active_dkms_version(std::string_view dkms_root, std::string_view release,
                                         std::string_view machine, std::string* active_version)
     -> amdsmi_status_t;
+
+/**
+ *  @brief List the amdgpu-kmod RPM versions installed for a running kernel.
+ *
+ *  @details Runs ``<rpm_path> --eval '%{_dbpath}'`` and then, only when that
+ *  directory holds a packages file (Packages, Packages.db or rpmdb.sqlite),
+ *  ``<rpm_path> -qa --qf '%{VERSION}-%{RELEASE}\n' amdgpu-kmod-<release>``,
+ *  which lists nothing, and exits 0, when that package is not installed.
+ *  The first command is a check before the query, which makes rpm create a
+ *  database where it finds none; it does not guarantee that rpm writes
+ *  nothing. Both run without a shell, with LC_ALL=C and HOME=/ as their whole
+ *  environment so that rpm reads no configuration of the caller, and without
+ *  the file descriptors the caller has open.
+ *
+ *  @param[in] rpm_path rpm executable.
+ *  @param[in] release Kernel release from uname; kmod package names embed it.
+ *  @param[out] kmod_versions Cleared on entry. Set to one ``VERSION-<build>``
+ *              for each installed version, where build is the leading digits
+ *              of RELEASE (6.16.13.000000-2412345). Empty when the package
+ *              is not installed.
+ *  @param[in] timeout Limit for both commands together, up to the exit of
+ *             rpm. An rpm that is still running then is left to end by
+ *             itself and is not signalled or killed. While it runs, this
+ *             function starts no other rpm and reports
+ *             ::AMDSMI_STATUS_NOT_SUPPORTED; the first call after it has
+ *             ended reaps it.
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS when rpm listed the installed versions, also
+ *          when it listed none.
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED when a listed version has no build,
+ *          or rpm failed or gave no complete answer in time.
+ *  @retval ::AMDSMI_STATUS_INVAL if @p kmod_versions is null.
+ */
+auto smi_amdgpu_get_kmod_versions(std::string_view rpm_path, std::string_view release,
+                                  std::vector<std::string>* kmod_versions,
+                                  std::chrono::milliseconds timeout = kRpmQueryTimeout)
+    -> amdsmi_status_t;
+
+/**
+ *  @brief Keeps the answer of smi_amdgpu_get_kmod_versions() for one kernel
+ *  release, asking rpm again only when that is worth it.
+ *
+ *  @details A list that rpm gave is kept until the object ends: the package
+ *  of a running kernel does not change, and rpm is slow to start. That holds
+ *  for an empty list too: no package installed is an answer. A failed lookup,
+ *  such as an rpm that was busy, is asked again after @p retry_after.
+ *  Thread safe. rpm runs once at a time and without the lock. A caller that
+ *  has no answer for @p release waits for it. One that has only a stale
+ *  failure gets that at once while another caller asks rpm, and asks rpm
+ *  itself otherwise.
+ */
+class KmodVersionCache {
+ public:
+  explicit KmodVersionCache(std::string_view rpm_path,
+                            std::chrono::milliseconds retry_after = kKmodRetryInterval);
+
+  /** @brief The versions for @p release, empty when rpm gave none. */
+  auto versions(std::string_view release) -> std::vector<std::string>;
+
+ private:
+  std::mutex mutex_;
+  std::condition_variable refreshed_;
+  std::string rpm_path_;
+  std::chrono::milliseconds retry_after_;
+  std::string release_;
+  std::vector<std::string> versions_;
+  std::chrono::steady_clock::time_point asked_at_{};
+  bool has_answer_ = false;
+  bool is_found_ = false;
+  bool is_refreshing_ = false;
+};
+
+/**
+ *  @brief Fill the version and package fields of @p info.
+ *
+ *  @details The package is the first of DKMS, kmod that has the kernel version
+ *  (A.B.C) of the module, and its build is added to the full version. A package
+ *  for another module is not reported, and neither is one whose build does not
+ *  fit behind the module version in driver_full_version. driver_version,
+ *  driver_date and driver_name are left alone.
+ *
+ *  @param[in] module_version /sys/module/amdgpu/version, or N/A.
+ *  @param[in] dkms_version Output of smi_amdgpu_get_active_dkms_version().
+ *  @param[in] kmod_version One version of smi_amdgpu_get_kmod_versions().
+ *  @param[out] info Its version and package fields are overwritten.
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS, or ::AMDSMI_STATUS_INVAL if @p info is null.
+ */
+auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
+                                      std::string_view dkms_version, std::string_view kmod_version,
+                                      amdsmi_driver_info_v2_t* info) -> amdsmi_status_t;
+
+/**
+ *  @brief Look up the driver package of the loaded module, then fill the
+ *  version and package fields of @p info.
+ *
+ *  @details Reads the DKMS package under @p dkms_root for the kernel in
+ *  @p uts. @p kmod_lookup is called with the kernel release, and only when the
+ *  module has an amdgpu version (A.B.C or A.B.C.D) that the DKMS package does
+ *  not match. The kmod package is the only version it lists that has the
+ *  kernel version of the module; when it lists several different ones, none
+ *  is reported.
+ *
+ *  @param[in] module_version /sys/module/amdgpu/version, or N/A.
+ *  @param[in] dkms_root Directory that contains kernel-* symlinks.
+ *  @param[in] uts Kernel release and hardware name from uname.
+ *  @param[in] kmod_lookup Returns the amdgpu-kmod versions for a kernel
+ *             release, as smi_amdgpu_get_kmod_versions() reports them.
+ *  @param[out] info Its version and package fields are overwritten.
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS, or ::AMDSMI_STATUS_INVAL if @p info is null.
+ */
+auto smi_amdgpu_get_driver_versions(
+    std::string_view module_version, std::string_view dkms_root, const utsname& uts,
+    const std::function<std::vector<std::string>(std::string_view)>& kmod_lookup,
+    amdsmi_driver_info_v2_t* info) -> amdsmi_status_t;
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

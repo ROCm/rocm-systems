@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "hsa/hsa_api_trace_minimal.h"
+#include "hsa/hsa_api_trace.h"
 
 #include "rocjitsu/code/dbt/virtual_lds.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
@@ -126,11 +126,11 @@ struct VirtualLdsRuntimeApi {
   decltype(&hsa_signal_create) signal_create = nullptr;
   decltype(&hsa_signal_destroy) signal_destroy = nullptr;
   decltype(&hsa_signal_load_scacquire) signal_load_scacquire = nullptr;
-  hsa_amd_agent_iterate_memory_pools_fn_t iterate_memory_pools = nullptr;
-  hsa_amd_memory_pool_get_info_fn_t memory_pool_get_info = nullptr;
-  hsa_amd_memory_pool_allocate_fn_t memory_pool_allocate = nullptr;
-  hsa_amd_memory_pool_free_fn_t memory_pool_free = nullptr;
-  hsa_amd_agents_allow_access_fn_t agents_allow_access = nullptr;
+  decltype(&hsa_amd_agent_iterate_memory_pools) iterate_memory_pools = nullptr;
+  decltype(&hsa_amd_memory_pool_get_info) memory_pool_get_info = nullptr;
+  decltype(&hsa_amd_memory_pool_allocate) memory_pool_allocate = nullptr;
+  decltype(&hsa_amd_memory_pool_free) memory_pool_free = nullptr;
+  decltype(&hsa_amd_agents_allow_access) agents_allow_access = nullptr;
 };
 
 /// @brief Install the original HSA entry points used by virtual-LDS dispatches.
@@ -165,12 +165,12 @@ private:
     bool has_kernarg_pool = false;
   };
   struct PoolSearch {
-    hsa_amd_memory_pool_get_info_fn_t get_info = nullptr;
+    decltype(&hsa_amd_memory_pool_get_info) get_info = nullptr;
     Pools pools;
   };
   struct GlobalKernargPoolSearch {
-    hsa_amd_agent_iterate_memory_pools_fn_t iterate_pools = nullptr;
-    hsa_amd_memory_pool_get_info_fn_t get_info = nullptr;
+    decltype(&hsa_amd_agent_iterate_memory_pools) iterate_pools = nullptr;
+    decltype(&hsa_amd_memory_pool_get_info) get_info = nullptr;
     hsa_amd_memory_pool_t kernarg_pool{};
     bool found = false;
   };

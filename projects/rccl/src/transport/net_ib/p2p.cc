@@ -82,6 +82,8 @@ static ncclResult_t ncclIbPrintWr(struct ibv_send_wr* wr, char* wrStr) {
 // The alignment for IB writes that is required to make LL and LL128 protocols work
 #define IB_WRITE_CHUNK_ALIGNMENT 128
 
+// Keep this hot loop on a 64-byte boundary.
+__attribute__((aligned(64)))
 ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   struct ncclIbRequest** reqs = comm->sendReqs[slot];
   volatile struct ncclIbSendFifo* slots = comm->ctsFifo[slot];
@@ -91,6 +93,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   TRACE(NCCL_NET, "NET/IB: %s: Posting a send request (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d)", __func__, reqs[0],
         reqs[0]->base, reqs[0]->id, slot, nreqs);
 
+  bool flagFlush = comm->flagFlush && slots[0].flagFlush;
   ncclResult_t ret;
   int nqps = 0;
   NCCLCHECK(ncclIbCommBaseGetNqpsPerRequest(&comm->base, &nqps));
@@ -140,11 +143,33 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   // - nreqs > 1
   //      Send size is still sent but receiver ignores it since the sizes are
   //      written to directly to remote completion records array
-  uint32_t immData = comm->base.recvMatchingScheme == BY_ID ? (uint32_t)(reqs[0]->id % UINT32_MAX) : reqs[0]->send.size;
+  uint32_t immData = comm->base.recvMatchingScheme == BY_ID ? (uint32_t)reqs[0]->id : reqs[0]->send.size;
 
   struct ibv_send_wr* lastWr = comm->wrs + nreqs - 1;
-  if (nreqs > 1 ||
-      (!(comm->base.remOooRq && comm->base.localOooRq) && comm->ar && reqs[0]->send.size > ncclIbArThreshold)) {
+  struct ibv_send_wr* sizesWr = NULL;
+  struct ibv_send_wr* flagWr = NULL;
+  if (flagFlush) {
+    // Payload (and sizes) go out as plain RDMA writes followed by the flag
+    // write, which carries the immediate data. Each QP writes its own flag.
+    if (nreqs > 1) {
+      sizesWr = ++lastWr;
+      memset(sizesWr, 0, sizeof(struct ibv_send_wr));
+      sizesWr->wr.rdma.remote_addr = comm->remCmplsRecords.addr + slot * sizeof(struct ncclIbRequestCompletionRecord);
+      sizesWr->num_sge = 1;
+      sizesWr->wr_id = wr_id;
+      sizesWr->opcode = IBV_WR_RDMA_WRITE;
+      sizesWr->next = sizesWr + 1;
+    }
+    lastWr++;
+    memset(lastWr, 0, sizeof(struct ibv_send_wr));
+    comm->flagFlushSrc[slot] = reqs[0]->id + 1;
+    comm->flagFlushSge.addr = (uint64_t)&comm->flagFlushSrc[slot];
+    lastWr->sg_list = &comm->flagFlushSge;
+    lastWr->num_sge = 1;
+    lastWr->wr.rdma.rkey = comm->flagFlushRkey;
+    flagWr = lastWr;
+  } else if (nreqs > 1 ||
+             (!(comm->base.remOooRq && comm->base.localOooRq) && comm->ar && reqs[0]->send.size > ncclIbArThreshold)) {
     // When Adaptive Routing is enabled, send the bulk of the data first as an
     // RDMA Write.
     lastWr++;
@@ -153,6 +178,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
       // Write remote sizes array
       lastWr->wr.rdma.remote_addr = comm->remCmplsRecords.addr + slot * sizeof(struct ncclIbRequestCompletionRecord);
       lastWr->num_sge = 1;
+      sizesWr = lastWr;
     }
   }
   lastWr->wr_id = wr_id;
@@ -209,16 +235,17 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
       }
     }
 
-    if (nreqs > 1) {
+    if (sizesWr) {
       // Populating the correct gather information based on the device and
       // slot used.
       // Note that the lkey is already correct from the initialization phase.
-      lastWr->sg_list = &(comm->devs[devIndex].sge);
-      lastWr->sg_list[0].addr = (uint64_t)(comm->remCmplsRecords.elems[slot]);
-      lastWr->sg_list[0].length = nreqs * sizeof(int);
+      sizesWr->sg_list = &(comm->devs[devIndex].sge);
+      sizesWr->sg_list[0].addr = (uint64_t)(comm->remCmplsRecords.elems[slot]);
+      sizesWr->sg_list[0].length = nreqs * sizeof(int);
       // Populate the correct RKey based on the device used
-      lastWr->wr.rdma.rkey = comm->remCmplsRecords.rkeys[devIndex];
+      sizesWr->wr.rdma.rkey = comm->remCmplsRecords.rkeys[devIndex];
     }
+    if (flagWr) flagWr->wr.rdma.remote_addr = comm->flagFlushRemAddr + qpIndex * NCCL_GDR_FLUSH_FLAG_STRIDE;
 
     // Selective retransmission: skip posting if already delivered
     if (!(comm->base.resiliency && reqs[0]->send.sentData[qpIndex] == true)) {
@@ -299,6 +326,8 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   return ncclSuccess;
 }
 
+// Keep this hot loop on a 64-byte boundary.
+__attribute__((aligned(64)))
 ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle,
                          void** request) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
@@ -326,6 +355,8 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
     *request = NULL;
     return ncclSuccess;
   }
+  // Order the nreqs load after the idx load above; on weakly ordered CPUs it could otherwise return a stale value.
+  std::atomic_thread_fence(std::memory_order_acquire);
   nreqs = slots[0].nreqs;
   // Wait until all data has arrived
   for (int r = 1; r < nreqs; r++)
@@ -438,6 +469,8 @@ isendFail:
   return ret;
 }
 
+// Keep this hot loop on a 64-byte boundary.
+__attribute__((aligned(64)))
 ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* req, int slot) {
   ncclIbQp* ctsQp = NULL;
   NCCLCHECK(ncclIbRecvCommGetQpForCts(comm, req->id, &ctsQp));
@@ -459,6 +492,9 @@ ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
 
   wr.opcode = IBV_WR_RDMA_WRITE;
   wr.send_flags = comm->remCtsFifo.flags; // IBV_SEND_INLINE
+  // The QP's max_inline_data only covers one CTS entry, so multi-receive
+  // CTS writes must not be inlined.
+  if (req->nreqs > 1) wr.send_flags &= ~IBV_SEND_INLINE;
 
   // We need to occasionally post a request with the IBV_SEND_SIGNALED flag, otherwise
   // the send queue will never empty.
@@ -516,6 +552,8 @@ postFifoFail:
   return postFifoRet;
 }
 
+// Keep this hot loop on a 64-byte boundary.
+__attribute__((aligned(64)))
 ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** phandles,
                          void** request) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
@@ -573,6 +611,7 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
 
   // Store the request in a table for easy retrieval by ID.
   comm->recvReqs[req->id % NET_IB_MAX_REQUESTS] = req;
+  req->recv.flagFlush = comm->flagFlush && comm->flagFlushHint;
 
   TIME_START(1);
   for (int i = 0; i < nqps; i++) {
@@ -620,6 +659,7 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
     localElem[i].size = sizes[i]; // Sanity/Debugging
     localElem[i].tag = tags[i];
     localElem[i].idx = comm->base.fifoHead + 1;
+    localElem[i].flagFlush = req->recv.flagFlush;
   }
 
   // Post to FIFO to notify sender
@@ -658,7 +698,6 @@ irecvFail:
 ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void** mhandles, void** request) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
   ncclResult_t ret = ncclSuccess;
-  ncclResult_t iflushRet = ncclSuccess;
   struct ncclIbRequest* req = NULL;
   struct ncclIbMrHandle* mhandle = NULL;
   int last = -1;
@@ -684,8 +723,9 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = (uint64_t)(req - comm->base.reqs) + NCCL_IB_FLUSH_REQ_WR_ID_OFFSET;
 
+    // Chain the unsignaled write to the signaled read: one post, RC send-queue order keeps the fence.
+    struct ibv_send_wr writeWr;
     if (useGpuFlushMem) {
-      struct ibv_send_wr writeWr;
       memset(&writeWr, 0, sizeof(writeWr));
       writeWr.wr_id = wr.wr_id;
       writeWr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
@@ -694,10 +734,8 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
       writeWr.num_sge = 1;
       writeWr.opcode = IBV_WR_RDMA_WRITE;
       writeWr.send_flags = 0;
-      struct ibv_send_wr* badWriteWr;
-      NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &writeWr, &badWriteWr), ret, iflushFail);
-    }
-    if (useGpuFlushMem) {
+      writeWr.next = &wr;
+
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
     } else {
@@ -713,7 +751,8 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
           wr.wr_id);
     TIME_START(4);
     struct ibv_send_wr* bad_wr;
-    NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr), iflushRet, iflushFail);
+    struct ibv_send_wr* postWr = useGpuFlushMem ? &writeWr : &wr;
+    NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, postWr, &bad_wr), ret, iflushFail);
     TIME_STOP(4);
 
     ncclIbAddEvent(req, i);
@@ -821,6 +860,19 @@ static inline ncclResult_t ncclIbRequestComplete(struct ncclIbRequest* r, int* d
   TRACE(NCCL_NET, "NET/IB: %s: %s request completed (req=%p, comm=%p, id=%ld, type=%s)", __func__,
         r->base->isSend ? "Send" : "Recv", r, r->base, r->id, ncclIbReqTypeStr[r->type]);
   *done = 1;
+  if (r->type == NCCL_NET_IB_REQ_RECV && r->recv.flagFlush) {
+    // net.cc reads this right after ncclIbTest() completes the request, so it
+    // describes this request even if a later one already completed.
+    // Same QPs as ncclIbCommBaseGetQpForRequest: nQps consecutive QPs from
+    // (id * nQps) % nqps; nQps is 1 or nqps, so they never wrap.
+    struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)r->base;
+    int nQpsPerRequest = 0;
+    NCCLCHECK(ncclIbCommBaseGetNqpsPerRequest(&recvComm->base, &nQpsPerRequest));
+    uint64_t nQps = nQpsPerRequest;
+    uint64_t first = (r->id * nQps) % recvComm->base.nqps;
+    recvComm->flagFlushLastDesc = (nQps << NCCL_GDR_FLUSH_COUNT_SHIFT) | (first << NCCL_GDR_FLUSH_FIRST_SHIFT) |
+                                  ((r->id + 1) & NCCL_GDR_FLUSH_SEQ_MASK);
+  }
   if (sizes && r->type == NCCL_NET_IB_REQ_RECV) {
     TRACE(NCCL_NET, "NET/IB: %s: Recv request completed (req=%p, comm=%p, id=%ld, type=%s, nreqs=%d)", __func__, r,
           r->base, r->id, ncclIbReqTypeStr[r->type], r->nreqs);
@@ -1057,6 +1109,8 @@ static inline ncclResult_t ncclIbCompletionEventProcess(struct ncclIbNetCommBase
   return ncclSuccess;
 }
 
+// Keep this hot loop on a 64-byte boundary.
+__attribute__((aligned(64)))
 ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
   struct ncclIbRequest* r = (struct ncclIbRequest*)request;
   *done = 0;

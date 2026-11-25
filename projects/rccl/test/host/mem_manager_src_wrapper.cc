@@ -4,10 +4,6 @@
 // Stubs that need real RCCL class layouts for correct C++ name mangling.
 // These are compiled with hipcc so they see the real headers.
 
-#include "roctx.h"
-roctx_scoped_range_in::roctx_scoped_range_in(const char*) noexcept {}
-roctx_scoped_range_in::~roctx_scoped_range_in() noexcept {}
-
 #include "utils.h"
 void* ncclMemoryStack::allocateSpilled(ncclMemoryStack*, size_t, size_t) { return nullptr; }
 

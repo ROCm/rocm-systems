@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vdsdir.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include <memory>
 
@@ -26,6 +27,8 @@ DsParamLoadVdsdir::DsParamLoadVdsdir(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_PARAM_LOAD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::DirectLds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -33,8 +36,9 @@ DecodeResult decodeDsParamLoadVdsdir(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vdsdir::validate_encoding(
       "ds_param_load", reinterpret_cast<const Vdsdir::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsParamLoadVdsdir>(opcode);
 }
 } // namespace detail
@@ -55,6 +59,8 @@ DsDirectLoadVdsdir::DsDirectLoadVdsdir(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_DIRECT_LOAD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::DirectLds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -62,8 +68,9 @@ DecodeResult decodeDsDirectLoadVdsdir(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vdsdir::validate_encoding(
       "ds_direct_load", reinterpret_cast<const Vdsdir::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsDirectLoadVdsdir>(opcode);
 }
 } // namespace detail

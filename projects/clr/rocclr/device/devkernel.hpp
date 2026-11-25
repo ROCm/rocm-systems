@@ -224,6 +224,7 @@ class Kernel {
     bool hasFuncMaxDynamicSharedSize_;    //!< context/function-level override was set
     bool hasFuncPreferredShmemCarveout_;  //!< context/function-level override was set
     int groupMemCarveout_;                //!< effective LDS carveout; -1 selects device default
+    uint32_t coarseMemCarveout_;      //!< LDS coarse carveout (enum value as opposed to percentage)
   };
 
   //! Default constructor

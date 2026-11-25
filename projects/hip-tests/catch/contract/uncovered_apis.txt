@@ -16,14 +16,14 @@
 # later added for an API here, remove its line — the checker flags redundant entries.
 
 # --- External-semaphore graph nodes (8) ---
-# The add path faults (SIGSEGV) without a real external semaphore, which can only be
-# produced by an external graphics/compute producer (Vulkan vkGetSemaphoreFdKHR,
-# DMA-buf, D3D/NvSci). Confirmed cross-arch: identical SIGSEGV on gfx1101 and
-# MI100/gfx908 even with valid non-null synthetic params, never launched. The
-# in-tree Vulkan unit suite (catch/unit/vulkan_interop) already covers these with a
-# real producer; the device-only contract layer deliberately does not pull in Vulkan.
-hipGraphAddExternalSemaphoresSignalNode        # ext-sem: add faults without a real Vulkan semaphore (cross-arch SIGSEGV)
-hipGraphAddExternalSemaphoresWaitNode          # ext-sem: add faults without a real Vulkan semaphore (cross-arch SIGSEGV)
+# A node holds a real external semaphore, which only an external graphics/compute
+# producer can create (Vulkan vkGetSemaphoreFdKHR, DMA-buf, D3D/NvSci); the
+# device-only contract layer deliberately does not pull in Vulkan. The SIGSEGV once
+# seen on every call came from null HIP runtime dispatch-table entries, not from the
+# semaphore; invalid-argument checks for all eight are in
+# catch/unit/graph/hipGraphExternalSemaphoresNodes.cc.
+hipGraphAddExternalSemaphoresSignalNode        # ext-sem: a signal node needs a real Vulkan semaphore
+hipGraphAddExternalSemaphoresWaitNode          # ext-sem: a wait node needs a real Vulkan semaphore
 hipGraphExternalSemaphoresSignalNodeGetParams  # ext-sem: requires a signal node that cannot be constructed device-only
 hipGraphExternalSemaphoresSignalNodeSetParams  # ext-sem: requires a signal node that cannot be constructed device-only
 hipGraphExternalSemaphoresWaitNodeGetParams    # ext-sem: requires a wait node that cannot be constructed device-only

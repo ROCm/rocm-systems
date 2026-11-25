@@ -8,6 +8,10 @@ Measure each revision in separate Release build directories and alternate their
 run order. Small simulator changes are easily hidden by CPU frequency, process
 startup, JIT caches, and unrelated host activity.
 
+For instruction microbenchmarks, see the [rj-arith measured policies and sampling
+method](arith-design.md#benchmarking). They are distinct from the end-to-end
+simulator measurements below.
+
 ## Metrics
 
 | Metric | Use |
@@ -81,6 +85,10 @@ Run from each revision's build tree; do not install either build into a shared
 SDK during the comparison.
 
 ## Prepare the host
+
+For dedicated Actions benchmark runners, see the
+[benchmark runner setup guide](benchmark-runner-setup.md) for CPU reservation,
+fixed frequency and idle settings, and Bpfland.
 
 Prefer a quiet host. If background work cannot be stopped, reserve complete
 physical cores with disjoint systemd cgroup cpusets. `taskset` constrains only
@@ -164,7 +172,7 @@ systemctl show "${background_units[@]}" \
 ```
 
 The sample wrapper below places the complete `/usr/bin/time`, `taskset`, `perf`,
-RocJITsu, and workload chain in a transient sibling scope, then drops privileges
+rocjitsu, and workload chain in a transient sibling scope, then drops privileges
 before measurement. Its pinned CPU pair is a subset of the reservation. Pass
 every required runtime input explicitly to `systemd-run`; do not measure only
 the client process.

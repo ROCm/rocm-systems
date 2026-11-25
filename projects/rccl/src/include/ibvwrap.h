@@ -77,6 +77,27 @@ ncclResult_t wrap_ibv_query_ece(struct ibv_qp* qp, struct ibv_ece* ece, int* sup
 ncclResult_t wrap_ibv_set_ece(struct ibv_qp* qp, struct ibv_ece* ece, int* supported);
 ncclResult_t wrap_ibv_query_port_speed(struct ibv_context* context, uint8_t port_num, uint64_t* speed);
 
+/* Extended verbs used by the GIN QP factory (gin_rocshmem_gda_factory.cc).
+ * These mirror the libibverbs extended-verbs entry points. Each returns
+ * ncclSuccess / fills *ret, or ncclSystemError when the underlying symbol is
+ * unavailable (optional symbols left NULL by the loader). */
+ncclResult_t wrap_ibv_create_cq_ex(struct ibv_cq_ex** ret, struct ibv_context* context,
+                                   struct ibv_cq_init_attr_ex* cq_attr);
+/* ibv_cq_ex_to_cq: a pointer cast (ibv_cq shares the leading layout). Returns
+ * NULL for a NULL input. No library symbol involved. */
+struct ibv_cq* wrap_ibv_cq_ex_to_cq(struct ibv_cq_ex* cq);
+ncclResult_t wrap_ibv_alloc_parent_domain(struct ibv_pd** ret, struct ibv_context* context,
+                                          struct ibv_parent_domain_init_attr* attr);
+ncclResult_t wrap_ibv_create_qp_ex(struct ibv_qp** ret, struct ibv_context* context,
+                                   struct ibv_qp_init_attr_ex* qp_init_attr_ex);
+/* ssize_t count of GID entries, or -1 on error / missing symbol. */
+ssize_t wrap_ibv_query_gid_table(struct ibv_context* context, struct ibv_gid_entry* entries, size_t max_entries,
+                                 uint32_t flags);
+/* 1 if DMA-BUF MR registration is supported on this PD's device, 0 otherwise.
+ * Uses rccl's native probe: a dummy ibv_reg_dmabuf_mr(fd=-1) and an errno check
+ * (see net_ib_cast/gdr.cc). Requires a valid PD; tests the real verbs/NIC path. */
+int wrap_ibv_is_dmabuf_supported(struct ibv_pd* pd);
+
 static inline ncclResult_t wrap_ibv_create_ah(struct ibv_ah** ret, struct ibv_pd* pd, struct ibv_ah_attr* attr) {
   if (ret) *ret = NULL; /*don't leave a stale pointer behind if creation fails*/
   if (ret == NULL || pd == NULL || pd->context == NULL || attr == NULL) {

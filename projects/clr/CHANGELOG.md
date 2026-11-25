@@ -2,6 +2,55 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
+## HIP 7.18.0 for ROCm 10.3.0
+
+### Added
+* New HIP APIs
+    - Graph Management: added graph and graph-node identifier queries.
+      * `hipGraphNodeGetLocalId` returns a node's graph-local ID.
+      * `hipGraphNodeGetToolsId` returns the node ID used by profiling tools.
+      * `hipGraphGetId` returns a graph ID.
+      * `hipGraphExecGetId` returns an executable graph ID.
+    - Memory Management: support for API parity with corresponding CUDA API.
+      * `hipMemcpyWithAttributesAsync` performs a single asynchronous 1D copy with the attributes
+        described by a `hipMemcpyAttributes` structure, without requiring the caller to build the
+        arrays that `hipMemcpyBatchAsync` takes.
+      * `hipMemcpy3DWithAttributesAsync` performs a single asynchronous 3D copy described by a
+        `hipMemcpy3DBatchOp` structure, without requiring the caller to build the operation list
+        that `hipMemcpy3DBatchAsync` takes.
+      * `hipArrayGetSparseProperties` returns the layout properties of a sparse HIP array in a
+        `hipArraySparseProperties` structure. Added for source compatibility: AMD devices do not
+        support sparse arrays, so it zeroes the structure and returns `hipErrorNotSupported`.
+      * `hipArrayGetPlane` returns a single format plane of a multiplanar HIP array. Added for
+        source compatibility: HIP does not implement multiplanar arrays, so no array has planes
+        and it validates its arguments and returns `hipErrorNotSupported`.
+    - Execution affinity: support for API parity with corresponding CUDA API.
+      * `hipDeviceGetExecAffinitySupport` reports whether a device supports a given execution-affinity
+        type and the device's CU-masking granularity. `hipExecAffinityTypeCUCount` is always reported
+        as supported. Two HIP-specific extension types, `hipExtExecAffinityTypeGranularityCU` and
+        `hipExtExecAffinityTypeGranularityWGP`, report the granularity the applies to the CU mask.
+
+### Resolved issues
+
+* Fixed `surf1DLayeredread/write` and `surf2DLayeredread/write` to address array layers rather than treating the layer index as a mip level. Reads and writes now access the requested nonzero layer.
+* Fixed texture-object gather component selection, the `tex2Dgather` and `tex2DLayered` pointer overloads, the horizontal derivative passed by `tex3DGrad`, and explicit mip levels in `tex1DLayeredLod`/`tex2DLayeredLod`.
+* `hipDrvLaunchKernelEx` now validates cluster dimensions before dispatch. Previously, an oversized or overflowing cluster size (e.g. exceeding the device maximum, or a product that overflows `uint32_t`) reached the hardware and caused an `HSA_STATUS_ERROR_INVALID_ARGUMENT` queue abort. Both `hipDrvLaunchKernelEx` and `hipLaunchKernelExC` now return `hipErrorInvalidClusterSize` at the API boundary for invalid cluster dimensions, matching CUDA's `cudaErrorInvalidClusterSize` / `CUDA_ERROR_INVALID_CLUSTER_SIZE` behavior. A cluster size greater than 1 on a device that does not support clusters (`clusterMaxSize == 0`) is also rejected.
+* Kernels without an LDS carveout preference now dispatch with no preference instead of a 0% LDS hint, and `hipFuncSetCacheConfig(hipFuncCachePreferNone)` no longer overrides `hipDeviceSetCacheConfig`.
+* `hipDeviceGetCacheConfig` now returns the value set by `hipDeviceSetCacheConfig` on devices with a configurable LDS carveout.
+* `hiprtcCreateProgram` and `hiprtcLinkCreate` no longer crash when the COMGR library cannot be loaded or is incompatible. They now return `HIPRTC_ERROR_INTERNAL_ERROR`. This check runs before argument validation, so when COMGR is unavailable, invalid arguments also yield `HIPRTC_ERROR_INTERNAL_ERROR` instead of `HIPRTC_ERROR_INVALID_PROGRAM` or `HIPRTC_ERROR_INVALID_INPUT`. The cause of the load failure is logged at `AMD_LOG_LEVEL=1` or higher.
+* Resolved heap corruption when `hipStreamDestroy` is called on a stream that `hipDeviceReset` already destroyed. When the stale handle no longer refers to a live stream, `hipStreamDestroy` now returns `hipErrorInvalidHandle`.
+* Resolved a segmentation fault on every call to the eight external-semaphore graph node APIs (`hipGraphAddExternalSemaphoresSignalNode`, `hipGraphAddExternalSemaphoresWaitNode`, and their `GetParams`/`SetParams`/`Exec...SetParams` APIs). Their runtime dispatch-table entries were never set; they now route to the implementations, and `hipGraphAddExternalSemaphoresSignalNode` returns `hipErrorInvalidValue` for invalid arguments as the wait variant does.
+* On Windows, `hipMalloc3DArray`, `hipArray3DCreate` and `hipMallocMipmappedArray` no longer reject 3D extents above 2048 or layered arrays with more than 2048 layers. `maxTexture3D`, `maxSurface3D` and the layered limits (`maxTexture1DLayered`, `maxTexture2DLayered` and their surface equivalents) now report the device's limits, matching Linux.
+* `hipCtxDestroy` no longer releases the device context for a context the caller did not create with `hipCtxCreate`, which could free the context while the runtime still referenced it.
+
+### Changed
+
+* After `hipFuncSetCacheConfig`, `preferredShmemCarveout` reads back `-1` for `hipFuncCachePreferNone` (was `0`) and `0` for `hipFuncCachePreferL1` (was `1`).
+* `hipCtxDestroy` returns `hipErrorInvalidContext` for a context the caller did not create with `hipCtxCreate` (was `hipSuccess`).
+* On gfx12 and later, pitched allocations use 128-byte alignment instead of 256, matching the hardware's linear pitch granularity. `hipMallocPitch`, `hipMemAllocPitch` and `hipMalloc3D` return a 128-byte-aligned pitch, and `hipDeviceProp_t::texturePitchAlignment` (OpenCL `CL_DEVICE_IMAGE_PITCH_ALIGNMENT`) reports 128. A 260-byte row now yields a 384-byte pitch rather than 512, so the allocation size changes with it. Earlier hardware is unchanged at 256 bytes. Applications that hard-coded the previous pitch, or derived a buffer size from it, will see different values.
+* Stream completion signals are now placed in device memory by default, as graph signals already are, on GPUs with a large BAR whose ROCr reports a signal-capable device pool, while no profiler tool is attached. Empty kernel dispatches and multi-stream launches get faster, while host reads of completion state get slower: `hipEventQuery`, `hipEventElapsedTime`, and a short kernel launched and synchronized on its own can take a few microseconds longer. Set `DEBUG_CLR_DEV_SIGNALS=0` to keep stream completion signals in host memory.
+* `hipMemPrefetchAsync` and `hipMemPrefetchAsync_v2` with a null stream and a GPU destination now enqueue the prefetch on the current device's null stream, as they already did for a host destination and as CUDA does (was the destination GPU's null stream). Null-stream prefetches are now ordered with each other and with other work on the current device's null stream, and `hipStreamSynchronize(nullptr)` and `hipDeviceSynchronize` wait for them. They are no longer ordered after work on the destination GPU's null stream.
+
 ## HIP 7.17.0 for ROCm 10.2.0
 
 ### Added
@@ -10,18 +59,41 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
       * `hipModuleEnumerateFunctions` returns the function handles defined in a loaded module.
     - Library Management: support for API parity with corresponding CUDA API.
       * `hipLibraryGetModule` returns the module handle associated with a library.
-* Disable HRR capture feature
-* Support for recovering the allocation properties of an imported virtual memory handle. `hipMemGetAllocationPropertiesFromHandle()` now reports `hipMemLocationTypeHost` for a host-backed allocation obtained from `hipMemImportFromShareableHandle()`, instead of always reporting device memory. For a device-backed allocation it reports the owning device rather than whichever device was current when the handle was imported.
+      * `hipKernelSetAttributeForDevice` sets a device-wide attribute for a kernel on a specific device.
+* Support for the `hipMemRangeFlagDmaBufMappingTypePcie` flag in `hipMemGetHandleForAddressRange`, providing parity with CUDA behavior.
+* Support for recovering allocation properties from imported virtual memory handles. `hipMemGetAllocationPropertiesFromHandle` now correctly reports `hipMemLocationTypeHost` for host-backed allocations imported via `hipMemImportFromShareableHandle`, instead of always reporting device memory. For device-backed allocations, it reports the owning device rather than the device that was current when the handle was imported.
+* Support in WSL 2 to prevent indefinite application hangs and to report errors for device-side faults, including out-of-bounds writes, null pointer dereferences, and device asserts.
+* Added `HIP_TARGET_API_VERSION` to enable compile-time API version selection, helping maintain source compatibility with applications built against older HIP API versions.
 
 ### Resolved issues
 
-* Fixed a regression where HIP applications on MI300A and other APUs failed at the first stream creation, `hipMemcpy`, `hipMemset`, or kernel launch with out-of-memory or invalid-argument errors after device-memory AQL rings were enabled by default (`DEBUG_CLR_AQL_DEV_QUEUE=1`). Large BAR now requires a real CPU link and a discrete agent, so APUs keep system-memory rings. WSL/Windows still uses CPU access to the GPU pool for discrete GPUs, because that path does not report link hops the way KFD does. Workaround before the fix: `DEBUG_CLR_AQL_DEV_QUEUE=0`.
+* Resolved a regression on MI300A and other APUs that could cause the first stream creation, `hipMemcpy`, `hipMemset`, or kernel launch to fail with out-of-memory or invalid-argument errors. The runtime now correctly uses system-memory AQL rings on APUs, which share memory with the host and do not provide a discrete device-memory path.
+* Resolved a memory leak in `VirtualGPU::ManagedBuffer` that could occur during stream creation when signal initialization failed. The runtime now properly cleans up partially created resources on error paths.
+* Resolved an issue in `hipLaunchKernel` where invalid or unloaded kernel handles could cause a segmentation fault. Invalid handles are now properly validated and return an appropriate error.
 * A registered `__device__` global that is absent from the loaded code object no longer aborts the process. Symbol lookup now returns `hipErrorInvalidSymbol` from the runtime's variable materialization path (`hipGetSymbolAddress`, `hipLibraryGetGlobal`, and related entry points). `hipModuleGetGlobal` still reports `hipErrorNotFound` for a missing name.
 * Fixed `__hip_bfloat162` comparisons that ignored or misread the high lane. `__hbneu2` now returns true only when both lanes are unordered-not-equal, `__hgt2` and `__hisnan2` now return the per-lane result in `.y` instead of always 1.0, and the `<`, `<=`, `>`, `>=` operators now compare `.y` with `.y`. Code that relied on the previous results may see different values.
+* Fixed an issue that could cause peer-to-peer (P2P) `hipMemcpyAsync()` transfers using the `hipMemcpyDeviceToDeviceNoCU` memcpy kind to fail on certain multi-GPU systems. SDMA engine selection has been improved to ensure reliable P2P transfer operation.
+* Resolved a performance issue affecting large host-to-device (H2D) transfers on integrated (unified-memory) GPUs, where HMM-based KFD userptr pinning could significantly reduce transfer throughput and appear to stall workloads. Large transfers are now routed through the existing staging-copy fallback, improving transfer performance.
+* Fixed a host-blocking issue in `hipMemcpyBatchAsync` that could occur when the API was repeatedly issued on a stream containing a long-running kernel. The implementation now reserves only the total descriptor space required for each dispatch in the kernel argument pool, preventing pool exhaustion and eliminating unnecessary host waits for kernel completion.
+* Resolved a segmentation fault in `hipStreamEndCapture` during multi-stream capture caused by a bookkeeping cycle among capture participants. The fix tracks capture participants in a single origin-stream-owned set, eliminating recursive traversal of forked streams during capture finalization and improving stream capture stability.
+* Resolved a potential deadlock between `hipMallocAsync` and `hipEventSynchronize` during concurrent multi-threaded execution.
+* Fixed incorrect calculations when using the type `bool` for `cooperative_groups::exclusive_scan`. The implementation now correctly handles the identity value for the first active lane and prevents unintended type conversions from `bool` to `int`.
+* Resolved an issue where legacy-stream sync operations (`hipMemset`, `hipMemcpy`) incorrectly invalidated `ThreadLocal` and `Relaxed` graph captures on `hipStreamNonBlocking` streams. These captures now remain active, matching CUDA semantics. `Global`-mode captures and captures involving blocking participants are still invalidated as expected.
+
+### Optimized
+
+* Enhanced graph execution update performance and scalability by reducing update overhead and eliminating quadratic scaling behavior in certain graph update scenarios.
+* Optimized memory allocation capacity on Windows by increasing the maximum aperture size to 4 TiB, enabling larger memory allocations and improving support for memory-intensive workloads.
+* Optimized the performance of `hipMemcpy3DBatchAsync` by reducing SDMA submission overhead. Previously, the runtime issued a separate SDMA submission for each operand, resulting in significant overhead for small transfers. For 4 KB copy operations, latency was approximately 9 µs per operand, with about 94% of the time attributable to submission overhead. This optimization improves the efficiency and performance of batched 3D memory copy operations.
 
 ### Changed
 
 * Stream priority is now disabled to avoid known queue-priority-related issues. Priority streams are currently not supported.
+* The `HIPRTC_USE_RUNTIME_UNBUNDLER` environment variable and its associated functionality have been removed from the HIP runtime. The runtime unbundler path is now always used; setting this variable no longer has any effect.
+
+### Known issues
+
+* A GPU Timeout Detection and Recovery (TDR) event may occur on ROCm 10.2 running under WSL 2 (Windows Subsystem for Linux 2) when executing the `vllm_rocm_gpt-oss-20b_default_inf_fp4` `vLLM` inference workload.
 
 ## HIP 7.16.0 for ROCm 10.1.0
 

@@ -267,9 +267,10 @@ def readFromKFD():
                     stepping_ver = int(device_id % 100)
 
                   target = "gfx" + format(major_ver, 'd') + format(minor_ver, 'x') + format(stepping_ver, 'x')
-                  # A0 silicon (ASIC revision 0) uses the -strict variant, matching rocminfo.
+                  # A0 silicon (ASIC revision 0) uses the -strict variant. Mirror the runtime
+                  # rule: strict unless HSA_DISABLE_GFX12_STRICT is exactly "1".
                   if target == "gfx1250" and asic_revision == 0 \
-                     and os.environ.get("HSA_DISABLE_GFX12_STRICT") == "0":
+                     and os.environ.get("HSA_DISABLE_GFX12_STRICT") != "1":
                     target += "-strict"
                   target_list.append(target)
               line = f.readline()

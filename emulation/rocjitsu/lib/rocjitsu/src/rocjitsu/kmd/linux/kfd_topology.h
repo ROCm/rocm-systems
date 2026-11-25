@@ -17,7 +17,7 @@
 /// rocdbgapi read back. They are driver-internal -- NOT part of the KFD UAPI --
 /// so rocjitsu defines its own constants here instead of vendoring the private
 /// amdkfd header. The values are placed within the UAPI-defined
-/// @c HSA_DBG_WATCH_ADDR_MASK_{LO,HI}_BIT fields from linux/uapi/kfd_sysfs.h,
+/// @c HSA_DBG_WATCH_ADDR_MASK_{LO,HI}_BIT fields from uapi/linux/kfd_sysfs.h,
 /// which is the ABI both sides agree on, so the high values are shifted by
 /// @c HSA_DBG_WATCH_ADDR_MASK_HI_BIT_SHIFT to land in the high field.
 
@@ -28,7 +28,7 @@
 
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "linux/uapi/kfd_sysfs.h"
+#include "uapi/linux/kfd_sysfs.h"
 RJ_DIAGNOSTIC_POP
 
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
@@ -142,19 +142,22 @@ inline DebugTopology debug_topology_for(uint32_t gfx_target_version) {
   const bool ttmps_always_setup =
       (gc < make_gc_ip_version(11, 0, 0) && gc != make_gc_ip_version(9, 4, 2)) ||
       gc >= make_gc_ip_version(11, 0, 0);
-  if (ttmps_always_setup)
+  if (ttmps_always_setup) {
     topo.debug_prop |= HSA_DBG_DISPATCH_INFO_ALWAYS_VALID;
+  }
 
   if (gc < make_gc_ip_version(10, 0, 0)) {
     // gfx9 (CDNA). The watch-address-mask range widens by one bit on the
     // gfx9.4.3/gfx9.4.4 parts (LO 6->7, HI 29->30).
-    if (gc == make_gc_ip_version(9, 4, 3) || gc == make_gc_ip_version(9, 4, 4))
+    if (gc == make_gc_ip_version(9, 4, 3) || gc == make_gc_ip_version(9, 4, 4)) {
       topo.debug_prop |= kWatchAddrMaskLoBitGfx943 | kWatchAddrMaskHiBitGfx943;
-    else
+    } else {
       topo.debug_prop |= kWatchAddrMaskLoBitGfx9 | kWatchAddrMaskHiBit;
+    }
 
-    if (gc >= make_gc_ip_version(9, 4, 2))
+    if (gc >= make_gc_ip_version(9, 4, 2)) {
       topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_MEMORY_OPERATIONS_SUPPORTED;
+    }
 
     // Per-queue reset is withheld only from SR-IOV virtual functions, which the
     // simulator never models.
@@ -163,8 +166,9 @@ inline DebugTopology debug_topology_for(uint32_t gfx_target_version) {
     // gfx10+ (RDNA).
     topo.debug_prop |= kWatchAddrMaskLoBitGfx10 | kWatchAddrMaskHiBit;
 
-    if (gc >= make_gc_ip_version(12, 0, 0))
+    if (gc >= make_gc_ip_version(12, 0, 0)) {
       topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_ALU_OPERATIONS_SUPPORTED;
+    }
 
     if (gc >= make_gc_ip_version(12, 1, 0)) {
       topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_MEMORY_OPERATIONS_SUPPORTED |
@@ -187,8 +191,9 @@ inline DebugTopology debug_topology_for(uint32_t gfx_target_version) {
   // instead of attaching and then having each individual wave stop declined.
   // The descriptive sub-capabilities stay as the driver derives them; they
   // qualify a support that is no longer claimed.
-  if (!cwsr_layout_modelled_for_gc_ip_version(gc))
+  if (!cwsr_layout_modelled_for_gc_ip_version(gc)) {
     topo.capability &= ~static_cast<uint32_t>(HSA_CAP_TRAP_DEBUG_SUPPORT);
+  }
 
   return topo;
 }
@@ -211,8 +216,9 @@ inline DebugTopology effective_topology_for(uint32_t gfx_target_version, uint32_
   // that captured a real device's capability word carries that device's
   // trap-debug bit, and the simulator must not inherit a claim it cannot honour.
   if (!cwsr_layout_modelled_for_gc_ip_version(
-          gc_ip_version_for_gfx_target_version(gfx_target_version)))
+          gc_ip_version_for_gfx_target_version(gfx_target_version))) {
     effective.capability &= ~static_cast<uint32_t>(HSA_CAP_TRAP_DEBUG_SUPPORT);
+  }
   return effective;
 }
 

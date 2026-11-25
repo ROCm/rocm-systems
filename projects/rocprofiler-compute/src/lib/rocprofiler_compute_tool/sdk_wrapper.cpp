@@ -100,3 +100,13 @@ void SdkWrapperImpl::at_intercept_table_registration_hsa(rocprofiler_intercept_l
     ROCPROFILER_CALL(rocprofiler_at_intercept_table_registration(callback, ROCPROFILER_HSA_TABLE, user_data),
                      "register HSA intercept table callback");
 }
+
+void SdkWrapperImpl::query_available_agents(rocprofiler_query_available_agents_cb_t callback,
+                                            void*                                   user_data)
+{
+    ROCPROFILER_CALL(rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
+                                                        callback,
+                                                        sizeof(rocprofiler_agent_t),
+                                                        user_data),
+                     "query available agents");
+}

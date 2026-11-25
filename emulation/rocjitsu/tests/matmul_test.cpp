@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "test_paths.h"
 
-#include "embedded_schema.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/executable.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -19,12 +21,6 @@
 
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
@@ -42,7 +38,7 @@ namespace {
 using namespace rocjitsu;
 using test::kernel_path;
 
-const std::string CONFIG_PATH = test::config_path("gfx950_mi355x.json");
+const std::string CONFIG_PATH = test::config_path("gfx950_mi350x.json");
 
 constexpr uint32_t TOTAL_XCDS = 8;
 constexpr uint32_t CUS_PER_XCD = 36; // 4 SEs × 9 physical CUs
@@ -50,24 +46,26 @@ constexpr uint32_t TOTAL_CUS = TOTAL_XCDS * CUS_PER_XCD;
 
 // AMDGPU kernel descriptor (HSA code object v3, 64 bytes).
 
-using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+using KD = rocjitsu::amdhsa::kernel_descriptor_t;
 
 // CPU golden reference.
 
 void cpu_matmul(const float *A, const float *B, float *C, unsigned N) {
-  for (unsigned i = 0; i < N; ++i)
+  for (unsigned i = 0; i < N; ++i) {
     for (unsigned j = 0; j < N; ++j) {
       float sum = 0.0f;
-      for (unsigned k = 0; k < N; ++k)
+      for (unsigned k = 0; k < N; ++k) {
         sum += A[i * N + k] * B[k * N + j];
+      }
       C[i * N + j] = sum;
     }
+  }
 }
 
 // Helpers.
 
 std::vector<std::unique_ptr<Instruction>> decode_all(const CodeObject &co) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   std::vector<std::unique_ptr<Instruction>> insts;
 
   for (const auto *sec : co.text_sections()) {
@@ -78,22 +76,25 @@ std::vector<std::unique_ptr<Instruction>> decode_all(const CodeObject &co) {
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, &data[pc]));
       EXPECT_NE(inst, nullptr);
       ++pc;
-      if (inst && inst->size() == 8)
+      if (inst && inst->size() == 8) {
         ++pc;
-      if (inst)
+      }
+      if (inst) {
         insts.push_back(std::move(inst));
+      }
     }
   }
   return insts;
 }
 
 KD read_kernel_descriptor(const CodeObject &co) {
-  for (const auto *sec : co.rodata_sections())
+  for (const auto *sec : co.rodata_sections()) {
     if (sec->size() >= sizeof(KD)) {
       KD kd;
       std::memcpy(&kd, sec->data(), sizeof(kd));
       return kd;
     }
+  }
   ADD_FAILURE() << "No .rodata section with kernel descriptor found";
   return {};
 }
@@ -114,17 +115,21 @@ struct KernelExecFixture {
   uint64_t kernel_object = 0;
 
   void setup(const char *kernel_name, uint32_t num_threads = 1) {
-    auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+    util::StringDiagnostic admission_diagnostic;
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
     soc = loaded.soc();
     gpu_mem = loaded.memory();
     loaded.engine_config.num_threads = num_threads;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
-    loaded.wire_links(engine->topology());
+    ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     if (num_threads > 1) {
       ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, num_threads));
     }
-    engine->create();
+    ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
 
     Executable exec(kernel_path(kernel_name));
     ASSERT_TRUE(exec.is_valid());
@@ -181,8 +186,9 @@ struct KernelExecFixture {
 
   /// Read back an NxN output matrix from GPU memory.
   void read_result(float *C_out, unsigned N) {
-    for (unsigned i = 0; i < N * N; ++i)
+    for (unsigned i = 0; i < N * N; ++i) {
       C_out[i] = std::bit_cast<float>(mem()->read32(C_ADDR + i * sizeof(float)));
+    }
   }
 };
 
@@ -208,11 +214,12 @@ TEST(MatmulCodeObjectTest, MfmaLoadsAndDecodes) {
   EXPECT_GT(insts.size(), 0u);
 
   bool has_mfma = false;
-  for (const auto &inst : insts)
+  for (const auto &inst : insts) {
     if (inst->mnemonic().starts_with("v_mfma_")) {
       has_mfma = true;
       break;
     }
+  }
   EXPECT_TRUE(has_mfma) << "MFMA kernel does not contain any v_mfma instructions";
 }
 
@@ -227,10 +234,12 @@ TEST(MatmulCodeObjectTest, NaiveUsesVALU) {
   bool has_vadd = false;
   for (const auto &inst : insts) {
     const auto &m = inst->mnemonic();
-    if (m.starts_with("v_mul_") || m.starts_with("v_fmac_") || m.starts_with("v_fma_"))
+    if (m.starts_with("v_mul_") || m.starts_with("v_fmac_") || m.starts_with("v_fma_")) {
       has_vmul = true;
-    if (m.starts_with("v_add_"))
+    }
+    if (m.starts_with("v_add_")) {
       has_vadd = true;
+    }
   }
   EXPECT_TRUE(has_vmul) << "Naive kernel should contain vector multiply/FMA";
   EXPECT_TRUE(has_vadd) << "Naive kernel should contain vector add";
@@ -244,9 +253,11 @@ TEST(MatmulCodeObjectTest, MfmaHasMultipleMfmaInstructions) {
 
   auto insts = decode_all(*co);
   size_t mfma_count = 0;
-  for (const auto &inst : insts)
-    if (inst->mnemonic().starts_with("v_mfma_"))
+  for (const auto &inst : insts) {
+    if (inst->mnemonic().starts_with("v_mfma_")) {
       ++mfma_count;
+    }
+  }
   EXPECT_GE(mfma_count, 1u) << "Expected at least 1 MFMA instruction";
 }
 
@@ -314,7 +325,7 @@ void run_matmul_stress(const char *kernel_name, unsigned N, uint32_t num_threads
   cpu_matmul(A.data(), B.data(), C_expected.data(), N);
 
   KernelExecFixture fx;
-  fx.setup(kernel_name, num_threads);
+  ASSERT_NO_FATAL_FAILURE(fx.setup(kernel_name, num_threads));
   fx.load_matrices(A.data(), B.data(), N);
   fx.write_kernargs(N);
 
@@ -363,10 +374,14 @@ TEST(MatmulStressTest, MfmaAllCUs_MultiThreaded) {
 // and all 288 physical CUs can dispatch and halt wavefronts (engine-driven, no kernel execution).
 
 TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
+  util::StringDiagnostic admission_diagnostic;
   constexpr uint32_t total_wgs = TOTAL_CUS;
-  constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  constexpr util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(rocjitsu::IsaFamily::Cdna4);
+  static_assert(maybe_s_endpgm.succeeded());
+  constexpr uint32_t SOPP_S_ENDPGM = maybe_s_endpgm.value();
 
-  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   // Single-threaded counterpart to the _MultiThreaded test below; pin one worker
@@ -374,18 +389,20 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
   loaded.engine_config.num_threads = 1;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  loaded.wire_links(engine->topology());
-  engine->create();
+  ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   // Write a kernel descriptor + s_endpgm to GPU memory.
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  ((256 / 8) - 1)); // CDNA4 VGPR granularity is 8
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  ((104 / 8) - 1));
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                     ((256 / 8) - 1)); // CDNA4 VGPR granularity is 8
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                     ((104 / 8) - 1));
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
 
   memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), KD_ADDR);
   memory->write32(KD_ADDR + sizeof(kernel_descriptor_t), SOPP_S_ENDPGM);
@@ -417,28 +434,34 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
 
 // Multi-threaded topology-only: 1 thread per XCD, dispatch s_endpgm to all CUs.
 TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
+  util::StringDiagnostic admission_diagnostic;
   constexpr uint32_t total_wgs = TOTAL_CUS;
-  constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  constexpr util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(rocjitsu::IsaFamily::Cdna4);
+  static_assert(maybe_s_endpgm_2.succeeded());
+  constexpr uint32_t SOPP_S_ENDPGM = maybe_s_endpgm_2.value();
 
-  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   loaded.engine_config.num_threads = TOTAL_XCDS;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  loaded.wire_links(engine->topology());
+  ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, TOTAL_XCDS));
-  engine->create();
+  ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  ((256 / 8) - 1)); // CDNA4 VGPR granularity is 8
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  ((104 / 8) - 1));
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                     ((256 / 8) - 1)); // CDNA4 VGPR granularity is 8
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                     ((104 / 8) - 1));
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
 
   memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), KD_ADDR);
   memory->write32(KD_ADDR + sizeof(kernel_descriptor_t), SOPP_S_ENDPGM);

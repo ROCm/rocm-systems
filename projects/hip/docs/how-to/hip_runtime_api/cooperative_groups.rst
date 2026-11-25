@@ -41,16 +41,16 @@ The thread hierarchy abstractions of cooperative groups are depicted in the foll
 
   Cooperative group thread hierarchy in grids.
 
-The **multi grid** is an abstraction of potentially multiple simultaneous
+The **multi-grid** is an abstraction of potentially multiple simultaneous
 launches of the same kernel over multiple devices. The **grid** in cooperative
 groups is a single dispatch of kernels for execution like the original grid.
 
 .. note::
 
-  * The ability to synchronize over a grid or multi grid requires the kernel to
+  * The ability to synchronize over a grid or multi-grid requires the kernel to
     be launched using the specific cooperative groups API.
 
-  * Multi grid deprecated since ROCm 5.0.
+  * Multi-grid has been deprecated since ROCm 5.0.
 
 The **block** is the same as the :ref:`inherent_thread_model` block entity.
 
@@ -79,7 +79,7 @@ Group types are based on the levels of synchronization and data sharing among th
 Thread-block group
 ------------------
 
-Represents an intra-block cooperative groups type where the participating threads within the group are the same threads that participated in the currently executing ``block``.
+Represents an intra-block cooperative group type where the participating threads within the group are the same threads that participated in the currently executing ``block``.
 
 .. code-block:: cpp
 
@@ -96,7 +96,7 @@ The ``group_index()`` , ``thread_index()`` , ``thread_rank()`` , ``size()``, ``c
 Grid group
 ------------
 
-Represents an inter-block cooperative groups type where the group's participating threads span multiple blocks running the same kernel on the same device. Use the cooperative launch API to enable synchronization across the grid group.
+Represents an inter-block cooperative group type where the group's participating threads span multiple blocks running the same kernel on the same device. Use the cooperative launch API to enable synchronization across the grid group.
 
 .. code-block:: cpp
 
@@ -114,7 +114,7 @@ are public of the ``grid_group`` class. For further details, check the :ref:`gri
 Multi-grid group
 ------------------
 
-Represents an inter-device cooperative groups type where the participating threads within the group span multiple devices that run the same kernel on the devices. Use the cooperative launch API to enable synchronization across the multi-grid group.
+Represents an inter-device cooperative group type where the participating threads within the group span multiple devices that run the same kernel on the devices. Use the cooperative launch API to enable synchronization across the multi-grid group.
 
 .. code-block:: cpp
 
@@ -285,7 +285,7 @@ The difference to the original block model in the ``reduce_sum`` device function
           // Every iteration the number of active threads
           // halves, until we processed all values
           for(unsigned int i = g.size() / 2; i > 0; i /= 2) {
-              // Store value in shared memroy with thread ID
+              // Store value in shared memory with thread ID
               shared[group_thread_id] = val;
 
               // Synchronize all threads in the group
@@ -347,7 +347,7 @@ The ``reduce_sum()`` function call and input data initialization difference to t
           // ...
       }
 
-At the device function, the input group type is the ``thread_group``, which is the parent class of all the cooperative groups type. With this, you can write generic functions, which can work with any type of cooperative groups.
+At the device function, the input group type is the ``thread_group``, which is the parent class of all cooperative group types. With this, you can write generic functions, which can work with any type of cooperative groups.
 
 .. _coop_synchronization:
 
@@ -606,7 +606,7 @@ The parameters are described here: :ref:`cg_operations`
 
 **Performance**
 
-On AMD, although all types ``T`` fulfilling the description above can be used with the functors in the ``cooperative_groups`` namespace, only some of them will receive hardware acceleration in the form of DPP instructions. Essentially only the types supported by ``__reduce_*_sync`` operations would potentially receive acceleration :ref:`hip_cpp_language_extensions:Warp reduction functions` The macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES`` might be needed to enable the hardware acceleration on some types.
+On AMD, although all types ``T`` fulfilling the description above can be used with the functors in the ``cooperative_groups`` namespace, only some of them will receive hardware acceleration in the form of DPP instructions. Essentially only the types supported by ``__reduce_*_sync`` operations would potentially receive acceleration (see :ref:`warp_reduction_functions`). The macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES`` might be needed to enable the hardware acceleration on some types.
 
 For arithmetic reduces (``plus``, ``less`` and ``greater``):
 
@@ -662,13 +662,18 @@ The parameters are described here: :ref:`cg_operations`
  The value returned for the first active lane is platform-dependent and may change in future releases. As a reference: 
 
 * AMD - the "identity" value is returned, according to the operation:
+
   * ``plus``: always 0
   * ``less``:
+
     * for integer types: the maximum value for the type, i.e. ``std::numeric_limits<T>::max()``
     * for floating point types: ``inf``
+
   * ``greater``:
+
     * for integer types: the minimum value for the type, i.e. ``std::numeric_limits<T>::lowest()``
     * for floating point types: ``-inf``
+
   * ``bit_and``: a value with all the bits set to 1
   * ``bit_or``: always 0
   * ``bit_xor``: always 0
@@ -729,6 +734,34 @@ uses dedicated global-to-LDS and LDS-to-global transfer paths in widths of 4, 8,
 or 16 bytes. On other devices, the implementation falls back to a software copy
 loop with equivalent semantics.
 
+invoke_one and invoke_one_broadcast
+-----------------------------------
+
+.. code-block:: cpp
+
+  template <typename Group, typename Fn, typename... Args>
+  void invoke_one(const Group& group, Fn&& fn, Args&&... args);
+
+  template <typename Group, typename Fn, typename... Args>
+  auto invoke_one_broadcast(const Group& group, Fn&& fn, Args&&... args) ->
+      decltype(fn(args...));
+
+``invoke_one`` selects a single thread of the calling group and uses it to call ``fn``
+with ``args``. ``invoke_one_broadcast`` does the same, and additionally distributes the
+returned value to all threads of the group.
+
+The thread selection mechanism is not guaranteed to be deterministic. Neither function
+synchronizes the group, so communication or synchronization within the calling group is
+not allowed inside ``fn``. Communication with threads outside of the calling group is
+allowed.
+
+All group types are supported by ``invoke_one``. ``invoke_one_broadcast`` supports
+``coalesced_group`` and ``thread_block_tile<N>``, because the result is distributed
+within a single wavefront.
+
+The return type of ``fn`` passed to ``invoke_one_broadcast`` must be trivially copyable
+and at most 32 bytes in size. For invocables returning ``void``, use ``invoke_one``.
+
 Unsupported NVIDIA CUDA features
 ================================
 
@@ -736,5 +769,4 @@ HIP doesn't support the following CUDA functions/operators in ``cooperative_grou
 
 * ``synchronize``
 * ``wait`` and ``wait_prior``
-* ``invoke_one`` and ``invoke_one_broadcast``
 * ``reduce_update_async`` and ``reduce_store_async``

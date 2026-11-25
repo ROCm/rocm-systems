@@ -48,8 +48,8 @@
 #define IR_CAP (16UL * 1024UL * 1024UL)
 #endif
 
-/// @brief Per-iteration read size. Must be a multiple of the filesystem
-/// block size for O_DIRECT. Override at compile time.
+/// @brief Per-iteration read size. Must be a multiple of the direct-I/O
+/// alignment. Override at compile time.
 #ifndef IR_CHUNK_SIZE
 #define IR_CHUNK_SIZE (64UL * 1024UL)
 #endif
@@ -66,21 +66,10 @@ main(int argc, char *argv[])
     const char *out_path = argv[2];
     const int   gpu_id   = (argc == 4) ? atoi(argv[3]) : 0;
 
-    /* Stat the input file to get its size and the filesystem block size. */
-    size_t file_size, block_size;
-    {
-        struct stat statbuf;
-        if (stat(in_path, &statbuf)) {
-            fprintf(stderr, "Could not stat %s (%s)\n", in_path, strerror(errno));
-            return EXIT_FAILURE;
-        }
-        file_size  = static_cast<size_t>(statbuf.st_size);
-        block_size = static_cast<size_t>(statbuf.st_blksize);
-        if (!is_power_of_two(block_size)) {
-            fprintf(stderr, "Block size is not a power of two (%zu)\n", block_size);
-            return EXIT_FAILURE;
-        }
-    }
+    /* Query file size and direct-I/O alignment. */
+    size_t file_size, io_alignment;
+    if (get_file_info(in_path, &file_size, &io_alignment))
+        return EXIT_FAILURE;
 
     if (0 == file_size) {
         fprintf(stderr, "Input file %s is empty\n", in_path);
@@ -88,15 +77,15 @@ main(int argc, char *argv[])
     }
 
     const size_t chunk_size = IR_CHUNK_SIZE;
-    if (chunk_size == 0 || (chunk_size & (block_size - 1)) != 0) {
-        fprintf(stderr, "IR_CHUNK_SIZE (%zu) must be a non-zero multiple of block size (%zu)\n", chunk_size,
-                block_size);
+    if (chunk_size == 0 || (chunk_size & (io_alignment - 1)) != 0) {
+        fprintf(stderr, "IR_CHUNK_SIZE (%zu) must be a non-zero multiple of direct-I/O alignment (%zu)\n",
+                chunk_size, io_alignment);
         return EXIT_FAILURE;
     }
 
     /* Cap the consumed bytes; over-sized files are silently truncated to IR_CAP. */
     const size_t payload_size = (file_size < IR_CAP) ? file_size : IR_CAP;
-    const size_t alloc_size   = align_up(payload_size, block_size);
+    const size_t alloc_size   = align_up(payload_size, io_alignment);
 
     int             in_fd  = -1;
     int             out_fd = -1;

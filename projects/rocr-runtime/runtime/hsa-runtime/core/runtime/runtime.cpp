@@ -44,6 +44,8 @@
 #include <cassert>
 #include <chrono>
 #include <thread>
+#include <condition_variable>
+#include <mutex>
 #include <cstring>
 #include <optional>
 #include <regex>
@@ -123,6 +125,8 @@ extern void _loader_debug_state();
 namespace core {
 bool g_use_interrupt_wait;
 bool g_use_mwaitx;
+bool g_use_yielding_poll;
+bool g_use_clflushopt;
 Runtime* Runtime::runtime_singleton_ = NULL;
 
 hsa_status_t Runtime::Acquire() {
@@ -990,6 +994,13 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal, hsa_signal_cond
   return HSA_STATUS_SUCCESS;
 }
 
+void Runtime::WakeAsyncSignalMonitor() {
+  // Notify unconditionally, as SetAsyncSignalHandler() does, so a monitor about to park can't
+  // miss it. Like SetAsyncSignalHandler(), this assumes waiters are gone before teardown.
+  if (!asyncSignals_.empty())
+    hsa_signal_handle((*asyncSignals_)->control.wake)->StoreReleaseAndNotify(1);
+}
+
 hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t handle,
                                  hsa_interop_map_flag_t flags, size_t size_hint, size_t* size,
                                  void** ptr, size_t* metadata_size, const void** metadata) {
@@ -1083,6 +1094,25 @@ hsa_status_t Runtime::InteropUnmap(void* ptr) {
   return HSA_STATUS_SUCCESS;
 }
 
+void Runtime::MarkReservedAddressSvm(const void* ptr, size_t size) {
+  if (ptr == nullptr || size == 0) return;
+
+  const uint8_t* start = reinterpret_cast<const uint8_t*>(ptr);
+  const uint8_t* end = start + size;
+
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
+  auto it = reserved_address_map_.upper_bound(ptr);
+  if (it != reserved_address_map_.begin()) --it;
+
+  for (; it != reserved_address_map_.end(); ++it) {
+    const uint8_t* range_start = reinterpret_cast<const uint8_t*>(it->first);
+    const uint8_t* range_end = range_start + it->second.size;
+    if (range_end <= start) continue;
+    if (range_start >= end) break;
+    it->second.svm_attrib = true;
+  }
+}
+
 /* This should be called memory_lock_ held */
 Runtime::AddressHandle* Runtime::VMemoryFindReservedAddressHandle(const void* va) {
   auto reservedAddressIt = reserved_address_map_.upper_bound(va);
@@ -1111,8 +1141,10 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
         ptr) {
       /* Allocation found */
       info->type = HSA_EXT_POINTER_TYPE_HSA_VMEM;
-      info->agentBaseAddress = const_cast<void*>(ptr);
-      info->hostBaseAddress = const_cast<void*>(ptr);
+      // Report the mapping the pointer lies in, as for other allocations: callers pair the base
+      // with sizeInBytes, so an interior pointer must not be reported as the base.
+      info->agentBaseAddress = const_cast<void*>(mappedHandleIt->first);
+      info->hostBaseAddress = const_cast<void*>(mappedHandleIt->first);
       info->sizeInBytes = mappedHandleIt->second.size;
       info->registered = true;
 
@@ -1190,9 +1222,17 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
   /* This is not a mapped address. Check if it is a reserved address range */
   auto addressHandle = VMemoryFindReservedAddressHandle(ptr);
   if (addressHandle) {
-    info->type = HSA_EXT_POINTER_TYPE_RESERVED_ADDR;
-    info->agentBaseAddress = NULL;
+    /*
+     * Reservations that have had hsa_amd_svm_attributes_set applied are backed
+     * by SVM system memory. Bare reservations have no backing.
+     */
+    info->type = addressHandle->svm_attrib ? HSA_EXT_POINTER_TYPE_SVM
+                                           : HSA_EXT_POINTER_TYPE_RESERVED_ADDR;
     info->hostBaseAddress = addressHandle->os_addr;
+    // The driver query supplies an agent address when it recognizes the
+    // reservation. Until then the agent base stays null. Fill and copy treat a
+    // non-null agent base as a mapped allocation and require an owner.
+    info->agentBaseAddress = nullptr;
     info->sizeInBytes = addressHandle->size;
     info->registered = addressHandle->registered;
     info->agentOwner = {};
@@ -1263,12 +1303,15 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
     if (VMemoryPtrInfo(ptr, &retInfo, alloc, num_agents_accessible, accessible) ==
         HSA_STATUS_SUCCESS) {
       /*
-       * For SVM allocations, the VA is reserved using hsa_amd_vmem_address_reserve with
-       * HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag. So for SVM allocations, we do not return
-       * yet as we can check whether this address was registered via hsa_amd_svm_attributes_set
-       * and provide additional information from hsaKmtQueryPointerInfo.
+       * An unregistered reservation falls through to the driver query, including
+       * after hsa_amd_svm_attributes_set has changed its type to SVM. That is the
+       * query these NO_REGISTER addresses went through before. A registered
+       * reservation, bare or SVM, is fully described here.
        */
-      if (!(retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR && !retInfo.registered)) {
+      const bool query_driver = !retInfo.registered &&
+          (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR ||
+           retInfo.type == HSA_EXT_POINTER_TYPE_SVM);
+      if (!query_driver) {
         memcpy(info, &retInfo, retInfo.size);
         return HSA_STATUS_SUCCESS;
       }
@@ -1303,11 +1346,11 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       if (described) ptr_driver = driver;
     }
     if (ptr_driver == nullptr) {
-      if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
-        /* This is an address that was reserved using hsa_amd_vmem_address_reserve with
-         * the HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag, but the address was not registered
-         * with hsa_amd_svm_attributes_set. So we return the contents of retInfo that
-         * were previously filled with VMemoryPtrInfo.
+      if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR ||
+          retInfo.type == HSA_EXT_POINTER_TYPE_SVM) {
+        /* NO_REGISTER reservation. The driver has no object for it, whether or
+         * not hsa_amd_svm_attributes_set has run. Keep the reservation record:
+         * RESERVED_ADDR until attributes are set, SVM afterwards.
          */
         memcpy(info, &retInfo, retInfo.size);
         return HSA_STATUS_SUCCESS;
@@ -2056,6 +2099,111 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
   return HSA_STATUS_SUCCESS;
 }
 
+namespace {
+// Nap ceiling (microseconds) for polling while interrupts are available: used by
+// the poll sentinel, and by AsyncEventsLoop when the sentinel thread cannot start.
+constexpr int kInterruptPollNapCeilingUs = 200;
+
+// Watches async signals that have no KFD event (IPC signals, DefaultSignals,
+// or interrupt signals created after the KFD events ran out) while the
+// async-events thread sleeps in the KFD wait on the interrupt-backed signals.
+// When one of them meets its condition it notifies the wake signal, the same
+// way SetAsyncSignalHandler() does, and the async-events thread then rescans
+// and runs the handler as usual. The entries are only read while armed; the
+// async-events thread disarms under the lock before it touches the list again.
+class PollSentinel {
+ public:
+  struct Entry {
+    hsa_signal_t signal;
+    hsa_signal_condition_t cond;
+    hsa_signal_value_t value;
+  };
+
+  explicit PollSentinel(hsa_signal_t wake) : wake_(wake) {}
+
+  ~PollSentinel() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      exit_ = true;
+    }
+    cv_.notify_one();
+    if (thread_.joinable()) thread_.join();
+  }
+
+  // False if the sentinel thread could not be started; the caller then polls.
+  bool Usable() const { return !failed_; }
+
+  bool Arm(std::vector<Entry>& entries) {
+    if (entries.empty()) return true;
+    if (!thread_.joinable()) {
+      try {
+        thread_ = std::thread([this] { Loop(); });
+      } catch (...) {
+        failed_ = true;
+        return false;
+      }
+    }
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      entries_.swap(entries);
+      armed_ = true;
+      ++generation_;
+    }
+    cv_.notify_one();
+    return true;
+  }
+
+  void Disarm() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      armed_ = false;
+    }
+    cv_.notify_one();
+  }
+
+ private:
+  void Loop() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    while (!exit_) {
+      cv_.wait(lock, [this] { return exit_ || armed_; });
+      // Each arming starts the nap at the floor again; the nap waits on the
+      // condition variable so Arm/Disarm cut it short.
+      uint64_t gen = generation_;
+      int nap_us = kPollNapFloorUs;
+      while (armed_ && !exit_) {
+        if (generation_ != gen) {
+          gen = generation_;
+          nap_us = kPollNapFloorUs;
+        }
+        // Held across the scan on purpose: after Disarm() returns, AsyncEventsLoop may
+        // Release() these signals, and Arm() swaps entries_ under the same lock.
+        for (const auto& e : entries_) {
+          if (CheckSignalCondition(hsa_signal_handle(e.signal)->LoadRelaxed(), e.cond, e.value)) {
+            armed_ = false;
+            hsa_signal_handle(wake_)->StoreReleaseAndNotify(1);
+            break;
+          }
+        }
+        if (!armed_) break;
+        cv_.wait_for(lock, std::chrono::microseconds(nap_us),
+                     [this, gen] { return exit_ || !armed_ || generation_ != gen; });
+        nap_us = NextPollNapUs(nap_us, kInterruptPollNapCeilingUs);
+      }
+    }
+  }
+
+  hsa_signal_t wake_;
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  std::vector<Entry> entries_;
+  uint64_t generation_ = 0;
+  bool armed_ = false;
+  bool exit_ = false;
+  bool failed_ = false;
+  std::thread thread_;
+};
+}  // namespace
+
 void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   AsyncEventsInfo* eventsInfo = reinterpret_cast<AsyncEventsInfo*>(_eventsInfo);
 
@@ -2067,6 +2215,10 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   auto& event_age_map = eventsInfo->events.age_by_event_;
   uint32_t unique_evts = 0;
   auto hsa_signals = reinterpret_cast<hsa_signal_handle*>(&async_events_.signal_[0]);
+  // Signals of the current batch that have no KFD event.
+  std::vector<size_t> poll_only;
+  std::vector<PollSentinel::Entry> sentinel_entries;
+  PollSentinel sentinel(async_events_control_.wake);
 
   auto processEvent = [&](size_t index, hsa_signal_value_t value, bool wait_any) {
     // No error or timeout occured, process the handlers
@@ -2088,9 +2240,9 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   // Prepares a list of events for a wait inside KFD
   auto PrepareInterrupt = [&](size_t idx) {
     HsaEvent* hsa_event = hsa_signals[idx]->EopEvent();
-    // If any signal doesn't have an interrupt, then switch to polling
+    // A signal without a KFD event stays out of the KFD wait list; the caller
+    // collects it in poll_only.
     if (hsa_event == nullptr) {
-      unique_evts = 0;
       return false;
     } else {
       if (hsa_events.size() <= unique_evts) {
@@ -2150,7 +2302,8 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       if (core::Runtime::runtime_singleton_->flag().wait_any()) {
         index = Signal::WaitMultiple(uint32_t(async_events_.Size()), &async_events_.signal_[0],
                                      &async_events_.cond_[0], &async_events_.value_[0],
-                                     uint64_t(-1), HSA_WAIT_STATE_BLOCKED, value, false);
+                                     uint64_t(-1), HSA_WAIT_STATE_BLOCKED, value, false,
+                                     /*wake_async_monitor=*/false);
       } else {
         // Skip wake-up signal logic
         index = 1;
@@ -2184,6 +2337,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
         }
         bool interrupt_wait = false;
         unique_evts = 0;
+        poll_only.clear();
 
         // Check remaining signals before sleeping.
         for (size_t i = index; i < async_events_.Size(); i++) {
@@ -2205,15 +2359,20 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           // If the current signal isn't complete and polling is disabled, then prepare KFD wait for
           // an interrupt
           if (!finish && !polling) {
-            interrupt_wait = PrepareInterrupt(i);
-            // If the interrupt was disabled, then force polling
-            if (!interrupt_wait) {
-              polling = true;
-              finish = false;
-            }
+            if (!PrepareInterrupt(i)) poll_only.push_back(i);
           } else if (unique_evts > 0) {
             unique_evts = 0;
-            interrupt_wait = false;
+          }
+        }
+        // Wait in KFD on the interrupt-backed signals while the poll sentinel
+        // watches the others. If the sentinel thread could not be started, poll
+        // all of them instead.
+        if (!finish && !polling) {
+          if (unique_evts > 0 && (poll_only.empty() || sentinel.Usable())) {
+            interrupt_wait = true;
+          } else if (unique_evts > 0 || !poll_only.empty()) {
+            polling = true;
+            unique_evts = 0;
           }
         }
         // If nothing was complete and an interrupt wait was requested, then call KFD
@@ -2256,7 +2415,16 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
 
             if (!finish) {
-              WaitForInterrupt();
+              sentinel_entries.clear();
+              for (size_t p : poll_only)
+                sentinel_entries.push_back(
+                    {async_events_.signal_[p], async_events_.cond_[p], async_events_.value_[p]});
+              // If the sentinel cannot start, skip the KFD wait; the next pass
+              // sees Usable() == false and polls.
+              if (sentinel.Arm(sentinel_entries)) {
+                WaitForInterrupt();
+                sentinel.Disarm();
+              }
             }
 
             for (size_t e = 0; e < async_events_.Size(); e++) {
@@ -2265,10 +2433,10 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
             break;
           }
-        } else if (polling && !finish && !g_use_interrupt_wait) {
-          // No interrupt-backed event is available for at least one pending
-          // signal (PrepareInterrupt forced polling) -- on the WSL/dxg thunk
-          // that is every signal, since it implements no KFD events at all.
+        } else if (polling && !finish) {
+          // No interrupt-backed event is available for the pending signals --
+          // on the WSL/dxg thunk that is every signal, since it implements no
+          // KFD events at all.
           // Without a sleep this loop monopolizes a CPU core re-scanning the
           // signal values for the whole lifetime of the async-events thread,
           // idle or not; the two async-events threads cost ~2 cores in every
@@ -2279,9 +2447,12 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           // observation latency while a long-lived idle wait costs almost no
           // CPU. The nap is re-initialized at the outer-loop boundary (see
           // poll_nap_us above), so the escalation only compounds within a
-          // single idle wait batch.
+          // single idle wait batch. With interrupts available this branch is only
+          // reached when the poll sentinel thread could not be started, and the
+          // nap is capped at kInterruptPollNapCeilingUs instead of spinning.
           os::uSleep(poll_nap_us);
-          poll_nap_us = NextPollNapUs(poll_nap_us, kPollNapCeilingUs);
+          poll_nap_us = NextPollNapUs(
+              poll_nap_us, g_use_interrupt_wait ? kInterruptPollNapCeilingUs : kPollNapCeilingUs);
         }
       }
     }
@@ -2779,6 +2950,8 @@ Runtime::Runtime()
   xnack_enabled_ = false;
   g_use_interrupt_wait = true;
   g_use_mwaitx = true;
+  g_use_yielding_poll = false;
+  g_use_clflushopt = false;
   ::_amdgpu_r_debug = {11, nullptr, reinterpret_cast<uintptr_t>(&_loader_debug_state),
                        r_debug::RT_CONSISTENT, 0};
   log_file = stderr;
@@ -2813,6 +2986,8 @@ hsa_status_t Runtime::Load() {
 
   g_use_interrupt_wait = flag_.enable_interrupt();
   g_use_mwaitx = flag_.check_mwaitx(cpuinfo.mwaitx);
+  g_use_yielding_poll = flag_.enable_yielding_poll();
+  g_use_clflushopt = cpuinfo.clflushopt;
 
   if (!AMD::Load()) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -3112,6 +3287,11 @@ void Runtime::LoadTools() {
   typedef Agent* (*tool_wrap_t)(Agent*);
   typedef void (*tool_add_t)(Runtime*);
 
+  // Set when a v3 tool owns the API table. Tools named in HSA_TOOLS_LIB are an
+  // explicit request and still load; tools that are merely loaded in the
+  // process are not picked up, since they would wrap the table a second time.
+  bool skip_loaded_tools = false;
+
 #if defined(HSA_ROCPROFILER_REGISTER) && HSA_ROCPROFILER_REGISTER > 0
   if (!flag().disable_tool_register()) {
     auto* profiler_api_table_ = static_cast<void*>(&hsa_api_table());
@@ -3142,9 +3322,7 @@ void Runtime::LoadTools() {
       }
     }
 
-    // if rocprofiler library supports registration and v1 support not explicitly requested,
-    // do not use old method
-    if (rocp_reg_status == ROCP_REG_SUCCESS && !allow_v1_registration) return;
+    skip_loaded_tools = (rocp_reg_status == ROCP_REG_SUCCESS && !allow_v1_registration);
   }
 #endif
 
@@ -3189,7 +3367,8 @@ void Runtime::LoadTools() {
   }
 
   // Discover loaded tools.
-  std::vector<os::LibHandle> loaded_hds = os::GetLoadedToolsLib();
+  std::vector<os::LibHandle> loaded_hds;
+  if (!skip_loaded_tools) loaded_hds = os::GetLoadedToolsLib();
   for (auto& handle : loaded_hds) {
     const uint32_t* order = (const uint32_t*)os::GetExportAddress(handle, "HSA_AMD_TOOL_PRIORITY");
     if (order) {
@@ -3637,6 +3816,8 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
   if (error != HSAKMT_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "hsaKmtSVMSetAttr failed.");
 
+  MarkReservedAddressSvm(base, len);
+
   return HSA_STATUS_SUCCESS;
 }
 
@@ -4018,9 +4199,12 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
       return status;
     }
 
-    // Only SVM allocations that were reserved using hsa_amd_vmem_address_reserve are valid for
-    // discard
-    if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR || ptr_info.registered) {
+    // Managed SVM is reserved with HSA_AMD_VMEM_ADDRESS_NO_REGISTER (registered == false).
+    // After hsa_amd_svm_attributes_set the same reservation is reported as
+    // HSA_EXT_POINTER_TYPE_SVM. Registered VMM reservations stay ineligible.
+    if (ptr_info.registered ||
+        (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR &&
+         ptr_info.type != HSA_EXT_POINTER_TYPE_SVM)) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
   }
@@ -4181,7 +4365,11 @@ hsa_status_t Runtime::SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uin
       debug_warning(false && "Retrieving SVM pointer information failed");
       return status;
     }
-    if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR || ptr_info.registered)
+    // Same eligibility as SvmBatchDiscard: unregistered reservations, including those
+    // reported as HSA_EXT_POINTER_TYPE_SVM after hsa_amd_svm_attributes_set.
+    if (ptr_info.registered ||
+        (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR &&
+         ptr_info.type != HSA_EXT_POINTER_TYPE_SVM))
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -4729,8 +4917,7 @@ Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, uint64_t flags_u
       imported(false),
       is_fabric_handle(false),
       alloc_flag(alloc_flag),
-      drm_owner(nullptr),
-      import_info_queried(false) {
+      drm_owner(nullptr) {
   assert(driver_handle.handle != 0);
 }
 
@@ -4742,8 +4929,23 @@ Runtime::MemoryHandle::MemoryHandle(int dmabuf_fd)
       imported(true),
       is_fabric_handle(false),
       alloc_flag(MemoryRegion::AllocateNoFlags),
-      drm_owner(nullptr),
-      import_info_queried(false) {}
+      drm_owner(nullptr) {
+  /* Caller holds memory_lock_. Ask each agent driver in turn and take the first
+   * that recognizes the fd. AgentDriver(KFD) is not used because it throws when
+   * no KFD driver is present. alloc_flag stays AllocateNoFlags: the dmabuf carries
+   * no memory-type metadata. */
+  if (driver_handle.dmabuf_fd < 0) return;
+
+  core::Runtime* runtime = core::Runtime::runtime_singleton_;
+  core::DmaBufInfo info = {};
+  for (auto& driver : runtime->AgentDrivers()) {
+    if (driver->QueryDmaBufInfo(driver_handle.dmabuf_fd, &info) == HSA_STATUS_SUCCESS) {
+      region = runtime->ResolveImportedRegion(info);
+      driver_handle.size = info.size;
+      return;
+    }
+  }
+}
 
 Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
     : region(nullptr),
@@ -4753,8 +4955,7 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
       imported(true),
       is_fabric_handle(true),
       alloc_flag(MemoryRegion::AllocateNoFlags),
-      drm_owner(nullptr),
-      import_info_queried(false) {}
+      drm_owner(nullptr) {}
 
 Runtime::MemoryHandle::~MemoryHandle() {
   if (driver_handle.handle != 0) {
@@ -5018,30 +5219,6 @@ const core::MemoryRegion* Runtime::ResolveImportedRegion(const core::DmaBufInfo&
   return system_regions_fine_[0].get();
 }
 
-/* Recover an imported handle's placement and size from its dmabuf and cache it in
- * the handle's own fields. Ask each agent driver in turn and take the first that
- * recognizes the fd; AgentDriver(KFD) is not used because it throws when no KFD
- * driver is present. A buffer the driver cannot describe is marked queried so the
- * ioctl is not repeated. Caller must hold memory_lock_. */
-void Runtime::EnsureImportInfo(MemoryHandle* memoryHandle) {
-  if (!memoryHandle->imported || memoryHandle->import_info_queried) return;
-  memoryHandle->import_info_queried = true;
-
-  if (memoryHandle->driver_handle.dmabuf_fd < 0) return;
-
-  core::DmaBufInfo info = {};
-  for (auto& driver : AgentDrivers()) {
-    if (driver->QueryDmaBufInfo(memoryHandle->driver_handle.dmabuf_fd, &info) ==
-        HSA_STATUS_SUCCESS) {
-      memoryHandle->region = ResolveImportedRegion(info);
-      memoryHandle->driver_handle.size = info.size;
-      /* alloc_flag stays AllocateNoFlags: the dmabuf carries no memory-type
-       * metadata, and the exporter may legitimately have used MEMORY_TYPE_NONE. */
-      return;
-    }
-  }
-}
-
 hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
   /* The per-GPU import of this dmabuf is deferred until hsa_amd_vmem_set_access is called, but the
@@ -5051,8 +5228,8 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   int owned_fd = os::DmaBufDup(dmabuf_fd);
   if (owned_fd < 0) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  /* Placement is not recovered here: importers that never query it should not pay
-   * for an ioctl. EnsureImportInfo does it on the first query that needs it. */
+  /* memory_lock_ is held across construction. The dmabuf constructor queries the
+   * fd for its owning region, which requires that lock. */
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto memoryHandle = std::make_unique<MemoryHandle>(owned_fd);
   *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
@@ -5101,8 +5278,14 @@ hsa_status_t Runtime::VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handl
 hsa_status_t Runtime::VMemoryRetainAllocHandle(hsa_amd_vmem_alloc_handle_t* mapped_handle,
                                                void* va) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
-  auto mappedHandleIt = mapped_handle_map_.find(va);
-  if (mappedHandleIt == mapped_handle_map_.end()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  // Look-up any mapped handle that contains this address.
+  auto mappedHandleIt = mapped_handle_map_.upper_bound(va);
+  if (mappedHandleIt == mapped_handle_map_.begin()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  mappedHandleIt--;
+  if (reinterpret_cast<const uint8_t*>(va) >=
+      reinterpret_cast<const uint8_t*>(mappedHandleIt->first) + mappedHandleIt->second.size) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
 
   MemoryHandle* memoryHandle = mappedHandleIt->second.mem_handle;
   memoryHandle->ref_count++;
@@ -5116,8 +5299,6 @@ hsa_status_t Runtime::VMemoryGetAllocPropertiesFromHandle(hsa_amd_vmem_alloc_han
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
   if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-
-  EnsureImportInfo(memoryHandle);
 
   const MemoryRegion* region = memoryHandle->region;
   *mem_region = region;
@@ -5148,7 +5329,6 @@ hsa_status_t Runtime::VMemoryGetHandleInfo(hsa_amd_vmem_alloc_handle_t allocHand
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
   if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-  EnsureImportInfo(memoryHandle);
   const MemoryRegion* region = memoryHandle->region;
 
   /* An unresolved import has no agent to report, and succeeding would hand back a

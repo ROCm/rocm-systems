@@ -11,12 +11,7 @@
 Panel Config:
   id: 1600
   title: UTCL1 (Translation Cache L1)
-  description: |-
-    UTCL1 (Unified Translation Cache Level 1) metrics for gfx1250. UTCL1 handles
-    address translation requests from UTCL0 and forwards misses to UTCL2.
-
   data source:
-
   - metric_table:
       id: 1601
       title: UTCL1 Metrics

@@ -2,15 +2,15 @@
 
 .. meta::
    :description: rocjitsu (ROCm Just-in-Time Suite) is an emulation toolkit for running AMD GPU applications on simulated or real hardware without requiring a physical GPU. It supports three execution strategies: full ISA simulation via LD_PRELOAD interposition, dynamic binary translation (DBT) enabling code compiled for one GPU architecture to run on another, and dynamic binary instrumentation (DBI) for runtime profiling, tracing, and race detection. Supported targets span CDNA1–CDNA4 and RDNA1–RDNA4 architectures (GFX9 through GFX12) plus RISC-V, with a JSON-configurable SoC topology and a daemon mode for multi-process workloads such as PyTorch and RCCL.
-   :keywords: rocJITsu, AMD, ROCm, GPU
+   :keywords: rocjitsu, AMD, ROCm, GPU
 
 ======================
-rocJITsu documentation
+rocjitsu documentation
 ======================
 
 rocjitsu (ROCm Just-in-Time Suite) is an emulation toolkit for running AMD GPU applications on simulated or real hardware without requiring a physical GPU. It supports three execution strategies: full ISA simulation via LD_PRELOAD interposition, dynamic binary translation (DBT) enabling code compiled for one GPU architecture to run on another, and dynamic binary instrumentation (DBI) for runtime profiling, tracing, and race detection. Supported targets span CDNA1–CDNA4 and RDNA1–RDNA4 architectures (GFX9 through GFX12) plus RISC-V, with a JSON-configurable SoC topology and a daemon mode for multi-process workloads such as PyTorch and RCCL.
 
-The rocJITsu public repository is located at
+The rocjitsu public repository is located at
 `ROCm/rocm-systems <https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu>`_.
 
 .. grid:: 2
@@ -39,18 +39,17 @@ The rocJITsu public repository is located at
       * :doc:`Inspect and disassemble a code object with the C API <tutorials/inspect-code-object>`
       * :doc:`Translate a CDNA4 kernel to RDNA4 using rj_dbt_translate <tutorials/translate-cdna4-to-rdna4>`
       * :doc:`Detect a missing barrier with the race detector <tutorials/race-detection-walkthrough>`
-      * :doc:`Detect an LDS data race with ConSan <tutorials/consan-detect-lds-race>`
       * :doc:`Analyze a code object for wait hazards with waitcheck <tutorials/waitcheck-analyze-code-object>`
 
    .. grid-item-card:: Reference
 
-      * :doc:`ConSan GPU LDS sanitizer reference <reference/consan>`
       * :doc:`waitcheck hazard analyzer reference <reference/waitcheck>`
       * :doc:`Virtual machine API reference <reference/api-vm>`
       * :doc:`Code object and instruction API reference <reference/api-code-object>`
       * :doc:`Status codes and compiler macros reference <reference/api-status>`
       * :doc:`rj_dbt_translate command reference <reference/rj-dbt-translate>`
       * :doc:`rocjitsu CLI reference <reference/rocjitsu-cli>`
+      * :doc:`Python execution API <reference/python-api>`
       * :doc:`Environment variable reference <reference/environment-variables>`
       * :doc:`Supported GPU architectures <reference/supported-architectures>`
 

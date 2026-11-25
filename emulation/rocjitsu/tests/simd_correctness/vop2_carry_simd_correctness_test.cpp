@@ -1,27 +1,15 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file vop2_carry_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs scalar body) for the
-/// carry-bearing VOP2 instructions wired into SIMD_VOP2_CARRY:
-///   v_add_co_u32, v_sub_co_u32, v_subrev_co_u32,
-///   v_addc_co_u32, v_subb_co_u32, v_subbrev_co_u32.
-/// Unlike the plain binary VOP2 path these write per-lane carry/borrow into
-/// VCC, and the addc/subb/subbrev forms read VCC as a carry-in. Each op runs
-/// TWICE in the same process -- once forcing the scalar body, once the SIMD fast
-/// path, with identical seed/inputs/EXEC/VCC-in -- and the scalar-vs-SIMD
-/// equivalence on BOTH the 64-lane destination AND the full 64-bit VCC is
-/// asserted with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate
-/// in-process). Inputs deliberately seed the
-/// 32-bit carry/borrow boundary (0xFFFFFFFF+1, a<b, a==b+cin, ...) on the low
-/// lanes — random-only inputs hide these corners. Inactive-lane carry-out VCC
-/// bits are zeroed under full and partial EXEC masks.
+// Compare decoded carry/borrow on scalar and SIMD CPU paths, including carry-in,
+// carry-out, boundary inputs and inactive lanes. Both results must agree bit for bit.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -81,13 +69,16 @@ struct Fixture {
 
   Fixture() : gpu_mem("vop2_carry_simd_mem"), l2("vop2_carry_simd_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = rocjitsu::IsaFamily::Cdna4;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop2_carry_simd", cfg, &gpu_mem, &l2);
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop2_carry_simd", cfg, &gpu_mem, &l2);
+    if (!cu) {
+      return;
+    }
+    decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
 
@@ -121,8 +112,9 @@ struct Fixture {
     EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     Result res;
     uint32_t vbase = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       res.dst[lane] = cu->read_vgpr(vbase + 2, lane);
+    }
     res.vcc = wf->vcc();
     return res;
   }
@@ -163,6 +155,9 @@ void check_case(const CarryCase &c, uint64_t exec) {
   auto run_mode = [&](bool force_scalar, uint64_t vcc_in) -> Fixture::Result {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure()) {
+      return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t enc = vop2_encode(c.opcode, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
@@ -210,8 +205,9 @@ TEST(Vop2CarrySimdCorrectness, FullExecMask) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
+  for (const auto &c : kCases) {
     check_case(c, /*exec=*/~0ULL);
+  }
 }
 
 TEST(Vop2CarrySimdCorrectness, PartialExecMask) {
@@ -222,8 +218,9 @@ TEST(Vop2CarrySimdCorrectness, PartialExecMask) {
   // Sparse/alternating pattern crossing SIMD chunk boundaries: exercises the
   // masked result store and per-chunk VCC merge (active bits updated, inactive
   // zeroed) on both halves of a wave64.
-  for (const auto &c : kCases)
+  for (const auto &c : kCases) {
     check_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+  }
 }
 
 } // namespace

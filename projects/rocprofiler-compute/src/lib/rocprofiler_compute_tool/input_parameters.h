@@ -16,7 +16,7 @@ public:
 
     virtual std::string_view get_output_path()                 = 0;
     virtual std::string_view get_requested_counters()          = 0;
-    virtual std::string_view get_iteration_multiplexing_mode() = 0;
+    virtual std::string_view get_iteration_multiplexing()      = 0;
     virtual std::string_view get_kernel_filter_include_regex() = 0;
     virtual std::string_view get_kernel_filter_range()         = 0;
     virtual std::string_view get_pc_sampling_method()          = 0;
@@ -27,7 +27,7 @@ class EnvInputParameters : public InputParameters
 public:
     static constexpr std::string_view kDefaultOutputPath{"./"};
     static constexpr std::string_view kDefaultRequestedCounters{""};
-    static constexpr std::string_view kDefaultIterationMultiplexingMode{""};
+    static constexpr std::string_view kDefaultIterationMultiplexing{""};
     static constexpr std::string_view kDefaultKernelFilterIncludeRegex{""};
     static constexpr std::string_view kDefaultKernelFilterRange{""};
     static constexpr std::string_view kDefaultPcSamplingMethod{""};
@@ -35,7 +35,7 @@ public:
     explicit EnvInputParameters(std::shared_ptr<const EnvironCache> environ = EnvironCache::instance());
     std::string_view get_output_path() override;
     std::string_view get_requested_counters() override;
-    std::string_view get_iteration_multiplexing_mode() override;
+    std::string_view get_iteration_multiplexing() override;
     std::string_view get_kernel_filter_include_regex() override;
     std::string_view get_kernel_filter_range() override;
     std::string_view get_pc_sampling_method() override;

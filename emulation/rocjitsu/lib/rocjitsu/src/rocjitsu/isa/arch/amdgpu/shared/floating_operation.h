@@ -18,8 +18,12 @@ struct SourceModifiers {
 };
 
 /// @brief ABS/NEG -> operation -> OMOD -> CLAMP, for scalar or SIMD raw bits.
-/// @details All sources and the result use Fmt. The operation owns input
-/// flushing, destination rounding, and any output flush before modifiers.
+/// @details All floating sources and the result use Fmt; a source without
+/// ABS/NEG bits, such as LDEXP's integer exponent, passes unchanged. The
+/// operation owns input flushing, destination rounding, and any output flush
+/// before modifiers. An operation whose tininess depends on OMOD, such as
+/// LDEXP, must take effective OMOD in its own policy: this stage sees only the
+/// rounded result.
 /// Signed input flushing commutes with ABS/NEG, so the operation may flush the
 /// modified raw source before widening it.
 template <typename Fmt, typename Op, typename... Vs>

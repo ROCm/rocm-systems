@@ -25,15 +25,13 @@ hipError_t ihipChooseDevice(int* device, const DeviceProp* properties) {
   IHIP_RETURN_ONFAIL(ihipDeviceGetCount(&count));
 
   for (cl_int i = 0; i < count; ++i) {
-    DeviceProp currentProp = {0};
+    DeviceProp currentProp = {};
     cl_uint validPropCount = 0;
     cl_uint matchedCount = 0;
-    hipError_t err = hipSuccess;
-
     if constexpr (std::is_same_v<DeviceProp, hipDeviceProp_tR0600>) {
-      err = ihipGetDeviceProperties(&currentProp, i);
+      (void)ihipGetDeviceProperties(&currentProp, i);
     } else {
-      err = hip::hipGetDevicePropertiesR0000(&currentProp, i);
+      (void)hip::hipGetDevicePropertiesR0000(&currentProp, i);
     }
 
     if (properties->major != 0) {
@@ -155,7 +153,7 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
   }
 
   // FIXME: should we cache the props, or just select from deviceHandle->info_?
-  hipDeviceProp_tR0600 prop = {0};
+  hipDeviceProp_tR0600 prop = {};
   HIP_RETURN_ONFAIL(ihipGetDeviceProperties(&prop, device));
 
   constexpr auto int32_max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
@@ -554,7 +552,12 @@ hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  *cacheConfig = hipFuncCache_t();
+  amd::Device* device = hip::getCurrentDevice()->devices()[0];
+  // Devices without a configurable carveout report no preference.
+  *cacheConfig = device->settings().groupMemCarveout_
+                     ? static_cast<hipFuncCache_t>(
+                           amd::carveoutPercentToFuncCache(device->GetGroupMemCarveout()))
+                     : hipFuncCachePreferNone;
 
   HIP_RETURN(hipSuccess);
 }
@@ -582,6 +585,9 @@ hipError_t hipDeviceGetLimit(size_t* pValue, hipLimit_t limit) {
       break;
     case hipExtLimitScratchCurrent:
       *pValue = hip::getCurrentDevice()->devices()[0]->ScratchLimitCurrent();
+      break;
+    case hipLimitPersistingL2CacheSize:
+      *pValue = hip::getCurrentDevice()->devices()[0]->PersistingL2CacheSizeCurrent();
       break;
     default:
       LogPrintfError("UnsupportedLimit = %d is passed", limit);
@@ -644,8 +650,6 @@ hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig) {
     HIP_RETURN(hipErrorStreamCaptureUnsupported);
   }
 
-  // No way to set cache config yet.
-
   hip::getCurrentDevice()->devices()[0]->UpdateGroupMemCarveout(
       amd::funcCacheToCarveoutPercent(static_cast<uint32_t>(cacheConfig)));
   HIP_RETURN(hipSuccess);
@@ -670,6 +674,11 @@ hipError_t hipDeviceSetLimit(hipLimit_t limit, size_t value) {
       break;
     case hipExtLimitScratchCurrent:
       if (!hip::getCurrentDevice()->devices()[0]->UpdateScratchLimitCurrent(value)) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      break;
+    case hipLimitPersistingL2CacheSize:
+      if (!hip::getCurrentDevice()->devices()[0]->UpdatePersistingL2CacheSizeCurrent(value)) {
         HIP_RETURN(hipErrorInvalidValue);
       }
       break;
@@ -702,7 +711,7 @@ hipError_t hipDeviceGetTexture1DLinearMaxWidth(size_t* maxWidthInElements,
   if (maxWidthInElements == nullptr || fmtDesc == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  hipDeviceProp_tR0600 prop = {0};
+  hipDeviceProp_tR0600 prop = {};
   HIP_RETURN_ONFAIL(ihipGetDeviceProperties(&prop, device));
   // Calculate element size according to fmtDesc
   size_t elementSize =

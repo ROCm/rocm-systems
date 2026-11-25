@@ -1,0 +1,743 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "execution_fuzz_core.h"
+#include "rocjitsu/isa/isa_family.h"
+
+#include "embedded_schema.h"
+#include "generated_kernel.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/isa/target_registry.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gws_device.h"
+#include "rocjitsu/vm/amdgpu/instruction_cache.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
+#include "rocjitsu/vm/amdgpu/xcd.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "rocjitsu/vm/soc.h"
+#include "util/diagnostic.h"
+
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <cassert>
+#include <cstdlib>
+#include <memory>
+#include <optional>
+#include <string>
+#include <thread>
+
+namespace rocjitsu::execution_fuzz {
+namespace {
+
+constexpr uint64_t kCodeBase = 0x10000;
+constexpr uint64_t kDataBase = 0x20000;
+
+using amdgpu::ArithmeticSemantics;
+
+constexpr std::array kArithmeticSemantics = {
+    ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose,
+    ArithmeticSemantics::BitExactEmpiricalAllowLoose,
+    ArithmeticSemantics::BitExactEmpiricalNoFpStatus, ArithmeticSemantics::BitExactEmpirical};
+// The generated CDNA5 WMMA prefix supports the first three semantics.
+constexpr size_t kWmmaSemanticsCount = 3;
+constexpr std::array kArithmeticCpuLimits = {RJ_ARITH_CPU_X86_64_ZEN4, RJ_ARITH_CPU_BASELINE,
+                                             RJ_ARITH_CPU_X86_64_V3, RJ_ARITH_CPU_X86_64_V4};
+
+struct TargetInfo {
+  std::string_view name;
+  rocjitsu::IsaFamily arch;
+  rj_code_target_id_t id;
+};
+
+constexpr std::array<TargetInfo, static_cast<size_t>(FuzzTarget::Count)> kTargets{{
+    {"gfx908", rocjitsu::IsaFamily::Cdna1, ROCJITSU_CODE_TARGET_GFX908},
+    {"gfx90a", rocjitsu::IsaFamily::Cdna2, ROCJITSU_CODE_TARGET_GFX90A},
+    {"gfx942", rocjitsu::IsaFamily::Cdna3, ROCJITSU_CODE_TARGET_GFX942},
+    {"gfx950", rocjitsu::IsaFamily::Cdna4, ROCJITSU_CODE_TARGET_GFX950},
+    {"gfx1010", rocjitsu::IsaFamily::Rdna1, ROCJITSU_CODE_TARGET_GFX1010},
+    {"gfx1030", rocjitsu::IsaFamily::Rdna2, ROCJITSU_CODE_TARGET_GFX1030},
+    {"gfx1100", rocjitsu::IsaFamily::Rdna3, ROCJITSU_CODE_TARGET_GFX1100},
+    {"gfx1150", rocjitsu::IsaFamily::Rdna3_5, ROCJITSU_CODE_TARGET_GFX1150},
+    {"gfx1200", rocjitsu::IsaFamily::Rdna4, ROCJITSU_CODE_TARGET_GFX1200},
+    {"gfx1201", rocjitsu::IsaFamily::Rdna4, ROCJITSU_CODE_TARGET_GFX1201},
+    {"gfx1250", rocjitsu::IsaFamily::Cdna5, ROCJITSU_CODE_TARGET_GFX1250},
+    {"gfx1251", rocjitsu::IsaFamily::Cdna5, ROCJITSU_CODE_TARGET_GFX1251},
+}};
+
+const TargetInfo &target_info(FuzzTarget target) {
+  const size_t index = static_cast<size_t>(target);
+  assert(index < kTargets.size() && "metadata requires a valid execution fuzz target");
+  return kTargets[index];
+}
+
+class BoundedFuzzAddressSpace final : public amdgpu::AddressSpaceTranslator {
+public:
+  BoundedFuzzAddressSpace(uint64_t code_size, uint64_t data_size)
+      : code_end_(kCodeBase + code_size), data_end_(kDataBase + data_size) {}
+
+  amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
+                                        amdgpu::VmAccessKind) const override {
+    const auto in_range = [&](uint64_t begin, uint64_t end) {
+      return size != 0 && address >= begin && address < end && size <= end - address;
+    };
+    uint64_t end = 0;
+    if (in_range(kCodeBase, code_end_)) {
+      end = code_end_;
+    } else if (in_range(kDataBase, data_end_)) {
+      end = data_end_;
+    } else {
+      return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    }
+
+    return {
+        .outcome = amdgpu::VmAccessOutcome::Complete,
+        .translation = {.domain = amdgpu::VmMemoryDomain::Local,
+                        .address = address,
+                        .contiguous_bytes = end - address,
+                        .mtype = amdgpu::Mtype::RW,
+                        .permissions = {.readable = true, .writable = true, .executable = true}}};
+  }
+
+private:
+  uint64_t code_end_ = 0;
+  uint64_t data_end_ = 0;
+};
+
+uint64_t next_random(uint64_t &state) {
+  state += 0x9e3779b97f4a7c15ULL;
+  uint64_t mixed = state;
+  mixed = (mixed ^ (mixed >> 30)) * 0xbf58476d1ce4e5b9ULL;
+  mixed = (mixed ^ (mixed >> 27)) * 0x94d049bb133111ebULL;
+  return mixed ^ (mixed >> 31);
+}
+
+uint8_t cache_mode_for_seed(uint64_t seed) {
+  // Give the cache choice its own stream so it does not reuse the first instruction draw.
+  constexpr uint64_t kCacheModeSalt = 0x3c79ac492ba7b653ULL;
+  seed ^= kCacheModeSalt;
+  return (next_random(seed) & 1) ? kCacheMemoryBit : 0;
+}
+
+void select_backends_for_seed(std::span<uint8_t> input, uint64_t seed,
+                              size_t semantics_count = kArithmeticSemantics.size()) {
+  // Use a separate draw for the backend selectors.
+  seed ^= 0x5318ca9a6c6e3fb1ULL;
+  const auto choice = next_random(seed);
+  input[0] |= static_cast<uint8_t>((choice % semantics_count) << kArithmeticSemanticsShift);
+  input[1] |= static_cast<uint8_t>((choice >> 8) & kArithmeticCpuMask);
+}
+
+uint32_t initial_value(uint64_t &seed) {
+  constexpr uint32_t edges[] = {0, 1, UINT32_MAX, 0x80000000, 0x7fffffff, 31, 32, 63};
+  const uint64_t bits = next_random(seed);
+  return (bits & 1) ? static_cast<uint32_t>(bits >> 32) : edges[(bits >> 1) % std::size(edges)];
+}
+
+std::string fuzz_config(FuzzTarget target, bool check_waits, ArithmeticSemantics semantics) {
+  const TargetInfo &info = target_info(target);
+  std::string json = R"({"num_threads":1,"async_helper_threads":0,"vm":{"arch":")";
+  json += config::arch_to_string(info.arch);
+  json += R"(","target":")";
+  json += info.name;
+  json += R"("},"wait_checking":")";
+  json += check_waits ? "all" : "off";
+  json += R"(","arithmetic":{"semantics":")";
+  json += amdgpu::arithmetic_semantics_name(semantics);
+  json +=
+      R"("},"topology":{"root":{"name":"soc","type":"soc","children":[{"name":"vram","type":"gpu_memory"},{"name":"xcd0","type":"xcd","children":[{"name":"l2","type":"l2_cache"},{"name":"cp","type":"command_processor"},{"name":"se0","type":"shader_engine","children":[{"name":"cu0","type":"compute_unit","config":[{"key":"num_wf_slots","value":"1"},{"key":"sgprs_per_wf","value":"128"},{"key":"vgprs_per_wf","value":")";
+  json += std::to_string(isa_properties(info.arch).max_addressable_vgprs_per_wf);
+  json += R"("},{"key":"lds_size_kb","value":")";
+  json += std::to_string(arch_lds_bytes(info.arch) / 1024);
+  json += R"("}]}]}]}]},"links":[]}})";
+  return json;
+}
+
+class ExecutionCounter final : public ExecutionPlugin {
+public:
+  explicit ExecutionCounter(RunStats &stats)
+      : ExecutionPlugin("execution_fuzz_raw_counter"), stats_(stats) {}
+
+  bool observes_after_execute_instruction() const override { return false; }
+  bool observes_async_instruction_issued() const override { return true; }
+  bool observes_memory_instruction_routing() const override { return false; }
+  bool observes_vgpr_reads() const override { return false; }
+  bool observes_vgpr_writes() const override { return false; }
+  bool observes_scalar_register_writes() const override { return false; }
+  bool observes_sgpr_reads() const override { return false; }
+  bool observes_memory_routing() const override { return false; }
+  bool observes_tensor_dma_memory_access() const override { return false; }
+  bool supports_async_instructions() const override { return true; }
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
+                                        amdgpu::Wavefront &) override {
+    ++stats_.executed;
+  }
+  void onAmdgpuAsyncInstructionIssued(uint64_t, const Instruction &, amdgpu::Wavefront &) override {
+    ++stats_.executed;
+    ++stats_.async_executed;
+  }
+  void onAmdgpuWavefrontHalted(amdgpu::Wavefront &) override { ++stats_.waves_halted; }
+
+private:
+  RunStats &stats_;
+};
+
+template <typename Encodings>
+util::FailureOr<std::vector<std::vector<uint8_t>>>
+make_instruction_seeds(FuzzTarget target, const Encodings &encodings) {
+  std::vector<std::vector<uint8_t>> result;
+  const TargetInfo &info = target_info(target);
+  const std::unique_ptr<Decoder> decoder = Decoder::create(default_isa_target_registry(), info.id);
+  if (!decoder) {
+    return util::Result::failure();
+  }
+  for (const auto &encoding : encodings) {
+    // Keep generated campaigns moving forward; arbitrary raw campaigns still
+    // cover control flow and termination encodings.
+    if (encoding.mnemonic.starts_with("s_branch") || encoding.mnemonic.starts_with("s_cbranch") ||
+        encoding.mnemonic.starts_with("s_endpgm") || encoding.mnemonic.starts_with("s_setpc") ||
+        encoding.mnemonic.starts_with("s_swappc") || encoding.mnemonic.starts_with("s_rfe") ||
+        encoding.mnemonic.starts_with("s_trap")) {
+      continue;
+    }
+    std::array<uint32_t, 4> words = {encoding.words[0], encoding.words[1], 0, 0};
+    util::StringDiagnostic rejection;
+    DecodeResult decoded = decoder->decode(words.data(), rejection.emitter());
+    if (decoded.failed()) {
+      continue;
+    }
+    const int size = decoded.value()->size();
+    if (size <= 0 || size > 16 || size % 4 != 0) {
+      continue;
+    }
+    std::vector<uint8_t> bytes(static_cast<size_t>(size));
+    for (int byte = 0; byte < size; ++byte) {
+      bytes[byte] = static_cast<uint8_t>(words[byte / 4] >> (8 * (byte % 4)));
+    }
+    result.push_back(std::move(bytes));
+  }
+  return result;
+}
+
+const util::FailureOr<std::vector<std::vector<uint8_t>>> &instruction_seeds(FuzzTarget target) {
+  static const std::array<util::FailureOr<std::vector<std::vector<uint8_t>>>,
+                          static_cast<size_t>(FuzzTarget::Count)>
+      seeds = {
+          make_instruction_seeds(FuzzTarget::Gfx908, cdna1::test_data::ENCODINGS),
+          make_instruction_seeds(FuzzTarget::Gfx90a, cdna2::test_data::ENCODINGS),
+          make_instruction_seeds(FuzzTarget::Gfx942, cdna3::test_data::ENCODINGS),
+          make_instruction_seeds(FuzzTarget::Gfx950, cdna4::test_data::ENCODINGS),
+          make_instruction_seeds(FuzzTarget::Gfx1010, rdna1::test_data::ENCODINGS),
+          make_instruction_seeds(FuzzTarget::Gfx1030, rdna2::test_data::ENCODINGS),
+          make_instruction_seeds(FuzzTarget::Gfx1100, rdna3::test_data::ENCODINGS),
+          make_instruction_seeds(FuzzTarget::Gfx1150, rdna3_5::test_data::ENCODINGS),
+          make_instruction_seeds(FuzzTarget::Gfx1200, rdna4::test_data::ENCODINGS),
+          make_instruction_seeds(FuzzTarget::Gfx1201, rdna4::test_data::ENCODINGS),
+          make_instruction_seeds(FuzzTarget::Gfx1250, cdna5::test_data::ENCODINGS),
+          make_instruction_seeds(FuzzTarget::Gfx1251, cdna5::test_data::ENCODINGS),
+      };
+  return seeds[static_cast<size_t>(target)];
+}
+
+} // namespace
+
+uint32_t terminating_instruction(FuzzTarget target) {
+  switch (target_info(target).arch) {
+  case rocjitsu::IsaFamily::Cdna1:
+    return cdna1::build_sopp(cdna1::kSEndpgmSopp)[0];
+  case rocjitsu::IsaFamily::Cdna2:
+    return cdna2::build_sopp(cdna2::kSEndpgmSopp)[0];
+  case rocjitsu::IsaFamily::Cdna3:
+    return cdna3::build_sopp(cdna3::kSEndpgmSopp)[0];
+  case rocjitsu::IsaFamily::Cdna4:
+    return cdna4::build_sopp(cdna4::kSEndpgmSopp)[0];
+  case rocjitsu::IsaFamily::Rdna1:
+    return rdna1::build_sopp(rdna1::kSEndpgmSopp)[0];
+  case rocjitsu::IsaFamily::Rdna2:
+    return rdna2::build_sopp(rdna2::kSEndpgmSopp)[0];
+  case rocjitsu::IsaFamily::Rdna3:
+    return rdna3::build_sopp(rdna3::kSEndpgmSopp)[0];
+  case rocjitsu::IsaFamily::Rdna3_5:
+    return rdna3_5::build_sopp(rdna3_5::kSEndpgmSopp)[0];
+  case rocjitsu::IsaFamily::Rdna4:
+    return rdna4::build_sopp(rdna4::kSEndpgmSopp)[0];
+  case rocjitsu::IsaFamily::Cdna5:
+    return cdna5::build_sopp(cdna5::kSEndpgmSopp)[0];
+  default:
+    assert(false && "every execution fuzz target has a terminating instruction");
+    std::abort();
+  }
+}
+
+std::optional<FuzzTarget> parse_target(std::string_view name) {
+  for (size_t index = 0; index < kTargets.size(); ++index) {
+    if (kTargets[index].name == name) {
+      return static_cast<FuzzTarget>(index);
+    }
+  }
+  return std::nullopt;
+}
+
+std::string_view target_name(FuzzTarget target) { return target_info(target).name; }
+
+rocjitsu::IsaFamily target_arch(FuzzTarget target) { return target_info(target).arch; }
+
+rj_code_target_id_t target_id(FuzzTarget target) { return target_info(target).id; }
+
+bool targets_cover_amdgpu_execution_registry() {
+  for (const IsaTargetDescriptor &descriptor : default_isa_target_registry().targets()) {
+    if (!descriptor.supports_execution) {
+      continue;
+    }
+    if (descriptor.family == rocjitsu::IsaFamily::Rv32i ||
+        descriptor.family == rocjitsu::IsaFamily::Rv64i) {
+      continue;
+    }
+    if (descriptor.bindings.empty()) {
+      return false;
+    }
+    for (const IsaTargetBinding &gpu : descriptor.bindings) {
+      if (!gpu.capabilities.execution_implemented) {
+        continue;
+      }
+      const bool covered = std::ranges::any_of(
+          kTargets, [&](const TargetInfo &target) { return target.id == gpu.public_id; });
+      if (!covered) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+std::optional<FuzzTarget> indexed_target(uint8_t index) {
+  if (index >= kTargets.size()) {
+    return std::nullopt;
+  }
+  return static_cast<FuzzTarget>(index);
+}
+
+util::FailureOr<std::vector<uint8_t>> terminated_program(std::span<const uint8_t> instructions,
+                                                         FuzzTarget target,
+                                                         util::DiagnosticEmitter diagnostic) {
+  const std::unique_ptr<Decoder> decoder =
+      Decoder::create(default_isa_target_registry(), target_id(target));
+  if (!decoder) {
+    return diagnostic.emit() << target_name(target) << " decoder is unavailable";
+  }
+  const std::size_t max_words = decoder->max_instruction_words();
+  std::vector<uint8_t> code(instructions.begin(), instructions.end());
+  while (code.size() % sizeof(uint32_t) != 0) {
+    code.push_back(0);
+  }
+  // A trailing partial instruction can consume up to max_words - 1 words
+  // before reaching the next instruction boundary.
+  const uint32_t end = terminating_instruction(target);
+  for (std::size_t word = 0; word < max_words; ++word) {
+    for (unsigned byte = 0; byte < sizeof(end); ++byte) {
+      code.push_back(static_cast<uint8_t>(end >> (8 * byte)));
+    }
+  }
+  // The last terminator still needs a full CU instruction fetch.
+  const std::size_t padding_bytes =
+      std::max(max_words * sizeof(uint32_t), amdgpu::InstructionCache::kFetchBytes - sizeof(end));
+  code.resize(code.size() + padding_bytes);
+  return code;
+}
+
+namespace {
+util::FailureOr<RunStats> run_input_once(
+    std::span<const uint8_t> input, std::span<const uint8_t> instructions,
+    FuzzTarget resolved_target, ArithmeticSemantics semantics,
+    const std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> &async_resources,
+    util::DiagnosticEmitter diagnostic) {
+  const auto terminated = terminated_program(instructions, resolved_target, diagnostic);
+  if (terminated.failed()) {
+    return util::Result::failure();
+  }
+  const std::vector<uint8_t> &code = terminated.value();
+
+  // Keep a mapped data island near the program. Address-bearing initial state
+  // points into this region while other registers retain high-entropy values.
+  std::array<uint8_t, 64 * 1024> data{};
+  const uint8_t control = input.size() >= kHeaderSize ? input[1] : 0;
+  const bool check_waits = (control & kWaitCheckingBit) != 0;
+  uint64_t seed = 0x4f1bbcdc6762c73bULL;
+  for (size_t byte_index = 0; byte_index < input.size(); ++byte_index) {
+    // These harness settings leave the initial guest state unchanged.
+    uint8_t byte = input[byte_index];
+    if (byte_index == 0 && input.size() >= kHeaderSize) {
+      byte &= kTargetMask;
+    }
+    if (byte_index == 1) {
+      byte &= ~(kWaitCheckingBit | kCacheMemoryBit | kArithmeticCpuMask);
+    }
+    seed = std::rotl(seed ^ byte, 11) * 0x9e3779b97f4a7c15ULL;
+  }
+  seed ^= static_cast<uint64_t>(resolved_target) * 0xd6e8feb86659fd93ULL;
+  for (auto &byte : data) {
+    byte = static_cast<uint8_t>(next_random(seed));
+  }
+
+  util::StringDiagnostic config_diagnostic;
+  util::FailureOr<config::LoadedConfig> maybe_loaded = config::load_config_from_string(
+      fuzz_config(resolved_target, check_waits, semantics), kEmbeddedSchema,
+      config_diagnostic.emitter(), 1, async_resources);
+  if (maybe_loaded.failed()) {
+    return diagnostic.emit() << "execution fuzz config failed: " << config_diagnostic.message();
+  }
+  config::LoadedConfig loaded = std::move(maybe_loaded).value();
+  auto *memory = loaded.memory();
+  auto *soc = loaded.soc();
+  amdgpu::Xcd *xcd = soc->xcd(0);
+  auto *cu = xcd->shader_engine(0)->compute_unit(0);
+  cu->limit_arithmetic_cpu_level(kArithmeticCpuLimits[control >> kArithmeticCpuShift]);
+  memory->load_image(code.data(), code.size(), kCodeBase);
+  memory->load_image(data.data(), data.size(), kDataBase);
+  amdgpu::GpuVm &gpu_vm = soc->gpu_vm();
+  auto translator =
+      std::make_shared<BoundedFuzzAddressSpace>(code.size(), static_cast<uint64_t>(data.size()));
+  auto physical_memory = std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*memory);
+  const auto address_space = gpu_vm.register_address_space(
+      1, translator, physical_memory, [](uint64_t, auto) {}, (control & kCacheMemoryBit) != 0);
+  if (!address_space) {
+    return diagnostic.emit() << "execution fuzz address-space registration failed";
+  }
+  cu->set_gpu_vm(&gpu_vm);
+  RunStats stats{.arithmetic_flags = cu->arithmetic_flags(), .force_scalar = cu->force_scalar()};
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  if (!group->add(std::make_unique<ExecutionCounter>(stats))) {
+    return diagnostic.emit() << "cannot attach execution fuzz counter";
+  }
+  cu->set_plugin_group(group);
+
+  const TargetInfo &info = target_info(resolved_target);
+  const uint32_t vgprs_per_wf = isa_properties(info.arch).max_addressable_vgprs_per_wf;
+  auto *wf = cu->dispatch_wf(0, kCodeBase, 128, vgprs_per_wf);
+  if (!wf) {
+    return diagnostic.emit() << "execution fuzz wave allocation failed";
+  }
+  wf->set_process_id(1);
+  // Arbitrary streams may contain a GWS barrier without a preceding GWS INIT.
+  // A compute unit without a CP or engine rejects such a barrier.
+  // Arm every process-scoped resource at zero so fuzzing starts from a defined
+  // state and can exercise GWS instructions. This deliberately trades detection
+  // of missing guest setup for that coverage; a direct compute-unit test still
+  // covers the rejection.
+  for (uint32_t rid = 0; rid < amdgpu::GwsDevice::kResourceCount; ++rid) {
+    cu->gws_init(*wf, rid, 0);
+  }
+  wf->set_address_space(address_space);
+  wf->set_lds_size(arch_lds_bytes(info.arch));
+  const uint64_t initial_exec = next_random(seed) | 1;
+  const bool full_exec = control & (kAsyncSelectBit | kFullExecMaskBit);
+  wf->set_exec_raw(full_exec ? (wf->wf_size() == 64 ? ~uint64_t{0} : 0xffffffffu) : initial_exec);
+  wf->set_vcc_raw(next_random(seed));
+  wf->write_scc(next_random(seed) & 1);
+  // Seed the generator's 64-bit address pairs with zero high halves.
+  for (uint32_t reg = 0; reg < 128; ++reg) {
+    const uint32_t value =
+        reg < kAddressPairRegisterCount
+            ? (reg % 2 == 0 ? static_cast<uint32_t>(kDataBase + (reg / 2) * kAddressPairStrideBytes)
+                            : 0)
+            : initial_value(seed);
+    wf->debug_write_sgpr(reg, value);
+  }
+  for (uint32_t reg = 0; reg < vgprs_per_wf; ++reg) {
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      const uint32_t value =
+          reg < kAddressPairRegisterCount
+              ? (reg % 2 == 0
+                     ? static_cast<uint32_t>(kDataBase + (reg / 2) * kAddressPairStrideBytes +
+                                             lane * sizeof(uint32_t))
+                     : 0)
+              : initial_value(seed);
+      wf->debug_write_vgpr(reg, lane, value);
+    }
+  }
+
+  constexpr uint32_t kStepBudget = 256;
+  uint32_t steps = 0;
+  while (steps++ < kStepBudget && cu->has_active_wfs()) {
+    cu->step();
+  }
+  if (cu->has_active_wfs()) {
+    ++stats.budget_exhausted;
+  } else if (stats.waves_halted != 0) {
+    ++stats.inputs_halted;
+  } else {
+    ++stats.inputs_stopped;
+  }
+  stats.l2_backing_reads = xcd->l2_cache()->backing_read_transactions();
+  return stats;
+}
+} // namespace
+
+util::FailureOr<RunStats>
+run_input(std::span<const uint8_t> input, std::optional<FuzzTarget> target,
+          std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> async_resources,
+          AsyncMode async_mode, std::optional<unsigned> issuers,
+          util::DiagnosticEmitter diagnostic) {
+  if (input.empty() || input.size() > kMaxInputSize) {
+    return diagnostic.emit() << "execution fuzz input must contain 1..1024 bytes";
+  }
+  if (issuers && (*issuers == 0 || *issuers > 8)) {
+    return diagnostic.emit() << "execution fuzz issuers must be 1..8";
+  }
+  if (async_mode == AsyncMode::Enabled && !async_resources) {
+    return diagnostic.emit() << "enabled asynchronous execution requires helper resources";
+  }
+
+  if (target && !indexed_target(static_cast<uint8_t>(*target))) {
+    return diagnostic.emit() << "invalid execution fuzz target";
+  }
+  const bool has_header = input.size() >= kHeaderSize;
+  const auto semantics_selector = has_header ? input.front() >> kArithmeticSemanticsShift : 0u;
+  if (!target && semantics_selector >= kArithmeticSemantics.size()) {
+    return RunStats{.inputs = 1};
+  }
+  const uint8_t target_selector = has_header ? input.front() & kTargetMask : input.front();
+  const std::optional<FuzzTarget> selected = target ? target : indexed_target(target_selector);
+  if (!selected) {
+    return RunStats{.inputs = 1};
+  }
+  const FuzzTarget resolved_target = *selected;
+  const auto semantics = semantics_selector < kArithmeticSemantics.size()
+                             ? kArithmeticSemantics[semantics_selector]
+                             : ArithmeticSemantics::Compatibility;
+  const uint8_t control = has_header ? input[1] : 0;
+  const std::span<const uint8_t> instructions = input.subspan(std::min(kHeaderSize, input.size()));
+  const auto arch = target_info(resolved_target).arch;
+  const bool async_capable = amdgpu::async_mma_policy::supported(arch);
+  const bool async_selected = async_mode == AsyncMode::Enabled ||
+                              (async_mode == AsyncMode::Auto && (control & kAsyncSelectBit));
+  const bool async_enabled = async_capable && async_selected && async_resources;
+  if (!async_enabled) {
+    async_resources.reset();
+  }
+  const unsigned issuer_count =
+      issuers.value_or((control & kConcurrentIssuerMask) == kConcurrentIssuerMask ? 2 : 1);
+
+  std::vector<util::FailureOr<RunStats>> results(issuer_count, util::Result::failure());
+  std::vector<std::string> failures(issuer_count);
+  std::vector<std::jthread> workers;
+  workers.reserve(issuer_count > 1 ? issuer_count : 0);
+  const auto execute = [&](unsigned issuer) {
+    util::StringDiagnostic failure;
+    results[issuer] = run_input_once(input, instructions, resolved_target, semantics,
+                                     async_resources, failure.emitter());
+    failures[issuer] = failure.message();
+  };
+  if (issuer_count == 1) {
+    execute(0);
+  } else {
+    for (unsigned issuer = 0; issuer != issuer_count; ++issuer) {
+      workers.emplace_back(execute, issuer);
+    }
+    for (auto &worker : workers) {
+      worker.join();
+    }
+  }
+  for (unsigned issuer = 0; issuer != issuer_count; ++issuer) {
+    if (results[issuer].failed()) {
+      return diagnostic.emit() << failures[issuer];
+    }
+  }
+
+  RunStats total;
+  bool halted = false;
+  bool stopped = false;
+  for (const util::FailureOr<RunStats> &maybe_result : results) {
+    const RunStats &result = maybe_result.value();
+    total.executed += result.executed;
+    total.async_executed += result.async_executed;
+    total.waves_halted += result.waves_halted;
+    total.budget_exhausted += result.budget_exhausted;
+    total.l2_backing_reads += result.l2_backing_reads;
+    halted |= result.inputs_halted != 0;
+    stopped |= result.inputs_stopped != 0;
+  }
+  total.arithmetic_flags = results.front().value().arithmetic_flags;
+  total.force_scalar = results.front().value().force_scalar;
+  total.async_capable_inputs = async_capable;
+  total.async_enabled_inputs = async_enabled;
+  total.concurrent_inputs = issuer_count > 1;
+  total.issuer_executions = issuer_count;
+  total.rounds = 1;
+  total.inputs = 1;
+  total.inputs_executed = total.executed != 0;
+  total.budget_exhausted = total.budget_exhausted != 0;
+  if (total.budget_exhausted == 0 && halted) {
+    total.inputs_halted = 1;
+  } else if (total.budget_exhausted == 0 && stopped) {
+    total.inputs_stopped = 1;
+  }
+  return total;
+}
+
+util::FailureOr<std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>>
+make_async_execution_resources(unsigned helpers, util::DiagnosticEmitter diagnostic) {
+  if (helpers == 0 || helpers > 128) {
+    return diagnostic.emit() << "async helper count must be 1..128";
+  }
+  return std::make_shared<amdgpu::matrix_coexecution::ExecutionResources>(helpers);
+}
+
+util::FailureOr<std::vector<uint8_t>> generated_kernel_input(uint64_t seed, size_t size,
+                                                             FuzzTarget target,
+                                                             util::DiagnosticEmitter diagnostic) {
+  if (!indexed_target(static_cast<uint8_t>(target))) {
+    return diagnostic.emit() << "invalid execution fuzz target";
+  }
+  if (size < kHeaderSize + kMinGeneratedKernelBytes || size > kMaxInputSize) {
+    return diagnostic.emit() << "invalid generated kernel input size";
+  }
+  std::vector<uint8_t> result(size);
+  result[0] = static_cast<uint8_t>(target);
+  const uint64_t seed_round = seed / kTargets.size();
+  result[1] =
+      kWaitCheckingBit | cache_mode_for_seed(seed) | ((seed_round & 4) ? kFullExecMaskBit : 0);
+  select_backends_for_seed(result, seed);
+  if (write_generated_kernel(std::span(result).subspan(kHeaderSize), target_info(target).arch, seed,
+                             diagnostic)
+          .failed()) {
+    return util::Result::failure();
+  }
+  return result;
+}
+
+util::FailureOr<std::vector<uint8_t>> random_input(uint64_t seed, size_t size,
+                                                   std::optional<FuzzTarget> target,
+                                                   util::DiagnosticEmitter diagnostic) {
+  if (target && !indexed_target(static_cast<uint8_t>(*target))) {
+    return diagnostic.emit() << "invalid execution fuzz target";
+  }
+  if (size == 0 || size > kMaxInputSize) {
+    return diagnostic.emit() << "execution fuzz input size must be 1..1024";
+  }
+  size_t cursor = std::min(size, kHeaderSize);
+  const uint64_t mode_seed = seed;
+  const FuzzTarget resolved_target =
+      target.value_or(static_cast<FuzzTarget>(static_cast<uint8_t>(seed) % kTargets.size()));
+  // Alternate migrated issuer-only FP8 and still helper-eligible FP4 pairs.
+  const auto opcode =
+      (seed & 16) ? cdna5::kVWmmaF3232x16x128F4Vop3p : cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p;
+  const std::array first_wmma = cdna5::build_vop3p(
+      opcode, {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
+  const std::array second_wmma = cdna5::build_vop3p(
+      opcode, {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3});
+  constexpr size_t wmma_prefix_size = (first_wmma.size() + second_wmma.size()) * sizeof(uint32_t);
+  const bool async_wmma_bias = target_info(resolved_target).arch == rocjitsu::IsaFamily::Cdna5 &&
+                               (seed & 15) == 1 && size - cursor >= wmma_prefix_size;
+  // Vary the generator and EXEC mode across seed rounds. Auto target selection
+  // shares seed bits with the raw-byte predicate, and the WMMA prefix requires
+  // a pinned CDNA5 target.
+  if (size >= kHeaderSize + kMinGeneratedKernelBytes && !async_wmma_bias && (seed & 7) != 0 &&
+      (seed / kTargets.size()) % 4 == 2) {
+    return generated_kernel_input(seed, size, resolved_target, diagnostic);
+  }
+
+  // The final size is known. Fill in place to avoid GCC 14/15's -O3 false
+  // positive -Wfree-nonheap-object in vector's reserve/push_back reallocation path.
+  std::vector<uint8_t> result(size);
+  result[0] = static_cast<uint8_t>(resolved_target);
+  size_t protected_prefix = cursor;
+  if (async_wmma_bias) {
+    auto append = [&](const auto &words) {
+      for (uint32_t word : words) {
+        for (unsigned byte = 0; byte < sizeof(word); ++byte) {
+          result[cursor++] = static_cast<uint8_t>(word >> (8 * byte));
+        }
+      }
+    };
+    append(first_wmma);
+    append(second_wmma);
+    assert(cursor - protected_prefix == wmma_prefix_size);
+    protected_prefix = cursor;
+  }
+  // Preserve fully arbitrary coverage while biasing most cases toward long
+  // sequences that have already crossed the decoder boundary.
+  if ((seed & 7) == 0) {
+    while (cursor < size) {
+      result[cursor++] = static_cast<uint8_t>(next_random(seed));
+    }
+  } else {
+    const util::FailureOr<std::vector<std::vector<uint8_t>>> &maybe_seeds =
+        instruction_seeds(resolved_target);
+    if (maybe_seeds.failed()) {
+      return diagnostic.emit() << target_name(resolved_target) << " decoder is unavailable";
+    }
+    const auto &seeds = maybe_seeds.value();
+    while (cursor < size) {
+      const auto &instruction = seeds[next_random(seed) % seeds.size()];
+      const size_t count = std::min(instruction.size(), size - cursor);
+      std::copy_n(instruction.begin(), count, result.begin() + cursor);
+      cursor += count;
+    }
+    // Bias some mutations toward instructions the wave is likely to reach.
+    // Keep whole-stream mutations as well, and leave the WMMA prefix intact.
+    if (protected_prefix < result.size()) {
+      const size_t tail_size = result.size() - protected_prefix;
+      const size_t window = (mode_seed & 0x100) ? std::min<size_t>(32, tail_size) : tail_size;
+      const size_t byte = protected_prefix + next_random(seed) % window;
+      result[byte] ^= static_cast<uint8_t>(uint8_t{1} << (next_random(seed) & 7));
+    }
+  }
+  if (result.size() >= kHeaderSize) {
+    uint8_t mode =
+        cache_mode_for_seed(mode_seed) | static_cast<uint8_t>((mode_seed >> 4) & kAsyncSelectBit);
+    if (async_wmma_bias) {
+      mode |= kFullExecMaskBit;
+    }
+    if (((mode_seed >> 5) & 3) == 3) {
+      mode |= kConcurrentIssuerMask;
+    }
+    result[1] = mode;
+    const size_t semantics_count =
+        async_wmma_bias ? kWmmaSemanticsCount : kArithmeticSemantics.size();
+    select_backends_for_seed(result, mode_seed, semantics_count);
+  }
+  return result;
+}
+
+} // namespace rocjitsu::execution_fuzz

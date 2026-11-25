@@ -1,0 +1,88 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+"""Run with --mode worker or hardware; see ../README.md."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+
+import rocjitsu
+
+
+def report(result, expected_arch, simulated):
+    assert result["arch"].split(":")[0] == expected_arch, result
+    assert result["simulated"] == simulated, result
+    print(
+        json.dumps({key: value for key, value in result.items() if key != "output"}),
+        flush=True,
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=("worker", "hardware"), required=True)
+    parser.add_argument("--config", type=Path)
+    parser.add_argument("--arch", required=True)
+    parser.add_argument("--hardware-index", type=int)
+    parser.add_argument(
+        "--extended", action="store_true", help="Check training and tiled matmul"
+    )
+    args = parser.parse_args()
+    config = None
+    if args.config:
+        config = json.loads(args.config.read_text())
+        config["cpu_thread_budget"] = 2
+        config["vm"]["gpu"]["device"]["marketing_name"] = (
+            "Rocjitsu Python simulated " + args.arch
+        )
+    import torch
+    from toy_kernels import gpu_tensor
+
+    if args.extended:
+        from advanced_workloads import check
+    else:
+        from toy_kernels import check
+
+    def hardware():
+        for framework in ("pytorch", "triton"):
+            result = check(framework, device=args.hardware_index)
+            assert result["pid"] == os.getpid()
+            report(result, "gfx1201", False)
+
+    print(
+        json.dumps({"torch": torch.__version__, "hip": torch.version.hip}), flush=True
+    )
+    if args.mode == "hardware":
+        hardware()
+    else:
+        if args.hardware_index is not None:
+            hardware()
+        for framework in ("pytorch", "triton"):
+            result = rocjitsu.run(check, framework, config=config, timeout=120)
+            assert result["pid"] != os.getpid()
+            report(result, args.arch, True)
+        with rocjitsu.Session(config) as session:
+            for framework in ("pytorch", "triton", "pytorch", "triton"):
+                result = session.run(check, framework, timeout=120)
+                assert result["pid"] == session.pid
+                report(result, args.arch, True)
+                if args.hardware_index is not None:
+                    hardware()
+            # GPU allocations cannot escape the interpreter that owns them.
+            try:
+                session.run(gpu_tensor, timeout=120)
+            except rocjitsu.RemoteError as error:
+                assert "GPU tensors" in str(error)
+            else:
+                raise AssertionError("GPU tensor escaped the worker")
+            cpu = torch.arange(8, dtype=torch.float32)
+            returned = session.run(lambda x: (x.cuda() + 1).cpu(), cpu, timeout=120)
+            torch.testing.assert_close(returned, cpu + 1, rtol=0, atol=0)
+        if args.hardware_index is not None:
+            hardware()
+
+
+if __name__ == "__main__":
+    main()

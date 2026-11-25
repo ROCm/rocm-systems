@@ -4,10 +4,14 @@
 
 include(FetchContent)
 
-# We use find_package manually instead of FIND_PACKAGE_ARGS with
-# FetchContent_Declare, since FIND_PACKAGE_ARGS was introduced in CMake
-# version 3.24, which is unavailable on some operating systems:
-# https://cmake.org/cmake/help/latest/module/FetchContent.html
+# Use the rocm-cmake that comes with ROCm, or fetch it if there isn't
+# one. FetchContent_Declare's FIND_PACKAGE_ARGS can't do this. The
+# package has to be found as ROCmCMakeBuildTools, the name a
+# superproject such as TheRock provides it under, so that has to be the
+# content name too. When it's fetched, FetchContent_MakeAvailable()
+# then writes a stub ROCmCMakeBuildToolsConfig.cmake to
+# CMAKE_FIND_PACKAGE_REDIRECTS_DIR, which every later find_package()
+# for it loads instead of the fetched one.
 find_package(ROCmCMakeBuildTools CONFIG QUIET)
 if(NOT ROCmCMakeBuildTools_FOUND)
 # lint_cmake: -readability/wonkycase

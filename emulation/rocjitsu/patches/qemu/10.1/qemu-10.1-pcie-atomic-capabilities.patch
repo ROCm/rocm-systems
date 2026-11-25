@@ -1,0 +1,46 @@
+diff --git a/hw/pci-bridge/gen_pcie_root_port.c b/hw/pci-bridge/gen_pcie_root_port.c
+index d9078e7..c1fbd9d 100644
+--- a/hw/pci-bridge/gen_pcie_root_port.c
++++ b/hw/pci-bridge/gen_pcie_root_port.c
+@@ -38,0 +39,2 @@ struct GenPCIERootPort {
++    bool atomic_comp32;
++    bool atomic_comp64;
+@@ -88,0 +91,12 @@ static void gen_rp_realize(DeviceState *dev, Error **errp)
++    if (grp->atomic_comp32 || grp->atomic_comp64) {
++        uint32_t atomics = 0;
++
++        if (grp->atomic_comp32) {
++            atomics |= PCI_EXP_DEVCAP2_ATOMIC_COMP32;
++        }
++        if (grp->atomic_comp64) {
++            atomics |= PCI_EXP_DEVCAP2_ATOMIC_COMP64;
++        }
++        pci_long_test_and_set_mask(d->config + d->exp.exp_cap + PCI_EXP_DEVCAP2,
++                                   atomics);
++    }
+@@ -131,0 +146,2 @@ static const Property gen_rp_props[] = {
++    DEFINE_PROP_BOOL("x-atomic-comp32", GenPCIERootPort, atomic_comp32, false),
++    DEFINE_PROP_BOOL("x-atomic-comp64", GenPCIERootPort, atomic_comp64, false),
+diff --git a/hw/pci/pcie.c b/hw/pci/pcie.c
+index eaeb688..747f667 100644
+--- a/hw/pci/pcie.c
++++ b/hw/pci/pcie.c
+@@ -244,0 +245,6 @@ int pcie_cap_init(PCIDevice *dev, uint8_t offset,
++    if ((type == PCI_EXP_TYPE_UPSTREAM || type == PCI_EXP_TYPE_DOWNSTREAM) &&
++        object_dynamic_cast(OBJECT(dev), TYPE_PCIE_PORT) &&
++        PCIE_PORT(dev)->atomic_route) {
++        pci_long_test_and_set_mask(exp_cap + PCI_EXP_DEVCAP2,
++                                   PCI_EXP_DEVCAP2_ATOMIC_ROUTE);
++    }
+diff --git a/hw/pci/pcie_port.c b/hw/pci/pcie_port.c
+index f3841a2..c376246 100644
+--- a/hw/pci/pcie_port.c
++++ b/hw/pci/pcie_port.c
+@@ -115,0 +116 @@ static const Property pcie_port_props[] = {
++    DEFINE_PROP_BOOL("x-atomic-route", PCIEPort, atomic_route, false),
+diff --git a/include/hw/pci/pcie_port.h b/include/hw/pci/pcie_port.h
+index 7cd7af8..9e0d2a9 100644
+--- a/include/hw/pci/pcie_port.h
++++ b/include/hw/pci/pcie_port.h
+@@ -38,0 +39 @@ struct PCIEPort {
++    bool        atomic_route;

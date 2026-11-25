@@ -87,11 +87,23 @@ public:
     /// true or false.
     static std::optional<bool> unsupported_file_systems();
 
-    /// @brief Control the size of the host bounce buffer used for async fallback I/O operations
+    /// @brief Allows IO operations to take place between files and host memory
     ///
-    /// The default value is 1 MiB.
-    static constexpr const char *const ASYNC_BUFFER_SIZE{"HIPFILE_ASYNC_BUFFER_SIZE"};
+    /// If enabled (default), file read/write operations allow host memory registered buffers in
+    /// addition to GPU buffers
+    static constexpr const char *const HOST{"HIPFILE_HOST"};
 
-    static std::optional<size_t> async_buffer_size();
+    /// @brief Get the value of HIPFILE_HOST from the environment
+    /// @return An optional boolean if HIPFILE_HOST was set, nullopt otherwise.
+    static std::optional<bool> host();
+
+    /// @brief Get the value of HIPFILE_DEVICE_STREAM_POOL_SIZE from the environment
+    ///
+    /// An optional unsigned int value if HIPFILE_DEVICE_STREAM_POOL_SIZE was set,
+    /// nullopt if HIPFILE_DEVICE_STREAM_POOL_SIZE was unset or had a value other than
+    /// a valid unsigned int.
+    static constexpr const char *const DEVICE_STREAM_POOL_SIZE{"HIPFILE_DEVICE_STREAM_POOL_SIZE"};
+
+    static std::optional<size_t> device_stream_pool_size();
 };
 }

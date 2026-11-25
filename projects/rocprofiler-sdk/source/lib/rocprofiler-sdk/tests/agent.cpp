@@ -50,6 +50,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <random>
+#include <set>
 #include <sstream>
 #include <type_traits>
 #include <typeinfo>
@@ -325,7 +326,8 @@ TEST(rocprofiler_lib, agent)
             // HSA lib doesn't set family ID for CPU-only but we do
             EXPECT_EQ(agent->family_id, hsa_agent->family_id) << msg;
         }
-        EXPECT_EQ(agent->fw_version.ui32.uCode, hsa_agent->ucode_version) << msg;
+        // HSA reports the full 16-bit compute microcode version, the agent keeps the low 10 bits.
+        EXPECT_EQ(agent->fw_version.ui32.uCode, hsa_agent->ucode_version & 0x3ffu) << msg;
         EXPECT_EQ(agent->sdma_fw_version.uCodeSDMA, hsa_agent->sdma_ucode_version) << msg;
 
         if(hsa_agent->shader_engs > 0)
@@ -818,6 +820,75 @@ TEST(rocprofiler_lib, agent_visibility_multigpu)
         ASSERT_EQ(itr->runtime_visibility.rocdecode, in_half.at(itr->id))
             << "agent-" << itr->node_id;
     }
+}
+
+// AIPROFSDK-1169: HIP_VISIBLE_DEVICES indexes the ROCR-visible list, so ROCR-hidden agents
+// must not trigger the "not visible to HSA" warning
+TEST(rocprofiler_lib, agent_visibility_rocr_hip_stacked)
+{
+    constexpr auto noval = std::string_view{};
+
+    common::set_env("ROCR_VISIBLE_DEVICES", noval, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
+
+    auto num_gpu_agents = get_gpu_agents().size();
+    if(num_gpu_agents < 3)
+    {
+        GTEST_SKIP() << "requires 3 or more gpu agents";
+    }
+
+    // on an 8-GPU system this reproduces the ticket's table exactly (target = GPU 4)
+    const uint32_t target = (num_gpu_agents >= 6) ? 4 : 1;
+
+    struct visibility_case
+    {
+        std::string        rocr;
+        std::string        hip;
+        std::set<uint32_t> hsa_visible;
+        std::set<uint32_t> hip_visible;
+    };
+
+    auto cases = std::vector<visibility_case>{
+        {"", std::to_string(target), {}, {target}},
+        {fmt::format("{},{}", target - 1, target), "1", {target - 1, target}, {target}},
+        {fmt::format("{},{}", target, target + 1), "0", {target, target + 1}, {target}},
+        {std::to_string(target), std::to_string(target), {target}, {}},
+    };
+
+    for(const auto& itr : cases)
+    {
+        common::set_env("ROCR_VISIBLE_DEVICES", itr.rocr, 1);
+        common::set_env("HIP_VISIBLE_DEVICES", itr.hip, 1);
+
+        testing::internal::CaptureStderr();
+        auto agents = get_gpu_agents();
+        auto err    = testing::internal::GetCapturedStderr();
+
+        auto msg = fmt::format("ROCR_VISIBLE_DEVICES={} HIP_VISIBLE_DEVICES={}", itr.rocr, itr.hip);
+
+        // get_gpu_agents() always warns; its absence means stderr was not captured
+        ASSERT_NE(err.find("refreshing internal topology"), std::string::npos) << msg << "\n"
+                                                                               << err;
+        EXPECT_EQ(err.find("not visible to HSA"), std::string::npos) << msg << "\n" << err;
+
+        ASSERT_EQ(agents.size(), num_gpu_agents) << msg;
+        for(const auto* agent : agents)
+        {
+            auto id      = agent->logical_node_type_id;
+            auto hsa_exp = static_cast<uint32_t>(itr.rocr.empty() || itr.hsa_visible.count(id) > 0);
+            auto hip_exp = static_cast<uint32_t>(itr.hip_visible.count(id) > 0);
+
+            EXPECT_EQ(agent->runtime_visibility.hsa, hsa_exp) << msg << " :: GPU " << id;
+            EXPECT_EQ(agent->runtime_visibility.hip, hip_exp) << msg << " :: GPU " << id;
+            EXPECT_EQ(agent->runtime_visibility.rccl, hip_exp) << msg << " :: GPU " << id;
+            EXPECT_EQ(agent->runtime_visibility.rocdecode, hip_exp) << msg << " :: GPU " << id;
+        }
+    }
+
+    common::set_env("ROCR_VISIBLE_DEVICES", noval, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
 }
 
 TEST(rocprofiler_lib, agent_visibility_inverted_multigpu)

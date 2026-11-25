@@ -12,11 +12,13 @@
 // tests skip via GTEST_SKIP when probe() fails (no GPU or SDMA unavailable).
 
 #include "gin/gin_anvil_sdma_factory.h"
+#include "sdma/anvil.hpp"
 
 #include "../common/ScopedEnv.hpp"
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <hsa/hsa_ext_amd.h>
 
 #include <cstdlib>
 #include <cstring>
@@ -30,6 +32,10 @@ uint32_t ncclDebugLevelMask = 0;
 uint64_t ncclDebugMask = 0;
 thread_local int ncclDebugNoWarn = 0;
 void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int, const char*, ...) {}
+
+// Defined in rocmwrap.cc in the real build; referenced by common/EnvVars.cpp's
+// GPU probe. This binary never needs cuMem, so report it unsupported.
+int ncclCuMemRuntimeSupported() { return 0; }
 
 using RcclUnitTesting::ScopedEnv;
 
@@ -59,6 +65,15 @@ int mockAllgatherFillDevices(void* ctx, void* buf, size_t) {
   return 0;
 }
 
+int mockAllgatherDevice0AtRank1(void* ctx, void* buf, size_t) {
+  const int nRanks = static_cast<int>(reinterpret_cast<intptr_t>(ctx));
+  auto* devices = static_cast<int*>(buf);
+  for (int rank = 0; rank < nRanks; ++rank) {
+    if (devices[rank] < 0) devices[rank] = rank == 0 ? 1 : rank;
+  }
+  return 0;
+}
+
 struct CreateOut {
   gin_anvil_sdma_handle_t handle{nullptr};
   void* gpu_handles{nullptr};
@@ -78,6 +93,25 @@ void destroyOut(CreateOut* out) {
   out->handle = nullptr;
   out->gpu_handles = nullptr;
   out->sdma_dirty = nullptr;
+}
+
+std::vector<void*> readTable(const CreateOut& out, int count) {
+  std::vector<void*> table(count, reinterpret_cast<void*>(0x1));
+  EXPECT_EQ(hipMemcpy(table.data(), out.gpu_handles, count * sizeof(void*), hipMemcpyDeviceToHost),
+            hipSuccess);
+  return table;
+}
+
+bool hasXgmiPeerAccess(int peer) {
+  int canAccess = 0;
+  uint32_t linkType = 0;
+  uint32_t hopCount = 0;
+  const hipError_t peerStatus = hipDeviceCanAccessPeer(&canAccess, 0, peer);
+  EXPECT_EQ(peerStatus, hipSuccess);
+  if (peerStatus != hipSuccess || !canAccess) return false;
+  const hipError_t linkStatus = hipExtGetLinkTypeAndHopCount(0, peer, &linkType, &hopCount);
+  EXPECT_EQ(linkStatus, hipSuccess);
+  return linkStatus == hipSuccess && linkType == HSA_AMD_LINK_INFO_TYPE_XGMI;
 }
 
 class GinAnvilSdmaFactoryTest : public ::testing::Test {
@@ -227,8 +261,7 @@ TEST_F(GinAnvilSdmaFactoryTest, Getters_NullHandle) {
 }
 
 // F10: multi-channel loopback (exercises channel stride + multi-queue setup).
-// Multi-rank (cross-device) SDMA queue creation requires peer access setup
-// that only works within RCCL's full init path; tested via alltoall_perf -D3.
+// Multi-rank and cross-device creation are covered by Create_MultiRankTable.
 TEST_F(GinAnvilSdmaFactoryTest, Create_MultiChannel) {
   if (gin_anvil_sdma_probe() <= 0) {
     GTEST_SKIP() << "Anvil SDMA probe failed";
@@ -241,6 +274,236 @@ TEST_F(GinAnvilSdmaFactoryTest, Create_MultiChannel) {
   EXPECT_GE(gin_anvil_sdma_get_channel_stride(out.handle), 0);
   EXPECT_LE(gin_anvil_sdma_get_channel_stride(out.handle), 1);
   destroyOut(&out);
+}
+
+// F10b: multi-rank create. The device table is pe-major (local_pe * numChannels + c) and
+// peers sharing a device share one queue (the connect loop skips an existing queue).
+TEST_F(GinAnvilSdmaFactoryTest, Create_MultiRankTable_SameDevice) {
+  if (gin_anvil_sdma_probe() <= 0) {
+    GTEST_SKIP() << "Anvil SDMA probe failed";
+  }
+
+  auto allOnDevice0 = [](void* ctx, void* buf, size_t) -> int {
+    const int nRanks = static_cast<int>(reinterpret_cast<intptr_t>(ctx));
+    auto* devs = static_cast<int*>(buf);
+    for (int i = 0; i < nRanks; ++i) {
+      if (devs[i] < 0) devs[i] = 0;
+    }
+    return 0;
+  };
+
+  void* dev0Handle = nullptr;
+  {
+    CreateOut one{};
+    ASSERT_EQ(tryCreate(1, 0, 0, allOnDevice0, 1, &one), 0);
+    dev0Handle = readTable(one, 1)[0];
+    ASSERT_NE(dev0Handle, nullptr);
+    destroyOut(&one);
+  }
+  for (int nRanks : {2, 3}) {
+    SCOPED_TRACE("nRanks=" + std::to_string(nRanks));
+    std::vector<void*> first;
+    for (int pass = 0; pass < 2; ++pass) {
+      CreateOut out{};
+      ASSERT_EQ(tryCreate(nRanks, 0, 0, allOnDevice0, 1, &out), 0);
+      EXPECT_EQ(gin_anvil_sdma_get_n_ranks(out.handle), nRanks);
+      std::vector<void*> t = readTable(out, nRanks);
+      for (int pe = 0; pe < nRanks; ++pe) {
+        EXPECT_NE(t[pe], nullptr) << "pe=" << pe;
+        EXPECT_EQ(t[pe], t[0]) << "pe=" << pe;
+      }
+      if (pass == 0) {
+        first = t;
+      } else {
+        EXPECT_EQ(t, first);
+      }
+      EXPECT_EQ(t[0], dev0Handle);
+      destroyOut(&out);
+    }
+  }
+}
+
+TEST_F(GinAnvilSdmaFactoryTest, Create_MultiRankTable_CrossDevice) {
+  if (gin_anvil_sdma_probe() <= 0) {
+    GTEST_SKIP() << "Anvil SDMA probe failed";
+  }
+
+  int ndev = 0;
+  ASSERT_EQ(hipGetDeviceCount(&ndev), hipSuccess);
+  if (ndev < 2) {
+    GTEST_SKIP() << "Cross-device case requires at least two GPUs";
+  }
+  if (!hasXgmiPeerAccess(1)) {
+    GTEST_SKIP() << "GPUs 0 and 1 require peer-accessible XGMI";
+  }
+
+  sdma_anvil::anvil.disconnectDevice(0);
+  sdma_anvil::anvil.disconnectDevice(1);
+  ASSERT_EQ(sdma_anvil::anvil.getSdmaQueue(0, 0, 0), nullptr);
+  ASSERT_EQ(sdma_anvil::anvil.getSdmaQueue(0, 1, 0), nullptr);
+
+  // A failed create on this peer-accessible XGMI path is a regression, not a skip.
+  CreateOut out2{};
+  ASSERT_EQ(tryCreate(2, 1, 0, mockAllgatherDevice0AtRank1, 1, &out2), 0);
+  hipPointerAttribute_t attributes{};
+  ASSERT_EQ(hipPointerGetAttributes(&attributes, out2.gpu_handles), hipSuccess);
+  EXPECT_EQ(attributes.device, 0);
+  std::vector<void*> t2 = readTable(out2, 2);
+  EXPECT_NE(t2[0], nullptr);
+  EXPECT_NE(t2[1], nullptr);
+  EXPECT_NE(t2[0], t2[1]);
+  ASSERT_NE(sdma_anvil::anvil.getSdmaQueue(0, 1, 0), nullptr);
+  ASSERT_NE(sdma_anvil::anvil.getSdmaQueue(0, 0, 0), nullptr);
+  EXPECT_EQ(t2[0], sdma_anvil::anvil.getSdmaQueue(0, 1, 0)->deviceHandle());
+  EXPECT_EQ(t2[1], sdma_anvil::anvil.getSdmaQueue(0, 0, 0)->deviceHandle());
+  destroyOut(&out2);
+}
+
+TEST_F(GinAnvilSdmaFactoryTest, Create_MultiRankTable_TwoChannels) {
+  if (gin_anvil_sdma_probe() <= 0) {
+    GTEST_SKIP() << "Anvil SDMA probe failed";
+  }
+
+  // With 2 channels a channel-major table differs from the pe-major one; peers reuse whatever queues already exist.
+  int ndev = 0;
+  ASSERT_EQ(hipGetDeviceCount(&ndev), hipSuccess);
+  if (ndev < 3) {
+    GTEST_SKIP() << "Two-channel case requires at least three GPUs";
+  }
+  if (!hasXgmiPeerAccess(1)) {
+    GTEST_SKIP() << "GPUs 0 and 1 require peer-accessible XGMI";
+  }
+  if (!hasXgmiPeerAccess(2)) {
+    GTEST_SKIP() << "GPUs 0 and 2 require peer-accessible XGMI";
+  }
+  sdma_anvil::anvil.disconnectDevice(2);
+  ASSERT_EQ(sdma_anvil::anvil.getSdmaQueue(0, 2, 0), nullptr);
+  constexpr int kChannels = 2;
+  constexpr int devices[] = {1, 0, 2};
+  CreateOut out3{};
+  ASSERT_EQ(tryCreate(3, 1, 0, mockAllgatherDevice0AtRank1, kChannels, &out3), 0);
+  std::vector<void*> t3 = readTable(out3, 3 * kChannels);
+  for (int rank = 0; rank < 3; ++rank) {
+    for (int channel = 0; channel < kChannels; ++channel) {
+      sdma_anvil::SdmaQueue* queue = sdma_anvil::anvil.getSdmaQueue(0, devices[rank], channel);
+      EXPECT_EQ(t3[rank * kChannels + channel], queue ? static_cast<void*>(queue->deviceHandle()) : nullptr)
+          << "rank=" << rank << " channel=" << channel;
+    }
+  }
+  EXPECT_NE(t3[2 * kChannels], nullptr);
+  EXPECT_NE(t3[2 * kChannels + 1], nullptr);
+  destroyOut(&out3);
+}
+
+// The CPX fold is not visible on a queue handle, and getSdmaEngineIdFromOamMap is
+// private. These assert when the fold runs, including the in-range diagonal a
+// partition must still fold. The engine the fold picks is rocSHMEM's contract and
+// is pinned by its anvil_engine_map_gtest.
+TEST(AnvilOamMapEngine, CpxPartitionFoldsTheInRangeDiagonal) {
+  EXPECT_TRUE(sdma_anvil::oamMapEngineNeedsFold(/*numSdmaXgmiEngines=*/0, /*numSdmaEnginesTotal=*/2,
+                                               /*doubledEngineId=*/0));
+}
+
+TEST(AnvilOamMapEngine, SpxInRangeDoesNotFold) {
+  EXPECT_FALSE(sdma_anvil::oamMapEngineNeedsFold(/*numSdmaXgmiEngines=*/8, /*numSdmaEnginesTotal=*/16,
+                                                /*doubledEngineId=*/0));
+  EXPECT_FALSE(sdma_anvil::oamMapEngineNeedsFold(8, 16, 14));
+}
+
+TEST(AnvilOamMapEngine, OutOfRangeFoldsEvenWithXgmiEngines) {
+  EXPECT_TRUE(sdma_anvil::oamMapEngineNeedsFold(/*numSdmaXgmiEngines=*/8, /*numSdmaEnginesTotal=*/2,
+                                               /*doubledEngineId=*/14));
+}
+
+TEST(AnvilOamMapEngine, ZeroEnginesDoesNotFold) {
+  EXPECT_FALSE(sdma_anvil::oamMapEngineNeedsFold(0, 0, 0));
+}
+
+// pciFunctionBus decides getOamId's fallback: physBusId differing from busId is what gives it a
+// second candidate to read, so a tail it refuses to parse means the physical-BDF read never runs.
+// getBusId lowercases an "00000000:00:00.0" buffer, so the function digit is the last character.
+TEST(AnvilPciFunctionBus, PartitionTailYieldsFunctionAndPhysicalBdf) {
+  const auto loc = sdma_anvil::pciFunctionBus("00000000:1b:00.1");
+  EXPECT_EQ(loc.function, 1);
+  EXPECT_EQ(loc.busId, "00000000:1b:00.1");
+  EXPECT_EQ(loc.physBusId, "00000000:1b:00.0");  // the second candidate getOamId reads
+}
+
+// PCI function numbers are three bits, so '0'-'7' is the whole range and both ends must parse.
+TEST(AnvilPciFunctionBus, WholeDigitRangeParses) {
+  for (int fn = 0; fn <= 7; ++fn) {
+    const std::string bdf = "00000000:1b:00." + std::to_string(fn);
+    const auto loc = sdma_anvil::pciFunctionBus(bdf);
+    EXPECT_EQ(loc.function, fn) << bdf;
+    EXPECT_EQ(loc.physBusId, "00000000:1b:00.0") << bdf;
+  }
+}
+
+// Function 0 parses but rewrites to itself, so physBusId == busId collapses getOamId's candidate
+// list to one entry -- the same shape as an unparsable tail, reached for a different reason.
+TEST(AnvilPciFunctionBus, FunctionZeroLeavesOneCandidate) {
+  const auto loc = sdma_anvil::pciFunctionBus("00000000:1b:00.0");
+  EXPECT_EQ(loc.function, 0);
+  EXPECT_EQ(loc.physBusId, loc.busId);
+}
+
+// A tail outside the range is not function 0: it stays -1 so foldOamMapEngine's unreadable-function
+// path is what runs, and busId is left untouched rather than rewritten to something that does not
+// exist. '8' and '9' are the ones that matter -- they are digits, so a std::isdigit test here would
+// accept them and invent a function PCI cannot express.
+TEST(AnvilPciFunctionBus, TailOutsideRangeIsNotFunctionZero) {
+  for (const char* bdf : {"00000000:1b:00.8", "00000000:1b:00.9", "00000000:1b:00.f",
+                          "00000000:1b:00.", "00000000:1b:00.a"}) {
+    const auto loc = sdma_anvil::pciFunctionBus(bdf);
+    EXPECT_EQ(loc.function, -1) << bdf;
+    EXPECT_EQ(loc.physBusId, loc.busId) << bdf;
+    EXPECT_EQ(loc.busId, bdf) << bdf;
+  }
+}
+
+// The parse is the last character and nothing else, so a BDF with no function field at all is read
+// as function 0 whenever it happens to end in a function digit. getBusId always writes a
+// "00000000:00:00.0" buffer so this does not arise today, and pinning it says which invariant
+// getOamId leans on: if that format ever loses its ".N" suffix, this returns a function and a
+// physBusId equal to busId rather than refusing, and the fallback read silently stops happening.
+TEST(AnvilPciFunctionBus, ParsesTheLastCharacterOnlyNotTheBdfShape) {
+  const auto noFn = sdma_anvil::pciFunctionBus("0000:1b:00");
+  EXPECT_EQ(noFn.function, 0);
+  EXPECT_EQ(noFn.physBusId, noFn.busId);
+  // A bare digit is accepted for the same reason: nothing checks the shape.
+  EXPECT_EQ(sdma_anvil::pciFunctionBus("3").function, 3);
+}
+
+// back() on an empty string is undefined, so the empty guard is load-bearing rather than defensive.
+TEST(AnvilPciFunctionBus, EmptyInputIsRefusedWithoutReadingTheTail) {
+  const auto loc = sdma_anvil::pciFunctionBus("");
+  EXPECT_EQ(loc.function, -1);
+  EXPECT_TRUE(loc.busId.empty());
+  EXPECT_TRUE(loc.physBusId.empty());
+}
+
+// The budget observable. Without it the refusal in connect() and the per-destination teardown in
+// disconnectDevice() are only visible in a log line, so neither the up-front refusal nor the
+// rollback that follows a part-way failure has anything a case can assert.
+//
+// Both of connect()'s failure exits have to land on the same count: the budget compare returns
+// before touching sdma_channels_, and a create that fails after some channels succeeded runs
+// rollback(), which gives back only the valid queues it charged. The request below is far past any
+// partition's budget, so the first exit is the expected one and the second is the fallback when a
+// node does not report a budget at all.
+//
+// disconnectDevice() is deliberately not called on the success branch: the channel map is
+// process-global, so dropping device 0 would destroy queues the fixture cases still hold.
+TEST(AnvilQueueBudget, FailedConnectDoesNotChargeTheBudget) {
+  if (gin_anvil_sdma_probe() <= 0) {
+    GTEST_SKIP() << "Anvil SDMA probe failed";
+  }
+  auto& anvil = sdma_anvil::anvil;
+  const uint32_t before = anvil.queuesUsed();
+  if (anvil.connect(/*srcDeviceId=*/0, /*dstDeviceId=*/0, /*numChannels=*/1 << 20)) {
+    GTEST_SKIP() << "node satisfied an over-subscribed connect; neither failure exit was reached";
+  }
+  EXPECT_EQ(anvil.queuesUsed(), before);
 }
 
 // F11: spread env atoi paths (non-zero/non-one numeric and invalid string).

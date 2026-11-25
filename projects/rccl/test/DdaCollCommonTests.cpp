@@ -82,4 +82,17 @@ TEST(DdaCollCommon, getGridAndBlockDims_HalfPrecision)
     EXPECT_LE(gridBlock.second.x, 512u);
 }
 
+// Bank 1 must start on a 128B line for any scratch size; an aligned scratch keeps its whole half.
+TEST(DdaCollCommon, ddaBankSize_KeepsBank1LineAligned)
+{
+    for (size_t bytes : {size_t{8}, size_t{2048}, size_t{1000000}, size_t{1000000 + 96}, size_t{(1u << 30) + 64}})
+    {
+        const size_t bank = dda::common::ddaBankSize(bytes);
+        EXPECT_EQ(bank % 128, 0u) << "scratch " << bytes;
+        EXPECT_LE(2 * bank, bytes) << "scratch " << bytes;
+        EXPECT_GT(2 * (bank + 128), bytes) << "scratch " << bytes << ": floored by more than one line";
+    }
+    EXPECT_EQ(dda::common::ddaBankSize(size_t{512} * 1024 * 1024), size_t{256} * 1024 * 1024);
+}
+
 } // namespace RcclUnitTesting

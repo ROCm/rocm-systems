@@ -31,19 +31,6 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-enum class TransposeKind : uint8_t {
-  NONE = 0,
-  TR_B4 = 1,
-  TR_B6 = 2,
-  B64_TR_B8 = 3,
-  TR16_B128 = 4,
-  B64_TR_B16 = 5,
-  WMMA_TR_B8 = 6,
-  CDNA5_DS_TR_B8 = 7,
-  CDNA4_TR_B4 = 8,
-  CDNA4_TR_B6 = 9,
-};
-
 /// @brief CDNA4 MFMA B64 byte-level transpose (B64_TR_B8 only).
 ///
 /// Within each 16-lane group, destination lane `l` byte `n` comes from source
@@ -63,8 +50,9 @@ inline void transpose_b64_tr_b8(std::vector<uint8_t> &response_data, uint32_t nu
       const uint32_t source_lane = source_base + 2u * dest_byte;
       const uint32_t source_offset = source_lane * bytes_per_lane_total + source_byte;
       const uint32_t dest_offset = dest_lane * bytes_per_lane_total + dest_byte;
-      if (source_offset < response_data.size() && dest_offset < output.size())
+      if (source_offset < response_data.size() && dest_offset < output.size()) {
         output[dest_offset] = response_data[source_offset];
+      }
     }
   }
 
@@ -103,8 +91,9 @@ inline void transpose_wmma_tr_b8(std::vector<uint8_t> &response_data, uint32_t &
 
       const uint32_t source_offset = source_lane * source_stride + byte;
       const uint32_t dest_offset = dest_lane * dest_stride + dest_byte;
-      if (source_offset < response_data.size() && dest_offset < output.size())
+      if (source_offset < response_data.size() && dest_offset < output.size()) {
         output[dest_offset] = response_data[source_offset];
+      }
     }
   }
 
@@ -149,8 +138,9 @@ inline void transpose_cdna5_ds_tr_b8(std::vector<uint8_t> &response_data, uint32
 inline uint64_t transpose_request_lane_mask(const VectorMemState &d, uint32_t wf_size) {
   const auto kind = static_cast<TransposeKind>(d.transpose);
   if (wf_size == 64 && (kind == TransposeKind::WMMA_TR_B8 ||
-                        (d.tag() == GLOBAL_MEM && kind == TransposeKind::TR16_B128)))
+                        (d.tag() == GLOBAL_MEM && kind == TransposeKind::TR16_B128))) {
     return d.lane_mask & 0xFFFF'FFFFULL;
+  }
   return d.lane_mask;
 }
 
@@ -165,6 +155,23 @@ inline void transpose_tr16_b128(std::vector<uint8_t> &response_data, uint32_t nu
 
   const uint32_t source_bytes_per_lane = num_elems * 4;
   compact_wave64 = compact_wave64 && wf_size == 64;
+  // Each ordinary B128 group is a self-contained 8x8 halfword tile.
+  // Snapshot it before overwriting the same eight destination lanes.
+  if (!compact_wave64 && num_elems == 4 && (wf_size == 32 || wf_size == 64) &&
+      response_data.size() == wf_size * 16) {
+    for (uint32_t base = 0; base < wf_size; base += 8) {
+      uint16_t source[8][8];
+      auto *group = response_data.data() + base * 16;
+      std::memcpy(source, group, sizeof(source));
+      for (unsigned row = 0; row < 8; ++row) {
+        for (unsigned col = 0; col < 8; ++col) {
+          std::memcpy(group + (row * 8 + col) * sizeof(uint16_t), &source[col][row],
+                      sizeof(uint16_t));
+        }
+      }
+    }
+    return;
+  }
   const uint32_t destination_bytes_per_lane =
       compact_wave64 ? source_bytes_per_lane / 2 : source_bytes_per_lane;
   const uint32_t halfwords_per_source_lane = source_bytes_per_lane / 2;
@@ -190,8 +197,9 @@ inline void transpose_tr16_b128(std::vector<uint8_t> &response_data, uint32_t nu
           const uint32_t dest_offset =
               physical_dest_lane * destination_bytes_per_lane + dest_halfword * 2;
 
-          if (source_offset + 2 <= response_data.size() && dest_offset + 2 <= output.size())
+          if (source_offset + 2 <= response_data.size() && dest_offset + 2 <= output.size()) {
             std::memcpy(&output[dest_offset], &response_data[source_offset], 2);
+          }
         }
       }
     }
@@ -221,8 +229,9 @@ inline void transpose_b64_tr_b16(std::vector<uint8_t> &response_data, uint32_t n
       const uint32_t source_offset = source_lane * bytes_per_lane_total + source_halfword * 2;
       const uint32_t dest_offset = dest_lane * bytes_per_lane_total + halfword_index * 2;
 
-      if (source_offset + 2 <= response_data.size() && dest_offset + 2 <= output.size())
+      if (source_offset + 2 <= response_data.size() && dest_offset + 2 <= output.size()) {
         std::memcpy(&output[dest_offset], &response_data[source_offset], 2);
+      }
     }
   }
 
@@ -254,8 +263,9 @@ inline void transpose_b4(std::vector<uint8_t> &response_data, uint32_t num_elems
       for (uint32_t lane_in_group = 0; lane_in_group < source_group_size; ++lane_in_group) {
         uint32_t source_offset = (lane_base + group_start + lane_in_group) * bytes_per_lane_total;
         for (uint32_t byte = 0;
-             byte < bytes_per_source_lane && source_offset + byte < response_data.size(); ++byte)
+             byte < bytes_per_source_lane && source_offset + byte < response_data.size(); ++byte) {
           source_bytes[lane_in_group][byte] = response_data[source_offset + byte];
+        }
       }
 
       for (uint32_t nibble_index = 0; nibble_index < nibbles_per_group; ++nibble_index) {
@@ -274,8 +284,9 @@ inline void transpose_b4(std::vector<uint8_t> &response_data, uint32_t num_elems
             lane_base + (cdna4 ? group_start & 16 : (group_start & 8) * 2) + nibble_index;
         uint32_t dest_offset = dest_lane * bytes_per_lane_total + dest_vgpr_index * 4;
 
-        if (dest_offset + 4 <= output.size())
+        if (dest_offset + 4 <= output.size()) {
           std::memcpy(&output[dest_offset], &packed_dword, 4);
+        }
       }
     }
   }
@@ -311,9 +322,10 @@ inline void transpose_b6(std::vector<uint8_t> &response_data, uint32_t num_elems
                                      : 8 * (input_index / 4) + (input_index % 4) + pass * 4;
         uint32_t source_offset = (lane_base + source_lane) * bytes_per_lane_total;
         for (uint32_t dword = 0; dword < dwords_per_lane; ++dword) {
-          if (source_offset + dword * 4 + 4 <= response_data.size())
+          if (source_offset + dword * 4 + 4 <= response_data.size()) {
             std::memcpy(&source_dwords[input_index][dword],
                         &response_data[source_offset + dword * 4], 4);
+          }
         }
       }
 
@@ -330,23 +342,26 @@ inline void transpose_b6(std::vector<uint8_t> &response_data, uint32_t num_elems
           uint32_t dword_index = input_bit_position / bits_per_dword;
           uint32_t bit_offset = input_bit_position % bits_per_dword;
           uint32_t element = source_dwords[input_lane_in_pass][dword_index] >> bit_offset;
-          if (bit_offset > (bits_per_dword - bits_per_element))
+          if (bit_offset > (bits_per_dword - bits_per_element)) {
             element |= source_dwords[input_lane_in_pass][dword_index + 1]
                        << (bits_per_dword - bit_offset);
+          }
           element &= 0x3f;
 
           uint32_t out_dword_index = output_bit_position / bits_per_dword;
           uint32_t out_bit_offset = output_bit_position % bits_per_dword;
           output_dwords[out_dword_index] |= (element << out_bit_offset);
-          if (out_bit_offset > (bits_per_dword - bits_per_element))
+          if (out_bit_offset > (bits_per_dword - bits_per_element)) {
             output_dwords[out_dword_index + 1] |= (element >> (bits_per_dword - out_bit_offset));
+          }
         }
 
         uint32_t dest_lane = lane_base + output_lane_in_pass + pass * lanes_per_pass;
         for (uint32_t dword = 0; dword < dwords_per_lane; ++dword) {
           uint32_t dest_offset = dest_lane * bytes_per_lane_total + dword * 4;
-          if (dest_offset + 4 <= output.size())
+          if (dest_offset + 4 <= output.size()) {
             std::memcpy(&output[dest_offset], &output_dwords[dword], 4);
+          }
         }
       }
     }
@@ -357,8 +372,7 @@ inline void transpose_b6(std::vector<uint8_t> &response_data, uint32_t num_elems
 
 inline void transpose_response(VectorMemState &d) {
   auto kind = static_cast<TransposeKind>(d.transpose);
-  const bool compact_wave64 =
-      d.tag() == GLOBAL_MEM && d.wf_size == 64 && kind == TransposeKind::TR16_B128;
+  const bool compact_wave64 = d.compact_wave64_global_transpose();
   switch (kind) {
   case TransposeKind::B64_TR_B8:
     transpose_b64_tr_b8(d.response_data, d.num_elems, d.wf_size);
@@ -386,8 +400,12 @@ inline void transpose_response(VectorMemState &d) {
   case TransposeKind::NONE:
     break;
   }
-  if (compact_wave64)
-    d.num_elems /= 2;
+  if (compact_wave64) {
+    if (kind == TransposeKind::TR16_B128) {
+      d.num_elems /= 2;
+    }
+    d.transpose = 0; // The response now contains the compact destination words.
+  }
 }
 
 } // namespace amdgpu

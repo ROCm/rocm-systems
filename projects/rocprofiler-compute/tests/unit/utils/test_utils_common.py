@@ -8,13 +8,68 @@ import io
 import logging
 import os
 import tempfile
+from collections import OrderedDict
 from pathlib import Path
 from unittest import mock
 
+import common
 import pytest
 
 import utils.utils_common as utils_common
 from utils.utils_common import canonical_config_arch
+
+LISTED_METRIC_IDS = ["0", "2", "2.1", "2.1.0", "2.1.1", "18", "18.1", "18.1.0", "18.2"]
+LISTED_METRIC_DETAILS = {
+    "0": ("Top Stats", "", ""),
+    "2": ("System Speed-of-Light", "", ""),
+    "2.1": ("System Speed-of-Light", "", ""),
+    "2.1.0": (
+        "VALU Utilization",
+        "Percent",
+        " ".join(["Counts the cycles the VALU was busy."] * 6),
+    ),
+    "2.1.1": ("VALU Instructions", "Instr per normUnit", "Short."),
+    "18": ("L2 Cache (per Channel)", "", ""),
+    "18.1": ("Aggregate Stats", "", ""),
+    "18.1.0": ("L2 Cache Hit Rate", "Percent", ""),
+    "18.2": ("L2 Cache Hit Rate (Percent)", "", ""),
+}
+
+
+def build_listing_panel_configs():
+    """Return panel_configs with a plain table and a per-channel table."""
+    unit_table = {
+        "id": 1801,
+        "title": "Aggregate Stats",
+        "header": {"metric": "Metric", "avg": "Avg", "unit": "Unit"},
+        "metric": {
+            "Hit Rate": {"avg": "AVG(TCC_HIT)", "unit": "Percent"},
+            "Requests": {"avg": "AVG(TCC_REQ)", "unit": "(Req + $normUnit)"},
+            "No Unit": {"avg": "AVG(TCC_MISS)"},
+        },
+    }
+    channel_table = {
+        "id": 1802,
+        "title": "Hit Rate (per Channel)",
+        "header": {"metric": "Metric", "expr": "Expression"},
+        "metric": {
+            "Channel ::_1": {"expr": "TCC_HIT[::_1]"},
+            "placeholder_range": {"::_1": "$total_l2_chan"},
+        },
+    }
+    panel_configs = OrderedDict()
+    panel_configs[1800] = {
+        "id": 1800,
+        "title": "L2 Cache (per Channel)",
+        "data source": [
+            {"metric_table": unit_table},
+            {"metric_table": channel_table},
+        ],
+        "metrics_description": {
+            "Hit Rate": "The percent of L2\n  requests that hit.",
+        },
+    }
+    return panel_configs
 
 
 class MockArgs:
@@ -401,7 +456,7 @@ def test_capture_subprocess_output_profile_mode(monkeypatch):
     monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
     success, output = utils_common.capture_subprocess_output(
-        ["echo", "test"], profileMode=True, enable_logging=False
+        ["echo", "test"], profileMode=True
     )
 
     assert success is True
@@ -451,241 +506,6 @@ def test_capture_subprocess_output_unicode_decode(monkeypatch):
     assert "�" in output
     # Popen must request "replace" error handling so bad bytes never raise.
     assert popen_calls[0].get("errors") == "replace"
-
-
-# =============================================================================
-# JSON DATA PARSING TESTS
-# =============================================================================
-
-
-def test_get_agent_dict_basic():
-    """
-    Test get_agent_dict correctly maps agent IDs to agent objects.
-    """
-    data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "agents": [
-                    {"id": {"handle": 1}, "type": 2, "node_id": 100},
-                    {"id": {"handle": 2}, "type": 2, "node_id": 200},
-                ]
-            }
-        ]
-    }
-
-    result = utils_common.get_agent_dict(data)
-
-    # Verify correct mapping
-    assert len(result) == 2
-    assert result[1]["node_id"] == 100
-    assert result[2]["node_id"] == 200
-    assert result[1]["type"] == 2
-    assert result[2]["type"] == 2
-
-
-def test_get_agent_dict_empty_agents():
-    """
-    Test get_agent_dict with an empty agents list.
-    """
-    data = {"rocprofiler-sdk-tool": [{"agents": []}]}
-
-    result = utils_common.get_agent_dict(data)
-
-    assert result == {}
-
-
-def test_get_agent_dict_missing_keys(monkeypatch):
-    """
-    Test get_agent_dict behavior when expected keys are missing.
-    """
-    # Case 1: Missing 'agents' key
-    data1 = {"rocprofiler-sdk-tool": [{}]}
-
-    with pytest.raises(KeyError):
-        utils_common.get_agent_dict(data1)
-
-    # Case 2: Missing 'rocprofiler-sdk-tool' key
-    data2 = {}
-
-    with pytest.raises(KeyError):
-        utils_common.get_agent_dict(data2)
-
-    # Case 3: Empty 'rocprofiler-sdk-tool' list
-    data3 = {"rocprofiler-sdk-tool": []}
-
-    with pytest.raises(IndexError):
-        utils_common.get_agent_dict(data3)
-
-
-def test_get_agent_dict_duplicate_agent_ids():
-    """
-    Test get_agent_dict behavior with duplicate agent IDs.
-    The function should overwrite previous entries with the same ID.
-    """
-    data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "agents": [
-                    {"id": {"handle": 1}, "type": 2, "node_id": 100, "name": "first"},
-                    {"id": {"handle": 1}, "type": 2, "node_id": 200, "name": "second"},
-                ]
-            }
-        ]
-    }
-
-    result = utils_common.get_agent_dict(data)
-
-    assert len(result) == 1
-    assert result[1]["node_id"] == 200
-    assert result[1]["name"] == "second"
-
-
-def test_get_agent_dict_non_integer_handles():
-    """
-    Test get_agent_dict with non-integer handle values.
-    """
-    data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "agents": [
-                    {"id": {"handle": "agent_1"}, "type": 2, "node_id": 100},
-                    {"id": {"handle": "agent_2"}, "type": 2, "node_id": 200},
-                ]
-            }
-        ]
-    }
-
-    result = utils_common.get_agent_dict(data)
-
-    assert len(result) == 2
-    assert result["agent_1"]["node_id"] == 100
-    assert result["agent_2"]["node_id"] == 200
-
-
-# =========================================================================
-# Tests for get_gpuid_dict function
-# =========================================================================
-def test_get_gpuid_dict_basic():
-    """Test that get_gpuid_dict correctly maps agent IDs to GPU IDs for a basic case.
-    Args:
-        None
-    Returns:
-        None: Asserts that agent IDs are correctly mapped to GPU IDs
-        based on node_id ordering.
-    """
-    data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "agents": [
-                    {"id": {"handle": 100}, "node_id": 5, "type": 2},  # GPU agent
-                    {"id": {"handle": 101}, "node_id": 3, "type": 2},  # GPU agent
-                    {"id": {"handle": 102}, "node_id": 7, "type": 2},  # GPU agent
-                ]
-            }
-        ]
-    }
-
-    expected = {101: 0, 100: 1, 102: 2}
-
-    result = utils_common.get_gpuid_dict(data)
-    assert result == expected
-
-
-def test_get_gpuid_dict_no_gpu_agents():
-    """Test that get_gpuid_dict returns an empty dictionary
-    when no GPU agents are present.
-    Args:
-        None
-    Returns:
-        None: Asserts that an empty dictionary is returned
-        when there are no GPU agents.
-    """
-    data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "agents": [
-                    {"id": {"handle": 100}, "node_id": 5, "type": 1},  # Non-GPU agent
-                    {"id": {"handle": 101}, "node_id": 3, "type": 3},  # Non-GPU agent
-                    {"id": {"handle": 102}, "node_id": 7, "type": 0},  # Non-GPU agent
-                ]
-            }
-        ]
-    }
-
-    result = utils_common.get_gpuid_dict(data)
-    assert result == {}
-
-
-def test_get_gpuid_dict_mixed_agents():
-    """Test that get_gpuid_dict correctly ignores non-GPU agents
-    and only maps GPU agents.
-    Args:
-        None
-    Returns:
-        None: Asserts that only GPU agents (type 2) are included
-        in the mapping.
-    """
-    data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "agents": [
-                    {"id": {"handle": 100}, "node_id": 5, "type": 2},  # GPU agent
-                    {"id": {"handle": 101}, "node_id": 3, "type": 1},  # Non-GPU agent
-                    {"id": {"handle": 102}, "node_id": 7, "type": 2},  # GPU agent
-                    {"id": {"handle": 103}, "node_id": 2, "type": 0},  # Non-GPU agent
-                ]
-            }
-        ]
-    }
-
-    # Expected mapping after sorting by node_id and filtering by type 2: 100->0, 102->1
-    expected = {100: 0, 102: 1}
-
-    result = utils_common.get_gpuid_dict(data)
-    assert result == expected
-
-
-def test_get_gpuid_dict_sorting():
-    """Test that get_gpuid_dict correctly sorts GPU agents by node_id
-    to determine GPU ID ordering.
-    Args:
-        None
-    Returns:
-        None: Asserts that GPU agents are sorted by node_id before
-        being assigned sequential GPU IDs.
-    """
-    data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "agents": [
-                    {"id": {"handle": 100}, "node_id": 10, "type": 2},  # GPU agent
-                    {"id": {"handle": 101}, "node_id": 5, "type": 2},  # GPU agent
-                    {"id": {"handle": 102}, "node_id": 8, "type": 2},  # GPU agent
-                    {"id": {"handle": 103}, "node_id": 1, "type": 2},  # GPU agent
-                ]
-            }
-        ]
-    }
-
-    expected = {103: 0, 101: 1, 102: 2, 100: 3}
-
-    result = utils_common.get_gpuid_dict(data)
-    assert result == expected
-
-
-def test_get_gpuid_dict_empty_agents():
-    """Test that get_gpuid_dict handles an empty agents list correctly.
-    Args:
-        None
-    Returns:
-        None: Asserts that an empty dictionary is returned when the
-        agents list is empty.
-    """
-    # Sample data with empty agents list
-    data = {"rocprofiler-sdk-tool": [{"agents": []}]}
-
-    result = utils_common.get_gpuid_dict(data)
-    assert result == {}
 
 
 # =============================================================================
@@ -783,35 +603,6 @@ def test_parse_pmc_perf_file_not_found():
     """
     with pytest.raises(FileNotFoundError):
         utils_common.parse_pmc_perf("nonexistent_file.yaml")
-
-
-# =============================================================================
-# SUBPROCESS OUTPUT TESTS
-# =============================================================================
-
-
-def test_capture_subprocess_output_with_logging_disabled(monkeypatch):
-    """
-    Test capture_subprocess_output with enable_logging=False doesn't call console_log.
-    """
-
-    monkeypatch.setattr(
-        "subprocess.Popen",
-        lambda *a, **k: make_dummy_process(lines=["test output\n"]),
-    )
-
-    log_calls = []
-    monkeypatch.setattr(
-        "utils.utils_common.console_log", lambda *a, **k: log_calls.append((a, k))
-    )
-    monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
-
-    success, output = utils_common.capture_subprocess_output(
-        ["echo", "test"], enable_logging=False
-    )
-
-    assert success is True
-    assert len(log_calls) == 0
 
 
 # =============================================================================
@@ -943,6 +734,11 @@ def test_convert_metric_id_to_panel_info_edge_case_dot_only():
 
     with pytest.raises(ValueError):
         utils_common.convert_metric_id_to_panel_info(".02")
+
+
+@pytest.mark.parametrize("gpu_arch", sorted(common.SUPPORTED_ARCHS))
+def test_get_arch_alias_to_panel_id_finds_template_aliases(gpu_arch):
+    assert utils_common.get_arch_alias_to_panel_id(gpu_arch)
 
 
 # =============================================================================
@@ -1081,69 +877,6 @@ def test_set_parser():
     shared = utils_common.parse_sets_yaml("gfx1152")
     assert "compute_thruput_flops" in shared
     assert shared["launch_stats"]["title"] == "Launch Stats"
-
-
-@pytest.mark.sci_notion
-def test_scientific_notation_trigger_below_lower_bound():
-    value = 0.0001
-    result = utils_common.format_scientific_notation_if_needed(value)
-    assert pytest.approx(float(result.strip()), rel=1e-9) == value
-
-
-@pytest.mark.sci_notion
-def test_scientific_notation_trigger_at_lower_bound():
-    value = 0.01
-    result = utils_common.format_scientific_notation_if_needed(value)
-    assert pytest.approx(float(result.strip()), rel=1e-9) == value
-
-
-@pytest.mark.sci_notion
-def test_scientific_notation_trigger_just_below_upper_bound():
-    value = 999999
-    result = utils_common.format_scientific_notation_if_needed(value, precision=6)
-    assert pytest.approx(float(result.strip()), rel=1e-6) == value
-
-
-@pytest.mark.sci_notion
-def test_scientific_notation_trigger_zero():
-    value = 0
-    result = utils_common.format_scientific_notation_if_needed(value)
-    assert float(result.strip()) == value  # Exact match for zero
-
-
-@pytest.mark.sci_notion
-def test_scientific_notation_trigger_slightly_below_lower_bound():
-    value = 0.009
-    result = utils_common.format_scientific_notation_if_needed(value)
-    assert pytest.approx(float(result.strip()), rel=1e-9) == value
-
-
-@pytest.mark.sci_notion
-def test_scientific_notation_trigger_well_below_lower_bound():
-    value = 1e-5
-    result = utils_common.format_scientific_notation_if_needed(value)
-    assert pytest.approx(float(result.strip()), rel=1e-9) == value
-
-
-@pytest.mark.sci_notion
-def test_scientific_notation_trigger_well_above_upper_bound():
-    value = 1e10
-    result = utils_common.format_scientific_notation_if_needed(value)
-    assert pytest.approx(float(result.strip()), rel=1e-9) == value
-
-
-@pytest.mark.sci_notion
-def test_alignment_and_width():
-    value = 1e10
-    result = utils_common.format_scientific_notation_if_needed(
-        value,
-        align=">",
-        width_align=12,
-        precision=2,
-        fmt_type_align="f",
-        max_length=8,
-    )
-    assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
 
 # =============================================================================
@@ -1287,13 +1020,25 @@ def test_resolve_rocm_library_path(tmp_path):
     assert resolve_rocm_library_path(str(missing)) == str(missing)
 
 
+def test_create_temp_rocprofiler_metrics_path_in_parent_dir(tmp_path):
+    metrics_path = Path(
+        utils_common.create_temp_rocprofiler_metrics_path(
+            {"rocprofiler-sdk": {"counters": []}}, tmp_path
+        )
+    )
+
+    assert metrics_path.parent == tmp_path
+    assert (metrics_path / "config.yaml").is_file()
+    assert (metrics_path / "counter_defs.yaml").is_file()
+
+
 # =============================================================================
-# BUILD METRIC LIST TESTS
+# BUILD METRIC DETAILS TESTS
 # =============================================================================
 
 
-class TestBuildMetricList:
-    """Tests for build_metric_list and _metric_has_valid_expr."""
+class TestBuildMetricDetails:
+    """Tests for build_metric_details and _metric_has_valid_expr."""
 
     # Maps YAML metric expression keys to their SUPPORTED_FIELD display names.
     _EXPR_KEY_TO_HEADER_DISPLAY = {
@@ -1308,9 +1053,9 @@ class TestBuildMetricList:
 
     @classmethod
     def setup_class(cls):
-        from utils.utils_common import build_metric_list
+        from utils.utils_common import build_metric_details
 
-        cls.build_metric_list = staticmethod(build_metric_list)
+        cls.build_metric_details = staticmethod(build_metric_details)
 
     def _build_test_panel_configs_for_single_metric(
         self, metric_name: str, expression_values: dict
@@ -1344,15 +1089,15 @@ class TestBuildMetricList:
         return panel_configs
 
     @staticmethod
-    def _extract_leaf_metric_entries(metric_list):
-        """Return only leaf metric entries whose ID has format 'panel.table.index'."""
-        return {k: v for k, v in metric_list.items() if k.count(".") == 2}
+    def _extract_leaf_metric_entries(metric_details):
+        """Return the names of leaf metrics whose ID has format 'panel.table.index'."""
+        return {k: v[0] for k, v in metric_details.items() if k.count(".") == 2}
 
     def test_given_metric_with_valid_value__it_presents_in_metric_list(self):
         panel_configs = self._build_test_panel_configs_for_single_metric(
             "Valid Metric A", {"value": "AVG(COUNTER_A)"}
         )
-        metric_list = self.build_metric_list(panel_configs, None)
+        metric_list = self.build_metric_details(panel_configs, None)
         leaf_entries = self._extract_leaf_metric_entries(metric_list)
         assert "Valid Metric A" in leaf_entries.values()
 
@@ -1360,7 +1105,7 @@ class TestBuildMetricList:
         panel_configs = self._build_test_panel_configs_for_single_metric(
             "Unsupported Metric B", {"value": None}
         )
-        metric_list = self.build_metric_list(panel_configs, None)
+        metric_list = self.build_metric_details(panel_configs, None)
         leaf_entries = self._extract_leaf_metric_entries(metric_list)
         assert "Unsupported Metric B" not in leaf_entries.values()
 
@@ -1368,7 +1113,7 @@ class TestBuildMetricList:
         panel_configs = self._build_test_panel_configs_for_single_metric(
             "Unsupported Metric C", {"value": "None"}
         )
-        metric_list = self.build_metric_list(panel_configs, None)
+        metric_list = self.build_metric_details(panel_configs, None)
         leaf_entries = self._extract_leaf_metric_entries(metric_list)
         assert "Unsupported Metric C" not in leaf_entries.values()
 
@@ -1376,7 +1121,7 @@ class TestBuildMetricList:
         panel_configs = self._build_test_panel_configs_for_single_metric(
             "Expr Metric", {"expr": "(100 * COUNTER_B / COUNTER_C)"}
         )
-        metric_list = self.build_metric_list(panel_configs, None)
+        metric_list = self.build_metric_details(panel_configs, None)
         leaf_entries = self._extract_leaf_metric_entries(metric_list)
         assert "Expr Metric" in leaf_entries.values()
 
@@ -1384,7 +1129,7 @@ class TestBuildMetricList:
         panel_configs = self._build_test_panel_configs_for_single_metric(
             "Partial Metric", {"avg": "AVG(COUNTER_E)", "min": None, "max": None}
         )
-        metric_list = self.build_metric_list(panel_configs, None)
+        metric_list = self.build_metric_details(panel_configs, None)
         leaf_entries = self._extract_leaf_metric_entries(metric_list)
         assert "Partial Metric" in leaf_entries.values()
 
@@ -1394,9 +1139,64 @@ class TestBuildMetricList:
         panel_configs = self._build_test_panel_configs_for_single_metric(
             "All None Metric", {"avg": None, "min": None, "max": None}
         )
-        metric_list = self.build_metric_list(panel_configs, None)
+        metric_list = self.build_metric_details(panel_configs, None)
         leaf_entries = self._extract_leaf_metric_entries(metric_list)
         assert "All None Metric" not in leaf_entries.values()
+
+
+def test_build_metric_details():
+    """Rows carry the unit and a one-line description; per-channel tables have
+    no metric rows without sys_info."""
+    metric_details = utils_common.build_metric_details(
+        build_listing_panel_configs(), None
+    )
+    assert metric_details == {
+        "18": ("L2 Cache (per Channel)", "", ""),
+        "18.1": ("Aggregate Stats", "", ""),
+        "18.1.0": ("Hit Rate", "Percent", "The percent of L2 requests that hit."),
+        "18.1.1": ("Requests", "(Req + $normUnit)", ""),
+        "18.1.2": ("No Unit", "", ""),
+        "18.2": ("Hit Rate (per Channel)", "", ""),
+    }
+
+
+@pytest.mark.parametrize(
+    ("selection", "expected_ids"),
+    [
+        ([], ["0", "2", "18"]),
+        (["all"], LISTED_METRIC_IDS),
+        (["sol", "18.1.0"], ["2", "2.1", "2.1.0", "2.1.1", "18", "18.1", "18.1.0"]),
+    ],
+)
+def test_select_listed_ids(selection, expected_ids):
+    """No selection lists blocks; ids and aliases add their parents and children."""
+    listed_ids = utils_common.select_listed_ids(
+        LISTED_METRIC_IDS, selection, {"sol": "2"}
+    )
+    assert listed_ids == expected_ids
+
+
+@pytest.mark.parametrize("selection", [["bogus"], ["all", "sol"]])
+def test_select_listed_ids_rejects_invalid_selection(selection):
+    with pytest.raises(SystemExit):
+        utils_common.select_listed_ids(LISTED_METRIC_IDS, selection, {"sol": "2"})
+
+
+def test_format_metric_tables():
+    output = utils_common.format_metric_tables(
+        LISTED_METRIC_DETAILS, LISTED_METRIC_IDS, {"2": "sol"}, terminal_width=100
+    )
+    lines = output.splitlines()
+
+    assert lines[:3] == ["0. Top Stats", "No metrics to list.", ""]
+    assert "2. System Speed-of-Light (alias: sol)" in lines
+    # Per-channel table 18.2 lists no metrics, so it gets no heading
+    assert "18.1 Aggregate Stats" in lines
+    assert not any(line.startswith("18.2") for line in lines)
+    # The long description wraps to fit the terminal width
+    assert max(len(line) for line in lines) <= 100
+    row_start = next(i for i, line in enumerate(lines) if line.startswith("| 2.1.0 "))
+    assert lines[row_start + 1].startswith("|           | ")
 
 
 # =============================================================================
@@ -1519,3 +1319,31 @@ def test_is_gfx1250_matches_only_the_supported_architecture():
     assert not utils_common.is_gfx1250("gfx12500")
     assert not utils_common.is_gfx1250("gfx1251")
     assert not utils_common.is_gfx1250(None)
+
+
+@pytest.mark.parametrize(
+    ("filter_blocks", "selects"),
+    [
+        (None, True),
+        ([], True),
+        (["4"], True),
+        (["roof"], True),
+        (["4.1.1"], True),
+        (["2", "4"], True),
+        (["2", "sol"], False),
+        (["40"], False),
+    ],
+    ids=[
+        "none",
+        "empty",
+        "block_4",
+        "alias",
+        "roofline_metric",
+        "with_other_block",
+        "no_roofline",
+        "block_40",
+    ],
+)
+def test_roofline_selection(filter_blocks, selects):
+    """4, 4.x and the roof alias all count as roofline."""
+    assert utils_common.selects_roofline(filter_blocks) is selects

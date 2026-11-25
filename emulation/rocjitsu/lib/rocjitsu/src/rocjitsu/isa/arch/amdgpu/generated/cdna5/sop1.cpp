@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/sop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include <memory>
 
@@ -20,10 +21,11 @@ SMovB32Sop1::SMovB32Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -32,14 +34,16 @@ SMovB32Sop1::SMovB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   flags_ |= RESULT_COPY;
+  set_amdgpu_operation(amdgpu::Operation::S_MOV_B32);
 }
 
 namespace detail {
 DecodeResult decodeSMovB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_mov_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SMovB32Sop1>(opcode);
 }
 } // namespace detail
@@ -53,11 +57,12 @@ SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -65,17 +70,20 @@ SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
-  if ((inst_.sdst < 105u && (inst_.sdst & 1u)) || (inst_.ssrc0 < 105u && (inst_.ssrc0 & 1u)))
+  if ((inst_.sdst < 105u && (inst_.sdst & 1u)) || (inst_.ssrc0 < 105u && (inst_.ssrc0 & 1u))) {
     flags_ |= MISALIGNED_SCALAR_DATA;
+  }
   flags_ |= RESULT_COPY;
+  set_amdgpu_operation(amdgpu::Operation::S_MOV_B64);
 }
 
 namespace detail {
 DecodeResult decodeSMovB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_mov_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SMovB64Sop1>(opcode);
 }
 } // namespace detail
@@ -92,10 +100,11 @@ SCmovB32Sop1::SCmovB32Sop1(const MachineInst *inst)
   src_operands_[2] = &scc;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -105,14 +114,16 @@ SCmovB32Sop1::SCmovB32Sop1(const MachineInst *inst)
   }
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= PREDICATED_DEF;
+  set_amdgpu_operation(amdgpu::Operation::S_CMOV_B32);
 }
 
 namespace detail {
 DecodeResult decodeSCmovB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_cmov_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmovB32Sop1>(opcode);
 }
 } // namespace detail
@@ -129,11 +140,12 @@ SCmovB64Sop1::SCmovB64Sop1(const MachineInst *inst)
   src_operands_[2] = &scc;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -143,14 +155,16 @@ SCmovB64Sop1::SCmovB64Sop1(const MachineInst *inst)
   }
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= PREDICATED_DEF;
+  set_amdgpu_operation(amdgpu::Operation::S_CMOV_B64);
 }
 
 namespace detail {
 DecodeResult decodeSCmovB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_cmov_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmovB64Sop1>(opcode);
 }
 } // namespace detail
@@ -164,10 +178,11 @@ SBrevB32Sop1::SBrevB32Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -175,14 +190,16 @@ SBrevB32Sop1::SBrevB32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_BREV_B32);
 }
 
 namespace detail {
 DecodeResult decodeSBrevB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_brev_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBrevB32Sop1>(opcode);
 }
 } // namespace detail
@@ -196,11 +213,12 @@ SBrevB64Sop1::SBrevB64Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -208,14 +226,16 @@ SBrevB64Sop1::SBrevB64Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_BREV_B64);
 }
 
 namespace detail {
 DecodeResult decodeSBrevB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_brev_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBrevB64Sop1>(opcode);
 }
 } // namespace detail
@@ -227,6 +247,7 @@ SGetShaderCyclesU64Sop1::SGetShaderCyclesU64Sop1(const MachineInst *inst)
   dst_operands_[0] = &sdst;
   num_src_ = 0;
   num_dst_ = 1;
+  set_amdgpu_operation(amdgpu::Operation::S_GET_SHADER_CYCLES_U64);
 }
 
 namespace detail {
@@ -235,8 +256,9 @@ DecodeResult decodeSGetShaderCyclesU64Sop1(const MachineInst *opcode,
   Result validation = Sop1::validate_encoding("s_get_shader_cycles_u64",
                                               reinterpret_cast<const Sop1::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::None, 0);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SGetShaderCyclesU64Sop1>(opcode);
 }
 } // namespace detail
@@ -250,10 +272,11 @@ SCtzI32B32Sop1::SCtzI32B32Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -261,14 +284,16 @@ SCtzI32B32Sop1::SCtzI32B32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_CTZ_I32_B32);
 }
 
 namespace detail {
 DecodeResult decodeSCtzI32B32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_ctz_i32_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCtzI32B32Sop1>(opcode);
 }
 } // namespace detail
@@ -282,11 +307,12 @@ SCtzI32B64Sop1::SCtzI32B64Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -294,14 +320,16 @@ SCtzI32B64Sop1::SCtzI32B64Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_CTZ_I32_B64);
 }
 
 namespace detail {
 DecodeResult decodeSCtzI32B64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_ctz_i32_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCtzI32B64Sop1>(opcode);
 }
 } // namespace detail
@@ -315,10 +343,11 @@ SClzI32U32Sop1::SClzI32U32Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -326,14 +355,16 @@ SClzI32U32Sop1::SClzI32U32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_CLZ_I32_U32);
 }
 
 namespace detail {
 DecodeResult decodeSClzI32U32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_clz_i32_u32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SClzI32U32Sop1>(opcode);
 }
 } // namespace detail
@@ -347,11 +378,12 @@ SClzI32U64Sop1::SClzI32U64Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -359,14 +391,16 @@ SClzI32U64Sop1::SClzI32U64Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_CLZ_I32_U64);
 }
 
 namespace detail {
 DecodeResult decodeSClzI32U64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_clz_i32_u64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SClzI32U64Sop1>(opcode);
 }
 } // namespace detail
@@ -380,10 +414,11 @@ SClsI32Sop1::SClsI32Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -391,14 +426,16 @@ SClsI32Sop1::SClsI32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_CLS_I32);
 }
 
 namespace detail {
 DecodeResult decodeSClsI32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_cls_i32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SClsI32Sop1>(opcode);
 }
 } // namespace detail
@@ -412,11 +449,12 @@ SClsI32I64Sop1::SClsI32I64Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -424,14 +462,16 @@ SClsI32I64Sop1::SClsI32I64Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_CLS_I32_I64);
 }
 
 namespace detail {
 DecodeResult decodeSClsI32I64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_cls_i32_i64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SClsI32I64Sop1>(opcode);
 }
 } // namespace detail
@@ -445,10 +485,11 @@ SSextI32I8Sop1::SSextI32I8Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         8, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -456,14 +497,16 @@ SSextI32I8Sop1::SSextI32I8Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(8, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_SEXT_I32_I8);
 }
 
 namespace detail {
 DecodeResult decodeSSextI32I8Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_sext_i32_i8", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSextI32I8Sop1>(opcode);
 }
 } // namespace detail
@@ -477,11 +520,12 @@ SSextI32I16Sop1::SSextI32I16Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -489,6 +533,7 @@ SSextI32I16Sop1::SSextI32I16Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_SEXT_I32_I16);
 }
 
 namespace detail {
@@ -496,8 +541,9 @@ DecodeResult decodeSSextI32I16Sop1(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_sext_i32_i16", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSextI32I16Sop1>(opcode);
 }
 } // namespace detail
@@ -512,10 +558,11 @@ SBitset0B32Sop1::SBitset0B32Sop1(const MachineInst *inst)
   src_operands_[1] = &ssrc0;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -523,6 +570,7 @@ SBitset0B32Sop1::SBitset0B32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_BITSET0_B32);
 }
 
 namespace detail {
@@ -530,8 +578,9 @@ DecodeResult decodeSBitset0B32Sop1(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_bitset0_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBitset0B32Sop1>(opcode);
 }
 } // namespace detail
@@ -546,10 +595,11 @@ SBitset0B64Sop1::SBitset0B64Sop1(const MachineInst *inst)
   src_operands_[1] = &ssrc0;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -557,6 +607,7 @@ SBitset0B64Sop1::SBitset0B64Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_BITSET0_B64);
 }
 
 namespace detail {
@@ -564,8 +615,9 @@ DecodeResult decodeSBitset0B64Sop1(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_bitset0_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBitset0B64Sop1>(opcode);
 }
 } // namespace detail
@@ -580,10 +632,11 @@ SBitset1B32Sop1::SBitset1B32Sop1(const MachineInst *inst)
   src_operands_[1] = &ssrc0;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -591,6 +644,7 @@ SBitset1B32Sop1::SBitset1B32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_BITSET1_B32);
 }
 
 namespace detail {
@@ -598,8 +652,9 @@ DecodeResult decodeSBitset1B32Sop1(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_bitset1_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBitset1B32Sop1>(opcode);
 }
 } // namespace detail
@@ -614,10 +669,11 @@ SBitset1B64Sop1::SBitset1B64Sop1(const MachineInst *inst)
   src_operands_[1] = &ssrc0;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -625,6 +681,7 @@ SBitset1B64Sop1::SBitset1B64Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_BITSET1_B64);
 }
 
 namespace detail {
@@ -632,8 +689,9 @@ DecodeResult decodeSBitset1B64Sop1(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_bitset1_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBitset1B64Sop1>(opcode);
 }
 } // namespace detail
@@ -647,10 +705,11 @@ SBitreplicateB64B32Sop1::SBitreplicateB64B32Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -658,6 +717,7 @@ SBitreplicateB64B32Sop1::SBitreplicateB64B32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_BITREPLICATE_B64_B32);
 }
 
 namespace detail {
@@ -665,8 +725,9 @@ DecodeResult decodeSBitreplicateB64B32Sop1(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_bitreplicate_b64_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBitreplicateB64B32Sop1>(opcode);
 }
 } // namespace detail
@@ -682,10 +743,11 @@ SAbsI32Sop1::SAbsI32Sop1(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 1;
   num_dst_ = 2;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -694,14 +756,16 @@ SAbsI32Sop1::SAbsI32Sop1(const MachineInst *inst)
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_ABS_I32);
 }
 
 namespace detail {
 DecodeResult decodeSAbsI32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_abs_i32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SAbsI32Sop1>(opcode);
 }
 } // namespace detail
@@ -717,10 +781,11 @@ SBcnt0I32B32Sop1::SBcnt0I32B32Sop1(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 1;
   num_dst_ = 2;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -729,6 +794,7 @@ SBcnt0I32B32Sop1::SBcnt0I32B32Sop1(const MachineInst *inst)
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_BCNT0_I32_B32);
 }
 
 namespace detail {
@@ -736,8 +802,9 @@ DecodeResult decodeSBcnt0I32B32Sop1(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_bcnt0_i32_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBcnt0I32B32Sop1>(opcode);
 }
 } // namespace detail
@@ -753,11 +820,12 @@ SBcnt0I32B64Sop1::SBcnt0I32B64Sop1(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 1;
   num_dst_ = 2;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -766,6 +834,7 @@ SBcnt0I32B64Sop1::SBcnt0I32B64Sop1(const MachineInst *inst)
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_BCNT0_I32_B64);
 }
 
 namespace detail {
@@ -773,8 +842,9 @@ DecodeResult decodeSBcnt0I32B64Sop1(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_bcnt0_i32_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBcnt0I32B64Sop1>(opcode);
 }
 } // namespace detail
@@ -790,10 +860,11 @@ SBcnt1I32B32Sop1::SBcnt1I32B32Sop1(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 1;
   num_dst_ = 2;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -802,6 +873,7 @@ SBcnt1I32B32Sop1::SBcnt1I32B32Sop1(const MachineInst *inst)
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_BCNT1_I32_B32);
 }
 
 namespace detail {
@@ -809,8 +881,9 @@ DecodeResult decodeSBcnt1I32B32Sop1(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_bcnt1_i32_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBcnt1I32B32Sop1>(opcode);
 }
 } // namespace detail
@@ -826,11 +899,12 @@ SBcnt1I32B64Sop1::SBcnt1I32B64Sop1(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 1;
   num_dst_ = 2;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -839,6 +913,7 @@ SBcnt1I32B64Sop1::SBcnt1I32B64Sop1(const MachineInst *inst)
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_BCNT1_I32_B64);
 }
 
 namespace detail {
@@ -846,8 +921,9 @@ DecodeResult decodeSBcnt1I32B64Sop1(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_bcnt1_i32_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBcnt1I32B64Sop1>(opcode);
 }
 } // namespace detail
@@ -863,10 +939,11 @@ SQuadmaskB32Sop1::SQuadmaskB32Sop1(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 1;
   num_dst_ = 2;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -875,6 +952,7 @@ SQuadmaskB32Sop1::SQuadmaskB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_QUADMASK_B32);
 }
 
 namespace detail {
@@ -882,8 +960,9 @@ DecodeResult decodeSQuadmaskB32Sop1(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_quadmask_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SQuadmaskB32Sop1>(opcode);
 }
 } // namespace detail
@@ -899,11 +978,12 @@ SQuadmaskB64Sop1::SQuadmaskB64Sop1(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 1;
   num_dst_ = 2;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -912,6 +992,7 @@ SQuadmaskB64Sop1::SQuadmaskB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_QUADMASK_B64);
 }
 
 namespace detail {
@@ -919,8 +1000,9 @@ DecodeResult decodeSQuadmaskB64Sop1(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_quadmask_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SQuadmaskB64Sop1>(opcode);
 }
 } // namespace detail
@@ -936,10 +1018,11 @@ SWqmB32Sop1::SWqmB32Sop1(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 1;
   num_dst_ = 2;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -948,14 +1031,16 @@ SWqmB32Sop1::SWqmB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_WQM_B32);
 }
 
 namespace detail {
 DecodeResult decodeSWqmB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_wqm_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SWqmB32Sop1>(opcode);
 }
 } // namespace detail
@@ -971,11 +1056,12 @@ SWqmB64Sop1::SWqmB64Sop1(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 1;
   num_dst_ = 2;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -984,14 +1070,16 @@ SWqmB64Sop1::SWqmB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_WQM_B64);
 }
 
 namespace detail {
 DecodeResult decodeSWqmB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_wqm_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SWqmB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1007,10 +1095,11 @@ SNotB32Sop1::SNotB32Sop1(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 1;
   num_dst_ = 2;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1019,14 +1108,16 @@ SNotB32Sop1::SNotB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_NOT_B32);
 }
 
 namespace detail {
 DecodeResult decodeSNotB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_not_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SNotB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1042,11 +1133,12 @@ SNotB64Sop1::SNotB64Sop1(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 1;
   num_dst_ = 2;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1055,14 +1147,16 @@ SNotB64Sop1::SNotB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_NOT_B64);
 }
 
 namespace detail {
 DecodeResult decodeSNotB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_not_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SNotB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1082,10 +1176,11 @@ SAndSaveexecB32Sop1::SAndSaveexecB32Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1097,6 +1192,7 @@ SAndSaveexecB32Sop1::SAndSaveexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_AND_SAVEEXEC_B32);
 }
 
 namespace detail {
@@ -1104,8 +1200,9 @@ DecodeResult decodeSAndSaveexecB32Sop1(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_and_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SAndSaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1125,11 +1222,12 @@ SAndSaveexecB64Sop1::SAndSaveexecB64Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1141,6 +1239,7 @@ SAndSaveexecB64Sop1::SAndSaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_AND_SAVEEXEC_B64);
 }
 
 namespace detail {
@@ -1148,8 +1247,9 @@ DecodeResult decodeSAndSaveexecB64Sop1(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_and_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SAndSaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1169,10 +1269,11 @@ SOrSaveexecB32Sop1::SOrSaveexecB32Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1185,6 +1286,7 @@ SOrSaveexecB32Sop1::SOrSaveexecB32Sop1(const MachineInst *inst)
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
   flags_ |= RESULT_OR;
+  set_amdgpu_operation(amdgpu::Operation::S_OR_SAVEEXEC_B32);
 }
 
 namespace detail {
@@ -1192,8 +1294,9 @@ DecodeResult decodeSOrSaveexecB32Sop1(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_or_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SOrSaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1213,11 +1316,12 @@ SOrSaveexecB64Sop1::SOrSaveexecB64Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1230,6 +1334,7 @@ SOrSaveexecB64Sop1::SOrSaveexecB64Sop1(const MachineInst *inst)
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
   flags_ |= RESULT_OR;
+  set_amdgpu_operation(amdgpu::Operation::S_OR_SAVEEXEC_B64);
 }
 
 namespace detail {
@@ -1237,8 +1342,9 @@ DecodeResult decodeSOrSaveexecB64Sop1(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_or_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SOrSaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1258,10 +1364,11 @@ SXorSaveexecB32Sop1::SXorSaveexecB32Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1273,6 +1380,7 @@ SXorSaveexecB32Sop1::SXorSaveexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_XOR_SAVEEXEC_B32);
 }
 
 namespace detail {
@@ -1280,8 +1388,9 @@ DecodeResult decodeSXorSaveexecB32Sop1(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_xor_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SXorSaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1301,11 +1410,12 @@ SXorSaveexecB64Sop1::SXorSaveexecB64Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1317,6 +1427,7 @@ SXorSaveexecB64Sop1::SXorSaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_XOR_SAVEEXEC_B64);
 }
 
 namespace detail {
@@ -1324,8 +1435,9 @@ DecodeResult decodeSXorSaveexecB64Sop1(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_xor_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SXorSaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1345,10 +1457,11 @@ SNandSaveexecB32Sop1::SNandSaveexecB32Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1360,6 +1473,7 @@ SNandSaveexecB32Sop1::SNandSaveexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_NAND_SAVEEXEC_B32);
 }
 
 namespace detail {
@@ -1367,8 +1481,9 @@ DecodeResult decodeSNandSaveexecB32Sop1(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_nand_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SNandSaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1388,11 +1503,12 @@ SNandSaveexecB64Sop1::SNandSaveexecB64Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1404,6 +1520,7 @@ SNandSaveexecB64Sop1::SNandSaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_NAND_SAVEEXEC_B64);
 }
 
 namespace detail {
@@ -1411,8 +1528,9 @@ DecodeResult decodeSNandSaveexecB64Sop1(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_nand_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SNandSaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1432,10 +1550,11 @@ SNorSaveexecB32Sop1::SNorSaveexecB32Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1447,6 +1566,7 @@ SNorSaveexecB32Sop1::SNorSaveexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_NOR_SAVEEXEC_B32);
 }
 
 namespace detail {
@@ -1454,8 +1574,9 @@ DecodeResult decodeSNorSaveexecB32Sop1(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_nor_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SNorSaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1475,11 +1596,12 @@ SNorSaveexecB64Sop1::SNorSaveexecB64Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1491,6 +1613,7 @@ SNorSaveexecB64Sop1::SNorSaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_NOR_SAVEEXEC_B64);
 }
 
 namespace detail {
@@ -1498,8 +1621,9 @@ DecodeResult decodeSNorSaveexecB64Sop1(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_nor_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SNorSaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1519,10 +1643,11 @@ SXnorSaveexecB32Sop1::SXnorSaveexecB32Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1534,6 +1659,7 @@ SXnorSaveexecB32Sop1::SXnorSaveexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_XNOR_SAVEEXEC_B32);
 }
 
 namespace detail {
@@ -1541,8 +1667,9 @@ DecodeResult decodeSXnorSaveexecB32Sop1(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_xnor_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SXnorSaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1562,11 +1689,12 @@ SXnorSaveexecB64Sop1::SXnorSaveexecB64Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1578,6 +1706,7 @@ SXnorSaveexecB64Sop1::SXnorSaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_XNOR_SAVEEXEC_B64);
 }
 
 namespace detail {
@@ -1585,8 +1714,9 @@ DecodeResult decodeSXnorSaveexecB64Sop1(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_xnor_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SXnorSaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1606,10 +1736,11 @@ SAndNot0SaveexecB32Sop1::SAndNot0SaveexecB32Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1621,6 +1752,7 @@ SAndNot0SaveexecB32Sop1::SAndNot0SaveexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_AND_NOT0_SAVEEXEC_B32);
 }
 
 namespace detail {
@@ -1628,8 +1760,9 @@ DecodeResult decodeSAndNot0SaveexecB32Sop1(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_and_not0_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SAndNot0SaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1649,11 +1782,12 @@ SAndNot0SaveexecB64Sop1::SAndNot0SaveexecB64Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1665,6 +1799,7 @@ SAndNot0SaveexecB64Sop1::SAndNot0SaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_AND_NOT0_SAVEEXEC_B64);
 }
 
 namespace detail {
@@ -1672,8 +1807,9 @@ DecodeResult decodeSAndNot0SaveexecB64Sop1(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_and_not0_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SAndNot0SaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1693,10 +1829,11 @@ SOrNot0SaveexecB32Sop1::SOrNot0SaveexecB32Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1708,6 +1845,7 @@ SOrNot0SaveexecB32Sop1::SOrNot0SaveexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_OR_NOT0_SAVEEXEC_B32);
 }
 
 namespace detail {
@@ -1715,8 +1853,9 @@ DecodeResult decodeSOrNot0SaveexecB32Sop1(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_or_not0_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SOrNot0SaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1736,11 +1875,12 @@ SOrNot0SaveexecB64Sop1::SOrNot0SaveexecB64Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1752,6 +1892,7 @@ SOrNot0SaveexecB64Sop1::SOrNot0SaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_OR_NOT0_SAVEEXEC_B64);
 }
 
 namespace detail {
@@ -1759,8 +1900,9 @@ DecodeResult decodeSOrNot0SaveexecB64Sop1(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_or_not0_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SOrNot0SaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1780,10 +1922,11 @@ SAndNot1SaveexecB32Sop1::SAndNot1SaveexecB32Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1795,6 +1938,7 @@ SAndNot1SaveexecB32Sop1::SAndNot1SaveexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_AND_NOT1_SAVEEXEC_B32);
 }
 
 namespace detail {
@@ -1802,8 +1946,9 @@ DecodeResult decodeSAndNot1SaveexecB32Sop1(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_and_not1_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SAndNot1SaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1823,11 +1968,12 @@ SAndNot1SaveexecB64Sop1::SAndNot1SaveexecB64Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1839,6 +1985,7 @@ SAndNot1SaveexecB64Sop1::SAndNot1SaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_AND_NOT1_SAVEEXEC_B64);
 }
 
 namespace detail {
@@ -1846,8 +1993,9 @@ DecodeResult decodeSAndNot1SaveexecB64Sop1(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_and_not1_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SAndNot1SaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1867,10 +2015,11 @@ SOrNot1SaveexecB32Sop1::SOrNot1SaveexecB32Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1882,6 +2031,7 @@ SOrNot1SaveexecB32Sop1::SOrNot1SaveexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_OR_NOT1_SAVEEXEC_B32);
 }
 
 namespace detail {
@@ -1889,8 +2039,9 @@ DecodeResult decodeSOrNot1SaveexecB32Sop1(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_or_not1_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SOrNot1SaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1910,11 +2061,12 @@ SOrNot1SaveexecB64Sop1::SOrNot1SaveexecB64Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1926,6 +2078,7 @@ SOrNot1SaveexecB64Sop1::SOrNot1SaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_OR_NOT1_SAVEEXEC_B64);
 }
 
 namespace detail {
@@ -1933,8 +2086,9 @@ DecodeResult decodeSOrNot1SaveexecB64Sop1(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_or_not1_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SOrNot1SaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1954,10 +2108,11 @@ SAndNot0WrexecB32Sop1::SAndNot0WrexecB32Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1969,6 +2124,7 @@ SAndNot0WrexecB32Sop1::SAndNot0WrexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_AND_NOT0_WREXEC_B32);
 }
 
 namespace detail {
@@ -1976,8 +2132,9 @@ DecodeResult decodeSAndNot0WrexecB32Sop1(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_and_not0_wrexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SAndNot0WrexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1997,11 +2154,12 @@ SAndNot0WrexecB64Sop1::SAndNot0WrexecB64Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2013,6 +2171,7 @@ SAndNot0WrexecB64Sop1::SAndNot0WrexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_AND_NOT0_WREXEC_B64);
 }
 
 namespace detail {
@@ -2020,8 +2179,9 @@ DecodeResult decodeSAndNot0WrexecB64Sop1(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_and_not0_wrexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SAndNot0WrexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -2041,10 +2201,11 @@ SAndNot1WrexecB32Sop1::SAndNot1WrexecB32Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2056,6 +2217,7 @@ SAndNot1WrexecB32Sop1::SAndNot1WrexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_AND_NOT1_WREXEC_B32);
 }
 
 namespace detail {
@@ -2063,8 +2225,9 @@ DecodeResult decodeSAndNot1WrexecB32Sop1(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_and_not1_wrexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SAndNot1WrexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -2084,11 +2247,12 @@ SAndNot1WrexecB64Sop1::SAndNot1WrexecB64Sop1(const MachineInst *inst)
   src_operands_[1] = &sdst_exec_in;
   num_src_ = 2;
   num_dst_ = 3;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2100,6 +2264,7 @@ SAndNot1WrexecB64Sop1::SAndNot1WrexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_AND_NOT1_WREXEC_B64);
 }
 
 namespace detail {
@@ -2107,8 +2272,9 @@ DecodeResult decodeSAndNot1WrexecB64Sop1(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_and_not1_wrexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SAndNot1WrexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -2125,6 +2291,8 @@ SMovrelsB32Sop1::SMovrelsB32Sop1(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_MOVRELS_B32);
+  flags_ |= RELATIVE_SGPR_SOURCE;
 }
 
 namespace detail {
@@ -2133,8 +2301,9 @@ DecodeResult decodeSMovrelsB32Sop1(const MachineInst *opcode,
   Result validation =
       Sop1::validate_encoding("s_movrels_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::None);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SMovrelsB32Sop1>(opcode);
 }
 } // namespace detail
@@ -2151,6 +2320,8 @@ SMovrelsB64Sop1::SMovrelsB64Sop1(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_MOVRELS_B64);
+  flags_ |= RELATIVE_SGPR_SOURCE;
 }
 
 namespace detail {
@@ -2159,8 +2330,9 @@ DecodeResult decodeSMovrelsB64Sop1(const MachineInst *opcode,
   Result validation =
       Sop1::validate_encoding("s_movrels_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::None);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SMovrelsB64Sop1>(opcode);
 }
 } // namespace detail
@@ -2176,10 +2348,11 @@ SMovreldB32Sop1::SMovreldB32Sop1(const MachineInst *inst)
   src_operands_[1] = &m0;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2188,6 +2361,8 @@ SMovreldB32Sop1::SMovreldB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   m0.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_MOVRELD_B32);
+  flags_ |= RELATIVE_SGPR_DESTINATION;
 }
 
 namespace detail {
@@ -2195,8 +2370,9 @@ DecodeResult decodeSMovreldB32Sop1(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_movreld_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SMovreldB32Sop1>(opcode);
 }
 } // namespace detail
@@ -2212,11 +2388,12 @@ SMovreldB64Sop1::SMovreldB64Sop1(const MachineInst *inst)
   src_operands_[1] = &m0;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2225,6 +2402,8 @@ SMovreldB64Sop1::SMovreldB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
   m0.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_MOVRELD_B64);
+  flags_ |= RELATIVE_SGPR_DESTINATION;
 }
 
 namespace detail {
@@ -2232,8 +2411,9 @@ DecodeResult decodeSMovreldB64Sop1(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_movreld_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SMovreldB64Sop1>(opcode);
 }
 } // namespace detail
@@ -2250,6 +2430,8 @@ SMovrelsd2B32Sop1::SMovrelsd2B32Sop1(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_MOVRELSD_2_B32);
+  flags_ |= RELATIVE_SGPR_SOURCE | RELATIVE_SGPR_DESTINATION;
 }
 
 namespace detail {
@@ -2258,8 +2440,9 @@ DecodeResult decodeSMovrelsd2B32Sop1(const MachineInst *opcode,
   Result validation = Sop1::validate_encoding("s_movrelsd_2_b32",
                                               reinterpret_cast<const Sop1::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::None);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SMovrelsd2B32Sop1>(opcode);
 }
 } // namespace detail
@@ -2274,6 +2457,8 @@ SGetPcI64Sop1::SGetPcI64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   pc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_GET_PC_I64);
+  flags_ |= READS_PC;
 }
 
 namespace detail {
@@ -2281,8 +2466,9 @@ DecodeResult decodeSGetPcI64Sop1(const MachineInst *opcode, const DecodeErrorEmi
   Result validation =
       Sop1::validate_encoding("s_get_pc_i64", reinterpret_cast<const Sop1::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::None, 0);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SGetPcI64Sop1>(opcode);
 }
 } // namespace detail
@@ -2298,6 +2484,7 @@ SSetPcI64Sop1::SSetPcI64Sop1(const MachineInst *inst)
   num_dst_ = 1;
   pc.apply_fieldless_caps(false, false, false);
   flags_ |= INDIRECT_BRANCH;
+  set_amdgpu_operation(amdgpu::Operation::S_SET_PC_I64);
 }
 
 namespace detail {
@@ -2305,8 +2492,9 @@ DecodeResult decodeSSetPcI64Sop1(const MachineInst *opcode, const DecodeErrorEmi
   Result validation =
       Sop1::validate_encoding("s_set_pc_i64", reinterpret_cast<const Sop1::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::None);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSetPcI64Sop1>(opcode);
 }
 } // namespace detail
@@ -2326,6 +2514,8 @@ SSwapPcI64Sop1::SSwapPcI64Sop1(const MachineInst *inst)
   pc.apply_fieldless_caps(false, false, false);
   pc_in.apply_fieldless_caps(false, false, false);
   flags_ |= INDIRECT_CALL;
+  set_amdgpu_operation(amdgpu::Operation::S_SWAP_PC_I64);
+  flags_ |= READS_PC;
 }
 
 namespace detail {
@@ -2333,8 +2523,9 @@ DecodeResult decodeSSwapPcI64Sop1(const MachineInst *opcode, const DecodeErrorEm
   Result validation =
       Sop1::validate_encoding("s_swap_pc_i64", reinterpret_cast<const Sop1::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::None);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSwapPcI64Sop1>(opcode);
 }
 } // namespace detail
@@ -2349,6 +2540,8 @@ SRfeI64Sop1::SRfeI64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   pc.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_PC;
+  set_amdgpu_operation(amdgpu::Operation::S_RFE_I64);
 }
 
 namespace detail {
@@ -2356,8 +2549,9 @@ DecodeResult decodeSRfeI64Sop1(const MachineInst *opcode, const DecodeErrorEmitt
   Result validation =
       Sop1::validate_encoding("s_rfe_i64", reinterpret_cast<const Sop1::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::None);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SRfeI64Sop1>(opcode);
 }
 } // namespace detail
@@ -2371,11 +2565,12 @@ SAddPcI64Sop1::SAddPcI64Sop1(const MachineInst *inst)
   dst_operands_[0] = &pc;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2385,14 +2580,17 @@ SAddPcI64Sop1::SAddPcI64Sop1(const MachineInst *inst)
   }
   pc.apply_fieldless_caps(false, false, false);
   flags_ |= INDIRECT_BRANCH;
+  set_amdgpu_operation(amdgpu::Operation::S_ADD_PC_I64);
+  flags_ |= READS_PC;
 }
 
 namespace detail {
 DecodeResult decodeSAddPcI64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_add_pc_i64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SAddPcI64Sop1>(opcode);
 }
 } // namespace detail
@@ -2408,6 +2606,7 @@ SSendmsgRtnB32Sop1::SSendmsgRtnB32Sop1(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= XCNT_DRAIN;
+  set_amdgpu_operation(amdgpu::Operation::S_SENDMSG_RTN_B32);
 }
 
 namespace detail {
@@ -2416,8 +2615,9 @@ DecodeResult decodeSSendmsgRtnB32Sop1(const MachineInst *opcode,
   Result validation = Sop1::validate_encoding("s_sendmsg_rtn_b32",
                                               reinterpret_cast<const Sop1::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::None, 0);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSendmsgRtnB32Sop1>(opcode);
 }
 } // namespace detail
@@ -2433,6 +2633,7 @@ SSendmsgRtnB64Sop1::SSendmsgRtnB64Sop1(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= XCNT_DRAIN;
+  set_amdgpu_operation(amdgpu::Operation::S_SENDMSG_RTN_B64);
 }
 
 namespace detail {
@@ -2441,8 +2642,9 @@ DecodeResult decodeSSendmsgRtnB64Sop1(const MachineInst *opcode,
   Result validation = Sop1::validate_encoding("s_sendmsg_rtn_b64",
                                               reinterpret_cast<const Sop1::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::None, 0);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSendmsgRtnB64Sop1>(opcode);
 }
 } // namespace detail
@@ -2457,6 +2659,7 @@ SBarrierSignalSop1::SBarrierSignalSop1(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= XCNT_DRAIN;
   flags_ |= BARRIER;
+  set_amdgpu_operation(amdgpu::Operation::S_BARRIER_SIGNAL);
 }
 
 namespace detail {
@@ -2465,8 +2668,9 @@ DecodeResult decodeSBarrierSignalSop1(const MachineInst *opcode,
   Result validation = Sop1::validate_encoding("s_barrier_signal",
                                               reinterpret_cast<const Sop1::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::None);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBarrierSignalSop1>(opcode);
 }
 } // namespace detail
@@ -2484,6 +2688,7 @@ SBarrierSignalIsfirstSop1::SBarrierSignalIsfirstSop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= XCNT_DRAIN;
+  set_amdgpu_operation(amdgpu::Operation::S_BARRIER_SIGNAL_ISFIRST);
 }
 
 namespace detail {
@@ -2492,8 +2697,9 @@ DecodeResult decodeSBarrierSignalIsfirstSop1(const MachineInst *opcode,
   Result validation = Sop1::validate_encoding("s_barrier_signal_isfirst",
                                               reinterpret_cast<const Sop1::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::None);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBarrierSignalIsfirstSop1>(opcode);
 }
 } // namespace detail
@@ -2509,6 +2715,7 @@ SGetBarrierStateSop1::SGetBarrierStateSop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_GET_BARRIER_STATE);
 }
 
 namespace detail {
@@ -2517,8 +2724,9 @@ DecodeResult decodeSGetBarrierStateSop1(const MachineInst *opcode,
   Result validation = Sop1::validate_encoding("s_get_barrier_state",
                                               reinterpret_cast<const Sop1::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::None);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SGetBarrierStateSop1>(opcode);
 }
 } // namespace detail
@@ -2534,6 +2742,7 @@ SBarrierInitSop1::SBarrierInitSop1(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   m0.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_BARRIER_INIT);
 }
 
 namespace detail {
@@ -2542,8 +2751,9 @@ DecodeResult decodeSBarrierInitSop1(const MachineInst *opcode,
   Result validation =
       Sop1::validate_encoding("s_barrier_init", reinterpret_cast<const Sop1::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::None);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBarrierInitSop1>(opcode);
 }
 } // namespace detail
@@ -2556,6 +2766,7 @@ SBarrierJoinSop1::SBarrierJoinSop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_BARRIER_JOIN);
 }
 
 namespace detail {
@@ -2564,8 +2775,9 @@ DecodeResult decodeSBarrierJoinSop1(const MachineInst *opcode,
   Result validation =
       Sop1::validate_encoding("s_barrier_join", reinterpret_cast<const Sop1::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::None);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBarrierJoinSop1>(opcode);
 }
 } // namespace detail
@@ -2579,10 +2791,11 @@ SAllocVgprSop1::SAllocVgprSop1(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2591,14 +2804,16 @@ SAllocVgprSop1::SAllocVgprSop1(const MachineInst *inst)
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_ALLOC_VGPR);
 }
 
 namespace detail {
 DecodeResult decodeSAllocVgprSop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_alloc_vgpr", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SAllocVgprSop1>(opcode);
 }
 } // namespace detail
@@ -2611,6 +2826,7 @@ SWakeupBarrierSop1::SWakeupBarrierSop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_WAKEUP_BARRIER);
 }
 
 namespace detail {
@@ -2619,8 +2835,9 @@ DecodeResult decodeSWakeupBarrierSop1(const MachineInst *opcode,
   Result validation = Sop1::validate_encoding("s_wakeup_barrier",
                                               reinterpret_cast<const Sop1::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::None);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SWakeupBarrierSop1>(opcode);
 }
 } // namespace detail
@@ -2632,10 +2849,11 @@ SSleepVarSop1::SSleepVarSop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 0;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2643,14 +2861,17 @@ SSleepVarSop1::SSleepVarSop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= SUSPENDS_WAVE;
+  set_amdgpu_operation(amdgpu::Operation::S_SLEEP_VAR);
 }
 
 namespace detail {
 DecodeResult decodeSSleepVarSop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_sleep_var", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSleepVarSop1>(opcode);
 }
 } // namespace detail
@@ -2664,10 +2885,11 @@ SCeilF32Sop1::SCeilF32Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2675,14 +2897,16 @@ SCeilF32Sop1::SCeilF32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_CEIL_F32);
 }
 
 namespace detail {
 DecodeResult decodeSCeilF32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_ceil_f32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCeilF32Sop1>(opcode);
 }
 } // namespace detail
@@ -2696,10 +2920,11 @@ SFloorF32Sop1::SFloorF32Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2707,14 +2932,16 @@ SFloorF32Sop1::SFloorF32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_FLOOR_F32);
 }
 
 namespace detail {
 DecodeResult decodeSFloorF32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_floor_f32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SFloorF32Sop1>(opcode);
 }
 } // namespace detail
@@ -2728,10 +2955,11 @@ STruncF32Sop1::STruncF32Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2739,14 +2967,16 @@ STruncF32Sop1::STruncF32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_TRUNC_F32);
 }
 
 namespace detail {
 DecodeResult decodeSTruncF32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_trunc_f32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<STruncF32Sop1>(opcode);
 }
 } // namespace detail
@@ -2760,10 +2990,11 @@ SRndneF32Sop1::SRndneF32Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2771,14 +3002,16 @@ SRndneF32Sop1::SRndneF32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_RNDNE_F32);
 }
 
 namespace detail {
 DecodeResult decodeSRndneF32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_rndne_f32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SRndneF32Sop1>(opcode);
 }
 } // namespace detail
@@ -2792,10 +3025,11 @@ SCvtF32I32Sop1::SCvtF32I32Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2803,14 +3037,16 @@ SCvtF32I32Sop1::SCvtF32I32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_CVT_F32_I32);
 }
 
 namespace detail {
 DecodeResult decodeSCvtF32I32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_cvt_f32_i32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCvtF32I32Sop1>(opcode);
 }
 } // namespace detail
@@ -2824,10 +3060,11 @@ SCvtF32U32Sop1::SCvtF32U32Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2835,14 +3072,16 @@ SCvtF32U32Sop1::SCvtF32U32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_CVT_F32_U32);
 }
 
 namespace detail {
 DecodeResult decodeSCvtF32U32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_cvt_f32_u32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCvtF32U32Sop1>(opcode);
 }
 } // namespace detail
@@ -2856,10 +3095,11 @@ SCvtI32F32Sop1::SCvtI32F32Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2867,14 +3107,16 @@ SCvtI32F32Sop1::SCvtI32F32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_CVT_I32_F32);
 }
 
 namespace detail {
 DecodeResult decodeSCvtI32F32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_cvt_i32_f32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCvtI32F32Sop1>(opcode);
 }
 } // namespace detail
@@ -2888,10 +3130,11 @@ SCvtU32F32Sop1::SCvtU32F32Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2899,14 +3142,16 @@ SCvtU32F32Sop1::SCvtU32F32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_CVT_U32_F32);
 }
 
 namespace detail {
 DecodeResult decodeSCvtU32F32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_cvt_u32_f32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCvtU32F32Sop1>(opcode);
 }
 } // namespace detail
@@ -2920,10 +3165,11 @@ SCvtF16F32Sop1::SCvtF16F32Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2931,29 +3177,33 @@ SCvtF16F32Sop1::SCvtF16F32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_CVT_F16_F32);
 }
 
 namespace detail {
 DecodeResult decodeSCvtF16F32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_cvt_f16_f32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCvtF16F32Sop1>(opcode);
 }
 } // namespace detail
 
 void SCvtF16F32Sop1::implicit_uses(RegisterSet &uses) const {
   Sop1::implicit_uses(uses);
-  if (auto r = sdst.to_register_ref())
+  if (auto r = sdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void SCvtF16F32Sop1::implicit_use_operands(
     std::vector<const ::rocjitsu::Operand *> &operands) const {
   Sop1::implicit_use_operands(operands);
-  if (sdst.to_register_ref())
+  if (sdst.to_register_ref()) {
     operands.push_back(&sdst);
+  }
 }
 
 SCvtF32F16Sop1::SCvtF32F16Sop1(const MachineInst *inst)
@@ -2965,11 +3215,12 @@ SCvtF32F16Sop1::SCvtF32F16Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2977,14 +3228,16 @@ SCvtF32F16Sop1::SCvtF32F16Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_CVT_F32_F16);
 }
 
 namespace detail {
 DecodeResult decodeSCvtF32F16Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_cvt_f32_f16", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCvtF32F16Sop1>(opcode);
 }
 } // namespace detail
@@ -2998,11 +3251,11 @@ SCvtHiF32F16Sop1::SCvtHiF32F16Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 =
-        Operand(16, OperandType::OPR_SIMM32,
-                static_cast<int>((
-                    reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
+    ssrc0 = Operand(
+        16, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -3010,6 +3263,7 @@ SCvtHiF32F16Sop1::SCvtHiF32F16Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_CVT_HI_F32_F16);
 }
 
 namespace detail {
@@ -3017,8 +3271,9 @@ DecodeResult decodeSCvtHiF32F16Sop1(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_cvt_hi_f32_f16", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCvtHiF32F16Sop1>(opcode);
 }
 } // namespace detail
@@ -3032,11 +3287,12 @@ SCeilF16Sop1::SCeilF16Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -3044,28 +3300,32 @@ SCeilF16Sop1::SCeilF16Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_CEIL_F16);
 }
 
 namespace detail {
 DecodeResult decodeSCeilF16Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_ceil_f16", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCeilF16Sop1>(opcode);
 }
 } // namespace detail
 
 void SCeilF16Sop1::implicit_uses(RegisterSet &uses) const {
   Sop1::implicit_uses(uses);
-  if (auto r = sdst.to_register_ref())
+  if (auto r = sdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void SCeilF16Sop1::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
   Sop1::implicit_use_operands(operands);
-  if (sdst.to_register_ref())
+  if (sdst.to_register_ref()) {
     operands.push_back(&sdst);
+  }
 }
 
 SFloorF16Sop1::SFloorF16Sop1(const MachineInst *inst)
@@ -3077,11 +3337,12 @@ SFloorF16Sop1::SFloorF16Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -3089,29 +3350,33 @@ SFloorF16Sop1::SFloorF16Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_FLOOR_F16);
 }
 
 namespace detail {
 DecodeResult decodeSFloorF16Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_floor_f16", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SFloorF16Sop1>(opcode);
 }
 } // namespace detail
 
 void SFloorF16Sop1::implicit_uses(RegisterSet &uses) const {
   Sop1::implicit_uses(uses);
-  if (auto r = sdst.to_register_ref())
+  if (auto r = sdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void SFloorF16Sop1::implicit_use_operands(
     std::vector<const ::rocjitsu::Operand *> &operands) const {
   Sop1::implicit_use_operands(operands);
-  if (sdst.to_register_ref())
+  if (sdst.to_register_ref()) {
     operands.push_back(&sdst);
+  }
 }
 
 STruncF16Sop1::STruncF16Sop1(const MachineInst *inst)
@@ -3123,11 +3388,12 @@ STruncF16Sop1::STruncF16Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -3135,29 +3401,33 @@ STruncF16Sop1::STruncF16Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_TRUNC_F16);
 }
 
 namespace detail {
 DecodeResult decodeSTruncF16Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_trunc_f16", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<STruncF16Sop1>(opcode);
 }
 } // namespace detail
 
 void STruncF16Sop1::implicit_uses(RegisterSet &uses) const {
   Sop1::implicit_uses(uses);
-  if (auto r = sdst.to_register_ref())
+  if (auto r = sdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void STruncF16Sop1::implicit_use_operands(
     std::vector<const ::rocjitsu::Operand *> &operands) const {
   Sop1::implicit_use_operands(operands);
-  if (sdst.to_register_ref())
+  if (sdst.to_register_ref()) {
     operands.push_back(&sdst);
+  }
 }
 
 SRndneF16Sop1::SRndneF16Sop1(const MachineInst *inst)
@@ -3169,11 +3439,12 @@ SRndneF16Sop1::SRndneF16Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -3181,29 +3452,33 @@ SRndneF16Sop1::SRndneF16Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  set_amdgpu_operation(amdgpu::Operation::S_RNDNE_F16);
 }
 
 namespace detail {
 DecodeResult decodeSRndneF16Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sop1::validate_encoding(
       "s_rndne_f16", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SRndneF16Sop1>(opcode);
 }
 } // namespace detail
 
 void SRndneF16Sop1::implicit_uses(RegisterSet &uses) const {
   Sop1::implicit_uses(uses);
-  if (auto r = sdst.to_register_ref())
+  if (auto r = sdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void SRndneF16Sop1::implicit_use_operands(
     std::vector<const ::rocjitsu::Operand *> &operands) const {
   Sop1::implicit_use_operands(operands);
-  if (sdst.to_register_ref())
+  if (sdst.to_register_ref()) {
     operands.push_back(&sdst);
+  }
 }
 
 } // namespace cdna5

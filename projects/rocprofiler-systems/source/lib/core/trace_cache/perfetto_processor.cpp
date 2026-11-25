@@ -9,7 +9,7 @@
 #include "core/common_types.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
-#include "core/gpu_metrics.hpp"
+#include "core/node_info.hpp"
 #include "core/perfetto/category_registry.hpp"
 #include "core/perfetto/counter_track.hpp"
 #include "core/perfetto/emitter.hpp"
@@ -548,6 +548,7 @@ perfetto_processor_t::prepare_for_processing()
     // its own process, not the post-processing OS pid).
     core::perfetto::ensure_synthetic_process_track_emitted(
         static_cast<int>(m_process_id));
+    core::perfetto::emit_system_info_packet(node_info::get_instance());
 }
 
 template <typename CategoryT, typename FuncT, typename... Args>

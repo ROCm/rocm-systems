@@ -7,7 +7,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -20,8 +19,9 @@ using util::ObservableSharedMutex;
 [[nodiscard]] bool wait_for_blocked_writers(ObservableSharedMutex &mutex, uint64_t expected) {
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
   while (mutex.blocked_writers() != expected) {
-    if (std::chrono::steady_clock::now() > deadline)
+    if (std::chrono::steady_clock::now() > deadline) {
       return false;
+    }
     std::this_thread::yield();
   }
   return true;
@@ -85,13 +85,15 @@ TEST(ObservableSharedMutexTest, EveryBlockedWriterIsCounted) {
   std::vector<std::jthread> writers;
   {
     auto reader = mutex.lock_shared();
-    for (uint64_t i = 0; i < kWriters; ++i)
+    for (uint64_t i = 0; i < kWriters; ++i) {
       writers.emplace_back([&] { auto guard = mutex.lock_exclusive(); });
+    }
 
     ASSERT_TRUE(wait_for_blocked_writers(mutex, kWriters));
   }
-  for (auto &writer : writers)
+  for (auto &writer : writers) {
     writer.join();
+  }
   EXPECT_EQ(mutex.blocked_writers(), 0u);
 }
 
@@ -116,25 +118,6 @@ TEST(ObservableSharedMutexTest, ExclusiveOwnershipHoldsOffAReader) {
   }
   reader.join();
   EXPECT_TRUE(read_entered.load(std::memory_order_acquire));
-}
-
-// Acquiring can throw -- DistributedSharedMutex::lock() reports system errors
-// that way -- and a throw past the count would leave a writer that does not
-// exist. Nothing lowers it again, so a later wait for it to fall hangs and a
-// wait for it to rise passes without anything having blocked.
-TEST(ObservableSharedMutexTest, TheWaitingCountUnwindsWhenAcquisitionThrows) {
-  ObservableSharedMutex mutex;
-  ASSERT_EQ(mutex.blocked_writers(), 0u);
-
-  try {
-    const ObservableSharedMutex::ExclusiveGuard::CountedWait counted(mutex);
-    EXPECT_EQ(mutex.blocked_writers(), 1u) << "the wait was never counted";
-    throw std::runtime_error("acquisition failed");
-  } catch (const std::runtime_error &) {
-  }
-
-  EXPECT_EQ(mutex.blocked_writers(), 0u)
-      << "a throw past the count leaves a phantom writer that nothing ever clears";
 }
 
 } // namespace

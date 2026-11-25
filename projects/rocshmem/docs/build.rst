@@ -131,6 +131,15 @@ the following flag to the build configuration scripts ``-DUSE_EXTERNAL_MPI=OFF``
 However, this will disable the functional and unit
 tests, as they require MPI to run.
 
+.. note::
+
+  The scripts in ``scripts/build_configs`` configure with the ``Ninja``
+  generator when ``ninja`` is found on ``PATH`` (falling back to CMake's
+  default generator otherwise), and build with
+  ``min(nproc, 32)`` parallel jobs by default. Set the ``BUILD_JOBS``
+  environment variable to override the job count, for example
+  ``BUILD_JOBS=16 ../scripts/build_configs/all_backends``.
+
 Memory allocator options
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -189,6 +198,8 @@ following host-stream APIs are made visible to rocprofiler-sdk tools:
 * ``rocshmem_getmem_on_stream``
 * ``rocshmem_putmem_on_stream``
 * ``rocshmem_putmem_signal_on_stream``
+* ``rocshmem_signal_add_on_stream``
+* ``rocshmem_signal_set_on_stream``
 * ``rocshmem_signal_wait_until_on_stream``
 
 If ``rocprofiler-register`` is not found, the build continues with tracing
@@ -345,6 +356,246 @@ and looking for the ``Name:`` field under each agent, for example
   (``librocshmem_device_gfx90a.bc``) is a single file and can only embed one variant's
   feature metadata. The chosen variant is reported at configure time, for example:
   ``Multiple feature variants requested for gfx90a (...); device bitcode will embed gfx90a:xnack+``.
+
+.. _build-options-reference:
+
+Build options reference
+^^^^^^^^^^^^^^^^^^^^^^^
+
+The scripts in ``scripts/build_configs`` set these CMake options for you. Pass
+them directly only if you need a configuration that no script covers; any
+option can be appended to a build script invocation, for example
+``../scripts/build_configs/all_backends -DBUILD_EXAMPLES=ON``.
+
+Backend and transport options
+"""""""""""""""""""""""""""""
+
+.. list-table::
+    :header-rows: 1
+    :widths: 32,10,58
+
+    * - **Option**
+      - **Default**
+      - **Description**
+
+    * - ``USE_IPC``
+      - ``ON``
+      - Enable the IPC backend for on-node, GPU-to-GPU communication.
+
+    * - ``USE_RO``
+      - ``OFF``
+      - Enable the reverse-offload (RO) backend. Requires ROCm-aware Open MPI
+        and UCX.
+
+    * - ``USE_GDA``
+      - ``OFF``
+      - Enable the GPU Direct Async (GDA) backend. At least one of
+        ``GDA_IONIC``, ``GDA_BNXT``, or ``GDA_MLX5`` must also be set, or GDA
+        is disabled with a warning at configure time.
+
+    * - ``USE_SDMA``
+      - ``${USE_IPC}``
+      - Enable the SDMA transport (MI300X and later). Implied by ``USE_IPC``.
+        Still gated at runtime by ``ROCSHMEM_SDMA_ENABLED``.
+
+    * - ``USE_LDS_STAGE``
+      - ``OFF``
+      - Enable the LDS-staged asynchronous IPC copy path on gfx1250, using the
+        portable async global-to-LDS backend. See
+        :doc:`LDS-staged copy routines <./api/lds_stage>`.
+
+    * - ``USE_TDM``
+      - ``OFF``
+      - Enable the gfx1250 TDM (Tensor Data Mover) engine as the backend for
+        LDS-staged IPC transfers. See
+        :doc:`LDS-staged copy routines <./api/lds_stage>`.
+
+    * - ``USE_HOST_VERBS``
+      - ``OFF``
+      - Enable the host-side verbs networking layer (``src/net``).
+
+    * - ``USE_SINGLE_NODE``
+      - ``OFF``
+      - Build with single-node support only.
+
+GDA provider options
+""""""""""""""""""""
+
+.. list-table::
+    :header-rows: 1
+    :widths: 32,10,58
+
+    * - **Option**
+      - **Default**
+      - **Description**
+
+    * - ``GDA_IONIC``
+      - ``OFF``
+      - Build the AMD Pensando IONIC RDMA provider.
+
+    * - ``GDA_BNXT``
+      - ``OFF``
+      - Build the Broadcom BNXT RDMA provider.
+
+    * - ``GDA_MLX5``
+      - ``OFF``
+      - Build the Mellanox MLX5 RDMA provider.
+
+    * - ``GDA_MUX``
+      - auto
+      - Build the provider multiplexer, which dispatches to the
+        hardware-specific provider at runtime. Defaults to ``ON`` when more
+        than one provider is enabled and ``OFF`` otherwise. Required (the
+        build fails otherwise) when more than one hardware GDA provider is
+        enabled; optional, and can be disabled, only when exactly one
+        provider is enabled.
+
+Code generation and tuning options
+""""""""""""""""""""""""""""""""""
+
+.. list-table::
+    :header-rows: 1
+    :widths: 32,10,58
+
+    * - **Option**
+      - **Default**
+      - **Description**
+
+    * - ``USE_THREADS``
+      - ``OFF``
+      - Allow work-group threads to share network queues.
+
+    * - ``USE_WF_COAL``
+      - ``OFF``
+      - Enable wavefront message coalescing.
+
+    * - ``USE_SHARED_CTX``
+      - ``OFF``
+      - Request support for contexts shared between work-groups.
+
+    * - ``USE_FUNC_CALL``
+      - ``OFF``
+      - Force the compiler to emit function calls for the library API instead
+        of inlining it. Useful for reducing register pressure and for making
+        rocSHMEM frames visible in profiles and backtraces.
+
+    * - ``USE_HDP_FLUSH``
+      - ``OFF``
+      - Force flushes of the HDP cache.
+
+    * - ``USE_HDP_FLUSH_HOST_SIDE``
+      - ``OFF``
+      - Flush the HDP cache from a host-side polling thread instead.
+
+    * - ``GPU_TARGETS``
+      - all supported
+      - Semicolon-separated list of GPU architectures to build device code
+        for. See `Targeting GPU architectures`_.
+
+    * - ``BUILD_LOCAL_GPU_TARGET_ONLY``
+      - ``OFF``
+      - Build only for the GPUs detected on the build machine.
+
+    * - ``USE_EXTERNAL_MPI``
+      - ``AUTO``
+      - Link against an external MPI. Set to ``OFF`` to build without MPI,
+        which also disables the functional and unit tests.
+
+    * - ``ROCSHMEM_NATIVE_LINK_JOBS``
+      - ``31``
+      - Number of parallel jobs used for the final device link of each
+        rocSHMEM executable (maps to the HIP ``--offload-jobs`` link flag).
+        Falls back to a single job, with a warning, when the HIP toolchain
+        does not support parallel offload jobs. Ignored, with a warning, when
+        ``HIP_CLANG_NUM_PARALLEL_JOBS`` already sets ``--offload-jobs``.
+
+Tests, tools, and examples
+""""""""""""""""""""""""""
+
+.. list-table::
+    :header-rows: 1
+    :widths: 32,10,58
+
+    * - **Option**
+      - **Default**
+      - **Description**
+
+    * - ``BUILD_FUNCTIONAL_TESTS``
+      - ``OFF``
+      - Build the functional tests. Uses MPI when available, otherwise SLR.
+
+    * - ``BUILD_UNIT_TESTS``
+      - ``OFF``
+      - Build the unit tests. Requires MPI.
+
+    * - ``BUILD_EXAMPLES``
+      - ``OFF``
+      - Build the programs in ``examples/``.
+
+    * - ``BUILD_TESTS_ONLY``
+      - ``OFF``
+      - Build only the tests, linking against a rocSHMEM from a ROCm release
+        rather than building the library.
+
+    * - ``BUILD_CTESTS``
+      - ``ON``
+      - Register the tests with CTest for tier-based execution.
+
+    * - ``BUILD_TOOLS``
+      - ``ON``
+      - Build the binary tools, such as ``rocshmem_info``.
+
+Profiling, debugging, and analysis
+""""""""""""""""""""""""""""""""""
+
+.. list-table::
+    :header-rows: 1
+    :widths: 32,10,58
+
+    * - **Option**
+      - **Default**
+      - **Description**
+
+    * - ``USE_ROCPROFILER_REGISTER``
+      - ``ON``
+      - Register the rocSHMEM API tables with ``rocprofiler-register`` so that
+        rocprofiler-sdk tools can trace host-stream APIs. See
+        `Profiling and tracing support`_.
+
+    * - ``PROFILE``
+      - ``OFF``
+      - Compile in statistics and timing counters. Required for
+        ``rocshmem_dump_stats()`` and ``rocshmem_reset_stats()`` to report
+        anything.
+
+    * - ``BUILD_DEBUG_TRACE_HOST``
+      - ``OFF``
+      - Compile in host-side trace logging. Required before
+        ``ROCSHMEM_DEBUG_LEVEL=api`` or ``trace`` produces host output.
+
+    * - ``BUILD_DEBUG_TRACE_DEVICE``
+      - ``OFF``
+      - Compile in device-side trace logging. Required before
+        ``ROCSHMEM_DEBUG_LEVEL=api`` or ``trace`` produces device output.
+
+    * - ``BUILD_DEBUG_DEVICE``
+      - ``OFF``
+      - Compile in device-side warning and informational logging, plus GDA
+        error checking.
+
+    * - ``BUILD_CODE_COVERAGE``
+      - ``OFF``
+      - Build with code coverage instrumentation. GCC only.
+
+    * - ``ASAN``
+      - ``OFF``
+      - Build with AddressSanitizer.
+
+.. note::
+
+  ``CMAKE_BUILD_TYPE=RelWithDebInfo`` is recommended when you intend to use the
+  deadlock analysis scripts, since a ``Release`` build shows only the outermost
+  non-inlined API frame. See :doc:`Analysis and debugging tools <./analysis_tools>`.
 
 Installation prefix
 ^^^^^^^^^^^^^^^^^^^

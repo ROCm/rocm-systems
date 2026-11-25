@@ -39,6 +39,7 @@ jobs:
         fetch-depth: 0
         sparse-checkout: |
           projects/rocprofiler-systems/
+          profilers/profiler-hub/
           .gitmodules
 
     - name: Configure ROCm Environment
@@ -89,7 +90,7 @@ jobs:
         git config --global --add safe.directory ${GITHUB_WORKSPACE}
         PR_SHA=$(git rev-parse HEAD)
         if [ "${{ github.event_name }}" = "pull_request" ]; then
-          BASE_REF="${{ github.event.pull_request.base.ref }}"
+          BASE_REF="${GITHUB_BASE_REF}"
         else
           BASE_REF="develop"
         fi
@@ -123,6 +124,7 @@ jobs:
         echo "Compiler version: $(gcc --version | head -n 1)"
         cmake --preset coverage \
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
+          -DPROFILER_HUB_FETCH_DEPENDENCIES=ON \
           -DROCPROFSYS_PYTHON_ENVS=py3.12 \
           "-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;videodecode;jpegdecode;openmp;roctx;scratch-memory;unified-memory;transferBench;hpc;sdma_test;annotate" \
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
@@ -156,13 +158,14 @@ jobs:
 
     # git checkout updates the gitlink but leaves the submodule work tree at
     # whatever the baseline build checked out, so sync it explicitly. Otherwise
-    # the PR is measured against the base branch's Dyninst.
+    # the PR is measured against the base branch's Dyninst/timemory.
     - name: Checkout PR Branch
       timeout-minutes: 10
       shell: bash
       run: |
         git checkout ${{ env.PR_SHA }}
         git submodule update --init --recursive projects/rocprofiler-systems/external/dyninst
+        git submodule update --init --recursive projects/rocprofiler-systems/external/timemory
 
     - name: Build
       timeout-minutes: 60

@@ -38,6 +38,13 @@
 #                         Relative paths are resolved inside each commit's
 #                         isolated worktree; absolute paths are used as-is.
 #                         See "Portability" below.
+#   --commit1-extra-args ARGS  Extra args appended to the build-config
+#                         invocation for commit1 only (e.g. "-DUSE_TDM=1").
+#                         Quote it as one string; it is word-split as-is.
+#                         Folded into the build/cache key, so this commit's
+#                         plain build and its extra-args build are cached
+#                         separately.
+#   --commit2-extra-args ARGS  Same as --commit1-extra-args, for commit2 only.
 #   --force-rebuild       Force a fresh rebuild even if the commit is already
 #                         cached (see resource_usage_compare.sh's header for
 #                         why this matters for a real before/after decision --
@@ -77,6 +84,8 @@ COMMIT_2=""
 GPU_TARGET="gfx950"
 BUILD_CONFIG="all_backends"
 CONFIG_PATH=""
+COMMIT1_EXTRA_ARGS=""
+COMMIT2_EXTRA_ARGS=""
 FORCE_REBUILD=false
 TOP_N=20
 OUTPUT_DIR=""
@@ -95,6 +104,8 @@ while [[ $# -gt 0 ]]; do
     --gpu-target)    _need_arg "$1" "$#"; GPU_TARGET="$2";    shift 2 ;;
     --build-config)  _need_arg "$1" "$#"; BUILD_CONFIG="$2";  shift 2 ;;
     --config-path)   _need_arg "$1" "$#"; CONFIG_PATH="$2";   shift 2 ;;
+    --commit1-extra-args) _need_arg "$1" "$#"; COMMIT1_EXTRA_ARGS="$2"; shift 2 ;;
+    --commit2-extra-args) _need_arg "$1" "$#"; COMMIT2_EXTRA_ARGS="$2"; shift 2 ;;
     --force-rebuild) FORCE_REBUILD=true; shift ;;
     --top)           _need_arg "$1" "$#"; TOP_N="$2";         shift 2 ;;
     --output-dir)    _need_arg "$1" "$#"; OUTPUT_DIR="$2";    shift 2 ;;
@@ -130,6 +141,16 @@ _cleanup_worktree() {
   fi
 }
 trap _cleanup_worktree EXIT
+
+# _cache_key_suffix ARGS -> short filesystem-safe tag derived from extra build
+# args, so "same sha, different -D flags" don't collide in build-cache/
+# lto-inline-remarks cache dirs. Empty input -> empty output (no change to
+# existing cache keys).
+_cache_key_suffix() {
+  local args="$1"
+  [[ -z "$args" ]] && return
+  echo "-$(echo -n "$args" | tr -c 'A-Za-z0-9' '_' | sed 's/_\+/_/g; s/^_//; s/_$//')"
+}
 
 # Only used for --build-config (name search); --config-path bypasses this
 # entirely. The second candidate is a legacy fallback for rocSHMEM's own
@@ -173,23 +194,24 @@ _resolve_build_config() {
   echo "$result"
 }
 
-# measure_commit <commit> <sha> -> prints the path to that commit's remarks
-# CSV (raw .yaml lives alongside it in the same cache dir).
+# measure_commit <commit> <sha> <extra_build_args> -> prints the path to that
+# commit's remarks CSV (raw .yaml lives alongside it in the same cache dir).
 measure_commit() {
-  local commit="$1" sha="$2"
-  local build_dir="$PARENT_DIR/build-cache-lto-remarks/${GPU_TARGET}-${CONFIG_LABEL}-${sha}"
-  local cache_dir="$PARENT_DIR/lto-inline-remarks/cache/${GPU_TARGET}-${CONFIG_LABEL}-${sha}"
-  local yaml="$cache_dir/remarks-${sha}.yaml"
-  local csv="$cache_dir/remarks-${sha}.csv"
+  local commit="$1" sha="$2" extra_args="$3"
+  local key="${sha}$(_cache_key_suffix "$extra_args")"
+  local build_dir="$PARENT_DIR/build-cache-lto-remarks/${GPU_TARGET}-${CONFIG_LABEL}-${key}"
+  local cache_dir="$PARENT_DIR/lto-inline-remarks/cache/${GPU_TARGET}-${CONFIG_LABEL}-${key}"
+  local yaml="$cache_dir/remarks-${key}.yaml"
+  local csv="$cache_dir/remarks-${key}.csv"
 
   if [[ -f "$csv" && "$FORCE_REBUILD" == false ]]; then
-    echo "  [$sha] cached -> $csv" >&2
+    echo "  [$key] cached -> $csv" >&2
     echo "$csv"
     return
   fi
 
-  echo "  [$sha] building ($GPU_TARGET / $CONFIG_LABEL)..." >&2
-  local worktree="/tmp/lto-remarks-worktree-${sha}-$$"
+  echo "  [$key] building ($GPU_TARGET / $CONFIG_LABEL${extra_args:+ / $extra_args})..." >&2
+  local worktree="/tmp/lto-remarks-worktree-${key}-$$"
 
   git -C "$PROJECT_DIR" worktree add "$worktree" "$commit" --detach >&2
   CURRENT_WORKTREE="$worktree"
@@ -213,12 +235,17 @@ measure_commit() {
     # wrapper's word-splitting. Verified against a scratch cmake project that
     # the full multi-token string survives intact this way.
     export LDFLAGS="-Xoffload-linker --plugin-opt=opt-remarks-filename=${yaml} -Xoffload-linker --plugin-opt=opt-remarks-passes=inline -Xoffload-linker --plugin-opt=opt-remarks-with-hotness"
+    # $extra_args is intentionally unquoted/word-split here so the caller can
+    # pass e.g. "-DUSE_TDM=1 -DUSE_SDMA=1" as one string and have it expand
+    # into separate cmake args.
+    # shellcheck disable=SC2086
     "$FOUND_BUILD_CONFIG" \
       --fresh \
       -DGPU_TARGETS="$GPU_TARGET" \
       -DBUILD_TOOLS=OFF \
       -DBUILD_UNIT_TESTS=OFF \
       -DBUILD_EXAMPLES=OFF \
+      $extra_args \
       2>&1 | tee "$cache_dir/build.log" >&2
   )
 
@@ -231,7 +258,7 @@ measure_commit() {
   fi
 
   python3 "$TOOLS_DIR/lto_inline_remarks_to_csv.py" --yaml "$yaml" --out "$csv" \
-    --arch "$GPU_TARGET" --build-config "$CONFIG_LABEL" --commit "$sha" >&2
+    --arch "$GPU_TARGET" --build-config "$CONFIG_LABEL" --commit "$key" >&2
 
   echo "$csv"
 }
@@ -240,51 +267,53 @@ COMMIT_1="${COMMIT_1:-HEAD}"
 SHA_1="$(git rev-parse --short=12 "$COMMIT_1")"
 
 echo "=== LTO inline remarks: $COMMIT_1${COMMIT_2:+ vs $COMMIT_2} ($GPU_TARGET / $CONFIG_LABEL) ==="
-CSV_1="$(measure_commit "$COMMIT_1" "$SHA_1")"
+CSV_1="$(measure_commit "$COMMIT_1" "$SHA_1" "$COMMIT1_EXTRA_ARGS")"
+KEY_1="${SHA_1}$(_cache_key_suffix "$COMMIT1_EXTRA_ARGS")"
 
 if [[ -z "$COMMIT_2" ]]; then
-  OUTDIR="${OUTPUT_DIR:-$PARENT_DIR/lto-inline-remarks/${GPU_TARGET}-${CONFIG_LABEL}-${SHA_1}}"
+  OUTDIR="${OUTPUT_DIR:-$PARENT_DIR/lto-inline-remarks/${GPU_TARGET}-${CONFIG_LABEL}-${KEY_1}}"
   mkdir -p "$OUTDIR"
-  cp "$CSV_1" "$OUTDIR/remarks-${SHA_1}.csv"
+  cp "$CSV_1" "$OUTDIR/remarks-${KEY_1}.csv"
   python3 "$TOOLS_DIR/lto_inline_remarks_report.py" \
-    --csv "$OUTDIR/remarks-${SHA_1}.csv" \
-    --out-chart "$OUTDIR/dashboard-${SHA_1}.png" \
-    --out-summary "$OUTDIR/summary-${SHA_1}.csv" \
+    --csv "$OUTDIR/remarks-${KEY_1}.csv" \
+    --out-chart "$OUTDIR/dashboard-${KEY_1}.png" \
+    --out-summary "$OUTDIR/summary-${KEY_1}.csv" \
     --top "$TOP_N"
   python3 "$TOOLS_DIR/lto_inline_remarks_dashboard.py" \
-    --baseline-csv "$OUTDIR/remarks-${SHA_1}.csv" --baseline-commit "$SHA_1" \
+    --baseline-csv "$OUTDIR/remarks-${KEY_1}.csv" --baseline-commit "$KEY_1" \
     --top "$TOP_N" --out "$OUTDIR/lto_inline_dashboard.html"
   echo ""
   echo "Single-commit snapshot -> $OUTDIR/"
-  echo "  remarks-${SHA_1}.csv, summary-${SHA_1}.csv, dashboard-${SHA_1}.png"
+  echo "  remarks-${KEY_1}.csv, summary-${KEY_1}.csv, dashboard-${KEY_1}.png"
   echo "  Dashboard -> $OUTDIR/lto_inline_dashboard.html"
   echo "  (raw YAML in cache: ${CSV_1%.csv}.yaml)"
   exit 0
 fi
 
 SHA_2="$(git rev-parse --short=12 "$COMMIT_2")"
-CSV_2="$(measure_commit "$COMMIT_2" "$SHA_2")"
+CSV_2="$(measure_commit "$COMMIT_2" "$SHA_2" "$COMMIT2_EXTRA_ARGS")"
+KEY_2="${SHA_2}$(_cache_key_suffix "$COMMIT2_EXTRA_ARGS")"
 
-OUTDIR="${OUTPUT_DIR:-$PARENT_DIR/lto-inline-remarks/${GPU_TARGET}-${CONFIG_LABEL}-${SHA_1}-vs-${SHA_2}}"
+OUTDIR="${OUTPUT_DIR:-$PARENT_DIR/lto-inline-remarks/${GPU_TARGET}-${CONFIG_LABEL}-${KEY_1}-vs-${KEY_2}}"
 mkdir -p "$OUTDIR"
-cp "$CSV_1" "$OUTDIR/remarks-${SHA_1}.csv"
-cp "$CSV_2" "$OUTDIR/remarks-${SHA_2}.csv"
+cp "$CSV_1" "$OUTDIR/remarks-${KEY_1}.csv"
+cp "$CSV_2" "$OUTDIR/remarks-${KEY_2}.csv"
 
 python3 "$TOOLS_DIR/lto_inline_remarks_diff.py" \
-  --baseline "$OUTDIR/remarks-${SHA_1}.csv" --branch "$OUTDIR/remarks-${SHA_2}.csv" \
+  --baseline "$OUTDIR/remarks-${KEY_1}.csv" --branch "$OUTDIR/remarks-${KEY_2}.csv" \
   --out "$OUTDIR/remarks_diff_pairs.csv" \
   --summary-out "$OUTDIR/remarks_diff_summary.csv" \
   --chart "$OUTDIR/remarks_diff_dashboard.png" \
   --top "$TOP_N"
 
 python3 "$TOOLS_DIR/lto_inline_remarks_dashboard.py" \
-  --baseline-csv "$OUTDIR/remarks-${SHA_1}.csv" --baseline-commit "$SHA_1" \
-  --branch-csv "$OUTDIR/remarks-${SHA_2}.csv" --branch-commit "$SHA_2" \
+  --baseline-csv "$OUTDIR/remarks-${KEY_1}.csv" --baseline-commit "$KEY_1" \
+  --branch-csv "$OUTDIR/remarks-${KEY_2}.csv" --branch-commit "$KEY_2" \
   --pairs-csv "$OUTDIR/remarks_diff_pairs.csv" \
   --top "$TOP_N" --out "$OUTDIR/lto_inline_dashboard.html"
 
 echo ""
 echo "Done. Report -> $OUTDIR/"
-echo "  remarks-${SHA_1}.csv, remarks-${SHA_2}.csv,"
+echo "  remarks-${KEY_1}.csv, remarks-${KEY_2}.csv,"
 echo "  remarks_diff_pairs.csv, remarks_diff_summary.csv, remarks_diff_dashboard.png"
 echo "  Dashboard -> $OUTDIR/lto_inline_dashboard.html"

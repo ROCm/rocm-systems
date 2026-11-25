@@ -1,9 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -167,16 +169,16 @@ constexpr CubeCase kCases[] = {
      {0x00000000u, 0x00000000u, 0x00000000u}},
 };
 
-class CubeInstructionTest : public ::testing::TestWithParam<rj_code_arch_t> {
+class CubeInstructionTest : public ::testing::TestWithParam<rocjitsu::IsaFamily> {
 protected:
   bool gfx9() const {
     const auto arch = GetParam();
-    return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-           arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+    return arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2 ||
+           arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
   }
   uint32_t first_opcode() const {
     const auto arch = GetParam();
-    const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+    const bool gfx10 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
     return gfx9() ? 452 : gfx10 ? 324 : 524;
   }
   amdgpu::ComputeUnitCore::Config config() const {
@@ -191,11 +193,11 @@ protected:
 };
 
 INSTANTIATE_TEST_SUITE_P(AllArchitectures, CubeInstructionTest,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                                           ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                                           ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA1,
-                                           ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-                                           ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5));
+                         ::testing::Values(rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                                           rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                           rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna1,
+                                           rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+                                           rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5));
 
 TEST_P(CubeInstructionTest, FaceCoordinatesAndModeMatchPhysicalWitnesses) {
   const auto arch = GetParam();
@@ -204,7 +206,9 @@ TEST_P(CubeInstructionTest, FaceCoordinatesAndModeMatchPhysicalWitnesses) {
     amdgpu::GpuMemory memory("cube_memory");
     amdgpu::L2Cache l2("cube_l2");
     const auto cfg = config();
-    auto cu = amdgpu::ComputeUnitCore::create("cube_cu", cfg, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "cube_cu", cfg, &memory, &l2));
     auto decoder = Decoder::create(arch);
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wf, nullptr);
@@ -224,8 +228,9 @@ TEST_P(CubeInstructionTest, FaceCoordinatesAndModeMatchPhysicalWitnesses) {
           for (uint32_t start = 0; start < std::size(kCases); start += wf->wf_size()) {
             for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
               const auto &c = kCases[(start + lane) % std::size(kCases)];
-              for (uint32_t source = 0; source < 3; ++source)
+              for (uint32_t source = 0; source < 3; ++source) {
                 cu->write_vgpr(vb + source, lane, c.input[source]);
+              }
               cu->write_vgpr(vb + 3, lane, 0xdeadbeefu);
             }
             ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
@@ -233,11 +238,14 @@ TEST_P(CubeInstructionTest, FaceCoordinatesAndModeMatchPhysicalWitnesses) {
               const auto &c = kCases[(start + lane) % std::size(kCases)];
               uint32_t expected = op == 3 && round ? c.directed_major[round - 1] : c.output[op];
               // RDNA4/CDNA5 always quiet sNaNs; earlier targets honor IEEE.
-              if ((ieee || arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) &&
-                  (expected & 0x7fffffffu) > 0x7f800000u)
+              if ((ieee || arch == rocjitsu::IsaFamily::Rdna4 ||
+                   arch == rocjitsu::IsaFamily::Cdna5) &&
+                  (expected & 0x7fffffffu) > 0x7f800000u) {
                 expected |= 0x00400000u;
-              if (!(exec & (1ull << lane)))
+              }
+              if (!(exec & (1ull << lane))) {
                 expected = 0xdeadbeefu;
+              }
               EXPECT_EQ(cu->read_vgpr(vb + 3, lane), expected)
                   << "case=" << (start + lane) % std::size(kCases) << " op=" << op
                   << " mode=" << mode << " scalar=" << scalar << " exec=" << exec;
@@ -500,13 +508,15 @@ constexpr CubeModifierCase kModifierCases[] = {
 
 TEST_P(CubeInstructionTest, SourceAndOutputModifiersMatchPhysicalWitnesses) {
   const auto arch = GetParam();
-  const bool modern = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+  const bool modern = arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
   for (bool scalar : {false, true}) {
     ForceScalarGuard guard(scalar);
     amdgpu::GpuMemory memory("cube_modifier_memory");
     amdgpu::L2Cache l2("cube_modifier_l2");
     const auto cfg = config();
-    auto cu = amdgpu::ComputeUnitCore::create("cube_modifier_cu", cfg, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "cube_modifier_cu", cfg, &memory, &l2));
     auto decoder = Decoder::create(arch);
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wf, nullptr);
@@ -524,8 +534,9 @@ TEST_P(CubeInstructionTest, SourceAndOutputModifiersMatchPhysicalWitnesses) {
         for (uint64_t exec : {wf->wf_size() == 64 ? ~0ull : 0xffffffffull, 0x55555555ull}) {
           wf->set_exec(exec);
           for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-            for (uint32_t source = 0; source < 3; ++source)
+            for (uint32_t source = 0; source < 3; ++source) {
               cu->write_vgpr(vb + source, lane, c.input[source]);
+            }
             cu->write_vgpr(vb + 3, lane, 0xdeadbeefu);
           }
           ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());

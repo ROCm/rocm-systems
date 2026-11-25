@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -30,6 +31,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--select", help="Catch2 selector; overrides the one in the config")
     parser.add_argument("--ignore-config", action="store_true",
                         help="run the cases the config would skip")
+    parser.add_argument(
+        "--launcher", default="",
+        help="Prefix for the suite process. Case listing still uses the Catch2 binary.",
+    )
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     if args.command[:1] == ["--"]:
@@ -285,6 +290,8 @@ def _run_suite(args: argparse.Namespace, state: dict) -> int:
             return 0
     else:
         command = list(args.command)
+    if args.launcher:
+        command = shlex.split(args.launcher) + command
     command = command + [
         "--durations",
         "yes",

@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/sopc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include <memory>
 
@@ -22,23 +23,27 @@ SCmpEqI32Sopc::SCmpEqI32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_EQ_I32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpEqI32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_eq_i32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpEqI32Sopc>(opcode);
 }
 } // namespace detail
@@ -54,23 +59,27 @@ SCmpLgI32Sopc::SCmpLgI32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_LG_I32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpLgI32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_lg_i32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpLgI32Sopc>(opcode);
 }
 } // namespace detail
@@ -86,23 +95,27 @@ SCmpGtI32Sopc::SCmpGtI32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_GT_I32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpGtI32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_gt_i32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpGtI32Sopc>(opcode);
 }
 } // namespace detail
@@ -118,23 +131,27 @@ SCmpGeI32Sopc::SCmpGeI32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_GE_I32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpGeI32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_ge_i32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpGeI32Sopc>(opcode);
 }
 } // namespace detail
@@ -150,23 +167,27 @@ SCmpLtI32Sopc::SCmpLtI32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_LT_I32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpLtI32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_lt_i32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpLtI32Sopc>(opcode);
 }
 } // namespace detail
@@ -182,23 +203,27 @@ SCmpLeI32Sopc::SCmpLeI32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_LE_I32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpLeI32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_le_i32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpLeI32Sopc>(opcode);
 }
 } // namespace detail
@@ -214,23 +239,27 @@ SCmpEqU32Sopc::SCmpEqU32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_EQ_U32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpEqU32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_eq_u32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpEqU32Sopc>(opcode);
 }
 } // namespace detail
@@ -246,23 +275,27 @@ SCmpLgU32Sopc::SCmpLgU32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_LG_U32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpLgU32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_lg_u32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpLgU32Sopc>(opcode);
 }
 } // namespace detail
@@ -278,23 +311,27 @@ SCmpGtU32Sopc::SCmpGtU32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_GT_U32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpGtU32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_gt_u32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpGtU32Sopc>(opcode);
 }
 } // namespace detail
@@ -310,23 +347,27 @@ SCmpGeU32Sopc::SCmpGeU32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_GE_U32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpGeU32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_ge_u32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpGeU32Sopc>(opcode);
 }
 } // namespace detail
@@ -342,23 +383,27 @@ SCmpLtU32Sopc::SCmpLtU32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_LT_U32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpLtU32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_lt_u32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpLtU32Sopc>(opcode);
 }
 } // namespace detail
@@ -374,23 +419,27 @@ SCmpLeU32Sopc::SCmpLeU32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_LE_U32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpLeU32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_le_u32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpLeU32Sopc>(opcode);
 }
 } // namespace detail
@@ -406,15 +455,18 @@ SBitcmp0B32Sopc::SBitcmp0B32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_BITCMP0_B32);
 }
 
 namespace detail {
@@ -422,8 +474,9 @@ DecodeResult decodeSBitcmp0B32Sopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_bitcmp0_b32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBitcmp0B32Sopc>(opcode);
 }
 } // namespace detail
@@ -439,15 +492,18 @@ SBitcmp1B32Sopc::SBitcmp1B32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_BITCMP1_B32);
 }
 
 namespace detail {
@@ -455,8 +511,9 @@ DecodeResult decodeSBitcmp1B32Sopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_bitcmp1_b32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBitcmp1B32Sopc>(opcode);
 }
 } // namespace detail
@@ -472,16 +529,19 @@ SBitcmp0B64Sopc::SBitcmp0B64Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_BITCMP0_B64);
 }
 
 namespace detail {
@@ -489,8 +549,9 @@ DecodeResult decodeSBitcmp0B64Sopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_bitcmp0_b64", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBitcmp0B64Sopc>(opcode);
 }
 } // namespace detail
@@ -506,16 +567,19 @@ SBitcmp1B64Sopc::SBitcmp1B64Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_BITCMP1_B64);
 }
 
 namespace detail {
@@ -523,8 +587,9 @@ DecodeResult decodeSBitcmp1B64Sopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_bitcmp1_b64", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBitcmp1B64Sopc>(opcode);
 }
 } // namespace detail
@@ -540,25 +605,29 @@ SCmpEqU64Sopc::SCmpEqU64Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_EQ_U64);
 }
 
 namespace detail {
 DecodeResult decodeSCmpEqU64Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_eq_u64", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpEqU64Sopc>(opcode);
 }
 } // namespace detail
@@ -574,25 +643,29 @@ SCmpLgU64Sopc::SCmpLgU64Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_LG_U64);
 }
 
 namespace detail {
 DecodeResult decodeSCmpLgU64Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_lg_u64", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpLgU64Sopc>(opcode);
 }
 } // namespace detail
@@ -608,23 +681,27 @@ SCmpLtF32Sopc::SCmpLtF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_LT_F32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpLtF32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_lt_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpLtF32Sopc>(opcode);
 }
 } // namespace detail
@@ -640,25 +717,29 @@ SCmpLtF16Sopc::SCmpLtF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_LT_F16);
 }
 
 namespace detail {
 DecodeResult decodeSCmpLtF16Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_lt_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpLtF16Sopc>(opcode);
 }
 } // namespace detail
@@ -674,23 +755,27 @@ SCmpEqF32Sopc::SCmpEqF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_EQ_F32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpEqF32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_eq_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpEqF32Sopc>(opcode);
 }
 } // namespace detail
@@ -706,25 +791,29 @@ SCmpEqF16Sopc::SCmpEqF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_EQ_F16);
 }
 
 namespace detail {
 DecodeResult decodeSCmpEqF16Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_eq_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpEqF16Sopc>(opcode);
 }
 } // namespace detail
@@ -740,23 +829,27 @@ SCmpLeF32Sopc::SCmpLeF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_LE_F32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpLeF32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_le_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpLeF32Sopc>(opcode);
 }
 } // namespace detail
@@ -772,25 +865,29 @@ SCmpLeF16Sopc::SCmpLeF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_LE_F16);
 }
 
 namespace detail {
 DecodeResult decodeSCmpLeF16Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_le_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpLeF16Sopc>(opcode);
 }
 } // namespace detail
@@ -806,23 +903,27 @@ SCmpGtF32Sopc::SCmpGtF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_GT_F32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpGtF32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_gt_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpGtF32Sopc>(opcode);
 }
 } // namespace detail
@@ -838,25 +939,29 @@ SCmpGtF16Sopc::SCmpGtF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_GT_F16);
 }
 
 namespace detail {
 DecodeResult decodeSCmpGtF16Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_gt_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpGtF16Sopc>(opcode);
 }
 } // namespace detail
@@ -872,23 +977,27 @@ SCmpLgF32Sopc::SCmpLgF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_LG_F32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpLgF32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_lg_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpLgF32Sopc>(opcode);
 }
 } // namespace detail
@@ -904,25 +1013,29 @@ SCmpLgF16Sopc::SCmpLgF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_LG_F16);
 }
 
 namespace detail {
 DecodeResult decodeSCmpLgF16Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_lg_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpLgF16Sopc>(opcode);
 }
 } // namespace detail
@@ -938,23 +1051,27 @@ SCmpGeF32Sopc::SCmpGeF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_GE_F32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpGeF32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_ge_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpGeF32Sopc>(opcode);
 }
 } // namespace detail
@@ -970,25 +1087,29 @@ SCmpGeF16Sopc::SCmpGeF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_GE_F16);
 }
 
 namespace detail {
 DecodeResult decodeSCmpGeF16Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_ge_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpGeF16Sopc>(opcode);
 }
 } // namespace detail
@@ -1004,23 +1125,27 @@ SCmpOF32Sopc::SCmpOF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_O_F32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpOF32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_o_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpOF32Sopc>(opcode);
 }
 } // namespace detail
@@ -1036,25 +1161,29 @@ SCmpOF16Sopc::SCmpOF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_O_F16);
 }
 
 namespace detail {
 DecodeResult decodeSCmpOF16Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_o_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpOF16Sopc>(opcode);
 }
 } // namespace detail
@@ -1070,23 +1199,27 @@ SCmpUF32Sopc::SCmpUF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_U_F32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpUF32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_u_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpUF32Sopc>(opcode);
 }
 } // namespace detail
@@ -1102,25 +1235,29 @@ SCmpUF16Sopc::SCmpUF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_U_F16);
 }
 
 namespace detail {
 DecodeResult decodeSCmpUF16Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_u_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpUF16Sopc>(opcode);
 }
 } // namespace detail
@@ -1136,23 +1273,27 @@ SCmpNgeF32Sopc::SCmpNgeF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_NGE_F32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpNgeF32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_nge_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpNgeF32Sopc>(opcode);
 }
 } // namespace detail
@@ -1168,25 +1309,29 @@ SCmpNgeF16Sopc::SCmpNgeF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_NGE_F16);
 }
 
 namespace detail {
 DecodeResult decodeSCmpNgeF16Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_nge_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpNgeF16Sopc>(opcode);
 }
 } // namespace detail
@@ -1202,23 +1347,27 @@ SCmpNlgF32Sopc::SCmpNlgF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_NLG_F32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpNlgF32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_nlg_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpNlgF32Sopc>(opcode);
 }
 } // namespace detail
@@ -1234,25 +1383,29 @@ SCmpNlgF16Sopc::SCmpNlgF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_NLG_F16);
 }
 
 namespace detail {
 DecodeResult decodeSCmpNlgF16Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_nlg_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpNlgF16Sopc>(opcode);
 }
 } // namespace detail
@@ -1268,23 +1421,27 @@ SCmpNgtF32Sopc::SCmpNgtF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_NGT_F32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpNgtF32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_ngt_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpNgtF32Sopc>(opcode);
 }
 } // namespace detail
@@ -1300,25 +1457,29 @@ SCmpNgtF16Sopc::SCmpNgtF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_NGT_F16);
 }
 
 namespace detail {
 DecodeResult decodeSCmpNgtF16Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_ngt_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpNgtF16Sopc>(opcode);
 }
 } // namespace detail
@@ -1334,23 +1495,27 @@ SCmpNleF32Sopc::SCmpNleF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_NLE_F32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpNleF32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_nle_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpNleF32Sopc>(opcode);
 }
 } // namespace detail
@@ -1366,25 +1531,29 @@ SCmpNleF16Sopc::SCmpNleF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_NLE_F16);
 }
 
 namespace detail {
 DecodeResult decodeSCmpNleF16Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_nle_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpNleF16Sopc>(opcode);
 }
 } // namespace detail
@@ -1400,23 +1569,27 @@ SCmpNeqF32Sopc::SCmpNeqF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_NEQ_F32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpNeqF32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_neq_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpNeqF32Sopc>(opcode);
 }
 } // namespace detail
@@ -1432,25 +1605,29 @@ SCmpNeqF16Sopc::SCmpNeqF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_NEQ_F16);
 }
 
 namespace detail {
 DecodeResult decodeSCmpNeqF16Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_neq_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpNeqF16Sopc>(opcode);
 }
 } // namespace detail
@@ -1466,23 +1643,27 @@ SCmpNltF32Sopc::SCmpNltF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_NLT_F32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpNltF32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_nlt_f32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpNltF32Sopc>(opcode);
 }
 } // namespace detail
@@ -1498,25 +1679,29 @@ SCmpNltF16Sopc::SCmpNltF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255) {
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) {
     ssrc1 =
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  }
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMP_NLT_F16);
 }
 
 namespace detail {
 DecodeResult decodeSCmpNltF16Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopc::validate_encoding(
       "s_cmp_nlt_f16", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpNltF16Sopc>(opcode);
 }
 } // namespace detail

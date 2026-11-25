@@ -120,10 +120,15 @@ hsa_status_t ComputeQueueTest::AgentMemcpy(void* dst, const void* src, size_t si
   throw_if_error(err);
 
   err = hsa_amd_memory_async_copy(dst, dst_ag, src, src_ag, size, 0, NULL, s);
-  throw_if_error(err);
+  if (err != HSA_STATUS_SUCCESS) {
+    hsa_signal_destroy(s);
+    throw_if_error(err);
+  }
 
   if (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX,
                                 HSA_WAIT_STATE_BLOCKED) != 0) {
+    // The copy failed and the runtime set the signal negative; the runtime is done with it.
+    hsa_signal_destroy(s);
     err = HSA_STATUS_ERROR;
     RDC_LOG(RDC_ERROR, "Async copy signal error");
 
@@ -229,8 +234,6 @@ hsa_status_t ComputeQueueTest::AllocateAndInitBuffers(BinarySearch* bs) {
 hsa_status_t ComputeQueueTest::LoadKernelFromObjFile(BinarySearch* bs) {
   hsa_status_t err;
   char agent_name[512];
-  hsa_code_object_reader_t code_obj_rdr = {0};
-  hsa_executable_t executable = {0};
 
   err = hsa_agent_get_info(bs->gpu_dev, HSA_AGENT_INFO_NAME, agent_name);
   throw_if_error(err);
@@ -251,22 +254,23 @@ hsa_status_t ComputeQueueTest::LoadKernelFromObjFile(BinarySearch* bs) {
     return HSA_STATUS_ERROR;
   }
 
-  err = hsa_code_object_reader_create_from_file(file_handle, &code_obj_rdr);
-  throw_if_error(err);
+  err = hsa_code_object_reader_create_from_file(file_handle, &bs->code_obj_rdr);
   close(file_handle);
+  throw_if_error(err);
 
   err = hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, NULL,
-                                  &executable);
+                                  &bs->executable);
   throw_if_error(err);
 
-  err = hsa_executable_load_agent_code_object(executable, bs->gpu_dev, code_obj_rdr, NULL, NULL);
+  err = hsa_executable_load_agent_code_object(bs->executable, bs->gpu_dev, bs->code_obj_rdr, NULL,
+                                              NULL);
   throw_if_error(err);
 
-  err = hsa_executable_freeze(executable, NULL);
+  err = hsa_executable_freeze(bs->executable, NULL);
   throw_if_error(err);
 
   hsa_executable_symbol_t kern_sym;
-  err = hsa_executable_get_symbol(executable, NULL, bs->kernel_name.c_str(), bs->gpu_dev, 0,
+  err = hsa_executable_get_symbol(bs->executable, NULL, bs->kernel_name.c_str(), bs->gpu_dev, 0,
                                   &kern_sym);
   throw_if_error(err);
 
@@ -592,21 +596,35 @@ hsa_status_t ComputeQueueTest::Run(BinarySearch* bs) {
   return HSA_STATUS_SUCCESS;
 }
 
-// Release all the RocR resources we have acquired in this application.
+// Release all the RocR resources we have acquired in this application. This runs on every path out
+// of RunBinarySearchTest(), so it releases only what was created and clears each handle it
+// releases. The queue is the module's (AcquireDiagQueue()) and stays.
 hsa_status_t ComputeQueueTest::CleanUp(BinarySearch* bs) {
   hsa_status_t err = HSA_STATUS_SUCCESS;
+  auto free_buffer = [&err](auto*& buffer) {
+    if (buffer != nullptr) {
+      err = hsa_amd_memory_pool_free(buffer);
+      buffer = nullptr;
+    }
+  };
 
-  err = hsa_amd_memory_pool_free(bs->input);
-
-  err = hsa_amd_memory_pool_free(bs->output);
-
-  err = hsa_amd_memory_pool_free(bs->input_arr);
-
-  err = hsa_amd_memory_pool_free(bs->kern_arg_buffer);
-
-  err = hsa_queue_destroy(bs->queue);
-
-  err = hsa_signal_destroy(bs->signal);
+  if (bs->executable.handle != 0) {
+    err = hsa_executable_destroy(bs->executable);
+    bs->executable.handle = 0;
+  }
+  if (bs->code_obj_rdr.handle != 0) {
+    err = hsa_code_object_reader_destroy(bs->code_obj_rdr);
+    bs->code_obj_rdr.handle = 0;
+  }
+  free_buffer(bs->input);
+  free_buffer(bs->output);
+  free_buffer(bs->input_arr);
+  free_buffer(bs->input_arr_local);
+  free_buffer(bs->kern_arg_buffer);
+  if (bs->signal.handle != 0) {
+    err = hsa_signal_destroy(bs->signal);
+    bs->signal.handle = 0;
+  }
 
   // shutdown will be called at destructor
   // err = hsa_shut_down();
@@ -615,10 +633,14 @@ hsa_status_t ComputeQueueTest::CleanUp(BinarySearch* bs) {
 }
 
 hsa_status_t ComputeQueueTest::RunBinarySearchTest(void) {
-  BinarySearch bs;
+  BinarySearch bs{};
   hsa_status_t err;
 
   InitializeBinarySearch(&bs);
+
+  // Release what the steps below create on every path out of this function, a failed step's
+  // exception included.
+  ScopeExit clean_up([this, &bs]() { CleanUp(&bs); });
 
   hsa_agent_t current_gpu;
   err = get_agent_by_gpu_index(gpu_index_, &current_gpu);
@@ -634,8 +656,7 @@ hsa_status_t ComputeQueueTest::RunBinarySearchTest(void) {
   err = hsa_signal_create(1, 0, NULL, &bs.signal);
   throw_if_error(err, "Fail to create signal.");
 
-  err = hsa_queue_create(bs.gpu_dev, 128, HSA_QUEUE_TYPE_MULTI, NULL, NULL, UINT32_MAX, UINT32_MAX,
-                         &bs.queue);
+  err = AcquireDiagQueue(bs.gpu_dev, &bs.queue);
   throw_if_error(err, "Fail to create queue.");
 
   err = FindPools(&bs);
@@ -651,8 +672,6 @@ hsa_status_t ComputeQueueTest::RunBinarySearchTest(void) {
 
   err = Run(&bs);
   throw_if_error(err, "Run binary search fail.");
-
-  CleanUp(&bs);
 
   gpu_info_ += "Run binary search task on GPU ";
   gpu_info_ += std::to_string(gpu_index_);

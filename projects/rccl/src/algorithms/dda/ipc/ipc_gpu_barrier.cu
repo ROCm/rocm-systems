@@ -11,7 +11,9 @@
 
 #include "algorithms/dda/ipc/ipc_gpu_barrier.h"
 
+#include "bitops.h"
 #include "checks.h"
+#include "comm.h"
 #include "debug.h"
 
 #include <cuda_runtime.h>
@@ -26,7 +28,14 @@ __host__ DeviceMailbox::DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf)
 /* static */ __host__ std::pair<std::unique_ptr<DeviceBuffer>, DeviceMailbox> DeviceMailbox::mallocAndInit(
   int nRanks, int nBlocks) {
   assert(nRanks == NRANKS);
-  auto flagBuf = std::make_unique<DeviceBuffer>(nRanks * nBlocks * sizeof(FlagType));
+  /* HIP pools fine-grained buffers under its fragment-pool cutoff into one
+   * exported chunk (ROCM-34219). After peers close one mailbox from that
+   * chunk, hipIpcOpenMemHandle of a later mailbox in it returns
+   * hipErrorInvalidDevicePointer. Pad to CUDA_IPC_MIN so each mailbox is its
+   * own allocation, and drop the pad once ROCM-34219 is fixed. */
+  size_t allocBytes = nRanks * nBlocks * sizeof(FlagType);
+  ALIGN_SIZE(allocBytes, CUDA_IPC_MIN);
+  auto flagBuf = std::make_unique<DeviceBuffer>(allocBytes);
   if (flagBuf == nullptr) {
     ERROR("DeviceMailbox::mallocAndInit: allocation failed");
     return {nullptr, DeviceMailbox{}};
@@ -41,13 +50,13 @@ __host__ DeviceMailbox::DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf)
 }
 
 __host__ IpcGpuBarrier::IpcGpuBarrier(int nRanks, int nBlocks, int selfRank,
-                                      const std::array<DeviceMailbox, NRANKS>& allMailboxes)
-  : nBlocks_(nBlocks), selfRank_(selfRank), allMailboxes_(allMailboxes) {
+                                      const std::array<DeviceMailbox, NRANKS>& allMailboxes, DdaKernelParams params)
+  : nBlocks_(nBlocks), selfRank_(selfRank), allMailboxes_(allMailboxes), params_(params) {
   assert(nRanks == NRANKS);
 }
 
 /* static */ __host__ std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> IpcGpuBarrier::mallocAndInit(
-  int nRanks, int nBlocks, int selfRank, void* bootstrap) {
+  int nRanks, int nBlocks, int selfRank, void* bootstrap, DdaKernelParams params) {
   assert(nRanks == NRANKS);
   auto selfAlloc = DeviceMailbox::mallocAndInit(nRanks, nBlocks);
   auto& selfMboxBuf = selfAlloc.first;
@@ -91,7 +100,7 @@ __host__ IpcGpuBarrier::IpcGpuBarrier(int nRanks, int nBlocks, int selfRank,
     }
   }
 
-  IpcGpuBarrier barrier(nRanks, nBlocks, selfRank, allMailboxes);
+  IpcGpuBarrier barrier(nRanks, nBlocks, selfRank, allMailboxes, params);
 
   auto resources = std::make_unique<IpcGpuBarrierResources>();
   resources->ipcMemHandler = std::move(memHandler);

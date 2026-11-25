@@ -123,6 +123,9 @@ static constexpr uint MaxUavArguments = 1024;
 static constexpr size_t MaxImageBufferSize = (1ull << 32) - 1;
 //! Maximum number of pixels for a 1D image created from a buffer
 static constexpr size_t MaxImageArraySize = 2048;
+//! HIP caps on PAL image limits, matching the ROCr backend
+static constexpr size_t MaxImageArraySizeHip = 8192;
+static constexpr size_t MaxImage3DDepth = 8192;
 
 //! Maximum number of supported constant buffers
 static constexpr uint MaxConstBuffers = MaxConstArguments + 8;

@@ -123,5 +123,6 @@ int main() {
 
   checkHipErrors(hipEventDestroy(start));
   checkHipErrors(hipEventDestroy(stop));
+  checkHipErrors(hipModuleUnload(module));
   checkHipErrors(hipCtxDestroy(context));
 }

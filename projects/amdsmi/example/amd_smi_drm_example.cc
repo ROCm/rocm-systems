@@ -404,9 +404,7 @@ static const std::map<amdsmi_processor_type_t, std::string> processor_type_map =
     {AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU, "NON_AMD_GPU"},
     {AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU, "NON_AMD_CPU"},
     {AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE, "AMD_CPU_CORE"},
-    {AMDSMI_PROCESSOR_TYPE_AMD_NIC, "AMD_AINIC"},
-    {AMDSMI_PROCESSOR_TYPE_BRCM_NIC, "BRCM_NIC"},
-    {AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH, "BRCM_SWITCH"}};
+    {AMDSMI_PROCESSOR_TYPE_AMD_NIC, "AMD_AINIC"}};
 
 static const std::map<amdsmi_link_type_t, std::string> link_type_map = {
     {AMDSMI_LINK_TYPE_INTERNAL, "INTERNAL"},
@@ -1221,20 +1219,26 @@ int main() {
       }
 
       // Get driver version
-      amdsmi_driver_info_t driver_info;
-      ret = amdsmi_get_gpu_driver_info(processor_handles[device_index], &driver_info);
+      amdsmi_driver_info_v2_t driver_info = {};
+      ret = amdsmi_get_gpu_driver_info_v2(processor_handles[device_index], &driver_info);
       if (ret != AMDSMI_STATUS_DIRECTORY_NOT_FOUND) {
         CHK_AMDSMI_RET(ret)
-        printf("    Output of amdsmi_get_gpu_driver_info:\n");
+        printf("    Output of amdsmi_get_gpu_driver_info_v2:\n");
         printf("\tDriver name: %s\n", driver_info.driver_name);
-        printf("\tamdgpu kernel source version: %s\n", driver_info.driver_kernel_version);
-        printf("\tamdgpu driver version: %s\n", driver_info.amdgpu_driver_version);
         printf("\tDriver version: %s\n", driver_info.driver_version);
-        printf("\tBuild version: %s\n", driver_info.driver_build_version);
-        printf("\tFull version: %s\n", driver_info.driver_full_version);
-        printf("\tDriver date: %s\n\n", driver_info.driver_date);
+        printf("\tDriver date: %s\n", driver_info.driver_date);
+        printf("\tDriver kernel version: %s\n", driver_info.driver_kernel_version);
+        printf("\tamdgpu driver version: %s\n", driver_info.amdgpu_driver_version);
+        printf("\tDriver build version: %s\n", driver_info.driver_build_version);
+        printf("\tDriver full version: %s\n", driver_info.driver_full_version);
+        if (driver_info.driver_package != AMDSMI_DRIVER_PACKAGE_NONE) {
+          printf("\tDriver package: %s\n", driver_info.driver_package == AMDSMI_DRIVER_PACKAGE_DKMS
+                                               ? "amdgpu-dkms"
+                                               : "amdgpu-kmod");
+        }
+        printf("\n");
       } else {
-        printf("\tamdsmi_get_gpu_driver_info(): not available on this device.\n");
+        printf("\tamdsmi_get_gpu_driver_info_v2(): not available on this device.\n");
       }
 
       // Get device cuid
@@ -1560,7 +1564,8 @@ int main() {
         CHK_AMDSMI_RET(ret)
       }
       printf("    Output of  amdsmi_get_temp_metric:\n");
-      std::cout << "\t\tTemperature: " << std::dec << val_i64 << "C" << "\n\n";
+      std::cout << "\t\tTemperature: " << std::dec << val_i64 << "C"
+                << "\n\n";
 
       // Get frame buffer
       amdsmi_vram_usage_t vram_usage = {};
@@ -2034,7 +2039,8 @@ int main() {
 
         std::cout << "\n";
         std::cout << " ** Note: Values MAX'ed out "
-                  << "(UINTX MAX are unsupported for the version in question) ** " << "\n\n";
+                  << "(UINTX MAX are unsupported for the version in question) ** "
+                  << "\n\n";
       }  // END GPU METRICS OUTPUTS
 
       // Get nearest GPUs

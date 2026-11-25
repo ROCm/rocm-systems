@@ -39,11 +39,9 @@ class HeapReservationTest : public TestBase {
  private:
   // Address space a child may map on top of what it already has.
   struct Budgets {
-    uint64_t generous = 0;   // every pool size fits, including 1x RAM
-    uint64_t ladder = 0;     // 1x refused, a smaller one fits
-    uint64_t tight = 0;      // nothing fits
+    uint64_t generous = 0;  // the host-RAM pool fits
+    uint64_t tight = 0;     // no host-RAM pool size fits
     bool valid = false;
-    bool ladder_possible = false;  // false when 1/2 RAM is below the floor
   };
 
   Budgets ComputeBudgets(uint64_t vram, uint64_t ram) const;

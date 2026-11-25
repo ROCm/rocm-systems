@@ -71,6 +71,10 @@ __global__ void TeamBroadcastTest(int loop, int skip, long long int *start_time,
 
   rocshmem_wg_team_create_ctx(teams[wg_id], ctx_type, &ctx);
 
+  // Without an LDS-staged build (USE_LDS_STAGE/USE_TDM) this returns 0.
+  extern __shared__ uint8_t tdm_lds[];
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
+
   [[maybe_unused]] int n_pes = rocshmem_ctx_n_pes(ctx);
   source_buf += wg_id * size;
   dest_buf += wg_id * size;
@@ -148,7 +152,7 @@ void TeamBroadcastTester<T1>::preLaunchKernel() {
 template <typename T1>
 void TeamBroadcastTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
                                            int loop, size_t size) {
-  size_t shared_bytes = 0;
+  size_t shared_bytes = rocshmem_query_lds_stage_bytes();
 
   int num_elems = size / sizeof(T1);
 
@@ -181,15 +185,15 @@ void TeamBroadcastTester<T1>::resetBuffers(size_t size) {
       if constexpr (std::is_same<T1, char>::value ||
                     std::is_same<T1, signed char>::value ||
                     std::is_same<T1, unsigned char>::value) {
-        source_buf[idx] = static_cast<T1>('a' + n_pes + wg_id);
+        source_buf[idx] = static_cast<T1>('a' + n_pes + wg_id + my_pe);
         dest_buf[idx] = static_cast<T1>('a' + wg_id);
       }
       else if constexpr (std::is_floating_point<T1>::value) {
-        source_buf[idx] = static_cast<T1>(3.14 + n_pes + wg_id);
+        source_buf[idx] = static_cast<T1>(3.14 + n_pes + wg_id + my_pe);
         dest_buf[idx] = static_cast<T1>(3.14 + wg_id);
       }
       else if constexpr (std::is_integral<T1>::value) {
-        source_buf[idx] = static_cast<T1>(n_pes + wg_id);
+        source_buf[idx] = static_cast<T1>(n_pes + wg_id + my_pe);
         dest_buf[idx] = static_cast<T1>(wg_id);
       }
     }

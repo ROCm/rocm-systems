@@ -55,7 +55,7 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
     ssize_t remCount = channelCount - elemOffset;
     ssize_t chunkOffset;
 
-    if (remCount < loopCount) chunkCount = alignUp(divUp(remCount, nranks), 16 / sizeof(T));
+    if (remCount < loopCount) chunkCount = ncclElementAlignedDivUp(remCount, nranks, (ssize_t)sizeof(T), (ssize_t)16);
 
     auto modRanks = [&] __device__(int r) -> int { return r - (r >= nranks ? nranks : 0); };
 
@@ -285,7 +285,8 @@ __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, st
 }
 } // namespace
 
-#if defined(__gfx942__) // Use a single slice per simple primitive for a single node on some gfx942 devices.
+// Use a single slice per simple primitive for a single node on gfx942 and gfx1250.
+#if defined(__gfx942__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
 #define rcclAllReduceRunRingSimpleProtoImpl(tid, nthreads, work) \
   if (work->rcclUseOneSlice) { \
     using Proto = \
@@ -505,7 +506,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_SIMPL
                       &channelCount, &chunkSize);
       const ssize_t loopCount = nvls->nHeads * chunkSize;
       int remCount = channelCount % (nvls->nHeads * chunkSize);
-      int lastChunkSize = alignUp(divUp(remCount, nvls->nHeads), 16384 / sizeof(T));
+      int lastChunkSize = ncclElementAlignedDivUp(remCount, nvls->nHeads, (int)sizeof(T), 16384);
 
       if (tid < tidEndScatter) {
         // Scatter
@@ -635,7 +636,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS_TREE, NCCL_PROTO_
     ssize_t offset;
     int nelem;
     int remCount = channelCount % (nvls->nHeads * chunkCount);
-    int lastChunkCount = alignUp(divUp(remCount, nvls->nHeads), 16 / sizeof(T));
+    int lastChunkCount = ncclElementAlignedDivUp(remCount, nvls->nHeads, (int)sizeof(T), 16);
 
     const int nThreadsScatter = scatterWarps * WARP_SIZE;
     const int nThreadsGather = gatherWarps * WARP_SIZE;

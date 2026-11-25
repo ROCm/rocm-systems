@@ -76,12 +76,44 @@ inline float rcclFp8ToFloat(uint8_t bits, bool isE5m2, bool fnuz) {
   return float(v);
 }
 
+// Mirror of rcclFp8ToFloat for the encode direction.
+inline uint8_t rcclFloatToFp8(float v, bool isE5m2, bool fnuz) {
+  if (isE5m2) {
+    if (fnuz) return __hip_fp8_e5m2_fnuz(v).__x;
+    return __hip_fp8_e5m2(v).__x;
+  }
+  if (fnuz) return __hip_fp8_e4m3_fnuz(v).__x;
+  return __hip_fp8_e4m3(v).__x;
+}
+
 typedef _Float16 half_t;
 typedef _Float16 half2_t __attribute__((ext_vector_type(2)));
 
 typedef short shortx2_t __attribute__((ext_vector_type(2)));
 typedef short __attribute__((ext_vector_type(2))) __amd_shortx2_storage_t;
 typedef float float2_t __attribute__((ext_vector_type(2)));
+
+#if __HIP_DEVICE_COMPILE__ && (defined(__gfx1250__) || defined(__gfx1250_strict__))
+#define RCCL_FP8_HAS_PK8 1
+
+typedef unsigned int fp8x8_storage_t __attribute__((ext_vector_type(2)));
+typedef float float8_t __attribute__((ext_vector_type(8)));
+
+// The pk8 upcasts take an E8M0 biased exponent, so 127 is a scale of 1.0.
+#define RCCL_FP8_SCALE_ONE_E8M0 127u
+
+inline __device__ fp8x8_storage_t hadd8(fp8x8_storage_t x, fp8x8_storage_t y) {
+  float8_t a = __builtin_amdgcn_cvt_scale_pk8_f32_fp8(x, RCCL_FP8_SCALE_ONE_E8M0, 0);
+  float8_t b = __builtin_amdgcn_cvt_scale_pk8_f32_fp8(y, RCCL_FP8_SCALE_ONE_E8M0, 0);
+  return __builtin_amdgcn_cvt_scalef32_pk8_fp8_f32(a + b, 1.f);
+}
+
+inline __device__ fp8x8_storage_t hadd8_b(fp8x8_storage_t x, fp8x8_storage_t y) {
+  float8_t a = __builtin_amdgcn_cvt_scale_pk8_f32_bf8(x, RCCL_FP8_SCALE_ONE_E8M0, 0);
+  float8_t b = __builtin_amdgcn_cvt_scale_pk8_f32_bf8(y, RCCL_FP8_SCALE_ONE_E8M0, 0);
+  return __builtin_amdgcn_cvt_scalef32_pk8_bf8_f32(a + b, 1.f);
+}
+#endif
 
 inline __device__ rccl_float8 hadd(rccl_float8 x, rccl_float8 y) {
 #if __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
@@ -1062,6 +1094,11 @@ inline float rcclFp8ToFloat(uint8_t bits, bool isE5m2, bool /*fnuz*/) {
   rccl_float8 v;
   v.data = bits;
   return float(v);
+}
+
+inline uint8_t rcclFloatToFp8(float v, bool isE5m2, bool /*fnuz*/) {
+  if (isE5m2) return rccl_bfloat8(v).data;
+  return rccl_float8(v).data;
 }
 
 #endif

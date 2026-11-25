@@ -211,7 +211,7 @@ inline float __internal_half2float(unsigned short x) {
 inline float __half2float(__half x) { return __internal_half2float(static_cast<__half_raw>(x).x); }
 inline float2 __half22float2(__half2 x) {
   return float2{__internal_half2float(static_cast<__half2_raw>(x).x),
-                __internal_half2float(static_cast<__half2_raw>(x).x)};
+                __internal_half2float(static_cast<__half2_raw>(x).y)};
 }
 
 inline float __low2float(__half2 x) { return __internal_half2float(static_cast<__half2_raw>(x).x); }

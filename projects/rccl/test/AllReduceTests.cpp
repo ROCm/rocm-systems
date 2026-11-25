@@ -5,6 +5,9 @@
  ************************************************************************/
 #include "TestBed.hpp"
 #include "CallCollectiveForked.hpp"
+#include "common/ProcessIsolatedTestRunner.hpp"
+#include "SingleProcMemRegTestUtils.hpp"
+#include "StandaloneUtils.hpp"
 
 namespace RcclUnitTesting
 {
@@ -149,6 +152,32 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
+  TEST(AllReduce, SingleProcMemReg)
+  {
+    SingleProcMemRegTestConfig config;
+    config.mode = SingleProcMemRegMode::Enabled;
+    config.funcTypes = {ncclCollAllReduce};
+    config.dataTypes = {ncclFloat64, ncclFloat32, ncclFloat16,
+                        ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2};
+    config.redOps = {ncclSum};
+    config.roots = {0};
+    // Unaligned element counts designed to break 16-byte alignment:
+    // - 1 elem of FP16 = 2 bytes   (NOT 16-byte aligned)
+    // - 3 elems of FP32 = 12 bytes (NOT 16-byte aligned)
+    // - 7 elems of FP16 = 14 bytes (NOT 16-byte aligned)
+    // - 4314 elems of FP16 = 8,628 bytes (8628 / 16 = 539.25 -> NOT 16-byte aligned)
+    // - 5003 elems of FP32 = 20,012 bytes (20012 / 16 = 1250.75 -> NOT 16-byte aligned)
+    config.numElements = {1, 3, 7, 4314, 5003, 10000001};
+    config.inPlaceList = {true, false};
+    config.useHipGraphList = {true, false};
+    RunSingleProcMemRegTest(config);
+  }
+
+  TEST(AllReduce, SingleProcMemRegDisabled)
+  {
+    RunSingleProcMemRegDisabledTest(ncclCollAllReduce, ncclFloat32, true);
+  }
+
   // This tests using custom pre-mult scalars reductions
   TEST(AllReduce, PreMultScalar)
   {
@@ -224,7 +253,7 @@ namespace RcclUnitTesting
   // Regression test for FP8 avg scaling by 1/(2*nRanks) wherever the device fp8 type is
   // FNUZ (AICOMRCCL-1945). It discriminates on gfx942 and the software fallback; where host
   // and device are both OCP it only guards the float scalar, whose host half is pinned in
-  // test/host/enqueue-test.cc. One rank runs the separate oneRankReduce kernel.
+  // test/host/enqueue/enqueue-test.d/redop.inc. One rank runs the separate oneRankReduce kernel.
   //
   // E5M2 is left out: ExpectedReduceFp8 (test/common/DeviceDataOps.hpp) sums in fp8 and
   // divides last, which disagrees with RCCL's pre-scale for a 2-bit mantissa on unpatched
@@ -860,5 +889,93 @@ namespace RcclUnitTesting
     }
     testBed.DestroyComms();
     testBed.Finalize();
+  }
+
+  // A NULL comm must be rejected like ncclAllReduceConfig rejects it, not dereferenced before the comm check.
+  TEST(AllReduce, NullCommReturnsInvalidArgument)
+  {
+    RUN_ISOLATED_TEST("AllReduce_NullCommReturnsInvalidArgument", []()
+    {
+      EXPECT_EQ(ncclInvalidArgument, ncclAllReduce(nullptr, nullptr, 16, ncclFloat32, ncclSum, nullptr, nullptr));
+    });
+  }
+
+  // Inside a group the rejection must also be recorded as the group error, so ncclGroupEnd reports it.
+  TEST(AllReduce, NullCommInsideGroupFailsGroupEnd)
+  {
+    RUN_ISOLATED_TEST("AllReduce_NullCommInsideGroupFailsGroupEnd", []()
+    {
+      ASSERT_EQ(ncclSuccess, ncclGroupStart());
+      EXPECT_EQ(ncclInvalidArgument, ncclAllReduce(nullptr, nullptr, 16, ncclFloat32, ncclSum, nullptr, nullptr));
+      EXPECT_EQ(ncclInvalidArgument, ncclGroupEnd());
+    });
+  }
+
+  // The other collectives that read comm before ncclEnqueueCheck must reject a NULL comm the same way.
+  TEST(AllReduce, NullCommWithBiasReturnsInvalidArgument)
+  {
+    RUN_ISOLATED_TEST("AllReduce_NullCommWithBiasReturnsInvalidArgument", []()
+    {
+      float acc = 0.0f;
+      EXPECT_EQ(ncclInvalidArgument,
+                ncclAllReduceWithBias(nullptr, nullptr, 16, ncclFloat32, ncclSum, nullptr, nullptr, &acc));
+    });
+  }
+
+  TEST(AllReduce, NullCommBroadcastReturnsInvalidArgument)
+  {
+    RUN_ISOLATED_TEST("AllReduce_NullCommBroadcastReturnsInvalidArgument", []()
+    {
+      EXPECT_EQ(ncclInvalidArgument, ncclBroadcast(nullptr, nullptr, 16, ncclFloat32, 0, nullptr, nullptr));
+    });
+  }
+
+  TEST(AllGather, NullCommReturnsInvalidArgument)
+  {
+    RUN_ISOLATED_TEST("AllGather_NullCommReturnsInvalidArgument", []()
+    {
+      EXPECT_EQ(ncclInvalidArgument, ncclAllGather(nullptr, nullptr, 16, ncclFloat32, nullptr, nullptr));
+    });
+  }
+
+  TEST(ReduceScatter, NullCommReturnsInvalidArgument)
+  {
+    RUN_ISOLATED_TEST("ReduceScatter_NullCommReturnsInvalidArgument", []()
+    {
+      EXPECT_EQ(ncclInvalidArgument, ncclReduceScatter(nullptr, nullptr, 16, ncclFloat32, ncclSum, nullptr, nullptr));
+    });
+  }
+
+  TEST(AlltoAll, NullCommReturnsInvalidArgument)
+  {
+    RUN_ISOLATED_TEST("AlltoAll_NullCommReturnsInvalidArgument", []()
+    {
+      EXPECT_EQ(ncclInvalidArgument, ncclAlltoAll(nullptr, nullptr, 16, ncclFloat32, nullptr, nullptr));
+    });
+  }
+
+  TEST(AlltoAllv, NullCommReturnsInvalidArgument)
+  {
+    RUN_ISOLATED_TEST("AlltoAllv_NullCommReturnsInvalidArgument", []()
+    {
+      size_t const counts[1] = {16};
+      size_t const displs[1] = {0};
+      EXPECT_EQ(ncclInvalidArgument,
+                ncclAlltoAllv(nullptr, counts, displs, nullptr, counts, displs, ncclFloat32, nullptr, nullptr));
+    });
+  }
+
+  // ncclCommCount alone rejects a NULL comm without recording the group error, so ncclGroupEnd would succeed.
+  TEST(AlltoAllv, NullCommInsideGroupFailsGroupEnd)
+  {
+    RUN_ISOLATED_TEST("AlltoAllv_NullCommInsideGroupFailsGroupEnd", []()
+    {
+      size_t const counts[1] = {16};
+      size_t const displs[1] = {0};
+      ASSERT_EQ(ncclSuccess, ncclGroupStart());
+      EXPECT_EQ(ncclInvalidArgument,
+                ncclAlltoAllv(nullptr, counts, displs, nullptr, counts, displs, ncclFloat32, nullptr, nullptr));
+      EXPECT_EQ(ncclInvalidArgument, ncclGroupEnd());
+    });
   }
 }

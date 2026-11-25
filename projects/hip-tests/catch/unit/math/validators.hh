@@ -204,12 +204,27 @@ template <typename T> class EqValidator : public MatcherBase<T> {
     return ss.str();
   }
 
- private:
+ protected:
   T target_;
 };
 
 template <typename T> auto EqValidatorBuilderFactory() {
   return [](T val, auto&&...) { return std::make_unique<EqValidator<T>>(val); };
+}
+
+// Like EqValidator, but also distinguishes +0.0 from -0.0.
+template <typename T> class EqOrderedZeroValidator : public EqValidator<T> {
+ public:
+  using EqValidator<T>::EqValidator;
+
+  bool match(const T& val) const override {
+    return EqValidator<T>::match(val) &&
+           (std::isnan(this->target_) || std::signbit(this->target_) == std::signbit(val));
+  }
+};
+
+template <typename T> auto EqOrderedZeroValidatorBuilderFactory() {
+  return [](T val, auto&&...) { return std::make_unique<EqOrderedZeroValidator<T>>(val); };
 }
 
 template <typename T, typename U, typename VBF, typename VBS>

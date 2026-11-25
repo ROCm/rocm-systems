@@ -43,6 +43,7 @@ OCCUPANCY_FIELDS = (
     "is_ext",
     "workgroup_id",
     "cluster_id",
+    "dispatch_id",
 )
 
 OCCUPANCY_VERSION = "3.1.0"
@@ -76,6 +77,7 @@ DISPATCH_FIELDS = (
     "dispatch_pkt_addr",
     "byte_offset",
     "flags",
+    "dispatch_id",
 )
 
 
@@ -160,6 +162,7 @@ def validate_dispatch_event(dispatch, dispatches, occupancy_file):
         "dispatch_pkt_addr",
         "byte_offset",
         "flags",
+        "dispatch_id",
     ):
         assert_json_int(dispatch[field], f"dispatch.{field}")
 
@@ -225,6 +228,7 @@ def test_code_object_memory(code_object_file_path, json_data, output_path):
     tool_memory = [read_bytes(saved) for saved in tool_memory_load[1:]]
 
     found = False
+    matched = False
     for hsa_file in code_object_file_path["hsa_memory_load"]:
 
         m = re.search(gfx_pattern, hsa_file)
@@ -235,9 +239,11 @@ def test_code_object_memory(code_object_file_path, json_data, output_path):
             found = True
             hsa_memory_bytes = open(hsa_file, "rb").read()
             # Checks if hsa_file is one of the saved code objects
-            assert any([hsa_memory_bytes == fs for fs in tool_memory])
-            break
+            if any(hsa_memory_bytes == fs for fs in tool_memory):
+                matched = True
+                break
     assert found is True
+    assert matched is True
 
 
 def test_perfcounter_target_cu(output_path, request):

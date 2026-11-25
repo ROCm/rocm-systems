@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.25)
 project(profiler-hub_find_package_test LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)

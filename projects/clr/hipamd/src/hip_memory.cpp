@@ -691,6 +691,8 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, amd
           *dstMemory->asBuffer(), srcOffset, dstOffset, sizeBytes,
           helper.copyMetadata());
       break;
+    case hipWriteBuffer:
+    case hipReadBuffer:
     case hipHostToHost:
       assert(false && "Unreachable case");
       break;
@@ -800,7 +802,8 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
   if (!isHostAsync) {
     command->queue()->finishCommand(command);
   } else if (!isGPUAsync) {
-    assert(dstDeviceMemory != nullptr || srcDeviceMemory != nullptr && "Must have device memory to have GPU async");
+    assert((dstDeviceMemory != nullptr || srcDeviceMemory != nullptr) &&
+           "Must have device memory to have GPU async");
     amd::Memory* syncMemory = (dstDeviceMemory != nullptr) ? dstDeviceMemory : srcDeviceMemory;
     hip::Stream* pStream = hip::getNullStream(syncMemory->GetDeviceById()->context());
     amd::Command::EventWaitList waitList;
@@ -1231,9 +1234,14 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
     }
   }
 
-  if (!image->create(nullptr)) {
+  amd::Memory::ErrorCode errorCode = amd::Memory::kErrorNone;
+  if (!image->create(nullptr, false, false, false, &errorCode)) {
     LogPrintfError("Cannot create image: 0x%x", image);
-    status = hipErrorOutOfMemory;
+    if (errorCode == amd::Memory::kErrorImagePitchUnsupported) {
+      status = hipErrorNotSupported;
+    } else {
+      status = hipErrorOutOfMemory;
+    }
     delete image;
     return nullptr;
   }
@@ -2562,7 +2570,7 @@ hipError_t hipMemcpy2DValidateArray(hipArray_const_t arr, size_t wOffset, size_t
 hipError_t hipMemcpy2D_common(void* dst, size_t dpitch, const void* src, size_t spitch,
                               size_t width, size_t height, hipMemcpyKind kind,
                               hipStream_t stream = nullptr, bool isAsync = false) {
-  hipError_t validateParams = hipSuccess, validateSrc = hipSuccess, validateDst = hipSuccess;
+  hipError_t validateParams = hipSuccess;
   if ((validateParams = hipMemcpy2DValidateParams(kind, stream)) != hipSuccess) {
     return validateParams;
   }
@@ -2758,13 +2766,6 @@ hipError_t ihipMemcpy3D_validate(const hipMemcpy3DParms* p) {
   // not have the same element size.
   if ((p->srcArray != nullptr) && (p->dstArray != nullptr)) {
     if (hip::getElementSize(p->srcArray) != hip::getElementSize(p->dstArray)) {
-         return hipErrorInvalidValue;
-      }
-
-    // If both src and dst are arrays, verify they have the same extents
-    if (p->srcArray->width != p->dstArray->width ||
-        p->srcArray->height != p->dstArray->height ||
-        p->srcArray->depth != p->dstArray->depth) {
       return hipErrorInvalidValue;
     }
   }
@@ -2900,7 +2901,12 @@ hipError_t hipDrvMemcpy3DAsync(const HIP_MEMCPY3D* pCopy, hipStream_t stream) {
 }
 
 // ================================================================================================
-static amd::CopyMetadata buildCopyMetadataFromAttrs(hipMemcpyAttributes* attrs, size_t* attrsIdxs,
+// Lock the public struct sizes (ABI).
+static_assert(sizeof(hipExtMemcpyAttributes) == 56, "hipExtMemcpyAttributes must stay 56 bytes");
+static_assert(sizeof(hipExtMemcpyWait) == 64, "hipExtMemcpyWait must stay 64 bytes");
+static_assert(sizeof(hipExtMemcpySignal) == 64, "hipExtMemcpySignal must stay 64 bytes");
+
+static amd::CopyMetadata buildCopyMetadataFromAttrs(hipExtMemcpyAttributes* attrs, size_t* attrsIdxs,
                                                      size_t numAttrs, size_t copyIdx, bool isAsync) {
   amd::CopyMetadata metadata(isAsync, amd::CopyMetadata::CopyEnginePreference::NONE);
 
@@ -2939,6 +2945,9 @@ static amd::CopyMetadata buildCopyMetadataFromAttrs(hipMemcpyAttributes* attrs, 
   if (flags & hipMemcpyFlagExtPreferCE) {
     // CE means Copy Engine here, so keep these copies on SDMA instead of shader blits.
     metadata.copyEnginePreference_ = amd::CopyMetadata::CopyEnginePreference::SDMA;
+  } else if (flags & hipMemcpyFlagExtPreferComputeEngine) {
+    // Shader blit path instead of SDMA.
+    metadata.copyEnginePreference_ = amd::CopyMetadata::CopyEnginePreference::BLIT;
   }
   if (flags & hipMemcpyFlagExtOpSwap) {
     metadata.copyOpType_ = amd::CopyMetadata::kCopyOpSwap;
@@ -3011,8 +3020,28 @@ static hipError_t EnqueueBatchCommands(std::vector<std::vector<Operation>>& oper
 }
 
 // ================================================================================================
+// Releases the batch commands that EnqueueBatchCommands placed on other GPUs' null streams.
+// When status is hipSuccess, the caller's stream first receives a marker that waits for them.
+static hipError_t EnqueueBatchMarker(hipError_t status, hip::Stream& stream,
+                                     amd::Command::EventWaitList& marker_wait_list) {
+  if (status == hipSuccess && !marker_wait_list.empty()) {
+    amd::Command* dependent_marker = new amd::Marker(stream, true, marker_wait_list);
+    if (dependent_marker == nullptr) {
+      status = hipErrorOutOfMemory;
+    } else {
+      dependent_marker->enqueue();
+      dependent_marker->release();
+    }
+  }
+  for (amd::Event* cmd : marker_wait_list) {
+    cmd->release();
+  }
+  return status;
+}
+
+// ================================================================================================
 // Returns the attribute flags that apply to copy `copyIdx`.
-static inline unsigned int getBatchCopyFlags(hipMemcpyAttributes* attrs, size_t* attrsIdxs,
+static inline unsigned int getBatchCopyFlags(hipExtMemcpyAttributes* attrs, size_t* attrsIdxs,
                                              size_t numAttrs, size_t copyIdx, size_t& attrIdx) {
   if (attrs == nullptr || numAttrs == 0) return 0;
   while (attrIdx + 1 < numAttrs && attrsIdxs[attrIdx + 1] <= copyIdx) ++attrIdx;
@@ -3020,14 +3049,99 @@ static inline unsigned int getBatchCopyFlags(hipMemcpyAttributes* attrs, size_t*
 }
 
 // ================================================================================================
-hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count,
-                           hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
+hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* sizesDst,
+                           hipExtMemcpyWait* waits, hipExtMemcpySignal* signals,
+                           size_t count,
+                           hipExtMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
                            hip::Stream& stream, bool isAsync, size_t* failIdx) {
   // Reports the entry a per-entry error refers to.
   const auto fail = [failIdx](size_t i, hipError_t error) {
     if (failIdx != nullptr) *failIdx = i;
     return error;
   };
+
+  // SIZE_MAX unless a specific entry is at fault.
+  if (failIdx != nullptr) *failIdx = SIZE_MAX;
+
+  if (dsts == nullptr || srcs == nullptr || sizes == nullptr || count == 0) {
+    return hipErrorInvalidValue;
+  }
+
+  if (numAttrs > 0) {
+    if (attrs == nullptr || attrsIdxs == nullptr) {
+      return hipErrorInvalidValue;
+    }
+    if (attrsIdxs[0] != 0 || numAttrs > count) {
+      return hipErrorInvalidValue;
+    }
+    for (size_t i = 1; i < numAttrs; ++i) {
+      if (attrsIdxs[i] <= attrsIdxs[i - 1] || attrsIdxs[i] >= count) {
+        return hipErrorInvalidValue;
+      }
+    }
+    constexpr unsigned int kValidFlagMask =
+        hipMemcpyFlagPreferOverlapWithCompute | hipMemcpyFlagExtPreferCE |
+        hipMemcpyFlagExtPreferComputeEngine | hipMemcpyFlagExtOpSwap |
+        hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst |
+        hipMemcpyFlagExtPreferLinear | hipMemcpyFlagExtPreferBroadcast;
+    for (size_t i = 0; i < numAttrs; ++i) {
+      if (attrs[i].srcAccessOrder < hipMemcpySrcAccessOrderStream ||
+          attrs[i].srcAccessOrder > hipMemcpySrcAccessOrderAny) {
+        return hipErrorInvalidValue;
+      }
+      const unsigned int f = attrs[i].flags;
+      if (f & ~kValidFlagMask) {
+        return hipErrorInvalidValue;
+      }
+      if ((f & hipMemcpyFlagExtOpSwap) &&
+          (f & (hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst))) {
+        return hipErrorInvalidValue;
+      }
+      if ((f & hipMemcpyFlagExtPreferCE) && (f & hipMemcpyFlagExtPreferComputeEngine)) {
+        return hipErrorInvalidValue;
+      }
+      // The shader copy path is linear only.
+      if ((f & hipMemcpyFlagExtPreferComputeEngine) &&
+          (f & (hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc |
+                hipMemcpyFlagExtOpIndirectDst))) {
+        return hipErrorInvalidValue;
+      }
+      // Grouping hints: validated but not yet acted on.
+      if ((f & hipMemcpyFlagExtPreferLinear) && (f & hipMemcpyFlagExtPreferBroadcast)) {
+        return hipErrorInvalidValue;
+      }
+      if ((f & hipMemcpyFlagExtPreferBroadcast) &&
+          (f & (hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc |
+                hipMemcpyFlagExtOpIndirectDst))) {
+        return hipErrorInvalidValue;
+      }
+      for (size_t r = 0; r < sizeof(attrs[i].reserved) / sizeof(attrs[i].reserved[0]); ++r) {
+        if (attrs[i].reserved[r] != 0) {
+          return hipErrorInvalidValue;
+        }
+      }
+    }
+  }
+
+  size_t sizeAttrIdx = 0;
+  for (size_t i = 0; i < count; ++i) {
+    if (sizes[i] == 0) {
+      return fail(i, hipErrorInvalidValue);
+    }
+    // sizesDst applies to swap entries only (0 < sizesDst[i] <= sizes[i]); it must be 0 otherwise.
+    if (sizesDst != nullptr) {
+      const bool isSwap = getBatchCopyFlags(attrs, attrsIdxs, numAttrs, i, sizeAttrIdx) &
+                          hipMemcpyFlagExtOpSwap;
+      if (isSwap ? (sizesDst[i] == 0 || sizesDst[i] > sizes[i]) : sizesDst[i] != 0) {
+        return fail(i, hipErrorInvalidValue);
+      }
+    }
+  }
+
+  // Per-entry waits/signals are reserved.
+  if (waits != nullptr || signals != nullptr) {
+    return hipErrorNotSupported;
+  }
 
   // Pre-compute memory objects once per copy to avoid repeated expensive
   // getMemoryObject calls later in validation, classification, and submission.
@@ -3106,6 +3220,15 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     }
   }
 
+  // An asymmetric swap without SDMA support is decomposed into two ops: one extra op per such entry.
+  // sizesDst is non-zero only for swap entries (validated above).
+  size_t extraOps = 0;
+  if (sizesDst != nullptr && !stream.device().settings().sdma_asymmetric_swap_supported_) {
+    for (size_t i = 0; i < count; ++i) {
+      extraOps += (sizesDst[i] != 0 && sizesDst[i] != sizes[i]);
+    }
+  }
+
   // Classify copies by type and group them by the queue device that will execute each batch.
   std::vector<std::vector<amd::BatchCopyOp>> copy_ops_by_device(g_devices.size());
   std::vector<std::vector<amd::BatchWriteMemoryOp>> write_ops_by_device(g_devices.size());
@@ -3169,23 +3292,45 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     }
 
     amd::CopyMetadata metadata = buildCopyMetadataFromAttrs(attrs, attrsIdxs, numAttrs, i, isAsync);
+
+    // Validated up front; non-zero only for swap entries.
+    const size_t sizeB = (sizesDst != nullptr) ? sizesDst[i] : 0;
+
     switch (type) {
       case hipCopyBuffer:
-      case hipCopyBufferSDMA: {
-        const hipMemoryType src_memory_type = getMemoryType(srcMemories[i]);
-        const hipMemoryType dst_memory_type = getMemoryType(dstMemories[i]);
-        const int device_id =
-            (src_memory_type == hipMemoryTypeDevice && dst_memory_type == hipMemoryTypeHost)
-                ? srcMemories[i]->getUserData().deviceId
-                : dstMemories[i]->getUserData().deviceId;
-        copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i],
-                                                   dstOffsets[i], sizes[i], metadata);
-        break;
-      }
+      case hipCopyBufferSDMA:
       case hipCopyBufferP2P: {
-        const int device_id = stream.DeviceId();
-        copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i],
-                                                   dstOffsets[i], sizes[i], metadata);
+        int device_id;
+        if (type == hipCopyBufferP2P) {
+          device_id = stream.DeviceId();
+        } else {
+          const hipMemoryType src_memory_type = getMemoryType(srcMemories[i]);
+          const hipMemoryType dst_memory_type = getMemoryType(dstMemories[i]);
+          device_id =
+              (src_memory_type == hipMemoryTypeDevice && dst_memory_type == hipMemoryTypeHost)
+                  ? srcMemories[i]->getUserData().deviceId
+                  : dstMemories[i]->getUserData().deviceId;
+        }
+        // Size the vector once on first use: this device receives at most the remaining entries
+        // plus the extra op of each decomposed swap.
+        if (copy_ops_by_device[device_id].capacity() == 0) {
+          copy_ops_by_device[device_id].reserve((count - i) + extraOps);
+        }
+        if (sizeB > 0 && sizeB != sizes[i]
+            && !stream.device().settings().sdma_asymmetric_swap_supported_) {
+          // Decompose: symmetric swap of [0, sizeB) plus a linear copy of the src tail
+          // [sizeB, sizes[i]). The ranges are disjoint, so the two ops are order-independent.
+          copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i],
+                                                     dstOffsets[i], sizeB, metadata);
+          amd::CopyMetadata tailMeta = metadata;
+          tailMeta.copyOpType_ = amd::CopyMetadata::kCopyOpLinear;
+          copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i],
+                                                     srcOffsets[i] + sizeB, dstOffsets[i] + sizeB,
+                                                     sizes[i] - sizeB, tailMeta);
+        } else {
+          copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i],
+                                                     dstOffsets[i], sizes[i], metadata, sizeB);
+        }
         break;
       }
       case hipHostToHost:
@@ -3237,29 +3382,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     stream_wait_cmd->release();
   }
 
-  if (status != hipSuccess) {
-    for (auto* cmd : marker_wait_list) {
-      cmd->release();
-    }
-    return status;
-  }
-
-  if (!marker_wait_list.empty()) {
-    amd::Command* dependent_marker = new amd::Marker(stream, true, marker_wait_list);
-    if (dependent_marker == nullptr) {
-      for (auto* cmd : marker_wait_list) {
-        cmd->release();
-      }
-      return hipErrorOutOfMemory;
-    }
-    dependent_marker->enqueue();
-    dependent_marker->release();
-    for (auto* cmd : marker_wait_list) {
-      cmd->release();
-    }
-  }
-
-  return hipSuccess;
+  return EnqueueBatchMarker(status, stream, marker_wait_list);
 }
 
 // ================================================================================================
@@ -3268,92 +3391,278 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
                                size_t* failIdx, hipStream_t stream) {
   HIP_INIT_API(hipMemcpyBatchAsync, dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs, failIdx,
                stream);
-  // validate stream
+  if (failIdx != nullptr) *failIdx = SIZE_MAX;
   if (!hip::isValid(stream)) {
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
   CHECK_STREAM_DETACHED_API(stream);
 
-  // validate inputs
-  if (dsts == nullptr || srcs == nullptr || sizes == nullptr || count == 0) {
+  if (numAttrs > 0 && (attrs == nullptr || attrsIdxs == nullptr || numAttrs > count)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  // Validate attributes structure if provided
+  // Legacy flag set; other bits are ignored, as before hipExtMemcpyBatchAsync.
+  constexpr unsigned int kLegacyFlagMask =
+      hipMemcpyFlagPreferOverlapWithCompute | hipMemcpyFlagExtPreferCE |
+      hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
+
+  // Convert by value; the struct strides differ.
+  std::vector<hipExtMemcpyAttributes> extAttrs;
+  hipExtMemcpyAttributes* extAttrsPtr = nullptr;
   if (numAttrs > 0) {
-    if (attrs == nullptr || attrsIdxs == nullptr) {
-      HIP_RETURN(hipErrorInvalidValue);
-    }
-    // First index must be 0
-    if (attrsIdxs[0] != 0) {
-      HIP_RETURN(hipErrorInvalidValue);
-    }
-    // numAttrs must not exceed count
-    if (numAttrs > count) {
-      HIP_RETURN(hipErrorInvalidValue);
-    }
-    // Validate attrsIdxs is monotonically increasing
-    for (size_t i = 1; i < numAttrs; ++i) {
-      if (attrsIdxs[i] <= attrsIdxs[i - 1] || attrsIdxs[i] >= count) {
-        HIP_RETURN(hipErrorInvalidValue);
-      }
-    }
-    // Validate srcAccessOrder values and flags
+    extAttrs.resize(numAttrs);
     for (size_t i = 0; i < numAttrs; ++i) {
-      if (attrs[i].srcAccessOrder < hipMemcpySrcAccessOrderStream ||
-          attrs[i].srcAccessOrder > hipMemcpySrcAccessOrderAny) {
-        HIP_RETURN(hipErrorInvalidValue);
-      }
-
-      const unsigned int kIndirectFlagMask =
-          hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
-      if ((attrs[i].flags & hipMemcpyFlagExtOpSwap) &&
-          (attrs[i].flags & kIndirectFlagMask)) {
-        HIP_RETURN(hipErrorInvalidValue);
-      }
+      extAttrs[i].srcAccessOrder = attrs[i].srcAccessOrder;
+      extAttrs[i].srcLocHint = attrs[i].srcLocHint;
+      extAttrs[i].dstLocHint = attrs[i].dstLocHint;
+      extAttrs[i].flags = attrs[i].flags & kLegacyFlagMask;
     }
+    extAttrsPtr = extAttrs.data();
   }
 
-  // Validate individual sizes and find first error
-  for (size_t i = 0; i < count; ++i) {
-    if (sizes[i] == 0) {
-      if (failIdx != nullptr) *failIdx = i;
-      HIP_RETURN(hipErrorInvalidValue);
-    }
-  }
-
-  if (failIdx != nullptr) *failIdx = SIZE_MAX;
-
-  // Call internal batch implementation
-  hipError_t status = ihipMemcpyBatch(dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs,
-                                      *hip::getStream(stream), true, failIdx);
-
-  HIP_RETURN(status);
+  HIP_RETURN(ihipMemcpyBatch(dsts, srcs, sizes, /*sizesDst=*/nullptr,
+                             /*waits=*/nullptr, /*signals=*/nullptr, count,
+                             extAttrsPtr, attrsIdxs, numAttrs,
+                             *hip::getStream(stream), true, failIdx));
 }
 
-hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opList, size_t* failIdx,
-                                 unsigned long long flags, hipStream_t stream) {
-  HIP_INIT_API(hipMemcpy3DBatchAsync, numOps, opList, failIdx, flags, stream);
-  if (flags != 0 || opList == nullptr || numOps == 0) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
+hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
+                                  size_t* sizes, size_t* sizesDst,
+                                  hipExtMemcpyWait* waits,
+                                  hipExtMemcpySignal* signals,
+                                  size_t count,
+                                  hipExtMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
+                                  hipStream_t stream) {
+  HIP_INIT_API(hipExtMemcpyBatchAsync, dsts, srcs, sizes, sizesDst, waits, signals,
+               count, attrs, attrsIdxs, numAttrs, stream);
   if (!hip::isValid(stream)) {
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
   CHECK_STREAM_DETACHED_API(stream);
 
-  hipError_t status = hipSuccess;
+  // Not supported while the stream is capturing.
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream->GetCaptureStatus() == hipStreamCaptureStatusActive) {
+    hip_stream->InvalidateCapture();
+    HIP_RETURN(hipErrorStreamCaptureUnsupported);
+  }
+  if (hip_stream->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
+    HIP_RETURN(hipErrorStreamCaptureInvalidated);
+  }
 
+  HIP_RETURN(ihipMemcpyBatch(dsts, srcs, sizes, sizesDst,
+                             waits, signals, count,
+                             attrs, attrsIdxs, numAttrs,
+                             *hip_stream, true, /*failIdx=*/nullptr));
+}
+
+hipError_t hipMemcpyWithAttributesAsync(void* dst, const void* src, size_t size,
+                                        hipMemcpyAttributes* attr, hipStream_t stream) {
+  HIP_INIT_API(hipMemcpyWithAttributesAsync, dst, src, size, attr, stream);
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+  CHECK_STREAM_DETACHED_API(stream);
+
+  if (dst == nullptr || src == nullptr || size == 0 || attr == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // Legacy flag set; other bits are ignored, matching hipMemcpyBatchAsync.
+  constexpr unsigned int kLegacyFlagMask =
+      hipMemcpyFlagPreferOverlapWithCompute | hipMemcpyFlagExtPreferCE |
+      hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
+
+  hipExtMemcpyAttributes extAttr{};
+  extAttr.srcAccessOrder = attr->srcAccessOrder;
+  extAttr.srcLocHint = attr->srcLocHint;
+  extAttr.dstLocHint = attr->dstLocHint;
+  extAttr.flags = attr->flags & kLegacyFlagMask;
+
+  // A single entry batch is exactly this copy. ihipMemcpyBatch validates the attribute itself.
+  void* dsts[1] = {dst};
+  void* srcs[1] = {const_cast<void*>(src)};
+  size_t sizes[1] = {size};
+  size_t attrsIdxs[1] = {0};
+
+  HIP_RETURN(ihipMemcpyBatch(dsts, srcs, sizes, /*sizesDst=*/nullptr,
+                             /*waits=*/nullptr, /*signals=*/nullptr, 1,
+                             &extAttr, attrsIdxs, 1,
+                             *hip::getStream(stream), true, /*failIdx=*/nullptr));
+}
+
+// ================================================================================================
+// Shared implementation behind hipMemcpy3DBatchAsync and hipMemcpy3DWithAttributesAsync. Callers
+// validate flags, opList and the stream before handing the operations over.
+static hipError_t ihipMemcpy3DBatch(size_t numOps, struct hipMemcpy3DBatchOp* opList,
+                                    size_t* failIdx, hipStream_t stream) {
   *failIdx = SIZE_MAX;
-  for (int i = 0; i < numOps; ++i) {
+  hip::Stream* hip_stream = hip::getStream(stream);
+
+  std::vector<std::vector<amd::BatchCopyRectOp>> copy_ops_by_device(g_devices.size());
+  std::vector<std::pair<size_t, HIP_MEMCPY3D>> per_entry_copies;
+  std::vector<HIP_MEMCPY3D> host_copies;
+  for (size_t i = 0; i < numOps; ++i) {
+    const hipMemcpySrcAccessOrder access_order = opList[i].srcAccessOrder;
+    if (access_order < hipMemcpySrcAccessOrderStream || access_order > hipMemcpySrcAccessOrderAny) {
+      *failIdx = i;
+      return hipErrorInvalidValue;
+    }
     hipMemcpy3DParms parms = getMemcpy3DParms(opList[i]);
-    status = ihipMemcpy3D(&parms, stream, true);
+    hipError_t status = ihipMemcpy3D_validate(&parms);
     if (status != hipSuccess) {
       *failIdx = i;
+      return status;
+    }
+    HIP_MEMCPY3D desc = getDrvMemcpy3DDesc(parms);
+    if (desc.WidthInBytes == 0 || desc.Height == 0 || desc.Depth == 0) {
+      *failIdx = i;
+      return hipErrorInvalidValue;
+    }
+
+    hipMemoryType src_memory_type;
+    hipMemoryType dst_memory_type;
+    ihipCopyMemParamSet(&desc, src_memory_type, dst_memory_type);
+
+    amd::Coord3D src_origin = {desc.srcXInBytes, desc.srcY, desc.srcZ};
+    amd::Coord3D dst_origin = {desc.dstXInBytes, desc.dstY, desc.dstZ};
+    amd::Coord3D copy_region = {desc.WidthInBytes, desc.Height, desc.Depth};
+    amd::BufferRect src_rect;
+    amd::BufferRect dst_rect;
+    amd::Image* src_image = nullptr;
+    amd::Image* dst_image = nullptr;
+    status = ihipDrvMemcpy3D_validate(&desc, src_origin, dst_origin, copy_region, &src_rect,
+                                      &dst_rect, &src_image, &dst_image);
+    if (status != hipSuccess) {
+      *failIdx = i;
+      return status;
+    }
+    if (src_memory_type == hipMemoryTypeArray || dst_memory_type == hipMemoryTypeArray) {
+      per_entry_copies.emplace_back(i, desc);
+      continue;
+    }
+
+    amd::Memory* src_memory = nullptr;
+    amd::Memory* dst_memory = nullptr;
+    hip::MemcpyType type;
+    if (src_memory_type == hipMemoryTypeHost) {
+      type = (dst_memory_type == hipMemoryTypeHost) ? hipHostToHost : hipWriteBuffer;
+    } else if (dst_memory_type == hipMemoryTypeHost) {
+      type = hipReadBuffer;
+    } else {
+      size_t src_offset = 0;
+      size_t dst_offset = 0;
+      getMemoryObjectPairs(hip::getCurrentDevice(), desc.srcDevice, desc.dstDevice, src_memory,
+                           dst_memory, src_offset, dst_offset);
+      const bool src_on_host = getMemoryType(src_memory) == hipMemoryTypeHost &&
+                               !IsManagedMemory(src_memory->getMemFlags());
+      const bool dst_on_host = getMemoryType(dst_memory) == hipMemoryTypeHost &&
+                               !IsManagedMemory(dst_memory->getMemFlags());
+      type = (src_on_host && dst_on_host)
+                 ? hipHostToHost
+                 : ihipGetMemcpyType(src_memory, dst_memory, hipMemcpyDefault);
+    }
+
+    switch (type) {
+      case hipCopyBuffer:
+      case hipCopyBufferSDMA: {
+        const int device_id = (getMemoryType(src_memory) == hipMemoryTypeDevice &&
+                               getMemoryType(dst_memory) == hipMemoryTypeHost)
+                                  ? src_memory->getUserData().deviceId
+                                  : dst_memory->getUserData().deviceId;
+        copy_ops_by_device[device_id].emplace_back(src_memory, dst_memory, src_rect, dst_rect,
+                                                   copy_region);
+        break;
+      }
+      case hipCopyBufferP2P: {
+        const int device_id = hip_stream->DeviceId();
+        copy_ops_by_device[device_id].emplace_back(src_memory, dst_memory, src_rect, dst_rect,
+                                                   copy_region);
+        break;
+      }
+      case hipHostToHost:
+        host_copies.push_back(desc);
+        break;
+      case hipWriteBuffer:
+      case hipReadBuffer:
+        per_entry_copies.emplace_back(i, desc);
+        break;
+    }
+  }
+
+  if (!host_copies.empty()) {
+    hip_stream->finish();
+    for (const HIP_MEMCPY3D& desc : host_copies) {
+      for (size_t z = 0; z < desc.Depth; ++z) {
+        for (size_t y = 0; y < desc.Height; ++y) {
+          const size_t src_offset =
+              ((desc.srcZ + z) * desc.srcHeight + desc.srcY + y) * desc.srcPitch + desc.srcXInBytes;
+          const size_t dst_offset =
+              ((desc.dstZ + z) * desc.dstHeight + desc.dstY + y) * desc.dstPitch + desc.dstXInBytes;
+          std::memcpy(static_cast<char*>(desc.dstHost) + dst_offset,
+                      static_cast<const char*>(desc.srcHost) + src_offset, desc.WidthInBytes);
+        }
+      }
+    }
+  }
+
+  amd::Command::EventWaitList marker_wait_list;
+  amd::Command* stream_wait_cmd = hip_stream->getLastQueuedCommand(true);
+  hipError_t status = EnqueueBatchCommands<amd::BatchCopyMemoryRectCommand>(
+      copy_ops_by_device, ROCCLR_COMMAND_BATCH_COPY_BUFFER_RECT, *hip_stream, true, stream_wait_cmd,
+      marker_wait_list);
+  if (stream_wait_cmd != nullptr) {
+    stream_wait_cmd->release();
+  }
+  status = EnqueueBatchMarker(status, *hip_stream, marker_wait_list);
+  if (status != hipSuccess) {
+    return status;
+  }
+
+  for (auto& [index, desc] : per_entry_copies) {
+    status = ihipMemcpyParam3D(&desc, stream, true);
+    if (status != hipSuccess) {
+      *failIdx = index;
       break;
     }
   }
-  HIP_RETURN(status);
+  return status;
+}
+
+// ================================================================================================
+hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opList, size_t* failIdx,
+                                 unsigned long long flags, hipStream_t stream) {
+  HIP_INIT_API(hipMemcpy3DBatchAsync, numOps, opList, failIdx, flags, stream);
+  size_t ignored_fail_idx = SIZE_MAX;
+  if (failIdx == nullptr) {
+    failIdx = &ignored_fail_idx;
+  }
+  if (flags != 0 || opList == nullptr || numOps == 0) {
+    *failIdx = SIZE_MAX;
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+  CHECK_STREAM_DETACHED_API(stream);
+
+  HIP_RETURN(ihipMemcpy3DBatch(numOps, opList, failIdx, stream));
+}
+
+// ================================================================================================
+hipError_t hipMemcpy3DWithAttributesAsync(struct hipMemcpy3DBatchOp* op, unsigned long long flags,
+                                          hipStream_t stream) {
+  HIP_INIT_API(hipMemcpy3DWithAttributesAsync, op, flags, stream);
+  if (flags != 0 || op == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+  CHECK_STREAM_DETACHED_API(stream);
+
+  size_t ignored_fail_idx = SIZE_MAX;
+  HIP_RETURN(ihipMemcpy3DBatch(1, op, &ignored_fail_idx, stream));
 }
 
 hipError_t ihipMemset_validate(amd::Memory* dstMemory, int64_t value, size_t valueSize,
@@ -3856,7 +4165,7 @@ hipError_t hipIpcOpenMemHandle(void** dev_ptr, hipIpcMemHandle_t handle, unsigne
     HIP_RETURN(hipErrorInvalidContext);
   }
 
-  if (ihandle->owners_device_id >= g_devices.size()) {
+  if (static_cast<size_t>(ihandle->owners_device_id) >= g_devices.size()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -3952,8 +4261,8 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
     HIP_RETURN(hipErrorInvalidValue);
   }
   size_t offset = 0;
-  amd::Memory* memObj = (ptr != nullptr) ? getMemoryObject(hip::getCurrentDevice(), ptr, offset) : nullptr;
-  int device = 0;
+  amd::Memory* memObj =
+      (ptr != nullptr) ? getMemoryObject(hip::getCurrentDevice(), ptr, offset) : nullptr;
   device::Memory* devMem = nullptr;
   memset(attributes, 0, sizeof(hipPointerAttribute_t));
 
@@ -3987,14 +4296,6 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
     if (attributes->isManaged) {
       attributes->type = hipMemoryTypeManaged;
     }
-  } else if (ptr != nullptr &&
-             PlatformState::Instance().StatCO().FindDeferredManagedVar(ptr) != nullptr) {
-    attributes->type = hipMemoryTypeManaged;
-    attributes->hostPointer = const_cast<void*>(ptr);
-    attributes->devicePointer = const_cast<void*>(ptr);
-    attributes->isManaged = true;
-    attributes->allocationFlags = 0;
-    attributes->device = hip::getCurrentDevice() ? hip::getCurrentDevice()->deviceId() : 0;
   } else {
     attributes->type = hipMemoryTypeUnregistered;
     attributes->devicePointer = nullptr;
@@ -4055,8 +4356,9 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_MEMORY_TYPE: {
-      if (memObj) {  // checks for host type or device type
-        *reinterpret_cast<uint32_t*>(data) = getMemoryType(memObj);
+      if (memObj) {
+        *reinterpret_cast<uint32_t*>(data) =
+            IsManagedMemory(memObj->getMemFlags()) ? hipMemoryTypeManaged : getMemoryType(memObj);
         break;
       }
       hipArray* arr = static_cast<hipArray*>(ptr);
@@ -4082,9 +4384,6 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
           *reinterpret_cast<uint32_t*>(data) = 0;
           return hipErrorInvalidValue;
         }
-      } else if (ptr != nullptr &&
-                 PlatformState::Instance().StatCO().FindDeferredManagedVar(ptr) != nullptr) {
-        *reinterpret_cast<uint32_t*>(data) = hipMemoryTypeManaged;
       } else {
         // Unregistered host memory (allocated on stack, heap etc.)
         *reinterpret_cast<uint32_t*>(data) = hipMemoryTypeUnregistered;
@@ -4317,8 +4616,8 @@ hipError_t hipDrvPointerGetAttributes(unsigned int numAttributes, hipPointer_att
 
   // Ignore the status, hipDrvPointerGetAttributes always returns success
   // If the ptr is invalid, the queried attributes will be assigned default values
-  for (int i = 0; i < numAttributes; ++i) {
-    hipError_t status = ihipPointerGetAttributes(data[i], attributes[i], ptr);
+  for (size_t i = 0; i < numAttributes; ++i) {
+    (void)ihipPointerGetAttributes(data[i], attributes[i], ptr);
   }
   HIP_RETURN(hipSuccess);
 }
@@ -4424,6 +4723,28 @@ hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hip
   }
 
   HIP_RETURN(ihipArray3DGetDescriptor(pArrayDescriptor, array));
+}
+
+hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned int planeIdx) {
+  HIP_INIT_API(hipArrayGetPlane, pPlaneArray, hArray, planeIdx);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
+
+  if (pPlaneArray == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  {
+    amd::ScopedLock lock(hipArraySetLock);
+    if (hip::hipArraySet.find(hArray) == hip::hipArraySet.end()) {
+      HIP_RETURN(hipErrorInvalidHandle);
+    }
+  }
+
+  *pPlaneArray = nullptr;
+
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+          "HIP does not implement multiplanar arrays, so no array has planes to return");
+  HIP_RETURN(hipErrorNotSupported);
 }
 
 hipError_t hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy, hipStream_t stream) {
@@ -4885,6 +5206,28 @@ hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* me
   HIP_RETURN(ihipMipmappedArrayGetMemoryRequirements(memoryRequirements, mipmap, device));
 }
 
+hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties,
+                                       hipArray_t array) {
+  HIP_INIT_API(hipArrayGetSparseProperties, sparseProperties, array);
+
+  if (sparseProperties == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  {
+    amd::ScopedLock lock(hipArraySetLock);
+    if (hip::hipArraySet.find(array) == hip::hipArraySet.end()) {
+      HIP_RETURN(hipErrorInvalidHandle);
+    }
+  }
+
+  *sparseProperties = {};
+
+  amd::Device* device = hip::getCurrentDevice()->devices()[0];
+  LogPrintfError("Sparse arrays not supported on the device %s", device->info().name_);
+  HIP_RETURN(hipErrorNotSupported);
+}
+
 hipError_t hipMallocMipmappedArray(hipMipmappedArray_t* mipmappedArray,
                                    const hipChannelFormatDesc* desc, hipExtent extent,
                                    unsigned int numLevels, unsigned int flags) {
@@ -4929,7 +5272,7 @@ hipError_t hipExternalMemoryGetMappedMipmappedArray(
   CHECK_STREAM_CAPTURE_SUPPORTED();
 
   auto buf = reinterpret_cast<amd::ExternalBuffer*>(extMem);
-  const device::Memory* devMem = buf->getDeviceMemory(*hip::getCurrentDevice()->devices()[0]);
+  (void)buf->getDeviceMemory(*hip::getCurrentDevice()->devices()[0]);
 
   HIP_ARRAY3D_DESCRIPTOR allocateArray = {mipmapDesc->extent.width,
                                           mipmapDesc->extent.height,

@@ -188,7 +188,7 @@ static int create_system_buffer(struct workload *w, struct buffer *buffer,
   create.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
   create.access_count = 1;
   create.accesses = &access;
-  CALL(w->api->memory_create(w->system_scope, &create, &buffer->memory));
+  CALL(w->api->memory_create(w->system_scope, &create, &buffer->memory, NULL));
 
   amdf_memory_map_info_t map;
   INIT(map, AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO);
@@ -274,7 +274,7 @@ static int create_local_buffer(struct workload *w) {
       (w->public_local ? AMDF_MEMORY_FLAG_HOST_VISIBLE : 0);
   create.access_count = 1;
   create.accesses = &access;
-  CALL(w->api->memory_create(w->local_scope, &create, &w->local.memory));
+  CALL(w->api->memory_create(w->local_scope, &create, &w->local.memory, NULL));
 
   amdf_memory_info_t info;
   INIT(info, AMDF_STRUCTURE_TYPE_MEMORY_INFO);
@@ -325,7 +325,7 @@ static int check_system_pair(struct workload *w, struct buffer *buffer,
   INIT(host, AMDF_STRUCTURE_TYPE_MEMORY_SITE);
   INIT(device, AMDF_STRUCTURE_TYPE_MEMORY_SITE);
   host.kind = AMDF_MEMORY_SITE_KIND_HOST;
-  host.value.host_mapping = buffer->mapping;
+  host.value.host.mapping = buffer->mapping;
   device.kind = AMDF_MEMORY_SITE_KIND_DEVICE;
   device.value.device.memory = buffer->memory;
   device.value.device.queue_family_ordinal = w->family;
@@ -352,7 +352,7 @@ static int check_public_local_pair(struct workload *w,
   INIT(host, AMDF_STRUCTURE_TYPE_MEMORY_SITE);
   INIT(device, AMDF_STRUCTURE_TYPE_MEMORY_SITE);
   host.kind = AMDF_MEMORY_SITE_KIND_HOST;
-  host.value.host_mapping = w->local.mapping;
+  host.value.host.mapping = w->local.mapping;
   device.kind = AMDF_MEMORY_SITE_KIND_DEVICE;
   device.value.device.memory = w->local.memory;
   device.value.device.queue_family_ordinal = w->family;
@@ -606,7 +606,7 @@ static int release_buffer(struct workload *w, struct buffer *buffer) {
     buffer->mapping = NULL;
   }
   if (buffer->memory != NULL) {
-    CALL(w->api->memory_destroy(buffer->memory));
+    CALL(w->api->memory_destroy(buffer->memory, NULL));
     buffer->memory = NULL;
   }
   return 0;

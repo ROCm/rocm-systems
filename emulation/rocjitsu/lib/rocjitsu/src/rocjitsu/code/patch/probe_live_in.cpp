@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/probe_live_in.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/exec_state.h" // complete type for the null ExecMaskAnalysis
@@ -43,8 +44,9 @@ const char *class_prefix(RegClass cls) {
 std::string format_register_set(const RegisterSet &regs) {
   std::string out;
   regs.for_each([&](RegisterRef ref) {
-    if (!out.empty())
+    if (!out.empty()) {
       out += ", ";
+    }
     out += class_prefix(ref.cls);
     out += std::to_string(ref.index);
   });
@@ -53,8 +55,9 @@ std::string format_register_set(const RegisterSet &regs) {
 
 std::optional<RegisterSet> analyze_probe_live_ins(const AmdGpuCodeObject &probe_obj,
                                                   const ResolvedProbeSymbol &sym,
-                                                  rj_code_arch_t arch, const ProbeAbi &abi,
-                                                  std::string *error_out) {
+                                                  rocjitsu::IsaFamily arch, const ProbeAbi &abi,
+                                                  uint8_t wave_size, std::string *error_out,
+                                                  ProbeEntryState entry_state) {
   if (!is_valid_probe_abi(abi)) {
     report(error_out, "probe ABI is not usable, cannot analyze live-ins");
     return std::nullopt;
@@ -63,7 +66,7 @@ std::optional<RegisterSet> analyze_probe_live_ins(const AmdGpuCodeObject &probe_
   // Resolving a gfx1250 vector operand needs a block where MODE.VGPR_MSB is
   // known zero (LivenessAnalysisOptions::entry_block). A trampoline anchor
   // carries no such guarantee and the call envelope sets no mode.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+  if (arch == rocjitsu::IsaFamily::Cdna5 && entry_state != ProbeEntryState::ZeroVgprBanks) {
     report(error_out, "gfx1250 probe bodies are not analyzable: MODE.VGPR_MSB at the "
                       "instrumentation site is unknown, so encoded vector operands do not "
                       "identify physical VGPRs");
@@ -126,16 +129,21 @@ std::optional<RegisterSet> analyze_probe_live_ins(const AmdGpuCodeObject &probe_
   const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(probe_obj.image_data()),
                                        probe_obj.image_size());
   for (const KernelDescriptorInfo &kd :
-       scan_kernel_descriptors(image, text->sectionOffset(), text->size(), text_index))
+       scan_kernel_descriptors(image, text->sectionOffset(), text->size(), text_index)) {
     spec.kernel_entries.insert(kd.entry_text_offset);
+  }
   spec.own_entries.insert(entry_text_offset);
 
   const std::vector<BasicBlock *> scope =
       reachable_kernel_blocks(blocks, block_index, block_positions, *entry, spec);
 
+  // Callable admission proves VSKIP clear at the call site and rejects bodies
+  // that can enable it. Analyze the body under that ABI entry precondition.
+  const BasicBlock *const vskip_clear_entries[] = {entry};
   LivenessAnalysisOptions options;
   options.arch = arch;
   options.entry_block = entry;
+  options.vskip_clear_entry_blocks = vskip_clear_entries;
   options.text =
       std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
   // Otherwise no EXEC-masked def is ever a kill and every VGPR the probe reads
@@ -144,13 +152,18 @@ std::optional<RegisterSet> analyze_probe_live_ins(const AmdGpuCodeObject &probe_
   // Only the entry block's live-in is needed, so skip materializing
   // per-instruction snapshots for the whole scope.
   options.restrict_live_before_to_instructions = true;
-  const LivenessAnalysis liveness{KernelBlockScope(scope), nullptr, options};
+  const LivenessAnalysis liveness{KernelBlockScope(scope), wave_size, nullptr, options};
 
   // Relative and GPR-indexed access displace an encoded VGPR index at runtime,
   // so the decoded operands no longer name every register the body reads. That
   // loses live-ins rather than inventing them -- the direction that lets a bad
   // probe through.
-  if (!liveness.global_vgpr_usage_is_complete()) {
+  auto maybe_complete = liveness.global_vgpr_usage_is_complete();
+  if (maybe_complete.failed()) {
+    report(error_out, "probe liveness is unavailable");
+    return std::nullopt;
+  }
+  if (!maybe_complete.value()) {
     report(error_out, "probe body has relative or GPR-indexed VGPR access, so its register reads "
                       "cannot be enumerated");
     return std::nullopt;
@@ -164,7 +177,12 @@ std::optional<RegisterSet> analyze_probe_live_ins(const AmdGpuCodeObject &probe_
   // What the convention supplies is a genuine live-in -- the closing
   // s_setpc_b64 reads the link pair and nothing writes it -- but the trampoline
   // produces it, so it is not a dependence on kernel-entry state.
-  const RegisterSet live_in = liveness.block_liveness(*entry).live_in;
+  auto maybe_block = liveness.block_liveness(*entry);
+  if (maybe_block.failed()) {
+    report(error_out, "probe liveness is unavailable");
+    return std::nullopt;
+  }
+  const RegisterSet live_in = maybe_block.value()->live_in;
   return live_in - supplied_registers(abi);
 }
 

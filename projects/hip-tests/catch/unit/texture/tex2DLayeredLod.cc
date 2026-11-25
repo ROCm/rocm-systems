@@ -7,6 +7,7 @@
 #include <hip_test_common.hh>
 
 #include "kernels.hh"
+#include "mip_selection_common.hh"
 #include "test_fixture.hh"
 
 /**
@@ -157,6 +158,22 @@ HIP_TEMPLATE_TEST_CASE(Unit_tex2DLayeredLod_Positive_ReadModeNormalizedFloat, ch
       }
     }
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Verify nonzero mip and array-layer selection with pointer and value overloads.
+ * Test source
+ * ------------------------
+ *    - unit/texture/tex2DLayeredLod.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.7
+ */
+HIP_TEST_CASE(Unit_tex2DLayeredLod_NonzeroMipSelection) {
+  CHECK_IMAGE_SUPPORT;
+  CheckMipSelection<2, true>();
 }
 
 /**

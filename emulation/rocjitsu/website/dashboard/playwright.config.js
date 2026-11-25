@@ -13,10 +13,18 @@ export default defineConfig({
   testDir: './tests/e2e',
   testMatch: /.*\.e2e\.js$/,
   fullyParallel: true,
+  workers: 2,
+  retries: 0,
+  timeout: 30_000,
+  expect: { timeout: 7_000 },
+  outputDir: './test-results/fixtures',
   forbidOnly: Boolean(process.env.CI),
   reporter: 'line',
   use: {
     baseURL,
+    colorScheme: 'light',
+    locale: 'en-US',
+    timezoneId: 'UTC',
     trace: 'retain-on-failure',
   },
   // Rendered behavior is asserted once under desktop; the mobile project only replays the

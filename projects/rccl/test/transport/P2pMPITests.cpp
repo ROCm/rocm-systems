@@ -377,8 +377,10 @@ public:
             TEST_INFO("Using test communicator with CE memcpy mode");
         }
 
-        // Test with a smaller buffer size to ensure successful operations
-        const size_t buffer_size = 1024 * sizeof(float);
+        // Stay above the LL/LL128 latency windows so this exercises SIMPLE and
+        // therefore the Copy Engine proxy rather than a kernel-only protocol.
+        const size_t count       = 2 * 1024 * 1024;
+        const size_t buffer_size = count * sizeof(float);
         void*        send_buffer = nullptr;
         void*        recv_buffer = nullptr;
 
@@ -398,7 +400,7 @@ public:
 
         // Initialize send buffer with test pattern
         hip_result = initializeBufferWithPattern<float>(
-            send_buffer, 1024, [rank = config.world_rank](size_t i) {
+            send_buffer, count, [rank = config.world_rank](size_t i) {
                 return static_cast<float>(rank * kSmallPatternMultiplier + i);
             });
         ASSERT_EQ(hipSuccess, hip_result)
@@ -411,30 +413,31 @@ public:
             TEST_INFO("Allocated buffers for CE memcpy testing");
         }
 
-        // Test: AllReduce operation - this triggers proxyConnect and proxyProgress
-        // in CE memcpy mode using the test communicator and stream
-        const ncclResult_t allreduce_result = ncclAllReduce(send_buffer,
-                                                            recv_buffer,
-                                                            1024,
-                                                            ncclFloat,
-                                                            ncclSum,
-                                                            getActiveCommunicator(),
-                                                            getActiveStream());
-        ASSERT_EQ(ncclSuccess, allreduce_result)
-            << "Rank " << config.world_rank
-            << ": AllReduce with CE memcpy failed, result: " << allreduce_result << " ("
-            << ncclGetErrorString(allreduce_result) << ")";
-        if(allreduce_result == ncclSuccess && config.world_rank == 0)
-        {
-            TEST_INFO("AllReduce with CE memcpy successful (exercises proxyProgress)");
-        }
+        const int send_peer = (config.world_rank + 1) % config.world_size;
+        const int recv_peer = (config.world_rank + config.world_size - 1) % config.world_size;
+        ASSERT_EQ(ncclSuccess, ncclGroupStart());
+        ASSERT_EQ(ncclSuccess,
+                  ncclSend(send_buffer, count, ncclFloat, send_peer,
+                           getActiveCommunicator(), getActiveStream()));
+        ASSERT_EQ(ncclSuccess,
+                  ncclRecv(recv_buffer, count, ncclFloat, recv_peer,
+                           getActiveCommunicator(), getActiveStream()));
+        ASSERT_EQ(ncclSuccess, ncclGroupEnd());
 
         // Synchronize stream using getActiveStream()
         hip_result = hipStreamSynchronize(getActiveStream());
         ASSERT_EQ(hipSuccess, hip_result)
-            << "Rank " << config.world_rank
-            << ": Stream sync failed after CE memcpy AllReduce, error: "
+            << "Rank " << config.world_rank << ": Stream sync failed after CE Send/Recv, error: "
             << hipGetErrorString(hip_result);
+
+        size_t error_idx;
+        float expected_val, actual_val;
+        EXPECT_TRUE(verifyBufferData<float>(
+            recv_buffer, count,
+            [recv_peer](size_t i) { return static_cast<float>(recv_peer * kSmallPatternMultiplier + i); },
+            kMaxValidationElements, 1e-5, &error_idx, &expected_val, &actual_val))
+            << "Rank " << config.world_rank << ": CE Send/Recv data mismatch at " << error_idx
+            << ", expected " << expected_val << ", got " << actual_val;
 
         if(config.world_rank == 0)
         {
@@ -508,6 +511,9 @@ public:
         // Step 5: Perform ncclSend/ncclRecv which internally triggers ncclRegisterP2pIpcBuffer
         const size_t count = num_floats;
 
+        // Drain setup leftovers so the check after the send/recv covers only that operation.
+        (void)hipGetLastError();
+
         auto nccl_result = ncclGroupStart();
         ASSERT_EQ(ncclSuccess, nccl_result)
             << "Rank " << config.world_rank << ": ncclGroupStart failed";
@@ -543,6 +549,13 @@ public:
         hip_result = hipStreamSynchronize(getActiveStream());
         ASSERT_EQ(hipSuccess, hip_result)
             << "Rank " << config.world_rank << ": hipStreamSynchronize failed";
+
+        // ROCM-33799: registration falls back silently for hipMalloc buffers and must not
+        // leave an error behind for the application's next hipGetLastError.
+        hip_result = hipGetLastError();
+        EXPECT_EQ(hipSuccess, hip_result)
+            << "Rank " << config.world_rank
+            << ": registered send/recv left a stale HIP error: " << hipGetErrorString(hip_result);
 
         if(config.world_rank == 0)
         {

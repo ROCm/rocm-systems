@@ -1,0 +1,29 @@
+# Fortran binding of roctx: see fortran-bindings.yml.
+name: Fortran bindings (roctx)
+
+on:
+  pull_request:
+    paths:
+      - 'projects/rocprofiler-sdk/source/include/rocprofiler-sdk-roctx/**.h'
+      - 'bindings/fortran/roctx/metadata/**'
+      - '.github/workflows/fortran-bindings-roctx.yml'
+      - '.github/workflows/fortran-bindings.yml'
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bindings:
+    uses: ./.github/workflows/fortran-bindings.yml
+    with:
+      lib: roctx
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}

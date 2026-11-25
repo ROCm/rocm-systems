@@ -7,26 +7,38 @@
 //! translation stay here. rocddi owns only bounded native submission state.
 
 use crate::generated::amdf::*;
-use crate::instance::{self, Device};
 use crate::memory;
+use crate::session::{self, Device};
 use crate::support::*;
 use rocddi::device::gpu::queue::{
     KernelQueue as NativeQueue, KernelQueueFormat, KernelQueueStatus as NativeStatus,
     KernelQueueWait,
 };
 use rocddi::memory::storage::Owned;
+use rocddi::memory::storage::RetainOnDrop;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
+/// Public kernel queue with its native submission and retirement state.
 struct KernelQueue {
+    /// Driver-mediated queue that owns accepted native submissions.
     native: NativeQueue,
+    /// Borrowed public device kept live by the queue registration count.
     device: *mut Device,
+    /// Immutable creation facts returned through the AMDF ABI.
     info: amdf_kernel_queue_info_t,
+    /// Highest submission ID published to callers.
     accepted: AtomicU64,
+    /// Prevents new work once public destruction begins.
     destroying: AtomicBool,
 }
 
 impl KernelQueue {
+    fn require_current_process(&self) -> Result<(), u64> {
+        // SAFETY: A live kernel queue borrows its registered device.
+        unsafe { &*self.device }.require_current_process()
+    }
+
     fn require_usable(&self) -> Result<(), u64> {
         if self.destroying.load(Ordering::Acquire) {
             Err(PRECONDITION)
@@ -79,7 +91,8 @@ pub(crate) unsafe extern "C" fn create(
             AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO,
         )?;
         let device = object(pointer.cast::<Device>())?;
-        let family = instance::family(device.native.endpoint(), create_info.queue_family_ordinal)?;
+        device.require_current_process()?;
+        let family = session::family(device.native.endpoint(), create_info.queue_family_ordinal)?;
         if family.publication_modes & AMDF_QUEUE_PUBLICATION_MODE_KERNEL == 0 {
             return Err(UNSUPPORTED);
         }
@@ -88,7 +101,8 @@ pub(crate) unsafe extern "C" fn create(
             AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA => KernelQueueFormat::Sdma,
             _ => return Err(UNSUPPORTED),
         };
-        let slot = Owned::<KernelQueue>::try_new_uninit().map_err(|_| EXHAUSTED)?;
+        let instance = session::device_instance(device);
+        let slot = instance.owner_slot::<KernelQueue>()?;
         register(&device.queues)?;
         let gpu = match device.native.gpu() {
             Ok(gpu) => gpu,
@@ -150,6 +164,7 @@ pub(crate) unsafe extern "C" fn status(
     crate::support::boundary(|| unsafe {
         let out = output(out, AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS)?;
         let queue = object(pointer.cast::<KernelQueue>())?;
+        queue.require_current_process()?;
         queue.require_usable()?;
         out.publish(queue.public_status(queue.native.status()));
         Ok(())
@@ -163,6 +178,7 @@ pub(crate) unsafe extern "C" fn refresh_status(
     crate::support::boundary(|| unsafe {
         let out = output(out, AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS)?;
         let queue = object(pointer.cast::<KernelQueue>())?;
+        queue.require_current_process()?;
         queue.require_usable()?;
         let sample = queue
             .native
@@ -203,6 +219,7 @@ pub(crate) unsafe extern "C" fn request_notification(
             _ => return Err(INVALID),
         }
         let queue = object(pointer.cast::<KernelQueue>())?;
+        queue.require_current_process()?;
         queue.require_usable()?;
         if submission > queue.accepted.load(Ordering::Acquire) {
             return Err(RANGE);
@@ -220,6 +237,7 @@ pub(crate) unsafe extern "C" fn wait(
     crate::support::boundary(|| unsafe {
         let start = Instant::now();
         let queue = object(pointer.cast::<KernelQueue>())?;
+        queue.require_current_process()?;
         queue.require_usable()?;
         let remaining = if timeout_nanoseconds == AMDF_TIMEOUT_INFINITE {
             AMDF_TIMEOUT_INFINITE
@@ -255,6 +273,7 @@ pub(crate) unsafe extern "C" fn submit(
         }
         let descriptors = array(submit_info.commands, submit_info.command_count)?;
         let queue = object(pointer.cast::<KernelQueue>())?;
+        queue.require_current_process()?;
         queue.require_usable()?;
         if (*queue.device).current_reset_epoch() != queue.info.reset_epoch {
             return Err(LOST);
@@ -271,6 +290,11 @@ pub(crate) unsafe extern "C" fn submit(
             descriptor.byte_offset,
             descriptor.byte_length,
         )?;
+        if queue.info.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA
+            && command.device_address % 32 != 0
+        {
+            return Err(INVALID);
+        }
         // SAFETY: kernel_command validates current attachment and execute
         // permission. The AMDF submit contract requires the caller to keep
         // command storage and indirect dependencies live and unchanged until
@@ -279,7 +303,9 @@ pub(crate) unsafe extern "C" fn submit(
             .native
             .submit(command)
             .map_err(|error| queue.observe_error(&error))?;
-        queue.accepted.store(submission, Ordering::Release);
+        // Native submissions can complete their slot in a different order
+        // from the callers publishing their IDs here.
+        queue.accepted.fetch_max(submission, Ordering::AcqRel);
         out.write(submission);
         Ok(())
     })
@@ -287,6 +313,7 @@ pub(crate) unsafe extern "C" fn submit(
 
 pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_kernel_queue_t) -> u64 {
     crate::support::boundary(|| unsafe {
+        object(pointer.cast::<KernelQueue>())?.require_current_process()?;
         let queue = exclusive(pointer.cast::<KernelQueue>())?;
         if !queue.destroying.load(Ordering::Acquire) {
             let accepted = queue.accepted.load(Ordering::Acquire);
@@ -298,18 +325,23 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_kernel_queue_t) -> u6
             }
             queue.destroying.store(true, Ordering::Release);
         }
-        let result = queue
-            .native
-            .destroy()
-            .map_err(|error| queue.observe_error(&error));
+        let result = queue.native.destroy().map_err(|error| {
+            if error.kind() == rocddi::ErrorKind::Busy && error.native_status().is_none() {
+                // Native preflight rejected destruction before releasing the
+                // queue. BUSY promises that this public handle can be retried.
+                queue.destroying.store(false, Ordering::Release);
+            }
+            queue.observe_error(&error)
+        });
+        if result == Err(BUSY) && !queue.destroying.load(Ordering::Acquire) {
+            return result;
+        }
         unregister(&(*queue.device).queues);
-        let owner = Owned::from_raw(pointer.cast::<KernelQueue>());
-        if result.is_err() {
-            // A failed native cleanup consumes the public handle. Retain the
-            // native owner and its dependencies without a second release.
-            std::mem::forget(owner);
-        } else {
-            drop(owner);
+        // A failed native cleanup consumes the public handle. Retain the
+        // native owner and its dependencies without a second release.
+        let owner = RetainOnDrop::new(Owned::from_raw(pointer.cast::<KernelQueue>()));
+        if result.is_ok() {
+            drop(owner.into_inner());
         }
         result
     })

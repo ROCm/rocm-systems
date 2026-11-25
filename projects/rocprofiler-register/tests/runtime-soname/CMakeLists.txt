@@ -111,3 +111,12 @@ rocprofiler_register_add_runtime_library_layout_test(test-runtime-sdk-colocated-
                                                      sdk-colocated-precedence)
 rocprofiler_register_add_runtime_library_layout_test(
     test-runtime-sdk-explicit-override-no-fallback sdk-explicit-override-no-fallback)
+rocprofiler_register_add_runtime_library_layout_test(
+    test-runtime-attach-sdk-colocated-precedence attach-sdk-colocated-precedence)
+rocprofiler_register_add_runtime_library_layout_test(
+    test-runtime-attach-no-sibling-sdk-prefers-register-dir
+    attach-no-sibling-sdk-prefers-register-dir)
+rocprofiler_register_add_runtime_library_layout_test(
+    test-runtime-attach-register-dir-fallback attach-register-dir-fallback)
+rocprofiler_register_add_runtime_library_layout_test(
+    test-runtime-attach-core-follows-attach-library attach-core-follows-attach-library)

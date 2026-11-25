@@ -256,10 +256,11 @@ hw_queue_drained(uint64_t real_rdid, uint64_t next_submit_pos)
 uint64_t
 close_admission_and_snapshot_locked(QueueState& state);
 
-/// Wait, bounded by an absolute kfd::steady_now_ns() deadline, until this queue's
-/// hardware read index has caught up with the sampled submit position `P`, so
-/// every packet in that snapshot -- hence every registered START -- has been
-/// consumed by the CP before the caller decides anything was lost.
+/// Wait, bounded by an absolute kfd::steady_now_ns() deadline, until the CP has
+/// retired every packet before the sampled submit position `P` -- its read index
+/// has caught up with `P`, or every slot the read index has not yet passed is back
+/// to INVALID -- so every packet in that snapshot, hence every registered START,
+/// has been consumed by the CP before the caller decides anything was lost.
 ///
 /// False on deadline; true immediately when real_rdid is null or P is already
 /// drained. _locked: the caller holds state.drain_mu, so real_rdid cannot be freed

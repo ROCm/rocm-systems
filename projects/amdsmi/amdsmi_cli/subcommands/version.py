@@ -26,7 +26,9 @@ class VersionCommands:
         # if no args are given, display everything available on this build
         if args.gpu_version is None and args.cpu_version is None and args.nic_version is None:
             args.gpu_version = True
-            args.cpu_version = self.helpers.is_amd_hsmp_initialized()
+            args.cpu_version = self.helpers.is_amd_hsmp_initialized() or bool(
+                self.helpers.get_devices_without_driver("hsmp_acpi")
+            )
             args.nic_version = True
 
         if not self.group_check_printed:
@@ -55,16 +57,30 @@ class VersionCommands:
         self.logger.output["amdgpu_version"] = "N/A"
         self.logger.output["amd_hsmp_driver_version"] = "N/A"
         self.logger.output["nic_driver_version"] = "N/A"
+        # Appended after the older keys so existing CSV columns keep their positions
+        self.logger.output["amdgpu_package"] = "N/A"
 
-        if args.gpu_version:
+        if args.gpu_version and not self.helpers.is_driver_loaded("amdgpu"):
+            gpu_version_str = "not loaded"
+            self.logger.output["amdgpu_version"] = gpu_version_str
+        elif args.gpu_version:
             try:
                 gpus = amdsmi_interface.amdsmi_get_processor_handles()
                 if isinstance(gpus, list) and len(gpus) > 0:
-                    driver_info = amdsmi_interface.amdsmi_get_gpu_driver_info(gpus[0])
-                    self.logger.output["amdgpu_version"] = driver_info["driver_full_version"]
+                    gpu_version_info = self.helpers.get_gpu_driver_info(gpus[0])
+                    gpu_version_str = gpu_version_info["driver_full_version"]
+                    self.logger.output["amdgpu_package"] = gpu_version_info["driver_package"]
+                else:
+                    gpu_version_str = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to get amdgpu driver versions | %s", e.get_error_info())
-        if args.cpu_version:
+                gpu_version_str = "N/A"
+
+            self.logger.output["amdgpu_version"] = gpu_version_str
+        if args.cpu_version and not self.helpers.is_driver_loaded("hsmp_acpi"):
+            cpu_version_str = "not loaded"
+            self.logger.output["amd_hsmp_driver_version"] = cpu_version_str
+        elif args.cpu_version:
             try:
                 ret = amdsmi_interface.amdsmi_get_cpu_handles()
                 cpus = ret["processor_handles"]
@@ -83,7 +99,12 @@ class VersionCommands:
             self.logger.output["amd_hsmp_driver_version"] = cpu_version_str
 
         nic_version_str = "N/A"
-        if args.nic_version:
+        if args.nic_version and not any(
+            self.helpers.is_driver_loaded(driver) for driver in ("ionic", "bnxt_en", "bng_en")
+        ):
+            nic_version_str = "not loaded"
+            self.logger.output["nic_driver_version"] = nic_version_str
+        elif args.nic_version:
             try:
                 ainic_device_handles = self.helpers.get_ainic_handles()
                 for nic_id, device_handle in enumerate(ainic_device_handles):
@@ -105,9 +126,12 @@ class VersionCommands:
             )
             if args.gpu_version:
                 human_readable_output = (
-                    human_readable_output
-                    + f" | amdgpu version: {self.logger.output['amdgpu_version']}"
+                    human_readable_output + f" | amdgpu version: {gpu_version_str}"
                 )
+                if self.logger.output["amdgpu_package"] != "N/A":
+                    human_readable_output += (
+                        f" | amdgpu package: {self.logger.output['amdgpu_package']}"
+                    )
             if args.cpu_version:
                 human_readable_output = (
                     human_readable_output + f" | hsmp version: {cpu_version_str}"

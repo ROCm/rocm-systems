@@ -17,12 +17,12 @@
 
 #include <gtest/gtest.h>
 
-#include <cstdlib>
 #include <string>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
 #include "fwupd_carveout_internal.h"
+#include "test_fixture_utils.h"
 
 using amd::smi::detail::BiosSetting;
 using amd::smi::detail::ClassifySetReply;
@@ -56,9 +56,8 @@ TEST(GpuUnit, FwupdCarveoutGetReportsNotSupportedOrSaneInfo) {
 }
 
 TEST(GpuUnit, FwupdCarveoutSetReportsNotSupportedWithoutMutating) {
-  setenv("AMDSMI_DRY_RUN", "1", 1);
+  const amd::smi::testing::ScopedEnvVar dry_run("AMDSMI_DRY_RUN", "1");
   const amdsmi_status_t ret = amd::smi::fwupd_set_carveout(0);
-  unsetenv("AMDSMI_DRY_RUN");
   EXPECT_TRUE(ret == AMDSMI_STATUS_NOT_SUPPORTED || ret == AMDSMI_STATUS_SUCCESS ||
               ret == AMDSMI_STATUS_NO_PERM)
       << "unexpected status: " << ret;

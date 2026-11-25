@@ -13,6 +13,7 @@
 #include <array>
 #include <memory>
 
+#include "algorithms/dda/device/dda_kernel_params.h"
 #include "algorithms/dda/device/device_buffer.h"
 #include "algorithms/dda/ipc/ipc_mem_handler.h"
 
@@ -33,13 +34,21 @@ __device__ __forceinline__ uint32_t cas(uint32_t* addr, uint32_t compare, uint32
 }
 
 template <std::memory_order Sem>
-__device__ __forceinline__ void putFlag(uint32_t* addr) {
-  while (cas<Sem>(addr, 0, 1) != 0);
+__device__ __forceinline__ bool putFlag(uint32_t* addr, DdaKernelParams params) {
+  int spins = 0;
+  while (cas<Sem>(addr, 0, 1) != 0) {
+    if (params.abortSpinTick(spins)) return false;
+  }
+  return true;
 }
 
 template <std::memory_order Sem>
-__device__ __forceinline__ void waitFlag(uint32_t* addr) {
-  while (cas<Sem>(addr, 1, 0) != 1);
+__device__ __forceinline__ bool waitFlag(uint32_t* addr, DdaKernelParams params) {
+  int spins = 0;
+  while (cas<Sem>(addr, 1, 0) != 1) {
+    if (params.abortSpinTick(spins)) return false;
+  }
+  return true;
 }
 
 constexpr int NRANKS = 8;
@@ -55,27 +64,27 @@ public:
 
   __host__ DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf);
 
-  __device__ inline void setFlagNoMemFence(int senderRank, int senderBlock) {
-    putFlag<std::memory_order_relaxed>(flags_ + getFlagIdx(senderRank, senderBlock));
+  __device__ inline bool setFlagNoMemFence(int senderRank, int senderBlock, DdaKernelParams params) const {
+    return putFlag<std::memory_order_relaxed>(flags_ + getFlagIdx(senderRank, senderBlock), params);
   }
 
-  __device__ inline void waitFlagNoMemFence(int senderRank, int senderBlock) {
-    waitFlag<std::memory_order_relaxed>(flags_ + getFlagIdx(senderRank, senderBlock));
+  __device__ inline bool waitFlagNoMemFence(int senderRank, int senderBlock, DdaKernelParams params) const {
+    return waitFlag<std::memory_order_relaxed>(flags_ + getFlagIdx(senderRank, senderBlock), params);
   }
 
-  __device__ inline void setFlagWithMemFence(int senderRank, int senderBlock) {
-    putFlag<std::memory_order_release>(flags_ + getFlagIdx(senderRank, senderBlock));
+  __device__ inline bool setFlagWithMemFence(int senderRank, int senderBlock, DdaKernelParams params) const {
+    return putFlag<std::memory_order_release>(flags_ + getFlagIdx(senderRank, senderBlock), params);
   }
 
-  __device__ inline void waitFlagWithMemFence(int senderRank, int senderBlock) {
-    waitFlag<std::memory_order_acquire>(flags_ + getFlagIdx(senderRank, senderBlock));
+  __device__ inline bool waitFlagWithMemFence(int senderRank, int senderBlock, DdaKernelParams params) const {
+    return waitFlag<std::memory_order_acquire>(flags_ + getFlagIdx(senderRank, senderBlock), params);
   }
 
 private:
   int nBlocks_;
   FlagType* flags_;
 
-  __device__ inline int getFlagIdx(int rank, int block) {
+  __device__ inline int getFlagIdx(int rank, int block) const {
     return block * NRANKS + rank;
   }
 };
@@ -93,10 +102,22 @@ public:
   __host__ IpcGpuBarrier() = default;
 
   static __host__ std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> mallocAndInit(
-    int nRanks, int nBlocks, int selfRank, void* bootstrap);
+    int nRanks, int nBlocks, int selfRank, void* bootstrap, DdaKernelParams params);
 
+  // `aborted` is the caller-held sticky abort state of this block: false at kernel
+  // start and passed to every barrier of the kernel. Once any signaling lane gives
+  // up a barrier on abort, the block signals no later barrier, so a late peer cannot
+  // pair its earlier flag with this block's next one and read data this rank never
+  // finished producing. The signaling lanes all sit in wave 0, so it is uniform
+  // across them.
+  //
+  // It is held by the caller, not by this object, on purpose. Kernels take the
+  // barrier by value; writing a member of a by-value kernel argument makes the
+  // compiler copy the whole object (mailbox table included) to per-lane scratch at
+  // every launch, because allMailboxes_ is indexed per lane. Keeping the barrier
+  // const lets it be read straight from the kernarg segment.
   template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess>
-  __device__ __forceinline__ void syncOnSameBlockIdx() {
+  __device__ __forceinline__ void syncOnSameBlockIdx(bool& aborted) const {
     enum class MemFenceType {
       RELEASE_ACQUIRE,
       RELEASE_ONLY,
@@ -113,19 +134,24 @@ public:
     if constexpr (hasPreviousMemAccess) {
       __syncthreads();
     }
-    if (threadIdx.x < NRANKS) {
+    if (threadIdx.x < NRANKS && !aborted) {
       auto peerRank = threadIdx.x;
+      bool signaled = false;
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
-        allMailboxes_[peerRank].setFlagNoMemFence(selfRank_, blockIdx.x);
+        signaled = allMailboxes_[peerRank].setFlagNoMemFence(selfRank_, blockIdx.x, params_);
       } else {
-        allMailboxes_[peerRank].setFlagWithMemFence(selfRank_, blockIdx.x);
+        signaled = allMailboxes_[peerRank].setFlagWithMemFence(selfRank_, blockIdx.x, params_);
       }
 
-      if constexpr (fenceType == MemFenceType::RELEASE_ONLY) {
-        allMailboxes_[selfRank_].waitFlagNoMemFence(peerRank, blockIdx.x);
-      } else {
-        allMailboxes_[selfRank_].waitFlagWithMemFence(peerRank, blockIdx.x);
+      bool arrived = false;
+      if (signaled) {
+        if constexpr (fenceType == MemFenceType::RELEASE_ONLY) {
+          arrived = allMailboxes_[selfRank_].waitFlagNoMemFence(peerRank, blockIdx.x, params_);
+        } else {
+          arrived = allMailboxes_[selfRank_].waitFlagWithMemFence(peerRank, blockIdx.x, params_);
+        }
       }
+      aborted = __any(!arrived);
     }
     if constexpr (hasSubsequentMemAccess) {
       __syncthreads();
@@ -136,8 +162,10 @@ private:
   int nBlocks_{-1};
   int selfRank_{-1};
   std::array<DeviceMailbox, NRANKS> allMailboxes_;
+  DdaKernelParams params_{};
 
-  __host__ IpcGpuBarrier(int nRanks, int nBlocks, int selfRank, const std::array<DeviceMailbox, NRANKS>& allMailboxes);
+  __host__ IpcGpuBarrier(int nRanks, int nBlocks, int selfRank, const std::array<DeviceMailbox, NRANKS>& allMailboxes,
+                         DdaKernelParams params);
 };
 
 } // namespace dda::common

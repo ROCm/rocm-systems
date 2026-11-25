@@ -18,11 +18,9 @@ The upstream GIN framework also provides a host-side IB proxy backend
 Building with `--rocshmem-gin` requires the
 [rocm-systems](https://github.com/ROCm/rocm-systems) mono-repo, which
 provides both `projects/rccl` and `projects/rocshmem` in a single tree.
-`install.sh` auto-detects the sibling rocshmem project and builds it from
-source via ExternalProject.  The device linker pipeline needs access to
-intermediate build artifacts (per-arch `.bc` files under
-`projects/rocshmem/build/bitcode/`) that are not part of the installed
-package, so a pre-built rocSHMEM install is not sufficient.
+`install.sh` auto-detects the sibling rocshmem project. It uses the rocSHMEM
+**source** (headers and a small set of provider/SDMA `.cpp` files that rccl
+compiles in itself) — it does **not** build or link the rocSHMEM library.
 
 RCCL provides two rocSHMEM integration modes (mutually exclusive):
 
@@ -31,16 +29,17 @@ cd projects/rccl
 ./install.sh --rocshmem-gin --amdgpu_targets=gfx950
 ```
 
-**`--rocshmem-gin`** builds rocSHMEM from source for headers, device bitcode,
-and host libraries.  `librocshmem.a` is **not** linked into `librccl.so`.
-GIN device symbols (QueuePair) are resolved via per-arch bitcode injection
-in the device linker pipeline.  GIN host plugin symbols are left unresolved
-in `librccl.so` (`--allow-shlib-undefined`) and resolved at runtime from
-the executable, which links `librocshmem.a` and exports symbols via
-`-rdynamic`.
+**`--rocshmem-gin`** produces a self-contained `librccl.so`: the GIN host code
+it needs is compiled directly into the library (the GDA factory and mlx5
+provider from `projects/rocshmem/src`, routed through rccl's own IB-verbs
+shim), and the GIN device code is header-only. So `librocshmem.a` is neither
+built nor linked, `librccl.so` leaves no rocSHMEM host symbol unresolved, and
+nothing downstream needs to link rocSHMEM — a plain `dlopen("librccl.so")`
+(e.g. from Python) just works.
 
-**`--rocshmem`** (separate feature) links `librocshmem.a` into `librccl.so`
-for the alltoall\_wg offload path.  Does not enable GIN plugins.
+**`--rocshmem`** (separate feature) is the only mode that builds and links
+`librocshmem.a` into `librccl.so`, for the alltoall\_wg offload path. Does not
+enable GIN plugins.
 
 ## Running
 
@@ -50,10 +49,13 @@ for the alltoall\_wg offload path.  Does not enable GIN plugins.
 |----------|---------|-------------|
 | `NCCL_GIN_ENABLE` | `1` | Enable/disable GIN (all backends) |
 | `NCCL_GIN_TYPE` | (auto) | Force a specific backend: `2`=IB proxy, `6`=rocSHMEM GDA, `7`=Anvil SDMA. **Not value-compatible with 2.30.7** (see below). |
+| `RCCL_GIN_TYPE_LIST` | (unset) | RCCL-only. Comma-separated backend types that may be active together, e.g. `6,7` (GDA and SDMA) or `6,2` (GDA and IB proxy). Ignored when `NCCL_GIN_TYPE` is set. See [Mixing backends](#mixing-backends). |
 | `NCCL_GIN_ANVIL_SDMA_THRESHOLD` | `128` | Minimum message size (bytes) to use SDMA; smaller messages fall back to the IB proxy |
 | `NCCL_GIN_ANVIL_SDMA_FUSED_SIGNAL` | `0` | Enable fused signal mode for SDMA (experimental) |
 | `NCCL_GIN_ANVIL_SDMA_CONN_CHECK` | `1` | Validate LSA signal connectivity on first bind (LSA team only; skipped under `NCCL_GIN_CONNECTION_RAIL`); set exactly `0` to bypass |
-| `RCCL_GIN_ALLREDUCE_FORCE_ENABLE` | `0` | GIN AllReduce is used only for messages >= 256 MiB by default (smaller sizes use DDA). Set to `1` to also use GIN AllReduce for smaller messages (LSA one-shot / LSA two-shot). |
+| `RCCL_GIN_ALLREDUCE_FORCE_ENABLE` | `0` | GIN AllReduce is used only for messages >= 256 MiB by default on gfx950 (smaller sizes use DDA). Set to `1` to also use GIN AllReduce for smaller messages (LSA one-shot / LSA two-shot). |
+| `NCCL_GIN_ALLREDUCE_GFX1250_ENABLE` | `0` | Opt in to GinScatter AllReduce on gfx1250 for symmetric `ncclSum` fp32/fp16/bf16 messages from 64 MiB through 4 GiB. `0` leaves gfx1250 on the pre-existing selectors. |
+| `NCCL_GIN_ALLREDUCE_SCRATCH_BYTES` | `536870912` | GinScatter incoming scratch, in bytes (512 MiB, matching CE). `0` skips the allocation and GinScatter is not selected. |
 | `NCCL_CUMEM_ENABLE` | `0` | Required: GIN needs `hipMemCreate`-based allocations |
 | `NCCL_DMABUF_ENABLE` | `0` | Recommended: enables dmabuf-based MR registration |
 | `NCCL_P2P_DISABLE` | `0` | Set to `1` to force inter-GPU traffic over the network (useful for single-node GIN testing) |
@@ -86,6 +88,38 @@ docker run -it --rm --shm-size 64G \
 
 To use the rocSHMEM GDA backend instead, set `NCCL_GIN_TYPE=6`.
 
+### Mixing backends
+
+With `NCCL_GIN_TYPE` unset, Anvil SDMA and the IB proxy are both active by
+default, and rocSHMEM GDA is off. `RCCL_GIN_TYPE_LIST` replaces that default set
+with the listed types, so one communicator can host DevComms on different
+backends:
+
+| `RCCL_GIN_TYPE_LIST` | Active backends | Default (`backends[0]`) |
+|------------------|-----------------|-------------------------|
+| `6,7` | rocSHMEM GDA, Anvil SDMA | Anvil SDMA |
+| `6,2` | rocSHMEM GDA, IB proxy | rocSHMEM GDA |
+| `6,7,2` | all three | Anvil SDMA |
+
+The default order is Anvil SDMA, then rocSHMEM GDA, then the IB proxy. A
+DevComm that leaves `ncclDevCommRequirements::ginType` as
+`NCCL_GIN_TYPE_NONE` gets the first backend that can serve it; set `ginType`
+to `NCCL_GIN_TYPE_ROCSHMEM_GDA` (or `NCCL_GIN_TYPE_ANVIL_SDMA`,
+`NCCL_GIN_TYPE_PROXY`) to pick one. Each backend still needs its own platform
+requirements below. A backend whose plugin fails to initialize is dropped from
+the set.
+
+Connecting is different: the first GIN DevComm on a communicator connects every
+listed backend together, and if any one of them fails to connect (for example,
+rocSHMEM GDA cannot create its queue pairs), GIN fails on that communicator for
+all of them. That includes the built-in Anvil SDMA alltoall and allreduce, which
+then return the error instead of running on SDMA. List only backends the
+platform supports.
+
+Entries must be backend types `2` through `7`; any other entry is dropped with a
+warning, and a list that leaves no backend registered also logs a warning. An
+empty `NCCL_GIN_TYPE` counts as unset, so it does not override the list.
+
 ### Platform requirements
 
 rocSHMEM GDA (`NCCL_GIN_TYPE=6`) requires a supported GDA NIC provider (mlx5, bnxt,
@@ -109,25 +143,68 @@ NCCL 2.31 inserted EFA GDA at value 5, so AMD backends shifted:
 
 Scripts and jobs that still set `NCCL_GIN_TYPE=6` now select rocSHMEM GDA, not Anvil SDMA.
 
-## Known limitations
+## Device-side provider dispatch
 
-- **GDA on symmetric kernels**: the `__constant__` device memory
-  (`constmem`, `logd_constants`) used by QueuePair is zero-initialized via
-  stub definitions in `gin_rocshmem_constmem.hip`.  This is sufficient for
-  SDMA (which does not read constmem) but GDA dispatch on symmetric kernels
-  (e.g. `reduce_scatter_gin_*`) is not functional until a proper
-  `hipMemcpyToSymbol` init path is added to librccl.so.
-- **GDA on AlltoAllPivot**: works via the specialized kernel path (per-arch
-  bitcode injection via `--rocshmem-bitcode`).
+The rccl build copies `queue_pair_mux.hpp` with an override so QueuePair device
+dispatch reads the GDA provider from the **QueuePair instance** (a per-QP member)
+rather than rocSHMEM's `__constant__ constmem.gda_provider`. This removes all
+`__constant__`/`__device__` globals from rccl's GIN device path, so a consumer
+kernel that includes the GIN headers inherits no hidden device state and needs no
+`hipMemcpyToSymbol` init (matching how the PROXY/GDAKI backends pass device state
+through the GPU context). The old zero-initialized `constmem` stub and its
+device-bitcode injection are gone.
+
+## Resource sharing modes
+
+`ncclGin` is constructed with a `ncclGinResourceSharingMode`
+(`ncclGinResourceSharingMode` in `nccl_device/gin/gin_device_common.h`) that tells
+the backend how a queue pair's send queue (SQ) is shared across the GPU threads
+that post to it. It only changes the SQ's internal synchronization, not *who*
+posts (a single elected lane still posts for the whole coop):
+
+| Mode | Value | Meaning |
+|------|-------|---------|
+| `GPU` | 0 | SQ shared grid-wide; keep the SQ lock. Library default. |
+| `CTA` | 1 | SQ shared within a CTA; keep the lock (no cheaper CTA-scope lock exists yet). |
+| `THREAD` | 2 | Exclusive QP ownership; drop the SQ lock. |
+
+`THREAD` elides a per-WQE lock (on rocSHMEM GDA, an agent-scope CAS + acquire/release
+fence), so it is the fast path when a QP has a single poster. It is the RCCL/rocSHMEM
+analogue of DOCA's `doca_gpu_dev_verbs_resource_sharing_mode`.
+
+Each backend maps the mode onto its own QP primitive:
+
+| Backend | How the mode is applied |
+|---------|-------------------------|
+| rocSHMEM GDA | `PostOpt{ThreadSafe<bool>}`: THREAD -> `ThreadSafe<false>` (no lock), GPU/CTA -> `ThreadSafe<true>` (lock). rocSHMEM has only an agent-scope lock, so CTA folds into GPU. |
+| GDAKI (DOCA) | Templated on the DOCA `resource_sharing_mode` enum; all three modes map to distinct DOCA values. |
+| Anvil SDMA, IB proxy | Ignored (no SQ lock to elide); correct regardless of the mode. |
+
+### rocSHMEM GDA THREAD precondition (stronger than GDAKI)
+
+At the moment, on the rocSHMEM GDA backend, **every logical context aliases the same per-peer QP
+array** (`gin_plugin_rocshmem_gda.cc` sets `gpuCtx->qps = cctx->gpu_qp_ptrs` for
+all contexts; only signals/counters are striped per `contextId`). So there is one
+SQ per peer for the *whole grid* -- unlike GDAKI, where `handle[contextId].gdqp`
+is a distinct QP per context.
+
+Consequently `THREAD` is safe here only when a **single coop posts to each peer
+across the entire grid** (e.g. all GIN confined to one CTA). The usual
+GDAKI-friendly pattern of one context per CTA does **not** give each CTA its own
+SQ on this backend, and a multi-CTA barrier that signals/flushes `qps[peer]` from
+every CTA would race under THREAD -- such callers must use `GPU` mode. True
+per-CTA QP parity is deferred to a GDA QP refactor.
 
 ## Writing tests that use the GIN device API
 
-Test executables that compile GIN device templates (e.g. `alltoall.cu`
-with `ENABLE_ROCSHMEM_GIN`) must link `roc::rocshmem` and use
-`-fgpu-rdc --hip-link -rdynamic`.  The `roc::rocshmem` target brings in
-`hip::device` which provides `--offload-arch` flags automatically.
-The `-rdynamic` flag exports host symbols so that `librccl.so` can resolve
-GIN plugin functions from the executable at runtime.
+Test executables consume GIN entirely through `roc::rccl` — they need no
+rocSHMEM `find_package`, no `roc::rocshmem` link, no `--whole-archive`, and no
+`-rdynamic`, because `librccl.so` is self-contained. The GIN device backends
+self-detect from the installed headers (`__has_include` of the GDA/SDMA device
+entry headers), so no `-DENABLE_ROCSHMEM_GIN` define is needed on the consumer
+either; a backend's device templates expand only if the test instantiates it.
+The GIN device API is header-only (inline), so the test's own kernels compile
+as ordinary whole-program device code — no `-fgpu-rdc`/`--hip-link` required.
 
 ## Source layout
 
@@ -138,6 +215,6 @@ GIN plugin functions from the executable at runtime.
 | `gin_plugin_rocshmem_gda.cc` | rocSHMEM GDA plugin vtable (`NCCL_GIN_TYPE=6`) |
 | `gin_plugin_anvil_sdma.cc` | Anvil SDMA plugin vtable (`NCCL_GIN_TYPE=7`) |
 | `gin_rocshmem_gda_factory.cc` | QueuePair creation, MR registration, topology discovery |
-| `gin_rocshmem_constmem.hip` | Stub `__constant__` definitions for device bitcode linking |
+| `gin_rocshmem_gda_ibv_shim.cc` | rccl-native IB verbs backend for the factory |
 | `gin_anvil_ipc_table_host.cc` | IPC table management for SDMA |
 | `gin_anvil_conn_check_device.cc` | LSA signal connectivity self-test kernels (device-linked) |

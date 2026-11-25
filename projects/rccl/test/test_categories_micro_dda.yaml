@@ -1,0 +1,58 @@
+# CTest categories for the host-only src/algorithms/dda/ microtests.
+#
+# Suites start with their unit's stem; the launcher patterns cover a whole collective dir, DdaIpc* covers ipc/, and
+# fabric_gpu_barrier/fabric_init add their ledger suites.
+test_categories:
+  quick: &micro_dda_quick
+    description: "Smoke - host-only src/algorithms/dda/ micro-tests, sub-second."
+    test_patterns:
+      - "DdaAllGather*"
+      - "DdaAllReduce*"
+      - "DdaAlltoall*"
+      - "DdaBroadcast*"
+      - "DdaPeerGrid*"  # alltoall/dda-alltoall-fabric-ll128-test.cc
+      - "DdaIpc*"  # ipc/ipc_init.cu, ipc_mem_handler.cc
+      - "DdaReduceScatter*"
+      - "FabricMemHandler*"
+      - "FabricGpuBarrier*"
+      - "FabricInit*"
+      - "IpcInit*"
+      - "HipVmmLedger*"
+      - "HostAllocLedger*"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "microtest"
+  standard:
+    <<: *micro_dda_quick
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "microtest"
+  comprehensive:
+    <<: *micro_dda_quick
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "microtest"
+  full:
+    <<: *micro_dda_quick
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "microtest"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 600
+    comprehensive: 600
+    full: 600

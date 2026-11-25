@@ -6,11 +6,11 @@
 #include "common/path.hpp"
 #include "common/string_utility.hpp"
 #include "config.hpp"
-#include "exception.hpp"
 #include "gpu.hpp"
 #include "state.hpp"
 #include <algorithm>
 #include <cstdint>
+#include <stdexcept>
 
 #include <timemory/settings/types.hpp>
 
@@ -442,8 +442,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _parser
             .add_argument({ "--periods" },
                           "Similar to specifying delay and/or duration except in "
-                          "the form <DELAY>:<DURATION>, <DELAY>:<DURATION>:<REPEAT>, "
-                          "and/or <DELAY>:<DURATION>:<REPEAT>:<CLOCK_ID>")
+                          "the form <DELAY>:<DURATION> or <DELAY>:<DURATION>:<REPEAT>")
             .min_count(1)
             .dtype("period-spec(s)")
             .action([&](parser_t& p) {
@@ -685,12 +684,11 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
     if(_data.reg.environ_filter("trace_wait", _data))
     {
         _parser
-            .add_argument(
-                { "--trace-wait" },
-                "Set the wait time (in seconds) "
-                "before collecting trace and/or profiling data"
-                "(in seconds). By default, the duration is in seconds of realtime "
-                "but that can changed via --trace-clock-id.")
+            .add_argument({ "--trace-wait" },
+                          "Set the wait time (in seconds) "
+                          "before collecting trace and/or profiling data. "
+                          "By default, the duration is in seconds of realtime "
+                          "but that can be changed via --trace-clock-id.")
             .count(1)
             .dtype("seconds")
             .action([&](parser_t& p) {
@@ -707,7 +705,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 { "--trace-duration" },
                 "Set the duration of the trace and/or profile data collection (in "
                 "seconds). By default, the duration is in seconds of realtime but "
-                "that can changed via --trace-clock-id.")
+                "that can be changed via --trace-clock-id.")
             .count(1)
             .dtype("seconds")
             .action([&](parser_t& p) {
@@ -724,9 +722,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .add_argument(
                 { "--trace-periods" },
                 "More powerful version of specifying trace delay and/or duration. Format "
-                "is one or more groups of: <DELAY>:<DURATION>, "
-                "<DELAY>:<DURATION>:<REPEAT>, "
-                "and/or <DELAY>:<DURATION>:<REPEAT>:<CLOCK_ID>.")
+                "is one or more groups of: <DELAY>:<DURATION> or "
+                "<DELAY>:<DURATION>:<REPEAT>.")
             .min_count(1)
             .dtype("period-spec(s)")
             .action([&](parser_t& p) {
@@ -761,7 +758,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _parser
             .add_argument(
                 { "--trace-clock-id" },
-                "Set the default clock ID for for trace delay/duration. Note: "
+                "Set the default clock ID for trace delay/duration. Note: "
                 "\"cputime\" is "
                 "the *process* CPU time and might need to be scaled based on the number "
                 "of "
@@ -847,33 +844,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.reg.processed_environs.emplace("text_output");
         _data.reg.processed_environs.emplace("json_output");
         _data.reg.processed_environs.emplace("cout_output");
-    }
-
-    if(_data.reg.environ_filter("profile_diff", _data))
-    {
-        _parser
-            .add_argument(
-                { "--profile-diff" },
-                "Generate a diff output b/t the profile collected and an existing "
-                "profile from another run Accepts 1-2 parameters corresponding to "
-                "the input path and the input prefix")
-            .min_count(1)
-            .max_count(2)
-            .dtype("path [prefix]")
-            .action([&](parser_t& p) {
-                auto _v = p.get<strvec_t>("profile-diff");
-                update_env(_data, env_vars::DIFF_OUTPUT, true);
-                update_env(_data, env_vars::INPUT_PATH, _v.at(0));
-                if(_v.size() > 1)
-                {
-                    update_env(_data, env_vars::INPUT_PREFIX, _v.at(1));
-                }
-            });
-
-        _data.reg.processed_environs.emplace("profile_diff");
-        _data.reg.processed_environs.emplace("diff_output");
-        _data.reg.processed_environs.emplace("input_path");
-        _data.reg.processed_environs.emplace("input_prefix");
     }
 
     _parser.start_group(
@@ -963,6 +933,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.reg.processed_environs.emplace("sampling_gpus");
     }
 
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     if(_data.reg.environ_filter("ai-nics", _data))
     {
         _parser
@@ -975,8 +946,9 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             });
 
         _data.reg.processed_environs.emplace("ai-nics");
-        _data.reg.processed_environs.emplace("sampling_ai-nics");
+        _data.reg.processed_environs.emplace("sampling_ainics");
     }
+#endif
 
     _parser.start_group("GENERAL SAMPLING OPTIONS",
                         "General options for timer-based sampling per-thread");
@@ -1131,7 +1103,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                     if(p.exists("sampling-overflow-event") &&
                        _v.front() != p.get<std::string>("sampling-overflow-event"))
                     {
-                        throw exception<std::runtime_error>(fmt::format(
+                        throw std::runtime_error(fmt::format(
                             "'--sample-overflow {} ...' conflicts with "
                             "'--sampling-overflow-event {}' option",
                             _v.front(), p.get<std::string>("sampling-overflow-event")));
@@ -1268,8 +1240,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
 
         if(_name.empty())
         {
-            throw exception<std::runtime_error>("Error! empty name for " +
-                                                itr->get_name());
+            throw std::runtime_error("Error! empty name for " + itr->get_name());
         }
 
         _data.reg.processed_settings.emplace(itr.get());
@@ -1291,7 +1262,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
                 }
                 if(_value.empty())
                 {
-                    throw exception<std::runtime_error>(
+                    throw std::runtime_error(
                         fmt::format("Error! no value for {}", _name));
                 }
                 update_env(_data, itr->get_env_name(), _value);
@@ -1306,7 +1277,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
                         fmt::format("{}", fmt::join(p.get<strvec_t>(_name), " "));
                     if(_value.empty())
                     {
-                        throw exception<std::runtime_error>(
+                        throw std::runtime_error(
                             fmt::format("Error! no value for {}", _name));
                     }
                     update_env(_data, itr->get_env_name(), _value);

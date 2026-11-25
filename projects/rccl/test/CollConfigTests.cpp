@@ -115,6 +115,14 @@ std::vector<ConfigCase> acceptedConfigs() {
   builder.add("cta_policy_efficiency", [](ncclCollConfig_t* c) { c->CTAPolicy = NCCL_CTA_POLICY_EFFICIENCY; });
   builder.add("cta_policy_zero", [](ncclCollConfig_t* c) { c->CTAPolicy = NCCL_CTA_POLICY_ZERO; });
   builder.add("cta_policy_max", [](ncclCollConfig_t* c) { c->CTAPolicy = kCtaPolicyMax; });
+  // One CTA bound without the other, as for ncclConfig_t (NVIDIA/nccl#2256): the unset bound stays
+  // NCCL_CONFIG_UNDEF_INT and is resolved at enqueue time.
+  builder.add("min_ctas_only", [](ncclCollConfig_t* c) { c->minCTAs = 4; });
+  builder.add("max_ctas_only", [](ncclCollConfig_t* c) { c->maxCTAs = 2; });
+  builder.add("min_and_max_ctas", [](ncclCollConfig_t* c) {
+    c->minCTAs = 4;
+    c->maxCTAs = 16;
+  });
   return builder.cases;
 }
 
@@ -147,6 +155,33 @@ TEST(CollConfigTests, AcceptedConfigs_ReturnSuccess) {
       ncclCollConfig_t internal = NCCL_COLLCONFIG_INITIALIZER;
       EXPECT_EQ(ncclParseCollConfig(&c.config, &internal), ncclSuccess) << "case: " << c.name;
     }
+  });
+}
+
+// A single CTA bound is kept as given, the other stays unset, and either one alone is enough to
+// isolate the call from aggregation (its channel range differs from its neighbours').
+TEST(CollConfigTests, SingleCtaBound_KeptAndIsolatedFromAggregation) {
+  RUN_ISOLATED_TEST("SingleCtaBound_KeptAndIsolatedFromAggregation", []() {
+    // Control: a user config with neither bound set does not isolate, so the
+    // checks below are down to the CTA bound rather than to any config being passed.
+    ncclCollConfig_t neither = NCCL_COLLCONFIG_INITIALIZER;
+    ncclCollConfig_t internal = NCCL_COLLCONFIG_INITIALIZER;
+    ASSERT_EQ(ncclParseCollConfig(&neither, &internal), ncclSuccess);
+    EXPECT_FALSE(ncclCollConfigNeedAggIsolate(&internal));
+
+    ncclCollConfig_t onlyMin = NCCL_COLLCONFIG_INITIALIZER;
+    onlyMin.minCTAs = 4;
+    ASSERT_EQ(ncclParseCollConfig(&onlyMin, &internal), ncclSuccess);
+    EXPECT_EQ(internal.minCTAs, 4);
+    EXPECT_EQ(internal.maxCTAs, NCCL_CONFIG_UNDEF_INT);
+    EXPECT_TRUE(ncclCollConfigNeedAggIsolate(&internal));
+
+    ncclCollConfig_t onlyMax = NCCL_COLLCONFIG_INITIALIZER;
+    onlyMax.maxCTAs = 2;
+    ASSERT_EQ(ncclParseCollConfig(&onlyMax, &internal), ncclSuccess);
+    EXPECT_EQ(internal.minCTAs, NCCL_CONFIG_UNDEF_INT);
+    EXPECT_EQ(internal.maxCTAs, 2);
+    EXPECT_TRUE(ncclCollConfigNeedAggIsolate(&internal));
   });
 }
 

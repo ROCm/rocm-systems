@@ -10,11 +10,52 @@
 //! Device, memory, and queue owners live in their respective modules.
 
 use crate::device::{Device, DeviceResources};
-use crate::driver::{self, DriverInstance};
-use crate::memory::storage::Shared;
+use crate::driver::{self, ConfigurableDriver, DriverConfiguration, DriverInstance};
+use crate::memory::Allocation;
 use crate::memory::storage::TryPush;
-use crate::topology::{Endpoint, EndpointDetails};
+use crate::memory::storage::{RetainOnDrop, Shared};
+use crate::os::{ProcessIdentity, native_error};
+use crate::topology::{Endpoint, TopologyGraphSnapshot};
 use crate::{Error, ErrorKind};
+use std::mem::ManuallyDrop;
+
+mod admission;
+pub(crate) use admission::{SessionAdmission, SessionLease, SessionOperation};
+
+/// Lifecycle shared by every clone and driver installed in one session.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionState {
+    /// Discovery and new resource transactions may be admitted.
+    Open,
+    /// New transactions are rejected; completion and cleanup remain available.
+    Retiring,
+    /// Every session-owned driver dependency has been discharged.
+    Closed,
+}
+
+/// Result of a nonblocking attempt to discharge session ownership.
+#[derive(Debug)]
+pub enum RetirementOutcome {
+    /// All session obligations are discharged; process context backing may remain.
+    Closed,
+    /// Another session handle, resource owner, or admitted operation remains.
+    Busy,
+    /// Cleanup was not proved. The session retains unfinished owners for retry.
+    Failed(Error),
+}
+
+impl RetirementOutcome {
+    fn into_result(self) -> Result<(), Error> {
+        match self {
+            Self::Closed => Ok(()),
+            Self::Busy => Err(Error::Operation {
+                kind: ErrorKind::Busy,
+                detail: "session has outstanding owners or operations",
+            }),
+            Self::Failed(error) => Err(error),
+        }
+    }
+}
 
 /// Maximum lifetime allowed for a driver context acquired through a session.
 ///
@@ -39,15 +80,19 @@ pub enum DriverContextLifetime {
 
 /// Caller-owned scope for discovery, activation, and driver shutdown.
 ///
-/// Each session has a requested [`DriverContextLifetime`] and one or more
+/// Each session has a requested [`DriverContextLifetime`] and zero or more
 /// independently identified drivers. Clones share the same driver set;
 /// separate constructors create independent driver instances. Creating a
 /// session does not activate an endpoint. An activated device retains exactly
 /// its owning driver instance, while the session coordinates discovery,
 /// routing, and shutdown.
 pub struct Session {
-    /// Shared registry. Each activated device retains only its owning driver.
-    registry: Shared<DriverRegistry>,
+    /// Callback-backed registry, destroyed only in the creating process.
+    registry: ManuallyDrop<Shared<DriverRegistry>>,
+    /// System-backed witness available before callback-backed registry access.
+    process: ProcessIdentity,
+    /// Shared admission has no back-reference to the driver registry.
+    admission: SessionAdmission,
 }
 
 /// Set of drivers installed in one logical session. The shared owner makes
@@ -57,10 +102,50 @@ struct DriverRegistry {
     drivers: Vec<DriverInstance>,
     /// Policy validated against every installed driver at construction.
     lifetime: DriverContextLifetime,
-    /// Process that constructed this registry; inherited sessions cannot run.
-    process_id: u32,
-    /// Prevents new work once any driver shutdown has started.
-    closing: bool,
+}
+
+/// Retains an unfinished session when its native shutdown must be retried.
+///
+/// Frontends that cannot keep a public session handle after shutdown can move
+/// the session here. Dropping an unfinished retirement conservatively retains
+/// its driver owners through process exit instead of releasing native state
+/// whose cleanup has not been proved.
+#[must_use = "retry native shutdown until it succeeds or retain this owner"]
+pub struct SessionRetirement {
+    session: Option<RetainOnDrop<Session>>,
+}
+
+impl SessionRetirement {
+    /// Retries only the drivers that remain after earlier shutdown attempts.
+    ///
+    /// # Errors
+    /// Preserves the unfinished session for another attempt.
+    pub fn try_destroy(&mut self) -> Result<(), Error> {
+        self.try_close().into_result()
+    }
+
+    /// Attempts retirement while preserving every unfinished native owner.
+    pub fn try_close(&mut self) -> RetirementOutcome {
+        let Some(session) = self.session.as_mut() else {
+            return RetirementOutcome::Closed;
+        };
+        let outcome = session.try_close();
+        if matches!(outcome, RetirementOutcome::Closed) {
+            drop(self.session.take().map(RetainOnDrop::into_inner));
+        }
+        outcome
+    }
+}
+
+impl Drop for Session {
+    #[allow(unsafe_code)]
+    fn drop(&mut self) {
+        if self.process.check().is_ok() {
+            // SAFETY: The wrapper owns this registry until this one Drop call.
+            // A fork child leaves the copied registry and allocator untouched.
+            unsafe { ManuallyDrop::drop(&mut self.registry) };
+        }
+    }
 }
 
 impl Clone for Session {
@@ -69,27 +154,84 @@ impl Clone for Session {
     fn clone(&self) -> Self {
         Self {
             registry: self.registry.clone(),
+            process: self.process.clone(),
+            admission: self.admission.clone(),
         }
     }
 }
 
 impl Session {
-    /// Queries optional information from the endpoint's owning driver.
-    /// Identity and discovered capabilities remain in [`Endpoint`]. This
-    /// query does not activate or revalidate the endpoint snapshot.
+    /// Observes the lifecycle shared by this session's handles and drivers.
     ///
     /// # Errors
-    /// Rejects an endpoint owned by another session or a closed session, and
+    /// Rejects a session inherited from another process.
+    pub fn state(&self) -> Result<SessionState, Error> {
+        self.ensure_process()?;
+        self.admission.state()
+    }
+
+    /// Stops new transactions through all session and derived resource handles.
+    /// Already admitted transactions may finish; cleanup remains available.
+    /// This does not wait for GPU work or revoke published producer pointers.
+    /// Repeating the transition is harmless, including after closure.
+    ///
+    /// # Errors
+    /// Rejects a session inherited from another process.
+    pub fn begin_retirement(&self) -> Result<(), Error> {
+        self.ensure_process()?;
+        self.admission.begin_retirement()
+    }
+
+    pub(crate) fn admission(&self) -> &SessionAdmission {
+        &self.admission
+    }
+
+    fn admit(&self) -> Result<SessionOperation, Error> {
+        self.ensure_process()?;
+        self.admission.enter()
+    }
+
+    /// Moves a session into an owner that retains failed native cleanup.
+    pub fn into_retirement(self) -> SessionRetirement {
+        SessionRetirement {
+            session: Some(RetainOnDrop::new(self)),
+        }
+    }
+
+    /// Populates optional information on an endpoint from its owning driver.
+    /// The query reopens the endpoint without activating it and rejects a
+    /// snapshot whose discovered metadata has changed. A failed query leaves
+    /// the caller's endpoint unchanged.
+    ///
+    /// # Errors
+    /// Rejects an endpoint owned by another session, a closed session, a
+    /// changed snapshot or a driver mutation of discovered facts, and
     /// propagates any driver query error.
-    pub fn query_endpoint_details(&self, endpoint: &Endpoint) -> Result<EndpointDetails, Error> {
-        self.ensure_open()?;
+    pub fn populate_endpoint(&self, endpoint: &mut Endpoint) -> Result<(), Error> {
+        let _operation = self.admit()?;
         let Some(driver) = self.driver_for_endpoint(endpoint) else {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
-                detail: "endpoint details require an endpoint in this session",
+                detail: "endpoint population requires an endpoint in this session",
             });
         };
-        driver.query_endpoint_details(endpoint)
+        let mut current = driver.open_endpoint(endpoint.id)?;
+        Self::validate_opened_endpoint(driver, endpoint.id, &current)?;
+        if !endpoint.matches_discovery(&current) {
+            return Err(Error::Operation {
+                kind: ErrorKind::DeviceLost,
+                detail: "endpoint metadata changed before population",
+            });
+        }
+        driver.populate_endpoint(&mut current)?;
+        if !endpoint.matches_discovery(&current) {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidData,
+                detail: "driver changed discovered endpoint facts during population",
+            });
+        }
+        *endpoint = current;
+        Ok(())
     }
 
     /// Selects the driver named by a passive endpoint snapshot without
@@ -101,50 +243,92 @@ impl Session {
             .find(|driver| driver.instance_id() == endpoint.driver_instance)
     }
 
-    /// Rejects new session operations after driver cleanup has started.
-    fn ensure_open(&self) -> Result<(), Error> {
-        self.ensure_process()?;
-        if self.registry.closing {
-            Err(Error::Operation {
-                kind: ErrorKind::Unsupported,
-                detail: "session driver shutdown has begun",
-            })
-        } else {
-            Ok(())
+    /// Rejects a record that a driver stamped with another instance's identity.
+    fn validate_endpoint_owner(driver: &DriverInstance, endpoint: &Endpoint) -> Result<(), Error> {
+        if endpoint.driver_instance != driver.instance_id() {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidData,
+                detail: "driver reported an endpoint owned by another instance",
+            });
         }
+        Ok(())
     }
 
     /// Rejects a session inherited through fork before touching driver state
     /// in the child process.
     fn ensure_process(&self) -> Result<(), Error> {
-        if self.registry.process_id == std::process::id() {
-            Ok(())
-        } else {
-            Err(Error::Operation {
-                kind: ErrorKind::InvalidArgument,
-                detail: "session belongs to another process",
-            })
-        }
+        self.process.check().map_err(|_| Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "session belongs to another process",
+        })
     }
 
-    /// Borrows the Linux KFD driver instance for Linux-specific memory interop.
-    /// A session without KFD cannot use KFD descriptor or SVM operations.
-    #[allow(clippy::unnecessary_find_map)]
-    pub(crate) fn linux_kfd(&self) -> Result<&Shared<driver::KfdDriver>, Error> {
-        self.ensure_open()?;
-        self.registry
-            .drivers
-            .iter()
-            .find_map(|driver| match driver {
-                DriverInstance::LinuxKfd(driver) => Some(driver),
+    /// Whether this session belongs to the calling process.
+    /// Frontends may use this for host-only paths that do not enter a driver.
+    #[must_use]
+    pub fn is_current_process(&self) -> bool {
+        self.process.check().is_ok()
+    }
 
-                #[cfg(test)]
-                DriverInstance::Test(_) => None,
-            })
-            .ok_or(Error::Operation {
-                kind: ErrorKind::Unsupported,
-                detail: "session has no Linux KFD driver",
-            })
+    pub(crate) fn process_identity(&self) -> ProcessIdentity {
+        self.process.clone()
+    }
+
+    /// Borrows installed drivers for a platform-specific capability lookup.
+    /// Rejects use after shutdown starts or from another process.
+    pub(crate) fn installed_drivers(&self) -> Result<&[DriverInstance], Error> {
+        let _operation = self.admit()?;
+        Ok(&self.registry.drivers)
+    }
+
+    /// Replaces one installed driver's complete pending configuration.
+    ///
+    /// The configuration type selects its backend. This records options without
+    /// opening native resources; activation applies the requested settings.
+    /// Configure before sharing the session or activating that driver. The
+    /// backend defines its options and how the complete replacement affects
+    /// pending requests.
+    ///
+    /// # Errors
+    /// Reports `Busy` while the session or selected driver is shared, or when
+    /// the driver has begun activation. Reports `Unsupported` when no matching
+    /// driver is installed, `InvalidArgument` for multiple matches, and errors
+    /// for an inherited/closing session or invalid backend configuration.
+    /// Failure leaves the previous configuration unchanged.
+    pub fn configure<C: DriverConfiguration>(&mut self, configuration: C) -> Result<(), Error> {
+        configuration.apply(self)
+    }
+
+    /// Selects and exclusively borrows a driver for typed configuration.
+    /// All configuration routes must enter here before accessing driver state.
+    /// The selector must only project a matching driver, preserving registry
+    /// entries, driver identities, and context lifetimes.
+    pub(crate) fn configure_driver<D: ConfigurableDriver>(
+        &mut self,
+        configuration: D::Configuration,
+        select: fn(&mut DriverInstance) -> Option<&mut Shared<D>>,
+    ) -> Result<(), Error> {
+        let _operation = self.admit()?;
+        let registry = Shared::get_mut(&mut self.registry).ok_or(Error::Operation {
+            kind: ErrorKind::Busy,
+            detail: "native configuration requires an unshared session",
+        })?;
+        let mut matching = registry.drivers.iter_mut().filter_map(select);
+        let driver = matching.next().ok_or(Error::Operation {
+            kind: ErrorKind::Unsupported,
+            detail: "this session has no matching configuration provider",
+        })?;
+        if matching.next().is_some() {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "configuration matches multiple installed drivers",
+            });
+        }
+        let driver = Shared::get_mut(driver).ok_or(Error::Operation {
+            kind: ErrorKind::Busy,
+            detail: "native configuration requires an unshared driver",
+        })?;
+        driver.configure(configuration)
     }
 
     /// Creates one instance of every compiled driver backend without opening,
@@ -153,6 +337,11 @@ impl Session {
     /// # Errors
     /// Fails with `ResourceExhausted` if driver registry metadata cannot be allocated.
     pub fn new(lifetime: DriverContextLifetime) -> Result<Self, Error> {
+        crate::os::note_runtime_image()
+            .map_err(|source| native_error("runtime image identity", source))?;
+        let process = ProcessIdentity::capture()
+            .map_err(|source| native_error("session process identity", source))?;
+        let admission = SessionAdmission::for_session(process.clone());
         let mut drivers = Vec::new();
         drivers
             .try_reserve_exact(driver::BUILTIN_DRIVER_FACTORIES.len())
@@ -160,23 +349,30 @@ impl Session {
                 resource: "session drivers",
             })?;
         for construct in driver::BUILTIN_DRIVER_FACTORIES {
-            drivers.push(construct(lifetime)?);
+            drivers.push(construct(lifetime, process.clone(), admission.clone())?);
         }
-        Self::from_drivers(drivers, lifetime)
+        Self::from_drivers_with_process(drivers, lifetime, process, admission)
     }
 
     /// Takes already constructed driver instances as one session registry.
     /// Every driver must have been configured with the same lifetime policy.
-    fn from_drivers(
+    #[cfg(test)]
+    pub(crate) fn from_drivers(
         drivers: Vec<DriverInstance>,
         lifetime: DriverContextLifetime,
     ) -> Result<Self, Error> {
-        if drivers.is_empty() {
-            return Err(Error::Operation {
-                kind: ErrorKind::InvalidArgument,
-                detail: "session requires at least one driver",
-            });
-        }
+        let process = ProcessIdentity::capture()
+            .map_err(|source| native_error("session process identity", source))?;
+        let admission = SessionAdmission::for_session(process.clone());
+        Self::from_drivers_with_process(drivers, lifetime, process, admission)
+    }
+
+    fn from_drivers_with_process(
+        mut drivers: Vec<DriverInstance>,
+        lifetime: DriverContextLifetime,
+        process: ProcessIdentity,
+        admission: SessionAdmission,
+    ) -> Result<Self, Error> {
         for (index, driver) in drivers.iter().enumerate() {
             if driver.context_lifetime() != lifetime {
                 return Err(Error::Operation {
@@ -194,13 +390,13 @@ impl Session {
                 });
             }
         }
+        for driver in &mut drivers {
+            driver.bind_admission(&admission)?;
+        }
         Ok(Self {
-            registry: Shared::new(DriverRegistry {
-                drivers,
-                lifetime,
-                process_id: std::process::id(),
-                closing: false,
-            })?,
+            registry: ManuallyDrop::new(Shared::new(DriverRegistry { drivers, lifetime })?),
+            process,
+            admission,
         })
     }
 
@@ -218,22 +414,34 @@ impl Session {
     /// is returned, and only failed drivers remain for a destroy retry. The
     /// session may then be used only for another destroy attempt.
     pub fn destroy(&mut self) -> Result<(), Error> {
-        self.ensure_process()?;
-        let registry = Shared::get_mut(&mut self.registry).ok_or(Error::Operation {
-            kind: ErrorKind::Busy,
-            detail: "another owner still borrows this session",
-        })?;
-        if registry
-            .drivers
-            .iter()
-            .any(DriverInstance::has_other_owners)
-        {
-            return Err(Error::Operation {
-                kind: ErrorKind::Busy,
-                detail: "a device or resource still borrows a session driver",
-            });
+        self.try_close().into_result()
+    }
+
+    /// Tries to close without waiting for callers, resources, or device work.
+    /// A busy open session remains open. After retirement starts, failures keep
+    /// the session retiring and retain only drivers requiring another attempt.
+    /// `Closed` never implies destruction of a shared process context.
+    pub fn try_close(&mut self) -> RetirementOutcome {
+        match self.state() {
+            Ok(SessionState::Closed) => return RetirementOutcome::Closed,
+            Err(error) => return RetirementOutcome::Failed(error),
+            Ok(SessionState::Open | SessionState::Retiring) => {}
         }
-        registry.closing = true;
+        if let Err(error) = self.preflight_destroy() {
+            return if error.kind() == ErrorKind::Busy {
+                RetirementOutcome::Busy
+            } else {
+                RetirementOutcome::Failed(error)
+            };
+        }
+        match self.admission.retire_if_idle() {
+            Ok(true) => {}
+            Ok(false) => return RetirementOutcome::Busy,
+            Err(error) => return RetirementOutcome::Failed(error),
+        }
+        let Some(registry) = Shared::get_mut(&mut self.registry) else {
+            return RetirementOutcome::Busy;
+        };
         let mut first_error = None;
         registry
             .drivers
@@ -248,13 +456,75 @@ impl Session {
             });
         // Retain failed drivers for retry. Every driver gets an attempt even
         // when another fails, so shutdown progress is independent of order.
-        first_error.map_or(Ok(()), Err)
+        if let Some(error) = first_error {
+            RetirementOutcome::Failed(error)
+        } else {
+            self.admission.finish_retirement();
+            RetirementOutcome::Closed
+        }
+    }
+
+    /// Checks whether another owner would make `destroy` return `Busy` before
+    /// native cleanup starts. This leaves the session fully usable on failure.
+    /// The caller serializes this check with new resource creation before using
+    /// it as a frontend teardown preflight.
+    ///
+    /// # Errors
+    /// Reports `Busy` while any session or driver owner remains live.
+    pub fn preflight_destroy(&mut self) -> Result<(), Error> {
+        self.preflight_destroy_with_internal_allocations(&[])
+    }
+
+    /// Preflights while accounting for exact internal service allocations.
+    /// Only those driver references are exempt; their owners must release them
+    /// before invoking `destroy`. Repeated allocation references are rejected.
+    pub(crate) fn preflight_destroy_with_internal_allocations(
+        &mut self,
+        internal: &[&Allocation],
+    ) -> Result<(), Error> {
+        self.ensure_process()?;
+        if !self.admission.is_idle()? {
+            return Err(Error::Operation {
+                kind: ErrorKind::Busy,
+                detail: "session has admitted operations or resource leases",
+            });
+        }
+        let registry = Shared::get_mut(&mut self.registry).ok_or(Error::Operation {
+            kind: ErrorKind::Busy,
+            detail: "another owner still borrows this session",
+        })?;
+        if internal.iter().enumerate().any(|(index, allocation)| {
+            internal[..index]
+                .iter()
+                .any(|previous| std::ptr::eq(*previous, *allocation))
+                || !registry
+                    .drivers
+                    .iter()
+                    .any(|driver| driver.owns_allocation(allocation))
+        }) {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "internal allocation is repeated or belongs to another session driver",
+            });
+        }
+        if registry
+            .drivers
+            .iter()
+            .any(|driver| driver.has_other_owners_except(internal))
+        {
+            return Err(Error::Operation {
+                kind: ErrorKind::Busy,
+                detail: "a device or resource still borrows a session driver",
+            });
+        }
+        Ok(())
     }
 
     /// Visits passive endpoint records from every installed driver. Each
     /// driver's records are generation-consistent; independent drivers have no
-    /// shared native generation. With multiple drivers, the session stages all
-    /// records and rejects duplicate endpoint IDs before calling `visitor`.
+    /// shared native generation. The session stages all records and rejects
+    /// duplicate endpoint IDs or incorrect driver identities before calling
+    /// `visitor`.
     /// Enumeration does not activate an endpoint or acquire execution state.
     ///
     /// # Errors
@@ -266,13 +536,11 @@ impl Session {
         &self,
         visitor: &mut dyn FnMut(Endpoint) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        self.ensure_open()?;
-        if self.registry.drivers.len() == 1 {
-            return self.registry.drivers[0].enumerate(visitor);
-        }
+        let _operation = self.admit()?;
         let mut records = Vec::new();
         for driver in &self.registry.drivers {
             driver.enumerate(&mut |endpoint| {
+                Self::validate_endpoint_owner(driver, &endpoint)?;
                 if records
                     .iter()
                     .any(|record: &Endpoint| record.id == endpoint.id)
@@ -291,9 +559,43 @@ impl Session {
         Ok(())
     }
 
+    /// Publishes a passive topology graph snapshot after every installed driver
+    /// has supplied and validated its contribution. KFD nodes and routes share
+    /// one checked generation per driver; the host OS reader is best effort
+    /// and has no common atomic generation with KFD or another driver.
+    ///
+    /// # Errors
+    /// Reports malformed or duplicate records, native discovery failure, or
+    /// allocation failure without publishing a partial candidate.
+    pub fn topology_graph_snapshot(&self) -> Result<TopologyGraphSnapshot, Error> {
+        let _operation = self.admit()?;
+        let mut snapshot = TopologyGraphSnapshot::new(crate::topology::host::graph_snapshot())?;
+        for driver in &self.registry.drivers {
+            let start = snapshot.endpoints.len();
+            driver.contribute_topology_graph(&mut snapshot)?;
+            for endpoint in &snapshot.endpoints[start..] {
+                Self::validate_endpoint_owner(driver, endpoint)?;
+            }
+        }
+        Ok(snapshot)
+    }
+
+    /// Checks cached access evidence through the endpoint owner's installed
+    /// driver. A successful native mapping is still required for an allocation.
+    #[must_use]
+    pub fn can_access_local_memory(&self, consumer: &Endpoint, owner: &Endpoint) -> bool {
+        let Ok(_operation) = self.admit() else {
+            return false;
+        };
+        consumer.driver_instance == owner.driver_instance
+            && self
+                .driver_for_endpoint(consumer)
+                .is_some_and(|driver| driver.can_access_local_memory(consumer, owner))
+    }
+
     /// Reads the exact endpoint selected by `id` and verifies its identity.
-    /// A multi-driver session first discovers which driver owns the ID and
-    /// rejects an ID collision. No execution endpoint is acquired.
+    /// A multi-driver session probes each driver's direct open path and rejects
+    /// an ID collision. No full enumeration or execution endpoint is acquired.
     ///
     /// # Errors
     /// Reports removal or identity mismatch, inconsistent discovery state,
@@ -301,27 +603,53 @@ impl Session {
     /// selected endpoint. A driver whose teardown has begun rejects the
     /// query.
     pub fn open_endpoint(&self, id: [u8; 16]) -> Result<Endpoint, Error> {
-        self.ensure_open()?;
+        let _operation = self.admit()?;
         if self.registry.drivers.len() == 1 {
-            return self.registry.drivers[0].open_endpoint(id);
+            let driver = &self.registry.drivers[0];
+            let endpoint = driver.open_endpoint(id)?;
+            Self::validate_opened_endpoint(driver, id, &endpoint)?;
+            return Ok(endpoint);
         }
-        let mut owner = None;
-        for (index, driver) in self.registry.drivers.iter().enumerate() {
-            driver.enumerate(&mut |endpoint| {
-                if endpoint.id == id && owner.replace(index).is_some() {
-                    return Err(Error::Operation {
-                        kind: ErrorKind::InvalidData,
-                        detail: "drivers reported the same endpoint ID",
-                    });
+        let mut found = None;
+        let mut stale = None;
+        for driver in &self.registry.drivers {
+            match driver.probe_endpoint(id) {
+                Ok(Some(endpoint)) => {
+                    Self::validate_opened_endpoint(driver, id, &endpoint)?;
+                    if found.replace(endpoint).is_some() {
+                        return Err(Error::Operation {
+                            kind: ErrorKind::InvalidData,
+                            detail: "drivers opened the same endpoint ID",
+                        });
+                    }
                 }
-                Ok(())
-            })?;
+                Ok(None) => {}
+                Err(error) if error.kind() == ErrorKind::DeviceLost => stale = Some(error),
+                Err(error) => return Err(error),
+            }
         }
-        let index = owner.ok_or(Error::Operation {
-            kind: ErrorKind::InvalidArgument,
-            detail: "endpoint ID is not present in this session",
-        })?;
-        self.registry.drivers[index].open_endpoint(id)
+        found.ok_or_else(|| {
+            stale.unwrap_or(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "endpoint ID is not present in this session",
+            })
+        })
+    }
+
+    /// Confirms that a direct read returned the requested identity and owner.
+    fn validate_opened_endpoint(
+        driver: &DriverInstance,
+        id: [u8; 16],
+        endpoint: &Endpoint,
+    ) -> Result<(), Error> {
+        Self::validate_endpoint_owner(driver, endpoint)?;
+        if endpoint.id != id {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidData,
+                detail: "driver opened an endpoint with a different ID",
+            });
+        }
+        Ok(())
     }
 
     /// Revalidates a passive endpoint with its owning driver and acquires or
@@ -336,7 +664,7 @@ impl Session {
     /// incompatible existing ownership, allocation failure, or driver I/O.
     /// Partial driver setup remains owned for safe cleanup or a later retry.
     pub fn activate(&self, endpoint: &Endpoint) -> Result<Device, Error> {
-        self.ensure_open()?;
+        let _operation = self.admit()?;
         let driver = self.driver_for_endpoint(endpoint).ok_or(Error::Operation {
             kind: ErrorKind::InvalidArgument,
             detail: "endpoint belongs to another driver instance",
@@ -362,16 +690,37 @@ impl Session {
         self.registry.lifetime
     }
 
+    /// Queries request-specific memory guarantees without activating a device.
+    ///
+    /// # Errors
+    /// Rejects foreign endpoints, a closed session or unsupported constructions.
+    pub fn memory_capabilities(
+        &self,
+        endpoint: &Endpoint,
+        request: crate::memory::device::MemoryCapabilityRequest<'_>,
+    ) -> Result<crate::memory::device::DeviceMemoryCapabilities, Error> {
+        let _operation = self.admit()?;
+        self.driver_for_endpoint(endpoint)
+            .ok_or(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "foreign memory capability endpoint",
+            })?
+            .memory_capabilities(endpoint, request)
+    }
+
     /// Returns whether the endpoint's driver can register caller-owned host
     /// pages for the selected endpoint and context lifetime. This capability
     /// query does not activate the device; a registration can still
     /// fail if its caller pages cannot be bound by the driver.
     #[must_use]
     pub fn supports_host_registration(&self, endpoint: &Endpoint) -> bool {
-        !self.registry.closing
-            && self
-                .driver_for_endpoint(endpoint)
-                .is_some_and(|driver| driver.supports_host_registration(endpoint))
+        self.memory_capabilities(
+            endpoint,
+            crate::memory::device::MemoryCapabilityRequest::Registration(
+                crate::memory::HostMappingPolicy::Fine,
+            ),
+        )
+        .is_ok()
     }
 }
 
@@ -379,15 +728,128 @@ impl Session {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::driver::VirtualMemoryOperations;
-    use crate::driver::test_driver::TestDriver;
+    use crate::device::gpu::queue::{QueueParameters, QueuePriority, QueueRequest};
+    use crate::driver::test_driver::{TestConfiguration, TestDriver};
+    use crate::driver::{Driver, VirtualMemoryOperations};
     use crate::memory::device::VirtualAddress;
     use crate::memory::host::HostAllocation;
     use crate::memory::{
         DeviceAccess, DeviceIntervals, DriverVirtualAddress, HostIntervals, MemoryKind,
     };
-    use crate::topology::{EndpointDetailsKind, EndpointKind};
+    use crate::topology::{EndpointKind, GpuInfo};
     use std::sync::atomic::Ordering;
+
+    #[test]
+    fn retirement_closes_admission_across_clones_before_native_teardown() {
+        let (mut session, probes) = test_session(&[[0x61; 16]]);
+        let clone = session.clone();
+        assert!(matches!(session.try_close(), RetirementOutcome::Busy));
+        assert_eq!(session.state().unwrap(), SessionState::Open);
+        clone.begin_retirement().unwrap();
+        assert_eq!(session.state().unwrap(), SessionState::Retiring);
+        assert_eq!(
+            clone.enumerate(&mut |_| Ok(())).unwrap_err().kind(),
+            ErrorKind::Unsupported
+        );
+        assert!(matches!(session.try_close(), RetirementOutcome::Busy));
+        assert_eq!(probes[0].shutdowns.load(Ordering::Relaxed), 0);
+        drop(clone);
+        assert!(matches!(session.try_close(), RetirementOutcome::Closed));
+        assert_eq!(session.state().unwrap(), SessionState::Closed);
+        session.begin_retirement().unwrap();
+        let closed_clone = session.clone();
+        assert!(matches!(session.try_close(), RetirementOutcome::Closed));
+        drop(closed_clone);
+        assert_eq!(probes[0].shutdowns.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn retirement_waits_for_an_admitted_transaction_and_its_published_lease() {
+        let (mut session, probes) = test_session(&[[0x62; 16]]);
+        let admission = session.admission.clone();
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        let operation = std::thread::spawn(move || {
+            let _operation = admission.enter().unwrap();
+            entered_tx.send(()).unwrap();
+            resume_rx.recv().unwrap();
+            // Nested owner publication remains part of the accepted transaction.
+            admission.lease().unwrap()
+        });
+        entered_rx.recv().unwrap();
+        session.begin_retirement().unwrap();
+        assert!(session.admission.enter().is_err());
+        assert!(matches!(session.try_close(), RetirementOutcome::Busy));
+        resume_tx.send(()).unwrap();
+        let lease = operation.join().unwrap();
+        assert!(matches!(session.try_close(), RetirementOutcome::Busy));
+        assert_eq!(probes[0].shutdowns.load(Ordering::Relaxed), 0);
+        let other = lease.clone();
+        drop(lease);
+        assert!(matches!(session.try_close(), RetirementOutcome::Busy));
+        drop(other);
+        assert!(matches!(session.try_close(), RetirementOutcome::Closed));
+    }
+
+    #[test]
+    fn native_failure_preserves_retiring_state_and_only_unfinished_drivers() {
+        let (mut session, probes) = test_session(&[[0x63; 16], [0x64; 16]]);
+        probes[1].fail_shutdown.store(true, Ordering::Relaxed);
+        assert!(matches!(session.try_close(), RetirementOutcome::Failed(_)));
+        assert_eq!(session.state().unwrap(), SessionState::Retiring);
+        assert!(session.enumerate(&mut |_| Ok(())).is_err());
+        assert!(matches!(session.try_close(), RetirementOutcome::Closed));
+        assert_eq!(probes[0].shutdowns.load(Ordering::Relaxed), 1);
+        assert_eq!(probes[1].shutdowns.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn independent_sessions_have_independent_retirement_authority() {
+        for lifetime in [
+            DriverContextLifetime::Process,
+            DriverContextLifetime::Session,
+        ] {
+            let mut first = Session::new(lifetime).unwrap();
+            let mut second = Session::new(lifetime).unwrap();
+            first.begin_retirement().unwrap();
+            assert_eq!(second.state().unwrap(), SessionState::Open);
+            second
+                .configure(crate::driver::linux_kfd::KfdConfiguration::default())
+                .unwrap();
+            assert!(matches!(first.try_close(), RetirementOutcome::Closed));
+            assert!(matches!(second.try_close(), RetirementOutcome::Closed));
+        }
+    }
+
+    #[test]
+    fn activating_one_backend_preserves_configuration_of_another() {
+        let id = [0x65; 16];
+        let mut session = Session::from_drivers(
+            vec![
+                DriverInstance::Test(
+                    Shared::new(TestDriver::new(
+                        id,
+                        EndpointKind::Npu,
+                        DriverContextLifetime::Session,
+                    ))
+                    .unwrap(),
+                ),
+                DriverInstance::LinuxKfd(Shared::new(driver::KfdDriver::new()).unwrap()),
+            ],
+            DriverContextLifetime::Session,
+        )
+        .unwrap();
+        let device = session
+            .activate(&session.open_endpoint(id).unwrap())
+            .unwrap();
+        session
+            .configure(crate::driver::linux_kfd::KfdConfiguration::default())
+            .unwrap();
+        session.begin_retirement().unwrap();
+        assert!(matches!(session.try_close(), RetirementOutcome::Busy));
+        drop(device);
+        assert!(matches!(session.try_close(), RetirementOutcome::Closed));
+    }
 
     #[test]
     fn builtin_catalog_constructs_independent_driver_instances() {
@@ -417,18 +879,227 @@ mod tests {
     }
 
     #[test]
+    fn typed_configuration_selects_only_its_matching_driver() {
+        let id = [0x25; 16];
+        let kfd = Shared::new(driver::KfdDriver::new()).unwrap();
+        let test = TestDriver::new(id, EndpointKind::Npu, DriverContextLifetime::Session);
+        let mut session = Session::from_drivers(
+            vec![
+                DriverInstance::LinuxKfd(kfd),
+                DriverInstance::Test(Shared::new(test).unwrap()),
+            ],
+            DriverContextLifetime::Session,
+        )
+        .unwrap();
+        let kfd = session.registry.drivers[0].linux_kfd().unwrap().clone();
+        let supports_registration = |session: &Session| {
+            let test = session
+                .registry
+                .drivers
+                .iter()
+                .find_map(|driver| match driver {
+                    DriverInstance::Test(driver) => Some(driver),
+                    DriverInstance::LinuxKfd(_) => None,
+                })
+                .unwrap();
+            let endpoint = test.open_endpoint(id).unwrap();
+            session.supports_host_registration(&endpoint)
+        };
+        assert!(!supports_registration(&session));
+        // Sharing the unselected KFD driver must not block configuration.
+        session
+            .configure(TestConfiguration {
+                host_registration: true,
+            })
+            .unwrap();
+        assert!(supports_registration(&session));
+        let retained_test = session
+            .registry
+            .drivers
+            .iter()
+            .find_map(|driver| match driver {
+                DriverInstance::Test(driver) => Some(driver.clone()),
+                DriverInstance::LinuxKfd(_) => None,
+            })
+            .unwrap();
+        assert_eq!(
+            session
+                .configure(TestConfiguration {
+                    host_registration: false,
+                })
+                .unwrap_err()
+                .kind(),
+            ErrorKind::Busy
+        );
+        assert!(supports_registration(&session));
+        drop(retained_test);
+        session
+            .configure(TestConfiguration {
+                host_registration: false,
+            })
+            .unwrap();
+        assert!(!supports_registration(&session));
+        drop(kfd);
+        session.destroy().unwrap();
+
+        let mut session = Session::new(DriverContextLifetime::Session).unwrap();
+        assert_eq!(
+            session
+                .configure(TestConfiguration {
+                    host_registration: true,
+                })
+                .unwrap_err()
+                .kind(),
+            ErrorKind::Unsupported
+        );
+        session.destroy().unwrap();
+    }
+
+    #[test]
+    fn ambiguous_configuration_leaves_all_drivers_unchanged() {
+        let ids = [[0x26; 16], [0x27; 16]];
+        let (mut session, _) = test_session(&ids);
+        assert_eq!(
+            session
+                .configure(TestConfiguration {
+                    host_registration: true,
+                })
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidArgument
+        );
+        for id in ids {
+            let endpoint = session.open_endpoint(id).unwrap();
+            assert!(!session.supports_host_registration(&endpoint));
+        }
+        session.destroy().unwrap();
+    }
+
+    #[test]
     fn cloned_session_blocks_driver_shutdown_until_released() {
         let mut session = Session::new(DriverContextLifetime::Session).unwrap();
         let clone = session.clone();
+        assert_eq!(
+            session.preflight_destroy().unwrap_err().kind(),
+            ErrorKind::Busy
+        );
+        assert_eq!(session.state().unwrap(), SessionState::Open);
         assert_eq!(session.destroy().unwrap_err().kind(), ErrorKind::Busy);
         drop(clone);
+        session.preflight_destroy().unwrap();
         session.destroy().unwrap();
+    }
+
+    #[test]
+    fn signal_page_preflight_exempts_only_its_own_driver_reference() {
+        let id = [0x71; 16];
+        let driver = Shared::new(
+            TestDriver::new(id, EndpointKind::Npu, DriverContextLifetime::Session)
+                .with_host_registration(),
+        )
+        .unwrap();
+        let mut session = Session::from_drivers(
+            vec![DriverInstance::Test(driver)],
+            DriverContextLifetime::Session,
+        )
+        .unwrap();
+        let driver = session
+            .registry
+            .drivers
+            .iter()
+            .find_map(|driver| match driver {
+                DriverInstance::Test(driver) => Some(driver.clone()),
+                DriverInstance::LinuxKfd(_) => None,
+            })
+            .unwrap();
+        let device = session
+            .activate(&session.open_endpoint(id).unwrap())
+            .unwrap();
+        let page = crate::memory::host_page_size().unwrap();
+        let mut host = HostAllocation::allocate(page, page).unwrap();
+        let mut registration = device
+            .register_host_allocation(
+                &host,
+                &[],
+                crate::memory::HostMappingPolicy::Fine,
+                page,
+                DeviceAccess::READ,
+            )
+            .unwrap();
+        drop(device);
+
+        assert_eq!(
+            session.preflight_destroy().unwrap_err().kind(),
+            ErrorKind::Busy
+        );
+        // The extra driver clone still makes this preflight Busy even when
+        // the registered allocation is identified as the internal page.
+        assert_eq!(
+            session
+                .preflight_destroy_with_internal_allocations(&[&registration])
+                .unwrap_err()
+                .kind(),
+            ErrorKind::Busy
+        );
+        let mut foreign = Session::new(DriverContextLifetime::Session).unwrap();
+        assert_eq!(
+            foreign
+                .preflight_destroy_with_internal_allocations(&[&registration])
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidArgument
+        );
+        foreign.destroy().unwrap();
+        drop(driver);
+        session
+            .preflight_destroy_with_internal_allocations(&[&registration])
+            .unwrap();
+        assert_eq!(session.destroy().unwrap_err().kind(), ErrorKind::Busy);
+        registration.free().unwrap();
+        drop(registration);
+        host.free().unwrap();
+        session.destroy().unwrap();
+    }
+
+    #[test]
+    #[allow(unsafe_code)]
+    fn retirement_keeps_a_busy_session_for_a_later_shutdown_attempt() {
+        let allocator_state = crate::test_support::allocator::State::default();
+        // SAFETY: The callback state outlives successful retirement below.
+        let allocator = unsafe { allocator_state.allocator() };
+        let session = allocator
+            .with_scope(|| Session::new(DriverContextLifetime::Session))
+            .unwrap();
+        assert!(allocator_state.allocations.load(Ordering::Relaxed) > 0);
+        let clone = session.clone();
+        let mut retirement = session.into_retirement();
+        assert_eq!(
+            retirement.try_destroy().unwrap_err().kind(),
+            ErrorKind::Busy
+        );
+        drop(clone);
+        retirement.try_destroy().unwrap();
+        retirement.try_destroy().unwrap();
+        assert_eq!(
+            allocator_state.frees.load(Ordering::Relaxed),
+            allocator_state.allocations.load(Ordering::Relaxed)
+        );
+    }
+
+    #[test]
+    fn dropping_unfinished_retirement_preserves_its_session_owner() {
+        let mut session = Session::new(DriverContextLifetime::Session).unwrap();
+        let retirement = session.clone().into_retirement();
+        drop(retirement);
+        // The discarded retirement still owns its registry reference. It must
+        // not run Session's destructor and authorize premature native release.
+        assert!(matches!(session.try_close(), RetirementOutcome::Busy));
     }
 
     #[test]
     fn live_reservation_lease_blocks_release_until_its_mapping_owner_finishes() {
         let mut session = Session::new(DriverContextLifetime::Session).unwrap();
-        let driver = session.linux_kfd().unwrap();
+        let driver = crate::memory::interop::linux::kfd_driver(&session).unwrap();
         // A process VA reservation needs no GPU endpoint, so this exercises the
         // public owner and its driver cleanup on CPU-only test hosts.
         let inner = driver
@@ -441,6 +1112,7 @@ mod tests {
                 Shared::new(inner).unwrap(),
                 Shared::new(HostIntervals::new()).unwrap(),
                 Shared::new(DeviceIntervals::new()).unwrap(),
+                session.process_identity(),
             )),
         };
         let mapping_lease = address.inner.linux_kfd().inner.clone();
@@ -472,6 +1144,8 @@ mod tests {
             probes.push(TestDriverProbe {
                 shutdowns: driver.shutdowns.clone(),
                 fail_shutdown: driver.fail_shutdown.clone(),
+                enumerations: driver.enumerations.clone(),
+                opens: driver.opens.clone(),
             });
             drivers.push(DriverInstance::Test(Shared::new(driver).unwrap()));
         }
@@ -481,15 +1155,128 @@ mod tests {
         )
     }
 
+    #[test]
+    fn test_driver_events_route_through_independent_public_subscriptions() {
+        use crate::device::event::{
+            DeviceEvent, GpuHardwareException, GpuResetCause, GpuResetScope, subscribe,
+        };
+
+        let id = [0x51; 16];
+        let driver = Shared::new(TestDriver::new(
+            id,
+            EndpointKind::Npu,
+            DriverContextLifetime::Session,
+        ))
+        .unwrap();
+        let mut session = Session::from_drivers(
+            vec![DriverInstance::Test(driver)],
+            DriverContextLifetime::Session,
+        )
+        .unwrap();
+        let driver = session
+            .registry
+            .drivers
+            .iter()
+            .find_map(|driver| match driver {
+                DriverInstance::Test(driver) => Some(driver.clone()),
+                DriverInstance::LinuxKfd(_) => None,
+            })
+            .unwrap();
+        let device = session
+            .activate(&session.open_endpoint(id).unwrap())
+            .unwrap();
+        let mut first = subscribe(&device).unwrap();
+        let mut second = subscribe(&device).unwrap();
+        assert_eq!(first.poll().unwrap(), None);
+
+        let event = DeviceEvent::GpuHardwareException(GpuHardwareException {
+            endpoint_id: Some(id),
+            origin_id: None,
+            scope: GpuResetScope::WholeGpu,
+            memory_lost: false,
+            cause: GpuResetCause::Hang,
+        });
+        driver.publish_event(event).unwrap();
+        assert_eq!(
+            first.wait(std::time::Duration::from_millis(5)).unwrap(),
+            Some(event)
+        );
+        assert_eq!(first.poll().unwrap(), None);
+        assert_eq!(second.poll().unwrap(), Some(event));
+        assert_eq!(second.poll().unwrap(), None);
+
+        let mut late = subscribe(&device).unwrap();
+        assert_eq!(late.poll().unwrap(), Some(event));
+
+        let next = DeviceEvent::GpuHardwareException(GpuHardwareException {
+            endpoint_id: Some(id),
+            origin_id: None,
+            scope: GpuResetScope::WholeGpu,
+            memory_lost: true,
+            cause: GpuResetCause::Ecc,
+        });
+        std::thread::scope(|scope| {
+            let waiter = scope.spawn(move || first.wait(std::time::Duration::from_secs(2)));
+            assert!(
+                driver
+                    .wait_for_subscriber(std::time::Duration::from_secs(1))
+                    .unwrap()
+            );
+            driver.publish_event(next).unwrap();
+            assert_eq!(waiter.join().unwrap().unwrap(), Some(next));
+        });
+        assert_eq!(second.poll().unwrap(), Some(next));
+        assert_eq!(late.poll().unwrap(), Some(next));
+
+        drop(late);
+        drop(second);
+        let older = DeviceEvent::GpuHardwareException(GpuHardwareException {
+            endpoint_id: Some(id),
+            origin_id: None,
+            scope: GpuResetScope::WholeGpu,
+            memory_lost: false,
+            cause: GpuResetCause::Other,
+        });
+        driver.publish_event(older).unwrap();
+        driver.publish_event(next).unwrap();
+        let mut late = subscribe(&device).unwrap();
+        assert_eq!(late.poll().unwrap(), Some(next));
+        assert_eq!(late.poll().unwrap(), None);
+        drop(late);
+        drop(device);
+        drop(driver);
+        session.destroy().unwrap();
+    }
+
     struct TestDriverProbe {
         shutdowns: std::sync::Arc<std::sync::atomic::AtomicUsize>,
         fail_shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        enumerations: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        opens: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[test]
+    fn multi_driver_direct_open_does_not_enumerate() {
+        let ids = [[0x11; 16], [0x22; 16], [0x33; 16]];
+        let (session, probes) = test_session(&ids);
+        assert_eq!(session.open_endpoint(ids[1]).unwrap().id, ids[1]);
+        for probe in probes {
+            assert_eq!(probe.enumerations.load(Ordering::Relaxed), 0);
+            assert_eq!(probe.opens.load(Ordering::Relaxed), 1);
+        }
     }
 
     #[test]
     fn multiple_drivers_route_endpoints_and_retry_only_unfinished_shutdown() {
         let ids = [[0x11; 16], [0x22; 16], [0x33; 16]];
         let (mut session, probes) = test_session(&ids);
+        assert_eq!(
+            crate::memory::interop::linux::kfd_driver(&session)
+                .err()
+                .unwrap()
+                .kind(),
+            ErrorKind::Unsupported
+        );
         let mut endpoints = Vec::new();
         session
             .enumerate(&mut |endpoint| {
@@ -502,15 +1289,20 @@ mod tests {
         assert_eq!(endpoints[1].id, ids[1]);
         assert_eq!(endpoints[2].id, ids[2]);
         assert_eq!(session.open_endpoint(ids[1]).unwrap(), endpoints[1]);
-        for endpoint in &endpoints {
-            let details = session.query_endpoint_details(endpoint).unwrap();
-            assert_eq!(details.product_name, None);
-            assert_eq!(details.kind, EndpointDetailsKind::Other);
+        for endpoint in &mut endpoints {
+            session.populate_endpoint(endpoint).unwrap();
+            assert_eq!(endpoint.product_name.as_deref(), Some("Test endpoint"));
         }
+        let mut stale = endpoints[0].clone();
+        stale.name[0] = b'!';
+        assert_eq!(
+            session.populate_endpoint(&mut stale).unwrap_err().kind(),
+            ErrorKind::DeviceLost
+        );
         let (mut other_session, _) = test_session(&ids);
         assert_eq!(
             other_session
-                .query_endpoint_details(&endpoints[0])
+                .populate_endpoint(&mut endpoints[0])
                 .unwrap_err()
                 .kind(),
             ErrorKind::InvalidArgument
@@ -522,6 +1314,7 @@ mod tests {
         other_session.destroy().unwrap();
         let first = session.activate(&endpoints[0]).unwrap();
         let second = session.activate(&endpoints[1]).unwrap();
+        assert_eq!(first.endpoint().product_name, endpoints[0].product_name);
         assert!(!first.shares_address_domain(&second));
         assert_eq!(first.address_range(), (0x1000, 0xffff));
         assert_eq!(first.gpu().err().unwrap().kind(), ErrorKind::Unsupported);
@@ -547,8 +1340,10 @@ mod tests {
         assert_eq!(probes[2].shutdowns.load(Ordering::Relaxed), 0);
         drop(first);
         drop(second);
+        assert!(session.can_access_local_memory(&endpoints[0], &endpoints[0]));
         probes[1].fail_shutdown.store(true, Ordering::Relaxed);
         assert_eq!(session.destroy().unwrap_err().kind(), ErrorKind::Driver);
+        assert!(!session.can_access_local_memory(&endpoints[1], &endpoints[1]));
         assert_eq!(probes[0].shutdowns.load(Ordering::Relaxed), 1);
         assert_eq!(probes[1].shutdowns.load(Ordering::Relaxed), 1);
         assert_eq!(probes[2].shutdowns.load(Ordering::Relaxed), 1);
@@ -558,7 +1353,7 @@ mod tests {
         );
         assert_eq!(
             session
-                .query_endpoint_details(&endpoints[0])
+                .populate_endpoint(&mut endpoints[0])
                 .unwrap_err()
                 .kind(),
             ErrorKind::Unsupported
@@ -571,6 +1366,234 @@ mod tests {
         assert_eq!(probes[0].shutdowns.load(Ordering::Relaxed), 1);
         assert_eq!(probes[1].shutdowns.load(Ordering::Relaxed), 2);
         assert_eq!(probes[2].shutdowns.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn inherited_session_does_not_report_local_memory_access() {
+        let id = [0x23; 16];
+        let (mut session, _) = test_session(&[id]);
+        let endpoint = session.open_endpoint(id).unwrap();
+        assert!(session.can_access_local_memory(&endpoint, &endpoint));
+        session.process = ProcessIdentity::with_pid_for_test(std::process::id().wrapping_add(1));
+        assert!(!session.can_access_local_memory(&endpoint, &endpoint));
+        assert_eq!(
+            session
+                .configure(TestConfiguration {
+                    host_registration: true,
+                })
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidArgument
+        );
+        session.process = ProcessIdentity::capture().unwrap();
+        session.destroy().unwrap();
+    }
+
+    #[test]
+    fn memory_capabilities_preserve_provider_constraints_through_activation() {
+        use crate::memory::device::MemoryCapabilityRequest;
+        let id = [0x33; 16];
+        let driver = TestDriver::new(id, EndpointKind::Cpu, DriverContextLifetime::Session)
+            .with_owned_allocation()
+            .with_host_registration();
+        let mut session = Session::from_drivers(
+            vec![DriverInstance::Test(Shared::new(driver).unwrap())],
+            DriverContextLifetime::Session,
+        )
+        .unwrap();
+        let endpoint = session.open_endpoint(id).unwrap();
+        let request = MemoryCapabilityRequest::Allocation(MemoryKind::System);
+        let capabilities = session.memory_capabilities(&endpoint, request).unwrap();
+        assert!(!capabilities.host_coherent);
+        assert!(!capabilities.queue_storage);
+        assert_eq!(capabilities.maximum_alignment, 1 << 20);
+        let device = session.activate(&endpoint).unwrap();
+        assert_eq!(device.memory_capabilities(request).unwrap(), capabilities);
+        assert_eq!(
+            device
+                .allocate(
+                    MemoryKind::System,
+                    capabilities.native.granularity,
+                    1 << 21,
+                    DeviceAccess::READ
+                )
+                .err()
+                .unwrap()
+                .kind(),
+            ErrorKind::Unsupported
+        );
+        assert_eq!(
+            device
+                .allocate(
+                    MemoryKind::System,
+                    capabilities.native.granularity,
+                    capabilities.native.alignment,
+                    DeviceAccess::READ | DeviceAccess::EXECUTE
+                )
+                .err()
+                .unwrap()
+                .kind(),
+            ErrorKind::Unsupported
+        );
+        let mut memory = device
+            .allocate(
+                MemoryKind::System,
+                capabilities.native.granularity,
+                capabilities.native.alignment,
+                DeviceAccess::READ,
+            )
+            .unwrap();
+        memory.free().unwrap();
+        drop(memory);
+        drop(device);
+        session.destroy().unwrap();
+    }
+
+    #[test]
+    fn populated_gpu_endpoint_keeps_discovery_identity_for_activation() {
+        let id = [0x34; 16];
+        let driver = TestDriver::new(
+            id,
+            EndpointKind::Gpu {
+                info: GpuInfo {
+                    asic_family_id: 11,
+                    ..GpuInfo::default()
+                },
+            },
+            DriverContextLifetime::Session,
+        );
+        let mut session = Session::from_drivers(
+            vec![DriverInstance::Test(Shared::new(driver).unwrap())],
+            DriverContextLifetime::Session,
+        )
+        .unwrap();
+        let mut endpoint = session.open_endpoint(id).unwrap();
+        assert_eq!(endpoint.product_name, None);
+        session.populate_endpoint(&mut endpoint).unwrap();
+        assert_eq!(endpoint.product_name.as_deref(), Some("Test endpoint"));
+        assert_eq!(endpoint.gpu().unwrap().asic_family_id, 11);
+        assert_eq!(
+            endpoint.gpu().unwrap().counter_frequency_hz,
+            Some(1_000_000)
+        );
+        session.populate_endpoint(&mut endpoint).unwrap();
+        let device = session.activate(&endpoint).unwrap();
+        assert_eq!(device.endpoint(), &endpoint);
+        let gpu = device.gpu().unwrap();
+        assert_eq!(gpu.asic_family_id(), 42);
+        assert_eq!(gpu.surface_config().unwrap().asic_family_id, 42);
+        assert_eq!(device.endpoint().gpu().unwrap().asic_family_id, 11);
+
+        let mut stale = endpoint.clone();
+        if let EndpointKind::Gpu { info } = &mut stale.kind {
+            info.asic_family_id = 12;
+        }
+        let unchanged = stale.clone();
+        assert_eq!(
+            session.populate_endpoint(&mut stale).unwrap_err().kind(),
+            ErrorKind::DeviceLost
+        );
+        assert_eq!(stale, unchanged);
+        assert_eq!(
+            session.activate(&stale).err().unwrap().kind(),
+            ErrorKind::InvalidArgument
+        );
+        drop(device);
+        session.destroy().unwrap();
+    }
+
+    #[test]
+    #[allow(unsafe_code)]
+    fn test_gpu_queue_routes_and_retains_dependencies_through_failed_retirement() {
+        struct Dependency(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+        impl Drop for Dependency {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Release);
+            }
+        }
+
+        let first_id = [0x35; 16];
+        let second_id = [0x36; 16];
+        let test_gpu = |id| {
+            TestDriver::new(
+                id,
+                EndpointKind::Gpu {
+                    info: GpuInfo {
+                        asic_family_id: 11,
+                        ..GpuInfo::default()
+                    },
+                },
+                DriverContextLifetime::Session,
+            )
+        };
+        let first = test_gpu(first_id);
+        let failures = first.fail_queue_destroy.clone();
+        let destroys = first.queue_destroys.clone();
+        let mut session = Session::from_drivers(
+            vec![
+                DriverInstance::Test(Shared::new(first).unwrap()),
+                DriverInstance::Test(Shared::new(test_gpu(second_id)).unwrap()),
+            ],
+            DriverContextLifetime::Session,
+        )
+        .unwrap();
+        let first_device = session
+            .activate(&session.open_endpoint(first_id).unwrap())
+            .unwrap();
+        let second_device = session
+            .activate(&session.open_endpoint(second_id).unwrap())
+            .unwrap();
+        let gpu = first_device.gpu().unwrap();
+        let request = QueueRequest {
+            control_memory: crate::device::gpu::queue::QueueRingMemory::System,
+            ring_size_bytes: 4096,
+            parameters: QueueParameters::Sdma,
+            priority: QueuePriority::Normal,
+            device_producer: false,
+        };
+        let dependency_drops = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        // SAFETY: The fake SDMA queue has no external addresses or producers.
+        let mut queue = unsafe {
+            gpu.create_queue_with_dependencies(request, Dependency(dependency_drops.clone()))
+        }
+        .unwrap();
+        assert_eq!(queue.info().ring_size_bytes, request.ring_size_bytes);
+        assert_eq!(queue.progress().unwrap(), (0, 0));
+        assert_eq!(
+            queue.map_device(gpu).unwrap().doorbell_device_address,
+            Some(0x8000)
+        );
+        assert_eq!(
+            queue
+                .map_device(second_device.gpu().unwrap())
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidArgument
+        );
+
+        drop(first_device);
+        drop(second_device);
+        assert_eq!(session.destroy().unwrap_err().kind(), ErrorKind::Busy);
+        failures.store(true, Ordering::Release);
+        let mut callbacks = 0;
+        // SAFETY: No fake transport was published to a producer.
+        assert_eq!(
+            unsafe { queue.destroy_with_retained_transport(&mut |_| callbacks += 1) }
+                .unwrap_err()
+                .kind(),
+            ErrorKind::Driver
+        );
+        assert_eq!(callbacks, 0);
+        assert_eq!(dependency_drops.load(Ordering::Acquire), 0);
+        assert_eq!(destroys.load(Ordering::Acquire), 0);
+        assert_eq!(queue.progress().unwrap(), (0, 0));
+        // SAFETY: No fake transport was published to a producer.
+        unsafe { queue.destroy_with_retained_transport(&mut |_| callbacks += 1) }.unwrap();
+        assert_eq!(callbacks, 1);
+        assert_eq!(destroys.load(Ordering::Acquire), 1);
+        drop(queue);
+        assert_eq!(dependency_drops.load(Ordering::Acquire), 1);
+        session.destroy().unwrap();
     }
 
     #[test]
@@ -678,6 +1701,54 @@ mod tests {
         );
         host.free().unwrap();
         drop(host);
+        drop(device);
+        session.destroy().unwrap();
+    }
+
+    #[test]
+    fn ordinary_allocation_can_bind_identity_without_a_native_alias_registry() {
+        use crate::memory::device::LocalBackingIdentity;
+        let id = [0x4b; 16];
+        let driver = TestDriver::new(id, EndpointKind::Npu, DriverContextLifetime::Session)
+            .with_owned_allocation();
+        let mut session = Session::from_drivers(
+            vec![DriverInstance::Test(Shared::new(driver).unwrap())],
+            DriverContextLifetime::Session,
+        )
+        .unwrap();
+        let device = session
+            .activate(&session.open_endpoint(id).unwrap())
+            .unwrap();
+        let page = crate::memory::host_page_size().unwrap();
+        let mut allocation = device
+            .allocate_with_peers(
+                &[],
+                crate::memory::MemoryKind::System,
+                page,
+                page,
+                DeviceAccess::READ | DeviceAccess::WRITE,
+            )
+            .unwrap();
+        let identity = LocalBackingIdentity {
+            namespace: 17,
+            object: 23,
+        };
+        assert_eq!(allocation.local_backing_identity(), None);
+        assert_eq!(allocation.backing_offset(), None);
+        allocation.bind_local_backing_identity(identity).unwrap();
+        allocation.bind_local_backing_identity(identity).unwrap();
+        assert!(
+            allocation
+                .bind_local_backing_identity(LocalBackingIdentity {
+                    object: 24,
+                    ..identity
+                })
+                .is_err()
+        );
+        assert_eq!(allocation.local_backing_identity(), Some(identity));
+        allocation.free().unwrap();
+        assert!(allocation.bind_local_backing_identity(identity).is_err());
+        drop(allocation);
         drop(device);
         session.destroy().unwrap();
     }
@@ -869,8 +1940,157 @@ mod tests {
         );
         assert_eq!(delivered, 0);
         assert_eq!(
+            session.topology_graph_snapshot().unwrap_err().kind(),
+            ErrorKind::InvalidData
+        );
+        assert_eq!(
             session.open_endpoint(id).unwrap_err().kind(),
             ErrorKind::InvalidData
         );
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod portable_tests {
+    use super::*;
+    use crate::driver::test_driver::TestDriver;
+    use crate::topology::{EndpointKind, GpuInfo};
+    #[test]
+    fn copy_transport_is_selected_by_the_provider_for_the_same_gpu_target() {
+        use crate::topology::{GpuCopyTransport, GpuQueueCapabilities, GpuTargetProfile};
+        for (profile, transport, direct, kernel, supported) in [
+            (
+                GpuTargetProfile::Gfx9,
+                Some(GpuCopyTransport::User),
+                true,
+                false,
+                cfg!(target_arch = "x86_64"),
+            ),
+            (
+                GpuTargetProfile::Gfx9,
+                Some(GpuCopyTransport::Kernel),
+                false,
+                true,
+                true,
+            ),
+            (GpuTargetProfile::Gfx9, None, true, true, false),
+            (
+                GpuTargetProfile::Gfx9,
+                Some(GpuCopyTransport::Kernel),
+                true,
+                false,
+                false,
+            ),
+            (
+                GpuTargetProfile::Gfx1201,
+                Some(GpuCopyTransport::User),
+                true,
+                true,
+                false,
+            ),
+            (
+                GpuTargetProfile::Other,
+                Some(GpuCopyTransport::Kernel),
+                false,
+                true,
+                false,
+            ),
+        ] {
+            let id = [0x36; 16];
+            let driver = TestDriver::new(
+                id,
+                EndpointKind::Gpu {
+                    info: GpuInfo {
+                        target_profile: profile,
+                        queues: GpuQueueCapabilities {
+                            copy: transport,
+                            sdma: direct
+                                .then_some(crate::topology::GpuUserQueueCapabilities::default()),
+                            kernel_sdma: kernel,
+                            ..GpuQueueCapabilities::default()
+                        },
+                        ..GpuInfo::default()
+                    },
+                },
+                DriverContextLifetime::Session,
+            );
+            let mut session = Session::from_drivers(
+                vec![DriverInstance::Test(Shared::new(driver).unwrap())],
+                DriverContextLifetime::Session,
+            )
+            .unwrap();
+            let device = session
+                .activate(&session.open_endpoint(id).unwrap())
+                .unwrap();
+            assert_eq!(device.gpu().unwrap().supports_linear_copy(), supported);
+            drop(device);
+            session.destroy().unwrap();
+        }
+    }
+
+    #[test]
+    fn clock_only_provider_routes_without_other_instrumentation_facets() {
+        let id = [0x35; 16];
+        let driver = TestDriver::new(
+            id,
+            EndpointKind::Gpu {
+                info: GpuInfo::default(),
+            },
+            DriverContextLifetime::Session,
+        );
+        let mut session = Session::from_drivers(
+            vec![DriverInstance::Test(Shared::new(driver).unwrap())],
+            DriverContextLifetime::Session,
+        )
+        .unwrap();
+        let endpoint = session.open_endpoint(id).unwrap();
+        let device = session.activate(&endpoint).unwrap();
+        let gpu = device.gpu().unwrap();
+        let clocks = gpu.clock_counters().unwrap();
+        assert_eq!(clocks.gpu, 17);
+        assert!(clocks.system.is_none());
+        assert_eq!(clocks.gpu_info.frequency_hz, 25_000_000);
+        assert_eq!(
+            gpu.pc_sampling_configurations(
+                crate::device::gpu::profiling::PcSamplingConfigurationSet::Supported
+            )
+            .unwrap_err()
+            .kind(),
+            ErrorKind::Unsupported
+        );
+        assert_eq!(
+            gpu.spm_acquire().unwrap_err().kind(),
+            ErrorKind::Unsupported
+        );
+        assert_eq!(
+            gpu.available_memory().unwrap_err().kind(),
+            ErrorKind::Unsupported
+        );
+        drop(device);
+        session.destroy().unwrap();
+    }
+
+    #[test]
+    fn session_without_device_providers_keeps_host_services_available() {
+        let mut session =
+            Session::from_drivers(Vec::new(), DriverContextLifetime::Session).unwrap();
+        let mut count = 0;
+        session
+            .enumerate(&mut |_| {
+                count += 1;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+        let caps = crate::memory::host::capabilities().unwrap();
+        let mut allocation = crate::memory::host::HostAllocation::allocate(
+            caps.allocation.granularity,
+            caps.allocation.alignment,
+        )
+        .unwrap();
+        assert_ne!(allocation.info().host_address, 0);
+        allocation.free().unwrap();
+        session.destroy().unwrap();
     }
 }

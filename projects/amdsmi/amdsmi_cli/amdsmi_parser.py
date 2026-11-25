@@ -4,7 +4,9 @@
 
 import argparse
 import errno
+import logging
 import os
+import re
 import sys
 import time
 import collections
@@ -30,6 +32,18 @@ CPU_DISABLE_APB_RANGE = range(0, 4)
 def _cpu_set_range_label(value_range):
     # Render a range like range(0, 2) as "0-1" for help text.
     return f"{value_range.start}-{value_range[-1]}"
+
+
+def _add_selected_devices(args, dest, device_handles):
+    """Add device_handles to args.<dest> once each, so repeated device options combine."""
+    selected = list(getattr(args, dest) or [])
+    # ctypes handles compare by identity, and every handle query returns new objects.
+    selected_values = {handle.value for handle in selected}
+    for handle in device_handles:
+        if handle.value not in selected_values:
+            selected_values.add(handle.value)
+            selected.append(handle)
+    setattr(args, dest, selected)
 
 
 # Custom Help Formatter for increasing the action max length
@@ -74,8 +88,10 @@ class AMDSMISubParser(argparse.ArgumentParser):
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
                 command, value, outputformat, hint=hint
             )
-        elif ": expected" in message:
-            # e.g. "argument --gpu: expected one argument"
+        elif re.search(r": expected (one|at least one|\d+) arguments?$", message):
+            # e.g. "argument --gpu: expected one argument", or
+            # "argument --node-balancing-mode: expected 2 arguments" for a
+            # fixed-nargs action.
             arg = (
                 message[len("argument ") :].split(":")[0]
                 if message.startswith("argument ")
@@ -86,6 +102,46 @@ class AMDSMISubParser(argparse.ArgumentParser):
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
                 command, message, outputformat
             )
+
+
+class _AssumeDriverLoaded:
+    """AMDSMIHelpers stand-in that reports one more driver as loaded, with no devices.
+
+    error() rebuilds the parser with it to learn whether rejected input needs that driver.
+    """
+
+    _FLAGS = {
+        "amdgpu": ("is_amdgpu_initialized",),
+        "hsmp_acpi": ("is_amd_hsmp_initialized",),
+        "ionic": ("is_ainic_initialized",),
+        "bnxt_en": ("is_ainic_initialized",),
+    }
+    _CHOICES = {
+        "amdgpu": ("get_gpu_choices",),
+        "hsmp_acpi": ("get_cpu_choices", "get_core_choices"),
+        "ionic": ("get_nic_choices",),
+        "bnxt_en": ("get_nic_choices",),
+    }
+
+    def __init__(self, helpers, driver):
+        self._helpers = helpers
+        self._flags = self._FLAGS[driver]
+        self._choices = self._CHOICES[driver]
+
+    def __getattr__(self, name):
+        if name in self._flags:
+            return lambda: True
+        if name in self._choices:
+            return lambda: ({}, "")
+        return getattr(self._helpers, name)
+
+
+def _nic_index(value):
+    """argparse type for a NIC port index; -1 selects every port."""
+    index = int(value)
+    if index < -1:
+        raise argparse.ArgumentTypeError(f"invalid index {value}: must be 0 or greater")
+    return index
 
 
 class AMDSMIParser(argparse.ArgumentParser):
@@ -122,6 +178,12 @@ class AMDSMIParser(argparse.ArgumentParser):
         sys_argv=None,
         helpers=None,
     ):
+        # error() rebuilds the parser from these to explain rejected input
+        self._rebuild_kwargs = {
+            name: value
+            for name, value in locals().items()
+            if name not in ("self", "helpers", "__class__")
+        }
 
         # Helper variables
         if helpers is None:
@@ -137,13 +199,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             self.gpu_choices = {}
             self.gpu_choices_str = ""
 
-        if self.helpers.is_brcm_switch_initialized():
-            self.switch_choices, self.switch_choices_str = self.helpers.get_switch_choices()
-        else:
-            self.switch_choices = {}
-            self.switch_choices_str = ""
-
-        if self.helpers.is_ainic_initialized() or self.helpers.is_brcm_nic_initialized():
+        if self.helpers.is_ainic_initialized():
             self.nic_choices, self.nic_choices_str = self.helpers.get_nic_choices()
         else:
             self.nic_choices = {}
@@ -289,6 +345,42 @@ class AMDSMIParser(argparse.ArgumentParser):
             else:
                 # If no subcommand is given, add the default parser
                 self._add_default_parser(self.subparsers, default)
+
+    def _without_amdgpu_only(self, func, command, nic_options):
+        """Return *func*, or without amdgpu a wrapper that runs it only for its NIC options.
+
+        The rest of the command reports GPUs, so without amdgpu it explains why it cannot.
+        """
+        if self.helpers.is_amdgpu_initialized():
+            return func
+
+        def run_nic_options(args):
+            if any(getattr(args, option, None) not in (None, False) for option in nic_options):
+                return func(args)
+            outputformat = self.helpers.get_output_format()
+            if self.helpers.get_devices_without_driver("amdgpu"):
+                raise amdsmi_cli_exceptions.AmdSmiDriverNotLoadedException(
+                    f"Command '{command}'", ["amdgpu"], outputformat
+                )
+            raise amdsmi_cli_exceptions.AmdSmiCommandNotSupportedException(command, outputformat)
+
+        return run_nic_options
+
+    def _rebuilt_subparsers(self, command):
+        """Map each missing driver whose hardware is present to the *command* subparser of a
+        parser rebuilt with that driver assumed loaded (None if the command is still absent).
+        """
+        subparsers = {}
+        for driver in self.helpers.get_missing_drivers():
+            try:
+                parser = AMDSMIParser(
+                    **self._rebuild_kwargs, helpers=_AssumeDriverLoaded(self.helpers, driver)
+                )
+            except Exception:  # best effort: without a rebuild the generic error stands
+                logging.debug("Could not rebuild the parser with %s loaded", driver, exc_info=True)
+                continue
+            subparsers[driver] = parser.subparsers.choices.get(command)
+        return subparsers
 
     def _not_negative_int(self, int_value, sub_arg=None):
         # Argument type validator
@@ -828,7 +920,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     )
                 )
                 if status:
-                    setattr(args, self.dest, selected_device_handles)
+                    _add_selected_devices(args, self.dest, selected_device_handles)
                 else:
                     if selected_device_handles == "":
                         raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(
@@ -862,13 +954,16 @@ class AMDSMIParser(argparse.ArgumentParser):
             def __call__(self, parser, args, values, option_string=None):
                 if "all" in nic_choices:
                     del nic_choices["all"]
+                # Bare --nic (nargs="*" yields []) selects every NIC, matching
+                # --port's bare-means-all convention.
+                nic_selections = values if values else ["all"]
                 status, selected_device_handles = (
                     amdsmi_helpers.get_device_handles_from_nic_selections(
-                        nic_selections=values, nic_choices=nic_choices
+                        nic_selections=nic_selections, nic_choices=nic_choices
                     )
                 )
                 if status:
-                    setattr(args, self.dest, selected_device_handles)
+                    _add_selected_devices(args, self.dest, selected_device_handles)
                 else:
                     if selected_device_handles == "":
                         raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(
@@ -882,42 +977,6 @@ class AMDSMIParser(argparse.ArgumentParser):
                         )
 
         return _NICSelectAction
-
-    def _switch_select(self, switch_choices):
-        """Custom argparse action to return the device handle(s) for the switches(s) selected
-        This will set the destination (args.switch) to a list of 1 or more device handles
-        If 1 or more device handles are not found then raise an ArgumentError for the first invalid switch seen
-        """
-
-        amdsmi_helpers = self.helpers
-
-        class _SwitchSelectAction(argparse.Action):
-            output_format = self.helpers.get_output_format()
-
-            # Checks the values
-            def __call__(self, parser, args, values, option_string=None):
-                if "all" in switch_choices:
-                    del switch_choices["all"]
-                status, selected_device_handles = (
-                    amdsmi_helpers.get_device_handles_from_switch_selections(
-                        switch_selections=values, switch_choices=switch_choices
-                    )
-                )
-                if status:
-                    setattr(args, self.dest, selected_device_handles)
-                else:
-                    if selected_device_handles == "":
-                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(
-                            "--switch", _SwitchSelectAction.output_format
-                        )
-                    else:
-                        raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(
-                            selected_device_handles,
-                            _SwitchSelectAction.output_format,
-                            amdsmi_cli_exceptions.AmdSmiDeviceKind.SWITCH,
-                        )
-
-        return _SwitchSelectAction
 
     def _cpu_select(self, cpu_choices):
         """Custom argparse action to return the device handle(s) for the cpu(s) selected
@@ -939,7 +998,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     )
                 )
                 if status:
-                    setattr(args, self.dest, selected_device_handles)
+                    _add_selected_devices(args, self.dest, selected_device_handles)
                 else:
                     if selected_device_handles == "":
                         raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(
@@ -978,7 +1037,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     )
                 )
                 if status:
-                    setattr(args, self.dest, selected_device_handles)
+                    _add_selected_devices(args, self.dest, selected_device_handles)
                 else:
                     if selected_device_handles == "":
                         raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(
@@ -1291,6 +1350,64 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         return _ValidatePtlFormat
 
+    def _validate_power_stabilization_configure(self):
+        """Validate and normalize --power-stabilization-configure.
+
+        Accepts either:
+          - a single '@<path>' argument pointing to a JSON file shaped like
+            the `static --power-stabilization --json` output (a top-level
+            `gpu_data` list with one entry per GPU) -- the path is only
+            syntax-checked here; set_value.py resolves the per-GPU entry
+            and parses its tokens once the target GPU is known, or
+          - one or more space- and/or comma-separated KEY=VALUE tokens
+            (lowercase keys matching amdsmi_power_stabilization_param_id_t).
+
+        Normalizes to a power_stabilization_configure_args(tokens, file_path)
+        namedtuple: `tokens` is an ordered list of
+        (AmdSmiPowerStabilizationParamId, value) tuples for the direct
+        KEY=VALUE form, or None for the '@<path>' form (and vice versa for
+        `file_path`).
+        """
+        power_stabilization_configure_args = collections.namedtuple(
+            "power_stabilization_configure_args", ["tokens", "file_path"]
+        )
+
+        class _PowerStabilizationConfigureAction(argparse.Action):
+            def __call__(self, parser, args, values, option_string=None):
+                # `@<path>` form: resolved once per GPU in set_value.py, since
+                # the file is a multi-GPU `gpu_data` dump and which entry
+                # applies isn't known until the GPU being processed is.
+                if len(values) == 1 and values[0].startswith("@"):
+                    if not values[0][1:]:
+                        raise argparse.ArgumentError(self, "File path cannot be empty after '@'.")
+                    setattr(
+                        args, self.dest, power_stabilization_configure_args(None, values[0][1:])
+                    )
+                    return
+
+                tokens = []
+                for value in values:
+                    tokens.extend(part for part in value.split(",") if part.strip() != "")
+
+                parsed = []
+                for token in tokens:
+                    try:
+                        result = AMDSMIHelpers.parse_power_stabilization_token(
+                            token, ignore_read_only=False
+                        )
+                    except ValueError as e:
+                        raise argparse.ArgumentError(self, f"{e} for {option_string}")
+                    parsed.append(result)
+
+                if not parsed:
+                    raise argparse.ArgumentError(
+                        self, f"{option_string} requires at least one KEY=VALUE pair"
+                    )
+
+                setattr(args, self.dest, power_stabilization_configure_args(parsed, None))
+
+        return _PowerStabilizationConfigureAction
+
     def _ampp_configure_options(self):
         """Custom action for --ampp-configure PROFILE_NAME KEY=VALUE [KEY=VALUE ...]"""
         output_format = self.helpers.get_output_format()
@@ -1418,10 +1535,63 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         parser.error = _intercept
 
-    def _add_device_arguments(self, subcommand_parser: argparse.ArgumentParser, required=False):
+    @staticmethod
+    def _guard_extended_requires_port(parser):
+        """--extended with no --port has no counter set to extend; this is a
+        parse-time usage error regardless of flag order on the command line."""
+        _original_parse_known_args = parser.parse_known_args
+
+        def _intercept(args=None, namespace=None):
+            namespace, extras = _original_parse_known_args(args, namespace)
+            if getattr(namespace, "extended", False) and getattr(namespace, "port", None) is None:
+                parser.error("argument --extended: not allowed without --port")
+            return namespace, extras
+
+        parser.parse_known_args = _intercept
+
+    @staticmethod
+    def _guard_nic_arguments_require_nic(parser):
+        """--port, --rdma and --sensors read a NIC; without --nic they would be ignored and a GPU
+        dump printed instead, so reject them at parse time."""
+        _original_parse_known_args = parser.parse_known_args
+
+        def _intercept(args=None, namespace=None):
+            namespace, extras = _original_parse_known_args(args, namespace)
+            is_nic_argument_given = (
+                (getattr(namespace, "port", None) is not None)
+                or (getattr(namespace, "rdma", None) is not None)
+                or getattr(namespace, "sensors", False)
+            )
+            if is_nic_argument_given and (getattr(namespace, "nic", None) is None):
+                parser.error("arguments --port/--rdma/--sensors: not allowed without --nic")
+            return namespace, extras
+
+        parser.parse_known_args = _intercept
+
+    @staticmethod
+    def _guard_nic_rejects_watch(parser):
+        """The NIC path prints once and never reaches the watch loop, so a watch flag with --nic
+        would be accepted and silently ignored; reject it at parse time."""
+        _original_parse_known_args = parser.parse_known_args
+
+        def _intercept(args=None, namespace=None):
+            namespace, extras = _original_parse_known_args(args, namespace)
+            is_watch_given = any(
+                getattr(namespace, dest, None) is not None
+                for dest in ("watch", "watch_time", "iterations")
+            )
+            if is_watch_given and (getattr(namespace, "nic", None) is not None):
+                parser.error("arguments --watch/--watch_time/--iterations: not allowed with --nic")
+            return namespace, extras
+
+        parser.parse_known_args = _intercept
+
+    def _add_device_arguments(
+        self, subcommand_parser: argparse.ArgumentParser, required=False, nic=False
+    ):
         # Device arguments help text
         gpu_help = (
-            f"Select a GPU ID, BDF, or UUID from the possible choices:\n{self.gpu_choices_str}"
+            f"Select a GPU ID, BDF, UUID or CUID from the possible choices:\n{self.gpu_choices_str}"
         )
         vf_help = "Gets general information about the specified VF (timeslice, fb info, …).\
                     \nAvailable only on virtualization OSs"
@@ -1464,20 +1634,13 @@ class AMDSMIParser(argparse.ArgumentParser):
                 "-v", "--vf", action="store", nargs="+", help=vf_help, choices=self.vf_choices
             )
 
-        if self.helpers.is_ainic_initialized() or self.helpers.is_brcm_nic_initialized():
+        if nic and self.helpers.is_ainic_initialized():
             nic_help = (
-                f"Select a NIC ID, BDF, or UUID from the possible choices:\n{self.nic_choices_str}"
+                "Select a NIC ID, BDF, or UUID from the possible choices; "
+                f"a bare --nic selects every NIC:\n{self.nic_choices_str}"
             )
             device_args.add_argument(
-                "-N", "--nic", action=self._nic_select(self.nic_choices), nargs="+", help=nic_help
-            )
-        if self.helpers.is_brcm_switch_initialized():
-            switch_help = f"Select a SWITCH ID, BDF, or UUID from the possible choices:\n{self.switch_choices_str}"
-            device_args.add_argument(
-                "--switch",
-                action=self._switch_select(self.switch_choices),
-                nargs="+",
-                help=switch_help,
+                "-N", "--nic", action=self._nic_select(self.nic_choices), nargs="*", help=nic_help
             )
 
     def _add_command_modifiers(self, subcommand_parser: argparse.ArgumentParser):
@@ -1551,7 +1714,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(version_parser)
 
         # help info
-        gpu_version_help = "Display the current amdgpu driver version"
+        gpu_version_help = "Display the current amdgpu driver version and package"
         cpu_version_help = "Display the current amd_hsmp or hsmp_acpi driver version"
         nic_version_help = "Display the current nic driver version"
 
@@ -1582,15 +1745,15 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
 
     def _add_list_parser(self, subparsers: argparse._SubParsersAction, func):
-        if not self.helpers.is_amdgpu_initialized():
-            # The list subcommand is only applicable to systems with amdgpu initialized
+        if not (self.helpers.is_amdgpu_initialized() or self.helpers.is_ainic_initialized()):
+            # The list subcommand needs a GPU or NIC driver
             return
 
         # Subparser help text
         list_help = "List GPU information"
         list_optionals_title = "List Arguments"
         list_subcommand_help = f"{self.description}\n\nLists all detected devices on the system.\
-                            \nLists the BDF, UUID, KFD_ID, NODE_ID, and Partition ID for each GPU and/or CPUs.\
+                            \nLists the BDF, UUID, KFD_ID, NODE_ID, Partition ID and CUID for each GPU and/or CPUs.\
                             \nIn virtualization environments, it can also list VFs associated to each\
                             \nGPU with some basic information for each VF."
         enumeration_help = "Enumeration mapping to other features.\
@@ -1602,13 +1765,13 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         list_parser._optionals.title = list_optionals_title
         list_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
-        list_parser.set_defaults(func=func)
+        list_parser.set_defaults(func=func, gpu=None, note_drivers=("amdgpu", "ionic", "bnxt_en"))
 
         # Create -e subparser
         list_parser.add_argument("-e", "--enumeration", action="store_true", help=enumeration_help)
 
         # Add Universal Arguments
-        self._add_device_arguments(list_parser, required=False)
+        self._add_device_arguments(list_parser, required=False, nic=True)
         self._add_command_modifiers(list_parser)
 
     def _add_static_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -1623,7 +1786,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         bus_help = "All bus information"
         vbios_help = "All video bios/IFWI information (if available)"
         limit_help = "All limit metric values (i.e. power and thermal limits)"
-        driver_help = "Displays driver version"
+        driver_help = "Displays driver version and package"
         vram_help = "All vram information"
         cache_help = "All cache information"
         board_help = "All board information"
@@ -1631,16 +1794,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         xgmi_plpd_help = "The available XGMI per-link power down policy"
         process_isolation_help = "The process isolation status"
         cuid_help = (
-            "Component Unified ID: the derived CUID, its component type, whether it is a\n"
-            "temporary (auxiliary) identifier, and which layer answered.\n"
-            "Not part of the default `amd-smi static` output; ask for it.\n"
-            "The primary CUID is not shown by default either: its payload embeds the raw\n"
-            "serial number. Add --cuid-primary, as root, to include it."
-        )
-        cuid_primary_help = (
-            "Include the primary CUID in the CUID output, implying --cuid. Requires\n"
-            "privilege, and prints a value that embeds the device serial number. Do not\n"
-            "paste it into a bug report."
+            "Component Unified ID: the CUID, its component type, which layer answered,\n"
+            "and whether it is temporary.\n"
+            "Not part of the default `amd-smi static` output; ask for it."
         )
         profile_help = "Display current and available power profiles"
         clk_options = self.helpers.get_clock_types()[0]
@@ -1676,7 +1832,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         static_parser._optionals.title = static_optionals_title
         static_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
-        static_parser.set_defaults(func=func)
+        static_parser.set_defaults(
+            func=func, note_drivers=("amdgpu", "hsmp_acpi", "ionic", "bnxt_en")
+        )
 
         # Handle GPU Options
         if self.helpers.is_amdgpu_initialized():
@@ -1722,9 +1880,6 @@ class AMDSMIParser(argparse.ArgumentParser):
             )
             static_parser.add_argument(
                 "-Y", "--cuid", action="store_true", required=False, help=cuid_help
-            )
-            static_parser.add_argument(
-                "-y", "--cuid-primary", action="store_true", required=False, help=cuid_primary_help
             )
             static_parser.add_argument(
                 "-C",
@@ -1777,6 +1932,19 @@ class AMDSMIParser(argparse.ArgumentParser):
                     "-u", "--numa", action="store_true", required=False, help=numa_help
                 )
 
+            # Power Stabilization is bare-metal Linux only (no NPM/guest-VF routing)
+            if self.helpers.is_linux() and self.helpers.is_baremetal():
+                power_stabilization_help = (
+                    "Power Stabilization status (HAWK dummy-compute insertion and Ramp Management)"
+                )
+                static_parser.add_argument(
+                    "-S",
+                    "--power-stabilization",
+                    action="store_true",
+                    required=False,
+                    help=power_stabilization_help,
+                )
+
             # Options to only display on a Hypervisor TODO: Add hypervisor driver check
             if self.helpers.is_hypervisor():
                 static_parser.add_argument(
@@ -1800,22 +1968,21 @@ class AMDSMIParser(argparse.ArgumentParser):
             )
 
         # Add Universal Arguments
-        self._add_device_arguments(static_parser, required=False)
+        self._add_device_arguments(static_parser, required=False, nic=True)
         self._add_command_modifiers(static_parser)
 
     def _add_firmware_parser(self, subparsers: argparse._SubParsersAction, func):
-        if not self.helpers.is_amdgpu_initialized():
-            # The firmware subcommand is only applicable to systems with amdgpu initialized
+        if not (self.helpers.is_amdgpu_initialized() or self.helpers.is_ainic_initialized()):
+            # The firmware subcommand needs either amdgpu or NIC initialized
             return
 
         # Subparser help text
-        firmware_help = "Gets firmware information about the specified GPU"
+        firmware_help = "Gets firmware information about the specified GPU or NIC"
         firmware_subcommand_help = f"{self.description}\n\nIf no GPU is specified, return firmware information for all GPUs on the system."
         firmware_optionals_title = "Firmware Arguments"
 
         # Optional arguments help text
         fw_list_help = "All FW list information"
-        nic_firmware_help = "Broadcom NIC firmware attributes"
         err_records_help = "All error records information"
 
         # Create firmware subparser
@@ -1824,7 +1991,11 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         firmware_parser._optionals.title = firmware_optionals_title
         firmware_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
-        firmware_parser.set_defaults(func=func)
+        firmware_parser.set_defaults(
+            func=self._without_amdgpu_only(func, "firmware", ("nic",)),
+            gpu=None,
+            note_drivers=("amdgpu", "ionic", "bnxt_en"),
+        )
 
         # Optional Args
         firmware_parser.add_argument(
@@ -1837,10 +2008,6 @@ class AMDSMIParser(argparse.ArgumentParser):
             help=fw_list_help,
             default=True,
         )
-        if self.helpers.is_brcm_nic_initialized():
-            firmware_parser.add_argument(
-                "--brcm_nic", action="store_true", required=False, help=nic_firmware_help
-            )
 
         # Options to only display on a Hypervisor
         if self.helpers.is_hypervisor():
@@ -1849,7 +2016,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             )
 
         # Add Universal Arguments
-        self._add_device_arguments(firmware_parser, required=False)
+        self._add_device_arguments(firmware_parser, required=False, nic=True)
         self._add_command_modifiers(firmware_parser)
 
     def _add_bad_pages_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -1898,9 +2065,35 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_device_arguments(bad_pages_parser, required=False)
         self._add_command_modifiers(bad_pages_parser)
 
+    @staticmethod
+    def _guard_nic_rejects_gpu_arguments(parser: argparse.ArgumentParser) -> None:
+        """The NIC path never reads the GPU and CPU metric flags, so one given with --nic would be
+        accepted and silently ignored; reject it at parse time."""
+        _original_parse_known_args = parser.parse_known_args
+        gpu_group_titles = {parser._optionals.title, "CPU Arguments", "CPU Core Arguments"}
+        nic_dests = {"help", "nic"}
+
+        def _intercept(args=None, namespace=None):
+            namespace, extras = _original_parse_known_args(args, namespace)
+            if getattr(namespace, "nic", None) is None:
+                return namespace, extras
+            given_flags = [
+                action.option_strings[-1]
+                for group in parser._action_groups
+                if group.title in gpu_group_titles
+                for action in group._group_actions
+                if (action.dest not in nic_dests)
+                and (getattr(namespace, action.dest, action.default) != action.default)
+            ]
+            if given_flags:
+                parser.error(f"arguments {'/'.join(given_flags)}: not allowed with --nic")
+            return namespace, extras
+
+        parser.parse_known_args = _intercept
+
     def _add_metric_parser(self, subparsers: argparse._SubParsersAction, func):
         # Subparser help text
-        metric_help = "Gets metric/performance information about the specified GPU, NIC, or switch"
+        metric_help = "Gets metric/performance information about the specified GPU or NIC"
         metric_subcommand_help = f"{self.description}\n\nIf no GPU is specified, returns metric information for all GPUs on the system.\
                                 \nIf no metric argument is provided, all metric information will be displayed."
         metric_optionals_title = "Metric arguments"
@@ -1910,8 +2103,6 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Help text for Arguments only Available on Linux Virtual OS and Baremetal platforms
         mem_usage_help = "Memory usage per block"
-        nic_metric_help = "Broadcom NIC metric attributes"
-        switch_metric_help = "Broadcom switch metric attributes"
 
         # Help text for Arguments only on Hypervisor and Baremetal platforms
         power_help = "Current power usage"
@@ -2012,7 +2203,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         metric_parser._optionals.title = metric_optionals_title
         metric_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
-        metric_parser.set_defaults(func=func)
+        metric_parser.set_defaults(
+            func=func, note_drivers=("amdgpu", "hsmp_acpi", "ionic", "bnxt_en")
+        )
 
         # Optional Args for Linux Virtual OS and Baremetal systems
         if not self.helpers.is_hypervisor() and not self.helpers.is_windows():
@@ -2331,19 +2524,56 @@ class AMDSMIParser(argparse.ArgumentParser):
                 help=core_eff_floor_limit_help,
             )
 
-        # Add BRCM NIC/Switch Arguments
-        if self.helpers.is_brcm_nic_initialized():
-            metric_parser.add_argument(
-                "--brcm_nic", action="store_true", required=False, help=nic_metric_help
+        if self.helpers.is_ainic_initialized():
+            port_help = (
+                "Show per-port statistics for the selected NIC.\n"
+                "    Bare --port shows all ports; --port <idx> shows one port."
             )
-        if self.helpers.is_brcm_switch_initialized():
-            metric_parser.add_argument(
-                "--brcm_switch", action="store_true", required=False, help=switch_metric_help
+            extended_help = "Show the extended vendor statistics set. Requires --port."
+            rdma_help = (
+                "Show RDMA hardware counters per RDMA port for the selected NIC.\n"
+                "    Bare --rdma shows all RDMA ports; --rdma <idx> shows one port.\n"
+                "    The index counts the NIC's RDMA ports from 0, across its RDMA devices.\n"
+                "    List the ports with 'static --nic'; it numbers them per device."
             )
+            sensors_help = (
+                "Show every hwmon sensor of the selected NIC with its thresholds\n"
+                "    (temperature, voltage and power), like the sensors command."
+            )
+
+            nic_stats_group = metric_parser.add_argument_group("NIC Arguments")
+            nic_stats_group.add_argument(
+                "--port",
+                type=_nic_index,
+                nargs="?",
+                const=-1,
+                default=None,
+                required=False,
+                help=port_help,
+            )
+            nic_stats_group.add_argument(
+                "--rdma",
+                type=_nic_index,
+                nargs="?",
+                const=-1,
+                default=None,
+                required=False,
+                help=rdma_help,
+            )
+            nic_stats_group.add_argument(
+                "--sensors", action="store_true", required=False, help=sensors_help
+            )
+            nic_stats_group.add_argument(
+                "--extended", action="store_true", required=False, help=extended_help
+            )
+            self._guard_extended_requires_port(metric_parser)
+            self._guard_nic_arguments_require_nic(metric_parser)
+            self._guard_nic_rejects_watch(metric_parser)
+            self._guard_nic_rejects_gpu_arguments(metric_parser)
 
         # Add Universal Arguments & watch Args
         self._add_watch_arguments(metric_parser)
-        self._add_device_arguments(metric_parser, required=False)
+        self._add_device_arguments(metric_parser, required=False, nic=True)
         command_modifier_group = self._add_command_modifiers(metric_parser)
         command_modifier_group.add_argument(
             "--show-unsupported", action="store_true", required=False, help=show_unsupported_help
@@ -2486,8 +2716,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         atomics_help = "Display 32 and 64-bit atomic io link capability between nodes"
         dma_help = "Display P2P direct memory access (DMA) link capability between nodes"
         bi_dir_help = "Display P2P bi-directional link capability between nodes"
-        nic_topo_help = "Display nic and gpu connectivity"
-        nic_shownuma_help = "Display nic,gpu's numa and cpu affinity"
 
         # Create topology subparser
         topology_parser = subparsers.add_parser(
@@ -2495,7 +2723,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         topology_parser._optionals.title = topology_optionals_title
         topology_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
-        topology_parser.set_defaults(func=func)
+        topology_parser.set_defaults(func=func, gpu=None, note_drivers=("amdgpu",))
 
         # Add Universal Arguments
         self._add_command_modifiers(topology_parser)
@@ -2529,14 +2757,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         topology_parser.add_argument(
             "-z", "--bi-dir", action="store_true", required=False, help=bi_dir_help
         )
-        if self.helpers.is_brcm_nic_initialized():
-            topology_parser.add_argument(
-                "--nic_topo", action="store_true", required=False, help=nic_topo_help
-            )
-        if self.helpers.is_brcm_switch_initialized():
-            topology_parser.add_argument(
-                "--nic_switch", action="store_true", required=False, help=nic_shownuma_help
-            )
 
     def _add_set_value_parser(self, subparsers: argparse._SubParsersAction, func):
         if not self.helpers.is_linux():
@@ -2577,7 +2797,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 accelerator_set_choices_str = ", ".join(accelerator_set_choices)
                 set_compute_partition_help = f"Set one of the following accelerator TYPE or profile INDEX:\n\t{accelerator_set_choices_str}.\n\tUse `sudo amd-smi partition --accelerator` to find acceptable values."
                 set_compute_partition_hint = f"\nValid inputs are: {accelerator_set_choices_str}.\nUse `sudo amd-smi partition --accelerator` to find acceptable values."
-                set_memory_partition_help = f"Set one of the following the memory partition modes:\n\t{memory_partition_choices_str}"
+                set_memory_partition_help = f"Set one of the following memory partition modes:\n\t{memory_partition_choices_str}\n\tThe mode applies at the next driver reload.\n\tSetting the current mode cancels a pending change."
                 soc_pstate_help_info = ", ".join(self.helpers.get_soc_pstates())
                 set_soc_pstate_help = f"Set the GPU soc pstate policy using policy id, an integer. Valid id's include:\n\t{soc_pstate_help_info}"
                 xgmi_plpd_help_info = ", ".join(self.helpers.get_xgmi_plpd_policies())
@@ -2876,6 +3096,34 @@ class AMDSMIParser(argparse.ArgumentParser):
                 help=set_node_power_limit_help,
                 metavar="WATTS",
             )
+
+            if self.helpers.is_linux() and self.helpers.is_baremetal():
+                set_power_stabilization_help = (
+                    "Configure Power Stabilization (HAWK dummy-compute insertion"
+                    " and Ramp Management)."
+                    "\n\tAccepts one or more space/comma-separated KEY=VALUE pairs"
+                    " (enable, power_floor, delay, insertion_priority, ramp_enable,"
+                    " ramp_max_ramp_up_rate, ramp_max_ramp_down_rate,"
+                    " ramp_min_time_at_power_floor, ramp_stop_delay), or a single"
+                    " @<path> argument pointing to a JSON file matching the"
+                    " `static --power-stabilization --json` output."
+                    "\n\tenable/ramp_enable accept on/off/true/false/1/0;"
+                    " insertion_priority accepts a name (OPPORTUNISTIC, GUARANTEED,"
+                    " DYNAMIC) or its integer value; the rest, including"
+                    " ramp_max_ramp_up_rate/ramp_max_ramp_down_rate, are integers."
+                    "\n\tExample: enable=on power_floor=70 insertion_priority=GUARANTEED"
+                    " ramp_max_ramp_up_rate=5"
+                    "\n\tEach key is applied in order; processing stops at the first failure."
+                )
+                set_value_exclusive_group.add_argument(
+                    "-s",
+                    "--power-stabilization-configure",
+                    action=self._validate_power_stabilization_configure(),
+                    nargs="+",
+                    required=False,
+                    help=set_power_stabilization_help,
+                    metavar="KEY=VALUE [KEY=VALUE ...] | @PATH",
+                )
 
         if self.helpers.is_amd_hsmp_initialized():
             if self.helpers.is_baremetal():
@@ -3228,8 +3476,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         ecc_help = "Monitor ECC single bit, ECC double bit, and PCIe replay error counts"
         mem_usage_help = "Monitor memory usage in MB"
         pcie_bandwidth_help = "Monitor PCIe bandwidth in Mb/s"
-        nic_monitor_help = "Broadcom NIC monitor attributes"
-        switch_monitor_help = "Broadcom switch monitor attributes"
         process_help = "Enable Process information table below monitor output;\n    Process Name may require elevated permissions"
         violation_help = "Monitor power and thermal violation status (%%);\n    Only available for MI300 or newer ASICs"
 
@@ -3239,7 +3485,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         monitor_parser._optionals.title = monitor_optionals_title
         monitor_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
-        monitor_parser.set_defaults(func=func)
+        monitor_parser.set_defaults(func=func, gpu=None, note_drivers=("amdgpu",))
 
         # Add monitor arguments
         monitor_parser.add_argument(
@@ -3286,14 +3532,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         monitor_parser.add_argument(
             "-q", "--process", action="store_true", required=False, help=process_help
         )
-        if self.helpers.is_brcm_nic_initialized():
-            monitor_parser.add_argument(
-                "--brcm_nic", action="store_true", required=False, help=nic_monitor_help
-            )
-        if self.helpers.is_brcm_switch_initialized():
-            monitor_parser.add_argument(
-                "--brcm_switch", action="store_true", required=False, help=switch_monitor_help
-            )
         if not self.helpers.is_virtual_os():
             monitor_parser.add_argument(
                 "-V", "--violation", action="store_true", required=False, help=violation_help
@@ -3486,9 +3724,6 @@ class AMDSMIParser(argparse.ArgumentParser):
             "Lists the CUID of every component on the node: the platform, CPU\n"
             "packages, GPUs, NPUs and NICs. Every CUID is temporary."
         )
-        node_cuid_primary_help = (
-            "Include each component's primary CUID, implying --cuid. Requires root."
-        )
 
         node_parser = subparsers.add_parser(
             "node", help=node_help, description=node_subcommand_help
@@ -3518,9 +3753,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         node_parser.add_argument(
             "-Y", "--cuid", action="store_true", required=False, help=node_cuid_help
-        )
-        node_parser.add_argument(
-            "-y", "--cuid-primary", action="store_true", required=False, help=node_cuid_primary_help
         )
 
         # Add Universal Arguments
@@ -3588,6 +3820,12 @@ class AMDSMIParser(argparse.ArgumentParser):
             message = message.split("'")[0]
             # Check if the command is possible in other system configurations and error accordingly
             if message in self.possible_commands:
+                rebuilt = self._rebuilt_subparsers(message)
+                drivers = [driver for driver, subparser in rebuilt.items() if subparser]
+                if drivers:
+                    raise amdsmi_cli_exceptions.AmdSmiDriverNotLoadedException(
+                        f"Command '{message}'", drivers, outputformat
+                    )
                 raise amdsmi_cli_exceptions.AmdSmiCommandNotSupportedException(
                     message, outputformat
                 )
@@ -3595,6 +3833,19 @@ class AMDSMIParser(argparse.ArgumentParser):
         elif "unrecognized arguments: " in message:
             l = len("unrecognized arguments: ")
             message = message[l:]
+            command = next((arg for arg in sys.argv[1:] if arg in self.possible_commands), "")
+            options = [token.split("=")[0] for token in message.split() if token.startswith("-")]
+            rebuilt = self._rebuilt_subparsers(command) if options else {}
+            for option in options:
+                drivers = [
+                    driver
+                    for driver, subparser in rebuilt.items()
+                    if subparser and option in subparser._option_string_actions
+                ]
+                if drivers:
+                    raise amdsmi_cli_exceptions.AmdSmiDriverNotLoadedException(
+                        f"Parameter '{option}'", drivers, outputformat
+                    )
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
                 sys.argv[1], message, outputformat
             )

@@ -31,7 +31,7 @@ set_property(CACHE AQLPROFILE_DEBUG_TRACE PROPERTY STRINGS 0 1 2)
 
 if(AQLPROFILE_DEBUG_TRACE STREQUAL "1" OR AQLPROFILE_DEBUG_TRACE STREQUAL "2")
     target_compile_definitions(rocprofiler-sdk-aqlprofile
-                               PRIVATE DEBUG_TRACE=${AQLPROFILE_DEBUG_TRACE})
+                               PRIVATE AQLPROFILE_DEBUG_LEVEL=${AQLPROFILE_DEBUG_TRACE})
 elseif(NOT AQLPROFILE_DEBUG_TRACE STREQUAL "0")
     message(FATAL_ERROR "AQLPROFILE_DEBUG_TRACE must be one of: 0, 1, 2")
 endif()

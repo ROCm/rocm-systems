@@ -75,6 +75,19 @@ export NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS=500
 ./your_rccl_application
 ```
 
+### Per-call Profiler Tags
+
+Set `ncclCollConfig_t::userProfilerTag` when submitting a collective or point-to-point
+operation with per-call configuration. With a profiler-v7-capable NCCL library, Inspector
+records this value as `coll_user_tag` or `p2p_user_tag` in the operation's JSON record.
+Tags are decimal strings to preserve all 64 bits, including values above `2^53`.
+An untagged operation reports `"0"`. Mapping tags to names is left to downstream tools.
+
+Inspector requires a NCCL library supporting profiler v7 and is intended to be built
+and shipped with the corresponding NCCL release. It exports only `ncclProfiler_v7`;
+older NCCL libraries cannot load this plugin. Running a new Inspector with an older
+NCCL library is not supported.
+
 ### Required Environment Variables
 
 - `NCCL_PROFILER_PLUGIN=/path/to/librccl-profiler-inspector.so`
@@ -291,8 +304,8 @@ Recommended default OTLP settings for fleet dashboards are `NCCL_INSPECTOR_OTEL_
 
 **Default OTLP data-point attributes (aggregated):**
 
-- Collectives: `version` (`v5.1`), `node`, `collective`, `message_size`, `algo_proto`
-- P2P: `version` (`v5.1`), `node`, `p2p_operation`, `message_size`
+- Collectives: `version` (`v7.1`), `node`, `collective`, `message_size`, `algo_proto`
+- P2P: `version` (`v7.1`), `node`, `p2p_operation`, `message_size`
 - Per-(comm, device) common attributes: `gpu` (for example `GPU0`), `comm_name`, `n_nodes`, `nranks`
 
 **Default OTLP metrics (aggregated):**
@@ -304,7 +317,7 @@ Recommended default OTLP settings for fleet dashboards are `NCCL_INSPECTOR_OTEL_
 
 **Verbose OTLP collective data-point attributes (per operation):**
 
-- `version` (`v5.2`), `node`, `collective`, `coll_sn`, `coll_msg_size_bytes`, `algo_proto`
+- `version` (`v7.2`), `node`, `collective`, `coll_sn`, `coll_msg_size_bytes`, `algo_proto`
 - Per-(comm, device) common attributes: `gpu`, `comm_name`, `comm_id`, `n_nodes`, `nranks`
 
 **Verbose OTLP collective metrics (per operation):**
@@ -313,7 +326,7 @@ Recommended default OTLP settings for fleet dashboards are `NCCL_INSPECTOR_OTEL_
 - `nccl_collective_exec_time_microseconds`
 - `nccl_collective_algobw_gbs`
 
-**Verbose OTLP P2P attributes/metrics** follow the same per-operation pattern (`version` (`v5.2`), `node`, `p2p_sn`, `p2p_peer`, exact message size, etc.) when P2P tracking is enabled.
+**Verbose OTLP P2P attributes/metrics** follow the same per-operation pattern (`version` (`v7.2`), `node`, `p2p_sn`, `p2p_peer`, exact message size, etc.) when P2P tracking is enabled.
 
 OTLP data points include `timeUnixNano`. Verbose mode uses the completed operation timestamp for each per-operation point. Default aggregated mode uses the latest completed operation timestamp in each bucket, so timestamp granularity improves without adding labels or increasing series cardinality.
 
@@ -323,8 +336,8 @@ OTLP data points include `timeUnixNano`. Verbose mode uses the completed operati
 # TYPE nccl_bus_bandwidth_gbs gauge
 # HELP nccl_collective_exec_time_microseconds RCCL collective execution time in microseconds
 # TYPE nccl_collective_exec_time_microseconds gauge
-nccl_bus_bandwidth_gbs{version="v5.1",cluster="alola",slurm_job_id="67940160",node="node001",gpu="GPU0",comm_name="unknown",n_nodes="1",nranks="8",collective="AllReduce",message_size="8-9MB",algo_proto="RING_SIMPLE"} 144.832
-nccl_collective_exec_time_microseconds{version="v5.1",cluster="alola",slurm_job_id="67940160",node="node001",gpu="GPU0",comm_name="unknown",n_nodes="1",nranks="8",collective="AllReduce",message_size="8-9MB",algo_proto="RING_SIMPLE"} 1772.12
+nccl_bus_bandwidth_gbs{version="v7.1",cluster="alola",slurm_job_id="67940160",node="node001",gpu="GPU0",comm_name="unknown",n_nodes="1",nranks="8",collective="AllReduce",message_size="8-9MB",algo_proto="RING_SIMPLE"} 144.832
+nccl_collective_exec_time_microseconds{version="v7.1",cluster="alola",slurm_job_id="67940160",node="node001",gpu="GPU0",comm_name="unknown",n_nodes="1",nranks="8",collective="AllReduce",message_size="8-9MB",algo_proto="RING_SIMPLE"} 1772.12
 ```
 
 Validate a snapshot with `promtool check metrics < file.prom`. Import the AMD Grafana template from [`grafana/`](grafana/README.md); it queries these `nccl_*` names and filters on the `cluster` and `slurm_job_id` labels.
@@ -342,7 +355,7 @@ Each output file contains JSON objects with the following structure:
     "nnodes": 1
   },
   "metadata": {
-    "inspector_output_format_version": "v4.1",
+    "inspector_output_format_version": "v4.3",
     "git_rev": "",
     "rec_mechanism": "nccl_profiler_interface",
     "dump_timestamp_us": 1748030377748202,
@@ -351,7 +364,10 @@ Each output file contains JSON objects with the following structure:
   },
   "coll_perf": {
     "coll": "AllReduce",
+    "coll_algo": "RING",
+    "coll_proto": "LL",
     "coll_sn": 1407,
+    "coll_user_tag": "42",
     "coll_msg_size_bytes": 17179869184,
     "coll_exec_time_us": 61974,
     "coll_algobw_gbs": 277.210914,
@@ -375,7 +391,7 @@ Because this record has no `coll_perf`/`p2p_perf` body, consumers that iterate p
     "nnodes": 1
   },
   "metadata": {
-    "inspector_output_format_version": "v4.1",
+    "inspector_output_format_version": "v4.2",
     "git_rev": "",
     "rec_mechanism": "nccl_profiler_interface",
     "dump_timestamp_us": 1748030377748202,
@@ -412,7 +428,7 @@ This will include additional event trace information in the JSON output, showing
     "nnodes": 1
   },
   "metadata": {
-    "inspector_output_format_version": "v4.1",
+    "inspector_output_format_version": "v4.3",
     "git_rev": "9019a1912-dirty",
     "rec_mechanism": "nccl_profiler_interface",
     "dump_timestamp_us": 1752867229276385,
@@ -421,7 +437,10 @@ This will include additional event trace information in the JSON output, showing
   },
   "coll_perf": {
     "coll": "ReduceScatter",
+    "coll_algo": "RING",
+    "coll_proto": "SIMPLE",
     "coll_sn": 1231,
+    "coll_user_tag": "9223372036854775807",
     "coll_msg_size_bytes": 2147483648,
     "coll_exec_time_us": 41057,
     "coll_timing_source": "kernel_gpu",

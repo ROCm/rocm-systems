@@ -194,21 +194,6 @@ def test_simd_trans_functor_uses_trans_output(template: str):
     assert line.endswith(f', true, {_F16_POLICY});')
 
 
-@pytest.mark.parametrize('operation', sorted(INPUT_FLUSHED_ROUNDING))
-def test_simd_input_flushed_rounding_has_plain_output(operation: str):
-    line = simd_probe_line(f'v_{operation}_f16_vop3')
-
-    assert line.endswith(f', false, {_F16_POLICY});')
-
-
-@pytest.mark.parametrize('operation', ['trunc', 'rndne', 'fract'])
-def test_simd_unflushed_rounding_has_neither_property(operation: str):
-    line = simd_probe_line(f'v_{operation}_f16_vop3')
-
-    assert 'input_denormal::Policy' not in line
-    assert ', true' not in line
-
-
 def test_flush_nearest_f32_membership_is_explicit():
     assert FLUSH_NEAREST_F32_OPS == _EXPECTED_FLUSH_NEAREST_F32_OPS
 

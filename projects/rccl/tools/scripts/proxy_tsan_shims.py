@@ -110,8 +110,8 @@ static void* testShmLookup(const char* p) {
 REGISTRY_ANCHOR = "#define NCCL_MAX_PROXY_CONNECTIONS"
 
 CONSUMER_OLD = """    if (proxyOps->pool == NULL) {
-      NCCLCHECK(ncclShmOpen(poolPath, sizeof(poolPath), sizeof(struct ncclProxyOpsPool), (void**)(&proxyOps->pool),
-                            NULL, -1, &proxyOps->handle));
+      NCCLCHECK(ncclShmOpen(poolPath, sizeof(poolPath), ncclProxyOpsPoolSize(sharedProxyState->tpLocalnRanks),
+                            (void**)(&proxyOps->pool), NULL, -1, &proxyOps->handle));
       proxyOps->nextOps = proxyOps->nextOpsEnd = proxyOps->freeOp = -1;
     }
 """
@@ -121,8 +121,8 @@ CONSUMER_NEW = """    if (proxyOps->pool == NULL) {
       if (shared != nullptr) {
         proxyOps->pool = (struct ncclProxyOpsPool*)shared;
       } else {
-        NCCLCHECK(ncclShmOpen(poolPath, sizeof(poolPath), sizeof(struct ncclProxyOpsPool), (void**)(&proxyOps->pool),
-                              NULL, -1, &proxyOps->handle));
+        NCCLCHECK(ncclShmOpen(poolPath, sizeof(poolPath), ncclProxyOpsPoolSize(sharedProxyState->tpLocalnRanks),
+                              (void**)(&proxyOps->pool), NULL, -1, &proxyOps->handle));
         testShmRegister(poolPath, proxyOps->pool);
       }
       proxyOps->nextOps = proxyOps->nextOpsEnd = proxyOps->freeOp = -1;

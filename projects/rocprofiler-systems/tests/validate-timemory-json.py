@@ -3,9 +3,9 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-import sys
-import json
 import argparse
+import json
+import sys
 
 
 def validate_json(data, labels, counts, depths):
@@ -49,6 +49,9 @@ if __name__ == "__main__":
         "-p", "--print", action="store_true", help="Print the processed perfetto data"
     )
     parser.add_argument("-i", "--input", type=str, help="Input file", required=True)
+    parser.add_argument(
+        "-r", "--root", type=str, help="Top-level JSON key", default="timemory"
+    )
 
     args = parser.parse_args()
 
@@ -63,7 +66,7 @@ if __name__ == "__main__":
 
         # demo display of data
         if args.print:
-            for itr in data["timemory"][args.metric]["ranks"][0]["graph"]:
+            for itr in data[args.root][args.metric]["ranks"][0]["graph"]:
                 _prefix = itr["prefix"]
                 _depth = itr["depth"]
                 _count = itr["entry"]["laps"]
@@ -71,11 +74,11 @@ if __name__ == "__main__":
                 if _idx is not None:
                     _prefix = _prefix[(_idx + 4) :]
 
-                print("| {:40} | {:6} | {:6} |".format(_prefix, _count, _depth))
+                print(f"| {_prefix:40} | {_count:6} | {_depth:6} |")
 
         try:
             validate_json(
-                data["timemory"][args.metric]["ranks"][0]["graph"],
+                data[args.root][args.metric]["ranks"][0]["graph"],
                 args.labels,
                 args.counts,
                 args.depths,

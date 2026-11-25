@@ -9,23 +9,70 @@
 
 #![allow(unsafe_code)]
 
+mod host_reservation;
 mod reservation;
 
+pub(crate) use host_reservation::HostReservation;
 pub(crate) use reservation::Reservation;
 
-use super::{invalid_data, process_identity};
+use super::invalid_data;
 use crate::error::error;
 use crate::memory::storage::Shared;
+use crate::os::ProcessIdentity;
 use crate::os::native_error;
 use crate::{Error, ErrorKind};
 use std::ffi::{c_int, c_void};
+use std::fs::File;
 use std::io;
+use std::os::fd::FromRawFd;
 use std::ptr;
 use std::sync::atomic::AtomicU32;
 
 unsafe extern "C" {
     fn getpagesize() -> c_int;
     fn madvise(address: *mut c_void, length: usize, advice: c_int) -> c_int;
+}
+
+/// Gives a retained anonymous reservation ordinary demand-paged host backing.
+///
+/// # Safety
+/// The caller owns this whole anonymous range and excludes other mappings or
+/// concurrent protection changes while this operation runs.
+pub(crate) unsafe fn commit_svm_range(address: usize, size: usize) -> io::Result<()> {
+    // SAFETY: The caller retains the anonymous VMA and grants host access to it.
+    if unsafe {
+        libc::mprotect(
+            address as *mut c_void,
+            size,
+            libc::PROT_READ | libc::PROT_WRITE,
+        )
+    } != 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Discards pages in an anonymous mapping retained by a higher-level owner.
+///
+/// # Safety
+/// The range must remain mapped, anonymous and page aligned. The caller must
+/// exclude host and device accesses whose contents need to survive discard.
+pub(crate) unsafe fn discard_svm_range(
+    address: usize,
+    size: usize,
+    immediate: bool,
+) -> io::Result<()> {
+    let advice = if immediate {
+        libc::MADV_DONTNEED
+    } else {
+        libc::MADV_FREE
+    };
+    // SAFETY: The caller owns the complete mapping and permits discarding it.
+    if unsafe { madvise(address as *mut c_void, size, advice) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 /// Returns the Linux page size after checking it is a nonzero power of two.
@@ -45,7 +92,9 @@ pub(crate) fn page_size() -> io::Result<usize> {
 /// The page is unmapped on drop unless publication transfers it to process
 /// lifetime ownership.
 pub(super) struct ForkMarkerPage {
+    /// Start of the private anonymous mapping.
     address: usize,
+    /// Byte extent to unmap if publication does not occur.
     length: usize,
 }
 
@@ -114,6 +163,22 @@ pub(crate) struct HostAllocation {
     /// `Some` until the mapping is released successfully. A failed release
     /// leaves the same owner here for a later explicit retry.
     mapping: Option<Reservation>,
+    /// Creating process retained even after the mapping is released.
+    process: ProcessIdentity,
+    /// File backing only for allocations requested as remappable sources.
+    source: Option<File>,
+}
+
+fn valid_host_layout(size: usize, alignment: usize, page: usize) -> bool {
+    crate::memory::constraints::AllocationLimits {
+        alignment: page as u64,
+        granularity: page as u64,
+        maximum_size: isize::MAX as u64,
+    }
+    .supports(crate::memory::constraints::AllocationDesc {
+        size: size as u64,
+        alignment: alignment as u64,
+    })
 }
 
 impl HostAllocation {
@@ -121,7 +186,6 @@ impl HostAllocation {
     /// acquires page-aligned host memory. The retained `process` guards later
     /// unmapping.
     pub(crate) fn create(size: u64, alignment: u64, process: u32) -> Result<Shared<Self>, Error> {
-        process_identity::prepare_for_hot_checks();
         let size = usize::try_from(size).map_err(|_| {
             error(
                 ErrorKind::InvalidArgument,
@@ -135,12 +199,7 @@ impl HostAllocation {
             )
         })?;
         let page = page_size().map_err(|e| native_error("host page size", e))?;
-        if size == 0
-            || size % page != 0
-            || size > isize::MAX as usize
-            || !alignment.is_power_of_two()
-            || alignment < page
-        {
+        if !valid_host_layout(size, alignment, page) {
             return Err(error(
                 ErrorKind::InvalidArgument,
                 "invalid host allocation extent or alignment",
@@ -150,9 +209,88 @@ impl HostAllocation {
         let mapping =
             Reservation::new_host_in_process(size, alignment, (0, isize::MAX as u64), process)
                 .map_err(|e| native_error("host allocation mmap", e))?;
+        let process = mapping.process_identity();
         Ok(owner.write(Self {
             mapping: Some(mapping),
+            process,
+            source: None,
         }))
+    }
+
+    pub(crate) fn create_remappable(
+        size: u64,
+        alignment: u64,
+        process: u32,
+    ) -> Result<Shared<Self>, Error> {
+        let size = usize::try_from(size).map_err(|_| {
+            error(
+                ErrorKind::InvalidArgument,
+                "host source exceeds address width",
+            )
+        })?;
+        let alignment = usize::try_from(alignment).map_err(|_| {
+            error(
+                ErrorKind::InvalidArgument,
+                "host source alignment exceeds address width",
+            )
+        })?;
+        let page = page_size().map_err(|source| native_error("host page size", source))?;
+        if !valid_host_layout(size, alignment, page) {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "invalid host source geometry",
+            ));
+        }
+        let file_size = i64::try_from(size).map_err(|_| {
+            error(
+                ErrorKind::InvalidArgument,
+                "host source exceeds file offset width",
+            )
+        })?;
+        let owner = Shared::try_new_uninit()?;
+        // SAFETY: memfd_create returns a newly owned descriptor or -1.
+        let descriptor = unsafe { libc::memfd_create(c"rocddi-host".as_ptr(), libc::MFD_CLOEXEC) };
+        if descriptor < 0 {
+            return Err(native_error(
+                "host source memfd_create",
+                io::Error::last_os_error(),
+            ));
+        }
+        // SAFETY: The successful syscall transferred this descriptor to us.
+        let file = unsafe { File::from_raw_fd(descriptor) };
+        // SAFETY: ftruncate only changes the owned file's length.
+        if unsafe { libc::ftruncate(descriptor, file_size) } != 0 {
+            return Err(native_error(
+                "host source ftruncate",
+                io::Error::last_os_error(),
+            ));
+        }
+        let mut mapping =
+            Reservation::new_host_in_process(size, alignment, (0, isize::MAX as u64), process)
+                .map_err(|source| native_error("host source reservation", source))?;
+        mapping
+            .map_file_read_write(&file, 0)
+            .map_err(|source| native_error("host source mmap", source))?;
+        let process = mapping.process_identity();
+        Ok(owner.write(Self {
+            mapping: Some(mapping),
+            process,
+            source: Some(file),
+        }))
+    }
+
+    pub(crate) fn is_remappable(&self) -> bool {
+        self.source.is_some()
+    }
+
+    pub(crate) fn source(&self) -> Option<&File> {
+        self.source.as_ref()
+    }
+
+    /// Rejects an inherited source before its file can be shared with a new
+    /// child-process reservation.
+    pub(crate) fn check_process(&self) -> io::Result<()> {
+        self.process.check()
     }
 
     /// Returns the numeric address and size of the live mapped extent.
@@ -167,6 +305,8 @@ impl HostAllocation {
     /// Releases the mapping once. Native failure leaves ownership available
     /// for retry; repeated successful calls do nothing.
     pub(crate) fn free(&mut self) -> Result<(), Error> {
+        self.check_process()
+            .map_err(|source| native_error("host allocation process identity", source))?;
         if let Some(mapping) = self.mapping.as_mut() {
             mapping
                 .release()
@@ -186,7 +326,15 @@ pub(crate) fn host_page_size() -> Result<u64, Error> {
 
 impl Drop for HostAllocation {
     fn drop(&mut self) {
-        if self.free().is_err() {
+        if self.check_process().is_err() {
+            // This copy does not own the parent's VMA. It has no native
+            // rollback to report or reservation to release in the child.
+            std::mem::forget(self.mapping.take());
+            return;
+        }
+        if let Err(error) = self.free() {
+            let (_, size) = self.extent();
+            crate::memory::device::record_rollback(error, size);
             // The mapping may still be live. Keep its owner from running a
             // second, unchecked unmap during this destructor.
             if let Some(mapping) = self.mapping.take() {
@@ -196,16 +344,67 @@ impl Drop for HostAllocation {
     }
 }
 
+pub(crate) fn host_memory_capabilities()
+-> Result<crate::memory::host::HostMemoryCapabilities, Error> {
+    use crate::memory::constraints::AllocationLimits;
+    use crate::memory::host::{HostMemoryCapabilities, HostReservationCapabilities};
+    let page = host_page_size()?;
+    Ok(HostMemoryCapabilities {
+        allocation: AllocationLimits {
+            alignment: page,
+            granularity: page,
+            maximum_size: isize::MAX as u64,
+        },
+        remappable_backing: true,
+        reservation: Some(HostReservationCapabilities {
+            reservation_granularity: page,
+            mapping_granularity: page,
+            maximum_size: (isize::MAX as u64) & !(page - 1),
+            maximum_alignment: 1_u64 << (usize::BITS - 2),
+            minimum_address: page,
+            maximum_address: usize::MAX as u64,
+        }),
+    })
+}
+
 #[cfg(test)]
 #[allow(unsafe_code, clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::memory::host::{
-        HostAllocation as PublicHostAllocation, host_cache_control, host_cache_line_size,
-        host_page_size,
-    };
+    use crate::host::cache::{CacheMaintenance, CachePolicy};
+    use crate::memory::host::{HostAllocation as PublicHostAllocation, host_page_size};
     use crate::os::linux::errno;
     use crate::session::{DriverContextLifetime, Session};
+
+    #[test]
+    fn svm_commit_preserves_contents_and_discard_only_replaces_selected_pages() {
+        let page = page_size().unwrap();
+        let mut reservation =
+            HostReservation::create(page * 3, page, page, std::process::id()).unwrap();
+        let (address, length) = reservation.extent();
+        // SAFETY: This test exclusively owns the anonymous three-page mapping
+        // and uses only raw pointers while changing its backing.
+        unsafe {
+            commit_svm_range(address, length).unwrap();
+            std::ptr::write_bytes(address as *mut u8, 0x5a, length);
+            commit_svm_range(address + page, page).unwrap();
+            assert_eq!((address as *const u8).add(page).read_volatile(), 0x5a);
+
+            discard_svm_range(address + page, page, true).unwrap();
+            let bytes = std::slice::from_raw_parts(address as *const u8, length);
+            assert!(bytes[..page].iter().all(|&byte| byte == 0x5a));
+            assert!(bytes[page..page * 2].iter().all(|&byte| byte == 0));
+            assert!(bytes[page * 2..].iter().all(|&byte| byte == 0x5a));
+
+            // Lazy discard does not promise whether earlier contents survive;
+            // a later write must cancel lazy reclamation for the written page.
+            discard_svm_range(address + page, page, false).unwrap();
+            (address as *mut u8).add(page).write_volatile(0xa5);
+            assert_eq!((address as *const u8).add(page).read_volatile(), 0xa5);
+        }
+        reservation.free().unwrap();
+    }
+
     #[test]
     fn cpu_storage_remains_available_after_session_shutdown() {
         let mut session = Session::new(DriverContextLifetime::Session).unwrap();
@@ -216,10 +415,10 @@ mod tests {
         let mut allocation = PublicHostAllocation::allocate(size, alignment).unwrap();
         assert_eq!(allocation.info().host_address as u64 % alignment, 0);
         assert_eq!(allocation.info().size, size);
-        if let Ok(line) = host_cache_line_size() {
+        if let Ok(recipe) = CacheMaintenance::qualify(CachePolicy::WriteBack) {
             // SAFETY: The newly allocated extent remains mapped.
             unsafe {
-                host_cache_control(allocation.info().host_address, size, line).unwrap();
+                recipe.apply(allocation.info().host_address, size).unwrap();
             }
         }
         allocation.free().unwrap();
@@ -241,7 +440,8 @@ mod tests {
                 .unwrap()
                 .free()
                 .unwrap_err()
-                .native_error_code(),
+                .native_status()
+                .and_then(crate::NativeStatus::errno_code),
             Some(errno::EIO)
         );
         assert_eq!(allocation.extent(), extent);

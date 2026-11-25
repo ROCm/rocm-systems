@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/control_flow.h"
 #include "rocjitsu/code/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/code/text_padding.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
-
-#include "util/except.h"
 
 #include <algorithm>
 #include <cassert>
@@ -36,8 +36,10 @@ bool is_block_terminator(const Instruction &inst) {
 
 bool has_no_static_successor(const Instruction &inst) {
   // Indirect calls return to the fallthrough block; indirect branches do not
-  // expose a statically-known successor in this local CFG.
-  return is_program_path_terminator(inst) || (inst.flags() & INDIRECT_BRANCH);
+  // expose a statically-known successor in this local CFG, except for the
+  // fallthrough of a fork or join.
+  return is_program_path_terminator(inst) ||
+         ((inst.flags() & INDIRECT_BRANCH) && !indirect_branch_falls_through(inst));
 }
 
 bool is_unconditional_branch(const Instruction &inst) {
@@ -45,8 +47,9 @@ bool is_unconditional_branch(const Instruction &inst) {
 }
 
 rj_code_target_id_t concrete_target(const CodeObject &co, rj_code_target_id_t selected_target) {
-  if (selected_target != ROCJITSU_CODE_TARGET_INVALID)
+  if (selected_target != ROCJITSU_CODE_TARGET_INVALID) {
     return selected_target;
+  }
   const auto *amdgpu_object = dynamic_cast<const AmdGpuCodeObject *>(&co);
   return amdgpu_object != nullptr ? amdgpu_object->target_id() : ROCJITSU_CODE_TARGET_INVALID;
 }
@@ -60,17 +63,21 @@ bool s_setpc_from_sreg(const Instruction &inst, uint32_t word, uint16_t ssrc0) {
   // gfx1250 renamed the scalar PC transfer without changing its role in the
   // call/return CFG. Accept both spellings; the raw source operand remains in
   // the low byte for the canonical one-word form.
-  const std::string_view mnemonic = inst.mnemonic();
-  if (inst.size() != sizeof(uint32_t) || (mnemonic != "s_setpc_b64" && mnemonic != "s_set_pc_i64"))
+  const amdgpu::Operation operation = inst.amdgpu_operation();
+  if (inst.size() != sizeof(uint32_t) || (operation != amdgpu::Operation::S_SETPC_B64 &&
+                                          operation != amdgpu::Operation::S_SET_PC_I64)) {
     return false;
+  }
   return static_cast<uint16_t>(word & 0xffu) == ssrc0;
 }
 
 std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
-  if (inst.size() != sizeof(uint32_t))
+  if (inst.size() != sizeof(uint32_t)) {
     return std::nullopt;
-  if ((inst.flags() & INDIRECT_CALL) == 0 || !inst.branch_offset_bytes())
+  }
+  if ((inst.flags() & INDIRECT_CALL) == 0 || !inst.branch_offset_bytes()) {
     return std::nullopt;
+  }
   return static_cast<uint16_t>((word >> 16) & 0x7fu);
 }
 
@@ -114,22 +121,25 @@ void BasicBlock::add_instruction(std::unique_ptr<Instruction> inst) {
 }
 
 const Instruction *BasicBlock::terminator() const {
-  if (storage_.empty())
+  if (storage_.empty()) {
     return nullptr;
+  }
   return storage_.back().get();
 }
 
 void BasicBlock::add_successor(BasicBlock &successor) {
-  if (std::ranges::find(successors_, &successor) != successors_.end())
+  if (std::ranges::find(successors_, &successor) != successors_.end()) {
     return;
+  }
   successors_.push_back(&successor);
   successor.predecessors_.push_back(this);
 }
 
 bool BasicBlock::remove_successor(BasicBlock &successor) {
   const auto successor_it = std::ranges::find(successors_, &successor);
-  if (successor_it == successors_.end())
+  if (successor_it == successors_.end()) {
     return false;
+  }
   successors_.erase(successor_it);
 
   const auto predecessor_it = std::ranges::find(successor.predecessors_, this);
@@ -140,16 +150,18 @@ bool BasicBlock::remove_successor(BasicBlock &successor) {
 }
 
 void BasicBlock::add_call_edge(CallEdge edge) {
-  if (edge.callee == nullptr || edge.continuation == nullptr)
+  if (edge.callee == nullptr || edge.continuation == nullptr) {
     return;
+  }
   const auto duplicate = std::ranges::find_if(call_edges_, [&](const CallEdge &existing) {
     return existing.kind == edge.kind && existing.callee == edge.callee &&
            existing.continuation == edge.continuation &&
            existing.source_call_offset == edge.source_call_offset &&
            existing.return_sreg == edge.return_sreg;
   });
-  if (duplicate != call_edges_.end())
+  if (duplicate != call_edges_.end()) {
     return;
+  }
   call_edges_.push_back(edge);
 }
 
@@ -162,7 +174,7 @@ void BasicBlock::add_static_pc_address_builder(PcAddressBuilder builder) {
 }
 
 FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
-BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+BasicBlock::build(const CodeObject &co, Decoder &decoder, rocjitsu::IsaFamily arch,
                   DecodeErrorEmitter emit_error, std::span<const uint64_t> extra_leaders,
                   ExternalEntryPolicy entry_policy, std::span<const uint64_t> extra_split_points,
                   rj_code_target_id_t target) {
@@ -176,7 +188,7 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
 }
 
 FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
-BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rocjitsu::IsaFamily arch,
                        DecodeErrorEmitter emit_error, std::span<const uint64_t> extra_leaders,
                        ExternalEntryPolicy entry_policy,
                        std::span<const uint64_t> extra_split_points, DecodedSection *prepared,
@@ -194,7 +206,14 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
       pc_address_builders = std::move(prepared->pc_address_builders);
     }
     const uint64_t section_end = sec->size();
+    std::unordered_set<uint64_t> calls_before_alignment;
     if (!prepared) {
+      const TextAlignmentGaps alignment_gaps(co, arch);
+      for (uint64_t entry : extra_leaders) {
+        if (alignment_gaps.contains(entry)) {
+          return emit_error.emit() << "CFG entry points into alignment at byte " << entry;
+        }
+      }
       uint64_t byte_offset = 0;
       const uint64_t range_end = section_end;
       // Full-section construction historically ignores a non-word trailing byte.
@@ -202,7 +221,22 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
         const size_t pc = static_cast<size_t>(byte_offset / sizeof(uint32_t));
         // gfx1250 zero-filled alignment is not an instruction. The finalizer
         // preserves the existing implicit-termination policy for these gaps.
-        if (arch == ROCJITSU_CODE_ARCH_CDNA5 && inst_data[pc] == 0) {
+        if (is_text_padding_word(arch, inst_data[pc])) {
+          byte_offset += sizeof(uint32_t);
+          continue;
+        }
+        if (inst_data[pc] == 0 && alignment_gaps.contains(byte_offset)) {
+          if (decoded.empty()) {
+            return emit_error.emit() << "unexpected alignment at byte " << byte_offset;
+          }
+          const Instruction &previous = *decoded.back();
+          if (previous.flags() & INDIRECT_CALL) {
+            // A noreturn call can end a function. Check its targets after
+            // indirect discovery and call/return classification.
+            calls_before_alignment.insert(previous.src_loc());
+          } else if (!has_no_static_successor(previous) && !is_unconditional_branch(previous)) {
+            return emit_error.emit() << "fallthrough into alignment at byte " << byte_offset;
+          }
           byte_offset += sizeof(uint32_t);
           continue;
         }
@@ -215,21 +249,29 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
         DecodeResult decode_result = decoder.decode_window(
             std::span<const uint32_t>(inst_data + pc, (range_end - byte_offset) / sizeof(uint32_t)),
             byte_offset, decode_error);
-        if (decode_result.failed())
+        if (decode_result.failed()) {
           return Result::failure();
-        byte_offset += static_cast<uint64_t>(decode_result.value()->size());
+        }
+        const Instruction &inst = *decode_result.value();
+        byte_offset += static_cast<uint64_t>(inst.size());
+        if (const auto delta = inst.branch_offset_bytes();
+            delta && alignment_gaps.contains(byte_offset + *delta)) {
+          return emit_error.emit() << "branch targets alignment at byte " << byte_offset + *delta;
+        }
         decoded.push_back(std::move(decode_result).value());
       }
     }
 
-    if (decoded.empty())
+    if (decoded.empty()) {
       continue;
+    }
 
     if (!prepared) {
       std::vector<const Instruction *> decoded_insts;
       decoded_insts.reserve(decoded.size());
-      for (const auto &inst : decoded)
+      for (const auto &inst : decoded) {
         decoded_insts.push_back(inst.get());
+      }
 
       // Indirect target discovery belongs with block construction because
       // recovered branch targets must become leaders before instructions are
@@ -252,21 +294,25 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
     std::set<uint64_t> leaders;
     leaders.insert(decoded.front()->src_loc());
     for (uint64_t leader : extra_leaders) {
-      if (leader < section_end)
+      if (leader < section_end) {
         leaders.insert(leader);
+      }
     }
     // Split points shape the block graph only. They are deliberately absent from the external-entry
     // set built below, so a helper named by a function symbol keeps the caller facts it is entered
     // with.
     for (uint64_t split : extra_split_points) {
-      if (split < section_end)
+      if (split < section_end) {
         leaders.insert(split);
+      }
     }
     for (const IndirectCallFixup &fixup : recovered_indirect_targets) {
-      if (fixup.source_call_offset < section_end)
+      if (fixup.source_call_offset < section_end) {
         leaders.insert(fixup.source_call_offset);
-      if (fixup.source_target_offset < section_end)
+      }
+      if (fixup.source_target_offset < section_end) {
         leaders.insert(fixup.source_target_offset);
+      }
     }
 
     // A block has one entry. In addition to splitting after terminators, split
@@ -279,11 +325,13 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
       // An undecodable run is a real CFG boundary. Without this leader the
       // block size would collapse the gap and corrupt every following source
       // offset during relocation.
-      if (i + 1 < decoded.size() && decoded[i + 1]->src_loc() != next_offset)
+      if (i + 1 < decoded.size() && decoded[i + 1]->src_loc() != next_offset) {
         leaders.insert(decoded[i + 1]->src_loc());
+      }
 
-      if (is_block_terminator(inst) && next_offset < section_end)
+      if (is_block_terminator(inst) && next_offset < section_end) {
         leaders.insert(next_offset);
+      }
 
       auto branch_delta = inst.branch_offset_bytes();
       assert((!(inst.flags() & (BRANCH | COND_BRANCH)) || branch_delta.has_value()) &&
@@ -294,8 +342,9 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
         // instruction. The generator exposes that delta in bytes.
         const int64_t target =
             static_cast<int64_t>(next_offset) + static_cast<int64_t>(*branch_delta);
-        if (target >= 0 && static_cast<uint64_t>(target) < section_end)
+        if (target >= 0 && static_cast<uint64_t>(target) < section_end) {
           leaders.insert(static_cast<uint64_t>(target));
+        }
       }
     }
 
@@ -312,9 +361,9 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
         const bool decode_gap =
             i >= decoded.size() ? next_offset < section_end : decoded[i]->src_loc() != next_offset;
         const Instruction &last = *current->terminator();
-        const bool can_fall_through = !is_program_path_terminator(last) &&
-                                      !is_unconditional_branch(last) &&
-                                      (last.flags() & INDIRECT_BRANCH) == 0;
+        const bool can_fall_through =
+            !is_program_path_terminator(last) && !is_unconditional_branch(last) &&
+            ((last.flags() & INDIRECT_BRANCH) == 0 || indirect_branch_falls_through(last));
         // Range bounds are not evidence that a callee ends here. Apply this
         // distinction before call/return classification can prune continuations.
         const bool padding_permitted =
@@ -325,29 +374,31 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
                      range.start_offset + range.size - next_offset >= sizeof(uint32_t);
             });
         const bool reaches_gfx1250_zero =
-            decode_gap && arch == ROCJITSU_CODE_ARCH_CDNA5 && next_offset < section_end &&
+            decode_gap && next_offset < section_end &&
             section_end - next_offset >= sizeof(uint32_t) && padding_permitted &&
-            inst_data[next_offset / sizeof(uint32_t)] == 0;
+            is_text_padding_word(arch, inst_data[next_offset / sizeof(uint32_t)]);
         // Running off the end of `.text` is the same boundary as running into padding: there is no
         // next instruction either way. Requiring padding to be present would make the result
         // depend on whether the linker happened to align the section, so an unterminated tail
         // would be translated verbatim in one build and given a terminator in the next.
         const bool reaches_section_end =
-            arch == ROCJITSU_CODE_ARCH_CDNA5 && i >= decoded.size() && next_offset >= section_end;
+            arch == rocjitsu::IsaFamily::Cdna5 && i >= decoded.size() && next_offset >= section_end;
         if (can_fall_through && (reaches_gfx1250_zero || reaches_section_end)) {
           current->has_terminator_ = true;
           current->has_implicit_terminator_ = true;
         }
-        if (terminates || decode_gap || (i < decoded.size() && leaders.contains(next_offset)))
+        if (terminates || decode_gap || (i < decoded.size() && leaders.contains(next_offset))) {
           break;
+        }
       }
       section_blocks.push_back(std::move(current));
     }
 
     std::unordered_map<uint64_t, BasicBlock *> block_by_offset;
     block_by_offset.reserve(section_blocks.size());
-    for (auto &block : section_blocks)
+    for (auto &block : section_blocks) {
       block_by_offset.emplace(block->start_offset(), block.get());
+    }
 
     // Attach every discovered PC-relative address producer to the block that
     // contains its s_getpc_b64. Blocks are in ascending source order and cover
@@ -357,32 +408,35 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
       const auto it = std::ranges::upper_bound(
           section_blocks, builder.source_getpc_offset, {},
           [](const std::unique_ptr<BasicBlock> &block) { return block->start_offset(); });
-      if (it == section_blocks.begin())
+      if (it == section_blocks.begin()) {
         continue;
+      }
       BasicBlock &owner = **(it - 1);
-      if (builder.source_getpc_offset >= owner.end_offset())
+      if (builder.source_getpc_offset >= owner.end_offset()) {
         continue;
+      }
       owner.add_static_pc_address_builder(builder);
     }
 
     std::vector<DeferredCallSite> deferred_calls;
     std::unordered_map<const BasicBlock *, size_t> call_site_by_source;
-    auto defer_call = [&](BasicBlock &source, BasicBlock &target, BasicBlock &continuation,
+    auto defer_call = [&](BasicBlock &source, BasicBlock &target, BasicBlock *continuation,
                           CallEdgeKind kind, uint64_t source_call_offset, uint16_t return_sreg,
                           bool target_set_incomplete) {
       const auto [map_it, inserted] =
           call_site_by_source.try_emplace(&source, deferred_calls.size());
       if (inserted) {
         deferred_calls.push_back({.source = &source,
-                                  .continuation = &continuation,
+                                  .continuation = continuation,
                                   .return_sreg = return_sreg,
                                   .target_set_incomplete = target_set_incomplete,
                                   .targets = {}});
       } else {
         DeferredCallSite &site = deferred_calls[map_it->second];
-        if (site.continuation != &continuation || site.return_sreg != return_sreg)
-          throw util::Exception(
-              std::string_view("inconsistent deferred call metadata for one terminator"));
+        // A source has one continuation, and discovery derives every target's
+        // return SGPR from the same decoded call instruction.
+        assert(site.continuation == continuation && site.return_sreg == return_sreg &&
+               "inconsistent deferred call metadata for one terminator");
         site.target_set_incomplete |= target_set_incomplete;
       }
 
@@ -392,16 +446,18 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
             return existing.kind == kind && existing.target == &target &&
                    existing.source_call_offset == source_call_offset;
           });
-      if (duplicate == site.targets.end())
+      if (duplicate == site.targets.end()) {
         site.targets.push_back(
             {.kind = kind, .target = &target, .source_call_offset = source_call_offset});
+      }
     };
 
     std::unordered_set<const BasicBlock *> missing_indirect_target_sources;
     for (const IndirectCallFixup &fixup : recovered_indirect_targets) {
       auto source_it = block_by_offset.find(fixup.source_call_offset);
-      if (source_it == block_by_offset.end())
+      if (source_it == block_by_offset.end()) {
         continue;
+      }
 
       BasicBlock *source = source_it->second;
       source->add_static_indirect_call_fixup(fixup);
@@ -414,13 +470,14 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
           continuation = continuation_it->second;
         }
 
-        if (fixup.source_is_call && continuation != nullptr) {
+        if (fixup.source_is_call && (continuation != nullptr ||
+                                     calls_before_alignment.contains(fixup.source_call_offset))) {
           // Whether this swappc is a function call depends on the callee body
           // reaching a matching setpc return. Defer that question until after
           // ordinary direct CFG edges have been added for every block; otherwise
           // helpers that branch or fall through internally to their return block
           // look falsely non-returning.
-          defer_call(*source, *target, *continuation, CallEdgeKind::IndirectSwapPc,
+          defer_call(*source, *target, continuation, CallEdgeKind::IndirectSwapPc,
                      fixup.source_call_offset, fixup.source_return_sreg, fixup.source_incomplete);
         } else {
           // Non-call recovered setpc targets are ordinary local CFG edges. If a
@@ -434,19 +491,24 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
         source->note_successor_issue(fixup.source_is_call ? SuccessorIssue::MissingCallTarget
                                                           : SuccessorIssue::MissingBranchTarget);
       }
-      if (fixup.source_is_call && !block_by_offset.contains(source->end_offset()))
+      if (fixup.source_is_call && !block_by_offset.contains(source->end_offset()) &&
+          !calls_before_alignment.contains(fixup.source_call_offset)) {
         source->note_successor_issue(SuccessorIssue::MissingCallContinuation);
+      }
     }
 
     for (size_t i = 0; i < section_blocks.size(); ++i) {
       auto &block = *section_blocks[i];
       const Instruction *term = block.terminator();
-      if (term == nullptr)
+      if (term == nullptr) {
         continue;
-      if ((term->flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) && !term->branch_offset_bytes())
+      }
+      if ((term->flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) && !term->branch_offset_bytes()) {
         block.note_successor_issue(SuccessorIssue::IndirectControlFlow);
-      if (has_no_static_successor(*term))
+      }
+      if (has_no_static_successor(*term)) {
         continue;
+      }
 
       auto branch_delta = term->branch_offset_bytes();
       assert((!(term->flags() & (BRANCH | COND_BRANCH)) || branch_delta.has_value()) &&
@@ -462,11 +524,14 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
           const auto fallthrough_it = block_by_offset.find(block.end_offset());
           const auto call_sdst = s_call_sdst(*term, first_word(*term));
           if (call_sdst && target_it != block_by_offset.end() &&
-              fallthrough_it != block_by_offset.end()) {
+              (fallthrough_it != block_by_offset.end() ||
+               calls_before_alignment.contains(term->src_loc()))) {
             // Like recovered swappc, direct s_call validation needs the callee's
             // internal CFG to be complete before we decide whether the target is
             // a returning helper or an ordinary reachable branch target.
-            defer_call(block, *target_it->second, *fallthrough_it->second, CallEdgeKind::DirectCall,
+            BasicBlock *continuation =
+                fallthrough_it == block_by_offset.end() ? nullptr : fallthrough_it->second;
+            defer_call(block, *target_it->second, continuation, CallEdgeKind::DirectCall,
                        term->src_loc(), *call_sdst, false);
           } else if (target_it != block_by_offset.end()) {
             block.add_successor(*target_it->second);
@@ -484,25 +549,29 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
       const auto fallthrough_it = block_by_offset.find(block.end_offset());
       // Conditional branches and ordinary instructions may fall through; direct
       // unconditional branches do not.
-      if (!is_unconditional_branch(*term) && fallthrough_it != block_by_offset.end())
+      if (!is_unconditional_branch(*term) && fallthrough_it != block_by_offset.end()) {
         block.add_successor(*fallthrough_it->second);
-      else if (!is_unconditional_branch(*term) && !block.has_implicit_terminator())
+      } else if (!is_unconditional_branch(*term) && !block.has_implicit_terminator() &&
+                 !calls_before_alignment.contains(term->src_loc())) {
         block.note_successor_issue((term->flags() & INDIRECT_CALL)
                                        ? SuccessorIssue::MissingCallContinuation
                                        : SuccessorIssue::MissingFallthrough);
+      }
     }
 
     // Discovery can recover a target outside the decoded ranges. Such a target
     // cannot prove non-returning, even when all decoded targets terminate.
     // Apply this after collecting every fixup so target order cannot matter.
-    for (DeferredCallSite &site : deferred_calls)
+    for (DeferredCallSite &site : deferred_calls) {
       site.target_set_incomplete |= missing_indirect_target_sources.contains(site.source);
+    }
 
     std::unordered_set<uint64_t> kernel_entry_offsets(extra_leaders.begin(), extra_leaders.end());
     std::vector<std::vector<CallReturnClassification>> classifications;
     classifications.reserve(deferred_calls.size());
-    for (const DeferredCallSite &site : deferred_calls)
+    for (const DeferredCallSite &site : deferred_calls) {
       classifications.emplace_back(site.targets.size(), CallReturnClassification::Unknown);
+    }
 
     auto classify_function = [&](BasicBlock &callee, uint16_t return_sreg,
                                  const std::vector<std::vector<CallReturnClassification>> &known) {
@@ -516,8 +585,9 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
 
       auto push_within_function = [&](BasicBlock *successor,
                                       std::optional<uint16_t> terminal_return_sreg) {
-        if (successor == nullptr)
+        if (successor == nullptr) {
           return;
+        }
         if (kernel_entry_offsets.contains(successor->start_offset()) && successor != &callee) {
           has_unknown_exit = true;
           return;
@@ -529,8 +599,9 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
         const WalkPoint point = stack.back();
         stack.pop_back();
         BasicBlock *block = point.block;
-        if (block == nullptr || !visited.insert({block, point.terminal_return_sreg}).second)
+        if (block == nullptr || !visited.insert({block, point.terminal_return_sreg}).second) {
           continue;
+        }
 
         const Instruction *term = block->terminator();
         if (term == nullptr) {
@@ -543,8 +614,9 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
           // also being scanned for a direct return through the enclosing pair.
           continue;
         }
-        if (s_setpc_from_sreg(*term, first_word(*term), return_sreg))
+        if (s_setpc_from_sreg(*term, first_word(*term), return_sreg)) {
           return CallReturnClassification::Returning;
+        }
 
         // An omitted indirect edge also prevents a non-return proof for an
         // enclosing caller, including tail transfers without deferred call metadata.
@@ -569,11 +641,14 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
               break;
             }
           }
-          if (reaches_continuation)
+          if (reaches_continuation) {
+            has_unknown_exit |= site.continuation == nullptr;
             push_within_function(site.continuation, point.terminal_return_sreg);
+          }
           for (BasicBlock *successor : block->successors()) {
-            if (successor != site.continuation)
+            if (successor != site.continuation) {
               push_within_function(successor, point.terminal_return_sreg);
+            }
           }
           continue;
         }
@@ -591,24 +666,30 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
                                      is_program_path_terminator(*term);
         if ((flags & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0) {
           const auto &fixups = block->static_indirect_call_fixups();
-          if (fixups.empty() || std::ranges::any_of(fixups, &IndirectCallFixup::source_incomplete))
+          if (fixups.empty() ||
+              std::ranges::any_of(fixups, &IndirectCallFixup::source_incomplete)) {
             has_unknown_exit = true;
+          }
         } else if (!is_program_exit) {
           if (auto branch_delta = term->branch_offset_bytes()) {
             const int64_t target = static_cast<int64_t>(block->end_offset()) + *branch_delta;
             if (target < 0 ||
-                block_by_offset.find(static_cast<uint64_t>(target)) == block_by_offset.end())
+                block_by_offset.find(static_cast<uint64_t>(target)) == block_by_offset.end()) {
               has_unknown_exit = true;
+            }
           }
           if (!is_unconditional_branch(*term) && (flags & INDIRECT_BRANCH) == 0 &&
-              block_by_offset.find(block->end_offset()) == block_by_offset.end())
+              block_by_offset.find(block->end_offset()) == block_by_offset.end()) {
             has_unknown_exit = true;
+          }
         }
 
-        if (block->successors().empty() && !is_program_exit)
+        if (block->successors().empty() && !is_program_exit) {
           has_unknown_exit = true;
-        for (BasicBlock *successor : block->successors())
+        }
+        for (BasicBlock *successor : block->successors()) {
           push_within_function(successor, point.terminal_return_sreg);
+        }
       }
 
       return has_unknown_exit ? CallReturnClassification::Unknown
@@ -620,8 +701,9 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
     // classification depend on source or fixup order. Cycles without a positive
     // return or non-return proof remain conservative Unknown sites.
     size_t num_targets = 0;
-    for (const DeferredCallSite &site : deferred_calls)
+    for (const DeferredCallSite &site : deferred_calls) {
       num_targets += site.targets.size();
+    }
     const size_t max_rounds = num_targets + 2;
     bool converged = false;
     for (size_t round = 0; round < max_rounds; ++round) {
@@ -631,8 +713,9 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
         const DeferredCallSite &site = deferred_calls[site_index];
         for (size_t target_index = 0; target_index < site.targets.size(); ++target_index) {
           BasicBlock *target = site.targets[target_index].target;
-          if (target == nullptr)
+          if (target == nullptr) {
             continue;
+          }
           const CallReturnClassification classification =
               classify_function(*target, site.return_sreg, classifications);
           if (classification != next[site_index][target_index]) {
@@ -650,8 +733,9 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
     if (!converged) {
       // A pathological non-monotone call graph must lose precision, not hang
       // or retain a potentially stale NonReturning classification.
-      for (auto &site_classifications : classifications)
+      for (auto &site_classifications : classifications) {
         std::ranges::fill(site_classifications, CallReturnClassification::Unknown);
+      }
     }
 
     for (size_t site_index = 0; site_index < deferred_calls.size(); ++site_index) {
@@ -678,7 +762,10 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
         }
       }
 
-      if (all_targets_nonreturning && !continuation_is_target) {
+      if (!site.continuation && all_targets_nonreturning) {
+        calls_before_alignment.erase(site.source->terminator()->src_loc());
+      }
+      if (site.continuation && all_targets_nonreturning && !continuation_is_target) {
         // Every finite target is proven to end without returning through this
         // call site's destination pair. Drop only this dead fallthrough; mixed
         // and unknown target sets retain the continuation conservatively.
@@ -686,15 +773,21 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
       }
     }
 
-    for (auto &block : section_blocks)
+    if (!calls_before_alignment.empty()) {
+      return emit_error.emit() << "call may return into alignment at byte "
+                               << *calls_before_alignment.begin();
+    }
+
+    for (auto &block : section_blocks) {
       blocks.push_back(std::move(block));
+    }
   }
 
   return blocks;
 }
 
 FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_reachable(
-    const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+    const CodeObject &co, Decoder &decoder, rocjitsu::IsaFamily arch,
     std::span<const uint64_t> entry_offsets, DecodeErrorEmitter emit_error,
     std::span<const CodeRange> permitted_ranges, std::span<const uint64_t> decode_seeds,
     std::span<const uint64_t> extra_split_points, rj_code_target_id_t target) {
@@ -708,35 +801,41 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_reachable(
 }
 
 FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
-BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rocjitsu::IsaFamily arch,
                       const BuildOptions &options, DecodeErrorEmitter emit_error) {
   const rj_code_target_id_t target_id = concrete_target(co, options.target);
   if (options.decode_policy == DecodePolicy::FullSection) {
-    if (!options.permitted_ranges.empty() || !options.decode_seeds.empty())
+    if (!options.permitted_ranges.empty() || !options.decode_seeds.empty()) {
       return emit_error.emit() << "full-section CFG does not accept ranges or decode seeds";
+    }
     return build_impl(co, decoder, arch, std::move(emit_error), options.entries,
                       options.entry_policy, options.split_points, nullptr, {}, target_id);
   }
-  if (options.entry_policy != ExternalEntryPolicy::ExplicitOnly)
+  if (options.entry_policy != ExternalEntryPolicy::ExplicitOnly) {
     return emit_error.emit() << "reachable CFG requires explicit external entries";
+  }
   const auto entry_offsets = options.entries;
   const auto permitted_ranges = options.permitted_ranges;
   const auto decode_seeds = options.decode_seeds;
   const auto extra_split_points = options.split_points;
-  if (entry_offsets.empty() && decode_seeds.empty())
+  if (entry_offsets.empty() && decode_seeds.empty()) {
     return std::vector<std::unique_ptr<BasicBlock>>{};
-  if (co.text_sections().size() != 1)
+  }
+  if (co.text_sections().size() != 1) {
     return emit_error.emit() << "reachable CFG requires exactly one text section";
+  }
   const Section &section = *co.text_sections().front();
   const uint64_t section_end = section.size();
   if (section_end == 0 || !section.data() ||
-      section_end > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+      section_end > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
     return emit_error.emit() << "invalid text section for reachable CFG";
+  }
 
   for (const CodeRange &range : permitted_ranges) {
     if (range.start_offset % sizeof(uint32_t) || range.size % sizeof(uint32_t) || range.size == 0 ||
-        range.start_offset >= section_end || range.size > section_end - range.start_offset)
+        range.start_offset >= section_end || range.size > section_end - range.start_offset) {
       return emit_error.emit() << "invalid reachable CFG code range at byte " << range.start_offset;
+    }
   }
   // Built in one step: a push_back onto a range-constructed vector trips a GCC 15
   // -Wfree-nonheap-object false positive.
@@ -760,8 +859,9 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
   const auto permitted_end = [&](uint64_t offset) -> std::optional<uint64_t> {
     const auto after =
         std::ranges::upper_bound(merged_ranges, offset, {}, &CodeRange::start_offset);
-    if (after == merged_ranges.begin())
+    if (after == merged_ranges.begin()) {
       return std::nullopt;
+    }
     const CodeRange &range = *std::prev(after);
     const uint64_t end = range.start_offset + range.size;
     return offset < end ? std::optional<uint64_t>(end) : std::nullopt;
@@ -780,28 +880,34 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
   std::unordered_set<uint64_t> seed_only;
   std::vector<uint64_t> worklist;
   const auto enqueue = [&](uint64_t offset, bool required, bool optional_seed = false) {
-    if (!permitted_end(offset))
+    if (!permitted_end(offset)) {
       return;
-    if (required)
+    }
+    if (required) {
       required_targets.insert(offset);
-    if (!optional_seed)
+    }
+    if (!optional_seed) {
       seed_only.erase(offset);
+    }
     if (enqueued.insert(offset).second) {
-      if (optional_seed)
+      if (optional_seed) {
         seed_only.insert(offset);
+      }
       worklist.push_back(offset);
     }
   };
   for (uint64_t entry : entry_offsets) {
-    if (entry % sizeof(uint32_t) || !permitted_end(entry))
+    if (entry % sizeof(uint32_t) || !permitted_end(entry)) {
       return emit_error.emit() << "invalid reachable CFG entry at byte " << entry;
+    }
     enqueue(entry, true);
   }
 
   std::vector<uint64_t> split_points(extra_split_points.begin(), extra_split_points.end());
   for (uint64_t seed : decode_seeds) {
-    if (seed % sizeof(uint32_t) || !permitted_end(seed))
+    if (seed % sizeof(uint32_t) || !permitted_end(seed)) {
       return emit_error.emit() << "invalid reachable CFG decode seed at byte " << seed;
+    }
     split_points.push_back(seed);
   }
   std::ranges::sort(split_points);
@@ -820,30 +926,35 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
   size_t round = 0;
   constexpr size_t kMaxDiscoveryRounds = 64;
   for (;;) {
-    if (round == kMaxDiscoveryRounds)
+    if (round == kMaxDiscoveryRounds) {
       return emit_error.emit() << "reachable CFG indirect discovery exceeded its round limit";
+    }
     for (; work_index < worklist.size(); ++work_index) {
       uint64_t offset = worklist[work_index];
-      if (offset % sizeof(uint32_t))
+      if (offset % sizeof(uint32_t)) {
         return emit_error.emit() << "unaligned CFG target at byte " << offset;
+      }
       const uint64_t decode_end = *permitted_end(offset);
       while (offset < decode_end) {
-        if (is_decoded_start(offset))
+        if (is_decoded_start(offset)) {
           break;
+        }
         if (offset / sizeof(uint32_t) < word_boundaries.size() &&
             word_boundaries[offset / sizeof(uint32_t)] == InstructionInterior) {
           // An unreferenced symbol can name an instruction's literal word. A
           // decode seed does not assert an executable boundary; real targets do.
-          if (offset == worklist[work_index] && seed_only.contains(offset))
+          if (offset == worklist[work_index] && seed_only.contains(offset)) {
             break;
+          }
           return emit_error.emit() << "CFG target overlaps an instruction at byte " << offset;
         }
         // Fallthrough into gfx1250 alignment terminates the path. An explicit
         // entry or branch into the same padding is malformed, not an empty graph.
-        if (arch == ROCJITSU_CODE_ARCH_CDNA5 && decode_end - offset >= sizeof(uint32_t) &&
-            words[offset / sizeof(uint32_t)] == 0) {
-          if (required_targets.contains(offset))
+        if (decode_end - offset >= sizeof(uint32_t) &&
+            is_text_padding_word(arch, words[offset / sizeof(uint32_t)])) {
+          if (required_targets.contains(offset)) {
             return emit_error.emit() << "CFG target points into padding at byte " << offset;
+          }
           break;
         }
         auto emit_at_offset = [&](std::string_view message) {
@@ -856,26 +967,30 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
             std::span<const uint32_t>(words + offset / sizeof(uint32_t),
                                       (decode_end - offset) / sizeof(uint32_t)),
             offset, decode_error);
-        if (decode_result.failed())
+        if (decode_result.failed()) {
           return Result::failure();
+        }
         const Instruction &inst = *decode_result.value();
         const uint64_t next_offset = offset + static_cast<uint64_t>(inst.size());
         const size_t first_word = offset / sizeof(uint32_t);
         const size_t end_word = next_offset / sizeof(uint32_t);
         for (size_t word = first_word; word < end_word; ++word) {
-          if (word_boundaries[word] != NotDecoded)
+          if (word_boundaries[word] != NotDecoded) {
             return emit_error.emit() << "overlapping CFG instruction at byte " << offset;
+          }
           word_boundaries[word] = word == first_word ? InstructionStart : InstructionInterior;
         }
         decoded.push_back(std::move(decode_result).value());
         if (auto delta = inst.branch_offset_bytes()) {
           const int64_t target = static_cast<int64_t>(next_offset) + static_cast<int64_t>(*delta);
-          if (target >= 0)
+          if (target >= 0) {
             enqueue(static_cast<uint64_t>(target), true);
+          }
         }
         if (is_block_terminator(inst)) {
-          if (!has_no_static_successor(inst) && !is_unconditional_branch(inst))
+          if (!has_no_static_successor(inst) && !is_unconditional_branch(inst)) {
             enqueue(next_offset, false);
+          }
           break;
         }
         offset = next_offset;
@@ -885,16 +1000,18 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
       std::ranges::sort(decoded, {}, [](const auto &inst) { return inst->src_loc(); });
       std::vector<const Instruction *> decoded_insts;
       decoded_insts.reserve(decoded.size());
-      for (const auto &inst : decoded)
+      for (const auto &inst : decoded) {
         decoded_insts.push_back(inst.get());
+      }
       prepared.pc_address_builders.clear();
       prepared.indirect_targets = discover_indirect_branch_edges(
           decoded_insts, text, arch, entry_offsets, ExternalEntryPolicy::ExplicitOnly,
           &prepared.pc_address_builders, split_points, decode_seeds, target_id);
       analyzed_size = decoded.size();
       for (const IndirectCallFixup &fixup : prepared.indirect_targets) {
-        if (!is_decoded_start(fixup.source_target_offset))
+        if (!is_decoded_start(fixup.source_target_offset)) {
           enqueue(fixup.source_target_offset, true);
+        }
       }
     }
     if (work_index != worklist.size()) {
@@ -904,8 +1021,9 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
     // Stabilize each seed's indirect closure before considering the next seed.
     // Otherwise an interior alias can claim a literal that the preceding seed
     // has not reached yet. Established instruction boundaries are never replaced.
-    while (seed_index < ordered_seeds.size() && work_index == worklist.size())
+    while (seed_index < ordered_seeds.size() && work_index == worklist.size()) {
       enqueue(ordered_seeds[seed_index++], false, true);
+    }
     if (work_index != worklist.size()) {
       round = 0;
       continue;
@@ -914,12 +1032,14 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
   }
 
   for (uint64_t target : required_targets) {
-    if (!is_decoded_start(target))
+    if (!is_decoded_start(target)) {
       return emit_error.emit() << "CFG target was not decoded at byte " << target;
+    }
   }
 
-  if (decoded.empty())
+  if (decoded.empty()) {
     return std::vector<std::unique_ptr<BasicBlock>>{};
+  }
 
   // Finalize the stabilized instruction stream and discovery facts directly.
   // This shares block/call construction without decoding or analyzing twice.

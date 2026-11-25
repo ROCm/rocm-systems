@@ -121,7 +121,7 @@ pub const AMDSMI_MAX_NUM_CLKS_PER_MID: u32 = 2;
 pub const AMDSMI_TIME_FORMAT: &[u8; 20] = b"%02d:%02d:%02d.%03d\0";
 pub const AMDSMI_DATE_FORMAT: &[u8; 35] = b"%04d-%02d-%02d:%02d:%02d:%02d.%03d\0";
 pub const AMDSMI_LIB_VERSION_MAJOR: u32 = 27;
-pub const AMDSMI_LIB_VERSION_MINOR: u32 = 2;
+pub const AMDSMI_LIB_VERSION_MINOR: u32 = 3;
 pub const AMDSMI_LIB_VERSION_RELEASE: u32 = 0;
 pub const AMDSMI_MAX_DRIVER_INFO_RSVD: u32 = 64;
 pub const AMDSMI_MAX_UUID_ELEMENTS: u32 = 16;
@@ -1708,14 +1708,10 @@ pub struct AmdsmiDriverInfoT {
     pub driver_version: [::std::os::raw::c_char; 256usize],
     pub driver_date: [::std::os::raw::c_char; 256usize],
     pub driver_name: [::std::os::raw::c_char; 256usize],
-    pub driver_kernel_version: [::std::os::raw::c_char; 256usize],
-    pub amdgpu_driver_version: [::std::os::raw::c_char; 256usize],
-    pub driver_build_version: [::std::os::raw::c_char; 256usize],
-    pub driver_full_version: [::std::os::raw::c_char; 256usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AmdsmiDriverInfoT"][::std::mem::size_of::<AmdsmiDriverInfoT>() - 1792usize];
+    ["Size of AmdsmiDriverInfoT"][::std::mem::size_of::<AmdsmiDriverInfoT>() - 768usize];
     ["Alignment of AmdsmiDriverInfoT"][::std::mem::align_of::<AmdsmiDriverInfoT>() - 1usize];
     ["Offset of field: AmdsmiDriverInfoT::driver_version"]
         [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_version) - 0usize];
@@ -1723,14 +1719,49 @@ const _: () = {
         [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_date) - 256usize];
     ["Offset of field: AmdsmiDriverInfoT::driver_name"]
         [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_name) - 512usize];
-    ["Offset of field: AmdsmiDriverInfoT::driver_kernel_version"]
-        [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_kernel_version) - 768usize];
-    ["Offset of field: AmdsmiDriverInfoT::amdgpu_driver_version"]
-        [::std::mem::offset_of!(AmdsmiDriverInfoT, amdgpu_driver_version) - 1024usize];
-    ["Offset of field: AmdsmiDriverInfoT::driver_build_version"]
-        [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_build_version) - 1280usize];
-    ["Offset of field: AmdsmiDriverInfoT::driver_full_version"]
-        [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_full_version) - 1536usize];
+};
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiDriverPackageT {
+    AmdsmiDriverPackageNone = 0,
+    AmdsmiDriverPackageDkms = 1,
+    AmdsmiDriverPackageKmod = 2,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiDriverInfoV2T {
+    pub driver_version: [::std::os::raw::c_char; 256usize],
+    pub driver_date: [::std::os::raw::c_char; 256usize],
+    pub driver_name: [::std::os::raw::c_char; 256usize],
+    pub driver_kernel_version: [::std::os::raw::c_char; 256usize],
+    pub amdgpu_driver_version: [::std::os::raw::c_char; 256usize],
+    pub driver_build_version: [::std::os::raw::c_char; 256usize],
+    pub driver_full_version: [::std::os::raw::c_char; 256usize],
+    pub driver_package: AmdsmiDriverPackageT,
+    pub reserved: [u32; 575usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiDriverInfoV2T"][::std::mem::size_of::<AmdsmiDriverInfoV2T>() - 4096usize];
+    ["Alignment of AmdsmiDriverInfoV2T"][::std::mem::align_of::<AmdsmiDriverInfoV2T>() - 4usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_version) - 0usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_date"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_date) - 256usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_name"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_name) - 512usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_kernel_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_kernel_version) - 768usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::amdgpu_driver_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, amdgpu_driver_version) - 1024usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_build_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_build_version) - 1280usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_full_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_full_version) - 1536usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_package"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_package) - 1792usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::reserved"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, reserved) - 1796usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -3546,6 +3577,20 @@ const _: () = {
     ["Offset of field: AmdsmiNicStatT::value"]
         [::std::mem::offset_of!(AmdsmiNicStatT, value) - 256usize];
 };
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNicCapabilityBitsT {
+    AmdsmiNicCapFwctl = 1,
+    AmdsmiNicCapNetdev = 2,
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNicTypeT {
+    AmdsmiNicTypeUnknown = 0,
+    AmdsmiNicTypeAinic = 1,
+    AmdsmiNicTypeUaloe = 2,
+    AmdsmiNicTypeOther = 3,
+}
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct AmdsmiNicAsicInfoT {
@@ -3653,6 +3698,140 @@ const _: () = {
         [::std::mem::offset_of!(AmdsmiNicFwInfoT, num_fw) - 0usize];
     ["Offset of field: AmdsmiNicFwInfoT::fw"]
         [::std::mem::offset_of!(AmdsmiNicFwInfoT, fw) - 4usize];
+};
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNicHealthStateT {
+    AmdsmiNicHealthUnknown = 0,
+    AmdsmiNicHealthHealthy = 1,
+    AmdsmiNicHealthWarning = 2,
+    AmdsmiNicHealthError = 3,
+    AmdsmiNicHealthUnsupported = 4,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiNicHealthT {
+    pub state: u8,
+    pub error_count: u32,
+    pub reporter: [::std::os::raw::c_char; 64usize],
+    pub reserved: [u64; 4usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiNicHealthT"][::std::mem::size_of::<AmdsmiNicHealthT>() - 104usize];
+    ["Alignment of AmdsmiNicHealthT"][::std::mem::align_of::<AmdsmiNicHealthT>() - 8usize];
+    ["Offset of field: AmdsmiNicHealthT::state"]
+        [::std::mem::offset_of!(AmdsmiNicHealthT, state) - 0usize];
+    ["Offset of field: AmdsmiNicHealthT::error_count"]
+        [::std::mem::offset_of!(AmdsmiNicHealthT, error_count) - 4usize];
+    ["Offset of field: AmdsmiNicHealthT::reporter"]
+        [::std::mem::offset_of!(AmdsmiNicHealthT, reporter) - 8usize];
+    ["Offset of field: AmdsmiNicHealthT::reserved"]
+        [::std::mem::offset_of!(AmdsmiNicHealthT, reserved) - 72usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiNicPortSplitT {
+    pub splittable: u8,
+    pub split_count: u8,
+    pub reserved: [u64; 1usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiNicPortSplitT"][::std::mem::size_of::<AmdsmiNicPortSplitT>() - 16usize];
+    ["Alignment of AmdsmiNicPortSplitT"][::std::mem::align_of::<AmdsmiNicPortSplitT>() - 8usize];
+    ["Offset of field: AmdsmiNicPortSplitT::splittable"]
+        [::std::mem::offset_of!(AmdsmiNicPortSplitT, splittable) - 0usize];
+    ["Offset of field: AmdsmiNicPortSplitT::split_count"]
+        [::std::mem::offset_of!(AmdsmiNicPortSplitT, split_count) - 1usize];
+    ["Offset of field: AmdsmiNicPortSplitT::reserved"]
+        [::std::mem::offset_of!(AmdsmiNicPortSplitT, reserved) - 8usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiNicTelemetryT {
+    pub health: AmdsmiNicHealthT,
+    pub port_split: AmdsmiNicPortSplitT,
+    pub reserved: [u64; 4usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiNicTelemetryT"][::std::mem::size_of::<AmdsmiNicTelemetryT>() - 152usize];
+    ["Alignment of AmdsmiNicTelemetryT"][::std::mem::align_of::<AmdsmiNicTelemetryT>() - 8usize];
+    ["Offset of field: AmdsmiNicTelemetryT::health"]
+        [::std::mem::offset_of!(AmdsmiNicTelemetryT, health) - 0usize];
+    ["Offset of field: AmdsmiNicTelemetryT::port_split"]
+        [::std::mem::offset_of!(AmdsmiNicTelemetryT, port_split) - 104usize];
+    ["Offset of field: AmdsmiNicTelemetryT::reserved"]
+        [::std::mem::offset_of!(AmdsmiNicTelemetryT, reserved) - 120usize];
+};
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiMetricUnitT {
+    AmdsmiMetricUnitBool = 2,
+    AmdsmiMetricUnitMillivolt = 5,
+    AmdsmiMetricUnitMillidegreeCelsius = 15,
+    AmdsmiMetricUnitMicrowatt = 16,
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiMetricCategoryT {
+    AmdsmiMetricCategoryTemperature = 3,
+    AmdsmiMetricCategoryPower = 4,
+    AmdsmiMetricCategoryVoltage = 14,
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNicSensorNameT {
+    AmdsmiNicSensorNameUnknown = 0,
+    AmdsmiNicSensorNameInput = 1,
+    AmdsmiNicSensorNameMin = 2,
+    AmdsmiNicSensorNameMax = 3,
+    AmdsmiNicSensorNameLcrit = 4,
+    AmdsmiNicSensorNameCrit = 5,
+    AmdsmiNicSensorNameEmergency = 6,
+    AmdsmiNicSensorNameShutdown = 7,
+    AmdsmiNicSensorNameCap = 8,
+    AmdsmiNicSensorNameAlarmMin = 9,
+    AmdsmiNicSensorNameAlarmMax = 10,
+    AmdsmiNicSensorNameAlarmLcrit = 11,
+    AmdsmiNicSensorNameAlarmCrit = 12,
+    AmdsmiNicSensorNameAlarmEmergency = 13,
+    AmdsmiNicSensorNameAlarmShutdown = 14,
+    AmdsmiNicSensorNameAlarmCap = 15,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiNicSensorT {
+    pub category: AmdsmiMetricCategoryT,
+    pub name: AmdsmiNicSensorNameT,
+    pub unit: AmdsmiMetricUnitT,
+    pub channel: u32,
+    pub instance: u32,
+    pub label: [::std::os::raw::c_char; 256usize],
+    pub value: i64,
+    pub reserved: [u64; 4usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiNicSensorT"][::std::mem::size_of::<AmdsmiNicSensorT>() - 320usize];
+    ["Alignment of AmdsmiNicSensorT"][::std::mem::align_of::<AmdsmiNicSensorT>() - 8usize];
+    ["Offset of field: AmdsmiNicSensorT::category"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, category) - 0usize];
+    ["Offset of field: AmdsmiNicSensorT::name"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, name) - 4usize];
+    ["Offset of field: AmdsmiNicSensorT::unit"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, unit) - 8usize];
+    ["Offset of field: AmdsmiNicSensorT::channel"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, channel) - 12usize];
+    ["Offset of field: AmdsmiNicSensorT::instance"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, instance) - 16usize];
+    ["Offset of field: AmdsmiNicSensorT::label"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, label) - 20usize];
+    ["Offset of field: AmdsmiNicSensorT::value"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, value) - 280usize];
+    ["Offset of field: AmdsmiNicSensorT::reserved"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, reserved) - 288usize];
 };
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -4621,8 +4800,6 @@ extern "C" {
 pub enum AmdsmiFabricSizeConstantsT {
     AmdsmiFabricActiveAcceleratorsBitmapSize = 32,
     AmdsmiFabricMaxLocalGpus = 16,
-    AmdsmiFabricMaxBitmapSize = 64,
-    AmdsmiFabricInfoV2ReservedWords = 37,
 }
 impl AmdsmiFabricTypeT {
     pub const AmdsmiFabricTypeUallink: AmdsmiFabricTypeT =
@@ -4652,79 +4829,6 @@ pub enum AmdsmiFabricAcceleratorVpodStateT {
     AmdsmiFabricAcceleratorVpodStateError = 4,
     AmdsmiFabricAcceleratorVpodStateUnknown = 5,
 }
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct AmdsmiFabricPpodDataT {
-    pub accelerator_id: u32,
-    pub ppod_id: [u8; 16usize],
-    pub ppod_size: u32,
-    pub local_accelerators: [u32; 16usize],
-    pub local_accelerator_count: u32,
-    pub bandwidth: u32,
-    pub latency: u32,
-}
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of AmdsmiFabricPpodDataT"][::std::mem::size_of::<AmdsmiFabricPpodDataT>() - 100usize];
-    ["Alignment of AmdsmiFabricPpodDataT"]
-        [::std::mem::align_of::<AmdsmiFabricPpodDataT>() - 4usize];
-    ["Offset of field: AmdsmiFabricPpodDataT::accelerator_id"]
-        [::std::mem::offset_of!(AmdsmiFabricPpodDataT, accelerator_id) - 0usize];
-    ["Offset of field: AmdsmiFabricPpodDataT::ppod_id"]
-        [::std::mem::offset_of!(AmdsmiFabricPpodDataT, ppod_id) - 4usize];
-    ["Offset of field: AmdsmiFabricPpodDataT::ppod_size"]
-        [::std::mem::offset_of!(AmdsmiFabricPpodDataT, ppod_size) - 20usize];
-    ["Offset of field: AmdsmiFabricPpodDataT::local_accelerators"]
-        [::std::mem::offset_of!(AmdsmiFabricPpodDataT, local_accelerators) - 24usize];
-    ["Offset of field: AmdsmiFabricPpodDataT::local_accelerator_count"]
-        [::std::mem::offset_of!(AmdsmiFabricPpodDataT, local_accelerator_count) - 88usize];
-    ["Offset of field: AmdsmiFabricPpodDataT::bandwidth"]
-        [::std::mem::offset_of!(AmdsmiFabricPpodDataT, bandwidth) - 92usize];
-    ["Offset of field: AmdsmiFabricPpodDataT::latency"]
-        [::std::mem::offset_of!(AmdsmiFabricPpodDataT, latency) - 96usize];
-};
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct AmdsmiFabricVpodDataT {
-    pub vpod_id: u32,
-    pub vpod_size: u32,
-    pub vpod_active_accelerators: [u32; 32usize],
-    pub addr_mode: AmdsmiFabricNpaAddressModeT,
-}
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of AmdsmiFabricVpodDataT"][::std::mem::size_of::<AmdsmiFabricVpodDataT>() - 140usize];
-    ["Alignment of AmdsmiFabricVpodDataT"]
-        [::std::mem::align_of::<AmdsmiFabricVpodDataT>() - 4usize];
-    ["Offset of field: AmdsmiFabricVpodDataT::vpod_id"]
-        [::std::mem::offset_of!(AmdsmiFabricVpodDataT, vpod_id) - 0usize];
-    ["Offset of field: AmdsmiFabricVpodDataT::vpod_size"]
-        [::std::mem::offset_of!(AmdsmiFabricVpodDataT, vpod_size) - 4usize];
-    ["Offset of field: AmdsmiFabricVpodDataT::vpod_active_accelerators"]
-        [::std::mem::offset_of!(AmdsmiFabricVpodDataT, vpod_active_accelerators) - 8usize];
-    ["Offset of field: AmdsmiFabricVpodDataT::addr_mode"]
-        [::std::mem::offset_of!(AmdsmiFabricVpodDataT, addr_mode) - 136usize];
-};
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct AmdsmiFabricStationDataT {
-    pub station_flags: u32,
-    pub num_stations: u8,
-    pub lane_en_bitmap: [u8; 64usize],
-}
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of AmdsmiFabricStationDataT"]
-        [::std::mem::size_of::<AmdsmiFabricStationDataT>() - 72usize];
-    ["Alignment of AmdsmiFabricStationDataT"]
-        [::std::mem::align_of::<AmdsmiFabricStationDataT>() - 4usize];
-    ["Offset of field: AmdsmiFabricStationDataT::station_flags"]
-        [::std::mem::offset_of!(AmdsmiFabricStationDataT, station_flags) - 0usize];
-    ["Offset of field: AmdsmiFabricStationDataT::num_stations"]
-        [::std::mem::offset_of!(AmdsmiFabricStationDataT, num_stations) - 4usize];
-    ["Offset of field: AmdsmiFabricStationDataT::lane_en_bitmap"]
-        [::std::mem::offset_of!(AmdsmiFabricStationDataT, lane_en_bitmap) - 5usize];
-};
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct AmdsmiFabricInfoV1T {
@@ -4771,48 +4875,6 @@ const _: () = {
         [::std::mem::offset_of!(AmdsmiFabricInfoV1T, accel_state) - 240usize];
 };
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct AmdsmiFabricInfoV2T {
-    pub fabric_type: AmdsmiFabricTypeT,
-    pub accel_state: AmdsmiFabricAcceleratorVpodStateT,
-    pub ppod: AmdsmiFabricPpodDataT,
-    pub vpod: AmdsmiFabricVpodDataT,
-    pub station: AmdsmiFabricStationDataT,
-    pub ppod_mask: u32,
-    pub vpod_mask: u32,
-    pub station_mask: u32,
-    pub reserved: [u32; 37usize],
-}
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of AmdsmiFabricInfoV2T"][::std::mem::size_of::<AmdsmiFabricInfoV2T>() - 480usize];
-    ["Alignment of AmdsmiFabricInfoV2T"][::std::mem::align_of::<AmdsmiFabricInfoV2T>() - 4usize];
-    ["Offset of field: AmdsmiFabricInfoV2T::fabric_type"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoV2T, fabric_type) - 0usize];
-    ["Offset of field: AmdsmiFabricInfoV2T::accel_state"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoV2T, accel_state) - 4usize];
-    ["Offset of field: AmdsmiFabricInfoV2T::ppod"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoV2T, ppod) - 8usize];
-    ["Offset of field: AmdsmiFabricInfoV2T::vpod"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoV2T, vpod) - 108usize];
-    ["Offset of field: AmdsmiFabricInfoV2T::station"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoV2T, station) - 248usize];
-    ["Offset of field: AmdsmiFabricInfoV2T::ppod_mask"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoV2T, ppod_mask) - 320usize];
-    ["Offset of field: AmdsmiFabricInfoV2T::vpod_mask"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoV2T, vpod_mask) - 324usize];
-    ["Offset of field: AmdsmiFabricInfoV2T::station_mask"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoV2T, station_mask) - 328usize];
-    ["Offset of field: AmdsmiFabricInfoV2T::reserved"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoV2T, reserved) - 332usize];
-};
-#[repr(u32)]
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-pub enum AmdsmiFabricInfoVersionT {
-    AmdsmiFabricInfoVersion1 = 0,
-    AmdsmiFabricInfoVersion2 = 4205903874,
-}
-#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct AmdsmiFabricInfoT {
     pub bdf: AmdsmiBdfT,
@@ -4824,22 +4886,19 @@ pub struct AmdsmiFabricInfoT {
 #[derive(Copy, Clone)]
 pub union AmdsmiFabricInfoTFabricInfo {
     pub v1: AmdsmiFabricInfoV1T,
-    pub v2: AmdsmiFabricInfoV2T,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of AmdsmiFabricInfoTFabricInfo"]
-        [::std::mem::size_of::<AmdsmiFabricInfoTFabricInfo>() - 480usize];
+        [::std::mem::size_of::<AmdsmiFabricInfoTFabricInfo>() - 244usize];
     ["Alignment of AmdsmiFabricInfoTFabricInfo"]
         [::std::mem::align_of::<AmdsmiFabricInfoTFabricInfo>() - 4usize];
     ["Offset of field: AmdsmiFabricInfoTFabricInfo::v1"]
         [::std::mem::offset_of!(AmdsmiFabricInfoTFabricInfo, v1) - 0usize];
-    ["Offset of field: AmdsmiFabricInfoTFabricInfo::v2"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoTFabricInfo, v2) - 0usize];
 };
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AmdsmiFabricInfoT"][::std::mem::size_of::<AmdsmiFabricInfoT>() - 552usize];
+    ["Size of AmdsmiFabricInfoT"][::std::mem::size_of::<AmdsmiFabricInfoT>() - 320usize];
     ["Alignment of AmdsmiFabricInfoT"][::std::mem::align_of::<AmdsmiFabricInfoT>() - 8usize];
     ["Offset of field: AmdsmiFabricInfoT::bdf"]
         [::std::mem::offset_of!(AmdsmiFabricInfoT, bdf) - 0usize];
@@ -4848,137 +4907,12 @@ const _: () = {
     ["Offset of field: AmdsmiFabricInfoT::fabric_info"]
         [::std::mem::offset_of!(AmdsmiFabricInfoT, fabric_info) - 12usize];
     ["Offset of field: AmdsmiFabricInfoT::reserved"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoT, reserved) - 492usize];
+        [::std::mem::offset_of!(AmdsmiFabricInfoT, reserved) - 256usize];
 };
 extern "C" {
     pub fn amdsmi_get_gpu_fabric_info(
         processor_handle: AmdsmiProcessorHandle,
         info: *mut AmdsmiFabricInfoT,
-    ) -> AmdsmiStatusT;
-}
-impl AmdsmiFabricConfigVersionT {
-    pub const AmdsmiFabricVpodConfigV1: AmdsmiFabricConfigVersionT =
-        AmdsmiFabricConfigVersionT::AmdsmiFabricPpodConfigV1;
-}
-impl AmdsmiFabricConfigVersionT {
-    pub const AmdsmiFabricStationConfigV1: AmdsmiFabricConfigVersionT =
-        AmdsmiFabricConfigVersionT::AmdsmiFabricPpodConfigV1;
-}
-#[repr(u32)]
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-pub enum AmdsmiFabricConfigVersionT {
-    AmdsmiFabricPpodConfigV1 = 1,
-}
-#[repr(u32)]
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-pub enum AmdsmiFabricPpodFieldT {
-    AmdsmiFabricPpodFieldAccelId = 1,
-    AmdsmiFabricPpodFieldPpodId = 2,
-    AmdsmiFabricPpodFieldPpodSize = 4,
-    AmdsmiFabricPpodFieldLocalAccels = 8,
-    AmdsmiFabricPpodFieldBandwidth = 16,
-    AmdsmiFabricPpodFieldLatency = 32,
-}
-#[repr(u32)]
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-pub enum AmdsmiFabricVpodFieldT {
-    AmdsmiFabricVpodFieldVpodId = 1,
-    AmdsmiFabricVpodFieldVpodSize = 2,
-    AmdsmiFabricVpodFieldVpodActiveAccels = 4,
-    AmdsmiFabricVpodFieldAddrMode = 8,
-}
-#[repr(u32)]
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-pub enum AmdsmiFabricDfFieldT {
-    AmdsmiFabricDfFieldStationFlags = 1,
-    AmdsmiFabricDfFieldLaneEnBitmap = 2,
-    AmdsmiFabricDfFieldNumStations = 4,
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct AmdsmiFabricPpodConfigT {
-    pub version: u32,
-    pub mask: u32,
-    pub commit: bool,
-    pub data: AmdsmiFabricPpodDataT,
-}
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of AmdsmiFabricPpodConfigT"]
-        [::std::mem::size_of::<AmdsmiFabricPpodConfigT>() - 112usize];
-    ["Alignment of AmdsmiFabricPpodConfigT"]
-        [::std::mem::align_of::<AmdsmiFabricPpodConfigT>() - 4usize];
-    ["Offset of field: AmdsmiFabricPpodConfigT::version"]
-        [::std::mem::offset_of!(AmdsmiFabricPpodConfigT, version) - 0usize];
-    ["Offset of field: AmdsmiFabricPpodConfigT::mask"]
-        [::std::mem::offset_of!(AmdsmiFabricPpodConfigT, mask) - 4usize];
-    ["Offset of field: AmdsmiFabricPpodConfigT::commit"]
-        [::std::mem::offset_of!(AmdsmiFabricPpodConfigT, commit) - 8usize];
-    ["Offset of field: AmdsmiFabricPpodConfigT::data"]
-        [::std::mem::offset_of!(AmdsmiFabricPpodConfigT, data) - 12usize];
-};
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct AmdsmiFabricVpodConfigT {
-    pub version: u32,
-    pub mask: u32,
-    pub commit: bool,
-    pub data: AmdsmiFabricVpodDataT,
-}
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of AmdsmiFabricVpodConfigT"]
-        [::std::mem::size_of::<AmdsmiFabricVpodConfigT>() - 152usize];
-    ["Alignment of AmdsmiFabricVpodConfigT"]
-        [::std::mem::align_of::<AmdsmiFabricVpodConfigT>() - 4usize];
-    ["Offset of field: AmdsmiFabricVpodConfigT::version"]
-        [::std::mem::offset_of!(AmdsmiFabricVpodConfigT, version) - 0usize];
-    ["Offset of field: AmdsmiFabricVpodConfigT::mask"]
-        [::std::mem::offset_of!(AmdsmiFabricVpodConfigT, mask) - 4usize];
-    ["Offset of field: AmdsmiFabricVpodConfigT::commit"]
-        [::std::mem::offset_of!(AmdsmiFabricVpodConfigT, commit) - 8usize];
-    ["Offset of field: AmdsmiFabricVpodConfigT::data"]
-        [::std::mem::offset_of!(AmdsmiFabricVpodConfigT, data) - 12usize];
-};
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct AmdsmiFabricStationConfigT {
-    pub version: u32,
-    pub mask: u32,
-    pub commit: bool,
-    pub data: AmdsmiFabricStationDataT,
-}
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of AmdsmiFabricStationConfigT"]
-        [::std::mem::size_of::<AmdsmiFabricStationConfigT>() - 84usize];
-    ["Alignment of AmdsmiFabricStationConfigT"]
-        [::std::mem::align_of::<AmdsmiFabricStationConfigT>() - 4usize];
-    ["Offset of field: AmdsmiFabricStationConfigT::version"]
-        [::std::mem::offset_of!(AmdsmiFabricStationConfigT, version) - 0usize];
-    ["Offset of field: AmdsmiFabricStationConfigT::mask"]
-        [::std::mem::offset_of!(AmdsmiFabricStationConfigT, mask) - 4usize];
-    ["Offset of field: AmdsmiFabricStationConfigT::commit"]
-        [::std::mem::offset_of!(AmdsmiFabricStationConfigT, commit) - 8usize];
-    ["Offset of field: AmdsmiFabricStationConfigT::data"]
-        [::std::mem::offset_of!(AmdsmiFabricStationConfigT, data) - 12usize];
-};
-extern "C" {
-    pub fn amdsmi_set_gpu_fabric_ppod_config(
-        processor_handle: AmdsmiProcessorHandle,
-        config: *const AmdsmiFabricPpodConfigT,
-    ) -> AmdsmiStatusT;
-}
-extern "C" {
-    pub fn amdsmi_set_gpu_fabric_vpod_config(
-        processor_handle: AmdsmiProcessorHandle,
-        config: *const AmdsmiFabricVpodConfigT,
-    ) -> AmdsmiStatusT;
-}
-extern "C" {
-    pub fn amdsmi_set_gpu_fabric_station_config(
-        processor_handle: AmdsmiProcessorHandle,
-        config: *const AmdsmiFabricStationConfigT,
     ) -> AmdsmiStatusT;
 }
 extern "C" {
@@ -5504,6 +5438,12 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_gpu_driver_info_v2(
+        processor_handle: AmdsmiProcessorHandle,
+        info: *mut AmdsmiDriverInfoV2T,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_get_gpu_asic_info(
         processor_handle: AmdsmiProcessorHandle,
         info: *mut AmdsmiAsicInfoT,
@@ -5690,6 +5630,18 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_nic_type(
+        processor_handle: AmdsmiProcessorHandle,
+        type_: *mut AmdsmiNicTypeT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_nic_capability(
+        processor_handle: AmdsmiProcessorHandle,
+        capability: *mut u32,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_get_nic_bus_info(
         processor_handle: AmdsmiProcessorHandle,
         info: *mut AmdsmiNicBusInfoT,
@@ -5705,6 +5657,13 @@ extern "C" {
     pub fn amdsmi_get_nic_port_info(
         processor_handle: AmdsmiProcessorHandle,
         info: *mut AmdsmiNicPortInfoT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_nic_port_ifindex(
+        processor_handle: AmdsmiProcessorHandle,
+        port_index: u32,
+        ifindex: *mut u32,
     ) -> AmdsmiStatusT;
 }
 extern "C" {
@@ -5728,6 +5687,19 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_nic_telemetry(
+        processor_handle: AmdsmiProcessorHandle,
+        info: *mut AmdsmiNicTelemetryT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_nic_hwmon_sensors(
+        processor_handle: AmdsmiProcessorHandle,
+        num_sensors: *mut u32,
+        sensors: *mut AmdsmiNicSensorT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_get_nic_port_statistics(
         processor_handle: AmdsmiProcessorHandle,
         port_index: u32,
@@ -5735,12 +5707,27 @@ extern "C" {
         stats: *mut AmdsmiNicStatT,
     ) -> AmdsmiStatusT;
 }
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNicStatScopeT {
+    AmdsmiNicStatScopeDefault = 0,
+    AmdsmiNicStatScopeExtended = 1,
+}
 extern "C" {
     pub fn amdsmi_get_nic_vendor_statistics(
         processor_handle: AmdsmiProcessorHandle,
         port_index: u32,
         num_stats: *mut u32,
         stats: *mut AmdsmiNicStatT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_nic_vendor_statistics_with_scope(
+        processor_handle: AmdsmiProcessorHandle,
+        port_index: u32,
+        num_stats: *mut u32,
+        stats: *mut AmdsmiNicStatT,
+        scope: AmdsmiNicStatScopeT,
     ) -> AmdsmiStatusT;
 }
 #[repr(C)]
@@ -5898,4 +5885,87 @@ extern "C" {
 }
 extern "C" {
     pub fn amdsmi_reset_ttm_pages_limit() -> AmdsmiStatusT;
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiHawkInsertionPriorityT {
+    AmdsmiHawkInsertionPriorityOpportunistic = 0,
+    AmdsmiHawkInsertionPriorityGuaranteed = 1,
+    AmdsmiHawkInsertionPriorityDynamic = 2,
+}
+impl AmdsmiPowerStabilizationParamIdT {
+    pub const AmdsmiPowerStabilizationParamLast: AmdsmiPowerStabilizationParamIdT =
+        AmdsmiPowerStabilizationParamIdT::AmdsmiPowerStabilizationParamRampStopDelay;
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiPowerStabilizationParamIdT {
+    AmdsmiPowerStabilizationParamEnable = 0,
+    AmdsmiPowerStabilizationParamPowerFloor = 1,
+    AmdsmiPowerStabilizationParamDelay = 2,
+    AmdsmiPowerStabilizationParamInsertionPriority = 3,
+    AmdsmiPowerStabilizationParamRampEnable = 4,
+    AmdsmiPowerStabilizationParamRampMaxRampUpRate = 5,
+    AmdsmiPowerStabilizationParamRampMaxRampDownRate = 6,
+    AmdsmiPowerStabilizationParamRampMinTimeAtPowerFloor = 7,
+    AmdsmiPowerStabilizationParamRampStopDelay = 8,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiPowerStabilizationInfoT {
+    pub host_control_enabled: bool,
+    pub enabled: bool,
+    pub power_floor: u32,
+    pub delay: u32,
+    pub insertion_priority: AmdsmiHawkInsertionPriorityT,
+    pub ramp_enabled: bool,
+    pub ramp_max_ramp_up_rate: u32,
+    pub ramp_max_ramp_down_rate: u32,
+    pub ramp_min_time_at_power_floor: u32,
+    pub ramp_stop_delay: u32,
+    pub reserved: [u64; 11usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiPowerStabilizationInfoT"]
+        [::std::mem::size_of::<AmdsmiPowerStabilizationInfoT>() - 128usize];
+    ["Alignment of AmdsmiPowerStabilizationInfoT"]
+        [::std::mem::align_of::<AmdsmiPowerStabilizationInfoT>() - 8usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::host_control_enabled"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, host_control_enabled) - 0usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::enabled"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, enabled) - 1usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::power_floor"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, power_floor) - 4usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::delay"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, delay) - 8usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::insertion_priority"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, insertion_priority) - 12usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_enabled"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, ramp_enabled) - 16usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_max_ramp_up_rate"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, ramp_max_ramp_up_rate) - 20usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_max_ramp_down_rate"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, ramp_max_ramp_down_rate) - 24usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_min_time_at_power_floor"][::std::mem::offset_of!(
+        AmdsmiPowerStabilizationInfoT,
+        ramp_min_time_at_power_floor
+    ) - 28usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_stop_delay"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, ramp_stop_delay) - 32usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::reserved"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, reserved) - 40usize];
+};
+extern "C" {
+    pub fn amdsmi_get_power_stabilization_info(
+        processor_handle: AmdsmiProcessorHandle,
+        info: *mut AmdsmiPowerStabilizationInfoT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_set_power_stabilization_param(
+        processor_handle: AmdsmiProcessorHandle,
+        param_id: AmdsmiPowerStabilizationParamIdT,
+        value: i64,
+    ) -> AmdsmiStatusT;
 }

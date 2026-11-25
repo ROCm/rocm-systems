@@ -114,7 +114,7 @@ Install the analyze mode dependencies
 =====================================
 
 Profile mode uses only the standard library. Analyze mode needs packages such as
-``numpy``, ``pandas``, ``dash``, and ``textual``, at the versions it pins.
+``numpy``, ``pandas``, ``plotly``, and ``rich``, at the versions it pins.
 
 Install them into a virtual environment of their own, separate from the one your
 profiled application uses. Those pins can conflict with a workload that brings
@@ -135,7 +135,7 @@ To confirm the environment has everything analyze mode needs:
 
 .. code-block:: bash
 
-   rocprof-compute analyze --verify-deps
+   rocprof-compute analyze --debug-verify-deps
 
 If you installed ROCm Compute Profiler from a package manager or the tarball
 rather than pip, install the dependencies from the requirements file in that

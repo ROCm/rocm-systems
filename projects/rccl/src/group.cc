@@ -229,21 +229,29 @@ struct ncclMgmtTaskJob {
 ncclResult_t ncclP2PPreconnectFunc(struct ncclAsyncJob* job_) {
   struct ncclPreconnectJob* job = (struct ncclPreconnectJob*)job_;
   struct ncclComm* comm = job->comm;
+  ncclResult_t ret = ncclSuccess;
   // Preconnect is not meant to be captured;
   // swap to relaxed mode so CUDA graph capture works correctly.
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  CUDACHECK(cudaSetDevice(comm->cudaDev));
+  CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, exit);
   if (!job_->isThreadMain && ncclOsCpuCount(comm->cpuAffinity)) ncclOsSetAffinity(comm->cpuAffinity);
-  NCCLCHECK(ncclTransportP2pSetup(comm, NULL, 1));
-  if (comm->p2pNet) NCCLCHECK(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET));
-  if (mode != cudaStreamCaptureModeRelaxed) CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  INFO(
-    NCCL_INIT,
-    "rank %d/%d cudaDev %d nvmlDev %d busId %#llx commId 0x%016llx Send/Recv P2P transport setup complete (p2pNet=%d)",
-    comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, (unsigned long long)comm->busId,
-    (unsigned long long)comm->commHash, comm->p2pNet ? 1 : 0);
-  return ncclSuccess;
+  NCCLCHECKGOTO(ncclTransportP2pSetup(comm, NULL, 1), ret, exit);
+  if (ncclP2pUsesMemcpy()) NCCLCHECKGOTO(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_CE), ret, exit);
+  if (comm->p2pNet) NCCLCHECKGOTO(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET), ret, exit);
+
+exit:
+  if (mode != cudaStreamCaptureModeRelaxed) {
+    cudaError_t err = cudaThreadExchangeStreamCaptureMode(&mode);
+    if (ret == ncclSuccess && err != cudaSuccess) ret = rcclCudaErrorHandler(err);
+  }
+  if (ret == ncclSuccess)
+    INFO(NCCL_INIT,
+         "rank %d/%d cudaDev %d nvmlDev %d busId %#llx commId 0x%016llx Send/Recv P2P transport setup complete "
+         "(p2pNet=%d)",
+         comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, (unsigned long long)comm->busId,
+         (unsigned long long)comm->commHash, comm->p2pNet ? 1 : 0);
+  return ret;
 }
 
 ncclResult_t ncclCollPreconnect(struct ncclComm* comm, bool* algoNeedConnect) {
@@ -310,7 +318,7 @@ ncclResult_t ncclPrepareTasksAndCollPreconnectFunc(struct ncclAsyncJob* job_) {
   memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
   CUDACHECK(cudaSetDevice(comm->cudaDev));
   if (!job_->isThreadMain && ncclOsCpuCount(comm->cpuAffinity)) ncclOsSetAffinity(comm->cpuAffinity);
-  NCCLCHECK(ncclPrepareTasks(comm, algoNeedConnect, &needConnect, job->simInfo));
+  NCCLCHECK(ncclPrepareTasks(comm, algoNeedConnect, &needConnect, /*needGenkDevComm=*/nullptr, job->simInfo));
   // Allow on-demand PAT connection without cuMem support (ROCm default), so PAT QPs can be created lazily.
   if ((comm->cuMemSupport || algoNeedConnect[NCCL_ALGO_PAT]) && needConnect) {
     // Preconnect is not meant to be captured;
@@ -397,8 +405,9 @@ ncclResult_t ncclCommGroupArgsGlobalCheck(struct ncclAsyncJob* job_) {
   ncclResult_t ret = ncclSuccess;
   while (!ncclIntruQueueEmpty(&comm->argsInfoQueue)) {
     struct ncclArgsInfo* argsInfo = ncclIntruQueueDequeue(&comm->argsInfoQueue);
-    NCCLCHECKGOTO(ncclArgsGlobalCheck(argsInfo), ret, fail);
+    ncclResult_t checkRet = ncclArgsGlobalCheck(argsInfo);
     free(argsInfo);
+    NCCLCHECKGOTO(checkRet, ret, fail);
   }
 
 exit:
@@ -416,24 +425,26 @@ ncclResult_t ncclCommGroupRegisterSymmetric(struct ncclAsyncJob* job_) {
 
   while (!ncclIntruQueueEmpty(&comm->devrState.regTaskQueue)) {
     struct ncclDevrRegTask* task = ncclIntruQueueDequeue(&comm->devrState.regTaskQueue);
-    NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, task->userPtr, task->userSize, task->winFlags, task->outWinDev),
-                  ret, fail);
+    ncclResult_t taskRet =
+      ncclDevrWindowRegisterInGroup(comm, task->userPtr, task->userSize, task->winFlags, task->outWinDev);
     free(task);
+    NCCLCHECKGOTO(taskRet, ret, fail);
   }
 
   while (!ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue)) {
     struct ncclDevrCommCreateTask* task = ncclIntruQueueDequeue(&comm->devrState.commCreateTaskQueue);
-    NCCLCHECKGOTO(ncclDevrCommCreateInternal(comm, task->reqs, task->outDevComm, /*isInternal=*/false,
-                                             task->deviceCodeVersion),
-                  ret, fail);
+    ncclResult_t taskRet =
+      ncclDevrCommCreateInternal(comm, task->reqs, task->outDevComm, task->isInternal, task->deviceCodeVersion);
     freeDevCommRequirements(task->reqs); // free additional task memory for reqs
     free(task);
+    NCCLCHECKGOTO(taskRet, ret, fail);
   }
 
   while (!ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
     struct ncclCeInitTask* task = ncclIntruQueueDequeue(&comm->ceInitTaskQueue);
-    NCCLCHECKGOTO(ncclCeInit(task->comm), ret, fail);
+    ncclResult_t taskRet = ncclCeInit(task->comm);
     free(task);
+    NCCLCHECKGOTO(taskRet, ret, fail);
   }
 
   if (comm->ceColl.stagingPending) {
@@ -443,8 +454,9 @@ ncclResult_t ncclCommGroupRegisterSymmetric(struct ncclAsyncJob* job_) {
 
   while (!ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
     struct ncclRmaCeInitTask* task = ncclIntruQueueDequeue(&comm->rmaCeInitTaskQueue);
-    NCCLCHECKGOTO(ncclRmaCeInit(task->comm), ret, fail);
+    ncclResult_t taskRet = ncclRmaCeInit(task->comm);
     free(task);
+    NCCLCHECKGOTO(taskRet, ret, fail);
   }
 
   while (!ncclIntruQueueEmpty(&comm->suspendTaskQueue)) {
@@ -464,6 +476,12 @@ ncclResult_t ncclCommGroupRegisterSymmetric(struct ncclAsyncJob* job_) {
 exit:
   return ret;
 fail:
+  // Unlike the other queues here, nothing drains commCreateTaskQueue at teardown.
+  while (!ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue)) {
+    struct ncclDevrCommCreateTask* task = ncclIntruQueueDequeue(&comm->devrState.commCreateTaskQueue);
+    freeDevCommRequirements(task->reqs);
+    free(task);
+  }
   goto exit;
 }
 
@@ -609,24 +627,59 @@ static void reclaimPlannerState(struct ncclComm* comm) {
   }
 }
 
+// Publish a per-comm groupJob link, taking the reference that link owns before
+// the pointer becomes visible so every claimer of comm->groupJob owns a
+// matching count. Returns false when the comm already holds a link.
+static bool ncclGroupJobTryLinkComm(struct ncclGroupJob* groupJob, struct ncclComm* comm) {
+  if (comm == nullptr) return false;
+  ncclAtomicRefCountIncrement(&groupJob->groupRefCount);
+  // Retry on weak-CAS spurious failure while the slot is still empty.
+  for (;;) {
+    struct ncclGroupJob* expected = nullptr;
+    if (COMPILER_ATOMIC_COMPARE_EXCHANGE(&comm->groupJob, &expected, groupJob, std::memory_order_acq_rel,
+                                         std::memory_order_acquire)) {
+      return true;
+    }
+    if (expected != nullptr) {
+      (void)ncclAtomicRefCountDecrement(&groupJob->groupRefCount);
+      return false;
+    }
+  }
+}
+
+// Clears comm->groupJob and drops the reference that link owned. Returns false
+// when the comm no longer points at this job, i.e. somebody else claimed it and
+// now owns that reference.
+static bool ncclGroupJobTryUnlinkComm(struct ncclGroupJob* groupJob, struct ncclComm* comm) {
+  if (comm == nullptr) return false;
+  struct ncclGroupJob* expected = groupJob;
+  if (!COMPILER_ATOMIC_COMPARE_EXCHANGE(&comm->groupJob, &expected, static_cast<struct ncclGroupJob*>(nullptr),
+                                        std::memory_order_acq_rel, std::memory_order_acquire)) {
+    return false;
+  }
+  (void)ncclAtomicRefCountDecrement(&groupJob->groupRefCount);
+  return true;
+}
+
 // Undo the comm->groupJob links published by the non-blocking branch of
 // ncclGroupEndInternal before that groupJob is destroyed on the fail path.
 // Without this a later ncclCommAbort -> ncclCommEnsureReady -> ncclGroupJobAbort
 // would dereference freed memory. An init/split comm is only reachable via
 // asyncJobs (it is never placed on the groupCommHead chains), so both lists
 // must be walked. Only clears comms that adopted this exact groupJob.
+// Callers must hold the owner reference, so the drops here cannot reach zero.
 static void groupJobUnlinkComms(struct ncclGroupJob* groupJob) {
   if (!ncclIntruQueueEmpty(&groupJob->asyncJobs)) {
     struct ncclAsyncJob* job = ncclIntruQueueHead(&groupJob->asyncJobs);
     do {
-      if (job->comm && job->comm->groupJob == groupJob) job->comm->groupJob = NULL;
+      (void)ncclGroupJobTryUnlinkComm(groupJob, job->comm);
       job = job->next;
     } while (job);
   }
   for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
     struct ncclComm* comm = groupJob->groupCommHead[type];
     while (comm != nullptr) {
-      if (comm->groupJob == groupJob) comm->groupJob = NULL;
+      (void)ncclGroupJobTryUnlinkComm(groupJob, comm);
       comm = comm->groupNext[type];
     }
   }
@@ -806,14 +859,42 @@ static void ncclGroupSymmetricJobFree(void* _job) {
   delete job;
 }
 
+// The bootstrap consensus that requires sibling local ranks to prepare concurrently is reached
+// only when the first symmetric kernel can actually be selected. Checking communicator capability
+// alone creates and joins one host thread per local rank for every ordinary collective.
+static bool ncclPlannerMayInitializeSymmetric(struct ncclComm* comm) {
+  if (comm->symkState.initialized) return false;
+  for (struct ncclTaskColl* task = comm->planner.collSorter.head; task != nullptr; task = task->next) {
+    if (task->symkExtract == RCCL_SYMK_EXTRACT_DENY) continue;
+    int tuningFunc = ncclTuningFuncIndex(task->func);
+    if (tuningFunc < 0) continue;
+    // A global forced selection wins over the per-call mask, but the tuning
+    // context still records which implementations that override enabled.
+    rcclTuningMask effAlgMask = comm->tuningContext.forced[tuningFunc] ? rcclTuningMask() : task->algMask;
+    bool symTuningEnabled = false;
+    for (int i = NCCL_TUNING_SYM_KERNEL_ID_OFFSET; i < NCCL_TUNING_CE_METHOD_ID_OFFSET; i++) {
+      if (comm->tuningContext.enabled[i][tuningFunc] && (effAlgMask.none() || effAlgMask.test(i))) {
+        symTuningEnabled = true;
+        break;
+      }
+    }
+    if (!symTuningEnabled) continue;
+    ncclDevRedOp_t symkOp = task->opHost == ncclAvg ? ncclDevSumPostDiv : task->opDev.op;
+    if (ncclSymkAvailable(comm, task->func, symkOp, task->datatype, task->count)) return true;
+  }
+  return false;
+}
+
 static ncclResult_t ncclPrepareTasksAndCollPreconnect(
   struct ncclComm* comm, ncclSimInfo_t* simInfo,
   struct ncclIntruQueue<struct ncclAsyncJob, &ncclAsyncJob::next>* asyncCollJobs) {
-  // Symmetric task selection performs a bootstrap consensus in ncclPrepareTasks.
-  // When this process owns multiple ranks, prepare them concurrently so the
-  // first rank cannot block before its sibling ranks enter the same consensus.
+  CUDACHECK(cudaSetDevice(comm->cudaDev));
+  // Concurrent prepare is needed only while a queued task can still trigger the first symk init consensus.
+  // When this process owns multiple ranks, prepare them concurrently so the first rank cannot
+  // block before its sibling ranks enter the same consensus.
   bool const needsConcurrentSymmetricPrepare =
-    comm->intraRanks > 1 && comm->symmetricSupport && !comm->p2pCrossClique;
+    comm->intraRanks > 1 && comm->symmetricSupport && !comm->p2pCrossClique &&
+    ncclPlannerMayInitializeSymmetric(comm);
   if (needsConcurrentSymmetricPrepare) {
     struct ncclPrepareTasksAndCollPreconnectJob* job;
     NEW_NOTHROW(job, ncclPrepareTasksAndCollPreconnectJob);
@@ -826,12 +907,12 @@ static ncclResult_t ncclPrepareTasksAndCollPreconnect(
     job->simInfo = simInfo;
     ncclIntruQueueEnqueue(asyncCollJobs, &job->base);
   } else {
-    bool needConnect = false;
+    bool needConnect = false, needGenkDevComm = false;
     bool algoNeedConnect[NCCL_NUM_ALGORITHMS];
     memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
 
     CUDACHECK(cudaSetDevice(comm->cudaDev));
-    NCCLCHECK(ncclPrepareTasks(comm, algoNeedConnect, &needConnect, simInfo));
+    NCCLCHECK(ncclPrepareTasks(comm, algoNeedConnect, &needConnect, &needGenkDevComm, simInfo));
 
     // Allow on-demand PAT connection without cuMem support (ROCm default), so PAT QPs can be created lazily.
     if ((comm->cuMemSupport || algoNeedConnect[NCCL_ALGO_PAT]) && needConnect) {
@@ -849,6 +930,19 @@ static ncclResult_t ncclPrepareTasksAndCollPreconnect(
         NCCLCHECK(ret);
       }
       memcpy(job->algoNeedConnect, algoNeedConnect, sizeof(bool) * NCCL_NUM_ALGORITHMS);
+      ncclIntruQueueEnqueue(asyncCollJobs, &job->base);
+    }
+
+    if (needGenkDevComm) {
+      struct ncclGroupSymmetricJob* job;
+      NEW_NOTHROW(job, ncclGroupSymmetricJob);
+      job->base.func = ncclCommGroupRegisterSymmetric;
+      job->base.undo = nullptr;
+      job->base.destructor = ncclGroupSymmetricJobFree;
+      job->base.state = ncclGroupJobRunning;
+      job->base.abortFlag = comm->abortFlag;
+      job->base.abortFlagDev = comm->abortFlagDev;
+      job->comm = comm;
       ncclIntruQueueEnqueue(asyncCollJobs, &job->base);
     }
   }
@@ -1155,6 +1249,10 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
   size_t realSize = 0;
   bool hasCommHead = false;
   ncclGroupJob* groupJob = NULL;
+  // Set once the non-blocking branch takes its owner reference. From then on the
+  // refcount decides when groupJob dies, including on the fail path.
+  bool groupJobOwnerRef = false;
+  int linkedComms = 0;
   internalSimInfo.magic = 0;
 
   if (ncclGroupDepth == 0) {
@@ -1221,10 +1319,6 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
         ncclAsyncJob* job = ncclIntruQueueHead(&groupJob->asyncJobs);
         do {
           NCCLCHECKGOTO(ncclCommSetAsyncError(job->comm, ncclInProgress), ret, fail);
-          if (job->comm->groupJob == NULL) {
-            job->comm->groupJob = groupJob;
-            groupJob->groupRefCount++;
-          }
           job = job->next;
         } while (job);
       }
@@ -1234,19 +1328,54 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
           ncclComm_t comm = ncclGroupCommHead[type];
           do {
             NCCLCHECKGOTO(ncclCommSetAsyncError(comm, ncclInProgress), ret, fail);
-            /* link group job to communicators. */
-            if (comm->groupJob == NULL) {
-              comm->groupJob = groupJob;
-              groupJob->groupRefCount++;
-            }
             comm = comm->groupNext[type];
           } while (comm);
         }
       }
 
       groupJob->base.func = groupLaunchNonBlocking;
-      STDTHREADCREATE_GOTO(groupJob->base.thread, ncclAsyncJobMain, ret, fail, &groupJob->base);
-      groupJob->nonBlockingInit = true;
+      {
+        // Publish the links before the launch thread exists: once it runs it
+        // destroys the queued jobs and rewrites groupNext, so walking either
+        // list alongside it would read freed memory. launchMutex covers the
+        // thread creation and the nonBlockingInit store as well, so a thread
+        // that claims a link mid-publish waits here instead of trying to join a
+        // thread that does not exist yet.
+        std::lock_guard<std::mutex> launchLock(groupJob->launchMutex);
+        // Owner reference: a claimer must not destroy groupJob while GroupEnd
+        // is still using it.
+        ncclAtomicRefCountIncrement(&groupJob->groupRefCount);
+        groupJobOwnerRef = true;
+        if (!ncclIntruQueueEmpty(&groupJob->asyncJobs)) {
+          ncclAsyncJob* job = ncclIntruQueueHead(&groupJob->asyncJobs);
+          do {
+            if (ncclGroupJobTryLinkComm(groupJob, job->comm)) linkedComms++;
+            job = job->next;
+          } while (job);
+        }
+        for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
+          if (ncclGroupCommHead[type]) {
+            ncclComm_t comm = ncclGroupCommHead[type];
+            do {
+              if (ncclGroupJobTryLinkComm(groupJob, comm)) linkedComms++;
+              comm = comm->groupNext[type];
+            } while (comm);
+          }
+        }
+        STDTHREADCREATE_GOTO(groupJob->base.thread, ncclAsyncJobMain, ret, fail, &groupJob->base);
+        groupJob->nonBlockingInit = true;
+      }
+
+      if (linkedComms == 0) {
+        // Every comm already held a link, so no reaper will ever see this job.
+        // Retire it here: dropping the last reference instead would destroy it
+        // while the launch thread is still reading it, leaving ~ncclAsyncJob's
+        // join as the only thing standing between that and a use-after-free.
+        (void)ncclGroupJobComplete(groupJob);
+      } else if (ncclAtomicRefCountDecrement(&groupJob->groupRefCount) == 0) {
+        delete groupJob;
+      }
+
       ret = ncclInProgress;
     } else {
       /* blocking group */
@@ -1272,7 +1401,12 @@ fail:
   if (groupJob) {
     groupJobUnlinkComms(groupJob);
     groupCleanup(groupJob->groupCommHead, &groupJob->asyncJobs, ret);
-    delete groupJob;
+    // Reached from the non-blocking branch only when the launch thread failed
+    // to start, with links already published. A thread that claimed one of them
+    // first still holds its reference, so let the refcount pick the destroyer.
+    if (!groupJobOwnerRef || ncclAtomicRefCountDecrement(&groupJob->groupRefCount) == 0) {
+      delete groupJob;
+    }
   } else {
     groupCleanup(ncclGroupCommHead, &ncclAsyncJobs, ret);
   }
@@ -1280,28 +1414,37 @@ fail:
   goto exit;
 }
 
+// True once ncclGroupEndInternal has started the launch thread, i.e. once
+// base.thread is joinable. Reading nonBlockingInit under launchMutex is what
+// keeps a thread that claimed a link mid-publish from joining too early.
+static bool groupJobLaunched(struct ncclGroupJob* groupJob) {
+  std::lock_guard<std::mutex> launchLock(groupJob->launchMutex);
+  return groupJob->nonBlockingInit;
+}
+
+// Both reapers below consume the reference that came with the comm->groupJob
+// link their caller claimed, so the last one out destroys the job. The join
+// itself precedes the drop, so a job can never be freed from under it.
 ncclResult_t ncclGroupJobComplete(struct ncclGroupJob* groupJob) {
   ncclResult_t ret = ncclSuccess;
-  if (groupJob && groupJob->nonBlockingInit) {
-    if (!COMPILER_ATOMIC_EXCHANGE(&groupJob->joined, true, std::memory_order_acq_rel)) {
-      ret = ncclAsyncJobComplete(&groupJob->base);
-    }
-    if (ncclAtomicRefCountDecrement(&groupJob->groupRefCount) == 0) {
-      delete groupJob;
-    }
+  if (groupJob == nullptr) return ret;
+  if (groupJobLaunched(groupJob) && !COMPILER_ATOMIC_EXCHANGE(&groupJob->joined, true, std::memory_order_acq_rel)) {
+    ret = ncclAsyncJobComplete(&groupJob->base);
+  }
+  if (ncclAtomicRefCountDecrement(&groupJob->groupRefCount) == 0) {
+    delete groupJob;
   }
   return ret;
 }
 
 ncclResult_t ncclGroupJobAbort(struct ncclGroupJob* groupJob) {
-  if (groupJob && groupJob->nonBlockingInit) {
-    if (!COMPILER_ATOMIC_EXCHANGE(&groupJob->joined, true, std::memory_order_acq_rel)) {
-      COMPILER_ATOMIC_STORE(&groupJob->abortFlag, true, std::memory_order_relaxed);
-      ncclAsyncJobComplete(&groupJob->base);
-    }
-    if (ncclAtomicRefCountDecrement(&groupJob->groupRefCount) == 0) {
-      delete groupJob;
-    }
+  if (groupJob == nullptr) return ncclSuccess;
+  if (groupJobLaunched(groupJob) && !COMPILER_ATOMIC_EXCHANGE(&groupJob->joined, true, std::memory_order_acq_rel)) {
+    COMPILER_ATOMIC_STORE(&groupJob->abortFlag, true, std::memory_order_relaxed);
+    ncclAsyncJobComplete(&groupJob->base);
+  }
+  if (ncclAtomicRefCountDecrement(&groupJob->groupRefCount) == 0) {
+    delete groupJob;
   }
   return ncclSuccess;
 }

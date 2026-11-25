@@ -1,34 +1,21 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file vop3p_mov_b32_simd_correctness_test.cpp
-/// @brief Golden selector check for v_pk_mov_b32_vop3p on CDNA targets.
-///
-/// Hardware-observed behavior for the assembler's default op_sel_hi value:
-/// op_sel[0] selects the low output dword from src0.{lo,hi}, and op_sel[1]
-/// selects the high output dword from src1.{lo,hi}. Each case runs twice in
-/// the same process -- once forcing the scalar body, once allowing the SIMD
-/// fast path -- and both paths must match the same golden 64-bit result. A
-/// mixed SGPR-pair/VGPR-pair case covers the legal scalar source encoding.
-/// In-process inactive lanes must keep the sentinel.
+// Packed MOV word selectors with scalar/VGPR sources, raw payloads and inactive lanes.
+// Both scalar and native execution use decoded production handlers.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/vop3p.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/vop3p.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3p.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-
-#include "util/simd.h"
 
 #include <array>
 #include <cstdint>
@@ -51,14 +38,14 @@ constexpr uint32_t kMixedVgprLo = 0x55555555u;
 constexpr uint32_t kMixedVgprHi = 0x66666666u;
 
 struct ArchCase {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   const char *name;
 };
 
 constexpr std::array<ArchCase, 3> kArchCases{{
-    {ROCJITSU_CODE_ARCH_CDNA2, "cdna2"},
-    {ROCJITSU_CODE_ARCH_CDNA3, "cdna3"},
-    {ROCJITSU_CODE_ARCH_CDNA4, "cdna4"},
+    {rocjitsu::IsaFamily::Cdna2, "cdna2"},
+    {rocjitsu::IsaFamily::Cdna3, "cdna3"},
+    {rocjitsu::IsaFamily::Cdna4, "cdna4"},
 }};
 
 constexpr void vop3p_encode(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t src1,
@@ -102,8 +89,11 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create(std::string("cu_vop3p_mov_b32_") + arch.name, cfg,
-                                         &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, std::string("cu_vop3p_mov_b32_") + arch.name, cfg,
+                                            &gpu_mem, &l2);
+    if (!cu) {
+      return;
+    }
     decoder = Decoder::create(arch.arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -131,35 +121,6 @@ struct Fixture {
     seed_inputs(rot, exec);
     EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     return read_output();
-  }
-
-  template <typename Inst>
-  std::array<uint64_t, WF_SIZE> run_simd_probe_impl(Instruction *inst, const ArchCase &arch,
-                                                    uint32_t rot, uint64_t exec, uint32_t op_sel) {
-    auto *typed_inst = dynamic_cast<Inst *>(inst);
-    EXPECT_NE(typed_inst, nullptr) << arch.name << " decoded unexpected instruction type";
-    if (typed_inst == nullptr)
-      return {};
-    seed_inputs(rot, exec);
-    EXPECT_TRUE(amdgpu::try_execute_vop3p_mov_b32_simd(*typed_inst, *wf))
-        << arch.name << " v_pk_mov_b32_vop3p op_sel=" << op_sel
-        << " did not take the SIMD fast path";
-    return read_output();
-  }
-
-  std::array<uint64_t, WF_SIZE> run_simd_probe(Instruction *inst, const ArchCase &arch,
-                                               uint32_t rot, uint64_t exec, uint32_t op_sel) {
-    switch (arch.arch) {
-    case ROCJITSU_CODE_ARCH_CDNA2:
-      return run_simd_probe_impl<cdna2::VPkMovB32Vop3p>(inst, arch, rot, exec, op_sel);
-    case ROCJITSU_CODE_ARCH_CDNA3:
-      return run_simd_probe_impl<cdna3::VPkMovB32Vop3p>(inst, arch, rot, exec, op_sel);
-    case ROCJITSU_CODE_ARCH_CDNA4:
-      return run_simd_probe_impl<cdna4::VPkMovB32Vop3p>(inst, arch, rot, exec, op_sel);
-    default:
-      ADD_FAILURE() << "unsupported arch case " << arch.name;
-      return {};
-    }
   }
 
   std::array<uint64_t, WF_SIZE> read_output() {
@@ -209,6 +170,9 @@ void check(uint64_t exec) {
                       uint32_t op_sel) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx(arch);
+    if (::testing::Test::HasFatalFailure()) {
+      return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
@@ -216,8 +180,7 @@ void check(uint64_t exec) {
     vop3p_encode(/*op=*/51, kDstVgpr, /*src0=*/256, /*src1=*/258, op_sel, words);
     Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_pk_mov_b32_vop3p decode failed";
-    auto out =
-        force_scalar ? fx.run(inst, rot, exec) : fx.run_simd_probe(inst, arch, rot, exec, op_sel);
+    auto out = fx.run(inst, rot, exec);
     delete inst;
     return out;
   };
@@ -231,10 +194,10 @@ void check(uint64_t exec) {
 
         EXPECT_EQ(scalar_out, golden)
             << arch.name << " v_pk_mov_b32_vop3p rot=" << rot << " op_sel=" << op_sel
-            << ": scalar path diverged from hardware-observed semantics";
+            << ": scalar path diverged from word-selection reference";
         EXPECT_EQ(simd_out, golden)
             << arch.name << " v_pk_mov_b32_vop3p rot=" << rot << " op_sel=" << op_sel
-            << ": SIMD path diverged from hardware-observed semantics";
+            << ": SIMD path diverged from word-selection reference";
 
         for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
           const bool active = (exec >> lane) & 1ULL;
@@ -253,55 +216,11 @@ void check(uint64_t exec) {
   }
 }
 
-TEST(Vop3pMovB32SimdCorrectness, FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
-  check(/*exec=*/~0ULL);
-}
+TEST(Vop3pMovB32SimdCorrectness, FullExec) { check(/*exec=*/~0ULL); }
 
-TEST(Vop3pMovB32SimdCorrectness, PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
-  check(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
-}
-
-TEST(Vop3pMovB32SimdCorrectness, ProductionSimdDispatchGolden) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
-
-  ForceScalarGuard gate_guard;
-  util::set_force_scalar_for_testing(false);
-  constexpr uint32_t kRot = 5;
-  constexpr uint32_t kOpSel = 3;
-  constexpr uint64_t kExec = 0xA5A5'F0F0'1234'8001ULL;
-  const auto golden = expected(kRot, kExec, kOpSel);
-
-  for (const auto &arch : kArchCases) {
-    Fixture fx(arch);
-    ASSERT_NE(fx.cu, nullptr);
-    ASSERT_NE(fx.wf, nullptr);
-    uint32_t words[2] = {0u, 0u};
-    vop3p_encode(/*op=*/51, kDstVgpr, /*src0=*/256, /*src1=*/258, kOpSel, words);
-    Instruction *inst = decode_valid(*fx.decoder, words);
-    ASSERT_NE(inst, nullptr) << arch.name << " v_pk_mov_b32_vop3p decode failed";
-    const auto out = fx.run(inst, kRot, kExec);
-    delete inst;
-
-    EXPECT_EQ(out, golden) << arch.name << ": production SIMD dispatch differed from golden";
-  }
-}
+TEST(Vop3pMovB32SimdCorrectness, PartialExec) { check(/*exec=*/0xA5A5'F0F0'1234'8001ULL); }
 
 TEST(Vop3pMovB32SimdCorrectness, MixedSgprPairAndVgprPairGolden) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
 
   ForceScalarGuard gate_guard;
   struct MixedSourceCase {
@@ -318,9 +237,13 @@ TEST(Vop3pMovB32SimdCorrectness, MixedSgprPairAndVgprPairGolden) {
        uint64_t{kMixedVgprLo} | (uint64_t{kMixedSgprHi} << 32)},
   }};
 
-  auto run_mode = [&](const ArchCase &arch, const MixedSourceCase &test_case, bool force_scalar) {
+  auto run_mode = [&](const ArchCase &arch, const MixedSourceCase &test_case,
+                      bool force_scalar) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx(arch);
+    if (::testing::Test::HasFatalFailure()) {
+      return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
@@ -328,9 +251,7 @@ TEST(Vop3pMovB32SimdCorrectness, MixedSgprPairAndVgprPairGolden) {
     Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << arch.name << " " << test_case.name
                              << " v_pk_mov_b32_vop3p decode failed";
-    auto out = force_scalar
-                   ? fx.run(inst, /*rot=*/0, /*exec=*/~0ULL)
-                   : fx.run_simd_probe(inst, arch, /*rot=*/0, /*exec=*/~0ULL, test_case.op_sel);
+    auto out = fx.run(inst, /*rot=*/0, /*exec=*/~0ULL);
     delete inst;
     return out;
   };

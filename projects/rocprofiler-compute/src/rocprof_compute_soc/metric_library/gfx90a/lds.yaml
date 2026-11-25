@@ -1,0 +1,11 @@
+lds.ai:
+  name: LDS Arithmetic Intensity
+  formula: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops) / SUM($lds_bytes)
+  unit: FLOPs/Byte
+  description: >-
+    Arithmetic Intensity relative to the Local Data Share (LDS). Higher values indicate
+    more compute per byte of LDS traffic, suggesting effective reuse of shared data
+    within a workgroup. Lower values suggest memory-bound behavior limited by LDS
+    bandwidth or bank-conflict pressure.
+lds.theoretical_bw:
+  peak_empirical: $LDSBw_empirical_peak

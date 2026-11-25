@@ -24,8 +24,10 @@ namespace rocjitsu::amdgpu {
 /// @brief Test-only access to legacy compatibility implementation details.
 class LegacyAddressSpaceTestAccess {
 public:
-  static std::mutex *backing_atomic_mutex_for(const void *address) {
-    return &LegacyAddressSpace::backing_atomic_mutex(reinterpret_cast<uintptr_t>(address));
+  static auto *backing_atomic_mutex_for(const void *address) {
+    const auto mapping = rocjitsu::host_mapping_lock().lock_shared();
+    return &LegacyAddressSpace::backing_atomic_mutex(
+        LegacyAddressSpace::host_backing_key(reinterpret_cast<uintptr_t>(address)));
   }
 
   static uint64_t rejected_identity_accesses(const LegacyAddressSpace &address_space) {
@@ -58,11 +60,33 @@ public:
 
 namespace rocjitsu::test {
 
+class ScopedHostMappingObservation {
+public:
+  explicit ScopedHostMappingObservation(bool observed) : previous_(current()) {
+    host_mapping_lock().set_mapping_changes_observed(observed);
+  }
+
+  ~ScopedHostMappingObservation() { host_mapping_lock().set_mapping_changes_observed(previous_); }
+
+  ScopedHostMappingObservation(const ScopedHostMappingObservation &) = delete;
+  ScopedHostMappingObservation &operator=(const ScopedHostMappingObservation &) = delete;
+
+private:
+  static bool current() {
+    const auto mapping = host_mapping_lock().lock_shared();
+    return host_mapping_lock().mapping_changes_observed();
+  }
+
+  bool previous_;
+};
+
 /// @brief Test-only owner that keeps legacy mappings under a real GpuVm.
 class LegacyGpuMemoryFixture : public amdgpu::GpuMemory {
 public:
-  explicit LegacyGpuMemoryFixture(std::string name)
-      : GpuMemory(std::move(name)), direct_address_space_(*this), legacy_vm_(gpu_vm_, this) {}
+  explicit LegacyGpuMemoryFixture(std::string name,
+                                  amdgpu::MemoryTransactionPolicy transactions = {})
+      : GpuMemory(std::move(name), transactions), direct_address_space_(*this),
+        legacy_vm_(gpu_vm_, this) {}
 
   using GpuMemory::read32;
   using GpuMemory::write32;
@@ -72,7 +96,7 @@ public:
                    util::DistributedSharedMutex *page_table_mutex,
                    const uint64_t *page_table_generation = nullptr,
                    std::shared_ptr<util::DistributedSharedMutex> request_mutex = {},
-                   std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch = {},
+                   util::IntrusiveSharedPtr<const amdgpu::VmMutationEpoch> mutation_epoch = {},
                    std::shared_ptr<amdgpu::LegacyPageTableCacheState> page_table_cache_state = {}) {
     unregister_process(vmid);
     const amdgpu::AddressSpaceHandle handle = legacy_vm_.register_address_space(
@@ -88,15 +112,17 @@ public:
                .fault_reporter = fault_reporter_});
     if (handle) {
       handles_[vmid] = handle;
-      if (amdgpu::LegacyAddressSpace *address_space = legacy_vm_.address_space(vmid))
+      if (amdgpu::LegacyAddressSpace *address_space = legacy_vm_.address_space(vmid)) {
         amdgpu::LegacyAddressSpaceTestAccess::set_default_passthrough(*address_space, passthrough_);
+      }
     }
   }
 
   void unregister_process(uint32_t vmid) {
     auto handle = handles_.find(vmid);
-    if (handle == handles_.end())
+    if (handle == handles_.end()) {
       return;
+    }
     (void)legacy_vm_.unregister_address_space(handle->second);
     handles_.erase(handle);
   }
@@ -104,14 +130,16 @@ public:
   void set_process_client_pid(uint32_t vmid, pid_t client_pid) {
     client_pids_[vmid] = client_pid;
     auto handle = handles_.find(vmid);
-    if (handle != handles_.end())
+    if (handle != handles_.end()) {
       (void)legacy_vm_.set_client_pid(handle->second, client_pid);
+    }
   }
 
   void set_process_mem_fd(uint32_t vmid, int mem_fd) {
     auto handle = handles_.find(vmid);
-    if (handle != handles_.end())
+    if (handle != handles_.end()) {
       (void)legacy_vm_.set_client_mem_fd(handle->second, mem_fd);
+    }
   }
 
   void set_passthrough(bool passthrough) {
@@ -120,8 +148,9 @@ public:
                                                                   passthrough);
     for (const auto &[vmid, handle] : handles_) {
       (void)legacy_vm_.set_passthrough(handle, passthrough);
-      if (amdgpu::LegacyAddressSpace *address_space = legacy_vm_.address_space(vmid))
+      if (amdgpu::LegacyAddressSpace *address_space = legacy_vm_.address_space(vmid)) {
         amdgpu::LegacyAddressSpaceTestAccess::set_default_passthrough(*address_space, passthrough);
+      }
     }
   }
 
@@ -138,17 +167,21 @@ public:
   amdgpu::GpuVm &gpu_vm() { return gpu_vm_; }
 
   amdgpu::LegacyAddressSpace &legacy_address_space(uint32_t vmid = 0) {
-    if (amdgpu::LegacyAddressSpace *address_space = legacy_vm_.address_space(vmid))
+    if (amdgpu::LegacyAddressSpace *address_space = legacy_vm_.address_space(vmid)) {
       return *address_space;
-    if (vmid == 0 && !handles_.empty())
+    }
+    if (vmid == 0 && !handles_.empty()) {
       return *legacy_vm_.address_space(handles_.begin()->first);
+    }
     return direct_address_space_;
   }
   const amdgpu::LegacyAddressSpace &legacy_address_space(uint32_t vmid = 0) const {
-    if (const amdgpu::LegacyAddressSpace *address_space = legacy_vm_.address_space(vmid))
+    if (const amdgpu::LegacyAddressSpace *address_space = legacy_vm_.address_space(vmid)) {
       return *address_space;
-    if (vmid == 0 && !handles_.empty())
+    }
+    if (vmid == 0 && !handles_.empty()) {
       return *legacy_vm_.address_space(handles_.begin()->first);
+    }
     return direct_address_space_;
   }
 
@@ -320,20 +353,24 @@ public:
 
 private:
   std::shared_ptr<amdgpu::LegacyAddressSpace> retain_legacy_address_space(uint32_t vmid) {
-    if (auto address_space = legacy_vm_.address_space_snapshot(vmid))
+    if (auto address_space = legacy_vm_.address_space_snapshot(vmid)) {
       return address_space;
-    if (vmid == 0 && !handles_.empty())
+    }
+    if (vmid == 0 && !handles_.empty()) {
       return legacy_vm_.address_space_snapshot(handles_.begin()->first);
+    }
     return std::shared_ptr<amdgpu::LegacyAddressSpace>(&direct_address_space_,
                                                        [](amdgpu::LegacyAddressSpace *) {});
   }
 
   std::shared_ptr<const amdgpu::LegacyAddressSpace>
   retain_legacy_address_space(uint32_t vmid) const {
-    if (auto address_space = legacy_vm_.address_space_snapshot(vmid))
+    if (auto address_space = legacy_vm_.address_space_snapshot(vmid)) {
       return address_space;
-    if (vmid == 0 && !handles_.empty())
+    }
+    if (vmid == 0 && !handles_.empty()) {
       return legacy_vm_.address_space_snapshot(handles_.begin()->first);
+    }
     return std::shared_ptr<const amdgpu::LegacyAddressSpace>(
         &direct_address_space_, [](const amdgpu::LegacyAddressSpace *) {});
   }

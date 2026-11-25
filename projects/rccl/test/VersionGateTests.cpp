@@ -46,15 +46,19 @@ TEST(VersionGateTests, CuMemVersionSupported)
     EXPECT_FALSE(NCCL_CUMEM_VERSION_SUPPORTED(ROCM_VER_7_12_0));
 }
 
-TEST(VersionGateTests, CuMemHostIsNativeOnly)
+TEST(VersionGateTests, CuMemHostVersionSupported)
 {
     EXPECT_TRUE (NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_12_60540));
     EXPECT_FALSE(NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_12_60540 - 1));
 
-    // Host allocations are deliberately NOT part of the 7.0.2.x backport
-    // (they rely on hipDeviceAttributeHostNumaId, absent there).
-    EXPECT_FALSE(NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_0_2_2));
-    EXPECT_FALSE(NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_0_3_0 - 1));
+    // 7.0.2.x backport window [70051831, 70060000).
+    EXPECT_TRUE (NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_0_2_2));
+    EXPECT_TRUE (NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_0_3_0 - 1));
+    EXPECT_FALSE(NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_0_2_2 - 1));
+    EXPECT_FALSE(NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_0_3_0));
+
+    // The gap between the backport upper bound and the native min is unsupported.
+    EXPECT_FALSE(NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_12_0));
 }
 
 // The DMA-BUF export gate is a conjunction: the CMake symbol probe alone must not
@@ -74,6 +78,16 @@ static_assert(NCCL_CUMEM_DMABUF_EXPORT_GATE ==
                   NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(NCCL_CUMEM_DMABUF_EXPORT_PROBE, HIP_VERSION),
               "the build's gate is no longer the parameterized gate for (probe, HIP_VERSION)");
 
+// The host VMM gate needs the hipMemLocationTypeHost probe too: stock ROCm 7.0.2
+// reports the backport's HIP_VERSION but does not declare the host location types.
+static_assert(NCCL_CUMEM_HOST_GATE_FOR(1, ROCM_VER_7_0_2_2), "backport headers inside the window must gate on");
+static_assert(!NCCL_CUMEM_HOST_GATE_FOR(0, ROCM_VER_7_0_2_2),
+              "stock 7.0.2 shares the backport version and must stay off without the probe");
+static_assert(NCCL_CUMEM_HOST_GATE_FOR(1, ROCM_VER_7_12_60540), "probe + native version must gate on");
+static_assert(!NCCL_CUMEM_HOST_GATE_FOR(1, ROCM_VER_7_12_0), "probe must not override an unsupported version");
+static_assert(NCCL_CUMEM_HOST_GATE == NCCL_CUMEM_HOST_GATE_FOR(NCCL_CUMEM_HOST_PROBE, HIP_VERSION),
+              "the build's host gate is no longer the parameterized gate for (probe, HIP_VERSION)");
+
 TEST(VersionGateTests, CeBatchAsyncWindow)
 {
     // Native 7.12+ (note: 7.12.0, lower than the cuMem milestone).
@@ -87,5 +101,12 @@ TEST(VersionGateTests, CeBatchAsyncWindow)
     EXPECT_FALSE(NCCL_CE_BATCH_ASYNC_VERSION_SUPPORTED(ROCM_VER_7_0_2_2 - 1));
     EXPECT_FALSE(NCCL_CE_BATCH_ASYNC_VERSION_SUPPORTED(ROCM_VER_7_0_3_0));
 }
+
+// Kernel 6.8 is the cuMem performance recommendation, not a support gate (see rocmwrap-test.cc).
+static_assert(NCCL_CUMEM_PERF_KERNEL_VERSION == NCCL_KERNEL_VERSION_CODE(6, 8), "cuMem kernel perf floor drifted");
+static_assert(NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(NCCL_KERNEL_VERSION_CODE(6, 8)), "6.8 must be recommended");
+static_assert(NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(NCCL_KERNEL_VERSION_CODE(6, 9)), "6.9 must be recommended");
+static_assert(!NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(NCCL_KERNEL_VERSION_CODE(6, 7)), "6.7 must not be recommended");
+static_assert(!NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(NCCL_KERNEL_VERSION_CODE(5, 14)), "5.14 must not be recommended");
 
 }  // namespace RcclUnitTesting

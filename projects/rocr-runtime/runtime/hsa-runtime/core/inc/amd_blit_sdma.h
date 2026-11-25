@@ -65,10 +65,9 @@ class BlitSdmaBase : public core::Blit {
   virtual bool isSDMA() const override { return true; }
   virtual hsa_status_t Initialize(const core::Agent& agent, bool use_xgmi,
                                   size_t linear_copy_size_override, int rec_engine) = 0;
-  virtual hsa_status_t SubmitCopyRectCommand(const hsa_pitched_ptr_t* dst,
-                                             const hsa_dim3_t* dst_offset,
-                                             const hsa_pitched_ptr_t* src,
-                                             const hsa_dim3_t* src_offset, const hsa_dim3_t* range,
+  virtual hsa_status_t SubmitCopyRectCommand(const hsa_amd_memory_copy_rect_ptr_t* srcs,
+                                             const hsa_amd_memory_copy_rect_ptr_t* dsts,
+                                             const hsa_dim3_t* ranges, uint16_t num_rects,
                                              std::vector<core::Signal*>& dep_signals,
                                              core::Signal& out_signal) = 0;
 
@@ -112,9 +111,13 @@ class BlitSdmaBase : public core::Blit {
   /// @brief Single-doorbell WaitSignal copy for gfx125+ single copies.
   /// Emits GCR invalidate + dep polls + N WaitSignal copy packets +
   /// GCR writeback + mailbox/trap — all in one ring reservation.
-  /// Only the first packet waits and only the final packet signals.
-  /// When profiling is enabled, start/end SDMA timestamp commands are emitted
-  /// around the copy packets (after dep polls and after copies respectively).
+  /// On the unprofiled path every copy packet waits on the first dependency
+  /// and signals, so out_signal is pre-incremented by num_copy_command - 1.
+  /// When profiling is enabled, every dependency is polled before the start
+  /// SDMA timestamp, the end timestamp follows the copy packets, the packets
+  /// carry no inline WAIT or SIGNAL, and out_signal completes after the end
+  /// timestamp via an atomic decrement, or a 64-bit fence write when platform
+  /// atomics are unavailable.
   virtual hsa_status_t SubmitLinearCopyBodyWaitSignal(
       void* dst, const void* src, size_t size,
       const std::vector<core::Signal*>& dep_signals,
@@ -182,6 +185,7 @@ class BlitSdmaBase : public core::Blit {
   /// @param body_signal  When non-null (!platform_atomic_support_ classic path),
   ///   the body fences this signal to 0 on completion instead of atomic-
   ///   decrementing out_signal.  Caller allocates one per engine group.
+  /// @param dst_size_list  Optional per-entry dst-side swap sizes (null = symmetric).
   virtual hsa_status_t SubmitBodies(
       hsa_amd_memory_copy_op_type_t op,
       void* const* dst_list,
@@ -191,9 +195,11 @@ class BlitSdmaBase : public core::Blit {
       bool indirect_src, bool indirect_dst,
       const std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal,
-      core::Signal* body_signal = nullptr) = 0;
+      core::Signal* body_signal = nullptr,
+      const size_t* dst_size_list = nullptr) = 0;
 
   virtual bool SwapSupported() const = 0;
+  virtual bool NativeAsymmetricSwapSupported() const = 0;
   virtual bool IndirectCopySupported() const = 0;
   virtual bool UsesGCR() const = 0;
 };
@@ -246,10 +252,9 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
       std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal, std::vector<core::Signal*>& gang_signals) override;
 
-  virtual hsa_status_t SubmitCopyRectCommand(const hsa_pitched_ptr_t* dst,
-                                             const hsa_dim3_t* dst_offset,
-                                             const hsa_pitched_ptr_t* src,
-                                             const hsa_dim3_t* src_offset, const hsa_dim3_t* range,
+  virtual hsa_status_t SubmitCopyRectCommand(const hsa_amd_memory_copy_rect_ptr_t* srcs,
+                                             const hsa_amd_memory_copy_rect_ptr_t* dsts,
+                                             const hsa_dim3_t* ranges, uint16_t num_rects,
                                              std::vector<core::Signal*>& dep_signals,
                                              core::Signal& out_signal) override;
 
@@ -332,9 +337,11 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
       bool indirect_src, bool indirect_dst,
       const std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal,
-      core::Signal* body_signal = nullptr) override;
+      core::Signal* body_signal = nullptr,
+      const size_t* dst_size_list = nullptr) override;
 
   bool SwapSupported() const override { return swap_supported_; }
+  bool NativeAsymmetricSwapSupported() const override { return false; }
   bool IndirectCopySupported() const override { return indirect_copy_supported_; }
   bool UsesGCR() const override { return useGCR; }
 

@@ -5,6 +5,7 @@
 
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -20,19 +21,14 @@
 #include <utility>
 #include <vector>
 
-#include "hsa/hsa_api_trace_minimal.h"
+#include "hsa/hsa_api_trace.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "scoped_temp.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
 
 extern "C" bool OnLoad(HsaApiTable *table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char *const *failed_tool_names);
@@ -116,7 +112,7 @@ struct FakeSignalValue {
 };
 std::vector<FakeSignalValue> g_fake_signal_values;
 hsa_queue_t *g_last_intercept_registered_queue = nullptr;
-hsa_amd_queue_intercept_handler_t g_fake_intercept_handler = nullptr;
+hsa_amd_queue_intercept_handler g_fake_intercept_handler = nullptr;
 void *g_fake_intercept_user_data = nullptr;
 std::vector<hsa_kernel_dispatch_packet_t> g_last_intercept_written_packets;
 uint64_t g_fake_symbol_kernel_object = 0;
@@ -133,21 +129,25 @@ constexpr hsa_executable_symbol_t kFakeKernelSymbol{500};
 constexpr uint32_t kResolvedHostGpuId = 8716;
 
 const char *isa_name(hsa_isa_t isa) {
-  if (isa.handle == kGuestIsa.handle)
+  if (isa.handle == kGuestIsa.handle) {
     return "amdgcn-amd-amdhsa--gfx950";
-  if (isa.handle == kHostIsa.handle)
+  }
+  if (isa.handle == kHostIsa.handle) {
     return "amdgcn-amd-amdhsa--gfx1201";
+  }
   return "";
 }
 
 hsa_status_t HSA_API fake_iterate_agents(hsa_status_t (*callback)(hsa_agent_t, void *),
                                          void *data) {
-  if (callback == nullptr)
+  if (callback == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   ++g_fake_iterate_agents_calls;
-  if (g_fail_agent_iteration)
+  if (g_fail_agent_iteration) {
     return HSA_STATUS_ERROR;
+  }
 
   {
     std::unique_lock lock(g_agent_mutex);
@@ -159,35 +159,41 @@ hsa_status_t HSA_API fake_iterate_agents(hsa_status_t (*callback)(hsa_agent_t, v
   }
 
   hsa_status_t status = callback(kGuestAgent, data);
-  if (status != HSA_STATUS_SUCCESS)
+  if (status != HSA_STATUS_SUCCESS) {
     return status;
+  }
   return callback(kHostAgent, data);
 }
 
 hsa_status_t HSA_API fake_iterate_agents_host_first(hsa_status_t (*callback)(hsa_agent_t, void *),
                                                     void *data) {
-  if (callback == nullptr)
+  if (callback == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   ++g_fake_iterate_agents_calls;
   hsa_status_t status = callback(kHostAgent, data);
-  if (status != HSA_STATUS_SUCCESS)
+  if (status != HSA_STATUS_SUCCESS) {
     return status;
+  }
   return callback(kGuestAgent, data);
 }
 
 hsa_status_t HSA_API fake_iterate_agents_with_cpu(hsa_status_t (*callback)(hsa_agent_t, void *),
                                                   void *data) {
-  if (callback == nullptr)
+  if (callback == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   ++g_fake_iterate_agents_calls;
   hsa_status_t status = callback(kCpuAgent, data);
-  if (status != HSA_STATUS_SUCCESS)
+  if (status != HSA_STATUS_SUCCESS) {
     return status;
+  }
   status = callback(kGuestAgent, data);
-  if (status != HSA_STATUS_SUCCESS)
+  if (status != HSA_STATUS_SUCCESS) {
     return status;
+  }
   return callback(kHostAgent, data);
 }
 
@@ -196,8 +202,9 @@ hsa_status_t HSA_API fake_iterate_agents_with_cpu(hsa_status_t (*callback)(hsa_a
 // collision: one agent satisfies both predicates and no distinct guest remains.
 hsa_status_t HSA_API fake_iterate_agents_host_only(hsa_status_t (*callback)(hsa_agent_t, void *),
                                                    void *data) {
-  if (callback == nullptr)
+  if (callback == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   ++g_fake_iterate_agents_calls;
   return callback(kHostAgent, data);
@@ -210,8 +217,9 @@ hsa_status_t HSA_API fake_shut_down() {
 
 hsa_status_t HSA_API fake_agent_get_info(hsa_agent_t agent, hsa_agent_info_t attribute,
                                          void *value) {
-  if (value == nullptr)
+  if (value == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   if (attribute == HSA_AGENT_INFO_DEVICE) {
     *static_cast<hsa_device_type_t *>(value) =
@@ -223,11 +231,12 @@ hsa_status_t HSA_API fake_agent_get_info(hsa_agent_t agent, hsa_agent_info_t att
     return HSA_STATUS_SUCCESS;
   }
   if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID)) {
-    if (agent.handle == kCpuAgent.handle)
+    if (agent.handle == kCpuAgent.handle) {
       *static_cast<uint32_t *>(value) = kCpuNodeId;
-    else
+    } else {
       *static_cast<uint32_t *>(value) =
           agent.handle == kGuestAgent.handle ? kGuestNodeId : kHostNodeId;
+    }
     return HSA_STATUS_SUCCESS;
   }
   return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -236,13 +245,16 @@ hsa_status_t HSA_API fake_agent_get_info(hsa_agent_t agent, hsa_agent_info_t att
 hsa_status_t HSA_API fake_agent_iterate_isas(hsa_agent_t agent,
                                              hsa_status_t (*callback)(hsa_isa_t, void *),
                                              void *data) {
-  if (callback == nullptr)
+  if (callback == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
-  if (agent.handle == kGuestAgent.handle)
+  if (agent.handle == kGuestAgent.handle) {
     return callback(kGuestIsa, data);
-  if (agent.handle == kHostAgent.handle)
+  }
+  if (agent.handle == kHostAgent.handle) {
     return callback(kHostIsa, data);
+  }
   return HSA_STATUS_ERROR_INVALID_AGENT;
 }
 
@@ -252,24 +264,29 @@ hsa_status_t HSA_API fake_agent_iterate_isas(hsa_agent_t agent,
 // constraint can tell the two roles apart.
 hsa_status_t HSA_API fake_agent_iterate_isas_overlapping(
     hsa_agent_t agent, hsa_status_t (*callback)(hsa_isa_t, void *), void *data) {
-  if (callback == nullptr)
+  if (callback == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  if (agent.handle != kGuestAgent.handle && agent.handle != kHostAgent.handle)
+  }
+  if (agent.handle != kGuestAgent.handle && agent.handle != kHostAgent.handle) {
     return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
 
   hsa_status_t status = callback(kGuestIsa, data);
-  if (status != HSA_STATUS_SUCCESS)
+  if (status != HSA_STATUS_SUCCESS) {
     return status;
+  }
   return callback(kHostIsa, data);
 }
 
 hsa_status_t HSA_API fake_isa_get_info_alt(hsa_isa_t isa, hsa_isa_info_t attribute, void *value) {
-  if (value == nullptr)
+  if (value == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   const char *name = isa_name(isa);
-  if (name[0] == '\0')
+  if (name[0] == '\0') {
     return HSA_STATUS_ERROR_INVALID_ISA;
+  }
 
   if (attribute == HSA_ISA_INFO_NAME_LENGTH) {
     *static_cast<uint32_t *>(value) = static_cast<uint32_t>(std::strlen(name));
@@ -285,8 +302,9 @@ hsa_status_t HSA_API fake_isa_get_info_alt(hsa_isa_t isa, hsa_isa_info_t attribu
 hsa_status_t HSA_API fake_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
                                        void (*)(hsa_status_t, hsa_queue_t *, void *), void *,
                                        uint32_t, uint32_t, hsa_queue_t **queue) {
-  if (queue == nullptr || size == 0 || size > g_fake_queue_packets.size())
+  if (queue == nullptr || size == 0 || size > g_fake_queue_packets.size()) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   g_last_queue_create_agent = agent;
   g_fake_queue_packets = {};
@@ -315,7 +333,7 @@ hsa_status_t HSA_API fake_amd_queue_intercept_create(
 }
 
 hsa_status_t HSA_API fake_amd_queue_intercept_register(hsa_queue_t *queue,
-                                                       hsa_amd_queue_intercept_handler_t callback,
+                                                       hsa_amd_queue_intercept_handler callback,
                                                        void *user_data) {
   g_last_intercept_registered_queue = queue;
   g_fake_intercept_handler = callback;
@@ -325,8 +343,9 @@ hsa_status_t HSA_API fake_amd_queue_intercept_register(hsa_queue_t *queue,
 
 void fake_intercept_packet_writer(const void *pkts, uint64_t pkt_count) {
   g_last_intercept_written_packets.clear();
-  if (pkts == nullptr || pkt_count == 0)
+  if (pkts == nullptr || pkt_count == 0) {
     return;
+  }
 
   const auto *packets = static_cast<const hsa_kernel_dispatch_packet_t *>(pkts);
   g_last_intercept_written_packets.assign(packets, packets + pkt_count);
@@ -356,8 +375,9 @@ void set_fake_signal_value(hsa_signal_t signal, hsa_signal_value_t value) {
 
 hsa_status_t HSA_API fake_signal_create(hsa_signal_value_t initial_value, uint32_t,
                                         const hsa_agent_t *, hsa_signal_t *signal) {
-  if (signal == nullptr)
+  if (signal == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
   *signal = hsa_signal_t{g_next_fake_signal_handle++};
   g_fake_created_signals.push_back(*signal);
   set_fake_signal_value(*signal, initial_value);
@@ -371,24 +391,27 @@ hsa_status_t HSA_API fake_signal_destroy(hsa_signal_t signal) {
 
 hsa_signal_value_t HSA_API fake_signal_load_scacquire(hsa_signal_t signal) {
   for (const FakeSignalValue &entry : g_fake_signal_values) {
-    if (entry.handle == signal.handle)
+    if (entry.handle == signal.handle) {
       return entry.value;
+    }
   }
   return 1;
 }
 
 hsa_status_t HSA_API
 fake_code_object_reader_create_from_file(hsa_file_t, hsa_code_object_reader_t *code_object_reader) {
-  if (code_object_reader == nullptr)
+  if (code_object_reader == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
   code_object_reader->handle = 1;
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t HSA_API fake_code_object_reader_create_from_memory(
     const void *, size_t, hsa_code_object_reader_t *code_object_reader) {
-  if (code_object_reader == nullptr)
+  if (code_object_reader == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
   code_object_reader->handle = g_next_memory_reader_handle++;
   return HSA_STATUS_SUCCESS;
 }
@@ -403,18 +426,21 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
   ++g_fake_load_agent_calls;
   g_last_load_agent = agent;
   g_last_load_reader = reader;
-  if (loaded_code_object != nullptr)
+  if (loaded_code_object != nullptr) {
     loaded_code_object->handle = 77;
+  }
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t HSA_API fake_executable_get_symbol_by_name(hsa_executable_t, const char *symbol_name,
                                                         const hsa_agent_t *,
                                                         hsa_executable_symbol_t *symbol) {
-  if (symbol_name == nullptr || symbol == nullptr)
+  if (symbol_name == nullptr || symbol == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  if (symbol_name != g_fake_symbol_name)
+  }
+  if (symbol_name != g_fake_symbol_name) {
     return HSA_STATUS_ERROR_INVALID_SYMBOL_NAME;
+  }
   *symbol = kFakeKernelSymbol;
   return HSA_STATUS_SUCCESS;
 }
@@ -423,16 +449,18 @@ hsa_status_t HSA_API fake_executable_iterate_agent_symbols(
     hsa_executable_t executable, hsa_agent_t agent,
     hsa_status_t (*callback)(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t, void *),
     void *data) {
-  if (callback == nullptr)
+  if (callback == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
   return callback(executable, agent, kFakeKernelSymbol, data);
 }
 
 hsa_status_t HSA_API fake_executable_symbol_get_info(hsa_executable_symbol_t symbol,
                                                      hsa_executable_symbol_info_t attribute,
                                                      void *value) {
-  if (symbol.handle != kFakeKernelSymbol.handle || value == nullptr)
+  if (symbol.handle != kFakeKernelSymbol.handle || value == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH) {
     const uint32_t name_length = static_cast<uint32_t>(g_fake_symbol_name.size());
@@ -486,8 +514,9 @@ hsa_status_t HSA_API fake_amd_memory_async_batch_copy(const hsa_amd_memory_copy_
                                                       const hsa_signal_t *) {
   g_last_batch_src_agents.clear();
   g_last_batch_dst_agents.clear();
-  if (copy_ops == nullptr && num_copy_ops != 0)
+  if (copy_ops == nullptr && num_copy_ops != 0) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   for (uint32_t op_idx = 0; op_idx < num_copy_ops; ++op_idx) {
     const hsa_amd_memory_copy_op_t &op = copy_ops[op_idx];
@@ -502,16 +531,19 @@ hsa_status_t HSA_API fake_amd_memory_async_batch_copy(const hsa_amd_memory_copy_
         g_last_batch_dst_agents.push_back(op.dst_agent.handle);
         continue;
       }
-      if (op.dst_agent_list == nullptr)
+      if (op.dst_agent_list == nullptr) {
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
       for (uint16_t entry_idx = 0; entry_idx < op.num_entries; ++entry_idx) {
         g_last_batch_src_agents.push_back(op.src_agent.handle);
         g_last_batch_dst_agents.push_back(op.dst_agent_list[entry_idx].handle);
       }
       continue;
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
-      if (op.num_entries == 0 || op.dst_agent_list == nullptr)
+    case HSA_AMD_MEMORY_COPY_OP_RECT:
+      if (op.num_entries == 0 || op.dst_agent_list == nullptr) {
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
       for (uint16_t entry_idx = 0; entry_idx < op.num_entries; ++entry_idx) {
         g_last_batch_src_agents.push_back(op.src_agent.handle);
         g_last_batch_dst_agents.push_back(op.dst_agent_list[entry_idx].handle);
@@ -526,10 +558,12 @@ hsa_status_t HSA_API fake_amd_memory_async_batch_copy(const hsa_amd_memory_copy_
 hsa_status_t HSA_API fake_amd_memory_lock(void *, size_t, hsa_agent_t *agents, int num_agent,
                                           void **) {
   g_last_memory_lock_agents.clear();
-  if (agents == nullptr && num_agent != 0)
+  if (agents == nullptr && num_agent != 0) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  for (int i = 0; i < num_agent; ++i)
+  }
+  for (int i = 0; i < num_agent; ++i) {
     g_last_memory_lock_agents.push_back(agents[i].handle);
+  }
   return HSA_STATUS_SUCCESS;
 }
 
@@ -538,10 +572,12 @@ hsa_status_t HSA_API fake_amd_memory_lock_to_pool(void *, size_t, hsa_agent_t *a
                                                   uint32_t, void **) {
   g_last_memory_lock_to_pool_pool = pool;
   g_last_memory_lock_to_pool_agents.clear();
-  if (agents == nullptr && num_agent != 0)
+  if (agents == nullptr && num_agent != 0) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  for (int i = 0; i < num_agent; ++i)
+  }
+  for (int i = 0; i < num_agent; ++i) {
     g_last_memory_lock_to_pool_agents.push_back(agents[i].handle);
+  }
   return HSA_STATUS_SUCCESS;
 }
 
@@ -549,10 +585,12 @@ hsa_status_t HSA_API fake_amd_vmem_set_access(void *, size_t,
                                               const hsa_amd_memory_access_desc_t *desc,
                                               size_t desc_cnt) {
   g_last_vmem_access_agents.clear();
-  if (desc == nullptr && desc_cnt != 0)
+  if (desc == nullptr && desc_cnt != 0) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  for (size_t i = 0; i < desc_cnt; ++i)
+  }
+  for (size_t i = 0; i < desc_cnt; ++i) {
     g_last_vmem_access_agents.push_back(desc[i].agent_handle.handle);
+  }
   return HSA_STATUS_SUCCESS;
 }
 
@@ -574,8 +612,9 @@ hsa_status_t HSA_API fake_amd_pointer_info(const void *, hsa_amd_pointer_info_t 
 
 hsa_status_t HSA_API fake_amd_agent_iterate_memory_pools(
     hsa_agent_t agent, hsa_status_t (*callback)(hsa_amd_memory_pool_t, void *), void *data) {
-  if (callback == nullptr)
+  if (callback == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   if (agent.handle == kGuestAgent.handle) {
     if (g_fail_guest_pool_iteration_once) {
@@ -593,20 +632,23 @@ hsa_status_t HSA_API fake_amd_agent_iterate_memory_pools(
   }
   if (agent.handle == kHostAgent.handle) {
     hsa_status_t status = callback(kHostPool, data);
-    if (status != HSA_STATUS_SUCCESS)
+    if (status != HSA_STATUS_SUCCESS) {
       return status;
+    }
     return callback(kHostKernargPool, data);
   }
-  if (agent.handle == kCpuAgent.handle)
+  if (agent.handle == kCpuAgent.handle) {
     return callback(kCpuFineGrainedPool, data);
+  }
   return HSA_STATUS_ERROR_INVALID_AGENT;
 }
 
 hsa_status_t HSA_API fake_amd_memory_pool_get_info(hsa_amd_memory_pool_t pool,
                                                    hsa_amd_memory_pool_info_t attribute,
                                                    void *value) {
-  if (value == nullptr)
+  if (value == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   if (attribute == HSA_AMD_MEMORY_POOL_INFO_SEGMENT) {
     *static_cast<uint32_t *>(value) = 0;
@@ -635,10 +677,12 @@ hsa_status_t HSA_API fake_amd_agent_memory_pool_get_info(hsa_agent_t agent,
   g_last_agent_memory_pool_agent = agent;
   g_last_agent_memory_pool = memory_pool;
 
-  if (value == nullptr)
+  if (value == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  if (memory_pool.handle == 0)
+  }
+  if (memory_pool.handle == 0) {
     return HSA_STATUS_SUCCESS;
+  }
   if (attribute == HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS) {
     *static_cast<uint32_t *>(value) = 0;
     return HSA_STATUS_SUCCESS;
@@ -706,31 +750,75 @@ struct FakeApiTable {
   }
 };
 
-void write_runtime_config_path(const std::string &runtime_dir,
-                               bool create_host_topology_node = true) {
-  setenv("ROCJITSU_RUNTIME_DIR", runtime_dir.c_str(), 1);
+[[nodiscard]] testing::AssertionResult create_host_node(const std::filesystem::path &host_node) {
+  std::error_code error;
+  std::filesystem::create_directories(host_node, error);
+  if (error) {
+    return testing::AssertionFailure() << "Failed to create host node: " << error.message();
+  }
+  return testing::AssertionSuccess();
+}
+
+[[nodiscard]] testing::AssertionResult write_host_gpu_id(const std::filesystem::path &host_node) {
+  std::ofstream gpu_id(host_node / "gpu_id");
+  gpu_id << kResolvedHostGpuId << '\n';
+  gpu_id.close();
+  if (!gpu_id) {
+    return testing::AssertionFailure() << "Failed to write host node gpu_id";
+  }
+  return testing::AssertionSuccess();
+}
+
+[[nodiscard]] testing::AssertionResult
+write_runtime_config_path(const std::string &runtime_dir, bool create_host_topology_node = true) {
+  if (setenv("ROCJITSU_RUNTIME_DIR", runtime_dir.c_str(), 1) == -1) {
+    return testing::AssertionFailure()
+           << "Failed to set ROCJITSU_RUNTIME_DIR: " << std::strerror(errno);
+  }
 
   const std::filesystem::path topology_root =
       std::filesystem::path(runtime_dir) / "topology" / "nodes";
-  std::filesystem::create_directories(topology_root);
+  std::error_code error;
+  std::filesystem::create_directories(topology_root, error);
+  if (error) {
+    return testing::AssertionFailure() << "Failed to create topology root: " << error.message();
+  }
   if (create_host_topology_node) {
     const std::filesystem::path host_node = topology_root / std::to_string(kHostNodeId);
-    std::filesystem::create_directories(host_node);
-    std::ofstream(host_node / "gpu_id") << kResolvedHostGpuId << '\n';
+    if (testing::AssertionResult result = create_host_node(host_node); !result) {
+      return result;
+    }
+    if (testing::AssertionResult result = write_host_gpu_id(host_node); !result) {
+      return result;
+    }
   }
   rj_hsa_dbt_set_topology_nodes_root_for_test(topology_root.c_str());
 
   std::ofstream config_path(rocjitsu::rpc_default_config_file_path());
   config_path << RJ_HOOK_UNIT_CONFIG_PATH << '\n' << kResolvedHostGpuId << '\n';
+  config_path.close();
+  if (!config_path) {
+    return testing::AssertionFailure() << "Failed to write runtime config path";
+  }
+  return testing::AssertionSuccess();
 }
 
 class InstalledHook {
 public:
-  explicit InstalledHook(FakeApiTable &api, bool create_host_topology_node = true)
-      : runtime_dir_("rocjitsu-hsa-hooks-unit-") {
+  [[nodiscard]] testing::AssertionResult initialize(FakeApiTable &api,
+                                                    bool create_host_topology_node = true) {
+    if (testing::AssertionResult result = runtime_dir_.initialize("rocjitsu-hsa-hooks-unit-");
+        !result) {
+      return result;
+    }
     OnUnload();
-    write_runtime_config_path(runtime_dir_.path(), create_host_topology_node);
+    if (testing::AssertionResult result =
+            write_runtime_config_path(runtime_dir_.path(), create_host_topology_node);
+        !result) {
+      return result;
+    }
     installed_ = OnLoad(&api.table, 0, 0, nullptr);
+    return testing::AssertionSuccess();
   }
   ~InstalledHook() {
     OnUnload();
@@ -790,7 +878,8 @@ void expect_batch_copy_forwarding(const hsa_amd_memory_copy_op_t &op,
   g_last_batch_src_agents.clear();
   g_last_batch_dst_agents.clear();
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.amd.hsa_amd_memory_async_batch_copy_fn, fake_amd_memory_async_batch_copy);
 
@@ -831,8 +920,9 @@ void reset_queue_fakes() {
 }
 
 void write_bytes(std::vector<uint8_t> &image, size_t offset, const void *src, size_t size) {
-  if (image.size() < offset + size)
+  if (image.size() < offset + size) {
     image.resize(offset + size);
+  }
   std::memcpy(image.data() + offset, src, size);
 }
 
@@ -842,8 +932,9 @@ void write_struct(std::vector<uint8_t> &image, size_t offset, const T &value) {
 }
 
 size_t align_up(size_t value, size_t alignment) {
-  if (alignment <= 1)
+  if (alignment <= 1) {
     return value;
+  }
   const size_t remainder = value % alignment;
   return remainder == 0 ? value : value + alignment - remainder;
 }
@@ -979,8 +1070,8 @@ make_translated_metadata_elf(uint32_t mach, const std::vector<VirtualLdsMetadata
 struct VirtualLdsRegistrationForTest {};
 
 VirtualLdsRegistrationForTest register_virtual_lds_kernel_for_test(
-    FakeApiTable &api, const rocr::llvm::amdhsa::kernel_descriptor_t &normal_descriptor,
-    const rocr::llvm::amdhsa::kernel_descriptor_t &virtual_descriptor, uint32_t static_lds_bytes,
+    FakeApiTable &api, const rocjitsu::amdhsa::kernel_descriptor_t &normal_descriptor,
+    const rocjitsu::amdhsa::kernel_descriptor_t &virtual_descriptor, uint32_t static_lds_bytes,
     uint32_t kernarg_size = 0,
     uint32_t backing_pointer_kernarg_offset = kVirtualLdsWrapperStateOffsetForTest,
     uint16_t flags = kVirtualLdsWrapperFlagsForTest, bool resolve_symbol_by_name = true,
@@ -1026,8 +1117,9 @@ VirtualLdsRegistrationForTest register_virtual_lds_kernel_for_test(
                 request_loaded_code_object ? &loaded : nullptr),
             HSA_STATUS_SUCCESS);
 
-  if (!resolve_symbol_by_name)
+  if (!resolve_symbol_by_name) {
     return {};
+  }
 
   hsa_executable_symbol_t symbol{};
   EXPECT_EQ(api.core.hsa_executable_get_symbol_by_name_fn(
@@ -1056,11 +1148,32 @@ hsa_status_t HSA_API capture_iterated_symbol_for_test(hsa_executable_t, hsa_agen
   return HSA_STATUS_SUCCESS;
 }
 
+TEST(HsaHooksUnitTest, RejectsUnreadableRuntimeHandoff) {
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(runtime.initialize("rj-hsa-unreadable-handoff-"));
+  rocjitsu::test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+  rocjitsu::test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv,
+                                                           runtime.path());
+  const std::string handoff = runtime.path() + "/config_path";
+  ASSERT_TRUE(std::filesystem::create_directory(handoff));
+  FakeApiTable api;
+  OnUnload();
+  testing::internal::CaptureStderr();
+  EXPECT_FALSE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  EXPECT_NE(diagnostic.find("failed to load runtime config"), std::string::npos);
+  EXPECT_NE(diagnostic.find("Cannot read runtime config handoff: " + handoff), std::string::npos);
+  EXPECT_EQ(api.core.hsa_code_object_reader_create_from_file_fn,
+            fake_code_object_reader_create_from_file);
+  OnUnload();
+}
+
 TEST(HsaHooksUnitTest, IterateAgentsDropsGuestOwnSlotWhenGuestAppearsFirst) {
   reset_pool_blocker(false);
   reset_agent_blocker(false);
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents);
 
@@ -1081,7 +1194,8 @@ TEST(HsaHooksUnitTest, IterateAgentsDropsGuestOwnSlotWhenHostAppearsFirst) {
   reset_agent_blocker(false);
   FakeApiTable api;
   api.core.hsa_iterate_agents_fn = fake_iterate_agents_host_first;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents_host_first);
 
@@ -1108,7 +1222,8 @@ TEST(HsaHooksUnitTest, MissingResolvedHostSuppressesGpuAgents) {
   reset_pool_blocker(false);
   reset_agent_blocker(false);
   FakeApiTable api;
-  InstalledHook hook(api, /*create_host_topology_node=*/false);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api, /*create_host_topology_node=*/false));
   ASSERT_TRUE(hook.installed());
   // Without this anchor the expectations below are indistinguishable from an
   // unpatched table forwarding straight to a fake that emits only GPU agents.
@@ -1134,7 +1249,8 @@ TEST(HsaHooksUnitTest, MissingResolvedHostStillPublishesCpuAgents) {
   reset_agent_blocker(false);
   FakeApiTable api;
   api.core.hsa_iterate_agents_fn = fake_iterate_agents_with_cpu;
-  InstalledHook hook(api, /*create_host_topology_node=*/false);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api, /*create_host_topology_node=*/false));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents_with_cpu);
 
@@ -1151,7 +1267,8 @@ TEST(HsaHooksUnitTest, MappedEnumerationStillPublishesCpuAgents) {
   reset_agent_blocker(false);
   FakeApiTable api;
   api.core.hsa_iterate_agents_fn = fake_iterate_agents_with_cpu;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents_with_cpu);
 
@@ -1168,12 +1285,14 @@ TEST(HsaHooksUnitTest, AgentMapperRetriesAfterUnreadableTopologyRoot) {
   reset_pool_blocker(false);
   reset_agent_blocker(false);
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents);
 
   // Redirect at a root that does not exist yet, so opendir fails outright.
-  rocjitsu::test::ScopedTempDirectory late("rocjitsu-late-topology-");
+  rocjitsu::test::ScopedTempDirectory late;
+  ASSERT_TRUE(late.initialize("rocjitsu-late-topology-"));
   const std::filesystem::path nodes = std::filesystem::path(late.path()) / "nodes";
   rj_hsa_dbt_set_topology_nodes_root_for_test(nodes.c_str());
 
@@ -1183,8 +1302,8 @@ TEST(HsaHooksUnitTest, AgentMapperRetriesAfterUnreadableTopologyRoot) {
   EXPECT_TRUE(first.empty());
 
   const std::filesystem::path host_node = nodes / std::to_string(kHostNodeId);
-  std::filesystem::create_directories(host_node);
-  std::ofstream(host_node / "gpu_id") << kResolvedHostGpuId << '\n';
+  ASSERT_TRUE(create_host_node(host_node));
+  ASSERT_TRUE(write_host_gpu_id(host_node));
 
   std::vector<uint64_t> second;
   EXPECT_EQ(api.core.hsa_iterate_agents_fn(collect_agent_handles, &second), HSA_STATUS_SUCCESS);
@@ -1199,16 +1318,18 @@ TEST(HsaHooksUnitTest, AgentMapperRetriesAfterUnreadableTopologyNode) {
   reset_pool_blocker(false);
   reset_agent_blocker(false);
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents);
 
   // Unlike the root test above, this root opens fine; it is the per-node gpu_id read
   // that fails, because the node directory exists with no gpu_id file in it.
-  rocjitsu::test::ScopedTempDirectory partial("rocjitsu-partial-topology-");
+  rocjitsu::test::ScopedTempDirectory partial;
+  ASSERT_TRUE(partial.initialize("rocjitsu-partial-topology-"));
   const std::filesystem::path nodes = std::filesystem::path(partial.path()) / "nodes";
   const std::filesystem::path host_node = nodes / std::to_string(kHostNodeId);
-  std::filesystem::create_directories(host_node);
+  ASSERT_TRUE(create_host_node(host_node));
   ASSERT_FALSE(std::filesystem::exists(host_node / "gpu_id"));
   rj_hsa_dbt_set_topology_nodes_root_for_test(nodes.c_str());
 
@@ -1216,7 +1337,7 @@ TEST(HsaHooksUnitTest, AgentMapperRetriesAfterUnreadableTopologyNode) {
   EXPECT_EQ(api.core.hsa_iterate_agents_fn(collect_agent_handles, &first), HSA_STATUS_SUCCESS);
   EXPECT_TRUE(first.empty());
 
-  std::ofstream(host_node / "gpu_id") << kResolvedHostGpuId << '\n';
+  ASSERT_TRUE(write_host_gpu_id(host_node));
 
   std::vector<uint64_t> second;
   EXPECT_EQ(api.core.hsa_iterate_agents_fn(collect_agent_handles, &second), HSA_STATUS_SUCCESS);
@@ -1230,7 +1351,8 @@ TEST(HsaHooksUnitTest, AgentMapperStopsRediscoveringAfterTransientRetryBudget) {
   reset_pool_blocker(false);
   reset_agent_blocker(false);
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents);
 
@@ -1258,7 +1380,8 @@ TEST(HsaHooksUnitTest, HotPathAgentMappingDoesNotRerunDiscovery) {
   reset_pool_blocker(false);
   reset_agent_blocker(false);
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.amd.hsa_amd_memory_pool_allocate_fn, fake_amd_memory_pool_allocate);
 
@@ -1285,7 +1408,8 @@ TEST(HsaHooksUnitTest, UnresolvedMappingRefusesQueueCreate) {
   reset_agent_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
-  InstalledHook hook(api, /*create_host_topology_node=*/false);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api, /*create_host_topology_node=*/false));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.core.hsa_queue_create_fn, fake_queue_create);
 
@@ -1304,7 +1428,8 @@ TEST(HsaHooksUnitTest, UnresolvedMappingRefusesInterceptQueueCreate) {
   FakeApiTable api;
   api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
   api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
-  InstalledHook hook(api, /*create_host_topology_node=*/false);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api, /*create_host_topology_node=*/false));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.amd.hsa_amd_queue_intercept_create_fn, fake_amd_queue_intercept_create);
 
@@ -1324,7 +1449,8 @@ TEST(HsaHooksUnitTest, UnresolvedMappingRefusesAgentCodeObjectLoad) {
   reset_agent_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
-  InstalledHook hook(api, /*create_host_topology_node=*/false);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api, /*create_host_topology_node=*/false));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.core.hsa_executable_load_agent_code_object_fn,
             fake_executable_load_agent_code_object);
@@ -1347,7 +1473,8 @@ TEST(HsaHooksUnitTest, UnresolvedMappingRefusesAgentPreload) {
   reset_pool_blocker(false);
   reset_agent_blocker(false);
   FakeApiTable api;
-  InstalledHook hook(api, /*create_host_topology_node=*/false);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api, /*create_host_topology_node=*/false));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.amd.hsa_amd_agent_preload_fn, fake_amd_agent_preload);
 
@@ -1360,7 +1487,8 @@ TEST(HsaHooksUnitTest, UnresolvedMappingRefusesAsyncScratchLimit) {
   reset_pool_blocker(false);
   reset_agent_blocker(false);
   FakeApiTable api;
-  InstalledHook hook(api, /*create_host_topology_node=*/false);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api, /*create_host_topology_node=*/false));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.amd.hsa_amd_agent_set_async_scratch_limit_fn,
             fake_amd_agent_set_async_scratch_limit);
@@ -1378,7 +1506,8 @@ TEST(HsaHooksUnitTest, UnresolvedMappingStillAllowsCpuPoolIteration) {
   reset_pool_blocker(false);
   reset_agent_blocker(false);
   FakeApiTable api;
-  InstalledHook hook(api, /*create_host_topology_node=*/false);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api, /*create_host_topology_node=*/false));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.amd.hsa_amd_agent_iterate_memory_pools_fn, fake_amd_agent_iterate_memory_pools);
 
@@ -1401,7 +1530,8 @@ TEST(HsaHooksUnitTest, ResolvedMappingStillAllowsUnrelatedAgentQueueCreate) {
   reset_agent_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.core.hsa_queue_create_fn, fake_queue_create);
 
@@ -1422,7 +1552,8 @@ TEST(HsaHooksUnitTest, SameIsaGuestAndHostSelectDistinctAgentsWhenGuestAppearsFi
   reset_agent_blocker(false);
   FakeApiTable api;
   api.core.hsa_agent_iterate_isas_fn = fake_agent_iterate_isas_overlapping;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents);
 
@@ -1437,7 +1568,8 @@ TEST(HsaHooksUnitTest, SameIsaGuestAndHostSelectDistinctAgentsWhenHostAppearsFir
   FakeApiTable api;
   api.core.hsa_agent_iterate_isas_fn = fake_agent_iterate_isas_overlapping;
   api.core.hsa_iterate_agents_fn = fake_iterate_agents_host_first;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents_host_first);
 
@@ -1456,7 +1588,8 @@ TEST(HsaHooksUnitTest, SameAgentForGuestAndHostFailsClosed) {
   FakeApiTable api;
   api.core.hsa_agent_iterate_isas_fn = fake_agent_iterate_isas_overlapping;
   api.core.hsa_iterate_agents_fn = fake_iterate_agents_host_only;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents_host_only);
 
@@ -1524,6 +1657,35 @@ TEST(HsaHooksUnitTest, BatchCopyMapsBroadcastScalarSourceAndDestinationList) {
                                {kHostAgent.handle, kHostAgent.handle});
 }
 
+TEST(HsaHooksUnitTest, BatchCopyMapsRectScalarSourceAndDestinationList) {
+  int src0 = 0;
+  int src1 = 0;
+  int dst0 = 0;
+  int dst1 = 0;
+  hsa_amd_memory_copy_rect_ptr_t rect_src[] = {
+      {.pitched_ptr = {.base = &src0, .pitch = 64, .slice = 64}, .offset = {}},
+      {.pitched_ptr = {.base = &src1, .pitch = 64, .slice = 64}, .offset = {}},
+  };
+  hsa_amd_memory_copy_rect_ptr_t rect_dst[] = {
+      {.pitched_ptr = {.base = &dst0, .pitch = 64, .slice = 64}, .offset = {}},
+      {.pitched_ptr = {.base = &dst1, .pitch = 64, .slice = 64}, .offset = {}},
+  };
+  hsa_dim3_t ranges[] = {{.x = 64, .y = 1, .z = 1}, {.x = 64, .y = 1, .z = 1}};
+  hsa_agent_t dst_agents[] = {kGuestAgent, kHostAgent};
+
+  hsa_amd_memory_copy_op_t op{};
+  op.type = HSA_AMD_MEMORY_COPY_OP_RECT;
+  op.num_entries = 2;
+  op.rect_src = rect_src;
+  op.src_agent = kGuestAgent;
+  op.dst_agent_list = dst_agents;
+  op.rect_dst = rect_dst;
+  op.range_list = ranges;
+
+  expect_batch_copy_forwarding(op, {kHostAgent.handle, kHostAgent.handle},
+                               {kHostAgent.handle, kHostAgent.handle});
+}
+
 TEST(HsaHooksUnitTest, BatchCopyMapsMultiIndirectScalarSourceAndDestinationList) {
   int src0 = 0;
   int src1 = 0;
@@ -1551,7 +1713,8 @@ TEST(HsaHooksUnitTest, PointerInfoReportsGuestIdentityOnce) {
   reset_pool_blocker(false);
   reset_agent_blocker(false);
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.amd.hsa_amd_pointer_info_fn, fake_amd_pointer_info);
 
@@ -1575,7 +1738,8 @@ TEST(HsaHooksUnitTest, AgentMemoryPoolGetInfoRejectsNullPoolBeforeForwarding) {
   g_last_agent_memory_pool_agent = {};
   g_last_agent_memory_pool = {};
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.amd.hsa_amd_agent_memory_pool_get_info_fn, fake_amd_agent_memory_pool_get_info);
 
@@ -1592,7 +1756,8 @@ TEST(HsaHooksUnitTest, PoolMapperRetriesAfterTransientPoolIterationFailure) {
   reset_agent_blocker(false);
   g_last_allocate_pool = {};
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.amd.hsa_amd_memory_pool_allocate_fn, fake_amd_memory_pool_allocate);
 
@@ -1611,7 +1776,8 @@ TEST(HsaHooksUnitTest, MemoryLockDeduplicatesAgentsAfterGuestMapping) {
   reset_agent_blocker(false);
   g_last_memory_lock_agents.clear();
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.amd.hsa_amd_memory_lock_fn, fake_amd_memory_lock);
 
@@ -1629,7 +1795,8 @@ TEST(HsaHooksUnitTest, MemoryLockToPoolMapsPoolAndDeduplicatesAgents) {
   g_last_memory_lock_to_pool_agents.clear();
   g_last_memory_lock_to_pool_pool = {};
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.amd.hsa_amd_memory_lock_to_pool_fn, fake_amd_memory_lock_to_pool);
 
@@ -1648,7 +1815,8 @@ TEST(HsaHooksUnitTest, VmemSetAccessDeduplicatesDescriptorsAfterGuestMapping) {
   reset_agent_blocker(false);
   g_last_vmem_access_agents.clear();
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.amd.hsa_amd_vmem_set_access_fn, fake_amd_vmem_set_access);
 
@@ -1667,7 +1835,8 @@ TEST(HsaHooksUnitTest, PoolAllocateWaitsForAgentDiscoveryPublication) {
   reset_agent_blocker(true);
   g_last_allocate_pool = {};
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents);
   ASSERT_NE(api.amd.hsa_amd_memory_pool_allocate_fn, fake_amd_memory_pool_allocate);
@@ -1723,7 +1892,8 @@ TEST(HsaHooksUnitTest, UninstallDoesNotWaitForPoolMapperDiscoveryLock) {
   reset_agent_blocker(false);
   g_last_allocate_pool = {};
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.amd.hsa_amd_memory_pool_allocate_fn, fake_amd_memory_pool_allocate);
 
@@ -1776,7 +1946,8 @@ TEST(HsaHooksUnitTest, GuestShutdownKeepsHookInstalledForProcessLifetime) {
   reset_agent_blocker(false);
   g_fake_shutdown_calls = 0;
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   auto *patched_shutdown = api.core.hsa_shut_down_fn;
   ASSERT_NE(patched_shutdown, fake_shut_down);
@@ -1789,7 +1960,7 @@ TEST(HsaHooksUnitTest, GuestShutdownKeepsHookInstalledForProcessLifetime) {
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsSymbolInfoReportsNormalDescriptorUntilPacketFallback) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -1816,7 +1987,8 @@ TEST(HsaHooksUnitTest, VirtualLdsSymbolInfoReportsNormalDescriptorUntilPacketFal
       make_translated_metadata_elf(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1201, metadata);
 
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   hsa_code_object_reader_t reader{};
@@ -1850,7 +2022,7 @@ TEST(HsaHooksUnitTest, VirtualLdsSymbolInfoReportsNormalDescriptorUntilPacketFal
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRegistryKeepsFittingDispatchOnNormalDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -1888,7 +2060,8 @@ TEST(HsaHooksUnitTest, VirtualLdsRegistryKeepsFittingDispatchOnNormalDescriptor)
       make_translated_metadata_elf(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1201, metadata);
 
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   hsa_code_object_reader_t reader{};
@@ -1944,12 +2117,13 @@ TEST(HsaHooksUnitTest, VirtualLdsRegistryKeepsFittingDispatchOnNormalDescriptor)
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRegistryResolvesKernelObjectFromIteratedSymbol) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   hsa_queue_t *queue = nullptr;
@@ -2015,7 +2189,7 @@ TEST(HsaHooksUnitTest, VirtualLdsRegistryResolvesKernelObjectFromIteratedSymbol)
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRegistryRejectsSidecarDescriptorAsPacketInput) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2054,7 +2228,8 @@ TEST(HsaHooksUnitTest, VirtualLdsRegistryRejectsSidecarDescriptorAsPacketInput) 
       make_translated_metadata_elf(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1201, metadata);
 
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   hsa_code_object_reader_t reader{};
@@ -2113,7 +2288,8 @@ TEST(HsaHooksUnitTest, QueueDoorbellSignalStoreIsForwardedAfterTrackedQueueScan)
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.core.hsa_queue_create_fn, fake_queue_create);
   ASSERT_NE(api.core.hsa_signal_store_relaxed_fn, fake_signal_store_relaxed);
@@ -2137,12 +2313,13 @@ TEST(HsaHooksUnitTest, QueueDoorbellSignalStoreIsForwardedAfterTrackedQueueScan)
 }
 
 TEST(HsaHooksUnitTest, QueueDoorbellRaisesPacketPrivateSizeFromDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   hsa_queue_t *queue = nullptr;
@@ -2203,7 +2380,7 @@ TEST(HsaHooksUnitTest, QueueDoorbellRaisesPacketPrivateSizeFromDescriptor) {
 }
 
 TEST(HsaHooksUnitTest, MultiProducerDoorbellRewritesEarlierPublishedPacket) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   // Fallback (non-intercept) multi-producer path: a producer publishes two ready
   // packets and rings once with the FINAL packet id. Packet 0 needs virtual-LDS
@@ -2214,7 +2391,8 @@ TEST(HsaHooksUnitTest, MultiProducerDoorbellRewritesEarlierPublishedPacket) {
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   hsa_queue_t *queue = nullptr;
@@ -2264,7 +2442,7 @@ TEST(HsaHooksUnitTest, MultiProducerDoorbellRewritesEarlierPublishedPacket) {
 }
 
 TEST(HsaHooksUnitTest, MultiProducerHoleCloseAdvancesFrontierAcrossReadySuffix) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   // Regression for the stranded-frontier bug: on a size-4 multi-producer queue an
   // out-of-order ring publishes a ready suffix ABOVE an unready hole, the hole
@@ -2283,7 +2461,8 @@ TEST(HsaHooksUnitTest, MultiProducerHoleCloseAdvancesFrontierAcrossReadySuffix) 
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   hsa_queue_t *queue = nullptr;
@@ -2364,12 +2543,13 @@ TEST(HsaHooksUnitTest, MultiProducerHoleCloseAdvancesFrontierAcrossReadySuffix) 
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRewriteWorksWithoutLoadedCodeObjectOutput) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   hsa_queue_t *queue = nullptr;
@@ -2444,12 +2624,13 @@ TEST(HsaHooksUnitTest, VirtualLdsRewriteWorksWithoutLoadedCodeObjectOutput) {
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsScannerKeepsDestroyedSignalSlotUntilReuse) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   hsa_queue_t *queue = nullptr;
@@ -2522,12 +2703,13 @@ TEST(HsaHooksUnitTest, VirtualLdsScannerKeepsDestroyedSignalSlotUntilReuse) {
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRewriteCopiesOriginalKernargIntoWrapperPrefix) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   hsa_queue_t *queue = nullptr;
@@ -2602,12 +2784,13 @@ TEST(HsaHooksUnitTest, VirtualLdsRewriteCopiesOriginalKernargIntoWrapperPrefix) 
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRewriteKeepsBelowThresholdDispatchOnNormalDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   hsa_queue_t *queue = nullptr;
@@ -2652,12 +2835,13 @@ TEST(HsaHooksUnitTest, VirtualLdsRewriteKeepsBelowThresholdDispatchOnNormalDescr
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRewriteKeepsExactHardwareLimitOnNormalDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   hsa_queue_t *queue = nullptr;
@@ -2700,12 +2884,13 @@ TEST(HsaHooksUnitTest, VirtualLdsRewriteKeepsExactHardwareLimitOnNormalDescripto
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRewriteKeepsStaticPlusDynamicLimitOnNormalDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   hsa_queue_t *queue = nullptr;
@@ -2749,14 +2934,15 @@ TEST(HsaHooksUnitTest, VirtualLdsRewriteKeepsStaticPlusDynamicLimitOnNormalDescr
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsInterceptRewritePublishesWrapperKernarg) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
   api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
   api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   hsa_queue_t *queue = nullptr;
@@ -2838,14 +3024,15 @@ TEST(HsaHooksUnitTest, VirtualLdsInterceptRewritePublishesWrapperKernarg) {
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsInterceptReleasesCompletedRetiredBuffers) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
   api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
   api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   hsa_queue_t *queue = nullptr;
@@ -2914,14 +3101,15 @@ TEST(HsaHooksUnitTest, VirtualLdsInterceptReleasesCompletedRetiredBuffers) {
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsInterceptReleasesBorrowedSignalBeforeDestroy) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
   api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
   api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.core.hsa_signal_destroy_fn, fake_signal_destroy);
 
@@ -2981,14 +3169,15 @@ TEST(HsaHooksUnitTest, VirtualLdsInterceptReleasesBorrowedSignalBeforeDestroy) {
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsInterceptKeepsBelowThresholdPacketOnNormalDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
   api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
   api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   hsa_queue_t *queue = nullptr;
@@ -3037,14 +3226,15 @@ TEST(HsaHooksUnitTest, VirtualLdsInterceptKeepsBelowThresholdPacketOnNormalDescr
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsInterceptKeepsStaticPlusDynamicLimitOnNormalDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
   api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
   api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   hsa_queue_t *queue = nullptr;
@@ -3095,12 +3285,13 @@ TEST(HsaHooksUnitTest, VirtualLdsInterceptKeepsStaticPlusDynamicLimitOnNormalDes
 }
 
 TEST(HsaHooksUnitTest, DoorbellForwardsOversizedPacketOnUnrelatedAgentQueueUnchanged) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   // A queue on an agent that is neither the guest nor the guest's execution host.
@@ -3140,14 +3331,15 @@ TEST(HsaHooksUnitTest, DoorbellForwardsOversizedPacketOnUnrelatedAgentQueueUncha
 }
 
 TEST(HsaHooksUnitTest, InterceptForwardsOversizedPacketOnUnrelatedAgentQueueUnchanged) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
   api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
   api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   hsa_queue_t *queue = nullptr;
@@ -3199,7 +3391,8 @@ TEST(HsaHooksUnitTest, LoadOnUnrelatedAgentForwardsDifferentTargetImageUnchanged
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   // A minimal, valid AMDGPU ELF for gfx942 (neither the guest gfx950 nor the
@@ -3234,7 +3427,8 @@ TEST(HsaHooksUnitTest, LoadOnUnrelatedAgentForwardsMalformedMetadataImageUnchang
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
 
   const std::vector<uint8_t> image(64, 0xAB); // not a valid ELF
@@ -3254,7 +3448,7 @@ TEST(HsaHooksUnitTest, LoadOnUnrelatedAgentForwardsMalformedMetadataImageUnchang
 }
 
 TEST(HsaHooksUnitDeathTest, InterceptGuestUnregisteredOversizedDispatchAborts) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   // fork-based death test: the guest queue's intercept handler runs synchronously
   // (no scanner jthread on the intercept path), so aborting inside it is safe to
@@ -3262,15 +3456,16 @@ TEST(HsaHooksUnitDeathTest, InterceptGuestUnregisteredOversizedDispatchAborts) {
   // metadata and whose group segment exceeds the host LDS limit has no sidecar to
   // fall back to, so it must fail closed rather than submit a host-faulting launch.
   GTEST_FLAG_SET(death_test_style, "threadsafe");
+  reset_pool_blocker(false);
+  reset_queue_fakes();
+  FakeApiTable api;
+  api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
+  api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
+
   EXPECT_DEATH(
       {
-        reset_pool_blocker(false);
-        reset_queue_fakes();
-        FakeApiTable api;
-        api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
-        api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
-        InstalledHook hook(api);
-
         hsa_queue_t *queue = nullptr;
         api.core.hsa_queue_create_fn(kGuestAgent, 4, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0, 0,
                                      &queue);
@@ -3301,7 +3496,8 @@ TEST(HsaHooksUnitTest, UntrackedSignalStoreScreleaseIsForwarded) {
   reset_pool_blocker(false);
   reset_queue_fakes();
   FakeApiTable api;
-  InstalledHook hook(api);
+  InstalledHook hook;
+  ASSERT_TRUE(hook.initialize(api));
   ASSERT_TRUE(hook.installed());
   ASSERT_NE(api.core.hsa_signal_store_screlease_fn, fake_signal_store_screlease);
 

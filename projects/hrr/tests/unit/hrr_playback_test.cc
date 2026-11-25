@@ -19,7 +19,7 @@
 #include <cstdlib>
 #include <string>
 
-// ROCM-27985: the post-H2D-restore drain (hrr_sync_after_replayed_h2d) must
+// The post-H2D-restore drain (hrr_sync_after_replayed_h2d) must
 // be skipped while a stream graph is being captured, because a device/stream
 // synchronize is illegal mid-capture (HIP 900/901). Lock that guard down: a
 // regression that dropped it would break HRR graph replay.
@@ -30,7 +30,7 @@ HRR_TEST_CASE(Unit_HRR_Playback_ReplayedH2DDrainGraphGuard) {
   REQUIRE_FALSE(hrr_replayed_h2d_needs_drain(true));
 }
 
-// ROCM-27985: hipMalloc is host-synchronous, so the zero-init injected after a
+// hipMalloc is host-synchronous, so the zero-init injected after a
 // host-synchronous replay allocation must be drained before the handler
 // returns. Without that edge the null-stream zero-init races every later
 // replayed event on a hipStreamNonBlocking stream and can overwrite a restored
@@ -51,7 +51,7 @@ HRR_TEST_CASE(Unit_HRR_Playback_ZeroInitDrainGuard) {
 // all. Tie it to HRR_VERSION rather than to a literal, so a future format bump
 // cannot leave the tool reporting a version it no longer reads.
 HRR_TEST_CASE(Unit_HRR_Playback_VersionOption) {
-  hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
+  hrr::test::SpawnProc proc(hrr_playback_bin(), /*capture_stdout=*/true);
   set_proc_search_path(proc);
 
   REQUIRE(proc.run("--version") == 0);
@@ -97,6 +97,32 @@ HRR_TEST_CASE(Unit_HRR_Playback_PlacementHeldRanges) {
   REQUIRE(h.r.size() == 1);
   CHECK(h.r.begin()->first == 0x10000);
   CHECK(h.r.begin()->second == 0x20000);
+}
+
+// The range placement maps for an allocation is checked: a size that wraps
+// 2^64, or rounding that does, is refused rather than turned into a small range
+// inside a held one.
+HRR_TEST_CASE(Unit_HRR_Playback_PlacementRangeChecked) {
+  const uint64_t G = 1ull << 21, B = 0x7f0000000000ull;
+  uint64_t b = 0, e = 0;
+  REQUIRE(hrr_place_range(B + 5, 100, G, &b, &e));
+  CHECK(b == B);
+  CHECK(e == B + G);
+  REQUIRE(hrr_place_range(B, G + 1, G, &b, &e));  // spills into a second granule
+  CHECK(e == B + 2 * G);
+
+  // rec + size lands exactly on 2^64, and one past it.
+  CHECK_FALSE(hrr_place_range(B, 0 - B, G, &b, &e));
+  CHECK_FALSE(hrr_place_range(B, 0 - B + 1, G, &b, &e));
+  CHECK_FALSE(hrr_place_range(B, ~0ull, G, &b, &e));
+  // Without the rec + size check this is accepted as [B, B + G).
+  CHECK_FALSE(hrr_place_range(B + 5, ~0ull, G, &b, &e));
+  // rec + size ends just below 2^64: no wrap, but rounding up to a granule does.
+  CHECK_FALSE(hrr_place_range(B, (0 - B) - 1, G, &b, &e));
+  // The same from a different start.
+  CHECK_FALSE(hrr_place_range(1ull << 63, (1ull << 63) - 1, G, &b, &e));
+  // Nothing to place.
+  CHECK_FALSE(hrr_place_range(B, 0, G, &b, &e));
 }
 
 /**

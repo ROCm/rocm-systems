@@ -8,6 +8,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mtype.h"
+#include "rocjitsu/vm/amdgpu/lds.h"
 
 #include <cstdint>
 #include <optional>
@@ -55,6 +56,21 @@ void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront 
 uint32_t async_lds_lane_address(const VglobalMachineInst &inst, const amdgpu::Wavefront &wf,
                                 uint32_t lds_operand, uint32_t access_size_bytes);
 
+/// @brief The LDS bytes one lane of an async store reads.
+struct AsyncLdsSource {
+  uint32_t address = amdgpu::kInvalidLdsAddress; ///< Absolute LDS address, or invalid.
+  uint32_t bytes = 0; ///< Leading bytes read from address; the rest read zero.
+};
+
+/// @brief Compute the LDS source of one async store lane.
+///
+/// @returns the absolute address and the leading bytes of the access inside
+/// the wave's allocation; bytes past it read zero. That out-of-range behavior
+/// is a modeling choice: the ISA specifies it for async loads only. A lane that
+/// reads no bytes returns amdgpu::kInvalidLdsAddress.
+AsyncLdsSource async_lds_lane_source(const VglobalMachineInst &inst, const amdgpu::Wavefront &wf,
+                                     uint32_t lds_operand, uint32_t access_size_bytes);
+
 void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d);
 
@@ -69,10 +85,12 @@ void ds_calculate_addresses_all_lanes(const VdsMachineInst &inst, amdgpu::Wavefr
                                       amdgpu::VectorMemState &d);
 
 inline amdgpu::Mtype mtype_from_bits(bool sc0, bool sc1) {
-  if (sc1)
+  if (sc1) {
     return amdgpu::Mtype::UC;
-  if (sc0)
+  }
+  if (sc0) {
     return amdgpu::Mtype::CC;
+  }
   return amdgpu::Mtype::RW;
 }
 

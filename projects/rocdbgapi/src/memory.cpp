@@ -562,7 +562,7 @@ generic_address_space_t::generic_address_for_address_space (
   if (aperture == nullptr)
     return std::nullopt;
 
-  if (segment_address == aperture->encoding.null_address ())
+  if (segment_address == segment_address_space.null_address ())
     return null_address ();
 
   if (aperture->encoding.kind () != segment_address_space.kind ())

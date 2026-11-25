@@ -1,0 +1,48 @@
+{
+  "cpu_thread_budget": 3,
+  "thread_allocations": [
+    {"num_threads": 1, "cpu_dispatch_threads": 2, "async_helper_threads": 0},
+    {"num_threads": 1, "cpu_dispatch_threads": 3, "async_helper_threads": 0}
+  ],
+  "vm": {
+    "arch": "cdna5",
+    "gpu": {
+      "device": {
+        "gpu_id": 1250,
+        "gfx_target_version": 120500,
+        "unique_id": 1250,
+        "num_sdma_engines": 0
+      }
+    }
+  },
+  "topology": {
+    "root": {
+      "name": "soc",
+      "type": "soc",
+      "children": [
+        {"name": "vram", "type": "gpu_memory"},
+        {"name": "xcd0", "type": "xcd", "children": [
+          {"name": "l2", "type": "l2_cache"},
+          {"name": "cp", "type": "command_processor"},
+          {"name": "se0", "type": "shader_engine", "children": [
+            {"name": "cu[0:4]", "type": "compute_unit"}
+          ]}
+        ]}
+      ]
+    }
+  },
+  "system": {
+    "nodes": [
+      {"id": "tray0", "gpus": [
+        {"id": "g2", "gpu_id": 202, "unique_id": 3002,
+         "location_id": 768, "drm_render_minor": 128}
+      ]},
+      {"id": "tray7", "gpus": [
+        {"id": "g5", "gpu_id": 505, "unique_id": 3005,
+         "location_id": 1024, "drm_render_minor": 129},
+        {"id": "g9", "gpu_id": 909, "unique_id": 3009,
+         "location_id": 1280, "drm_render_minor": 130}
+      ]}
+    ]
+  }
+}

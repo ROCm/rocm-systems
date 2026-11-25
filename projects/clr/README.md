@@ -32,7 +32,7 @@ Building CLR requires the ROCm stack to be installed on the system. In addition,
 
 ```bash
 sudo apt install rocm-llvm-dev
-pip3 install CppHeaderParser
+pip3 install cxxheaderparser
 ```
 
 For OpenCL, you need to install the ICD loader package provided by the distribution:
@@ -117,6 +117,12 @@ For detailed instructions, please refer to [How to build HIP](https://rocm.docs.
    cmake ../rocm-systems/projects/clr -DCMAKE_BUILD_TYPE=Release -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=%HIP_COMMON_DIR% -DHIPCC_BIN_DIR=%HIPCC_BIN_DIR% -DCMAKE_INSTALL_PREFIX=..\install -D__HIP_ENABLE_PCH=OFF -DROCCLR_ENABLE_HSA=ON -DROCCLR_ENABLE_PAL=OFF -D__HIP_ENABLE_RTC=ON -DUSE_PROF_API=OFF -DROCR_DLL_LOAD=OFF -DAMD_COMPUTE_WIN=../../../shared/amdgpu-windows-interop/
    cmake --build . --config Release -j 6 --target install
    ```
+
+### Build options
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `CLR_ENABLE_WERROR` | `OFF` | Build the CLR targets (`rocclr`, `amdhip64`, and `hiprtc`) with `-Wall -Werror` |
 
 ## Tests
 

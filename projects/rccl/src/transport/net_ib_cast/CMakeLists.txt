@@ -2,6 +2,7 @@
 set(NET_IB_CAST_SOURCES
     src/transport/net_ib_limits.h
     src/transport/net_ib_cast/net_ib_cast_inspect.h
+    src/transport/net_ib_cast/net_ib_qp_sharing_inspect.h
     src/transport/net_ib_cast/net_ib_ops_fault.h
     src/transport/net_ib_cast/common_cast.h
     src/transport/net_ib_cast/connect_cast.h

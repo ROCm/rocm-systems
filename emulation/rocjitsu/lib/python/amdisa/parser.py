@@ -1240,7 +1240,18 @@ class Parser:
                     opcodes.setdefault(name, set()).add(
                         int(xs.get_node_text(xs.get_node(form, xs.OPCODE)))
                     )
+        # The generic FLAT decoder serves multiple segments for a shared opcode.
+        # Preserve each segment's membership before discarding equivalent classes.
         primary = opcodes.get('ENC_FLAT', set())
+        if primary:
+            masks = self.isa_spec.flat_segments_by_opcode
+            for name, values in opcodes.items():
+                segment = (
+                    0 if name == 'ENC_FLAT' else self.profile.unique_flat_segment(name)
+                )
+                if segment is not None:
+                    for opcode in values:
+                        masks[opcode] = masks.get(opcode, 0) | (1 << segment)
         return {
             name: values - primary
             for name, values in opcodes.items()
@@ -1319,6 +1330,9 @@ class Parser:
                         opnd_type = self.profile.normalize_operand_type(
                             enc_name, field_name, opnd_type
                         )
+                        opnd_type = self.profile.normalize_instruction_operand_type(
+                            inst_name, available_encodings, opnd_type
+                        )
                         data_format_name = (
                             xs.get_node_text(data_format_name_node)
                             if data_format_name_node is not None
@@ -1329,6 +1343,13 @@ class Parser:
                         opnd_name = synthesize_fieldless_name(opnd_type)
                         data_format_name = ''
                         is_fieldless = True
+                    # Read from the node rather than data_format_name, which is
+                    # blank for fieldless operands: a VOPC's fieldless VCC
+                    # destination becomes an SGPR under SDWA sd=1.
+                    is_wave_mask = (
+                        data_format_name_node is not None
+                        and xs.get_node_text(data_format_name_node) == 'FMT_NUM_M64'
+                    )
                     opnds.append(
                         Operand(
                             opnd_name,
@@ -1341,6 +1362,7 @@ class Parser:
                             order,
                             data_format_name,
                             is_fieldless,
+                            is_wave_mask,
                         )
                     )
                 opnds.sort(key=lambda x: x.order)
@@ -1353,6 +1375,8 @@ class Parser:
                             item
                             for item in self.isa_spec.encoding_map['ENC_FLAT'].insts
                             if item.opcode == opcode
+                            and item.required_flat_segment
+                            == self.profile.unique_flat_segment(enc_name)
                         ),
                         None,
                     )
@@ -1412,6 +1436,15 @@ class Parser:
                     if dt_ptr == -1:
                         continue
                     decode_func = f'decode{inst.fmt_name}'
+                    if (
+                        retain_segment
+                        and sum(
+                            item.opcode == opcode
+                            for item in self.isa_spec.encoding_map['ENC_FLAT'].insts
+                        )
+                        > 1
+                    ):
+                        decode_func = f'decodeFlatSegment{opcode}'
                     if enc.is_primary_decode:
                         dt[dt_ptr].decode_func = decode_func
                         dt[dt_ptr].inst_name = inst.fmt_name

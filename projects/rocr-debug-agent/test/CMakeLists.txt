@@ -87,6 +87,7 @@ set(MAIN_SOURCES
     debug_agent_test.cpp
     vector_add_assert_trap.cpp
     sigquit.cpp
+    sigquit_resume.cpp
     print_all_waves.cpp
     snapshot_objfile_on_load.cpp
     vector_add_normal.cpp

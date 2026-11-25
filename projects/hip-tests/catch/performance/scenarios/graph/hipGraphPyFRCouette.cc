@@ -9,7 +9,7 @@
  *
  * The PyFR 2D couette-flow case (40-element Navier-Stokes p2) creates exactly
  * three small HIP graphs per RK4 step.  Per-step time is dominated by
- * hipGraphLaunch (~75 us/launch on MI300X).  This test builds the three graph
+ * hipGraphLaunch.  This test builds the three graph
  * topologies with lightweight stand-in kernels and measures launch overhead
  * in a tight loop, reproducing the bottleneck without PyFR.
  *
@@ -167,9 +167,42 @@ static hipGraph_t build_graph_7(uint64_t ticks, void* d_buf1, void* d_buf2) {
   return g;
 }
 
+// The three PyFR graphs and graph_7's memcpy buffers, all instantiated before
+// any timed region so that only hipGraphLaunch is measured.
+struct PyFRGraphs {
+  void* d_buf1 = nullptr;
+  void* d_buf2 = nullptr;
+  hipGraph_t graph_3{}, graph_5{}, graph_7{};
+  hipGraphExec_t exec_3{}, exec_5{}, exec_7{};
+
+  explicit PyFRGraphs(uint64_t ticks) {
+    HIP_CHECK(hipMalloc(&d_buf1, 32768));
+    HIP_CHECK(hipMalloc(&d_buf2, 32768));
+    graph_3 = build_graph_3(ticks);
+    graph_5 = build_graph_5(ticks);
+    graph_7 = build_graph_7(ticks, d_buf1, d_buf2);
+    HIP_CHECK(hipGraphInstantiate(&exec_3, graph_3, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphInstantiate(&exec_5, graph_5, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphInstantiate(&exec_7, graph_7, nullptr, nullptr, 0));
+  }
+
+  ~PyFRGraphs() {
+    HIP_CHECK(hipGraphExecDestroy(exec_3));
+    HIP_CHECK(hipGraphExecDestroy(exec_5));
+    HIP_CHECK(hipGraphExecDestroy(exec_7));
+    HIP_CHECK(hipGraphDestroy(graph_3));
+    HIP_CHECK(hipGraphDestroy(graph_5));
+    HIP_CHECK(hipGraphDestroy(graph_7));
+    HIP_CHECK(hipFree(d_buf1));
+    HIP_CHECK(hipFree(d_buf2));
+  }
+
+  PyFRGraphs(const PyFRGraphs&) = delete;
+  PyFRGraphs& operator=(const PyFRGraphs&) = delete;
+};
+
 // ── Benchmark driver ───────────────────────────────────────────────────────
 struct PyFRGraphResults {
-  double instantiate_us;
   double first_launch_us;
   double avg_launch_us;
   double p50_launch_us;
@@ -177,15 +210,9 @@ struct PyFRGraphResults {
   double device_avg_us;
 };
 
-static PyFRGraphResults bench_graph(hipGraph_t graph, hipStream_t stream,
+static PyFRGraphResults bench_graph(hipGraphExec_t exec, hipStream_t stream,
                                     int warmup, int repeats) {
   PyFRGraphResults res{};
-
-  hipGraphExec_t exec{};
-  auto t0 = std::chrono::steady_clock::now();
-  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
-  auto t1 = std::chrono::steady_clock::now();
-  res.instantiate_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
 
   for (int i = 0; i < warmup; ++i) {
     HIP_CHECK(hipGraphLaunch(exec, stream));
@@ -242,16 +269,14 @@ static PyFRGraphResults bench_graph(hipGraph_t graph, hipStream_t stream,
   // stays within the sample range (e.g. p99 of 1000 samples is index 989, not 990).
   res.p50_launch_us = cpu_us[(repeats - 1) * 50 / 100];
   res.p99_launch_us = cpu_us[(repeats - 1) * 99 / 100];
-
-  HIP_CHECK(hipGraphExecDestroy(exec));
   return res;
 }
 
 static void print_results(const char* name, int nodes, const PyFRGraphResults& r) {
-  CONSOLE_PRINT("  %-10s (%2d nodes)  inst=%7.1f us  first=%7.1f us  "
+  CONSOLE_PRINT("  %-10s (%2d nodes)  first=%7.1f us  "
                 "avg=%7.1f us  p50=%7.1f us  p99=%7.1f us  dev_avg=%7.1f us",
                 name, nodes,
-                r.instantiate_us, r.first_launch_us,
+                r.first_launch_us,
                 r.avg_launch_us, r.p50_launch_us, r.p99_launch_us,
                 r.device_avg_us);
 }
@@ -264,26 +289,14 @@ static void run_pyfr_couette_bench(uint32_t kernel_us, int steps, int warmup_ste
   hipStream_t stream{};
   HIP_CHECK(hipStreamCreate(&stream));
 
-  void* d_buf1 = nullptr;
-  void* d_buf2 = nullptr;
-  HIP_CHECK(hipMalloc(&d_buf1, 32768));
-  HIP_CHECK(hipMalloc(&d_buf2, 32768));
-
-  hipGraph_t g3 = build_graph_3(ticks);
-  hipGraph_t g5 = build_graph_5(ticks);
-  hipGraph_t g7 = build_graph_7(ticks, d_buf1, d_buf2);
-
-  hipGraphExec_t e3{}, e5{}, e7{};
-  HIP_CHECK(hipGraphInstantiate(&e3, g3, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphInstantiate(&e5, g5, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphInstantiate(&e7, g7, nullptr, nullptr, 0));
+  PyFRGraphs graphs(ticks);
 
   // Warmup
   for (int s = 0; s < warmup_steps; ++s) {
     for (int stage = 0; stage < 4; ++stage) {
-      HIP_CHECK(hipGraphLaunch(e3, stream));
-      HIP_CHECK(hipGraphLaunch(e5, stream));
-      HIP_CHECK(hipGraphLaunch(e7, stream));
+      HIP_CHECK(hipGraphLaunch(graphs.exec_3, stream));
+      HIP_CHECK(hipGraphLaunch(graphs.exec_5, stream));
+      HIP_CHECK(hipGraphLaunch(graphs.exec_7, stream));
     }
     HIP_CHECK(hipStreamSynchronize(stream));
   }
@@ -292,9 +305,9 @@ static void run_pyfr_couette_bench(uint32_t kernel_us, int steps, int warmup_ste
   auto t0 = std::chrono::steady_clock::now();
   for (int s = 0; s < steps; ++s) {
     for (int stage = 0; stage < 4; ++stage) {
-      HIP_CHECK(hipGraphLaunch(e3, stream));
-      HIP_CHECK(hipGraphLaunch(e5, stream));
-      HIP_CHECK(hipGraphLaunch(e7, stream));
+      HIP_CHECK(hipGraphLaunch(graphs.exec_3, stream));
+      HIP_CHECK(hipGraphLaunch(graphs.exec_5, stream));
+      HIP_CHECK(hipGraphLaunch(graphs.exec_7, stream));
     }
     HIP_CHECK(hipStreamSynchronize(stream));
   }
@@ -311,16 +324,8 @@ static void run_pyfr_couette_bench(uint32_t kernel_us, int steps, int warmup_ste
                 steps, launches_per_step);
   CONSOLE_PRINT("Total time      : %.1f ms", total_ms);
   CONSOLE_PRINT("Per-step        : %.3f ms", per_step_ms);
-  CONSOLE_PRINT("Per-launch      : %.1f us  (target: < 75 us)", per_launch_us);
+  CONSOLE_PRINT("Per-launch      : %.1f us", per_launch_us);
 
-  HIP_CHECK(hipGraphExecDestroy(e3));
-  HIP_CHECK(hipGraphExecDestroy(e5));
-  HIP_CHECK(hipGraphExecDestroy(e7));
-  HIP_CHECK(hipGraphDestroy(g3));
-  HIP_CHECK(hipGraphDestroy(g5));
-  HIP_CHECK(hipGraphDestroy(g7));
-  HIP_CHECK(hipFree(d_buf1));
-  HIP_CHECK(hipFree(d_buf2));
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -328,8 +333,8 @@ static void run_pyfr_couette_bench(uint32_t kernel_us, int steps, int warmup_ste
  * Test Description
  * ------------------------
  *    - ROCM-25757: Benchmark hipGraphLaunch overhead for each of the three
- *      PyFR couette-flow graphs individually.  Reports instantiation and
- *      launch latency (CPU-side and device-side).
+ *      PyFR couette-flow graphs individually.  Reports launch latency
+ *      (CPU-side and device-side); all graphs are instantiated before timing.
  * Test source
  * ------------------------
  *    - performance/scenarios/graph/hipGraphPyFRCouette.cc
@@ -344,34 +349,18 @@ HIP_TEST_CASE(Performance_PyFR_Couette_IndividualGraphs) {
   hipStream_t stream{};
   HIP_CHECK(hipStreamCreate(&stream));
 
-  void* d_buf1 = nullptr;
-  void* d_buf2 = nullptr;
-  HIP_CHECK(hipMalloc(&d_buf1, 32768));
-  HIP_CHECK(hipMalloc(&d_buf2, 32768));
-
   constexpr int warmup = 10;
   constexpr int repeats = 1000;
+
+  PyFRGraphs graphs(ticks);
 
   CONSOLE_PRINT("\n=== PyFR Couette-Flow Graph Launch Overhead (ROCM-25757) ===");
   CONSOLE_PRINT("Kernel stub: %u us | warmup: %d | repeats: %d\n", kernel_us, warmup, repeats);
 
-  hipGraph_t g3 = build_graph_3(ticks);
-  auto r3 = bench_graph(g3, stream, warmup, repeats);
-  print_results("graph_3", 17, r3);
+  print_results("graph_3", 17, bench_graph(graphs.exec_3, stream, warmup, repeats));
+  print_results("graph_5", 4, bench_graph(graphs.exec_5, stream, warmup, repeats));
+  print_results("graph_7", 7, bench_graph(graphs.exec_7, stream, warmup, repeats));
 
-  hipGraph_t g5 = build_graph_5(ticks);
-  auto r5 = bench_graph(g5, stream, warmup, repeats);
-  print_results("graph_5", 4, r5);
-
-  hipGraph_t g7 = build_graph_7(ticks, d_buf1, d_buf2);
-  auto r7 = bench_graph(g7, stream, warmup, repeats);
-  print_results("graph_7", 7, r7);
-
-  HIP_CHECK(hipGraphDestroy(g3));
-  HIP_CHECK(hipGraphDestroy(g5));
-  HIP_CHECK(hipGraphDestroy(g7));
-  HIP_CHECK(hipFree(d_buf1));
-  HIP_CHECK(hipFree(d_buf2));
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -380,8 +369,7 @@ HIP_TEST_CASE(Performance_PyFR_Couette_IndividualGraphs) {
  * ------------------------
  *    - ROCM-25757: End-to-end PyFR couette-flow RK4 step simulation.
  *      Launches all three graphs in sequence, four times per step (one per
- *      RK4 stage), measuring per-step and per-launch overhead.  The 75 us
- *      per-launch target comes from profiling the real PyFR workload.
+ *      RK4 stage), measuring per-step and per-launch overhead.
  * Test source
  * ------------------------
  *    - performance/scenarios/graph/hipGraphPyFRCouette.cc
@@ -398,8 +386,8 @@ HIP_TEST_CASE(Performance_PyFR_Couette_StepSimulation) {
  * Test Description
  * ------------------------
  *    - ROCM-25757: Minimal single-iteration test for logging/tracing.
- *      Instantiates each graph, does 1 warmup launch + 1 timed launch,
- *      then destroys.  Use with AMD_LOG_LEVEL=5 or DEBUG_HIP_GRAPH_DOT_PRINT.
+ *      Instantiates all graphs, then does 1 warmup launch + 1 timed launch
+ *      of each.  Use with AMD_LOG_LEVEL=5 or DEBUG_HIP_GRAPH_DOT_PRINT.
  * Test source
  * ------------------------
  *    - performance/scenarios/graph/hipGraphPyFRCouette.cc
@@ -414,29 +402,13 @@ HIP_TEST_CASE(Performance_PyFR_Couette_SingleIteration) {
   hipStream_t stream{};
   HIP_CHECK(hipStreamCreate(&stream));
 
-  void* d_buf1 = nullptr;
-  void* d_buf2 = nullptr;
-  HIP_CHECK(hipMalloc(&d_buf1, 32768));
-  HIP_CHECK(hipMalloc(&d_buf2, 32768));
+  PyFRGraphs graphs(ticks);
 
   CONSOLE_PRINT("\n=== PyFR Couette-Flow Single Iteration (for tracing) ===\n");
 
-  hipGraph_t g3 = build_graph_3(ticks);
-  auto r3 = bench_graph(g3, stream, 1, 1);
-  print_results("graph_3", 17, r3);
+  print_results("graph_3", 17, bench_graph(graphs.exec_3, stream, 1, 1));
+  print_results("graph_5", 4, bench_graph(graphs.exec_5, stream, 1, 1));
+  print_results("graph_7", 7, bench_graph(graphs.exec_7, stream, 1, 1));
 
-  hipGraph_t g5 = build_graph_5(ticks);
-  auto r5 = bench_graph(g5, stream, 1, 1);
-  print_results("graph_5", 4, r5);
-
-  hipGraph_t g7 = build_graph_7(ticks, d_buf1, d_buf2);
-  auto r7 = bench_graph(g7, stream, 1, 1);
-  print_results("graph_7", 7, r7);
-
-  HIP_CHECK(hipGraphDestroy(g3));
-  HIP_CHECK(hipGraphDestroy(g5));
-  HIP_CHECK(hipGraphDestroy(g7));
-  HIP_CHECK(hipFree(d_buf1));
-  HIP_CHECK(hipFree(d_buf2));
   HIP_CHECK(hipStreamDestroy(stream));
 }

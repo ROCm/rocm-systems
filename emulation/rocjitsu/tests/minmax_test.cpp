@@ -8,6 +8,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
+#include "util/host_target.h"
 #include "util/simd.h"
 
 #include <gtest/gtest.h>
@@ -16,6 +17,7 @@
 #include <cmath>
 #include <cstdint>
 #include <random>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -24,6 +26,26 @@ namespace denorm = rocjitsu::amdgpu::input_denormal;
 namespace fmt = rocjitsu::amdgpu::fp_format;
 namespace mm = rocjitsu::amdgpu::minmax;
 using mm::Nan;
+
+// Legacy selection must not silently use a default CDNA/non-IEEE policy, and
+// modern operations must not accept a legacy policy they would ignore.
+template <typename Op>
+concept HasModernOperation = requires { typename mm::Operation<fmt::F32, Op>; };
+template <typename Op>
+concept HasLegacyOperation = requires { typename mm::LegacyOperation<fmt::F32, Op>; };
+template <typename Op>
+concept HasModernBinaryEvaluation =
+    requires { mm::evaluate<fmt::F32, Op>(denorm::Policy{}, uint32_t{}, uint32_t{}); };
+static_assert(HasModernOperation<mm::MinNum> && HasModernOperation<mm::Med3Num>);
+static_assert(!HasModernOperation<mm::LegacyMin> && !HasModernOperation<mm::LegacyMin3> &&
+              !HasModernOperation<mm::LegacyMed3>);
+static_assert(HasLegacyOperation<mm::LegacyMin> && HasLegacyOperation<mm::LegacyMin3> &&
+              HasLegacyOperation<mm::LegacyMed3>);
+static_assert(!HasLegacyOperation<mm::MinNum> && !HasLegacyOperation<mm::Min3Num> &&
+              !HasLegacyOperation<mm::Med3Num>);
+static_assert(HasModernBinaryEvaluation<mm::MinNum> && !HasModernBinaryEvaluation<mm::LegacyMin>);
+static_assert(
+    !std::is_constructible_v<mm::LegacyOperation<fmt::F32, mm::LegacyMin>, denorm::Policy>);
 
 constexpr denorm::Policy kKeep{false};
 constexpr denorm::Policy kFlush{true};
@@ -40,8 +62,9 @@ template <typename Fmt> struct Ref {
 
   static L prepare(L x, bool flush) {
     x &= Fmt::kBits;
-    if (flush && (x & Fmt::kInfinity) == 0)
+    if (flush && (x & Fmt::kInfinity) == 0) {
       x &= Fmt::kSign;
+    }
     return x;
   }
 
@@ -51,13 +74,14 @@ template <typename Fmt> struct Ref {
     const int exponent = static_cast<int>((x & Fmt::kInfinity) >> Fmt::kMantissaBits);
     const double mantissa = static_cast<double>(x & kMant);
     double v;
-    if (exponent == 0)
+    if (exponent == 0) {
       v = std::ldexp(mantissa, 1 - bias - static_cast<int>(Fmt::kMantissaBits));
-    else if ((x & Fmt::kInfinity) == Fmt::kInfinity)
+    } else if ((x & Fmt::kInfinity) == Fmt::kInfinity) {
       v = HUGE_VAL;
-    else
+    } else {
       v = std::ldexp(mantissa + std::ldexp(1.0, Fmt::kMantissaBits),
                      exponent - bias - static_cast<int>(Fmt::kMantissaBits));
+    }
     return negative ? -v : v;
   }
 
@@ -65,23 +89,29 @@ template <typename Fmt> struct Ref {
   static L select(bool maximum, Nan rule, L a, L b) {
     const L quiet = L{1} << (Fmt::kMantissaBits - 1);
     if (rule == Nan::PROPAGATE) {
-      if (nan(a))
+      if (nan(a)) {
         return a | quiet;
-      if (nan(b))
+      }
+      if (nan(b)) {
         return b | quiet;
+      }
     } else {
-      if (nan(a) && nan(b))
+      if (nan(a) && nan(b)) {
         return a | quiet;
-      if (nan(a))
+      }
+      if (nan(a)) {
         return b;
-      if (nan(b))
+      }
+      if (nan(b)) {
         return a;
+      }
     }
     const double va = value(a);
     const double vb = value(b);
     if (va == vb) {
-      if (va != 0.0)
+      if (va != 0.0) {
         return a;
+      }
       // Equal numeric values can still be different signed zeros: -0 < +0.
       const bool a_negative = (a & Fmt::kSign) != 0;
       return (a_negative == maximum) ? b : a;
@@ -97,14 +127,17 @@ template <typename Fmt> struct Ref {
     a = prepare(a, flush);
     b = prepare(b, flush);
     c = prepare(c, flush);
-    if (nan(a) || nan(b) || nan(c))
+    if (nan(a) || nan(b) || nan(c)) {
       return select(false, Nan::NUMBER, select(false, Nan::NUMBER, a, b), c);
+    }
     const L largest = select(true, Nan::NUMBER, select(true, Nan::NUMBER, a, b), c);
     // Match by encoding so -0 and +0 remain distinct, as observed on gfx1201.
-    if (largest == a)
+    if (largest == a) {
       return select(true, Nan::NUMBER, b, c);
-    if (largest == b)
+    }
+    if (largest == b) {
       return select(true, Nan::NUMBER, a, c);
+    }
     return select(true, Nan::NUMBER, a, b);
   }
 };
@@ -156,11 +189,13 @@ template <typename Fmt> std::vector<typename Fmt::Lane> specials() {
 
 template <typename Fmt> void expect_binary(typename Fmt::Lane a, typename Fmt::Lane b) {
   const auto fns = ops2<Fmt>();
-  for (const bool flush : {false, true})
-    for (std::size_t i = 0; i < kOps.size(); ++i)
+  for (const bool flush : {false, true}) {
+    for (std::size_t i = 0; i < kOps.size(); ++i) {
       ASSERT_EQ(fns[i](a, b, denorm::Policy{flush}),
                 Ref<Fmt>::select(kOps[i].maximum, kOps[i].rule, a, b, flush))
           << "op " << i << " a 0x" << std::hex << a << " b 0x" << b << " flush " << flush;
+    }
+  }
 }
 
 template <typename Fmt>
@@ -193,19 +228,23 @@ void expect_ternary(typename Fmt::Lane a, typename Fmt::Lane b, typename Fmt::La
 template <typename Fmt> void check_specials_and_random() {
   using L = typename Fmt::Lane;
   const auto values = specials<Fmt>();
-  for (const L a : values)
+  for (const L a : values) {
     for (const L b : values) {
       expect_binary<Fmt>(a, b);
-      for (const L c : values)
+      for (const L c : values) {
         expect_ternary<Fmt>(a, b, c);
+      }
     }
+  }
   std::mt19937_64 rng(0x5eed);
   const auto draw = [&](int i) {
     L x = static_cast<L>(rng()) & Fmt::kBits;
-    if (i & 1)
+    if (i & 1) {
       x &= ~Fmt::kInfinity; // Include subnormal inputs frequently.
-    if (i & 2)
+    }
+    if (i & 2) {
       x = values[rng() % values.size()];
+    }
     return x;
   };
   for (int i = 0; i < 20000; ++i) {
@@ -216,11 +255,12 @@ template <typename Fmt> void check_specials_and_random() {
 }
 
 TEST(MinmaxTest, F16EveryEncodingAgainstSpecials) {
-  for (uint32_t a = 0; a <= 0xffffu; ++a)
+  for (uint32_t a = 0; a <= 0xffffu; ++a) {
     for (const uint32_t b : specials<fmt::F16>()) {
       expect_binary<fmt::F16>(a, b);
       expect_binary<fmt::F16>(b, a);
     }
+  }
 }
 
 TEST(MinmaxTest, F16SpecialsAndRandom) { check_specials_and_random<fmt::F16>(); }
@@ -271,16 +311,17 @@ TEST(MinmaxTest, MatchesGfx1201NumForms) {
 // SIMD lanes select the same source as the scalar path.
 // ---------------------------------------------------------------------------
 
-#if __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_STDX_SIMD
 template <typename Fmt, typename V> void expect_simd_matches_scalar() {
   using L = typename Fmt::Lane;
   constexpr std::size_t W = V::size();
   std::vector<L> values = specials<Fmt>();
   std::mt19937_64 rng(0xc0ffee);
-  while (values.size() % W != 0 || values.size() < 4 * W)
+  while (values.size() % W != 0 || values.size() < 4 * W) {
     values.push_back(static_cast<L>(rng()) & ~Fmt::kInfinity);
-  for (const denorm::Policy p : {kKeep, kFlush})
-    for (std::size_t rotate = 0; rotate < W; ++rotate)
+  }
+  for (const denorm::Policy p : {kKeep, kFlush}) {
+    for (std::size_t rotate = 0; rotate < W; ++rotate) {
       for (std::size_t base = 0; base < values.size(); base += W) {
         alignas(64) std::array<L, W> a{}, b{}, c{};
         for (std::size_t i = 0; i < W; ++i) {
@@ -302,6 +343,8 @@ template <typename Fmt, typename V> void expect_simd_matches_scalar() {
           ASSERT_EQ(L(med[i]), (mm::evaluate<Fmt, mm::Med3Num>(p, a[i], b[i], c[i])));
         }
       }
+    }
+  }
 }
 #endif
 
@@ -309,10 +352,10 @@ TEST(MinmaxTest, SimdMatchesScalar) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
   } else {
-#if __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_STDX_SIMD
     expect_simd_matches_scalar<fmt::F16, util::native<uint32_t>>();
     expect_simd_matches_scalar<fmt::F32, util::native<uint32_t>>();
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
     expect_simd_matches_scalar<fmt::F64, util::stdx::fixed_size_simd<uint64_t, 1>>();
 #else
     expect_simd_matches_scalar<fmt::F64, util::native<uint64_t>>();

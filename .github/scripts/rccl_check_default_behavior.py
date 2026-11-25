@@ -27,8 +27,13 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
+import rccl_assemble_changelog as assemble
+
 SRC_TREE = "projects/rccl/src/"
-CHANGELOG = "projects/rccl/CHANGELOG.md"
+CHANGELOG = assemble.CHANGELOG.as_posix()
+CHANGELOG_FRAGMENTS = f"{assemble.FRAGMENTS.as_posix()}/"
+CHANGELOG_FRAGMENTS_README = f"{CHANGELOG_FRAGMENTS}README.md"
+CHANGELOG_PATHSPEC = (CHANGELOG, CHANGELOG_FRAGMENTS, f":(exclude){CHANGELOG_FRAGMENTS_README}")
 NCCL_ENV_DOC = "projects/rccl/docs/userguide/source/env.rst"
 RCCL_ENV_DOC = "projects/rccl/docs/api-reference/env-variables.rst"
 ENV_DOCS = (NCCL_ENV_DOC, RCCL_ENV_DOC)
@@ -43,6 +48,7 @@ UNREADABLE_MESSAGE = (
     f"Use the same argument layout as other declarations of this macro, or put {SKIP_TOKEN} "
     "in the PR title or body."
 )
+BAD_FRAGMENT_MESSAGE = f"Name a changelog fragment {assemble.FRAGMENT_NAME_RULE}, as a regular file, not a symlink."
 _MAX_CONTINUATION = 40
 _PAGE_SIZE = 100
 
@@ -432,7 +438,11 @@ def _annotations(finding: Finding) -> list[str]:
         detail = f"removed (was default {finding.old_default})"
     asks: list[tuple[str, str]] = []
     if finding.needs_changelog:
-        asks.append(("error", f"Name it in {CHANGELOG}, or put {SKIP_TOKEN} in the PR title or body."))
+        asks.append((
+            "error",
+            f"Name it in {CHANGELOG} or in a new file under {CHANGELOG_FRAGMENTS}, "
+            f"or put {SKIP_TOKEN} in the PR title or body.",
+        ))
     if finding.needs_docs:
         pages = " or ".join(doc_pages_for(finding))
         asks.append((
@@ -460,11 +470,12 @@ def _tick(value: str | None) -> str:
     return f"`{value}`"
 
 
-def _summary(undocumented: list[Finding], unreadable: list[Place]) -> str:
+def _summary(undocumented: list[Finding], unreadable: list[Place], bad_fragments: list[str]) -> str:
+    sections: list[str] = []
     if _blocks(undocumented, unreadable):
-        sections = ["### Undocumented RCCL default-behavior changes\n"]
-    else:
-        sections = ["### New RCCL env vars without docs\n"]
+        sections.append("### Undocumented RCCL default-behavior changes\n")
+    elif undocumented:
+        sections.append("### New RCCL env vars without docs\n")
     if undocumented:
         rows: list[str] = []
         for item in undocumented:
@@ -480,7 +491,11 @@ def _summary(undocumented: list[Finding], unreadable: list[Place]) -> str:
         )
         bullets = [suggestion(item) for item in undocumented if item.needs_changelog]
         if bullets:
-            sections.append(f"Paste into `{CHANGELOG}`:\n\n" + "\n".join(bullets) + "\n")
+            sections.append(
+                f"Paste into `{CHANGELOG}`, or into a new file `{CHANGELOG_FRAGMENTS}<name>.<section>.md`:\n\n"
+                + "\n".join(bullets)
+                + "\n"
+            )
         grouped: dict[tuple[str, ...], list[str]] = {}
         for item in undocumented:
             if item.needs_docs:
@@ -494,6 +509,9 @@ def _summary(undocumented: list[Finding], unreadable: list[Place]) -> str:
     if unreadable:
         lines = "\n".join(f"* `{place.path}:{place.line}`" for place in unreadable)
         sections.append(f"{UNREADABLE_MESSAGE}\n\n{lines}\n")
+    if bad_fragments:
+        lines = "\n".join(f"* `{path}`" for path in bad_fragments)
+        sections.append(f"### Changelog fragments the nightly fold cannot use\n\n{BAD_FRAGMENT_MESSAGE}\n\n{lines}\n")
     return "\n".join(sections)
 
 
@@ -555,9 +573,12 @@ def _blocks(undocumented: list[Finding], unreadable: list[Place]) -> bool:
     return bool(unreadable) or any(item.needs_changelog or item.needs_docs for item in undocumented)
 
 
-def report(undocumented: list[Finding], unreadable: list[Place], skipped: bool) -> int:
-    """Print annotations and a summary, sync the PR comment, and return the exit code."""
-    if not undocumented and not unreadable:
+def report(undocumented: list[Finding], unreadable: list[Place], skipped: bool, bad_fragments: list[str]) -> int:
+    """Print annotations and a summary, sync the PR comment, and return the exit code.
+
+    ``skipped`` does not cover ``bad_fragments``: one of them stops the nightly fold of every fragment.
+    """
+    if not undocumented and not unreadable and not bad_fragments:
         print(PASS_MESSAGE)
         sync_pull_request_comment(PASS_MESSAGE, create=False)
         return 0
@@ -568,20 +589,24 @@ def report(undocumented: list[Finding], unreadable: list[Place], skipped: bool) 
                 print(f"::notice {_where(finding, place)}::{finding.primary_env} {finding.kind} (override)")
         for place in unreadable:
             print(f"::notice file={place.path},line={place.line}::unreadable declaration (override)")
-        sync_pull_request_comment(SKIPPED_MESSAGE, create=False)
-        return 0
+        if not bad_fragments:
+            sync_pull_request_comment(SKIPPED_MESSAGE, create=False)
+            return 0
+        undocumented, unreadable = [], []
     for finding in undocumented:
         print(*_annotations(finding), sep="\n")
     for place in unreadable:
         print(f"::error file={place.path},line={place.line}::{UNREADABLE_MESSAGE}")
-    summary = _summary(undocumented, unreadable)
+    for path in bad_fragments:
+        print(f"::error file={path}::{BAD_FRAGMENT_MESSAGE}")
+    summary = _summary(undocumented, unreadable, bad_fragments)
     print(summary)
     step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if step_summary:
         with Path(step_summary).open("a", encoding="utf-8") as handle:
             handle.write(summary)
     sync_pull_request_comment(summary, create=True)
-    return 1 if _blocks(undocumented, unreadable) else 0
+    return 1 if bad_fragments or _blocks(undocumented, unreadable) else 0
 
 
 @dataclass(frozen=True)
@@ -794,11 +819,27 @@ def known_names(repo: Path, rev: str, names: set[str]) -> set[str]:
 
 
 def changelog_additions(repo: Path, base_ref: str) -> str:
-    """Lines the pull request adds to the changelog."""
-    diff = _git(repo, ["diff", "-U0", "--no-color", base_ref, "HEAD", "--", CHANGELOG])
+    """Lines the pull request adds to the changelog or to a changelog fragment."""
+    diff = _git(repo, ["diff", "-U0", "--no-color", base_ref, "HEAD", "--", *CHANGELOG_PATHSPEC])
     return "\n".join(
         line[1:] for line in diff.splitlines() if line.startswith("+") and not line.startswith("+++")
     )
+
+
+def bad_fragments(repo: Path, base_ref: str) -> list[str]:
+    """Paths the pull request adds or changes under the fragment directory that the nightly fold cannot use."""
+    fields = _git(
+        repo, ["diff", "--raw", "-z", "--no-renames", "--diff-filter=d", base_ref, "HEAD", "--", CHANGELOG_FRAGMENTS]
+    ).split("\0")
+    return [
+        path
+        for status, path in zip(fields[0::2], fields[1::2])
+        if path != CHANGELOG_FRAGMENTS_README
+        and (
+            status.split()[1] == "120000"
+            or assemble.fragment_section(path.removeprefix(CHANGELOG_FRAGMENTS)) is None
+        )
+    ]
 
 
 def accessor_map(repo: Path) -> dict[str, tuple[str, ...]]:
@@ -856,7 +897,12 @@ def check(repo: Path, base_ref: str, override_texts: list[str]) -> int:
         known_before=known_names(repo, base_ref, added),
         known_after=known_names(repo, "HEAD", _env_names(changed, "removed")),
     )
-    return report(pending, unreadable_declarations(after), skipped=SKIP_TOKEN in overrides)
+    return report(
+        pending,
+        unreadable_declarations(after),
+        skipped=SKIP_TOKEN in overrides,
+        bad_fragments=bad_fragments(repo, base_ref),
+    )
 
 
 def main(argv: list[str]) -> int:

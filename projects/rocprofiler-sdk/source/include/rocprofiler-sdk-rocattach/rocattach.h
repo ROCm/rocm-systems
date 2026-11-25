@@ -86,12 +86,15 @@ rocattach_get_version_triplet(rocattach_version_triplet_t* info) ROCATTACH_API R
  *
  * Enumerates the full process tree rooted at `pid` (via /proc) and attaches to each process.
  * Attachment proceeds breadth-first from the root. If any individual attach fails, the error is
- * logged and attachment continues with the remaining processes; the return status reflects the
- * last error seen.
+ * logged and attachment continues with the remaining processes. The processes that attached,
+ * which need not include the root, are recorded for rocattach_detach_tree().
  *
  * @param [in] pid Root process ID to attach to
  * @return ::rocattach_status_t
- * @retval ::ROCATTACH_STATUS_SUCCESS All processes attached successfully
+ * @retval ::ROCATTACH_STATUS_SUCCESS At least one process in the tree attached. Call
+ * rocattach_detach_tree() with the same `pid` to detach them.
+ * @retval other No process in the tree attached; the status is that of the last failure. Nothing
+ * is recorded, so rocattach_detach_tree() is not needed.
  */
 rocattach_status_t
 rocattach_attach_tree(int pid) ROCATTACH_API;

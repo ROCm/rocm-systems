@@ -16,9 +16,10 @@
 /// property of linking against the same shared object rather than of two
 /// programs being kept in step.
 
+#include "rocjitsu/cli.h"
 #include "rocjitsu/code/dbt/gfx1250_b0_a0_cache.h"
+#include "rocjitsu/code/dbt/gfx1250_b0_to_a0_library.h"
 #include "rocjitsu/code/dbt/translation_store.h"
-#include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -40,8 +41,9 @@ constexpr uint64_t kMaxInputBytes = 4ull << 30;
 
 [[nodiscard]] bool read_file(const char *path, std::vector<uint8_t> &out) {
   const int fd = open(path, O_RDONLY | O_CLOEXEC);
-  if (fd < 0)
+  if (fd < 0) {
     return false;
+  }
   struct stat info {};
   if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode) ||
       static_cast<uint64_t>(info.st_size) > kMaxInputBytes) {
@@ -60,28 +62,6 @@ constexpr uint64_t kMaxInputBytes = 4ull << 30;
   }
   close(fd);
   return true;
-}
-
-void usage(const char *program) {
-  std::fprintf(stderr,
-               "usage: %s [--store-root DIR] [--force] [--portable] "
-               "[--fail-on-skipped] FILE...\n"
-               "\n"
-               "Translate each gfx1250 code object and record the result in the\n"
-               "shared translation tier, where the runtime hook finds it without\n"
-               "translating again.\n"
-               "\n"
-               "  --store-root DIR  Write here instead of the location derived from\n"
-               "                    the translator's own install prefix.\n"
-               "  --force           Translate even objects already recorded.\n"
-               "  --portable        Accepted for packaging compatibility; this\n"
-               "                    domain always uses its packaged-cache contract.\n"
-               "  --fail-on-skipped Exit nonzero if any input is rejected.\n"
-               "\n"
-               "Each input must be a standalone AMDGPU code object. Extracting\n"
-               "those from fat binaries, bundles and archives is the caller's job;\n"
-               "see rocjitsu-pretranslate.py, installed alongside this tool.\n",
-               program);
 }
 
 /// @brief What became of one input.
@@ -120,18 +100,15 @@ Outcome pretranslate_one(const char *path, rocjitsu::TranslationStore &store, bo
     return Outcome::kAlreadyHeld;
   }
 
-  uint8_t *translated = nullptr;
-  size_t translated_size = 0;
+  std::vector<uint8_t> translated;
   // The info block is required by the entry point rather than optional, and this
   // tool has no use for what it reports: the store keys on the source bytes it
   // already holds. Diagnostics are declined for the same reason -- a scan over an
   // install tree meets many objects this translator will refuse, and the refusal
   // itself is the answer.
-  rj_gfx1250_b0_to_a0_translation_info_t info{};
-  const rj_status_t status = rj_gfx1250_b0_to_a0_translate(
-      source.data(), source.size(), &translated, &translated_size, &info, nullptr, nullptr);
-  if (status != ROCJITSU_STATUS_SUCCESS || translated == nullptr || translated_size == 0) {
-    rj_gfx1250_b0_to_a0_free(translated);
+  rocjitsu::Gfx1250B0ToA0TranslationInfo info{};
+  const rj_status_t status = rocjitsu::translate_gfx1250_b0_to_a0(source, translated, info);
+  if (status != ROCJITSU_STATUS_SUCCESS || translated.empty()) {
     // A verdict on the bytes, not a malfunction: a scan over an install tree
     // will hand this tool plenty of objects for other targets.
     if (status == ROCJITSU_STATUS_INVALID_CODE_OBJECT ||
@@ -143,8 +120,7 @@ Outcome pretranslate_one(const char *path, rocjitsu::TranslationStore &store, bo
     return Outcome::kFailed;
   }
 
-  store.store(key, {translated, translated_size}, rocjitsu::kGfx1250B0A0Identity);
-  rj_gfx1250_b0_to_a0_free(translated);
+  store.store(key, translated, rocjitsu::kGfx1250B0A0Identity);
 
   // Read it back. The store is best effort by design: it declines quietly when
   // an entry is too large or the filesystem is too full, which is right for a
@@ -156,55 +132,63 @@ Outcome pretranslate_one(const char *path, rocjitsu::TranslationStore &store, bo
     return Outcome::kFailed;
   }
 
-  std::printf("write   %s (%zu -> %zu bytes)\n", path, source.size(), translated_size);
+  std::printf("write   %s (%zu -> %zu bytes)\n", path, source.size(), translated.size());
   return Outcome::kWritten;
 }
 
 } // namespace
 
 int main(int argc, char **argv) {
-  std::string root;
-  bool force = false;
-  bool fail_on_skipped = false;
-  std::vector<const char *> inputs;
-
-  for (int i = 1; i < argc; ++i) {
-    const std::string_view arg(argv[i]);
-    if (arg == "--help" || arg == "-h") {
-      usage(argv[0]);
-      return 0;
-    }
-    if (arg == "--force") {
-      force = true;
-    } else if (arg == "--portable") {
-      // Compatibility with packaging recipes written before the domain owned
-      // its key policy. There is deliberately no mode override: an entry this
-      // product's runtime cannot read is not a useful output.
-    } else if (arg == "--fail-on-skipped") {
-      fail_on_skipped = true;
-    } else if (arg == "--store-root") {
-      if (++i == argc) {
-        std::fprintf(stderr, "--store-root needs a directory\n");
-        return 2;
-      }
-      root = argv[i];
-    } else if (arg.starts_with("--store-root=")) {
-      root = arg.substr(std::strlen("--store-root="));
-    } else if (arg.starts_with("-")) {
-      std::fprintf(stderr, "unknown option %s\n", argv[i]);
-      return 2;
-    } else {
-      inputs.push_back(argv[i]);
-    }
-  }
-
-  if (inputs.empty()) {
-    usage(argv[0]);
+  using namespace rocjitsu::cli;
+  Command command{"rj_pretranslate"};
+  auto root_flag = std::make_shared<StringFlag>(FlagInfo{
+      "--store-root", {}, "Translation store directory (default: translator install prefix)"});
+  auto force_flag = std::make_shared<BoolFlag>(
+      FlagInfo{"--force", {}, "Translate objects already recorded", ValueMode::Switch});
+  auto portable = std::make_shared<BoolFlag>(
+      FlagInfo{"--portable",
+               {},
+               "Packaging compatibility; the packaged-cache contract always applies",
+               ValueMode::Switch});
+  auto fail_flag = std::make_shared<BoolFlag>(
+      FlagInfo{"--fail-on-skipped", {}, "Fail if any input is rejected", ValueMode::Switch});
+  auto help =
+      std::make_shared<BoolFlag>(FlagInfo{"--help", {"-h"}, "Show help", ValueMode::Switch});
+  auto report = [](std::string_view message) {
+    std::fprintf(stderr, "%.*s\n", static_cast<int>(message.size()), message.data());
+  };
+  util::DiagnosticEmitter diagnostic(report);
+  if (command
+          .add_flags("Translation store", {root_flag, force_flag, portable, fail_flag}, diagnostic)
+          .failed() ||
+      command.add_flag(help, diagnostic).failed()) {
     return 2;
   }
+  std::vector<std::string_view> arguments(argv + 1, argv + argc);
+  auto parsed = parse(command, arguments, diagnostic);
+  if (parsed.failed()) {
+    return 2;
+  }
+  const auto usage = [&] {
+    std::fprintf(
+        stderr,
+        "%s\nTranslate standalone AMDGPU FILE... inputs into the shared translation tier.\n"
+        "Extract fat binaries, bundles and archives with rocjitsu-pretranslate.py.\n",
+        format_help(command).c_str());
+  };
+  if (help->value()) {
+    usage();
+    return 0;
+  }
+  if (parsed.value().positional.empty()) {
+    usage();
+    return 2;
+  }
+  std::string root = root_flag->value();
 
-  if (root.empty())
+  if (root.empty()) {
     root = rocjitsu::shared_translation_root(rocjitsu::gfx1250_b0_a0_translator_anchor());
+  }
   if (root.empty()) {
     std::fprintf(stderr, "cannot locate the translator's install prefix; pass --store-root\n");
     return 1;
@@ -225,8 +209,8 @@ int main(int argc, char **argv) {
   std::printf("store   %s\n", root.c_str());
 
   Totals totals;
-  for (const char *path : inputs) {
-    switch (pretranslate_one(path, store, force)) {
+  for (const auto &path : parsed.value().positional) {
+    switch (pretranslate_one(path.c_str(), store, force_flag->value())) {
     case Outcome::kWritten:
       ++totals.written;
       break;
@@ -245,5 +229,5 @@ int main(int argc, char **argv) {
 
   std::printf("summary written=%zu held=%zu skipped=%zu failed=%zu\n", totals.written,
               totals.already_held, totals.rejected, totals.failed);
-  return totals.failed == 0 && (!fail_on_skipped || totals.rejected == 0) ? 0 : 1;
+  return totals.failed == 0 && (!fail_flag->value() || totals.rejected == 0) ? 0 : 1;
 }

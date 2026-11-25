@@ -4,8 +4,7 @@
 # SPDX-License-Identifier: MIT
 
 import os
-import sys
-import time
+
 import rocprofsys
 from rocprofsys.profiler import config as omni_config
 

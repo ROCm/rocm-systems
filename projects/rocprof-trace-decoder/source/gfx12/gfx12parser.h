@@ -55,11 +55,14 @@ private:
 class TokenGenerator : public NaviTokenGenerator
 {
 public:
-    TokenGenerator(const uint8_t* _buffer, size_t size, int64_t _globaltime, int64_t _base_time);
+    TokenGenerator(
+        const uint8_t* _buffer, size_t size, int64_t _globaltime, int64_t _base_time, bool read_header = true
+    );
     gfx10::Token next() final;
 
 private:
     bool bIsExt = false;
     TokenLookupTable lookupbits{};
+    header_type header{};
 };
 } // namespace gfx12

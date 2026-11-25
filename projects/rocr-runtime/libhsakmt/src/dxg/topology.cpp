@@ -854,8 +854,10 @@ HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties& props) {
   dxg_topology->num_sysfs_nodes = dxg_topology->numa_node_count_ + num_adapters;
   dxg_runtime->HeapInit();
   props.NumNodes = dxg_topology->num_sysfs_nodes;
-  // Update default GPU node to account CPU nodes
-  dxg_runtime->default_node = dxg_topology->numa_node_count_;
+  // Every enumerated GPU is a default map target.
+  dxg_runtime->default_node.clear();
+  for (uint32_t i = 0; i < num_adapters; ++i)
+    dxg_runtime->default_node.push_back(dxg_topology->numa_node_count_ + i);
 
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -964,7 +966,8 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.LuidLowPart = device->GetLuid().LowPart;
   props.LuidHighPart = device->GetLuid().HighPart;
 
-  props.EngineId.ui32.uCode = device->GetMecFwVersion();
+  props.EngineId.ui32.uCode = device->GetMecFwVersion() & 0x3ff;
+  props.uCodeEngineVersions.uCodeCompute = device->GetMecFwVersion() & 0xffff;
   if (const char* envvar = getenv("HSA_OVERRIDE_GFX_VERSION"); envvar) {
     char dummy = '\0';
     uint32_t major = 0, minor = 0, step = 0;

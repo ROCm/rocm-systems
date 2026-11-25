@@ -1,0 +1,65 @@
+# CTest categories for host-only src/graph/ microtests.
+#
+# Suites start with their source unit's stem. The exceptions are connect.cc's
+# GraphConnect* and ConnectMicrotest* suites (and its EveryRank/ instantiation),
+# rome_models.cc's GraphRomeModels* suites, graph-dev-test.cc's
+# TopoGpuDevMicrotest, and rccl_graph_gen.cc's GraphGen* suites and their
+# parameterized instantiations.
+test_categories:
+  quick: &micro_graph_quick
+    description: "Smoke - host-only src/graph/ micro-tests, sub-second."
+    test_patterns:
+      - "ConnectMicrotestReject.*"
+      - "Constructions/GraphGenDispatchTest.*"
+      - "EveryRank/ConnectMicrotest.*"
+      - "EvenNodeCounts/GraphGenWaleckiEvenTest.*"
+      - "GraphConnect*"
+      - "GraphGen*"
+      - "GraphRomeModels*"
+      - "NodeCounts/GraphGenWaleckiTest.*"
+      - "Paths*"
+      - "PrimeNodeCounts/GraphGenPrimeRingTest.*"
+      - "Rings*"
+      - "RomeModels*"
+      - "Search*"
+      - "Tables/GraphGenFixedRingTableTest.*"
+      - "Topo*"  # topo.cc; also matches graph-dev-test.cc's TopoGpuDevMicrotest
+      - "Trees*"
+      - "Xml*"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "microtest"
+  standard:
+    <<: *micro_graph_quick
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "microtest"
+  comprehensive:
+    <<: *micro_graph_quick
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "microtest"
+  full:
+    <<: *micro_graph_quick
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "microtest"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 600
+    comprehensive: 600
+    full: 600

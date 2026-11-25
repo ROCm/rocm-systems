@@ -3,11 +3,11 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-import atexit
-import sys
-import os
-import time
 import argparse
+import atexit
+import os
+import sys
+import time
 from collections import defaultdict
 
 from perfetto.trace_processor import TraceProcessor, TraceProcessorConfig
@@ -336,11 +336,12 @@ if __name__ == "__main__":
                     "when -d is provided"
                 )
 
-    if args.key_names or args.key_counts:
-        if len(args.key_names) != len(args.key_counts):
-            raise RuntimeError(
-                "--key-names and --key-counts must have the same number of entries"
-            )
+    if (args.key_names or args.key_counts) and len(args.key_names) != len(
+        args.key_counts
+    ):
+        raise RuntimeError(
+            "--key-names and --key-counts must have the same number of entries"
+        )
 
     tp = load_trace(args.input, bin_path=args.trace_processor_shell)
 

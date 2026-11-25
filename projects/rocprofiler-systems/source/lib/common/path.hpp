@@ -373,6 +373,25 @@ is_text_file(const std::string& filename)
 }
 
 /**
+ * @brief Create the parent directory of @p filepath (and any missing ancestors).
+ *
+ * @param filepath Path of a file whose parent directory must exist.
+ * @param error    Set to the failure reason when the directory cannot be created.
+ * @return true if there is nothing to create or the directory is in place.
+ */
+inline bool
+ensure_parent_directory(const std::string& filepath, std::error_code& error)
+{
+    const auto parent = parent_path(filepath);
+    if(parent.empty())
+    {
+        return true;
+    }
+    std::filesystem::create_directories(parent, error);
+    return !error;
+}
+
+/**
  * @brief Create the parent directory of @p filepath, then open @p out_fstream on it.
  * The parent directory tree is created if absent; an already-existing
  * directory is not an error. A @p filepath with no directory component (e.g.
@@ -388,15 +407,10 @@ bool
 create_parent_dirs_and_open_ofstream(std::ofstream&     out_fstream,
                                      const std::string& filepath, std::ios::openmode mode)
 {
-    const auto parent = parent_path(filepath);
-    if(!parent.empty())
+    std::error_code error;
+    if(!ensure_parent_directory(filepath, error))
     {
-        std::error_code error;
-        std::filesystem::create_directories(parent, error);
-        if(error)
-        {
-            return false;
-        }
+        return false;
     }
 
     out_fstream.open(filepath, mode);

@@ -4,9 +4,9 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Fakes for the symbols defined by src/config/collconfig.cc. No state, so no
-// reset. collTaskAppend reads a per-call config through these two, so a target
-// that includes enqueue.cc and covers collTaskAppend references them.
+// Fakes for the symbols defined by src/config/collconfig.cc. collTaskAppend
+// reads a per-call config through these two, so a target that includes
+// enqueue.cc and covers collTaskAppend references them.
 //
 // The isolation predicate is reproduced rather than stubbed: it is pure
 // arithmetic over the config header, so a copy cannot drift in behaviour, only
@@ -22,7 +22,12 @@
 #include "nccl.h"
 #include "config/collconfig.h"
 
+#include "collconfig_fakes.h"
 #include "fail_loud.h"
+#include "signature-drift.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_parseCollConfig, ncclParseCollConfig);
+#undef ASSERT_HOOK_MATCHES_PROD
 
 // Mirrors src/config/collconfig.cc: a zero-size config means no user config.
 hipEvent_t ncclCollConfigGetLaunchCompletionEvent(const ncclCollConfig_t* c) {
@@ -42,10 +47,20 @@ bool ncclCollConfigNeedAggIsolate(const ncclCollConfig_t* config) {
   return false;
 }
 
-ncclResult_t ncclCollConfigGetAlgMask(const ncclCollConfig_t* config, ncclFunc_t, uint64_t* outMask) {
+ncclResult_t ncclCollConfigGetAlgMask(const ncclCollConfig_t* config, ncclFunc_t, rcclTuningMask* outMask) {
   if (ncclCollConfigHasAlgSelection(config)) {
     FailLoud("collconfig_fakes", "ncclCollConfigGetAlgMask: config->algSelection needs the real parser");
   }
-  *outMask = 0;  // no selection -> automatic
+  *outMask = rcclTuningMask();  // no selection -> automatic
   return ncclSuccess;
 }
+
+static ncclResult_t DefaultParseCollConfig(const ncclCollConfig_t*, ncclCollConfig_t*) {
+  FailLoudUnfaked("collconfig_fakes", "ncclParseCollConfig");
+}
+std::function<ncclResult_t(const ncclCollConfig_t*, ncclCollConfig_t*)> g_parseCollConfig = DefaultParseCollConfig;
+ncclResult_t ncclParseCollConfig(const ncclCollConfig_t* config, ncclCollConfig_t* internal) {
+  return g_parseCollConfig(config, internal);
+}
+
+void ResetCollConfigFakes() { g_parseCollConfig = DefaultParseCollConfig; }

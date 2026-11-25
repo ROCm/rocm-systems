@@ -16,13 +16,15 @@
 /// hook returns an HSA error instead of retrying the original reader, because
 /// the original ELF may target a different GPU ISA.
 
-#include "hsa/hsa_api_trace_minimal.h"
+#include "hsa/hsa_api_trace.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/config/dbt_guest_config.h"
@@ -31,6 +33,7 @@
 #include "rocjitsu/hooks/virtual_lds.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "util/arena_alloc.h"
+#include "util/diagnostic.h"
 #include "util/intrusive_list.h"
 #include "util/log.h"
 
@@ -47,7 +50,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <dirent.h>
-#include <exception>
 #include <execinfo.h>
 #include <fcntl.h>
 #include <limits>
@@ -68,18 +70,11 @@
 #include <utility>
 #include <vector>
 
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
-
 // Test seams live outside the anonymous namespace so the test-only translation
 // unit can reach them, but they stay at hidden visibility: only
 // librocjitsu_hooks_testing.so exports a C entry point for them.
 namespace rocjitsu::hooks {
 namespace {
-
 std::mutex g_topology_nodes_root_mutex;
 std::optional<std::string> g_topology_nodes_root_for_test;
 
@@ -103,7 +98,6 @@ void set_topology_nodes_root_for_test(const char *root) {
 } // namespace rocjitsu::hooks
 
 namespace {
-
 using rocjitsu::AmdGpuCodeObject;
 using rocjitsu::arch_for_elf_mach;
 using rocjitsu::arch_lds_bytes;
@@ -176,7 +170,7 @@ struct sigaction g_previous_sigabrt {};
 /// @brief Parsed ISA target used by DBT and HSA agent matching.
 struct TargetInfo {
   std::string_view name;
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   uint32_t mach;
 };
 
@@ -185,10 +179,10 @@ constexpr std::array<uint32_t, 5> kAcceptedConcreteTargetMachs = {
     EF_AMDGPU_MACH_AMDGCN_GFX1200, EF_AMDGPU_MACH_AMDGCN_GFX1201};
 
 constexpr std::array<TargetInfo, 4> kArchAliases = {{
-    {"cdna3", ROCJITSU_CODE_ARCH_CDNA3, elf_mach_for_arch(ROCJITSU_CODE_ARCH_CDNA3)},
-    {"cdna4", ROCJITSU_CODE_ARCH_CDNA4, elf_mach_for_arch(ROCJITSU_CODE_ARCH_CDNA4)},
-    {"rdna3", ROCJITSU_CODE_ARCH_RDNA3, elf_mach_for_arch(ROCJITSU_CODE_ARCH_RDNA3)},
-    {"rdna4", ROCJITSU_CODE_ARCH_RDNA4, elf_mach_for_arch(ROCJITSU_CODE_ARCH_RDNA4)},
+    {"cdna3", rocjitsu::IsaFamily::Cdna3, elf_mach_for_arch(rocjitsu::IsaFamily::Cdna3)},
+    {"cdna4", rocjitsu::IsaFamily::Cdna4, elf_mach_for_arch(rocjitsu::IsaFamily::Cdna4)},
+    {"rdna3", rocjitsu::IsaFamily::Rdna3, elf_mach_for_arch(rocjitsu::IsaFamily::Rdna3)},
+    {"rdna4", rocjitsu::IsaFamily::Rdna4, elf_mach_for_arch(rocjitsu::IsaFamily::Rdna4)},
 }};
 
 /// @brief Return the byte offset immediately after an API-table field.
@@ -248,14 +242,16 @@ struct HookConfig {
   for (uint32_t mach : kAcceptedConcreteTargetMachs) {
     std::string_view name = elf_mach_name(mach);
     if (value == name) {
-      const rj_code_arch_t arch = arch_for_elf_mach(mach);
-      if (arch != ROCJITSU_CODE_ARCH_INVALID)
+      const rocjitsu::IsaFamily arch = arch_for_elf_mach(mach);
+      if (arch != rocjitsu::IsaFamily::Invalid) {
         return TargetInfo{name, arch, mach};
+      }
     }
   }
   for (const TargetInfo &target : kArchAliases) {
-    if (value == target.name)
+    if (value == target.name) {
       return target;
+    }
   }
   return std::nullopt;
 }
@@ -276,10 +272,12 @@ processor_revision_from_config(rocjitsu::config::DbtSiliconRevision revision) {
 
 /// @brief Clamp a user-provided hook log level to the supported range.
 [[nodiscard]] int clamp_log_level(int value) {
-  if (value < kLogDisabled)
+  if (value < kLogDisabled) {
     return kLogDisabled;
-  if (value > kLogDebug)
+  }
+  if (value > kLogDebug) {
     return kLogDebug;
+  }
   return value;
 }
 
@@ -290,8 +288,9 @@ void invoke_previous_signal_handler(int signo, siginfo_t *info, void *context) {
     previous.sa_sigaction(signo, info, context);
     return;
   }
-  if (previous.sa_handler == SIG_IGN)
+  if (previous.sa_handler == SIG_IGN) {
     return;
+  }
   if (previous.sa_handler != SIG_DFL && previous.sa_handler != nullptr) {
     previous.sa_handler(signo);
     return;
@@ -331,8 +330,9 @@ void signal_backtrace_handler(int signo, siginfo_t *info, void *context) {
 
 /// @brief Install fatal-signal backtrace handling when enabled by config.
 void maybe_install_signal_backtrace(bool enabled) {
-  if (!enabled)
+  if (!enabled) {
     return;
+  }
 
   prewarm_signal_backtrace();
 
@@ -343,8 +343,9 @@ void maybe_install_signal_backtrace(bool enabled) {
 
   struct sigaction previous_sigsegv {};
   struct sigaction previous_sigabrt {};
-  if (::sigaction(SIGSEGV, &action, &previous_sigsegv) != 0)
+  if (::sigaction(SIGSEGV, &action, &previous_sigsegv) != 0) {
     return;
+  }
   if (::sigaction(SIGABRT, &action, &previous_sigabrt) != 0) {
     (void)::sigaction(SIGSEGV, &previous_sigsegv, nullptr);
     return;
@@ -359,21 +360,25 @@ void maybe_install_signal_backtrace(bool enabled) {
 /// @brief Restore fatal-signal handlers installed before rocjitsu.
 void restore_signal_backtrace_handlers() {
   g_signal_backtrace_enabled.store(false, std::memory_order_release);
-  if (!g_signal_backtrace_installed.exchange(false, std::memory_order_acq_rel))
+  if (!g_signal_backtrace_installed.exchange(false, std::memory_order_acq_rel)) {
     return;
+  }
   (void)::sigaction(SIGSEGV, &g_previous_sigsegv, nullptr);
   (void)::sigaction(SIGABRT, &g_previous_sigabrt, nullptr);
 }
 
 /// @brief Load and validate DBT hook configuration from the runtime config file.
 [[nodiscard]] std::optional<HookConfig> parse_config() {
-  std::optional<rocjitsu::config::DbtGuestConfig> dbt_guest;
-  try {
-    dbt_guest = rocjitsu::config::load_dbt_guest_config_from_runtime_config();
-  } catch (const std::exception &error) {
-    std::fprintf(stderr, "[rocjitsu-hooks] failed to load runtime config: %s\n", error.what());
+  util::StringDiagnostic diagnostic;
+  auto maybe_dbt_guest =
+      rocjitsu::config::load_dbt_guest_config_from_runtime_config(diagnostic.emitter());
+  if (maybe_dbt_guest.failed()) {
+    std::fprintf(stderr, "[rocjitsu-hooks] failed to load runtime config: %s\n",
+                 diagnostic.message().c_str());
     return std::nullopt;
   }
+  std::optional<rocjitsu::config::DbtGuestConfig> dbt_guest = std::move(maybe_dbt_guest.value());
+
   if (!dbt_guest) {
     std::fprintf(stderr, "[rocjitsu-hooks] runtime config is required for the DBT HSA hook\n");
     return std::nullopt;
@@ -411,8 +416,9 @@ void restore_signal_backtrace_handlers() {
 
 /// @brief Emit a hook log message through the rocjitsu logger.
 void log_message(int required_level, const char *format, ...) {
-  if (g_log_level.load(std::memory_order_relaxed) < required_level)
+  if (g_log_level.load(std::memory_order_relaxed) < required_level) {
     return;
+  }
 
   std::array<char, 512> message{};
   va_list args;
@@ -433,8 +439,9 @@ void log_message(int required_level, const char *format, ...) {
 
 /// @brief Emit a virtual-LDS dispatch trace line through public hook logging.
 void trace_virtual_lds_dispatch(const char *format, ...) {
-  if (!trace_virtual_lds_dispatch_enabled())
+  if (!trace_virtual_lds_dispatch_enabled()) {
     return;
+  }
 
   std::array<char, 512> message{};
   va_list args;
@@ -449,14 +456,17 @@ void trace_virtual_lds_dispatch(const char *format, ...) {
 [[nodiscard]] bool trace_virtual_lds_userargs_enabled() { return log_level_enabled(kLogDebug); }
 
 [[nodiscard]] bool host_range_is_readable(uint64_t address, size_t size) {
-  if (address == 0 || size == 0)
+  if (address == 0 || size == 0) {
     return false;
-  if (address > std::numeric_limits<uint64_t>::max() - static_cast<uint64_t>(size - 1))
+  }
+  if (address > std::numeric_limits<uint64_t>::max() - static_cast<uint64_t>(size - 1)) {
     return false;
+  }
 
   FILE *maps = std::fopen("/proc/self/maps", "r");
-  if (maps == nullptr)
+  if (maps == nullptr) {
     return false;
+  }
 
   const uint64_t end = address + static_cast<uint64_t>(size);
   char line[512];
@@ -464,10 +474,12 @@ void trace_virtual_lds_dispatch(const char *format, ...) {
     unsigned long long start = 0;
     unsigned long long stop = 0;
     char perms[5] = {};
-    if (std::sscanf(line, "%llx-%llx %4s", &start, &stop, perms) != 3)
+    if (std::sscanf(line, "%llx-%llx %4s", &start, &stop, perms) != 3) {
       continue;
-    if (perms[0] != 'r')
+    }
+    if (perms[0] != 'r') {
       continue;
+    }
     if (address >= start && end <= stop) {
       std::fclose(maps);
       return true;
@@ -480,8 +492,9 @@ void trace_virtual_lds_dispatch(const char *format, ...) {
 
 void trace_virtual_lds_userargs_pointer(uint64_t packet_id, uint32_t offset, uint64_t pointer) {
   constexpr size_t kUserArgsTraceBytes = 128;
-  if (!trace_virtual_lds_userargs_enabled())
+  if (!trace_virtual_lds_userargs_enabled()) {
     return;
+  }
 
   if (!host_range_is_readable(pointer, kUserArgsTraceBytes)) {
     std::fprintf(stderr,
@@ -495,24 +508,28 @@ void trace_virtual_lds_userargs_pointer(uint64_t packet_id, uint32_t offset, uin
                static_cast<unsigned long long>(packet_id), offset,
                static_cast<unsigned long long>(pointer));
   const auto *bytes = reinterpret_cast<const uint8_t *>(pointer);
-  for (size_t i = 0; i < kUserArgsTraceBytes; ++i)
+  for (size_t i = 0; i < kUserArgsTraceBytes; ++i) {
     std::fprintf(stderr, "%02x", bytes[i]);
+  }
   std::fprintf(stderr, "\n");
 }
 
 void trace_virtual_lds_kernarg(uint64_t packet_id, const void *kernarg, size_t size) {
-  if (!trace_virtual_lds_kernarg_enabled())
+  if (!trace_virtual_lds_kernarg_enabled()) {
     return;
+  }
 
   constexpr size_t kMaxTraceBytes = 96;
   const size_t trace_bytes = std::min(size, kMaxTraceBytes);
   std::fprintf(stderr, "[rocjitsu-vlds-kernarg] packet=%llu size=%zu bytes=",
                static_cast<unsigned long long>(packet_id), size);
   const auto *bytes = static_cast<const uint8_t *>(kernarg);
-  for (size_t i = 0; i < trace_bytes; ++i)
+  for (size_t i = 0; i < trace_bytes; ++i) {
     std::fprintf(stderr, "%02x", bytes[i]);
-  if (trace_bytes != size)
+  }
+  if (trace_bytes != size) {
     std::fprintf(stderr, "...");
+  }
   std::fprintf(stderr, "\n");
 
   // Tensile UserArgs kernels commonly pass a host-side argument block pointer
@@ -523,10 +540,12 @@ void trace_virtual_lds_kernarg(uint64_t packet_id, const void *kernarg, size_t s
     for (uint32_t offset = 0; offset + sizeof(uint64_t) <= size; offset += sizeof(uint32_t)) {
       uint64_t pointer = 0;
       std::memcpy(&pointer, bytes + offset, sizeof(pointer));
-      if (pointer == 0 || pointer == previous_pointer)
+      if (pointer == 0 || pointer == previous_pointer) {
         continue;
-      if (pointer < (uint64_t{1} << 32u))
+      }
+      if (pointer < (uint64_t{1} << 32u)) {
         continue;
+      }
       trace_virtual_lds_userargs_pointer(packet_id, offset, pointer);
       previous_pointer = pointer;
     }
@@ -534,15 +553,15 @@ void trace_virtual_lds_kernarg(uint64_t packet_id, const void *kernarg, size_t s
 }
 
 /// @brief Return a compact architecture-family name for diagnostics.
-[[nodiscard]] const char *arch_name(rj_code_arch_t arch) {
+[[nodiscard]] const char *arch_name(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return "cdna3";
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return "cdna4";
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return "rdna3";
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return "rdna4";
   default:
     return "invalid";
@@ -583,6 +602,8 @@ void trace_virtual_lds_kernarg(uint64_t packet_id, const void *kernarg, size_t s
     return "kernel-skipped";
   case DiagnosticKind::ResidualRewrite:
     return "residual-rewrite";
+  case DiagnosticKind::InternalError:
+    return "internal-error";
   }
   return "unknown";
 }
@@ -591,17 +612,21 @@ void trace_virtual_lds_kernarg(uint64_t packet_id, const void *kernarg, size_t s
 void print_diagnostic(FILE *stream, const TranslationDiagnostic &diagnostic) {
   std::fprintf(stream, "[rocjitsu-dbt] %s: %s", diagnostic_severity_name(diagnostic.severity),
                diagnostic_kind_name(diagnostic.kind));
-  if (diagnostic.guest_offset)
+  if (diagnostic.guest_offset) {
     std::fprintf(stream, " .text+0x%llx",
                  static_cast<unsigned long long>(*diagnostic.guest_offset));
-  if (diagnostic.output_offset)
+  }
+  if (diagnostic.output_offset) {
     std::fprintf(stream, " output:.text+0x%llx",
                  static_cast<unsigned long long>(*diagnostic.output_offset));
-  if (!diagnostic.mnemonic.empty())
+  }
+  if (!diagnostic.mnemonic.empty()) {
     std::fprintf(stream, " %s", diagnostic.mnemonic.c_str());
+  }
   std::fprintf(stream, ": %s\n", diagnostic.message.c_str());
-  for (const std::string &item : diagnostic.required_work)
+  for (const std::string &item : diagnostic.required_work) {
     std::fprintf(stream, "[rocjitsu-dbt]   required: %s\n", item.c_str());
+  }
 }
 
 /// @brief Print errors unconditionally and lower-severity diagnostics when requested.
@@ -609,14 +634,15 @@ void print_diagnostics(FILE *stream, std::span<const TranslationDiagnostic> diag
                        bool include_warnings) {
   for (const TranslationDiagnostic &diagnostic : diagnostics) {
     if (diagnostic.severity == DiagnosticSeverity::Error || include_warnings ||
-        diagnostic.kind == DiagnosticKind::KernelSkipped)
+        diagnostic.kind == DiagnosticKind::KernelSkipped) {
       print_diagnostic(stream, diagnostic);
+    }
   }
 }
 
 /// @brief ISA family and exact ELF machine value detected from a code object.
 struct DetectedElfTarget {
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Invalid;
   uint32_t mach = 0;
 };
 
@@ -628,15 +654,18 @@ struct DetectedElfTarget {
 /// exact MACH is kept because ROCR rejects same-family-but-different-stepping
 /// code objects such as gfx1200 ELFs loaded on gfx1201 agents.
 [[nodiscard]] DetectedElfTarget detect_target_from_elf(const uint8_t *bytes, size_t size) {
-  if (bytes == nullptr || size < sizeof(Elf64_Ehdr))
+  if (bytes == nullptr || size < sizeof(Elf64_Ehdr)) {
     return {};
+  }
 
   Elf64_Ehdr header{};
   std::memcpy(&header, bytes, sizeof(header));
-  if (std::memcmp(header.e_ident, rocjitsu::EI_MAGIC, rocjitsu::EI_MAGIC_SIZE) != 0)
+  if (std::memcmp(header.e_ident, rocjitsu::EI_MAGIC, rocjitsu::EI_MAGIC_SIZE) != 0) {
     return {};
-  if (header.e_ident[rocjitsu::EI_CLASS] != ELFCLASS64 || header.e_machine != EM_AMDGPU)
+  }
+  if (header.e_ident[rocjitsu::EI_CLASS] != ELFCLASS64 || header.e_machine != EM_AMDGPU) {
     return {};
+  }
 
   const uint32_t mach = header.e_flags & EF_AMDGPU_MACH;
   return DetectedElfTarget{arch_for_elf_mach(mach), mach};
@@ -693,8 +722,9 @@ public:
     }
 
     void *storage = entry_pool_.try_allocate(sizeof(Entry));
-    if (storage == nullptr)
+    if (storage == nullptr) {
       return false;
+    }
     auto *entry = new (storage) Entry(reader.handle, bytes, size, owned);
     entries_.push_front(*entry);
     return true;
@@ -780,8 +810,9 @@ public:
   hsa_agent_t map_agent(hsa_executable_t executable, hsa_agent_t agent) {
     std::lock_guard lock(mutex_);
     auto it = map_.find(key(executable, agent));
-    if (it == map_.end())
+    if (it == map_.end()) {
       return agent;
+    }
     return hsa_agent_t{it->second};
   }
 
@@ -790,10 +821,11 @@ public:
     std::lock_guard lock(mutex_);
     const uint64_t prefix = executable.handle;
     for (auto it = map_.begin(); it != map_.end();) {
-      if (it->first.first == prefix)
+      if (it->first.first == prefix) {
         it = map_.erase(it);
-      else
+      } else {
         ++it;
+      }
     }
   }
 
@@ -830,7 +862,7 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_memory(
 
 /// @brief Warn for file-backed readers, which the MVP cannot translate safely.
 hsa_status_t HSA_API rj_code_object_reader_create_from_file(
-    hsa_file_t file, hsa_code_object_reader_t *code_object_reader);
+    hsa_file_t file, hsa_code_object_reader_t *code_object_reader) noexcept;
 
 /// @brief Remove tracked reader bytes and forward reader destruction.
 hsa_status_t HSA_API rj_code_object_reader_destroy(hsa_code_object_reader_t code_object_reader);
@@ -845,7 +877,7 @@ hsa_status_t HSA_API rj_iterate_agents(hsa_status_t (*callback)(hsa_agent_t agen
 /// @brief Translate guest code objects and load the translated ELF on the host agent.
 hsa_status_t HSA_API rj_executable_load_agent_code_object(
     hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
-    const char *options, hsa_loaded_code_object_t *loaded_code_object);
+    const char *options, hsa_loaded_code_object_t *loaded_code_object) noexcept;
 
 /// @brief Preserve guest ISA iteration so framework fatbin selection picks guest images.
 hsa_status_t HSA_API rj_agent_iterate_isas(hsa_agent_t agent,
@@ -1059,7 +1091,7 @@ void clear_virtual_lds_dispatch_queues();
   X(amd_queue_intercept_register, amd_ext_,                                                        \
     api_table_has_field(amd_ext_, offsetof(AmdExtTable, hsa_amd_queue_intercept_register_fn),      \
                         &AmdExtTable::hsa_amd_queue_intercept_register_fn),                        \
-    hsa_amd_queue_intercept_register_fn, hsa_amd_queue_intercept_register_fn_t)
+    hsa_amd_queue_intercept_register_fn, decltype(&hsa_amd_queue_intercept_register))
 
 /// @brief HSA table entries patched by the DBT hook.
 ///
@@ -1121,75 +1153,75 @@ void clear_virtual_lds_dispatch_queues();
     rj_executable_load_agent_code_object, decltype(hsa_executable_load_agent_code_object) *)       \
   X(amd_memory_pool_get_info, amd_ext_, amd_ext_ != nullptr, true,                                 \
     hsa_amd_memory_pool_get_info_fn, rj_amd_memory_pool_get_info,                                  \
-    hsa_amd_memory_pool_get_info_fn_t)                                                             \
+    decltype(&hsa_amd_memory_pool_get_info))                                                       \
   X(amd_agent_iterate_memory_pools, amd_ext_, amd_ext_ != nullptr, true,                           \
     hsa_amd_agent_iterate_memory_pools_fn, rj_amd_agent_iterate_memory_pools,                      \
-    hsa_amd_agent_iterate_memory_pools_fn_t)                                                       \
+    decltype(&hsa_amd_agent_iterate_memory_pools))                                                 \
   X(amd_memory_pool_allocate, amd_ext_, amd_ext_ != nullptr, true,                                 \
     hsa_amd_memory_pool_allocate_fn, rj_amd_memory_pool_allocate,                                  \
-    hsa_amd_memory_pool_allocate_fn_t)                                                             \
+    decltype(&hsa_amd_memory_pool_allocate))                                                       \
   X(amd_memory_pool_free, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_memory_pool_free_fn,        \
-    rj_amd_memory_pool_free, hsa_amd_memory_pool_free_fn_t)                                        \
+    rj_amd_memory_pool_free, decltype(&hsa_amd_memory_pool_free))                                  \
   X(amd_profiling_set_profiler_enabled, amd_ext_, amd_ext_ != nullptr, true,                       \
     hsa_amd_profiling_set_profiler_enabled_fn, rj_amd_profiling_set_profiler_enabled,              \
-    hsa_amd_profiling_set_profiler_enabled_fn_t)                                                   \
+    decltype(&hsa_amd_profiling_set_profiler_enabled))                                             \
   X(amd_profiling_get_dispatch_time, amd_ext_, amd_ext_ != nullptr, true,                          \
     hsa_amd_profiling_get_dispatch_time_fn, rj_amd_profiling_get_dispatch_time,                    \
-    hsa_amd_profiling_get_dispatch_time_fn_t)                                                      \
+    decltype(&hsa_amd_profiling_get_dispatch_time))                                                \
   X(amd_profiling_convert_tick_to_system_domain, amd_ext_, amd_ext_ != nullptr, true,              \
     hsa_amd_profiling_convert_tick_to_system_domain_fn,                                            \
     rj_amd_profiling_convert_tick_to_system_domain,                                                \
-    hsa_amd_profiling_convert_tick_to_system_domain_fn_t)                                          \
+    decltype(&hsa_amd_profiling_convert_tick_to_system_domain))                                    \
   X(amd_agent_memory_pool_get_info, amd_ext_, amd_ext_ != nullptr, true,                           \
     hsa_amd_agent_memory_pool_get_info_fn, rj_amd_agent_memory_pool_get_info,                      \
-    hsa_amd_agent_memory_pool_get_info_fn_t)                                                       \
+    decltype(&hsa_amd_agent_memory_pool_get_info))                                                 \
   X(amd_agents_allow_access, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_agents_allow_access_fn,  \
-    rj_amd_agents_allow_access, hsa_amd_agents_allow_access_fn_t)                                  \
+    rj_amd_agents_allow_access, decltype(&hsa_amd_agents_allow_access))                            \
   X(amd_memory_async_copy, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_memory_async_copy_fn,      \
-    rj_amd_memory_async_copy, hsa_amd_memory_async_copy_fn_t)                                      \
+    rj_amd_memory_async_copy, decltype(&hsa_amd_memory_async_copy))                                \
   X(amd_memory_async_copy_on_engine, amd_ext_, amd_ext_ != nullptr, true,                          \
     hsa_amd_memory_async_copy_on_engine_fn, rj_amd_memory_async_copy_on_engine,                    \
-    hsa_amd_memory_async_copy_on_engine_fn_t)                                                      \
+    decltype(&hsa_amd_memory_async_copy_on_engine))                                                \
   X(amd_memory_async_copy_rect, amd_ext_, amd_ext_ != nullptr, true,                               \
     hsa_amd_memory_async_copy_rect_fn, rj_amd_memory_async_copy_rect,                              \
-    hsa_amd_memory_async_copy_rect_fn_t)                                                           \
+    decltype(&hsa_amd_memory_async_copy_rect))                                                     \
   X(amd_memory_copy_engine_status, amd_ext_, amd_ext_ != nullptr, true,                            \
     hsa_amd_memory_copy_engine_status_fn, rj_amd_memory_copy_engine_status,                        \
-    hsa_amd_memory_copy_engine_status_fn_t)                                                        \
+    decltype(&hsa_amd_memory_copy_engine_status))                                                  \
   X(amd_memory_lock, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_memory_lock_fn,                  \
-    rj_amd_memory_lock, hsa_amd_memory_lock_fn_t)                                                  \
+    rj_amd_memory_lock, decltype(&hsa_amd_memory_lock))                                            \
   X(amd_memory_lock_to_pool, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_memory_lock_to_pool_fn,  \
-    rj_amd_memory_lock_to_pool, hsa_amd_memory_lock_to_pool_fn_t)                                  \
+    rj_amd_memory_lock_to_pool, decltype(&hsa_amd_memory_lock_to_pool))                            \
   X(amd_svm_prefetch_async, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_svm_prefetch_async_fn,    \
-    rj_amd_svm_prefetch_async, hsa_amd_svm_prefetch_async_fn_t)                                    \
+    rj_amd_svm_prefetch_async, decltype(&hsa_amd_svm_prefetch_async))                              \
   X(amd_pointer_info, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_pointer_info_fn,                \
-    rj_amd_pointer_info, hsa_amd_pointer_info_fn_t)                                                \
+    rj_amd_pointer_info, decltype(&hsa_amd_pointer_info))                                          \
   X(amd_vmem_set_access, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_vmem_set_access_fn,          \
-    rj_amd_vmem_set_access, hsa_amd_vmem_set_access_fn_t)                                          \
+    rj_amd_vmem_set_access, decltype(&hsa_amd_vmem_set_access))                                    \
   X(amd_vmem_get_access, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_vmem_get_access_fn,          \
-    rj_amd_vmem_get_access, hsa_amd_vmem_get_access_fn_t)                                          \
+    rj_amd_vmem_get_access, decltype(&hsa_amd_vmem_get_access))                                    \
   X(amd_agent_set_async_scratch_limit, amd_ext_, amd_ext_ != nullptr, true,                        \
     hsa_amd_agent_set_async_scratch_limit_fn, rj_amd_agent_set_async_scratch_limit,                \
-    hsa_amd_agent_set_async_scratch_limit_fn_t)                                                    \
+    decltype(&hsa_amd_agent_set_async_scratch_limit))                                              \
   X(amd_memory_get_preferred_copy_engine, amd_ext_, amd_ext_ != nullptr, true,                     \
     hsa_amd_memory_get_preferred_copy_engine_fn, rj_amd_memory_get_preferred_copy_engine,          \
-    hsa_amd_memory_get_preferred_copy_engine_fn_t)                                                 \
+    decltype(&hsa_amd_memory_get_preferred_copy_engine))                                           \
   X(amd_memory_fill, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_memory_fill_fn,                  \
-    rj_amd_memory_fill, hsa_amd_memory_fill_fn_t)                                                  \
+    rj_amd_memory_fill, decltype(&hsa_amd_memory_fill))                                            \
   X(amd_memory_async_batch_copy, amd_ext_,                                                         \
     api_table_has_field(amd_ext_, offsetof(AmdExtTable, hsa_amd_memory_async_batch_copy_fn),       \
                         &AmdExtTable::hsa_amd_memory_async_batch_copy_fn),                         \
     true, hsa_amd_memory_async_batch_copy_fn, rj_amd_memory_async_batch_copy,                      \
-    hsa_amd_memory_async_batch_copy_fn_t)                                                          \
+    decltype(&hsa_amd_memory_async_batch_copy))                                                    \
   X(amd_agent_preload, amd_ext_,                                                                   \
     api_table_has_field(amd_ext_, offsetof(AmdExtTable, hsa_amd_agent_preload_fn),                 \
                         &AmdExtTable::hsa_amd_agent_preload_fn),                                   \
-    true, hsa_amd_agent_preload_fn, rj_amd_agent_preload, hsa_amd_agent_preload_fn_t)              \
+    true, hsa_amd_agent_preload_fn, rj_amd_agent_preload, decltype(&hsa_amd_agent_preload))        \
   X(amd_queue_intercept_create, amd_ext_,                                                          \
     api_table_has_field(amd_ext_, offsetof(AmdExtTable, hsa_amd_queue_intercept_create_fn),        \
                         &AmdExtTable::hsa_amd_queue_intercept_create_fn),                          \
     true, hsa_amd_queue_intercept_create_fn, rj_amd_queue_intercept_create,                        \
-    hsa_amd_queue_intercept_create_fn_t)
+    decltype(&hsa_amd_queue_intercept_create))
 
 /// @brief Process-local HSA API table patch state for the rocjitsu DBT tool.
 ///
@@ -1207,8 +1239,9 @@ public:
       std::fprintf(stderr, "[rocjitsu-hooks] OnLoad called while hook is already active\n");
       return false;
     }
-    if (!validate_table(table))
+    if (!validate_table(table)) {
       return false;
+    }
 
     table_ = table;
     core_ = table->core_;
@@ -1217,14 +1250,16 @@ public:
     config_ = std::move(config);
 
 #define RJ_SAVE_SAVED_ONLY(name, table_ptr, present, field, type)                                  \
-  if (present)                                                                                     \
-    original_##name##_ = (table_ptr)->field;
+  if (present) {                                                                                   \
+    original_##name##_ = (table_ptr)->field;                                                       \
+  }
     RJ_HSA_SAVED_ONLY_ENTRIES(RJ_SAVE_SAVED_ONLY)
 #undef RJ_SAVE_SAVED_ONLY
 
 #define RJ_SAVE_PATCH(name, table_ptr, present, patch_if_original, field, wrapper, type)           \
-  if (present)                                                                                     \
-    original_##name##_ = (table_ptr)->field;
+  if (present) {                                                                                   \
+    original_##name##_ = (table_ptr)->field;                                                       \
+  }
     RJ_HSA_PATCH_ENTRIES(RJ_SAVE_PATCH)
 #undef RJ_SAVE_PATCH
 
@@ -1238,8 +1273,9 @@ public:
     }
 
 #define RJ_INSTALL_PATCH(name, table_ptr, present, patch_if_original, field, wrapper, type)        \
-  if ((present) && (!(patch_if_original) || original_##name##_ != nullptr))                        \
-    (table_ptr)->field = wrapper;
+  if ((present) && (!(patch_if_original) || original_##name##_ != nullptr)) {                      \
+    (table_ptr)->field = wrapper;                                                                  \
+  }
     RJ_HSA_PATCH_ENTRIES(RJ_INSTALL_PATCH)
 #undef RJ_INSTALL_PATCH
 
@@ -1259,8 +1295,9 @@ public:
       if (active_ && core_ != nullptr) {
         log_message(kLogVerbose, "uninstall begin");
 #define RJ_RESTORE_PATCH(name, table_ptr, present, patch_if_original, field, wrapper, type)        \
-  if ((present) && (table_ptr)->field == wrapper)                                                  \
-    (table_ptr)->field = original_##name##_;
+  if ((present) && (table_ptr)->field == wrapper) {                                                \
+    (table_ptr)->field = original_##name##_;                                                       \
+  }
         RJ_HSA_PATCH_ENTRIES(RJ_RESTORE_PATCH)
 #undef RJ_RESTORE_PATCH
       }
@@ -1276,8 +1313,9 @@ public:
     // against stale entry points and post-unload callbacks become no-ops.
     rocjitsu::hooks::clear_virtual_lds_runtime_api();
     clear_memory_pool_mapper();
-    if (!had_state)
+    if (!had_state) {
       return;
+    }
 
     std::lock_guard lock(mutex_);
     log_message(kLogVerbose, "uninstall end");
@@ -1389,17 +1427,21 @@ RjHsaLayer &layer() {
 
 /// @brief Parse a uint32_t from a NUL-terminated sysfs text value.
 [[nodiscard]] bool parse_u32_text(const char *text, uint32_t *out) {
-  if (!text || !out)
+  if (!text || !out) {
     return false;
+  }
   errno = 0;
   char *end = nullptr;
   unsigned long parsed = std::strtoul(text, &end, 0);
-  if (errno != 0 || end == text || parsed > UINT32_MAX)
+  if (errno != 0 || end == text || parsed > UINT32_MAX) {
     return false;
-  while (*end == '\n' || *end == '\r' || *end == ' ' || *end == '\t')
+  }
+  while (*end == '\n' || *end == '\r' || *end == ' ' || *end == '\t') {
     ++end;
-  if (*end != '\0')
+  }
+  if (*end != '\0') {
     return false;
+  }
   *out = static_cast<uint32_t>(parsed);
   return true;
 }
@@ -1407,18 +1449,21 @@ RjHsaLayer &layer() {
 /// @brief Read a uint32_t from a sysfs-style file.
 [[nodiscard]] std::optional<uint32_t> read_u32_file(const std::string &path) {
   FILE *file = std::fopen(path.c_str(), "r");
-  if (!file)
+  if (!file) {
     return std::nullopt;
+  }
 
   std::array<char, 64> buffer{};
   char *line = std::fgets(buffer.data(), static_cast<int>(buffer.size()), file);
   std::fclose(file);
-  if (!line)
+  if (!line) {
     return std::nullopt;
+  }
 
   uint32_t value = 0;
-  if (!parse_u32_text(buffer.data(), &value))
+  if (!parse_u32_text(buffer.data(), &value)) {
     return std::nullopt;
+  }
   return value;
 }
 
@@ -1443,18 +1488,21 @@ struct TopologyNodeResult {
 /// @brief Search one KFD topology root for the node id owning @p gpu_id.
 [[nodiscard]] TopologyNodeResult node_id_for_kfd_gpu_id_in_root(const char *root, uint32_t gpu_id) {
   DIR *dir = opendir(root);
-  if (!dir)
+  if (!dir) {
     return TopologyNodeResult{TopologyLookup::kUnreadable, 0};
+  }
 
   bool unreadable_node = false;
   TopologyNodeResult result{TopologyLookup::kAbsent, 0};
   while (dirent *entry = readdir(dir)) {
-    if (entry->d_name[0] == '.')
+    if (entry->d_name[0] == '.') {
       continue;
+    }
 
     uint32_t node_id = 0;
-    if (!parse_u32_text(entry->d_name, &node_id))
+    if (!parse_u32_text(entry->d_name, &node_id)) {
       continue;
+    }
 
     std::string gpu_id_path = std::string(root) + "/" + entry->d_name + "/gpu_id";
     std::optional<uint32_t> node_gpu_id = read_u32_file(gpu_id_path);
@@ -1471,8 +1519,9 @@ struct TopologyNodeResult {
     }
   }
   closedir(dir);
-  if (result.status == TopologyLookup::kAbsent && unreadable_node)
+  if (result.status == TopologyLookup::kAbsent && unreadable_node) {
     result.status = TopologyLookup::kUnreadable;
+  }
   return result;
 }
 
@@ -1483,8 +1532,9 @@ struct TopologyNodeResult {
 /// not expose that value directly, so the hook reads the redirected topology
 /// tree and later compares agents by `HSA_AMD_AGENT_INFO_DRIVER_NODE_ID`.
 [[nodiscard]] TopologyNodeResult node_id_for_kfd_gpu_id(uint32_t gpu_id) {
-  if (std::optional<std::string> root = rocjitsu::hooks::topology_nodes_root_for_test())
+  if (std::optional<std::string> root = rocjitsu::hooks::topology_nodes_root_for_test()) {
     return node_id_for_kfd_gpu_id_in_root(root->c_str(), gpu_id);
+  }
 
   constexpr std::array<const char *, 2> kTopologyNodeRoots = {
       "/sys/devices/virtual/kfd/kfd/topology/nodes", "/sys/class/kfd/kfd/topology/nodes"};
@@ -1494,10 +1544,12 @@ struct TopologyNodeResult {
   TopologyNodeResult verdict{TopologyLookup::kUnreadable, 0};
   for (const char *root : kTopologyNodeRoots) {
     TopologyNodeResult result = node_id_for_kfd_gpu_id_in_root(root, gpu_id);
-    if (result.status == TopologyLookup::kFound)
+    if (result.status == TopologyLookup::kFound) {
       return result;
-    if (result.status == TopologyLookup::kAbsent)
+    }
+    if (result.status == TopologyLookup::kAbsent) {
       verdict.status = TopologyLookup::kAbsent;
+    }
   }
   return verdict;
 }
@@ -1532,8 +1584,9 @@ public:
   hsa_agent_t map(hsa_agent_t agent) {
     ensure_discovered();
     std::lock_guard lock(mutex_);
-    if (has_mapping_ && agent.handle == guest_.handle)
+    if (has_mapping_ && agent.handle == guest_.handle) {
       return host_;
+    }
     return agent;
   }
 
@@ -1594,8 +1647,9 @@ public:
     // underneath this one would invert the order used by ensure_discovered().
     const bool configured = dbt_guest_configured();
     std::lock_guard lock(mutex_);
-    if (!has_mapping_)
+    if (!has_mapping_) {
       return MappingSnapshot{{}, {}, configured};
+    }
     return MappingSnapshot{guest_, host_, false};
   }
 
@@ -1616,8 +1670,9 @@ public:
   hsa_agent_t guest_for_host(hsa_agent_t agent) {
     ensure_discovered();
     std::lock_guard lock(mutex_);
-    if (has_mapping_ && agent.handle == host_.handle)
+    if (has_mapping_ && agent.handle == host_.handle) {
       return guest_;
+    }
     return agent;
   }
 
@@ -1679,12 +1734,15 @@ private:
   /// @brief Return true when an HSA ISA name names the requested target.
   static bool target_matches_isa_name(std::string_view isa_name, std::string_view target) {
     constexpr std::string_view prefix = "amdgcn-amd-amdhsa--";
-    if (isa_name.starts_with(prefix))
+    if (isa_name.starts_with(prefix)) {
       isa_name.remove_prefix(prefix.size());
-    if (!isa_name.starts_with(target))
+    }
+    if (!isa_name.starts_with(target)) {
       return false;
-    if (isa_name.size() == target.size())
+    }
+    if (isa_name.size() == target.size()) {
       return true;
+    }
     return isa_name[target.size()] == ':' || isa_name[target.size()] == '\0';
   }
 
@@ -1692,16 +1750,19 @@ private:
   static hsa_status_t isa_callback(hsa_isa_t isa, void *data) {
     auto *search = static_cast<IsaSearchData *>(data);
     auto *get_info = layer().isa_get_info_alt();
-    if (!get_info)
+    if (!get_info) {
       return HSA_STATUS_ERROR;
+    }
 
     uint32_t name_length = 0;
     if (get_info(isa, HSA_ISA_INFO_NAME_LENGTH, &name_length) != HSA_STATUS_SUCCESS ||
-        name_length == 0)
+        name_length == 0) {
       return HSA_STATUS_SUCCESS;
+    }
     std::vector<char> name(name_length + 1, 0);
-    if (get_info(isa, HSA_ISA_INFO_NAME, name.data()) != HSA_STATUS_SUCCESS)
+    if (get_info(isa, HSA_ISA_INFO_NAME, name.data()) != HSA_STATUS_SUCCESS) {
       return HSA_STATUS_SUCCESS;
+    }
 
     if (target_matches_isa_name(std::string_view(name.data()), search->target.name)) {
       search->found = true;
@@ -1713,8 +1774,9 @@ private:
   /// @brief Return true when @p agent advertises an ISA matching @p target.
   bool agent_has_target(hsa_agent_t agent, TargetInfo target) {
     auto *iterate_isas = layer().agent_iterate_isas();
-    if (!iterate_isas)
+    if (!iterate_isas) {
       return false;
+    }
     IsaSearchData search{this, target, false};
     hsa_status_t status = iterate_isas(agent, isa_callback, &search);
     return search.found || status == HSA_STATUS_INFO_BREAK;
@@ -1723,14 +1785,16 @@ private:
   /// @brief Read ROCR's KFD topology node id for @p agent.
   std::optional<uint32_t> agent_driver_node_id(hsa_agent_t agent) {
     auto *get_info = layer().agent_get_info();
-    if (!get_info)
+    if (!get_info) {
       return std::nullopt;
+    }
 
     uint32_t node_id = 0;
     hsa_status_t status =
         get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &node_id);
-    if (status != HSA_STATUS_SUCCESS)
+    if (status != HSA_STATUS_SUCCESS) {
       return std::nullopt;
+    }
     return node_id;
   }
 
@@ -1765,19 +1829,22 @@ private:
     ++search->visited;
     const bool claimed_host =
         search->host_agent.handle == 0 && search->self->agent_matches_host(agent, *search);
-    if (claimed_host)
+    if (claimed_host) {
       search->host_agent = agent;
+    }
     if (search->guest_agent.handle == 0 && search->self->agent_has_target(agent, search->guest)) {
       // Leave the guest slot open for a distinct agent rather than aliasing the
       // host into it: a mapping whose two sides are the same agent translates
       // nothing.
-      if (claimed_host)
+      if (claimed_host) {
         search->role_collision = true;
-      else
+      } else {
         search->guest_agent = agent;
+      }
     }
-    if (search->guest_agent.handle != 0 && search->host_agent.handle != 0)
+    if (search->guest_agent.handle != 0 && search->host_agent.handle != 0) {
       return HSA_STATUS_INFO_BREAK;
+    }
     return HSA_STATUS_SUCCESS;
   }
 
@@ -1809,10 +1876,12 @@ private:
       // full ROCR agent iteration, and map()/is_guest() reach here once per copy and
       // once per dispatch. The first discovery still waits, because discovered_ is
       // false until an attempt has been published.
-      while (!attempt_settled_locked(policy) && discovering_)
+      while (!attempt_settled_locked(policy) && discovering_) {
         discovery_cv_.wait(lock);
-      if (attempt_settled_locked(policy))
+      }
+      if (attempt_settled_locked(policy)) {
         return;
+      }
       discovering_ = true;
       generation = generation_;
     }
@@ -1872,15 +1941,16 @@ private:
           discovered_guest = search.guest_agent;
           discovered_host = search.host_agent;
           role_collision = search.role_collision && search.guest_agent.handle == 0;
-          if (has_mapping)
+          if (has_mapping) {
             outcome = DiscoveryOutcome::kResolved;
-          else if (!iterated || search.visited == 0)
+          } else if (!iterated || search.visited == 0) {
             // ROCR refused the iteration or has published no agent yet.
             outcome = DiscoveryOutcome::kRetryable;
-          else
+          } else {
             // A complete agent list that does not hold the configured pair is a
             // configuration verdict; a retry reads the same list.
             outcome = DiscoveryOutcome::kFinal;
+          }
         }
       }
     }
@@ -1905,8 +1975,9 @@ private:
       discovering_ = false;
     }
     discovery_cv_.notify_all();
-    if (!published)
+    if (!published) {
       return;
+    }
 
     if (has_mapping) {
       log_message(kLogInfo, "mapped guest agent=%llu to host agent=%llu",
@@ -1967,8 +2038,9 @@ public:
     ensure_discovered();
     std::lock_guard lock(mutex_);
     auto it = guest_to_host_.find(pool.handle);
-    if (it == guest_to_host_.end())
+    if (it == guest_to_host_.end()) {
       return pool;
+    }
     return hsa_amd_memory_pool_t{it->second};
   }
 
@@ -1991,20 +2063,23 @@ private:
 
   /// @brief Collected memory pools for one HSA agent.
   struct PoolList {
-    hsa_amd_memory_pool_get_info_fn_t get_info = nullptr;
+    decltype(&hsa_amd_memory_pool_get_info) get_info = nullptr;
     std::vector<PoolInfo> pools;
   };
 
   /// @brief Callback that records a pool and its matching attributes.
   static hsa_status_t collect_pool(hsa_amd_memory_pool_t pool, void *data) {
     auto *list = static_cast<PoolList *>(data);
-    if (list == nullptr || list->get_info == nullptr)
+    if (list == nullptr || list->get_info == nullptr) {
       return HSA_STATUS_ERROR;
+    }
 
     PoolInfo info{};
     info.pool = pool;
-    if (list->get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &info.segment) != HSA_STATUS_SUCCESS)
+    if (list->get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &info.segment) !=
+        HSA_STATUS_SUCCESS) {
       return HSA_STATUS_SUCCESS;
+    }
     (void)list->get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &info.global_flags);
     (void)list->get_info(pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED,
                          &info.runtime_alloc_allowed);
@@ -2024,8 +2099,9 @@ private:
   static std::optional<PoolInfo> find_match(const PoolInfo &guest,
                                             std::span<const PoolInfo> host_pools) {
     for (const PoolInfo &host : host_pools) {
-      if (same_kind(guest, host))
+      if (same_kind(guest, host)) {
         return host;
+      }
     }
     return std::nullopt;
   }
@@ -2034,8 +2110,9 @@ private:
   void ensure_discovered() {
     {
       std::lock_guard lock(mutex_);
-      if (discovered_)
+      if (discovered_) {
         return;
+      }
     }
 
     auto *iterate_pools = layer().amd_agent_iterate_memory_pools();
@@ -2051,8 +2128,9 @@ private:
     const AgentMapper::MappingSnapshot agents = AgentMapper::instance().snapshot();
     const hsa_agent_t guest = agents.guest;
     const hsa_agent_t host = agents.host;
-    if (guest.handle == 0 || host.handle == 0)
+    if (guest.handle == 0 || host.handle == 0) {
       return;
+    }
 
     std::unordered_map<uint64_t, uint64_t> discovered;
     bool mapped_any_pool = false;
@@ -2066,8 +2144,9 @@ private:
       if (guest_status == HSA_STATUS_SUCCESS && host_status == HSA_STATUS_SUCCESS) {
         for (const PoolInfo &guest_pool : guest_pools.pools) {
           std::optional<PoolInfo> host_pool = find_match(guest_pool, host_pools.pools);
-          if (!host_pool)
+          if (!host_pool) {
             continue;
+          }
           discovered[guest_pool.pool.handle] = host_pool->pool.handle;
           mapped_any_pool = true;
           log_message(kLogDebug, "mapped guest pool=%llu to host pool=%llu",
@@ -2086,8 +2165,9 @@ private:
 
     {
       std::lock_guard lock(mutex_);
-      if (discovered_)
+      if (discovered_) {
         return;
+      }
       guest_to_host_ = std::move(discovered);
       discovered_ = true;
     }
@@ -2121,11 +2201,13 @@ void clear_agent_mapper() { AgentMapper::instance().clear(); }
 /// null check is a local guard against that precondition being relaxed.
 [[nodiscard]] bool agent_is_gpu(hsa_agent_t agent) {
   auto *get_info = layer().agent_get_info();
-  if (get_info == nullptr)
+  if (get_info == nullptr) {
     return true;
+  }
   hsa_device_type_t device_type{};
-  if (get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type) != HSA_STATUS_SUCCESS)
+  if (get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type) != HSA_STATUS_SUCCESS) {
     return true;
+  }
   return device_type == HSA_DEVICE_TYPE_GPU;
 }
 
@@ -2199,15 +2281,17 @@ hsa_status_t forward_amd_call(Original original, Args &&...args) {
 hsa_status_t HSA_API rj_code_object_reader_create_from_memory(
     const void *code_object, size_t size, hsa_code_object_reader_t *code_object_reader) {
   auto *original = layer().create_from_memory();
-  if (original == nullptr)
+  if (original == nullptr) {
     return HSA_STATUS_ERROR;
+  }
 
   const hsa_status_t status = original(code_object, size, code_object_reader);
   if (status == HSA_STATUS_SUCCESS && code_object_reader != nullptr && code_object != nullptr) {
     if (!CodeObjectReaderRegistry::instance().store(
             *code_object_reader, static_cast<const uint8_t *>(code_object), size, {})) {
-      if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
+      if (auto *original_destroy = layer().destroy(); original_destroy != nullptr) {
         (void)original_destroy(*code_object_reader);
+      }
       *code_object_reader = {};
       std::fprintf(stderr, "[rocjitsu-hooks] failed to track memory-backed code-object reader\n");
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -2219,10 +2303,11 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_memory(
 }
 
 hsa_status_t HSA_API rj_code_object_reader_create_from_file(
-    hsa_file_t file, hsa_code_object_reader_t *code_object_reader) {
+    hsa_file_t file, hsa_code_object_reader_t *code_object_reader) noexcept {
   auto *original = layer().create_from_file();
-  if (original == nullptr)
+  if (original == nullptr) {
     return HSA_STATUS_ERROR;
+  }
 
   const hsa_status_t status = original(file, code_object_reader);
   if (status == HSA_STATUS_SUCCESS && code_object_reader != nullptr) {
@@ -2232,29 +2317,22 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_file(
     // the same DBT path as memory-backed framework code objects.
     struct stat statbuf {};
     if (file >= 0 && fstat(file, &statbuf) == 0 && statbuf.st_size > 0) {
-      std::shared_ptr<std::vector<uint8_t>> owned;
-      try {
-        owned = std::make_shared<std::vector<uint8_t>>(static_cast<size_t>(statbuf.st_size));
-      } catch (const std::bad_alloc &) {
-        // The HSA tools ABI cannot propagate C++ allocation failures. Fall
-        // through to the existing diagnostic and let ROCR keep the reader.
+      auto owned = std::make_shared<std::vector<uint8_t>>(static_cast<size_t>(statbuf.st_size));
+
+      size_t done = 0;
+      while (done < owned->size()) {
+        const ssize_t read =
+            pread(file, owned->data() + done, owned->size() - done, static_cast<off_t>(done));
+        if (read <= 0) {
+          break;
+        }
+        done += static_cast<size_t>(read);
       }
-      if (owned) {
-        size_t done = 0;
-        while (done < owned->size()) {
-          const ssize_t read =
-              pread(file, owned->data() + done, owned->size() - done, static_cast<off_t>(done));
-          if (read <= 0)
-            break;
-          done += static_cast<size_t>(read);
-        }
-        if (done == owned->size() &&
-            CodeObjectReaderRegistry::instance().store(*code_object_reader, owned->data(),
-                                                       owned->size(), owned)) {
-          log_message(kLogDebug, "registered file-backed reader=%llu bytes=%zu",
-                      static_cast<unsigned long long>(code_object_reader->handle), owned->size());
-          return status;
-        }
+      if (done == owned->size() && CodeObjectReaderRegistry::instance().store(
+                                       *code_object_reader, owned->data(), owned->size(), owned)) {
+        log_message(kLogDebug, "registered file-backed reader=%llu bytes=%zu",
+                    static_cast<unsigned long long>(code_object_reader->handle), owned->size());
+        return status;
       }
     }
     std::fprintf(stderr,
@@ -2271,8 +2349,9 @@ hsa_status_t HSA_API rj_code_object_reader_destroy(hsa_code_object_reader_t code
   CodeObjectReaderRegistry::instance().remove(code_object_reader);
 
   auto *original = layer().destroy();
-  if (original == nullptr)
+  if (original == nullptr) {
     return HSA_STATUS_ERROR;
+  }
   hsa_status_t status = original(code_object_reader);
   log_message(kLogVerbose, "reader_destroy status=%d", static_cast<int>(status));
   return status;
@@ -2281,11 +2360,13 @@ hsa_status_t HSA_API rj_code_object_reader_destroy(hsa_code_object_reader_t code
 /// @brief Map every agent in a caller-owned array into a temporary vector.
 std::vector<hsa_agent_t> map_agent_array(const hsa_agent_t *agents, size_t count) {
   std::vector<hsa_agent_t> mapped;
-  if (!agents || count == 0)
+  if (!agents || count == 0) {
     return mapped;
+  }
   mapped.reserve(count);
-  for (size_t i = 0; i < count; ++i)
+  for (size_t i = 0; i < count; ++i) {
     mapped.push_back(AgentMapper::instance().map(agents[i]));
+  }
   return mapped;
 }
 
@@ -2298,8 +2379,9 @@ struct MappedAgentList {
 /// @brief Map a caller-owned agent array and keep only the first mapped handle.
 MappedAgentList map_unique_agent_array(const hsa_agent_t *agents, size_t count) {
   MappedAgentList mapped;
-  if (!agents || count == 0)
+  if (!agents || count == 0) {
     return mapped;
+  }
 
   mapped.agents.reserve(count);
   for (size_t i = 0; i < count; ++i) {
@@ -2336,12 +2418,14 @@ struct MappedAccessAgents {
 MappedAccessAgents map_access_agent_array(const hsa_agent_t *agents, uint32_t count,
                                           const uint32_t *flags) {
   MappedAccessAgents mapped;
-  if (!agents || count == 0)
+  if (!agents || count == 0) {
     return mapped;
+  }
 
   mapped.agents.reserve(count);
-  if (flags)
+  if (flags) {
     mapped.flags.reserve(count);
+  }
 
   for (uint32_t i = 0; i < count; ++i) {
     hsa_agent_t agent = AgentMapper::instance().map(agents[i]);
@@ -2363,8 +2447,9 @@ MappedAccessAgents map_access_agent_array(const hsa_agent_t *agents, uint32_t co
     }
 
     mapped.agents.push_back(agent);
-    if (flags)
+    if (flags) {
       mapped.flags.push_back(flags[i]);
+    }
   }
 
   return mapped;
@@ -2380,8 +2465,9 @@ struct MappedAccessDescs {
 MappedAccessDescs map_unique_access_descs(const hsa_amd_memory_access_desc_t *desc,
                                           size_t desc_cnt) {
   MappedAccessDescs mapped;
-  if (!desc || desc_cnt == 0)
+  if (!desc || desc_cnt == 0) {
     return mapped;
+  }
 
   mapped.descs.reserve(desc_cnt);
   for (size_t i = 0; i < desc_cnt; ++i) {
@@ -2418,7 +2504,7 @@ struct BatchCopyAgentShape {
 ///
 /// @details `hsa_amd_memory_copy_op_t` stores scalar and list fields in unions.
 /// Current ROCR uses a scalar `src_agent` for every supported operation and uses
-/// `dst_agent_list` for multi-entry/broadcast forms. `src_agent_list` is
+/// `dst_agent_list` for multi-entry, broadcast, and rect forms. `src_agent_list` is
 /// documented as reserved, so probing it as a pointer misclassifies ordinary
 /// scalar source-agent handles as caller-owned arrays.
 BatchCopyAgentShape batch_copy_agent_shape(const hsa_amd_memory_copy_op_t &op) {
@@ -2434,6 +2520,7 @@ BatchCopyAgentShape batch_copy_agent_shape(const hsa_amd_memory_copy_op_t &op) {
         .dst_list = op.num_entries > 0,
     };
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
+  case HSA_AMD_MEMORY_COPY_OP_RECT:
     return BatchCopyAgentShape{
         .src_scalar = true,
         .dst_scalar = false,
@@ -2452,8 +2539,9 @@ BatchCopyAgentShape batch_copy_agent_shape(const hsa_amd_memory_copy_op_t &op) {
 /// count. Shrinking the array in place preserves that ownership while avoiding
 /// the common host+guest pair collapsing into two copies of the visible guest.
 void map_pointer_info_accessible_agents(uint32_t *num_agents_accessible, hsa_agent_t **accessible) {
-  if (num_agents_accessible == nullptr || accessible == nullptr || *accessible == nullptr)
+  if (num_agents_accessible == nullptr || accessible == nullptr || *accessible == nullptr) {
     return;
+  }
 
   hsa_agent_t *agents = *accessible;
   uint32_t out_count = 0;
@@ -2466,8 +2554,9 @@ void map_pointer_info_accessible_agents(uint32_t *num_agents_accessible, hsa_age
         break;
       }
     }
-    if (duplicate)
+    if (duplicate) {
       continue;
+    }
     agents[out_count++] = mapped;
   }
   *num_agents_accessible = out_count;
@@ -2528,8 +2617,9 @@ public:
     state.queue = queue;
     state.host_agent = host_agent;
     state.doorbell_signal = queue->doorbell_signal.handle;
-    if (auto config = layer().config())
+    if (auto config = layer().config()) {
       state.host_lds_bytes = arch_lds_bytes(config->target.arch);
+    }
     // host_agent is the mapped agent: for a guest queue rj_queue_create remapped
     // the guest agent to the guest's execution host, so a match here means this is
     // the queue that runs guest work. Only that queue's dispatches are rewritten
@@ -2545,8 +2635,9 @@ public:
     // The polling scanner is only a fallback for non-intercept queues that use
     // the normal doorbell path; starting it for intercept-only workloads leaves
     // an unnecessary background reader active during process teardown.
-    if (!uses_packet_interceptor)
+    if (!uses_packet_interceptor) {
       ensure_scanner_started_locked();
+    }
     const uint64_t queue_key = reinterpret_cast<uintptr_t>(queue);
     auto old = queues_by_ptr_.find(queue_key);
     if (old != queues_by_ptr_.end()) {
@@ -2572,13 +2663,15 @@ public:
 
   /// @brief Release all slot-owned resources for a queue being destroyed.
   void erase_queue(hsa_queue_t *queue) {
-    if (queue == nullptr)
+    if (queue == nullptr) {
       return;
+    }
     std::lock_guard lock(mutex_);
     const uint64_t queue_key = reinterpret_cast<uintptr_t>(queue);
     auto it = queues_by_ptr_.find(queue_key);
-    if (it == queues_by_ptr_.end())
+    if (it == queues_by_ptr_.end()) {
       return;
+    }
     queues_by_doorbell_.erase(it->second.doorbell_signal);
     release_queue(it->second);
     queues_by_ptr_.erase(it);
@@ -2596,8 +2689,9 @@ public:
   /// the slot record also prevents the scanner from rewriting a stale completed
   /// packet. Interceptor buffers are already retired, so reap them immediately.
   void retire_destroyed_completion_signal(hsa_signal_t signal) {
-    if (signal.handle == 0)
+    if (signal.handle == 0) {
       return;
+    }
 
     // O(queues x slots) per hsa_signal_destroy. Acceptable because virtual-LDS
     // dispatches (the only ones that borrow a completion signal) are rare relative
@@ -2608,18 +2702,21 @@ public:
     std::lock_guard lock(mutex_);
     for (auto &[queue_key, state] : queues_by_ptr_) {
       (void)queue_key;
-      for (VirtualLdsDispatchBuffers &buffers : state.slots)
+      for (VirtualLdsDispatchBuffers &buffers : state.slots) {
         mark_destroyed_completion_signal(buffers, signal);
-      for (VirtualLdsDispatchBuffers &buffers : state.retired_buffers)
+      }
+      for (VirtualLdsDispatchBuffers &buffers : state.retired_buffers) {
         mark_destroyed_completion_signal(buffers, signal);
+      }
       release_completed_retired_buffers(state);
     }
   }
 
   /// @brief Rewrite any kernel dispatch packet made visible by this doorbell.
   void rewrite_before_doorbell(hsa_signal_t signal, hsa_signal_value_t value) {
-    if (value < 0)
+    if (value < 0) {
       return;
+    }
     std::lock_guard lock(mutex_);
     auto doorbell_it = queues_by_doorbell_.find(signal.handle);
     static std::atomic<uint32_t> doorbell_trace_count{0};
@@ -2629,17 +2726,21 @@ public:
                                  static_cast<long long>(value),
                                  doorbell_it != queues_by_doorbell_.end());
     }
-    if (doorbell_it == queues_by_doorbell_.end())
+    if (doorbell_it == queues_by_doorbell_.end()) {
       return;
+    }
     auto queue_it = queues_by_ptr_.find(doorbell_it->second);
-    if (queue_it == queues_by_ptr_.end())
+    if (queue_it == queues_by_ptr_.end()) {
       return;
+    }
 
     QueueState &state = queue_it->second;
-    if (state.queue == nullptr || state.queue->base_address == nullptr || state.queue->size == 0)
+    if (state.queue == nullptr || state.queue->base_address == nullptr || state.queue->size == 0) {
       return;
-    if (state.uses_packet_interceptor)
+    }
+    if (state.uses_packet_interceptor) {
       return;
+    }
 
     const uint64_t packet_id = static_cast<uint64_t>(value);
     // A producer (single- OR multi-producer) can reserve and publish several
@@ -2692,8 +2793,9 @@ public:
       scanner_.request_stop();
       scanner_to_join = std::move(scanner_);
     }
-    if (scanner_to_join.joinable())
+    if (scanner_to_join.joinable()) {
       scanner_to_join.join();
+    }
 
     std::lock_guard lock(mutex_);
     for (auto &[queue, state] : queues_by_ptr_) {
@@ -2715,9 +2817,10 @@ public:
   /// @brief Rewrite a contiguous packet batch delivered by ROCR's intercept queue.
   void rewrite_intercept_packets(hsa_queue_t *queue, const void *pkts, uint64_t pkt_count,
                                  uint64_t user_pkt_index,
-                                 hsa_amd_queue_intercept_packet_writer_t writer) {
-    if (writer == nullptr || pkts == nullptr || pkt_count == 0)
+                                 hsa_amd_queue_intercept_packet_writer writer) {
+    if (writer == nullptr || pkts == nullptr || pkt_count == 0) {
       return;
+    }
     static_assert(sizeof(hsa_kernel_dispatch_packet_t) == 64,
                   "AQL packets must remain 64 bytes for intercept rewriting");
 
@@ -2746,8 +2849,9 @@ public:
                                  static_cast<unsigned long long>(pkt_count));
       for (uint64_t index = 0; index < pkt_count; ++index) {
         hsa_kernel_dispatch_packet_t &packet = packets[static_cast<size_t>(index)];
-        if (!is_kernel_dispatch_packet(packet))
+        if (!is_kernel_dispatch_packet(packet)) {
           continue;
+        }
         ensure_intercept_packet_private_size(packet, user_pkt_index + index);
         const uint64_t packet_id = user_pkt_index + index;
         auto prepared = prepare_virtual_lds_dispatch(state, packet, packet_id, "intercept");
@@ -2815,10 +2919,12 @@ private:
   };
 
   static void release_queue(QueueState &state) {
-    for (VirtualLdsDispatchBuffers &buffers : state.slots)
+    for (VirtualLdsDispatchBuffers &buffers : state.slots) {
       release_virtual_lds_buffers(buffers);
-    for (VirtualLdsDispatchBuffers &buffers : state.retired_buffers)
+    }
+    for (VirtualLdsDispatchBuffers &buffers : state.retired_buffers) {
       release_virtual_lds_buffers(buffers);
+    }
     state.retired_buffers.clear();
   }
 
@@ -2829,8 +2935,9 @@ private:
         release_virtual_lds_buffers(*it);
         continue;
       }
-      if (out != it)
+      if (out != it) {
         *out = *it;
+      }
       ++out;
     }
     state.retired_buffers.erase(out, state.retired_buffers.end());
@@ -2842,8 +2949,9 @@ private:
     // Internally-created signals are destroyed only by release_virtual_lds_buffers
     // through the saved original HSA entry point, so they never enter this hook.
     // Keep the ownership check explicit in case a handle is exposed unexpectedly.
-    if (buffers.owns_completion_signal || buffers.completion_signal.handle != signal.handle)
+    if (buffers.owns_completion_signal || buffers.completion_signal.handle != signal.handle) {
       return;
+    }
 
     buffers.completion_signal = {};
     buffers.completion_signal_was_pending = false;
@@ -2862,8 +2970,9 @@ private:
 
   static void retire_slot_buffers(QueueState &state, uint32_t slot) {
     VirtualLdsDispatchBuffers &slot_buffers = state.slots[slot];
-    if (empty_virtual_lds_buffers(slot_buffers))
+    if (empty_virtual_lds_buffers(slot_buffers)) {
       return;
+    }
     // AQL queue slots may be reused before the previously dispatched kernel has
     // retired. Move old virtual-LDS backing allocations to the retired list and
     // let completion-signal cleanup release them once CP has finished the
@@ -2883,8 +2992,9 @@ private:
   static void ensure_intercept_packet_private_size(hsa_kernel_dispatch_packet_t &packet,
                                                    uint64_t packet_id) {
     const uint32_t descriptor_private = descriptor_private_segment_size(packet.kernel_object);
-    if (descriptor_private <= packet.private_segment_size)
+    if (descriptor_private <= packet.private_segment_size) {
       return;
+    }
 
     // Unlike ensure_queue_packet_private_size (the ring path), no INVALID header
     // toggle is needed here: the intercept path edits a private std::vector copy
@@ -2902,8 +3012,9 @@ private:
   static void ensure_queue_packet_private_size(hsa_kernel_dispatch_packet_t &packet,
                                                uint64_t packet_id, uint32_t slot, uint16_t header) {
     const uint32_t descriptor_private = descriptor_private_segment_size(packet.kernel_object);
-    if (descriptor_private <= packet.private_segment_size)
+    if (descriptor_private <= packet.private_segment_size) {
       return;
+    }
 
     const uint32_t original_private = packet.private_segment_size;
     // Mark the slot not-ready (INVALID) while mutating the body, then republish
@@ -2925,8 +3036,9 @@ private:
   static void note_packet_ready(QueueState &state, uint64_t packet_id, bool ready) {
     // Only packets at or beyond the contiguous cursor can advance it; a ready
     // packet below it was already accounted for.
-    if (!ready || packet_id < state.next_packet_id)
+    if (!ready || packet_id < state.next_packet_id) {
       return;
+    }
 
     // Remember this packet as ready even if it is not the one the cursor is
     // waiting for. An out-of-order producer can ring a later packet while an
@@ -2961,8 +3073,9 @@ private:
   write_virtual_lds_kernarg_wrapper(void *wrapper, const KernargExtensionLayout &layout,
                                     const hsa_kernel_dispatch_packet_t &packet,
                                     const VirtualLdsDispatchState &dispatch_state) {
-    if (wrapper == nullptr)
+    if (wrapper == nullptr) {
       return false;
+    }
     const uint64_t original_kernarg_pointer = reinterpret_cast<uintptr_t>(packet.kernarg_address);
     const KernargExtensionPayloadWrite payload{
         .data = &dispatch_state,
@@ -3182,8 +3295,9 @@ private:
     // actually ready when observed.
     for (uint64_t packet_id = begin_packet_id; packet_id < end_packet_id; ++packet_id) {
       const bool ready = rewrite_packet(state, packet_id);
-      if (advance_contiguous_cursor)
+      if (advance_contiguous_cursor) {
         note_packet_ready(state, packet_id, ready);
+      }
     }
   }
 
@@ -3197,16 +3311,18 @@ private:
     const uint16_t header =
         std::atomic_ref<uint16_t>(packet.header).load(std::memory_order_acquire);
     const uint32_t type = aql_packet_type(header);
-    if (type == HSA_PACKET_TYPE_INVALID)
+    if (type == HSA_PACKET_TYPE_INVALID) {
       return false;
+    }
 
     if (!is_kernel_dispatch_packet(packet)) {
       retire_slot_buffers(state, slot);
       return true;
     }
 
-    if (slot_buffers.kernarg != nullptr && packet.kernarg_address == slot_buffers.kernarg)
+    if (slot_buffers.kernarg != nullptr && packet.kernarg_address == slot_buffers.kernarg) {
       return true;
+    }
 
     retire_slot_buffers(state, slot);
     ensure_queue_packet_private_size(packet, packet_id, slot, header);
@@ -3233,18 +3349,22 @@ private:
     if (load_write_index == nullptr) {
       static std::atomic<bool> reported{false};
       bool expected = false;
-      if (reported.compare_exchange_strong(expected, true, std::memory_order_relaxed))
+      if (reported.compare_exchange_strong(expected, true, std::memory_order_relaxed)) {
         trace_virtual_lds_dispatch("scanner disabled: hsa_queue_load_write_index_relaxed missing");
+      }
       return;
     }
 
     std::lock_guard lock(mutex_);
     for (auto &[queue_key, state] : queues_by_ptr_) {
       (void)queue_key;
-      if (state.queue == nullptr || state.queue->base_address == nullptr || state.queue->size == 0)
+      if (state.queue == nullptr || state.queue->base_address == nullptr ||
+          state.queue->size == 0) {
         continue;
-      if (state.uses_packet_interceptor)
+      }
+      if (state.uses_packet_interceptor) {
         continue;
+      }
       const uint64_t write_index = load_write_index(state.queue);
       if (write_index != 0) {
         static std::atomic<uint32_t> scan_trace_count{0};
@@ -3265,8 +3385,9 @@ private:
       // (the safety-net case where a submission's doorbell was not observed).
       const uint64_t tail_packets = std::min(write_index, kVirtualLdsScannerTailPackets);
       const uint64_t scan_begin = std::max(write_index - tail_packets, state.next_packet_id);
-      if (scan_begin >= write_index)
+      if (scan_begin >= write_index) {
         continue;
+      }
       rewrite_packet_range(state, scan_begin, write_index, false);
     }
   }
@@ -3278,8 +3399,9 @@ private:
   // joining the thread.
   void ensure_scanner_started_locked() {
     std::lock_guard lifecycle(scanner_lifecycle_mutex_);
-    if (stopping_ || scanner_.joinable())
+    if (stopping_ || scanner_.joinable()) {
       return;
+    }
     scanner_ = std::jthread([this](std::stop_token stop) {
       using namespace std::chrono_literals;
       trace_virtual_lds_dispatch("scanner started load_write_index=%d",
@@ -3313,21 +3435,23 @@ void clear_virtual_lds_dispatch_queues() { VirtualLdsDispatchQueueRegistry::inst
 
 /// @brief ROCR intercept-queue callback that rewrites virtual-LDS packets pre-submit.
 void virtual_lds_packet_interceptor(const void *pkts, uint64_t pkt_count, uint64_t user_pkt_index,
-                                    void *data, hsa_amd_queue_intercept_packet_writer_t writer) {
+                                    void *data, hsa_amd_queue_intercept_packet_writer writer) {
   auto *queue = static_cast<hsa_queue_t *>(data);
   static std::atomic<uint32_t> intercept_trace_count{0};
   if (intercept_trace_count.fetch_add(1, std::memory_order_relaxed) < 128) {
     uint16_t first_header = 0;
-    if (pkts != nullptr && pkt_count != 0)
+    if (pkts != nullptr && pkt_count != 0) {
       std::memcpy(&first_header, pkts, sizeof(first_header));
+    }
     trace_virtual_lds_dispatch(
         "intercept callback queue=%p packets=%llu user_index=%llu first_header=0x%x",
         static_cast<void *>(queue), static_cast<unsigned long long>(pkt_count),
         static_cast<unsigned long long>(user_pkt_index), first_header);
   }
   if (queue == nullptr) {
-    if (writer != nullptr)
+    if (writer != nullptr) {
       writer(pkts, pkt_count);
+    }
     return;
   }
   VirtualLdsDispatchQueueRegistry::instance().rewrite_intercept_packets(queue, pkts, pkt_count,
@@ -3342,8 +3466,9 @@ void virtual_lds_packet_interceptor(const void *pkts, uint64_t pkt_count, uint64
 /// it and every oversized-LDS dispatch would fault.
 [[nodiscard]] bool register_virtual_lds_packet_interceptor(hsa_queue_t *queue) {
   auto *register_interceptor = layer().amd_queue_intercept_register();
-  if (register_interceptor == nullptr || queue == nullptr)
+  if (register_interceptor == nullptr || queue == nullptr) {
     return false;
+  }
   const hsa_status_t status = register_interceptor(queue, virtual_lds_packet_interceptor, queue);
   if (status != HSA_STATUS_SUCCESS) {
     log_message(kLogInfo, "failed to register virtual-LDS queue interceptor queue=%p status=%d",
@@ -3358,8 +3483,9 @@ void virtual_lds_packet_interceptor(const void *pkts, uint64_t pkt_count, uint64
 hsa_status_t HSA_API rj_iterate_agents(hsa_status_t (*callback)(hsa_agent_t agent, void *data),
                                        void *data) {
   auto *original = layer().iterate_agents();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
 
   // One locked read: reading the handles and the verdict separately lets a
   // concurrent clear() pair a stale handle with a fresh verdict. This is also
@@ -3385,9 +3511,10 @@ hsa_status_t HSA_API rj_iterate_agents(hsa_status_t (*callback)(hsa_agent_t agen
     // HSA_STATUS_ERROR out of hsa_iterate_agents, which HIP/CLR reports as a
     // fatal ROCR init failure instead of "no device".
     if (mapping.failed) {
-      if (AgentMapper::instance().claim_failure_report())
+      if (AgentMapper::instance().claim_failure_report()) {
         std::fprintf(stderr, "[rocjitsu-hooks] suppressing all GPU agents: DBT is enabled but no "
                              "guest/host agent mapping was resolved\n");
+      }
 
       struct GpuSuppression {
         hsa_status_t (*callback)(hsa_agent_t, void *) = nullptr;
@@ -3396,8 +3523,9 @@ hsa_status_t HSA_API rj_iterate_agents(hsa_status_t (*callback)(hsa_agent_t agen
 
       auto suppress_callback = [](hsa_agent_t agent, void *opaque) -> hsa_status_t {
         auto *suppressed = static_cast<GpuSuppression *>(opaque);
-        if (agent_is_gpu(agent))
+        if (agent_is_gpu(agent)) {
           return HSA_STATUS_SUCCESS;
+        }
         return suppressed->callback(agent, suppressed->data);
       };
       return original(suppress_callback, &suppression);
@@ -3439,8 +3567,9 @@ hsa_status_t HSA_API rj_agent_iterate_isas(hsa_agent_t agent,
                                            hsa_status_t (*callback)(hsa_isa_t isa, void *data),
                                            void *data) {
   auto *original = layer().agent_iterate_isas();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
 
   // HIP/CLR derives the application-visible device ISA from this callback.
   // Keep the synthetic agent guest-facing so fatbin selection picks gfx950 code
@@ -3455,11 +3584,13 @@ hsa_status_t HSA_API rj_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue
                                      void *data, uint32_t private_segment_size,
                                      uint32_t group_segment_size, hsa_queue_t **queue) {
   auto *original = layer().queue_create();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   // A queue on a raw agent is the dispatch path the enumeration guard closes.
-  if (mapping_unusable())
+  if (mapping_unusable()) {
     return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
   hsa_agent_t mapped = AgentMapper::instance().map(agent);
   log_message(kLogVerbose, "queue_create agent=%llu mapped=%llu size=%u",
               static_cast<unsigned long long>(agent.handle),
@@ -3486,8 +3617,9 @@ hsa_status_t HSA_API rj_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue
 
   status =
       original(mapped, size, type, callback, data, private_segment_size, group_segment_size, queue);
-  if (status == HSA_STATUS_SUCCESS && queue != nullptr)
+  if (status == HSA_STATUS_SUCCESS && queue != nullptr) {
     VirtualLdsDispatchQueueRegistry::instance().record_queue(*queue, mapped);
+  }
   return status;
 }
 
@@ -3496,11 +3628,13 @@ hsa_status_t HSA_API rj_amd_queue_intercept_create(
     void (*callback)(hsa_status_t, hsa_queue_t *, void *), void *data,
     uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t **queue) {
   auto *original = layer().amd_queue_intercept_create();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   // Same dispatch path as rj_queue_create, reached directly by tools.
-  if (mapping_unusable())
+  if (mapping_unusable()) {
     return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
   hsa_agent_t mapped = AgentMapper::instance().map(agent_handle);
   log_message(kLogVerbose, "queue_intercept_create agent=%llu mapped=%llu size=%u",
               static_cast<unsigned long long>(agent_handle.handle),
@@ -3518,8 +3652,9 @@ hsa_status_t HSA_API rj_amd_queue_intercept_create(
 
 hsa_status_t HSA_API rj_queue_destroy(hsa_queue_t *queue) {
   auto *original = layer().queue_destroy();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   log_message(kLogVerbose, "queue_destroy queue=%p id=%llu", static_cast<void *>(queue),
               queue ? static_cast<unsigned long long>(queue->id) : 0);
   VirtualLdsDispatchQueueRegistry::instance().erase_queue(queue);
@@ -3530,8 +3665,9 @@ hsa_status_t HSA_API rj_queue_destroy(hsa_queue_t *queue) {
 
 hsa_status_t HSA_API rj_signal_destroy(hsa_signal_t signal) {
   auto *original = layer().signal_destroy();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
 
   // Detach the borrowed handle before ROCR invalidates it. This also serializes
   // against the queue scanner and intercept callbacks, both of which use the
@@ -3543,22 +3679,25 @@ hsa_status_t HSA_API rj_signal_destroy(hsa_signal_t signal) {
 void HSA_API rj_signal_store_relaxed(hsa_signal_t signal, hsa_signal_value_t value) {
   VirtualLdsDispatchQueueRegistry::instance().rewrite_before_doorbell(signal, value);
   auto *original = layer().signal_store_relaxed();
-  if (original != nullptr)
+  if (original != nullptr) {
     original(signal, value);
+  }
 }
 
 void HSA_API rj_signal_store_screlease(hsa_signal_t signal, hsa_signal_value_t value) {
   VirtualLdsDispatchQueueRegistry::instance().rewrite_before_doorbell(signal, value);
   auto *original = layer().signal_store_screlease();
-  if (original != nullptr)
+  if (original != nullptr) {
     original(signal, value);
+  }
 }
 
 hsa_status_t HSA_API rj_agent_iterate_regions(
     hsa_agent_t agent, hsa_status_t (*callback)(hsa_region_t region, void *data), void *data) {
   auto *original = layer().agent_iterate_regions();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   hsa_agent_t mapped = AgentMapper::instance().map(agent);
   log_message(kLogDebug, "agent_iterate_regions agent=%llu mapped=%llu",
               static_cast<unsigned long long>(agent.handle),
@@ -3569,8 +3708,9 @@ hsa_status_t HSA_API rj_agent_iterate_regions(
 hsa_status_t HSA_API rj_memory_assign_agent(void *ptr, hsa_agent_t agent,
                                             hsa_access_permission_t access) {
   auto *original = layer().memory_assign_agent();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   hsa_agent_t mapped = AgentMapper::instance().map(agent);
   log_message(kLogVerbose, "memory_assign_agent ptr=%p agent=%llu mapped=%llu access=%d", ptr,
               static_cast<unsigned long long>(agent.handle),
@@ -3589,8 +3729,9 @@ hsa_status_t HSA_API rj_shut_down() {
   }
 
   auto *original = layer().shut_down();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   return original();
 }
 
@@ -3600,8 +3741,9 @@ hsa_status_t HSA_API rj_executable_destroy(hsa_executable_t executable) {
   VirtualLdsRuntimeRegistry::instance().erase_executable(executable);
   ExecutableAgentRegistry::instance().erase_executable(executable);
   auto *original = layer().executable_destroy();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   hsa_status_t status = original(executable);
   log_message(kLogVerbose, "executable_destroy status=%d", static_cast<int>(status));
   return status;
@@ -3612,8 +3754,9 @@ hsa_status_t HSA_API rj_executable_get_symbol(hsa_executable_t executable, const
                                               int32_t call_convention,
                                               hsa_executable_symbol_t *symbol) {
   auto *original = layer().executable_get_symbol();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   hsa_agent_t mapped = ExecutableAgentRegistry::instance().map_agent(executable, agent);
   mapped = AgentMapper::instance().map(mapped);
   log_message(kLogVerbose, "get_symbol exec=%llu agent=%llu mapped=%llu symbol=%s",
@@ -3622,8 +3765,9 @@ hsa_status_t HSA_API rj_executable_get_symbol(hsa_executable_t executable, const
               static_cast<unsigned long long>(mapped.handle), symbol_name ? symbol_name : "");
   hsa_status_t status =
       original(executable, module_name, symbol_name, mapped, call_convention, symbol);
-  if (status == HSA_STATUS_SUCCESS && symbol_name != nullptr && symbol != nullptr)
+  if (status == HSA_STATUS_SUCCESS && symbol_name != nullptr && symbol != nullptr) {
     VirtualLdsRuntimeRegistry::instance().record_symbol(executable, symbol_name, *symbol);
+  }
   return status;
 }
 
@@ -3632,8 +3776,9 @@ hsa_status_t HSA_API rj_executable_get_symbol_by_name(hsa_executable_t executabl
                                                       const hsa_agent_t *agent,
                                                       hsa_executable_symbol_t *symbol) {
   auto *original = layer().executable_get_symbol_by_name();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   hsa_agent_t mapped_agent{};
   const hsa_agent_t *mapped_ptr = nullptr;
   if (agent != nullptr) {
@@ -3646,8 +3791,9 @@ hsa_status_t HSA_API rj_executable_get_symbol_by_name(hsa_executable_t executabl
               static_cast<unsigned long long>(agent ? agent->handle : 0),
               static_cast<unsigned long long>(mapped_agent.handle), symbol_name ? symbol_name : "");
   hsa_status_t status = original(executable, symbol_name, mapped_ptr, symbol);
-  if (status == HSA_STATUS_SUCCESS && symbol_name != nullptr && symbol != nullptr)
+  if (status == HSA_STATUS_SUCCESS && symbol_name != nullptr && symbol != nullptr) {
     VirtualLdsRuntimeRegistry::instance().record_symbol(executable, symbol_name, *symbol);
+  }
   return status;
 }
 
@@ -3655,8 +3801,9 @@ hsa_status_t HSA_API rj_executable_symbol_get_info(hsa_executable_symbol_t execu
                                                    hsa_executable_symbol_info_t attribute,
                                                    void *value) {
   auto *original = layer().executable_symbol_get_info();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
 
   hsa_status_t status = original(executable_symbol, attribute, value);
   if (status == HSA_STATUS_SUCCESS && attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT &&
@@ -3676,19 +3823,22 @@ hsa_status_t HSA_API rj_executable_symbol_get_info(hsa_executable_symbol_t execu
 [[nodiscard]] std::optional<std::string>
 query_executable_symbol_name(hsa_executable_symbol_t executable_symbol) {
   auto *original = layer().executable_symbol_get_info();
-  if (!original)
+  if (!original) {
     return std::nullopt;
+  }
 
   uint32_t name_length = 0;
   hsa_status_t status =
       original(executable_symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH, &name_length);
-  if (status != HSA_STATUS_SUCCESS || name_length == 0)
+  if (status != HSA_STATUS_SUCCESS || name_length == 0) {
     return std::nullopt;
+  }
 
   std::string symbol_name(name_length, '\0');
   status = original(executable_symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, symbol_name.data());
-  if (status != HSA_STATUS_SUCCESS)
+  if (status != HSA_STATUS_SUCCESS) {
     return std::nullopt;
+  }
   return symbol_name;
 }
 
@@ -3697,8 +3847,9 @@ hsa_status_t HSA_API rj_executable_agent_global_variable_define(hsa_executable_t
                                                                 const char *variable_name,
                                                                 void *address) {
   auto *original = layer().executable_agent_global_variable_define();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   hsa_agent_t mapped = ExecutableAgentRegistry::instance().map_agent(executable, agent);
   mapped = AgentMapper::instance().map(mapped);
   log_message(kLogVerbose, "global_variable_define exec=%llu agent=%llu mapped=%llu name=%s",
@@ -3735,8 +3886,9 @@ hsa_status_t HSA_API rj_executable_iterate_agent_symbols(
     hsa_status_t (*callback)(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t, void *),
     void *data) {
   auto *original = layer().executable_iterate_agent_symbols();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   hsa_agent_t mapped = ExecutableAgentRegistry::instance().map_agent(executable, agent);
   mapped = AgentMapper::instance().map(mapped);
   // Always route through the recording callback, even when the agent mapping is
@@ -3772,8 +3924,9 @@ hsa_status_t HSA_API rj_executable_iterate_symbols(
     hsa_executable_t executable,
     hsa_status_t (*callback)(hsa_executable_t, hsa_executable_symbol_t, void *), void *data) {
   auto *original = layer().executable_iterate_symbols();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   IterateSymbolsData wrapped{callback, data};
   return original(executable, rj_iterate_symbols_callback, &wrapped);
 }
@@ -3781,8 +3934,9 @@ hsa_status_t HSA_API rj_executable_iterate_symbols(
 hsa_status_t HSA_API rj_amd_agent_iterate_memory_pools(
     hsa_agent_t agent, hsa_status_t (*callback)(hsa_amd_memory_pool_t, void *), void *data) {
   auto *original = layer().amd_agent_iterate_memory_pools();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   hsa_agent_t mapped = mapped_agent(agent);
   log_message(kLogDebug, "amd_agent_iterate_memory_pools agent=%llu mapped=%llu",
               static_cast<unsigned long long>(agent.handle),
@@ -3794,8 +3948,9 @@ hsa_status_t HSA_API rj_amd_memory_pool_get_info(hsa_amd_memory_pool_t memory_po
                                                  hsa_amd_memory_pool_info_t attribute,
                                                  void *value) {
   auto *original = layer().amd_memory_pool_get_info();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   log_message(kLogDebug, "amd_memory_pool_get_info pool=%llu attr=%u",
               static_cast<unsigned long long>(memory_pool.handle),
               static_cast<unsigned>(attribute));
@@ -3805,8 +3960,9 @@ hsa_status_t HSA_API rj_amd_memory_pool_get_info(hsa_amd_memory_pool_t memory_po
 hsa_status_t HSA_API rj_amd_memory_pool_allocate(hsa_amd_memory_pool_t memory_pool, size_t size,
                                                  uint32_t flags, void **ptr) {
   auto *original = layer().amd_memory_pool_allocate();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   hsa_amd_memory_pool_t mapped_pool = mapped_memory_pool(memory_pool);
   log_message(kLogVerbose, "amd_memory_pool_allocate pool=%llu mapped=%llu size=%zu flags=0x%x",
               static_cast<unsigned long long>(memory_pool.handle),
@@ -3819,8 +3975,9 @@ hsa_status_t HSA_API rj_amd_memory_pool_allocate(hsa_amd_memory_pool_t memory_po
 
 hsa_status_t HSA_API rj_amd_memory_pool_free(void *ptr) {
   auto *original = layer().amd_memory_pool_free();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   log_message(kLogVerbose, "amd_memory_pool_free ptr=%p", ptr);
   hsa_status_t status = original(ptr);
   log_message(kLogVerbose, "amd_memory_pool_free status=%d", static_cast<int>(status));
@@ -3829,8 +3986,9 @@ hsa_status_t HSA_API rj_amd_memory_pool_free(void *ptr) {
 
 hsa_status_t HSA_API rj_amd_profiling_set_profiler_enabled(hsa_queue_t *queue, int enable) {
   auto *original = layer().amd_profiling_set_profiler_enabled();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   log_message(kLogVerbose, "amd_profiling_set_profiler_enabled queue=%p enable=%d",
               static_cast<void *>(queue), enable);
   return original(queue, enable);
@@ -3839,8 +3997,9 @@ hsa_status_t HSA_API rj_amd_profiling_set_profiler_enabled(hsa_queue_t *queue, i
 hsa_status_t HSA_API rj_amd_profiling_get_dispatch_time(hsa_agent_t agent, hsa_signal_t signal,
                                                         hsa_amd_profiling_dispatch_time_t *time) {
   auto *original = layer().amd_profiling_get_dispatch_time();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   hsa_agent_t mapped = mapped_agent(agent);
   hsa_status_t status = forward_amd_call(original, MappedAgentArg{mapped}, signal, time);
   log_message(kLogVerbose,
@@ -3858,8 +4017,9 @@ hsa_status_t HSA_API rj_amd_profiling_convert_tick_to_system_domain(hsa_agent_t 
                                                                     uint64_t agent_tick,
                                                                     uint64_t *system_tick) {
   auto *original = layer().amd_profiling_convert_tick_to_system_domain();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   hsa_agent_t mapped = mapped_agent(agent);
   hsa_status_t status = forward_amd_call(original, MappedAgentArg{mapped}, agent_tick, system_tick);
   log_message(kLogVerbose,
@@ -3877,15 +4037,17 @@ hsa_status_t HSA_API rj_amd_agent_memory_pool_get_info(hsa_agent_t agent,
                                                        hsa_amd_agent_memory_pool_info_t attribute,
                                                        void *value) {
   auto *original = layer().amd_agent_memory_pool_get_info();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
-  if (value == nullptr)
+  }
+  if (value == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
   if (memory_pool.handle == 0) {
     // ROCR converts the AMD pool handle back to an internal region before
     // answering agent/pool access queries. Keep null synthetic handles from
     // crossing that ABI boundary; they are invalid AMD memory pools.
-    return HSA_STATUS_ERROR_INVALID_MEMORY_POOL;
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_INVALID_MEMORY_POOL);
   }
   hsa_agent_t mapped = mapped_agent(agent);
   hsa_amd_memory_pool_t mapped_pool = mapped_memory_pool(memory_pool);
@@ -3903,8 +4065,9 @@ hsa_status_t HSA_API rj_amd_agent_memory_pool_get_info(hsa_agent_t agent,
 hsa_status_t HSA_API rj_amd_agents_allow_access(uint32_t num_agents, const hsa_agent_t *agents,
                                                 const uint32_t *flags, const void *ptr) {
   auto *original = layer().amd_agents_allow_access();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   auto mapped = map_access_agent_array(agents, num_agents, flags);
   const uint32_t forwarded_count =
       mapped.changed ? static_cast<uint32_t>(mapped.agents.size()) : num_agents;
@@ -3923,8 +4086,9 @@ hsa_status_t HSA_API rj_amd_memory_async_copy(void *dst, hsa_agent_t dst_agent, 
                                               const hsa_signal_t *dep_signals,
                                               hsa_signal_t completion_signal) {
   auto *original = layer().amd_memory_async_copy();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   hsa_agent_t mapped_dst = mapped_agent(dst_agent);
   hsa_agent_t mapped_src = mapped_agent(src_agent);
   log_message(kLogVerbose,
@@ -3944,8 +4108,9 @@ hsa_status_t HSA_API rj_amd_memory_async_copy_on_engine(
     uint32_t num_dep_signals, const hsa_signal_t *dep_signals, hsa_signal_t completion_signal,
     hsa_amd_sdma_engine_id_t engine_id, bool force_copy_on_sdma) {
   auto *original = layer().amd_memory_async_copy_on_engine();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   hsa_agent_t mapped_dst = mapped_agent(dst_agent);
   hsa_agent_t mapped_src = mapped_agent(src_agent);
   log_message(kLogVerbose,
@@ -3967,8 +4132,9 @@ hsa_status_t HSA_API rj_amd_memory_async_copy_rect(
     hsa_amd_copy_direction_t dir, uint32_t num_dep_signals, const hsa_signal_t *dep_signals,
     hsa_signal_t completion_signal) {
   auto *original = layer().amd_memory_async_copy_rect();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   hsa_agent_t mapped = mapped_agent(copy_agent);
   log_message(kLogVerbose, "amd_memory_async_copy_rect agent=%llu mapped=%llu dir=%u",
               static_cast<unsigned long long>(copy_agent.handle),
@@ -3980,8 +4146,9 @@ hsa_status_t HSA_API rj_amd_memory_async_copy_rect(
 hsa_status_t HSA_API rj_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa_agent_t src_agent,
                                                       uint32_t *engine_ids_mask) {
   auto *original = layer().amd_memory_copy_engine_status();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   return forward_amd_call(original, mapped_agent_arg(dst_agent), mapped_agent_arg(src_agent),
                           engine_ids_mask);
 }
@@ -3990,8 +4157,9 @@ hsa_status_t HSA_API rj_amd_memory_get_preferred_copy_engine(hsa_agent_t dst_age
                                                              hsa_agent_t src_agent,
                                                              uint32_t *engine_ids_mask) {
   auto *original = layer().amd_memory_get_preferred_copy_engine();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   return forward_amd_call(original, mapped_agent_arg(dst_agent), mapped_agent_arg(src_agent),
                           engine_ids_mask);
 }
@@ -3999,8 +4167,9 @@ hsa_status_t HSA_API rj_amd_memory_get_preferred_copy_engine(hsa_agent_t dst_age
 hsa_status_t HSA_API rj_amd_memory_lock(void *host_ptr, size_t size, hsa_agent_t *agents,
                                         int num_agent, void **agent_ptr) {
   auto *original = layer().amd_memory_lock();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   MappedAgentList mapped = num_agent > 0
                                ? map_unique_agent_array(agents, static_cast<size_t>(num_agent))
                                : MappedAgentList{};
@@ -4013,8 +4182,9 @@ hsa_status_t HSA_API rj_amd_memory_lock_to_pool(void *host_ptr, size_t size, hsa
                                                 int num_agent, hsa_amd_memory_pool_t pool,
                                                 uint32_t flags, void **agent_ptr) {
   auto *original = layer().amd_memory_lock_to_pool();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   MappedAgentList mapped = num_agent > 0
                                ? map_unique_agent_array(agents, static_cast<size_t>(num_agent))
                                : MappedAgentList{};
@@ -4026,8 +4196,9 @@ hsa_status_t HSA_API rj_amd_memory_lock_to_pool(void *host_ptr, size_t size, hsa
 
 hsa_status_t HSA_API rj_amd_memory_fill(void *ptr, uint32_t value, size_t count) {
   auto *original = layer().amd_memory_fill();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   log_message(kLogVerbose, "amd_memory_fill ptr=%p value=0x%x count=%zu", ptr, value, count);
   hsa_status_t status = original(ptr, value, count);
   log_message(kLogVerbose, "amd_memory_fill status=%d", static_cast<int>(status));
@@ -4038,14 +4209,16 @@ hsa_status_t HSA_API rj_amd_pointer_info(const void *ptr, hsa_amd_pointer_info_t
                                          void *(*alloc)(size_t), uint32_t *num_agents_accessible,
                                          hsa_agent_t **accessible) {
   auto *original = layer().amd_pointer_info();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   log_message(kLogVerbose, "amd_pointer_info ptr=%p", ptr);
   hsa_status_t status = original(ptr, info, alloc, num_agents_accessible, accessible);
   if (status == HSA_STATUS_SUCCESS) {
     if (info != nullptr &&
-        info->size >= offsetof(hsa_amd_pointer_info_t, agentOwner) + sizeof(info->agentOwner))
+        info->size >= offsetof(hsa_amd_pointer_info_t, agentOwner) + sizeof(info->agentOwner)) {
       info->agentOwner = AgentMapper::instance().guest_for_host(info->agentOwner);
+    }
     map_pointer_info_accessible_agents(num_agents_accessible, accessible);
   }
   log_message(kLogVerbose, "amd_pointer_info status=%d owner=%llu accessible=%u",
@@ -4060,8 +4233,9 @@ hsa_status_t HSA_API rj_amd_svm_prefetch_async(void *ptr, size_t size, hsa_agent
                                                const hsa_signal_t *dep_signals,
                                                hsa_signal_t completion_signal) {
   auto *original = layer().amd_svm_prefetch_async();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   hsa_agent_t mapped = mapped_agent(agent);
   log_message(kLogVerbose, "amd_svm_prefetch_async ptr=%p size=%zu agent=%llu mapped=%llu", ptr,
               size, static_cast<unsigned long long>(agent.handle),
@@ -4074,8 +4248,9 @@ hsa_status_t HSA_API rj_amd_vmem_set_access(void *va, size_t size,
                                             const hsa_amd_memory_access_desc_t *desc,
                                             size_t desc_cnt) {
   auto *original = layer().amd_vmem_set_access();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   MappedAccessDescs mapped = map_unique_access_descs(desc, desc_cnt);
   const hsa_amd_memory_access_desc_t *forwarded_desc = mapped.changed ? mapped.descs.data() : desc;
   size_t forwarded_count = mapped.changed ? mapped.descs.size() : desc_cnt;
@@ -4086,8 +4261,9 @@ hsa_status_t HSA_API rj_amd_vmem_set_access(void *va, size_t size,
 hsa_status_t HSA_API rj_amd_vmem_get_access(void *va, hsa_access_permission_t *perms,
                                             hsa_agent_t agent_handle) {
   auto *original = layer().amd_vmem_get_access();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   hsa_agent_t mapped = mapped_agent(agent_handle);
   log_message(kLogVerbose, "amd_vmem_get_access va=%p agent=%llu mapped=%llu", va,
               static_cast<unsigned long long>(agent_handle.handle),
@@ -4097,11 +4273,13 @@ hsa_status_t HSA_API rj_amd_vmem_get_access(void *va, hsa_access_permission_t *p
 
 hsa_status_t HSA_API rj_amd_agent_set_async_scratch_limit(hsa_agent_t agent, size_t threshold) {
   auto *original = layer().amd_agent_set_async_scratch_limit();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   // GPU-only scratch tuning; with no mapping this would reconfigure the raw host.
-  if (mapping_unusable())
+  if (mapping_unusable()) {
     return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
   hsa_agent_t mapped = mapped_agent(agent);
   log_message(kLogVerbose, "amd_agent_set_async_scratch_limit agent=%llu mapped=%llu threshold=%zu",
               static_cast<unsigned long long>(agent.handle),
@@ -4113,10 +4291,12 @@ hsa_status_t HSA_API rj_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op
                                                     uint32_t num_copy_ops, uint32_t num_dep_signals,
                                                     const hsa_signal_t *dep_signals) {
   auto *original = layer().amd_memory_async_batch_copy();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
-  if (!copy_ops || num_copy_ops == 0)
+  }
+  if (!copy_ops || num_copy_ops == 0) {
     return original(copy_ops, num_copy_ops, num_dep_signals, dep_signals);
+  }
 
   std::vector<hsa_amd_memory_copy_op_t> mapped(copy_ops, copy_ops + num_copy_ops);
   std::vector<std::vector<hsa_agent_t>> mapped_dst_lists;
@@ -4127,10 +4307,12 @@ hsa_status_t HSA_API rj_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op
     auto &op = mapped[i];
     const BatchCopyAgentShape shape = batch_copy_agent_shape(op);
 
-    if (shape.src_scalar)
+    if (shape.src_scalar) {
       op.src_agent = mapped_agent(op.src_agent);
-    if (shape.dst_scalar)
+    }
+    if (shape.dst_scalar) {
       op.dst_agent = mapped_agent(op.dst_agent);
+    }
     if (shape.dst_list && op.dst_agent_list != nullptr) {
       mapped_dst_lists.push_back(map_agent_array(op.dst_agent_list, op.num_entries));
       op.dst_agent_list = mapped_dst_lists.back().data();
@@ -4141,11 +4323,13 @@ hsa_status_t HSA_API rj_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op
 
 hsa_status_t HSA_API rj_amd_agent_preload(hsa_agent_t agent, uint64_t flags) {
   auto *original = layer().amd_agent_preload();
-  if (!original)
+  if (!original) {
     return HSA_STATUS_ERROR;
+  }
   // Stages code onto a GPU ahead of dispatch; GPU-only, so refuse with the rest.
-  if (mapping_unusable())
+  if (mapping_unusable()) {
     return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
   hsa_agent_t mapped = mapped_agent(agent);
   log_message(kLogVerbose, "amd_agent_preload agent=%llu mapped=%llu flags=0x%llx",
               static_cast<unsigned long long>(agent.handle),
@@ -4158,8 +4342,9 @@ hsa_status_t HSA_API rj_amd_agent_preload(hsa_agent_t agent, uint64_t flags) {
 [[nodiscard]] hsa_status_t create_translated_reader(std::vector<uint8_t> translated,
                                                     hsa_code_object_reader_t *translated_reader) {
   auto *owned_storage = new (std::nothrow) std::vector<uint8_t>(std::move(translated));
-  if (owned_storage == nullptr)
+  if (owned_storage == nullptr) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
   std::shared_ptr<const std::vector<uint8_t>> owned(owned_storage);
 
   auto *original_create = layer().create_from_memory();
@@ -4168,13 +4353,15 @@ hsa_status_t HSA_API rj_amd_agent_preload(hsa_agent_t agent, uint64_t flags) {
   }
 
   const hsa_status_t status = original_create(owned->data(), owned->size(), translated_reader);
-  if (status != HSA_STATUS_SUCCESS)
+  if (status != HSA_STATUS_SUCCESS) {
     return status;
+  }
 
   if (!CodeObjectReaderRegistry::instance().store(*translated_reader, owned->data(), owned->size(),
                                                   owned)) {
-    if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
+    if (auto *original_destroy = layer().destroy(); original_destroy != nullptr) {
       (void)original_destroy(*translated_reader);
+    }
     *translated_reader = {};
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
@@ -4183,10 +4370,11 @@ hsa_status_t HSA_API rj_amd_agent_preload(hsa_agent_t agent, uint64_t flags) {
 
 hsa_status_t HSA_API rj_executable_load_agent_code_object(
     hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
-    const char *options, hsa_loaded_code_object_t *loaded_code_object) {
+    const char *options, hsa_loaded_code_object_t *loaded_code_object) noexcept {
   auto *original_load = layer().load_agent_code_object();
-  if (original_load == nullptr)
+  if (original_load == nullptr) {
     return HSA_STATUS_ERROR;
+  }
 
   auto config = layer().config();
   if (!config) {
@@ -4217,12 +4405,14 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   // validation/registration -- doing so could misdecode it and load a wrong
   // artifact on that agent. Forward it verbatim before any reader lookup, target
   // detection, source override, translation, or registry mutation.
-  if (!guest_load)
+  if (!guest_load) {
     return original_load(executable, agent, code_object_reader, options, loaded_code_object);
+  }
 
   hsa_agent_t load_agent = AgentMapper::instance().host_for_guest();
-  if (load_agent.handle == 0)
+  if (load_agent.handle == 0) {
     return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
 
   CodeObjectReaderRegistry::ReaderBytes reader_bytes =
       CodeObjectReaderRegistry::instance().lookup(code_object_reader);
@@ -4245,7 +4435,7 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     source_target.arch = config->source_override->arch;
     source_target.mach = config->source_override->mach;
   }
-  if (source_target.arch == ROCJITSU_CODE_ARCH_INVALID || source_target.mach == 0) {
+  if (source_target.arch == rocjitsu::IsaFamily::Invalid || source_target.mach == 0) {
     std::fprintf(stderr, "[rocjitsu-hooks] failed to detect source ISA from code-object ELF\n");
     return HSA_STATUS_ERROR;
   }
@@ -4253,8 +4443,8 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   // gfx1250 A0 and B0 share an ELF machine ID, so a same-arch/same-mach match
   // does not identify the revision. When both revisions are configured, use the
   // selected same-ISA translation profile. Otherwise fail closed.
-  const bool gfx1250_same_target = source_target.arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-                                   config->target.arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+  const bool gfx1250_same_target = source_target.arch == rocjitsu::IsaFamily::Cdna5 &&
+                                   config->target.arch == rocjitsu::IsaFamily::Cdna5 &&
                                    source_target.mach == config->target.mach;
   const bool have_gfx1250_revisions = config->guest_revision != ProcessorRevision::Unspecified &&
                                       config->host_revision != ProcessorRevision::Unspecified;
@@ -4290,8 +4480,9 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
         original_load(executable, load_agent, code_object_reader, options, loaded_code_object);
     log_message(kLogVerbose, "load_agent_code_object already-target status=%d",
                 static_cast<int>(status));
-    if (status == HSA_STATUS_SUCCESS)
+    if (status == HSA_STATUS_SUCCESS) {
       ExecutableAgentRegistry::instance().record(executable, agent, load_agent);
+    }
     if (status == HSA_STATUS_SUCCESS) {
       const hsa_loaded_code_object_t loaded =
           loaded_code_object != nullptr ? *loaded_code_object : hsa_loaded_code_object_t{};
@@ -4324,19 +4515,9 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     return HSA_STATUS_ERROR;
   }
 
-  rocjitsu::TranslatedCodeObject translated;
-  try {
-    BinaryTranslator translator(source_target.arch, config->target.arch, config->target.mach,
-                                translator_options);
-    translated = translator.translate(source_object);
-  } catch (const std::exception &error) {
-    std::fprintf(stderr, "[rocjitsu-hooks] code-object translation threw an exception: %s\n",
-                 error.what());
-    return HSA_STATUS_ERROR;
-  } catch (...) {
-    std::fprintf(stderr, "[rocjitsu-hooks] code-object translation threw an unknown exception\n");
-    return HSA_STATUS_ERROR;
-  }
+  BinaryTranslator translator(source_target.arch, config->target.arch, config->target.mach,
+                              translator_options);
+  rocjitsu::TranslatedCodeObject translated = translator.translate(source_object);
 
   print_diagnostics(stderr, translated.diagnostics, config->log_level > kLogDisabled);
   if (translated.elf_bytes.empty() || has_error_diagnostic(translated.diagnostics)) {
@@ -4388,8 +4569,9 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   log_message(kLogVerbose, "load_agent_code_object translated load_agent=%llu status=%d",
               static_cast<unsigned long long>(load_agent.handle), static_cast<int>(status));
   CodeObjectReaderRegistry::instance().remove(translated_reader);
-  if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
+  if (auto *original_destroy = layer().destroy(); original_destroy != nullptr) {
     (void)original_destroy(translated_reader);
+  }
 
   if (status != HSA_STATUS_SUCCESS) {
     std::fprintf(stderr, "[rocjitsu-hooks] translated code-object load failed: %d\n",
@@ -4427,33 +4609,37 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
   (void)failed_tool_count;
   (void)failed_tool_names;
 
-  auto config = parse_config();
-  if (!config)
-    return false;
-  const bool signal_backtrace = config->signal_backtrace;
-  // The mapper is a process-wide singleton, so it outlives the layer. uninstall()
-  // clears it, but a discovery already in flight then republishes a kFinal miss
-  // behind that clear -- and nothing clears it again. Repeat the clear here so such
-  // a verdict cannot latch a permanent all-GPU suppression into this install.
-  clear_agent_mapper();
-  if (!layer().install(table, std::move(*config)))
-    return false;
-  // Virtual-LDS resource management lives in its own hook component. Give it
-  // only the original runtime entries so allocations cannot recurse through
-  // the wrappers installed above.
-  rocjitsu::hooks::set_virtual_lds_runtime_api({
-      .iterate_agents = layer().iterate_agents(),
-      .signal_create = layer().signal_create(),
-      .signal_destroy = layer().signal_destroy(),
-      .signal_load_scacquire = layer().signal_load_scacquire(),
-      .iterate_memory_pools = layer().amd_agent_iterate_memory_pools(),
-      .memory_pool_get_info = layer().amd_memory_pool_get_info(),
-      .memory_pool_allocate = layer().amd_memory_pool_allocate(),
-      .memory_pool_free = layer().amd_memory_pool_free(),
-      .agents_allow_access = layer().amd_agents_allow_access(),
-  });
-  maybe_install_signal_backtrace(signal_backtrace);
-  return true;
+  return [&]() noexcept {
+    auto config = parse_config();
+    if (!config) {
+      return false;
+    }
+    const bool signal_backtrace = config->signal_backtrace;
+    // The mapper is a process-wide singleton, so it outlives the layer. uninstall()
+    // clears it, but a discovery already in flight then republishes a kFinal miss
+    // behind that clear -- and nothing clears it again. Repeat the clear here so such
+    // a verdict cannot latch a permanent all-GPU suppression into this install.
+    clear_agent_mapper();
+    if (!layer().install(table, std::move(*config))) {
+      return false;
+    }
+    // Virtual-LDS resource management lives in its own hook component. Give it
+    // only the original runtime entries so allocations cannot recurse through
+    // the wrappers installed above.
+    rocjitsu::hooks::set_virtual_lds_runtime_api({
+        .iterate_agents = layer().iterate_agents(),
+        .signal_create = layer().signal_create(),
+        .signal_destroy = layer().signal_destroy(),
+        .signal_load_scacquire = layer().signal_load_scacquire(),
+        .iterate_memory_pools = layer().amd_agent_iterate_memory_pools(),
+        .memory_pool_get_info = layer().amd_memory_pool_get_info(),
+        .memory_pool_allocate = layer().amd_memory_pool_allocate(),
+        .memory_pool_free = layer().amd_memory_pool_free(),
+        .agents_allow_access = layer().amd_agents_allow_access(),
+    });
+    maybe_install_signal_backtrace(signal_backtrace);
+    return true;
+  }();
 }
 
 /// @brief ROCR HSA tools unload entry point.

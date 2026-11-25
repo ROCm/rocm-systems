@@ -117,6 +117,7 @@ from .amdsmi_interface import amdsmi_get_cpu_affinity_with_scope
 
 # # SW Version Information
 from .amdsmi_interface import amdsmi_get_gpu_driver_info
+from .amdsmi_interface import amdsmi_get_gpu_driver_info_v2
 
 # # ASIC and Bus Static Information
 from .amdsmi_interface import amdsmi_get_gpu_asic_info
@@ -265,6 +266,7 @@ from .amdsmi_interface import amdsmi_topo_get_link_weight
 from .amdsmi_interface import amdsmi_get_minmax_bandwidth_between_processors
 from .amdsmi_interface import amdsmi_get_link_metrics
 from .amdsmi_interface import amdsmi_topo_get_link_type
+from .amdsmi_interface import amdsmi_get_gpu_cpu_links
 from .amdsmi_interface import amdsmi_get_link_topology
 from .amdsmi_interface import amdsmi_topo_get_p2p_status
 from .amdsmi_interface import amdsmi_is_P2P_accessible
@@ -344,6 +346,8 @@ from .amdsmi_interface import AmdSmiVirtualizationMode
 from .amdsmi_interface import AmdSmiVramType
 from .amdsmi_interface import AmdSmiAffinityScope
 from .amdsmi_interface import AmdSmiPtlData
+from .amdsmi_interface import AmdSmiHawkInsertionPriority
+from .amdsmi_interface import AmdSmiPowerStabilizationParamId
 from .amdsmi_interface import AmdSmiNpmBalancingMode
 
 from .amdsmi_interface import amdsmi_get_gpu_uma_carveout_info
@@ -351,6 +355,10 @@ from .amdsmi_interface import amdsmi_set_gpu_uma_carveout
 from .amdsmi_interface import amdsmi_get_ttm_info
 from .amdsmi_interface import amdsmi_set_ttm_pages_limit
 from .amdsmi_interface import amdsmi_reset_ttm_pages_limit
+
+# Power Stabilization (HAWK dummy-compute insertion + Ramp Management)
+from .amdsmi_interface import amdsmi_get_power_stabilization_info
+from .amdsmi_interface import amdsmi_set_power_stabilization_param
 
 # AMPP (amdsmi power profile)
 from .amdsmi_interface import amdsmi_get_ampp_profiles
@@ -361,9 +369,6 @@ from .amdsmi_interface import amdsmi_configure_ampp_profile
 # # Fabric (IFoE/UALoE) Information
 from .amdsmi_interface import amdsmi_get_fabric_telemetry_data
 from .amdsmi_interface import amdsmi_get_gpu_fabric_info
-from .amdsmi_interface import amdsmi_set_gpu_fabric_ppod_config
-from .amdsmi_interface import amdsmi_set_gpu_fabric_vpod_config
-from .amdsmi_interface import amdsmi_set_gpu_fabric_station_config
 
 # Exceptions
 from .amdsmi_exception import AmdSmiLibraryException

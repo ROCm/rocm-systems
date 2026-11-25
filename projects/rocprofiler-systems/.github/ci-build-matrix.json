@@ -5,7 +5,7 @@
             "cc": "gcc",
             "ccache_key_distro": "ubuntu-jammy",
             "cdash_suffix": "ubuntu-jammy-g++-rocm-6.3-python-internal-dyninst-hidden-viz",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11\" -DROCPROFSYS_STRIP_LIBRARIES=OFF \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network\" -DUSE_CLANG_OMP=OFF",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" -DROCPROFSYS_STRIP_LIBRARIES=OFF \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network\" -DUSE_CLANG_OMP=OFF",
             "compiler": "g++",
             "cpack_prefix": "/opt/rocprofiler-systems",
             "distro": "jammy",
@@ -14,7 +14,7 @@
             "install_cleanup": "rm -fr /opt/rocprofiler-systems-dev/",
             "install_prefix": "/opt/rocprofiler-systems-dev",
             "name": "Ubuntu 22.04 \u2022 g++ \u2022 ROCm 6.3",
-            "python_envs_glob": "py3.{8,9,10,11}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "sanity_check_rocm": true,
             "test_env_modules": true
         },
@@ -23,7 +23,7 @@
             "cc": "gcc",
             "ccache_key_distro": "ubuntu-jammy",
             "cdash_suffix": "ubuntu-jammy-g++-rocm-6.4-python-internal-dyninst-hidden-viz",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11\" -DROCPROFSYS_STRIP_LIBRARIES=OFF \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network\" -DUSE_CLANG_OMP=OFF",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" -DROCPROFSYS_STRIP_LIBRARIES=OFF \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network\" -DUSE_CLANG_OMP=OFF",
             "compiler": "g++",
             "cpack_prefix": "/opt/rocprofiler-systems",
             "distro": "jammy",
@@ -32,7 +32,7 @@
             "install_cleanup": "rm -fr /opt/rocprofiler-systems-dev/",
             "install_prefix": "/opt/rocprofiler-systems-dev",
             "name": "Ubuntu 22.04 \u2022 g++ \u2022 ROCm 6.4",
-            "python_envs_glob": "py3.{8,9,10,11}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "sanity_check_rocm": true,
             "test_env_modules": true
         },
@@ -41,7 +41,7 @@
             "cc": "gcc",
             "ccache_key_distro": "ubuntu-jammy",
             "cdash_suffix": "ubuntu-jammy-g++-rocm-7.0-python-internal-dyninst-hidden-viz",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11\" -DROCPROFSYS_STRIP_LIBRARIES=OFF \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network\" -DUSE_CLANG_OMP=OFF",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" -DROCPROFSYS_STRIP_LIBRARIES=OFF \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network\" -DUSE_CLANG_OMP=OFF",
             "compiler": "g++",
             "cpack_prefix": "/opt/rocprofiler-systems",
             "distro": "jammy",
@@ -50,7 +50,7 @@
             "install_cleanup": "rm -fr /opt/rocprofiler-systems-dev/",
             "install_prefix": "/opt/rocprofiler-systems-dev",
             "name": "Ubuntu 22.04 \u2022 g++ \u2022 ROCm 7.0",
-            "python_envs_glob": "py3.{8,9,10,11}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "sanity_check_rocm": true,
             "test_env_modules": true
         },
@@ -59,7 +59,7 @@
             "cc": "gcc",
             "ccache_key_distro": "ubuntu-jammy",
             "cdash_suffix": "ubuntu-jammy-g++-rocm-7.1-python-internal-dyninst-hidden-viz",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11\" -DROCPROFSYS_STRIP_LIBRARIES=OFF \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network\" -DUSE_CLANG_OMP=OFF",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" -DROCPROFSYS_STRIP_LIBRARIES=OFF \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network\" -DUSE_CLANG_OMP=OFF",
             "compiler": "g++",
             "cpack_prefix": "/opt/rocprofiler-systems",
             "distro": "jammy",
@@ -68,7 +68,7 @@
             "install_cleanup": "rm -fr /opt/rocprofiler-systems-dev/",
             "install_prefix": "/opt/rocprofiler-systems-dev",
             "name": "Ubuntu 22.04 \u2022 g++ \u2022 ROCm 7.1",
-            "python_envs_glob": "py3.{8,9,10,11}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "sanity_check_rocm": true,
             "test_env_modules": true
         },
@@ -77,7 +77,7 @@
             "cc": "gcc",
             "ccache_key_distro": "ubuntu-jammy",
             "cdash_suffix": "ubuntu-jammy-g++-rocm-7.2-python-internal-dyninst-hidden-viz",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11\" -DROCPROFSYS_STRIP_LIBRARIES=OFF \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network\" -DUSE_CLANG_OMP=OFF",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" -DROCPROFSYS_STRIP_LIBRARIES=OFF \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network\" -DUSE_CLANG_OMP=OFF",
             "compiler": "g++",
             "cpack_prefix": "/opt/rocprofiler-systems",
             "distro": "jammy",
@@ -86,7 +86,7 @@
             "install_cleanup": "rm -fr /opt/rocprofiler-systems-dev/",
             "install_prefix": "/opt/rocprofiler-systems-dev",
             "name": "Ubuntu 22.04 \u2022 g++ \u2022 ROCm 7.2",
-            "python_envs_glob": "py3.{8,9,10,11}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "sanity_check_rocm": true,
             "test_env_modules": true
         },
@@ -94,7 +94,7 @@
             "cc": "gcc",
             "ccache_key_distro": "ubuntu-noble",
             "cdash_suffix": "ubuntu-noble-g++-python-internal-dyninst",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;lulesh\" -DCMAKE_PREFIX_PATH=/opt/rocm -DUSE_CLANG_OMP=OFF",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;lulesh\" -DCMAKE_PREFIX_PATH=/opt/rocm -DUSE_CLANG_OMP=OFF",
             "compiler": "g++",
             "cpack_prefix": "/opt/rocprofiler-systems",
             "distro": "noble",
@@ -103,14 +103,14 @@
             "install_cleanup": "rm -fr /opt/rocprofiler-systems/",
             "install_prefix": "/opt/rocprofiler-systems",
             "name": "Ubuntu 24.04 \u2022 g++ \u2022 ROCm 6.3",
-            "python_envs_glob": "py3.{8,9,10,11,12,13}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "sanity_check_rocm": true
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "ubuntu-noble",
             "cdash_suffix": "ubuntu-noble-g++-python-internal-dyninst",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;lulesh\" -DCMAKE_PREFIX_PATH=/opt/rocm -DUSE_CLANG_OMP=OFF",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;lulesh\" -DCMAKE_PREFIX_PATH=/opt/rocm -DUSE_CLANG_OMP=OFF",
             "compiler": "g++",
             "cpack_prefix": "/opt/rocprofiler-systems",
             "distro": "noble",
@@ -119,14 +119,14 @@
             "install_cleanup": "rm -fr /opt/rocprofiler-systems/",
             "install_prefix": "/opt/rocprofiler-systems",
             "name": "Ubuntu 24.04 \u2022 g++ \u2022 ROCm 6.4",
-            "python_envs_glob": "py3.{8,9,10,11,12,13}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "sanity_check_rocm": true
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "ubuntu-noble",
             "cdash_suffix": "ubuntu-noble-g++-python-internal-dyninst",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;lulesh\" -DCMAKE_PREFIX_PATH=/opt/rocm -DUSE_CLANG_OMP=OFF",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;lulesh\" -DCMAKE_PREFIX_PATH=/opt/rocm -DUSE_CLANG_OMP=OFF",
             "compiler": "g++",
             "cpack_prefix": "/opt/rocprofiler-systems",
             "distro": "noble",
@@ -135,14 +135,14 @@
             "install_cleanup": "rm -fr /opt/rocprofiler-systems/",
             "install_prefix": "/opt/rocprofiler-systems",
             "name": "Ubuntu 24.04 \u2022 g++ \u2022 ROCm 7.0",
-            "python_envs_glob": "py3.{8,9,10,11,12,13}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "sanity_check_rocm": true
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "ubuntu-noble",
             "cdash_suffix": "ubuntu-noble-g++-python-internal-dyninst",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;lulesh\" -DCMAKE_PREFIX_PATH=/opt/rocm -DUSE_CLANG_OMP=OFF",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;lulesh\" -DCMAKE_PREFIX_PATH=/opt/rocm -DUSE_CLANG_OMP=OFF",
             "compiler": "g++",
             "cpack_prefix": "/opt/rocprofiler-systems",
             "distro": "noble",
@@ -151,14 +151,14 @@
             "install_cleanup": "rm -fr /opt/rocprofiler-systems/",
             "install_prefix": "/opt/rocprofiler-systems",
             "name": "Ubuntu 24.04 \u2022 g++ \u2022 ROCm 7.1",
-            "python_envs_glob": "py3.{8,9,10,11,12,13}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "sanity_check_rocm": true
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "ubuntu-noble",
             "cdash_suffix": "ubuntu-noble-g++-python-internal-dyninst",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;lulesh\" -DCMAKE_PREFIX_PATH=/opt/rocm -DUSE_CLANG_OMP=OFF",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;lulesh\" -DCMAKE_PREFIX_PATH=/opt/rocm -DUSE_CLANG_OMP=OFF",
             "compiler": "g++",
             "cpack_prefix": "/opt/rocprofiler-systems",
             "distro": "noble",
@@ -167,14 +167,14 @@
             "install_cleanup": "rm -fr /opt/rocprofiler-systems/",
             "install_prefix": "/opt/rocprofiler-systems",
             "name": "Ubuntu 24.04 \u2022 g++ \u2022 ROCm 7.2",
-            "python_envs_glob": "py3.{8,9,10,11,12,13}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "sanity_check_rocm": true
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "debian",
             "cdash_suffix": "debian-12-g++",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_OMPT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode;network\" -DCMAKE_PREFIX_PATH=/opt/rocm -DUSE_CLANG_OMP=OFF",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_OMPT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode;network\" -DCMAKE_PREFIX_PATH=/opt/rocm -DUSE_CLANG_OMP=OFF",
             "compiler": "g++",
             "cpack_prefix": "/opt/rocprofiler-systems",
             "distro": "debian",
@@ -183,13 +183,13 @@
             "install_cleanup": "rm -rf /opt/rocprofiler-systems",
             "install_prefix": "/opt/rocprofiler-systems",
             "name": "Debian 12 \u2022 g++ \u2022 ROCm 6.4",
-            "python_envs_glob": "py3.{8,9,10,11,12,13}"
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}"
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "debian",
             "cdash_suffix": "debian-12-g++",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_OMPT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode;network\" -DCMAKE_PREFIX_PATH=/opt/rocm -DUSE_CLANG_OMP=OFF",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_OMPT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode;network\" -DCMAKE_PREFIX_PATH=/opt/rocm -DUSE_CLANG_OMP=OFF",
             "compiler": "g++",
             "cpack_prefix": "/opt/rocprofiler-systems",
             "distro": "debian",
@@ -198,13 +198,13 @@
             "install_cleanup": "rm -rf /opt/rocprofiler-systems",
             "install_prefix": "/opt/rocprofiler-systems",
             "name": "Debian 12 \u2022 g++ \u2022 ROCm 7.0",
-            "python_envs_glob": "py3.{8,9,10,11,12,13}"
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}"
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "debian",
             "cdash_suffix": "debian-12-g++",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_OMPT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode;network\" -DCMAKE_PREFIX_PATH=/opt/rocm -DUSE_CLANG_OMP=OFF",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_OMPT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode;network\" -DCMAKE_PREFIX_PATH=/opt/rocm -DUSE_CLANG_OMP=OFF",
             "compiler": "g++",
             "cpack_prefix": "/opt/rocprofiler-systems",
             "distro": "debian",
@@ -213,13 +213,13 @@
             "install_cleanup": "rm -rf /opt/rocprofiler-systems",
             "install_prefix": "/opt/rocprofiler-systems",
             "name": "Debian 12 \u2022 g++ \u2022 ROCm 7.1",
-            "python_envs_glob": "py3.{8,9,10,11,12,13}"
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}"
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "debian",
             "cdash_suffix": "debian-12-g++",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_OMPT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode;network\" -DCMAKE_PREFIX_PATH=/opt/rocm -DUSE_CLANG_OMP=OFF",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_OMPT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode;network\" -DCMAKE_PREFIX_PATH=/opt/rocm -DUSE_CLANG_OMP=OFF",
             "compiler": "g++",
             "cpack_prefix": "/opt/rocprofiler-systems",
             "distro": "debian",
@@ -228,13 +228,13 @@
             "install_cleanup": "rm -rf /opt/rocprofiler-systems",
             "install_prefix": "/opt/rocprofiler-systems",
             "name": "Debian 12 \u2022 g++ \u2022 ROCm 7.2",
-            "python_envs_glob": "py3.{8,9,10,11,12,13}"
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}"
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "redhat",
             "cdash_suffix": "rhel-8.10-g++-python-mpip-rocm-6.3",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
             "compiler": "g++",
             "container_opts": "--shm-size=512m",
             "cpack_prefix": "",
@@ -246,13 +246,13 @@
             "is_rhel": true,
             "name": "RHEL 8.10 \u2022 g++ \u2022 ROCm 6.3",
             "os_major": "8",
-            "python_envs_glob": "py3.{8,9,10,11}"
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}"
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "redhat",
             "cdash_suffix": "rhel-8.10-g++-python-mpip-rocm-6.4",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
             "compiler": "g++",
             "container_opts": "--shm-size=512m",
             "cpack_prefix": "",
@@ -264,13 +264,13 @@
             "is_rhel": true,
             "name": "RHEL 8.10 \u2022 g++ \u2022 ROCm 6.4",
             "os_major": "8",
-            "python_envs_glob": "py3.{8,9,10,11}"
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}"
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "redhat",
             "cdash_suffix": "rhel-8.10-g++-python-mpip-rocm-7.0",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
             "compiler": "g++",
             "container_opts": "--shm-size=512m",
             "cpack_prefix": "",
@@ -282,13 +282,13 @@
             "is_rhel": true,
             "name": "RHEL 8.10 \u2022 g++ \u2022 ROCm 7.0",
             "os_major": "8",
-            "python_envs_glob": "py3.{8,9,10,11}"
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}"
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "redhat",
             "cdash_suffix": "rhel-8.10-g++-python-mpip-rocm-7.1",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
             "compiler": "g++",
             "container_opts": "--shm-size=512m",
             "cpack_prefix": "",
@@ -300,13 +300,13 @@
             "is_rhel": true,
             "name": "RHEL 8.10 \u2022 g++ \u2022 ROCm 7.1",
             "os_major": "8",
-            "python_envs_glob": "py3.{8,9,10,11}"
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}"
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "redhat",
             "cdash_suffix": "rhel-8.10-g++-python-mpip-rocm-7.2",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
             "compiler": "g++",
             "container_opts": "--shm-size=512m",
             "cpack_prefix": "",
@@ -318,13 +318,13 @@
             "is_rhel": true,
             "name": "RHEL 8.10 \u2022 g++ \u2022 ROCm 7.2",
             "os_major": "8",
-            "python_envs_glob": "py3.{8,9,10,11}"
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}"
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "redhat",
             "cdash_suffix": "rhel-9-g++-python-mpip-rocm-6.3",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
             "compiler": "g++",
             "container_opts": "--shm-size=512m",
             "cpack_prefix": "",
@@ -336,13 +336,13 @@
             "is_rhel": true,
             "name": "RHEL 9 \u2022 g++ \u2022 ROCm 6.3",
             "os_major": "9",
-            "python_envs_glob": "py3.{8,9,10,11}"
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}"
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "redhat",
             "cdash_suffix": "rhel-9-g++-python-mpip-rocm-6.4",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
             "compiler": "g++",
             "container_opts": "--shm-size=512m",
             "cpack_prefix": "",
@@ -354,13 +354,13 @@
             "is_rhel": true,
             "name": "RHEL 9 \u2022 g++ \u2022 ROCm 6.4",
             "os_major": "9",
-            "python_envs_glob": "py3.{8,9,10,11}"
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}"
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "redhat",
             "cdash_suffix": "rhel-9-g++-python-mpip-rocm-7.0",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
             "compiler": "g++",
             "container_opts": "--shm-size=512m",
             "cpack_prefix": "",
@@ -372,13 +372,13 @@
             "is_rhel": true,
             "name": "RHEL 9 \u2022 g++ \u2022 ROCm 7.0",
             "os_major": "9",
-            "python_envs_glob": "py3.{8,9,10,11}"
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}"
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "redhat",
             "cdash_suffix": "rhel-9-g++-python-mpip-rocm-7.1",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
             "compiler": "g++",
             "container_opts": "--shm-size=512m",
             "cpack_prefix": "",
@@ -390,13 +390,13 @@
             "is_rhel": true,
             "name": "RHEL 9 \u2022 g++ \u2022 ROCm 7.1",
             "os_major": "9",
-            "python_envs_glob": "py3.{8,9,10,11}"
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}"
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "redhat",
             "cdash_suffix": "rhel-9-g++-python-mpip-rocm-7.2",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
             "compiler": "g++",
             "container_opts": "--shm-size=512m",
             "cpack_prefix": "",
@@ -408,13 +408,13 @@
             "is_rhel": true,
             "name": "RHEL 9 \u2022 g++ \u2022 ROCm 7.2",
             "os_major": "9",
-            "python_envs_glob": "py3.{8,9,10,11}"
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}"
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "redhat",
             "cdash_suffix": "rhel-10-g++-python-mpip-rocm-7.1",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
             "compiler": "g++",
             "container_opts": "--shm-size=512m",
             "cpack_prefix": "",
@@ -426,13 +426,13 @@
             "is_rhel": true,
             "name": "RHEL 10 \u2022 g++ \u2022 ROCm 7.1",
             "os_major": "10",
-            "python_envs_glob": "py3.{8,9,10,11}"
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}"
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "redhat",
             "cdash_suffix": "rhel-10-g++-python-mpip-rocm-7.2",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_MPI=OFF -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload\"",
             "compiler": "g++",
             "container_opts": "--shm-size=512m",
             "cpack_prefix": "",
@@ -444,7 +444,7 @@
             "is_rhel": true,
             "name": "RHEL 10 \u2022 g++ \u2022 ROCm 7.2",
             "os_major": "10",
-            "python_envs_glob": "py3.{8,9,10,11}"
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}"
         }
     ],
     "system_deps": [
@@ -452,14 +452,14 @@
             "cc": "gcc",
             "ccache_key_distro": "ubuntu-jammy-system-deps",
             "cdash_suffix": "ubuntu-jammy-system-deps-g++",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\"",
             "compiler": "g++",
             "distro": "jammy-system-deps",
             "group": "ubuntu-22.04",
             "image": "dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-ubuntu-22.04",
             "install_prefix": "/opt/rocprofiler-systems",
             "name": "Ubuntu 22.04 \u2022 g++ \u2022 system deps",
-            "python_envs_glob": "py3.{8,9,10,11}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "sanity_check_rocm": true,
             "system_deps_apt": "g++ binutils-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev libspdlog-dev libfmt-dev",
             "use_clang_omp": "OFF"
@@ -468,14 +468,14 @@
             "cc": "amdclang",
             "ccache_key_distro": "ubuntu-jammy-system-deps",
             "cdash_suffix": "ubuntu-jammy-system-deps-amdclang++",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\"",
             "compiler": "amdclang++",
             "distro": "jammy-system-deps",
             "group": "ubuntu-22.04",
             "image": "dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-ubuntu-22.04",
             "install_prefix": "/opt/rocprofiler-systems",
             "name": "Ubuntu 22.04 \u2022 amdclang++ \u2022 system deps",
-            "python_envs_glob": "py3.{8,9,10,11}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "sanity_check_rocm": true,
             "system_deps_apt": "g++ binutils-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev libspdlog-dev libfmt-dev",
             "use_clang_omp": "ON"
@@ -484,14 +484,14 @@
             "cc": "gcc",
             "ccache_key_distro": "ubuntu-noble-system-deps",
             "cdash_suffix": "ubuntu-noble-system-deps-g++",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\"",
             "compiler": "g++",
             "distro": "noble-system-deps",
             "group": "ubuntu-24.04",
             "image": "dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-ubuntu-24.04",
             "install_prefix": "/opt/rocprofiler-systems",
             "name": "Ubuntu 24.04 \u2022 g++ \u2022 system deps",
-            "python_envs_glob": "py3.{8,9,10,11,12,13}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "sanity_check_rocm": true,
             "system_deps_apt": "g++ binutils-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev libspdlog-dev libfmt-dev",
             "use_clang_omp": "OFF"
@@ -500,14 +500,14 @@
             "cc": "amdclang",
             "ccache_key_distro": "ubuntu-noble-system-deps",
             "cdash_suffix": "ubuntu-noble-system-deps-amdclang++",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\"",
             "compiler": "amdclang++",
             "distro": "noble-system-deps",
             "group": "ubuntu-24.04",
             "image": "dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-ubuntu-24.04",
             "install_prefix": "/opt/rocprofiler-systems",
             "name": "Ubuntu 24.04 \u2022 amdclang++ \u2022 system deps",
-            "python_envs_glob": "py3.{8,9,10,11,12,13}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "sanity_check_rocm": true,
             "system_deps_apt": "g++ binutils-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev libspdlog-dev libfmt-dev",
             "use_clang_omp": "ON"
@@ -516,14 +516,14 @@
             "cc": "gcc",
             "ccache_key_distro": "debian-system-deps",
             "cdash_suffix": "debian-12-system-deps-g++",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode;network\" -DCMAKE_PREFIX_PATH=/opt/rocm",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode;network\" -DCMAKE_PREFIX_PATH=/opt/rocm",
             "compiler": "g++",
             "distro": "debian-system-deps",
             "group": "debian",
             "image": "dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-debian-12",
             "install_prefix": "/opt/rocprofiler-systems",
             "name": "Debian 12 \u2022 g++ \u2022 system deps",
-            "python_envs_glob": "py3.{8,9,10,11,12,13}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "sanity_check_rocm": true,
             "system_deps_apt": "g++ binutils-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev libspdlog-dev libfmt-dev",
             "use_clang_omp": "OFF"
@@ -532,14 +532,14 @@
             "cc": "amdclang",
             "ccache_key_distro": "debian-system-deps",
             "cdash_suffix": "debian-12-system-deps-amdclang++",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode;network\" -DCMAKE_PREFIX_PATH=/opt/rocm",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_OMPT=OFF -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode;network\" -DCMAKE_PREFIX_PATH=/opt/rocm",
             "compiler": "amdclang++",
             "distro": "debian-system-deps",
             "group": "debian",
             "image": "dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-debian-12",
             "install_prefix": "/opt/rocprofiler-systems",
             "name": "Debian 12 \u2022 amdclang++ \u2022 system deps",
-            "python_envs_glob": "py3.{8,9,10,11,12,13}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "sanity_check_rocm": true,
             "system_deps_apt": "g++ binutils-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev libspdlog-dev libfmt-dev",
             "use_clang_omp": "ON"
@@ -548,7 +548,7 @@
             "cc": "gcc",
             "ccache_key_distro": "redhat-system-deps",
             "cdash_suffix": "rhel-9-system-deps-g++",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_USE_MPI_HEADERS=ON -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_USE_MPI_HEADERS=ON -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\"",
             "compiler": "g++",
             "container_opts": "--shm-size=512m",
             "distro": "rhel-9-system-deps",
@@ -558,14 +558,14 @@
             "is_rhel": true,
             "name": "RHEL 9 \u2022 g++ \u2022 system deps",
             "os_major": "9",
-            "python_envs_glob": "py3.{8,9,10,11,12,13}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "use_clang_omp": "OFF"
         },
         {
             "cc": "amdclang",
             "ccache_key_distro": "redhat-system-deps",
             "cdash_suffix": "rhel-9-system-deps-amdclang++",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_USE_MPI_HEADERS=ON -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_USE_MPI_HEADERS=ON -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\"",
             "compiler": "amdclang++",
             "container_opts": "--shm-size=512m",
             "distro": "rhel-9-system-deps",
@@ -575,14 +575,14 @@
             "is_rhel": true,
             "name": "RHEL 9 \u2022 amdclang++ \u2022 system deps",
             "os_major": "9",
-            "python_envs_glob": "py3.{8,9,10,11,12,13}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "use_clang_omp": "ON"
         },
         {
             "cc": "gcc",
             "ccache_key_distro": "redhat-system-deps",
             "cdash_suffix": "rhel-10-system-deps-g++",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_USE_MPI_HEADERS=ON -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_USE_MPI_HEADERS=ON -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\"",
             "compiler": "g++",
             "container_opts": "--shm-size=512m",
             "distro": "rhel-10-system-deps",
@@ -592,14 +592,14 @@
             "is_rhel": true,
             "name": "RHEL 10 \u2022 g++ \u2022 system deps",
             "os_major": "10",
-            "python_envs_glob": "py3.{8,9,10,11,12,13}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "use_clang_omp": "OFF"
         },
         {
             "cc": "amdclang",
             "ccache_key_distro": "redhat-system-deps",
             "cdash_suffix": "rhel-10-system-deps-amdclang++",
-            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_USE_MPI_HEADERS=ON -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13\"",
+            "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev -DROCPROFSYS_USE_MPI_HEADERS=ON -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON -DROCPROFSYS_BUILD_SPDLOG=OFF -DROCPROFSYS_BUILD_FMT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15\"",
             "compiler": "amdclang++",
             "container_opts": "--shm-size=512m",
             "distro": "rhel-10-system-deps",
@@ -609,7 +609,7 @@
             "is_rhel": true,
             "name": "RHEL 10 \u2022 amdclang++ \u2022 system deps",
             "os_major": "10",
-            "python_envs_glob": "py3.{8,9,10,11,12,13}",
+            "python_envs_glob": "py3.{8,9,10,11,12,13,14,15}",
             "use_clang_omp": "ON"
         }
     ]

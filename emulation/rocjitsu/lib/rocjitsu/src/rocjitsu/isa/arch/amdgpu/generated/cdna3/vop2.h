@@ -211,6 +211,12 @@ class VLshrrevB32Vop2 : public Vop2 {
 public:
   VLshrrevB32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop2::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp || modifiers.dpp8) {
+      modifiers.src0 = &vsrc1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand vsrc1;
@@ -223,6 +229,12 @@ class VAshrrevI32Vop2 : public Vop2 {
 public:
   VAshrrevI32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop2::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp || modifiers.dpp8) {
+      modifiers.src0 = &vsrc1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand vsrc1;
@@ -235,6 +247,12 @@ class VLshlrevB32Vop2 : public Vop2 {
 public:
   VLshlrevB32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop2::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp || modifiers.dpp8) {
+      modifiers.src0 = &vsrc1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand vsrc1;
@@ -329,6 +347,12 @@ class VSubrevCoU32Vop2 : public Vop2 {
 public:
   VSubrevCoU32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop2::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp || modifiers.dpp8) {
+      modifiers.src0 = &vsrc1;
+    }
+  }
   Operand vdst;
   Operand vcc;
   Operand src0;
@@ -370,6 +394,12 @@ class VSubbrevCoU32Vop2 : public Vop2 {
 public:
   VSubbrevCoU32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop2::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp || modifiers.dpp8) {
+      modifiers.src0 = &vsrc1;
+    }
+  }
   Operand vdst;
   Operand vcc;
   Operand src0;
@@ -497,6 +527,12 @@ class VSubrevU16Vop2 : public Vop2 {
 public:
   VSubrevU16Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop2::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp || modifiers.dpp8) {
+      modifiers.src0 = &vsrc1;
+    }
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
@@ -523,6 +559,12 @@ class VLshlrevB16Vop2 : public Vop2 {
 public:
   VLshlrevB16Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop2::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp || modifiers.dpp8) {
+      modifiers.src0 = &vsrc1;
+    }
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
@@ -536,6 +578,12 @@ class VLshrrevB16Vop2 : public Vop2 {
 public:
   VLshrrevB16Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop2::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp || modifiers.dpp8) {
+      modifiers.src0 = &vsrc1;
+    }
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
@@ -549,6 +597,12 @@ class VAshrrevI16Vop2 : public Vop2 {
 public:
   VAshrrevI16Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop2::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp || modifiers.dpp8) {
+      modifiers.src0 = &vsrc1;
+    }
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
@@ -677,6 +731,12 @@ class VSubrevU32Vop2 : public Vop2 {
 public:
   VSubrevU32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop2::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp || modifiers.dpp8) {
+      modifiers.src0 = &vsrc1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand vsrc1;

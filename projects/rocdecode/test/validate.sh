@@ -35,10 +35,51 @@ BUILD_DIR="$SCRIPT_DIR/../build"
 SKIP_CTEST=0
 SKIP_CONFORMANCE=0
 CHECK_ROCM=0
+# Output surface memory types for the conformance phase (--mem-type). Empty means
+# the sample's own default, with no -m passed, exactly as before the option existed.
+MEM_TYPES=()
+
+# Cross-platform knobs. On Windows (Git Bash reports MINGW*/MSYS*/CYGWIN* from uname)
+# the core library is built with the MSVC multi-config generator, so CTest needs an
+# explicit -C Release, and the conformance script is launched with `python` (the
+# `python3` name on Windows is usually the inert Store shim). On Linux these stay as
+# they were: no config flag, python3.
+IS_WINDOWS=0
+PY=python3
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1; PY=python ;;
+esac
+
+# On Windows, make the install's runtime DLLs loadable from just ROCM_PATH. The
+# Windows loader ignores ROCM_PATH, so rocdecode.dll (in ROCM_PATH/bin), the
+# rocm_sysdeps_va*.dll and vaon12_drv_video.dll (in ROCM_PATH/lib/rocm_sysdeps/bin)
+# are only found if those dirs are on PATH; the VA-API layer also needs
+# LIBVA_DRIVERS_PATH pointed at the sysdeps bin dir. If the caller already set these
+# up, this is a harmless no-op (dirs are only prepended when not already on PATH).
+if [[ $IS_WINDOWS -eq 1 ]]; then
+  WIN_ROCM="${ROCM_PATH:-C:/opt/rocm}"
+  SYSDEPS_BIN="$WIN_ROCM/lib/rocm_sysdeps/bin"
+  # Git Bash's PATH is colon-separated, but native Windows paths carry a
+  # drive-letter colon (C:/opt/rocm) that would split mid-path and leave the DLL
+  # dirs unreachable. Convert to POSIX form (/c/opt/rocm) with cygpath before
+  # prepending so launched programs actually find the decode DLLs.
+  for d in "$WIN_ROCM/bin" "$SYSDEPS_BIN"; do
+    if [[ -d "$d" ]]; then
+      d_posix="$(cygpath -u "$d")"
+      if [[ ":$PATH:" != *":$d_posix:"* ]]; then
+        PATH="$d_posix:$PATH"
+      fi
+    fi
+  done
+  export PATH
+  # LIBVA_DRIVERS_PATH is read by the VA-API loader (native Windows code), so it
+  # must stay a native path, not the POSIX form used for PATH.
+  [[ -d "$SYSDEPS_BIN" ]] && export LIBVA_DRIVERS_PATH="$SYSDEPS_BIN"
+fi
 
 usage() {
   cat <<'EOF'
-Usage: validate.sh [--build-dir DIR] [--skip-ctest] [--skip-conformance] [--check-rocm]
+Usage: validate.sh [--build-dir DIR] [--skip-ctest] [--skip-conformance] [--mem-type LIST] [--check-rocm]
 
 Runs the rocDecode CTest suite and per-codec conformance tests, then prints a
 combined summary. Exits 0 if everything passed, 1 otherwise.
@@ -47,6 +88,10 @@ Options:
   --build-dir DIR      Path to the CMake build directory (default: ../build)
   --skip-ctest         Skip the CTest phase
   --skip-conformance   Skip all conformance phases
+  --mem-type LIST      Run the conformance phase once per output surface memory
+                       type in LIST, a comma-separated list of 0 (device internal),
+                       1 (device copied) and 2 (host copied), e.g. 1 or 0,1.
+                       Default: the sample's own default (0), labelled as before.
   --check-rocm         Verify the ROCm toolchain (ROCM_PATH exists + writable) and exit
   -h, --help           Show this help and exit
 
@@ -67,6 +112,23 @@ EOF
 # derives its compiler, install prefix, and CTest data path from ROCM_PATH
 # (defaulting to /opt/rocm), so a wrong/unset value fails confusingly.
 check_rocm_path() {
+  # On Windows the compiler is MSVC (no amdclang++); ROCM_PATH only selects the
+  # install tree rocDecode is resolved from, so a dir-exists check is what matters.
+  # The caller is expected to have already set up the env (ROCM_PATH plus the
+  # install's bin dirs on PATH and LIBVA_DRIVERS_PATH) in this cmd/shell session.
+  if [[ $IS_WINDOWS -eq 1 ]]; then
+    local rp="${ROCM_PATH:-C:/opt/rocm}"
+    if [[ ! -d "$rp" ]]; then
+      {
+        echo "ERROR: ROCM_PATH does not exist: $rp"
+        echo "  Fix: point ROCM_PATH at your rocDecode install prefix (default C:/opt/rocm)"
+        echo "       and make sure its bin dirs are on PATH before launching Claude Code."
+      } >&2
+      return 1
+    fi
+    echo "Using ROCM_PATH=$rp (Windows/MSVC)"
+    return 0
+  fi
   local rp="${ROCM_PATH:-/opt/rocm}"
   local note
   if [[ -n "${ROCM_PATH:-}" ]]; then
@@ -121,6 +183,32 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-ctest) SKIP_CTEST=1; shift ;;
     --skip-conformance) SKIP_CONFORMANCE=1; shift ;;
+    --mem-type)
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --mem-type requires a list such as 1 or 0,1" >&2
+        echo >&2
+        usage >&2
+        exit 1
+      fi
+      # Check the whole argument before splitting it: `read -a` drops a trailing
+      # empty field and stops at the first newline, so "0," or "0<newline>3" would
+      # otherwise pass as "0". 3 (not mapped) is excluded: it returns no frames,
+      # so there is nothing to compare against the reference MD5.
+      if [[ ! "$2" =~ ^[012](,[012])*$ ]]; then
+        echo "ERROR: invalid --mem-type '$2' (expected a comma-separated list of 0, 1, 2 such as 1 or 0,1)" >&2
+        exit 1
+      fi
+      IFS=',' read -r -a MEM_TYPES <<< "$2"
+      SEEN=","
+      for MT in "${MEM_TYPES[@]}"; do
+        if [[ "$SEEN" == *",$MT,"* ]]; then
+          echo "ERROR: --mem-type lists $MT more than once" >&2
+          exit 1
+        fi
+        SEEN="$SEEN$MT,"
+      done
+      shift 2
+      ;;
     --check-rocm) CHECK_ROCM=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1"; echo; usage; exit 1 ;;
@@ -132,7 +220,13 @@ done
 # normal test run (which does not install) skips it.
 check_rocm_path || exit 1
 if [[ $CHECK_ROCM -eq 1 ]]; then
-  check_rocm_writable || exit 1
+  # The writable-prefix check guards `make install` into ROCM_PATH on Linux. On
+  # Windows the bash `-w` test on a native path is unreliable and the MSVC
+  # `cmake --install` does not need sudo, so the dir-exists check (done above) is
+  # sufficient there.
+  if [[ $IS_WINDOWS -eq 0 ]]; then
+    check_rocm_writable || exit 1
+  fi
   exit 0
 fi
 
@@ -172,7 +266,14 @@ if [[ $SKIP_CTEST -eq 0 ]]; then
     echo "ERROR: Build directory not found: $BUILD_DIR" >&2
     RESULTS["$CTEST_PHASE"]="FAILED"
   else
-    make -C "$BUILD_DIR" test ARGS="-VV" 2>&1 | tee "$RESULTS_DIR/ctest_output.txt"
+    # Linux uses `make test`; Windows has no make and the MSVC generator is
+    # multi-config, so drive CTest directly with -C Release. Both emit the same
+    # "100% tests passed"/"0 tests failed" summary the grep below keys on.
+    if [[ $IS_WINDOWS -eq 1 ]]; then
+      ctest --test-dir "$BUILD_DIR" -C Release -VV 2>&1 | tee "$RESULTS_DIR/ctest_output.txt"
+    else
+      make -C "$BUILD_DIR" test ARGS="-VV" 2>&1 | tee "$RESULTS_DIR/ctest_output.txt"
+    fi
     if grep -qE "100% tests passed|0 tests failed" "$RESULTS_DIR/ctest_output.txt"; then
       RESULTS["$CTEST_PHASE"]="PASSED"
     else
@@ -195,51 +296,75 @@ declare -A CODEC_DIRS=(
 )
 CODEC_ORDER=(AVC AV1 HEVC VP9)
 
+# One conformance pass per requested memory type. "" stands for the sample's default:
+# no -m is passed and the phases, logs and result directories keep their original names.
+if [[ ${#MEM_TYPES[@]} -eq 0 ]]; then
+  MEM_PASSES=("")
+else
+  MEM_PASSES=("${MEM_TYPES[@]}")
+fi
+
 if [[ $SKIP_CONFORMANCE -eq 0 ]]; then
   pushd "$SCRIPT_DIR/testScripts" > /dev/null
-  for CODEC in "${CODEC_ORDER[@]}"; do
-    PHASE_ORDER+=("Conformance $CODEC")
-    DIR="${CODEC_DIRS[$CODEC]}"
-    if [[ ! -d "$DIR" ]]; then
-      echo "WARNING: Conformance directory not found for $CODEC: $DIR (skipping)"
-      echo "         Set ROCDECODE_CONFORMANCE_DIR to the parent of the *Conformance folders."
-      echo "         (currently: ${ROCDECODE_CONFORMANCE_DIR:-<unset, using default \$HOME/rocDecodeConformance>})"
-      RESULTS["Conformance $CODEC"]="WARNING"
-      continue
-    fi
-    echo "=== Running Conformance: $CODEC ==="
-    OUT="$RESULTS_DIR/conformance_${CODEC}_output.txt"
-    # Give each codec its own results directory under this run. Without it every codec, and
-    # every other sweep on the machine, shares the script's default directory and appends to one
-    # rocDecode_output.log, so the pass counts are taken over another run's output.
-    python3 run_rocDecode_Conformance.py \
-      --rocDecode_directory "$SCRIPT_DIR/.." \
-      --files_directory "$DIR" \
-      --results_directory "$RESULTS_DIR/$CODEC" \
-      2>&1 | tee "$OUT"
-    # A pass count above the stream count cannot come from decoding; it means the tally was taken
-    # over output that is not all from this run. Call that out rather than letting it land as an
-    # ordinary pass or failure, which is how it reads otherwise.
-    TOTAL_STREAMS=$(grep -oE "completed on the [0-9]+ streams" "$OUT" | grep -oE "[0-9]+" | tail -1)
-    PASSING_STREAMS=$(grep -oE "number of passing streams is [0-9]+" "$OUT" | grep -oE "[0-9]+" | tail -1)
-    if [[ -n "$TOTAL_STREAMS" && -n "$PASSING_STREAMS" && "$PASSING_STREAMS" -gt "$TOTAL_STREAMS" ]]; then
-      echo "ERROR: $CODEC reported $PASSING_STREAMS passing streams out of $TOTAL_STREAMS."
-      echo "       The tally is inconsistent, so these results are not usable. This happens when"
-      echo "       another conformance run shares the results directory; re-run with nothing else"
-      echo "       decoding on this machine."
-      RESULTS["Conformance $CODEC"]="FAILED"
-    elif grep -q "The number of failing streams is 0" "$OUT" && \
-         grep -q "The number of streams that did not finish decoding is 0" "$OUT"; then
-      RESULTS["Conformance $CODEC"]="PASSED"
-    else
-      RESULTS["Conformance $CODEC"]="FAILED"
-    fi
+  for MT in "${MEM_PASSES[@]}"; do
+    for CODEC in "${CODEC_ORDER[@]}"; do
+      if [[ -n "$MT" ]]; then
+        PHASE="Conformance $CODEC (-m $MT)"
+        TAG="${CODEC}_m${MT}"
+        MEM_ARGS=(--mem_type "$MT")
+      else
+        PHASE="Conformance $CODEC"
+        TAG="$CODEC"
+        MEM_ARGS=()
+      fi
+      PHASE_ORDER+=("$PHASE")
+      DIR="${CODEC_DIRS[$CODEC]}"
+      if [[ ! -d "$DIR" ]]; then
+        echo "WARNING: Conformance directory not found for $CODEC: $DIR (skipping)"
+        echo "         Set ROCDECODE_CONFORMANCE_DIR to the parent of the *Conformance folders."
+        echo "         (currently: ${ROCDECODE_CONFORMANCE_DIR:-<unset, using default \$HOME/rocDecodeConformance>})"
+        RESULTS["$PHASE"]="WARNING"
+        continue
+      fi
+      echo "=== Running $PHASE ==="
+      OUT="$RESULTS_DIR/conformance_${TAG}_output.txt"
+      # Give each codec (and memory type) its own results directory under this run. Without it
+      # every codec, and every other sweep on the machine, shares the script's default directory
+      # and appends to one rocDecode_output.log, so the pass counts are taken over another run's
+      # output.
+      "$PY" run_rocDecode_Conformance.py \
+        --rocDecode_directory "$SCRIPT_DIR/.." \
+        --files_directory "$DIR" \
+        --results_directory "$RESULTS_DIR/$TAG" \
+        ${MEM_ARGS[@]+"${MEM_ARGS[@]}"} \
+        2>&1 | tee "$OUT"
+      # A pass count above the stream count cannot come from decoding; it means the tally was taken
+      # over output that is not all from this run. Call that out rather than letting it land as an
+      # ordinary pass or failure, which is how it reads otherwise.
+      TOTAL_STREAMS=$(grep -oE "completed on the [0-9]+ streams" "$OUT" | grep -oE "[0-9]+" | tail -1)
+      PASSING_STREAMS=$(grep -oE "number of passing streams is [0-9]+" "$OUT" | grep -oE "[0-9]+" | tail -1)
+      if [[ -n "$TOTAL_STREAMS" && -n "$PASSING_STREAMS" && "$PASSING_STREAMS" -gt "$TOTAL_STREAMS" ]]; then
+        echo "ERROR: $PHASE reported $PASSING_STREAMS passing streams out of $TOTAL_STREAMS."
+        echo "       The tally is inconsistent, so these results are not usable. This happens when"
+        echo "       another conformance run shares the results directory; re-run with nothing else"
+        echo "       decoding on this machine."
+        RESULTS["$PHASE"]="FAILED"
+      elif grep -q "The number of failing streams is 0" "$OUT" && \
+           grep -q "The number of streams that did not finish decoding is 0" "$OUT"; then
+        RESULTS["$PHASE"]="PASSED"
+      else
+        RESULTS["$PHASE"]="FAILED"
+      fi
+    done
   done
   popd > /dev/null
 else
-  for CODEC in "${CODEC_ORDER[@]}"; do
-    PHASE_ORDER+=("Conformance $CODEC")
-    RESULTS["Conformance $CODEC"]="SKIPPED"
+  for MT in "${MEM_PASSES[@]}"; do
+    for CODEC in "${CODEC_ORDER[@]}"; do
+      if [[ -n "$MT" ]]; then PHASE="Conformance $CODEC (-m $MT)"; else PHASE="Conformance $CODEC"; fi
+      PHASE_ORDER+=("$PHASE")
+      RESULTS["$PHASE"]="SKIPPED"
+    done
   done
 fi
 

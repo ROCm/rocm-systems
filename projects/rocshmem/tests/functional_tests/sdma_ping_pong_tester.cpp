@@ -25,6 +25,7 @@
 #include "sdma_ping_pong_tester.hpp"
 
 #include <rocshmem/rocshmem.hpp>
+#include "backend_bc.hpp"
 #include "context.hpp"
 #include "ipc_policy.hpp"
 #include "sdma/anvil_device.hpp"
@@ -32,6 +33,10 @@
 #include "verify_results_kernels.hpp"
 
 using namespace rocshmem;
+
+namespace rocshmem {
+extern Backend *backend;
+}
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -85,10 +90,10 @@ __global__ void SdmaPingPongTest(int loop, int skip,
     int *s_int = reinterpret_cast<int *>(my_s);
 
     // Drain all setup loads from HBM before entering the timed loop.
-#if defined(__GFX12__)
-    asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
-#else
+#if defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__)
     __builtin_amdgcn_s_waitcnt(0);
+#else
+    asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
 #endif
 
     for (int i = 0; i < loop + skip; i++) {
@@ -145,6 +150,13 @@ SdmaPingPongTester::SdmaPingPongTester(TesterArguments args) : Tester(args) {
   sig_addr = (uint64_t *)alloc_test_buffer(sizeof(uint64_t) * args.num_wgs);
   rtt_factor = 2;
   bw_factor = 2;
+
+  // False if SDMA failed to connect (e.g. no xGMI) and fell back to IPC.
+  sdma_unavailable = !backend->ipcImpl.sdmaImpl_.sdmaEnabled;
+  if (sdma_unavailable && args.myid == 0) {
+    std::cout << "sdma_pingpong: SKIPPED (SDMA did not connect on this "
+                 "topology; fell back to IPC memcpy)\n";
+  }
 }
 
 SdmaPingPongTester::~SdmaPingPongTester() {
@@ -161,6 +173,8 @@ void SdmaPingPongTester::resetBuffers(size_t size) {
 
 void SdmaPingPongTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                                       size_t size) {
+  if (sdma_unavailable) return;
+
   size_t shared_bytes = 0;
 
   hipLaunchKernelGGL(SdmaPingPongTest, gridSize, blockSize, shared_bytes,
@@ -173,6 +187,11 @@ void SdmaPingPongTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
 }
 
 void SdmaPingPongTester::verifyResults(size_t size) {
+  if (sdma_unavailable) {
+    _print_results = false;
+    return;
+  }
+
   if (args.op_type <= 1) return;
 
   size_t check_bytes = size * args.num_wgs;

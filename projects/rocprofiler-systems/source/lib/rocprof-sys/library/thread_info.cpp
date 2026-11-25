@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/thread_info.hpp"
+#include "common/clocks.hpp"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/control/clocks/timeline.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "library/causal/delay.hpp"
@@ -102,13 +102,6 @@ init_index_data(std::int64_t _tid, bool _offset = false)
 thread_local std::int64_t offset_causal_count = 0;
 const auto                unknown_thread      = std::optional<thread_info>{};
 std::int64_t              peak_num_threads    = max_supported_threads;
-
-// Register callback to allow thread_data containers to query peak_num_threads
-// when they are instantiated, ensuring late-instantiated containers are properly sized.
-const auto peak_num_threads_callback_registered = []() {
-    set_peak_num_threads_callback([]() -> std::int64_t { return peak_num_threads; });
-    return true;
-}();
 }  // namespace
 
 std::atomic<size_t> thread_info::initialized_threads = 0;
@@ -148,7 +141,7 @@ grow_data(std::int64_t _tid)
             LOG_WARNING("[{}] Growing thread data from {} to {}...", _tid,
                         peak_num_threads, peak_num_threads + max_supported_threads);
 
-            for(auto itr : grow_functors())
+            for(auto itr : get_grow_functors())
             {
                 if(itr)
                 {
@@ -202,7 +195,7 @@ thread_info::init(bool _offset)
         _info                 = thread_info{};
         _info->is_offset      = threading::offset_this_id();
         _info->index_data     = init_index_data(_tid, _info->is_offset);
-        _info->lifetime.first = control::clocks::timeline_ns();
+        _info->lifetime.first = clocks::timeline::now_ns();
 
         const auto _sequent_tid = _info->index_data->sequent_value;
         _info->causal_count     = (!_info->is_offset && _sequent_tid < peak_num_threads)

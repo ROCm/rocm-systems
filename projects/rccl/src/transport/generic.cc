@@ -9,7 +9,12 @@
 #include "transport.h"
 #include "bootstrap.h"
 
+// RCCL: HIP leaves multi-segment registration off until a job opts in.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+NCCL_PARAM(MultiSegmentRegister, "MULTI_SEGMENT_REGISTER", 0);
+#else
 NCCL_PARAM(MultiSegmentRegister, "MULTI_SEGMENT_REGISTER", 1);
+#endif
 
 ncclResult_t ncclTransportRingConnect(struct ncclComm* comm) {
   struct ringConnInfo {
@@ -122,10 +127,10 @@ ncclResult_t ncclTransportPatConnect(struct ncclComm* comm) {
     struct ncclTopoGraph* graph = !comm->isOneRPN ? &comm->graphs[NCCL_ALGO_NVLS] : &comm->graphs[NCCL_ALGO_TREE];
     int nChannels = !comm->isOneRPN ? comm->nvlsChannels : comm->nChannels;
 
-    for (int mask = 1; mask < comm->nNodes; mask <<= 1) {
-      int prevNode = (comm->node + mask) % comm->nNodes;
+    for (int dim = 0; (1 << dim) < comm->nNodes; dim++) {
+      int prevNode = patSendPeer(comm->node, comm->nNodes, dim, /*mirrored=*/false);
       int numLocalRanks = comm->localRanks;
-      int nextNode = (comm->node + comm->nNodes - mask) % comm->nNodes;
+      int nextNode = patRecvPeer(comm->node, comm->nNodes, dim, /*mirrored=*/false);
       int prevPeer = prevNode;
       int nextPeer = nextNode;
       if (!comm->isOneRPN) {

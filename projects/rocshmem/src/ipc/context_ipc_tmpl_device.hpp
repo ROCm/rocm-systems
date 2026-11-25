@@ -272,9 +272,16 @@ __device__ int IPCContext::reduce_wave(rocshmem_team_t team, T *dest,
 
   int PE_size = team_obj->tinfo_wrt_world->size;
 
-  size_t direct_pWrk = PE_size * nreduce;
+  // pWrk is indexed by world rank in internal_direct_allreduce_wave, so its
+  // required capacity is bounded by the largest world rank in the team, not
+  // the team size.
+  size_t direct_pWrk =
+      (static_cast<size_t>(team_obj->get_pe_in_world(PE_size - 1)) + 1) * nreduce;
   size_t direct_pSync = PE_size;
-  size_t provided_pWrk = max(nreduce / 2 + 1, ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE);
+  // See reduce_wg for why this is rescaled from double-sized units to
+  // T-sized units.
+  size_t provided_pWrk = max(nreduce / 2 + 1,
+      (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T));
   size_t provided_pSync = ROCSHMEM_REDUCE_SYNC_SIZE;
 
   size_t ring_pSync = 2 * PE_size;
@@ -283,7 +290,8 @@ __device__ int IPCContext::reduce_wave(rocshmem_team_t team, T *dest,
     internal_direct_allreduce_wave<T, Op>(dest, source, nreduce, team_obj);
   } else {
     if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
-      size_t ring_pWrk = ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
+      size_t ring_pWrk =
+          (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T);
       int chunk_size = ring_pWrk / PE_size;
       int seg_size = chunk_size * PE_size;
 
@@ -315,7 +323,7 @@ __device__ int IPCContext::reduce_wave(rocshmem_team_t team, T *dest,
         }
       }
     } else {
-      LOGD_WARN("Unsupported reduction size for IPC wave conduit.");
+      LOGD_WARN("Unsupported reduction size for IPC wave backend.");
       return ROCSHMEM_ERROR;
     }
   }
@@ -427,13 +435,18 @@ __device__ void IPCContext::internal_ring_allreduce_wg(
                             chunk_size, wg_id, wg_size);
     }
 
-    // Loop 2 in the example above
+    // Loop 2 in the example above (allgather). Relayed through pWrk (like
+    // loop 1) instead of writing directly into the peer's dst: the direct
+    // write and its pSync completion flag go through different IPC
+    // mappings (heap vs. wrk_sync_pool), so the flag can be visible before
+    // the write is.
     for (int iter = PE_size - 1; iter < 2 * PE_size - 2; iter++) {
       off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
-      putmem_nbi_wg(reinterpret_cast<void *>(&dst[off_send + off_seg]),
+      off_recv = (((my_pe_in_team - iter + 2 * PE_size) % PE_size) * chunk_size);
+
+      internal_putmem_wg(reinterpret_cast<void *>(&pWrk[off_send]),
                     reinterpret_cast<void *>(&dst[off_send + off_seg]),
                     chunk_size * sizeof(T), send_pe);
-      __syncthreads();
       fence(send_pe);
       if (is_thread_zero_in_block()) {
         wait_val = seg + 10;
@@ -442,12 +455,26 @@ __device__ void IPCContext::internal_ring_allreduce_wg(
       }
       atomic::threadfence<atomic::memory_scope::system,
                           atomic::memory_order::acquire>();
-
       __syncthreads();
+
+      for (int i = wg_id; i < chunk_size; i += wg_size) {
+        dst[off_seg + off_recv + i] = pWrk[off_recv + i];
+      }
+      __syncthreads();
+    }
+
+    // The next segment reuses this segment's pWrk slots (loop 1 of seg+1
+    // writes where loop 2 of this seg just wrote). The pSync flags only
+    // signal "data arrived," not "receiver has consumed it," so without a
+    // barrier a fast PE could start seg+1's sends before a slower peer has
+    // copied seg's data out of pWrk, corrupting it.
+    if (seg + 1 < n_seg) {
+      barrier_wg(reinterpret_cast<rocshmem_team_t>(team_obj));
     }
   }
 
-  for (int i = wg_id; i < 2 * constmem.num_pes - 2; i += wg_size) {
+  // Team-relative bound, not the global PE count.
+  for (int i = wg_id; i < 2 * PE_size - 2; i += wg_size) {
     pSync[i] = ROCSHMEM_SYNC_VALUE;
   }
   __syncthreads();
@@ -537,17 +564,23 @@ __device__ int IPCContext::reduce_wg(rocshmem_team_t team, T *dest,
 
   int PE_size = team_obj->tinfo_wrt_world->size;
 
-  size_t direct_pWrk = PE_size * nreduce;
+  // pWrk is indexed by world rank in internal_direct_allreduce_wg, so its
+  // required capacity is bounded by the largest world rank in the team, not
+  // the team size.
+  size_t direct_pWrk =
+      (static_cast<size_t>(team_obj->get_pe_in_world(PE_size - 1)) + 1) * nreduce;
   size_t direct_pSync = PE_size;
   size_t ring_pSync = 2 * PE_size;
-  size_t provided_pWrk = max(nreduce / 2 + 1, ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE);
+  size_t provided_pWrk = max(nreduce / 2 + 1,
+      (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T));
   size_t provided_pSync = ROCSHMEM_REDUCE_SYNC_SIZE;
 
   if (provided_pWrk >= direct_pWrk && provided_pSync >= direct_pSync) {
     internal_direct_allreduce_wg<T, Op>(dest, source, nreduce, team_obj);
   } else {
     if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
-      size_t ring_pWrk = ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
+      size_t ring_pWrk =
+          (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T);
       // integer division truncating value
       int chunk_size = ring_pWrk / PE_size;
       int seg_size = chunk_size * PE_size;
@@ -583,7 +616,7 @@ __device__ int IPCContext::reduce_wg(rocshmem_team_t team, T *dest,
         }
       }
     } else {
-      LOGD_WARN("Unsupported reduction size for IPC conduit.");
+      LOGD_WARN("Unsupported reduction size for IPC backend.");
       return ROCSHMEM_ERROR;
     }
   }
@@ -761,23 +794,6 @@ __device__ int IPCContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ void IPCContext::internal_put_broadcast_wave(T *dst, const T *src, int nelems, int pe_root, int pe_start,
-    int stride, int pe_size) {  // NOLINT(runtime/int)
-  if (my_pe == pe_root) {
-    int finish = pe_start + stride * pe_size;
-    for (int i = pe_start; i < finish; i += stride) {
-        put_nbi_wave(dst, src, nelems, i);
-    }
-  }
-}
-
-template <typename T>
-__device__ void IPCContext::internal_get_broadcast_wave(
-  T *dst, const T *src, int nelems, int pe_root) {
-    get_wave(dst, src, nelems, pe_root);
-}
-
-template <typename T>
 __device__ int IPCContext::broadcast_wave(rocshmem_team_t team,
                               T *dest, const T *source, int nelems, int PE_root) {
   if (dest == nullptr ||
@@ -785,50 +801,14 @@ __device__ int IPCContext::broadcast_wave(rocshmem_team_t team,
     team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
 
-  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
-
-  int stride = team_obj->tinfo_wrt_world->stride;
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int pe_size = team_obj->tinfo_wrt_world->size;
-  long *p_sync = team_obj->bcast_pSync;
-
-  // Passed pe_root is relative to team, convert to world root
-  int pe_root_world = team_obj->get_pe_in_world(PE_root);
-  internal_broadcast_wave<T>(dest, source, nelems, pe_root_world,
-                              pe_start, stride, pe_size, p_sync);
-
+  internal_broadcastmem_wave(team, dest, source, nelems * sizeof(T), PE_root);
   return ROCSHMEM_SUCCESS;
-}
-
-template <typename T>
-__device__ void IPCContext::internal_broadcast_wave(T *dst, const T *src, int nelems,
-                                      int pe_root, int pe_start,
-                                      int stride, int pe_size,
-                                      long *p_sync) {  // NOLINT(runtime/int)
-  if (constmem.num_pes < 4) {
-    internal_put_broadcast_wave<T>(dst, src, nelems, pe_root, pe_start, stride, pe_size);
-  } else {
-    internal_get_broadcast_wave<T>(dst, src, nelems, pe_root);
-  }
-
-  // Synchronize on completion of broadcast
-  internal_sync_wave(my_pe, pe_start, stride, pe_size, p_sync);
 }
 
 template <typename T>
 __device__ void IPCContext::broadcast_wg(rocshmem_team_t team, T *dst,
                                       const T *src, int nelems, int pe_root) {
-  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
-
-  int stride = team_obj->tinfo_wrt_world->stride;
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int pe_size = team_obj->tinfo_wrt_world->size;
-  long *p_sync = team_obj->bcast_pSync;
-
-  // Passed pe_root is relative to team, convert to world root
-  int pe_root_world = team_obj->get_pe_in_world(pe_root);
-  internal_broadcastmem_wg(dst, src, nelems * sizeof(T), pe_root_world, pe_start, stride,
-               pe_size, p_sync);
+  internal_broadcastmem_wg(team, dst, src, nelems * sizeof(T), pe_root);
 }
 
 template <typename T>
@@ -852,7 +832,7 @@ __device__ void IPCContext::alltoall_linear_wg(rocshmem_team_t team, T *dst,
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
   int pe_size = team_obj->num_pes;
   int stride = team_obj->tinfo_wrt_world->stride;
-  long *pSync = team_obj->alltoall_pSync;
+  long *pSync = team_obj->barrier_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
   // Have each PE put their designated data to the other PEs
@@ -878,7 +858,7 @@ __device__ void IPCContext::alltoall_linear_thread_puts_wg(rocshmem_team_t team,
   size_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
   int tid = get_flat_block_id();
-  int step_size = min(get_flat_block_size(), WF_SIZE);
+  int step_size = get_flat_block_size();
 
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
@@ -896,14 +876,13 @@ __device__ void IPCContext::alltoall_linear_thread_puts_wg(rocshmem_team_t team,
 
   // wait until everyone has obtained their designated data
   for (int j = tid; j < pe_size; j+= step_size) {
-    int dest_pe = team_obj->get_pe_in_world(j);
 
-    long *sync_flag = &pSync[alltoall_pSync_offset + dest_pe];
+    long *sync_flag = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flag) != 1) { }
 
     //quiet(dest_pe);// needed to quiet add when it is nbi in gda, it is not nbi in ipc
 
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+    pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
   if (is_thread_zero_in_block()) {
@@ -936,7 +915,10 @@ __device__ void IPCContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
 template <typename T>
 __device__ void IPCContext::fcollect_wg(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
-  fcollectmem_linear_wg(team, dst, src, nelems * sizeof(T));
+  // Route through the generic dispatcher so this path exercises the new
+  // thread-puts fast path (and its size/SDMA gating) instead of
+  // reimplementing it here.
+  fcollectmem_wg(team, dst, src, nelems * sizeof(T));
 }
 
 template <typename T>
@@ -945,7 +927,7 @@ __device__ int IPCContext::fcollect_wave(rocshmem_team_t team, T *dst,
   if (dst == nullptr || src == nullptr || team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
 
-  fcollectmem_linear_wave(team, dst, src, nelems * sizeof(T));
+  internal_fcollectmem_wave(team, dst, src, nelems * sizeof(T));
 
   return ROCSHMEM_SUCCESS;
 }
@@ -1020,7 +1002,7 @@ __device__ inline int IPCContext::tile_put(void* dst_data, const void* src_data,
                                            const size_t* start_coord, const size_t* boundary,
                                            int ndim, size_t element_size, int pe,
                                            [[maybe_unused]] uint64_t flags) {
-  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(dst_data, pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1038,7 +1020,7 @@ __device__ inline int IPCContext::tile_put_wave(void* dst_data, const void* src_
                                                 const size_t* start_coord, const size_t* boundary,
                                                 int ndim, size_t element_size, int pe,
                                                 [[maybe_unused]] uint64_t flags) {
-  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(dst_data, pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1058,7 +1040,7 @@ __device__ inline int IPCContext::tile_put_wg(void* dst_data, const void* src_da
                                               const size_t* start_coord, const size_t* boundary,
                                               int ndim, size_t element_size, int pe,
                                               [[maybe_unused]] uint64_t flags) {
-  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(dst_data, pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1080,7 +1062,7 @@ __device__ inline int IPCContext::tile_get(void* dst_data, const void* src_data,
                                            const size_t* start_coord, const size_t* boundary,
                                            int ndim, size_t element_size, int pe,
                                            [[maybe_unused]] uint64_t flags) {
-  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(const_cast<void*>(src_data), pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1098,7 +1080,7 @@ __device__ inline int IPCContext::tile_get_wave(void* dst_data, const void* src_
                                                 const size_t* start_coord, const size_t* boundary,
                                                 int ndim, size_t element_size, int pe,
                                                 [[maybe_unused]] uint64_t flags) {
-  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(const_cast<void*>(src_data), pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1118,7 +1100,7 @@ __device__ inline int IPCContext::tile_get_wg(void* dst_data, const void* src_da
                                               const size_t* start_coord, const size_t* boundary,
                                               int ndim, size_t element_size, int pe,
                                               [[maybe_unused]] uint64_t flags) {
-  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(const_cast<void*>(src_data), pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1146,6 +1128,7 @@ __device__ inline int IPCContext::tile_allgather(rocshmem_team_t team,
                                                  int ndim,
                                                  size_t element_size,
                                                  uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
   int team_size = team_obj->num_pes;
 
@@ -1186,6 +1169,7 @@ __device__ inline int IPCContext::tile_allgather_wave(rocshmem_team_t team,
                                                       int ndim,
                                                       size_t element_size,
                                                       uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
   int team_size = team_obj->num_pes;
 
@@ -1225,6 +1209,7 @@ __device__ inline int IPCContext::tile_allgather_wg(rocshmem_team_t team,
                                                     int ndim,
                                                     size_t element_size,
                                                     uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
   int team_size = team_obj->num_pes;
 
@@ -1266,6 +1251,7 @@ __device__ inline int IPCContext::tile_broadcast(rocshmem_team_t team,
                                                  size_t element_size,
                                                  int pe_root,
                                                  uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
   int my_pe_in_team = team_obj->my_pe;
   int root_pe_world = team_obj->get_pe_in_world(pe_root);
@@ -1281,7 +1267,6 @@ __device__ inline int IPCContext::tile_broadcast(rocshmem_team_t team,
     // Root PE: copy src tile into dst locally when they are different buffers.
     // Non-root PEs receive via tile_get above; the root must populate its own
     // dst explicitly — the GET path does not write to the root's dst.
-    // Use Put (not Get) to avoid system-scope loads on local finegrained memory.
     tile_memcpy_rma<MemcpyKind::Put, TileScope::Lane>(
         dst_data, src_data, dst_strides, src_strides,
         start_coord, boundary, ndim, element_size);
@@ -1304,6 +1289,7 @@ __device__ inline int IPCContext::tile_broadcast_wave(rocshmem_team_t team,
                                                       size_t element_size,
                                                       int pe_root,
                                                       uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
   int my_pe_in_team = team_obj->my_pe;
   int root_pe_world = team_obj->get_pe_in_world(pe_root);
@@ -1317,7 +1303,6 @@ __device__ inline int IPCContext::tile_broadcast_wave(rocshmem_team_t team,
     }
   } else if (dst_data != src_data) {
     // Root PE: copy src tile into dst locally when they are different buffers.
-    // Use Put (not Get) to avoid system-scope loads on local finegrained memory.
     tile_memcpy_rma<MemcpyKind::Put, TileScope::Wave>(
         dst_data, src_data, dst_strides, src_strides,
         start_coord, boundary, ndim, element_size);
@@ -1340,6 +1325,7 @@ __device__ inline int IPCContext::tile_broadcast_wg(rocshmem_team_t team,
                                                     size_t element_size,
                                                     int pe_root,
                                                     uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
   int my_pe_in_team = team_obj->my_pe;
   int root_pe_world = team_obj->get_pe_in_world(pe_root);
@@ -1353,7 +1339,6 @@ __device__ inline int IPCContext::tile_broadcast_wg(rocshmem_team_t team,
     }
   } else if (dst_data != src_data) {
     // Root PE: copy src tile into dst locally when they are different buffers.
-    // Use Put (not Get) to avoid system-scope loads on local finegrained memory.
     tile_memcpy_rma<MemcpyKind::Put, TileScope::Wg>(
         dst_data, src_data, dst_strides, src_strides,
         start_coord, boundary, ndim, element_size);
@@ -1439,7 +1424,7 @@ __device__ inline int IPCContext::tile_reduce_typed_impl(
   const int my_pe_in_team = team_obj->my_pe;
   const int root_pe_world = team_obj->get_pe_in_world(root);
 
-  if (root < 0 || root >= team_size || ndim < 1 || ndim > 2) {
+  if (root < 0 || root >= team_size || ndim < 1 || ndim > TileView::MAX_NDIM) {
     LOGD_WARN("Invalid tile reduce arguments for IPC backend");
     return ROCSHMEM_ERROR;
   }

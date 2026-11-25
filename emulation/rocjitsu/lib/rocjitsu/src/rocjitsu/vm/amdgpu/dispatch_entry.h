@@ -15,6 +15,7 @@
 #include "rocjitsu/vm/amdgpu/consumer_cursor_journal.h"
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/gpu_queue_registry.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h"
@@ -41,7 +42,6 @@ class ComputeUnitCore;
 class Pm4ScratchPool;
 struct Pm4FailureState;
 using QueueCuSelection = std::optional<std::vector<ComputeUnitCore *>>;
-class GpuVmAccess;
 
 /// @brief Validate the packet storage shared by AQL registration and update paths.
 [[nodiscard]] inline constexpr bool valid_aql_packet_ring(uint64_t base_address,
@@ -65,6 +65,7 @@ struct ComputeQueueConfig {
   AddressSpaceHandle address_space;
   InterruptSink interrupt_sink{};
   uint32_t process_id = 0;
+  ProcessIdentityKind process_identity_kind = ProcessIdentityKind::Pasid;
   uint32_t queue_id = 0;
   QueueCuSelection enabled_cus = std::nullopt;
   uint64_t ring_base_va = 0;
@@ -78,8 +79,12 @@ struct ComputeQueueConfig {
   QueueDoorbellMode doorbell_mode = QueueDoorbellMode::Explicit;
   bool uses_kfd_queue_abi = false;
   uint64_t queue_desc_va = 0;
+  /// GPU virtual address of the runtime queue exception status word.
   uint64_t exception_status_va = 0;
+  /// Runtime event ID for software queue exceptions.
   uint32_t exception_event_id = 0;
+  /// Software exception route, independent of packet mailbox interrupts.
+  InterruptSink exception_event_sink{};
   /// Spread each of this queue's dispatches over every XCD of the SoC, the way a
   /// multi-XCD part does when it runs as a single partition. Set by the queue
   /// creation path that models such a device; registering the queue replicates it
@@ -143,7 +148,12 @@ enum class CompletionPublicationPhase : uint8_t {
 class CompletionPublicationState {
 public:
   CompletionPublicationPhase phase = CompletionPublicationPhase::ExecutionEnd;
-  std::shared_ptr<GpuVmAccess> access;
+  /// Ordinary binding used to select and publish this dispatch's L2 lines.
+  /// Replacement revokes it, so a refused flush cannot resume on a new root.
+  util::IntrusiveSharedPtr<GpuVmAccessSnapshot> flush_access;
+  /// Pinned dispatch binding used by the retryable signal journal. It can
+  /// finish an already committed signal after the ordinary root is replaced.
+  util::IntrusiveSharedPtr<GpuVmAccessSnapshot> signal_access;
   uint64_t start_timestamp = 0;
   uint64_t end_timestamp = 0;
   uint64_t mailbox_pointer = 0;
@@ -159,12 +169,11 @@ enum class QueueIdlePublicationPhase : uint8_t {
   Inactive,
   CaptureAccess,
   ReadSignalHandle,
-  StoreIdleStatus,
   ReadMailboxPointer,
   ReadEventId,
   StoreMailbox,
   DeliverEventInterrupt,
-  DeliverGenericInterrupt,
+  NotifyIdle,
   Complete,
 };
 
@@ -172,7 +181,7 @@ enum class QueueIdlePublicationPhase : uint8_t {
 class QueueIdlePublicationState {
 public:
   QueueIdlePublicationPhase phase = QueueIdlePublicationPhase::Inactive;
-  std::shared_ptr<GpuVmAccess> access;
+  util::IntrusiveSharedPtr<GpuVmAccessSnapshot> access;
   AddressSpaceHandle address_space;
   InterruptSink interrupt_sink;
   uint64_t queue_desc_va = 0;
@@ -209,7 +218,7 @@ enum class QueueScratchRequestPhase : uint8_t {
 class QueueScratchRequestState {
 public:
   QueueScratchRequestPhase phase = QueueScratchRequestPhase::Inactive;
-  std::shared_ptr<GpuVmAccess> access;
+  util::IntrusiveSharedPtr<GpuVmAccessSnapshot> access;
   uint64_t packet_index = 0;
   uint64_t status = 0;
   uint64_t signal_address = 0;
@@ -243,7 +252,7 @@ enum class QueueScratchReclaimPhase : uint8_t {
 class QueueScratchReclaimState {
 public:
   QueueScratchReclaimPhase phase = QueueScratchReclaimPhase::Inactive;
-  std::shared_ptr<GpuVmAccess> access;
+  util::IntrusiveSharedPtr<GpuVmAccessSnapshot> access;
   uint64_t dispatch_id = 0;
   uint64_t signal_address = 0;
   uint64_t mailbox_pointer = 0;
@@ -314,13 +323,24 @@ struct GridCompletion {
 struct DispatchEntry {
   uint32_t dispatch_id = 0;
   uint32_t queue_id = 0;
+  /// Wrapped AQL ring slot exposed in saved wave context.
   uint32_t queue_packet_id = 0;
   AddressSpaceHandle address_space;
-  /// Immutable VM snapshot captured by the queue-service transaction that
-  /// admitted this dispatch. Every wave in the dispatch shares this snapshot.
-  std::shared_ptr<const GpuVmAccess> execution_access;
+  /// Immutable VM snapshot captured when this packet was admitted. Kernel
+  /// waves and completion publication share its backing generation.
+  util::IntrusiveSharedPtr<const GpuVmAccessSnapshot> execution_access;
+  /// VM generation selected for execution and completion. A revoked snapshot
+  /// can be refreshed after invalidation; root replacement leaves it pinned.
+  uint64_t execution_translation_epoch = 0;
+  /// Write-admission sequence captured before this dispatch's waves start.
+  /// Missing or saturated proof fails closed on invalidation.
+  uint64_t execution_cache_write_sequence = UINT64_MAX;
+  /// Shared by all waves and XCD shards. Once a potentially effectful
+  /// instruction runs, completion cannot rebind its signal after invalidation.
+  std::shared_ptr<std::atomic_bool> execution_effect_possible;
   InterruptSink interrupt_sink;
   uint32_t process_id = 0;
+  ProcessIdentityKind process_identity_kind = ProcessIdentityKind::Pasid;
 
   /// Snapshot of the queue's physical CU selection; nullopt means unrestricted.
   QueueCuSelection enabled_cus = std::nullopt;
@@ -328,21 +348,28 @@ struct DispatchEntry {
     return !enabled_cus || std::ranges::find(*enabled_cus, cu) != enabled_cus->end();
   }
 
-  /// AQL ring packet id (queue read index at which this dispatch's packet was
-  /// fetched). Used only for rocm-dbgapi wave/dispatch correlation.
-  uint32_t aql_packet_id = 0;
+  /// Monotonic AQL packet index retained until this dispatch releases its ring slot.
+  uint64_t aql_packet_id = 0;
+  /// Admission-time slot address, retained across queue ring replacement.
+  uint64_t aql_packet_address = 0;
+  /// Whether retirement must invalidate an admitted AQL ring slot.
+  bool owns_aql_ring_slot = false;
 
   uint64_t kernel_entry_pc = 0;
   uint64_t code_load_bias = 0;
   uint32_t wfs_per_workgroup = 1;
   uint32_t sgprs_per_wf = 104;
   uint32_t vgprs_per_wf = 256;
+  uint32_t accum_vgpr_base = 0;
   uint64_t kernarg_addr = 0;
   uint32_t kernarg_size = 0;
   uint32_t num_user_sgprs = 2;
   uint32_t kernel_code_properties = 0;
   /// Register-programmed compute launches use the PM4 user-data register ABI.
   bool pm4_abi = false;
+  /// DRM maps shader addresses in the high half at sign-extended VAs.
+  bool drm_shader_addresses = false;
+  bool uses_kfd_queue_abi = false; ///< KFD AQL dispatches use the calibrated GPU clock.
   std::shared_ptr<Pm4FailureState>
       pm4_failure{};                     ///< Shared with all waves and the owning submission.
   std::array<uint32_t, 16> user_sgprs{}; ///< PM4 COMPUTE_USER_DATA register values.
@@ -354,6 +381,7 @@ struct DispatchEntry {
   uint8_t kernel_wave_size = 0;
   uint16_t kernarg_preload = 0;
   uint32_t initial_mode_raw = 0;
+  uint32_t initial_ib_sts2 = 0; ///< GFX11 memory-order and forward-progress state.
   uint64_t dispatch_ptr = 0;
   uint64_t queue_ptr = 0;
   uint32_t workgroup_id_offset = 0;
@@ -379,6 +407,12 @@ struct DispatchEntry {
   bool enable_wg_id_y = false;
   bool enable_wg_id_z = false;
   bool enable_wg_info = false;
+  enum class OrderedAppend { Disabled, PerWave, PerWorkgroup };
+  OrderedAppend ordered_append = OrderedAppend::Disabled;
+  /// Number of distinct compute IDs in the ring's GDS_COMPUTE_MAX_WAVE_ID range.
+  uint32_t ordered_id_count = 4096;
+  /// Enable the private-segment wave-offset SGPR at dispatch.
+  bool enable_private_segment = false;
   uint8_t enable_vgpr_workitem_id = 0;
   uint16_t workgroup_size_x = 64;
   uint16_t workgroup_size_y = 1;
@@ -386,11 +420,13 @@ struct DispatchEntry {
   uint64_t scratch_backing_addr = 0;
   uint32_t private_segment_fixed_size = 0;
   /// Number of physical scratch scoreboard slots backed in each shader engine.
-  /// Unlimited for dispatches that do not use the gfx1250 runtime scratch ABI.
+  /// Unlimited for dispatches without runtime scratch occupancy metadata.
   uint32_t scratch_wave_limit_per_se = std::numeric_limits<uint32_t>::max();
   /// Number of wave slices between adjacent shader-engine scratch regions.
   /// Zero selects the model's full physical capacity for simulator-owned backing.
   uint32_t scratch_wave_stride_per_se = 0;
+  /// Per-wave byte stride provisioned by the runtime; zero selects synthetic sizing.
+  uint64_t scratch_wave_bytes = 0;
   uint32_t group_segment_fixed_size = 0;
   /// ROCr allocated primary scratch for this dispatch as a single-use block.
   bool scratch_use_once = false;
@@ -406,7 +442,7 @@ struct DispatchEntry {
   uint32_t completed_wgs = 0;
 
   uint64_t completion_signal = 0;
-  /// @brief HSA-system-clock tick captured when the CP accepted this dispatch.
+  /// @brief GPU reference-clock timestamp from gpu_timestamp() when the CP accepted this dispatch.
   ///
   /// @details ROCR's `hsa_amd_profiling_get_dispatch_time` reads dispatch
   /// timestamps from the completion signal after the packet retires. Real CP
@@ -424,6 +460,9 @@ struct DispatchEntry {
   /// An AMD vendor packet executes this PM4 buffer before publishing completion.
   uint64_t aql_pm4_ib_address = 0;
   uint32_t aql_pm4_ib_dwords = 0;
+  /// Standard HSA barrier with no acquire or release fence scope. Such a
+  /// packet has no cache effects of its own across a VM root replacement.
+  bool no_fence_aql_barrier = false;
   /// Completion hooks and signal have already been delivered.
   bool completion_notified = false;
   bool execution_begun = false;
@@ -462,8 +501,9 @@ struct DispatchEntry {
   /// packet has completed", which for a fanned-out dispatch is a property of the
   /// whole grid: this XCD finishing its share says nothing about the others.
   [[nodiscard]] bool grid_fully_completed() const {
-    if (grid_completion)
+    if (grid_completion) {
       return grid_completion->grid_retired();
+    }
     return fully_completed();
   }
 
@@ -522,10 +562,12 @@ struct DispatchEntry {
     // A complete grid makes the highest active axis period a multiple of all
     // lower-axis periods, so one alignment check preserves the full rank.
     uint64_t period = cluster_size_x;
-    if (cluster_size_y > 1 || cluster_size_z > 1)
+    if (cluster_size_y > 1 || cluster_size_z > 1) {
       period = static_cast<uint64_t>(grid_wgs_x) * cluster_size_y;
-    if (cluster_size_z > 1)
+    }
+    if (cluster_size_z > 1) {
       period = static_cast<uint64_t>(grid_wgs_x) * grid_wgs_y * cluster_size_z;
+    }
     return period;
   }
 
@@ -633,10 +675,12 @@ inline constexpr uint32_t kPackedTidZShift = 20;
 [[nodiscard]] inline constexpr uint32_t pack_workitem_id(WorkitemCoord id,
                                                          uint32_t component_count) {
   uint32_t packed = id.x & kPackedTidMask;
-  if (component_count >= 1)
+  if (component_count >= 1) {
     packed |= (id.y & kPackedTidMask) << kPackedTidYShift;
-  if (component_count >= 2)
+  }
+  if (component_count >= 2) {
     packed |= (id.z & kPackedTidMask) << kPackedTidZShift;
+  }
   return packed;
 }
 
@@ -673,14 +717,16 @@ inline constexpr uint32_t kPackedTidZShift = 20;
   const uint32_t lanes = wave_size > 64 ? 64 : wave_size;
   for (uint32_t lane = 0; lane < lanes; ++lane) {
     const WorkitemCoord id = workitem_local_coord(entry, wf_index_in_wg, lane, wave_size);
-    if (id.z >= workgroup_size_z)
+    if (id.z >= workgroup_size_z) {
       continue;
+    }
     const uint64_t global_x = static_cast<uint64_t>(wg_x) * workgroup_size_x + id.x;
     const uint64_t global_y = static_cast<uint64_t>(wg_y) * workgroup_size_y + id.y;
     const uint64_t global_z = static_cast<uint64_t>(wg_z) * workgroup_size_z + id.z;
     if (global_x < entry.grid_size_x && global_y < entry.grid_size_y &&
-        global_z < entry.grid_size_z)
+        global_z < entry.grid_size_z) {
       mask |= 1ULL << lane;
+    }
   }
   return mask;
 }
@@ -741,15 +787,14 @@ struct ComputeQueueRecord : ComputeQueueConfig {
   /// A command-processor pass observed this queue while its debugger gate was closed.
   /// Cleared on resume after scheduling one pass to process the deferred work.
   bool debug_work_deferred = false;
-  /// CP-private monotonic fetch cursor: the next ring index to fetch. Normally
-  /// tracks read_ptr_va exactly, but stays ahead of it while the debugger holds
-  /// the queue's read_dispatch_id at a trapped dispatch (so packets are not
-  /// re-fetched). See fetch_from_queue and serialize_queue_debug_waves.
+  /// CP-private monotonic index of the next packet to fetch. The public read
+  /// cursor instead marks the oldest packet still owned by a live dispatch.
   uint64_t fetch_cursor = 0;
-  /// A durable admission must invalidate its ring slot before publishing the cursor.
+  /// Retirement invalidates its ring slot before publishing the consumer cursor.
   struct AqlSlotRelease {
     GpuVmAccess access;
     uint64_t address;
+    uint64_t next_consumer;
     uint32_t header;
   };
   std::optional<AqlSlotRelease> aql_slot_release;
@@ -798,12 +843,15 @@ struct ComputeQueueRecord : ComputeQueueConfig {
   /// of pushed entries. Callers already hold the CP's queue mutex.
   void push_entry(DispatchEntry entry) {
     ++activity_generation;
-    if (activity_generation == 0)
+    if (activity_generation == 0) {
       ++activity_generation;
-    if (accepted_entries < first_accepted_entry_kinds.size())
+    }
+    if (accepted_entries < first_accepted_entry_kinds.size()) {
       first_accepted_entry_kinds[accepted_entries] = entry.kind;
-    if (accepted_entries == 0)
+    }
+    if (accepted_entries == 0) {
       first_accepted_address_space = entry.address_space;
+    }
     entries.push_back(std::move(entry));
     ++accepted_entries;
   }

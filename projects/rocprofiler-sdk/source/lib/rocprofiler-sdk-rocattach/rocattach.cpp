@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,13 +26,16 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 
 #include <rocprofiler-sdk-rocattach/defines.h>
 #include <rocprofiler-sdk-rocattach/rocattach.h>
 #include <rocprofiler-sdk-rocattach/types.h>
 #include <rocprofiler-sdk/version.h>
+#include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
+#include <algorithm>
 #include <fstream>
 #include <map>
 #include <mutex>
@@ -57,13 +60,12 @@ struct pid_entry_t
     : session(tid)
     {}
     session_t session;
-    // Non-empty only for tree-attach root PIDs. Holds the ordered list of PIDs
-    // successfully attached by rocattach_attach_tree() for this root. Consumed
-    // (and cleared) by the corresponding rocattach_detach_tree() call.
-    std::vector<pid_t> tree_pids;
 };
 
 using session_list_t = std::map<int, pid_entry_t>;
+// root pid of a rocattach_attach_tree() call -> the pids it attached. Kept apart from
+// session_list_t so that a tree is recorded even when the root itself failed to attach.
+using tree_list_t = std::map<int, std::vector<pid_t>>;
 
 #define ROCATTACH_STATUS_STRING(CODE, MSG)                                                         \
     template <>                                                                                    \
@@ -121,6 +123,14 @@ get_sessions()
 {
     static auto*& session_list = rocprofiler::common::static_object<session_list_t>::construct();
     return session_list;
+}
+
+// guarded by get_sessions_lock_guard()
+tree_list_t*
+get_trees()
+{
+    static auto*& tree_list = rocprofiler::common::static_object<tree_list_t>::construct();
+    return tree_list;
 }
 
 std::lock_guard<std::mutex>
@@ -333,8 +343,9 @@ setup(int pid)
     const char* tool_lib_path = tool_lib_path_env.c_str();
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Tool library path: " << tool_lib_path;
 
-    auto tool_path = fs::path{tool_lib_path_env};
-    if(tool_path.empty())
+    // The tool library path is a colon-delimited list of libraries
+    auto tool_paths = sdk::parse::tokenize(tool_lib_path_env, ":");
+    if(tool_paths.empty())
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Tool library path must not be empty.";
         return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
@@ -342,8 +353,12 @@ setup(int pid)
 
     // Bare or relative library names must be resolved by dlopen in the target
     // process using the target's loader search path and working directory.
-    if(tool_path.is_absolute())
+    // Any invalid library fails the attachment.
+    for(const auto& itr : tool_paths)
     {
+        auto tool_path = fs::path{itr};
+        if(!tool_path.is_absolute()) continue;
+
         status = validate_target_absolute_tool_path(pid, tool_path);
         if(status != ROCATTACH_STATUS_SUCCESS)
         {
@@ -391,9 +406,31 @@ setup(int pid)
     }
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attachment success to pid " << pid;
 
+    // Buffers written to the target are unmapped on every return path, except after a failed call
+    // into the target: its state is then unknown. rocprofiler_register_attach copies both strings,
+    // so they can be unmapped once it returns, whatever its return value.
+    auto target_state_unknown = false;
+    auto unmap_target_buffer  = [session, pid, &target_state_unknown](
+                                   void*& addr, size_t length, std::string_view description) {
+        if(addr == nullptr || target_state_unknown) return;
+
+        if(session->simple_munmap(addr, length) != ROCATTACH_STATUS_SUCCESS)
+        {
+            ROCP_ERROR << "[rocprofiler-sdk-rocattach] Failed to free " << description
+                       << " memory in target process " << pid << ", continuing...";
+            return;
+        }
+        ROCP_TRACE << "[rocprofiler-sdk-rocattach] Cleaned up " << description
+                   << " memory in target process " << pid;
+    };
+
     // Build and write environment buffer to target process
     auto  environment_buffer      = build_environment_buffer();
     void* environment_buffer_addr = nullptr;
+    auto  free_environment_buffer = common::scope_destructor{[&]() {
+        unmap_target_buffer(
+            environment_buffer_addr, environment_buffer.size(), "environment buffer");
+    }};
     status                        = write_data_to_target(
         *session, "environment buffer", environment_buffer, environment_buffer_addr);
     if(status != ROCATTACH_STATUS_SUCCESS)
@@ -406,6 +443,8 @@ setup(int pid)
     std::vector<uint8_t> tool_lib_buffer(tool_lib_path, tool_lib_path + tool_lib_path_len);
 
     void* tool_lib_path_addr = nullptr;
+    auto  free_tool_lib_path = common::scope_destructor{
+        [&]() { unmap_target_buffer(tool_lib_path_addr, tool_lib_path_len, "tool library path"); }};
     status =
         write_data_to_target(*session, "tool library path", tool_lib_buffer, tool_lib_path_addr);
     if(status != ROCATTACH_STATUS_SUCCESS)
@@ -426,6 +465,7 @@ setup(int pid)
             << "[rocprofiler-sdk-rocattach] Failed to call "
                "rocprofiler-register::rocprofiler_register_attach function in target process "
             << pid << ". status: " << status;
+        target_state_unknown = true;
         return status;
     }
     else if(retval != 0)
@@ -437,30 +477,6 @@ setup(int pid)
         return ROCATTACH_STATUS_ERROR;
     }
 
-    // Clean up - free the environment buffer and tool library path memory in target process
-    status = session->simple_munmap(environment_buffer_addr, environment_buffer.size());
-    if(status != ROCATTACH_STATUS_SUCCESS)
-    {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Failed to free environment buffer memory in "
-                      "target process "
-                   << pid << ", continuing...";
-        // Continue anyway since the main operation succeeded
-    }
-    ROCP_TRACE
-        << "[rocprofiler-sdk-rocattach] Cleaned up tool environment memory in target process "
-        << pid;
-
-    status = session->simple_munmap(tool_lib_path_addr, tool_lib_path_len);
-    if(status != ROCATTACH_STATUS_SUCCESS)
-    {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Failed to free tool library path memory in "
-                      "target process "
-                   << pid << ", continuing...";
-        // Continue anyway since the main operation succeeded
-    }
-    ROCP_TRACE
-        << "[rocprofiler-sdk-rocattach] Cleaned up tool library path memory in target process "
-        << pid;
     return ROCATTACH_STATUS_SUCCESS;
 }
 
@@ -595,23 +611,33 @@ rocattach_attach_tree(int root_pid)
         }
     }
 
+    if(attached_pids.empty())
     {
-        auto  lg       = rocprofiler::rocattach::get_sessions_lock_guard();
-        auto* sessions = CHECK_NOTNULL(rocprofiler::rocattach::get_sessions());
-        auto  it       = sessions->find(root_pid);
-        if(it != sessions->end())
+        // pids always contains root_pid, so at least one setup() failed and set last_status
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] rocattach_attach_tree attached none of the "
+                   << pids.size() << " process(es) in tree rooted at pid " << root_pid;
+        return last_status;
+    }
+
+    {
+        auto  lg   = rocprofiler::rocattach::get_sessions_lock_guard();
+        auto& tree = (*CHECK_NOTNULL(rocprofiler::rocattach::get_trees()))[root_pid];
+        for(pid_t pid : attached_pids)
         {
-            it->second.tree_pids = std::move(attached_pids);
-        }
-        else
-        {
-            ROCP_ERROR << "[rocprofiler-sdk-rocattach] rocattach_attach_tree could not record tree "
-                          "session for root pid "
-                       << root_pid;
+            if(std::find(tree.begin(), tree.end(), pid) == tree.end()) tree.push_back(pid);
         }
     }
 
-    return last_status;
+    if(attached_pids.size() < pids.size())
+    {
+        ROCP_WARNING << "[rocprofiler-sdk-rocattach] rocattach_attach_tree attached "
+                     << attached_pids.size() << " of " << pids.size()
+                     << " process(es) in tree rooted at pid " << root_pid
+                     << "; see the errors above for the processes that were skipped";
+    }
+
+    // the attached processes are recorded for rocattach_detach_tree(), so report success
+    return ROCATTACH_STATUS_SUCCESS;
 }
 
 rocattach_status_t
@@ -645,19 +671,17 @@ rocattach_detach_tree(int root_pid)
     // the processes that were attached, no more and no less.
     std::vector<pid_t> pids;
     {
-        auto  lg       = rocprofiler::rocattach::get_sessions_lock_guard();
-        auto* sessions = CHECK_NOTNULL(rocprofiler::rocattach::get_sessions());
-        auto  it       = sessions->find(root_pid);
-        if(it == sessions->end() || it->second.tree_pids.empty())
+        auto  lg    = rocprofiler::rocattach::get_sessions_lock_guard();
+        auto* trees = CHECK_NOTNULL(rocprofiler::rocattach::get_trees());
+        auto  it    = trees->find(root_pid);
+        if(it == trees->end() || it->second.empty())
         {
             ROCP_ERROR << "[rocprofiler-sdk-rocattach] rocattach_detach_tree called for root pid "
                        << root_pid << " which has no recorded tree attachment session.";
             return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
         }
-        pids = std::move(it->second.tree_pids);
-        // If root_pid was not successfully attached it won't be in pids, meaning teardown()
-        // won't erase its entry. Remove it here to avoid leaving an orphan in the map.
-        if(pids.empty() || pids.front() != root_pid) sessions->erase(it);
+        pids = std::move(it->second);
+        trees->erase(it);
     }
 
     ROCP_INFO << "[rocprofiler-sdk-rocattach] rocattach_detach_tree detaching " << pids.size()
@@ -703,6 +727,7 @@ rocattach_detach(int pid)
             {
                 pids.emplace_back(pair_itr.first);
             }
+            CHECK_NOTNULL(rocprofiler::rocattach::get_trees())->clear();
         }
 
         for(int pid_itr : pids)

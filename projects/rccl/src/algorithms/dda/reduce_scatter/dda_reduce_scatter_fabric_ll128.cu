@@ -2,19 +2,23 @@
  * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
  * Host launcher + eligibility for the LL128-protocol DDA fabric reduce-scatter.
- * Reduce-scatter analogue of dda_all_reduce_fabric_ll128.cu; reuses the codepath-
- * agnostic ddaReduceScatterFabricLL128 kernel from reduce_scatter_dda_fabric_ll128.h.
+ * Reduce-scatter analogue of the LL128 one-shot launcher in
+ * dda_all_reduce_fabric_ll.cu. Messages up to the peer-parallel cap take the
+ * ddaReduceScatterFabricLL128PeerPar kernel (reduce_scatter_dda_fabric_ll128_peerpar.h),
+ * larger ones the batched ddaReduceScatterFabricLL128 kernel (reduce_scatter_dda_fabric_ll128.h).
  * See LICENSE.txt for license information.
  ************************************************************************/
 
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 
 #include "algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128.h"
+#include "algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128_peerpar.h"
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
 #include "param.h"
+#include "rccl_common.h"
 
 #include <cuda_runtime.h>
 #include <hip/hip_ext.h>
@@ -23,85 +27,136 @@
 #include <cstddef>
 #include <cstdint>
 
-// Runtime-adjustable LL128 ReduceScatter block size (threads/block). Must be a
-// multiple of 16 (lanes per 128B line) in [16, 1024]; invalid values fall back
-// to the tuned default. Env: RCCL_DDA_LL128_RS_THREADS.
-RCCL_PARAM(DdaLL128RsThreads, "DDA_LL128_RS_THREADS", 1024);
+// Batched kernel block size, overriding the table: a multiple of the warp up to kDdaLL128RsMaxThreads, else ignored.
+RCCL_PARAM(DdaLL128RSThreads, "DDA_LL128_RS_THREADS", 0);
+// Largest message the peer-parallel kernel takes, overriding the arch table. 0 keeps the batched kernel at every size.
+RCCL_PARAM(DdaLL128RSPeerMaxBytes, "DDA_LL128_RS_PEER_MAX_BYTES", kDdaThresholdUnset);
 
 namespace {
 
-using dda::common::kDdaLL128DataElems;
-using dda::common::kDdaLL128Lanes;
-using dda::common::kDdaLL128RsMaxBytes;
-using dda::common::kDdaLL128RsSlotStrideLines;
-using dda::common::LLLine128;
+using dda::common::ddaBankSize;
+using dda::common::ddaLL128RsPeerWarps;
+using dda::common::ddaLL128RsSlotWords;
+using dda::common::ddaLL128Slices;
+using dda::common::ddaLL128ValidThreads;
+using dda::common::kDdaLL128RsMaxThreads;
+using dda::common::kDdaLL128RsPeerMaxThreads;
+using dda::common::kDdaLL128RsPeerMaxWarps;
+using dda::common::kDdaLL128Warp;
+using dda::common::kDdaLL128WireWordsPerSlice;
 
-// LL128 scratch: 2 banks * nRanks slots * kDdaLL128RsSlotStrideLines * 128B.
-static inline size_t ddaLL128RsScratchSize(int nRanks) {
-  return (size_t)2 * (size_t)nRanks * kDdaLL128RsSlotStrideLines * sizeof(LLLine128);
-}
-
-// Validated block size from the runtime flag; falls back to `dflt` if the
-// configured value is not a multiple of 16 in [16, 1024].
-static inline unsigned ddaLL128RsThreads(unsigned dflt) {
-  const int64_t v = rcclParamDdaLL128RsThreads();
-  if (v >= 16 && v <= 1024 && (v % 16) == 0) {
-    return (unsigned)v;
+// A valid DDA_LL128_RS_THREADS, else the arch table's block size if the launch bound allows it, else the bound.
+static inline unsigned ddaLL128RSThreads(const ncclComm* comm) {
+  const auto fits = [](int64_t v) { return ddaLL128ValidThreads(v) && v <= (int64_t)kDdaLL128RsMaxThreads; };
+  const int64_t user = rcclParamDdaLL128RSThreads();
+  if (fits(user)) {
+    return (unsigned)user;
   }
-  return dflt;
+  const int tuned = rcclDdaFabricRsLL128Threads(comm);
+  return fits(tuned) ? (unsigned)tuned : kDdaLL128RsMaxThreads;
 }
 
-template <typename T>
-static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, void* recvbuff, size_t recvcount,
-                                                         ncclComm* comm, cudaStream_t stream) {
-  const int nRanks = comm->nRanks;
-  const size_t bytes = recvcount * sizeof(T); // per-rank shard bytes
-  const size_t nWords = bytes >> 3;
-  const size_t numLines = (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
+// Peer-parallel while the whole message is within DDA_LL128_RS_PEER_MAX_BYTES, or the arch table's cap when unset.
+static inline bool ddaLL128RsPeerParallel(const ncclComm* comm, size_t shardBytes) {
+  const size_t bytes = shardBytes * (size_t)comm->nRanks;
+  const int64_t user = rcclParamDdaLL128RSPeerMaxBytes();
+  if (user != kDdaThresholdUnset) {
+    return user > 0 && bytes <= (size_t)user;
+  }
+  return bytes <= rcclDdaFabricRsLL128PeerMaxBytes(comm);
+}
 
-  // 1D grid over line-groups; each block has threads/16 groups.
-  const unsigned threads = ddaLL128RsThreads(1024); // multiple of 16 (lanes/line)
-  const size_t groups = threads / (unsigned)kDdaLL128Lanes;
+// Launch shape of whichever kernel the message takes.
+struct DdaLL128RsGeom {
+  dim3 grid;
+  dim3 block;
+  bool peerPar;
+};
+
+// A warp (batched) or a warp group (peer-parallel) carries one slice, so blocks = ceil(slices / slicesPerBlock),
+// capped by the grid budget. More slices than the grid holds just means more passes through the slice loop.
+static inline DdaLL128RsGeom ddaReduceScatterFabricLL128Geom(ncclComm* comm, size_t shardBytes) {
+  const size_t slices = ddaLL128Slices(shardBytes);
   int nBlocksMax = comm->ddaFabricMaxBlocks;
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
   }
-  unsigned blocks = (unsigned)std::min<size_t>((numLines + groups - 1) / groups, (size_t)nBlocksMax);
+  const bool peerPar = ddaLL128RsPeerParallel(comm, shardBytes);
+  unsigned threads = 0;
+  size_t slicesPerBlock = 0;
+  if (peerPar) {
+    // A group is a warp per rank. A block starts as one group and doubles its groups up to kDdaLL128RsPeerMaxThreads
+    // only while one group per block would pass the block cap.
+    const unsigned groupThreads =
+      (unsigned)ddaLL128RsPeerWarps(comm->nRanks, kDdaLL128RsPeerMaxWarps) * (unsigned)kDdaLL128Warp;
+    threads = groupThreads;
+    while (threads * 2 <= (unsigned)kDdaLL128RsPeerMaxThreads) {
+      const size_t groups = threads / groupThreads;
+      if ((slices + groups - 1) / groups <= (size_t)nBlocksMax) {
+        break;
+      }
+      threads *= 2;
+    }
+    slicesPerBlock = threads / groupThreads;
+  } else {
+    threads = ddaLL128RSThreads(comm);
+    slicesPerBlock = threads / (unsigned)kDdaLL128Warp;
+  }
+  unsigned blocks = (unsigned)std::min<size_t>((slices + slicesPerBlock - 1) / slicesPerBlock, (size_t)nBlocksMax);
   if (blocks == 0) {
     blocks = 1;
   }
   // flatBlockId (blockIdx.x) must stay within the device epoch array.
   if ((int)blocks > comm->ddaLLEpochLen) {
     blocks = (unsigned)comm->ddaLLEpochLen;
-    if (blocks == 0) blocks = 1;
+    if (blocks == 0) {
+      blocks = 1;
+    }
   }
-  dim3 block(threads);
-  dim3 grid(blocks);
+  return {dim3(blocks), dim3(threads), peerPar};
+}
+
+template <typename T>
+static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, void* recvbuff, size_t recvcount,
+                                                         ncclComm* comm, cudaStream_t stream) {
+  const int nRanks = comm->nRanks;
+  const size_t shardBytes = recvcount * sizeof(T);
+  const size_t slices = ddaLL128Slices(shardBytes);
+  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
+
+  const DdaLL128RsGeom geom = ddaReduceScatterFabricLL128Geom(comm, shardBytes);
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
+  // Same epoch counter every other LL/LL128 tier uses: they share a scratch
+  // layout, so one monotonic flag is what keeps either from accepting a line
+  // the other left.
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
-  INFO(NCCL_COLL, "DDA fabric ReduceScatter LL128: nRanks=%d shardBytes=%zu numLines=%zu grid=%u block=%u", nRanks,
-       bytes, numLines, grid.x, block.x);
+  INFO(NCCL_COLL,
+       "DDA fabric ReduceScatter LL128: nRanks=%d shardBytes=%zu slices=%zu grid=%u block=%u "
+       "(%s, bankSize=%zu)",
+       nRanks, shardBytes, slices, geom.grid.x, geom.block.x, geom.peerPar ? "peer-parallel" : "warp-per-slice",
+       bankSize);
 
+  const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback.
+  // The two kernels take the same arguments.
+  const auto launch = [&](auto batched, auto peerPar) {
+    hipExtLaunchKernelGGL(geom.peerPar ? peerPar : batched, geom.grid, geom.block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          shardBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
+  };
+  // NRANKS_CT 4/8: unrolled peer loops; 0: runtime fallback.
   switch (nRanks) {
   case 4:
-    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 4>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
-                          static_cast<const T*>(sendbuff), recvcount, comm->rank, nRanks, epochDev, epochLen);
+    launch(dda::common::ddaReduceScatterFabricLL128<T, 4>, dda::common::ddaReduceScatterFabricLL128PeerPar<T, 4>);
     break;
   case 8:
-    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 8>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
-                          static_cast<const T*>(sendbuff), recvcount, comm->rank, nRanks, epochDev, epochLen);
+    launch(dda::common::ddaReduceScatterFabricLL128<T, 8>, dda::common::ddaReduceScatterFabricLL128PeerPar<T, 8>);
     break;
   default:
-    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 0>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
-                          static_cast<const T*>(sendbuff), recvcount, comm->rank, nRanks, epochDev, epochLen);
+    launch(dda::common::ddaReduceScatterFabricLL128<T, 0>, dda::common::ddaReduceScatterFabricLL128PeerPar<T, 0>);
     break;
   }
 
@@ -114,15 +169,13 @@ static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, v
 
 bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                              ncclDataType_t datatype, ncclRedOp_t op) {
-  (void)sendbuff;
-  (void)recvbuff;
-  if (!rcclParamDdaLL()) {
-    return false;
-  }
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
   if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
+    return false;
+  }
+  if (comm->ddaLLEpochDev == nullptr || comm->ddaLLEpochLen < 1) {
     return false;
   }
   if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {
@@ -134,24 +187,40 @@ bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuf
   if (op != ncclSum) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
 
-  const size_t bytes = recvcount * ncclTypeSize(datatype); // per-rank shard
-  // Payload is staged as 8-byte words, so the shard must be a whole number of
-  // words.
-  if (bytes % 8 != 0) {
+  const size_t shardBytes = recvcount * ncclTypeSize(datatype);
+
+  // The LL128 line format packs 16B-aligned data with no chunk straddling a
+  // line, so a partial 16B chunk has nowhere to go, and the 16B wire accesses
+  // need both user buffers aligned to match.
+  if (shardBytes % 16 != 0) {
     return false;
   }
-  if (bytes > kDdaLL128RsMaxBytes) {
+  if (!dda::common::ddaUserBuffers16ByteAligned(sendbuff, recvbuff)) {
     return false;
   }
-  if (ddaLL128RsScratchSize(comm->nRanks) > comm->ddaScratchBytes) {
+
+  // Wrap compares the full message (nRanks shards) against the arch table; keep
+  // that same total here so direct Eligible() callers agree with the selector.
+  if (shardBytes * (size_t)comm->nRanks > rcclDdaLL128Threshold(comm, ncclFuncReduceScatter)) {
+    return false;
+  }
+
+  // The shard has to fit the slices one rank's slot holds.
+  const size_t slotWords = ddaLL128RsSlotWords(ddaBankSize(comm->ddaScratchBytes), comm->nRanks);
+  if (ddaLL128Slices(shardBytes) * (size_t)kDdaLL128WireWordsPerSlice > slotWords) {
     return false;
   }
 
   return true;
+}
+
+uint32_t ncclReduceScatterDdaFabricLL128Blocks(ncclComm* comm, size_t recvcount, ncclDataType_t datatype) {
+  const dim3 grid = ddaReduceScatterFabricLL128Geom(comm, recvcount * ncclTypeSize(datatype)).grid;
+  return grid.x * grid.y;
 }
 
 ncclResult_t ncclReduceScatterDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t recvcount,
@@ -165,6 +234,10 @@ ncclResult_t ncclReduceScatterDdaFabricLL128(const void* sendbuff, void* recvbuf
     return ncclReduceScatterDdaFabricLL128Typed<half>(sendbuff, recvbuff, recvcount, comm, stream);
   case ncclBfloat16:
     return ncclReduceScatterDdaFabricLL128Typed<bf16>(sendbuff, recvbuff, recvcount, comm, stream);
+  case ncclFloat8e4m3:
+    return ncclReduceScatterDdaFabricLL128Typed<dda::common::fp8e4m3>(sendbuff, recvbuff, recvcount, comm, stream);
+  case ncclFloat8e5m2:
+    return ncclReduceScatterDdaFabricLL128Typed<dda::common::fp8e5m2>(sendbuff, recvbuff, recvcount, comm, stream);
   default:
     return ncclInvalidArgument;
   }

@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import csv
 import json
 import pytest
 
@@ -35,6 +36,17 @@ def pytest_addoption(parser):
         default="async-copy-tracing-test.json",
         help="Input JSON",
     )
+    parser.addoption("--application-times", help="Application completion timestamps CSV")
+    parser.addoption("--copy-trace", help="Memory copy trace CSV")
+
+
+@pytest.fixture
+def completion_times(request):
+    def read_csv(option):
+        with open(request.config.getoption(option)) as inp:
+            return list(csv.DictReader(inp))
+
+    return read_csv("--application-times"), read_csv("--copy-trace")
 
 
 @pytest.fixture

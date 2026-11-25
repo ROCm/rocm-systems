@@ -12,6 +12,8 @@ the quoted form. Indirect (transitive) inclusion is allowed.
 To ban another header, add an entry to banned-includes.json.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import os

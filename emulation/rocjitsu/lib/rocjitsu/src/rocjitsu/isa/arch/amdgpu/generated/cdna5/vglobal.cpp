@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vglobal.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include <memory>
@@ -22,8 +23,8 @@ template <typename VmemMachineInst> uint32_t vflat_vaddr_bits(const VmemMachineI
 GlobalLoadU8Vglobal::GlobalLoadU8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_u8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadU8Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
@@ -32,8 +33,9 @@ GlobalLoadU8Vglobal::GlobalLoadU8Vglobal(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -41,6 +43,8 @@ GlobalLoadU8Vglobal::GlobalLoadU8Vglobal(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -48,8 +52,9 @@ DecodeResult decodeGlobalLoadU8Vglobal(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_u8", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadU8Vglobal>(opcode);
 }
 } // namespace detail
@@ -57,8 +62,8 @@ DecodeResult decodeGlobalLoadU8Vglobal(const MachineInst *opcode,
 GlobalLoadI8Vglobal::GlobalLoadI8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_i8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadI8Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
@@ -67,8 +72,9 @@ GlobalLoadI8Vglobal::GlobalLoadI8Vglobal(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -76,6 +82,8 @@ GlobalLoadI8Vglobal::GlobalLoadI8Vglobal(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -83,8 +91,9 @@ DecodeResult decodeGlobalLoadI8Vglobal(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_i8", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadI8Vglobal>(opcode);
 }
 } // namespace detail
@@ -92,8 +101,8 @@ DecodeResult decodeGlobalLoadI8Vglobal(const MachineInst *opcode,
 GlobalLoadU16Vglobal::GlobalLoadU16Vglobal(const MachineInst *inst)
     : Vglobal("global_load_u16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadU16Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
@@ -102,8 +111,9 @@ GlobalLoadU16Vglobal::GlobalLoadU16Vglobal(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -111,6 +121,8 @@ GlobalLoadU16Vglobal::GlobalLoadU16Vglobal(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_U16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -118,8 +130,9 @@ DecodeResult decodeGlobalLoadU16Vglobal(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_u16", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadU16Vglobal>(opcode);
 }
 } // namespace detail
@@ -127,8 +140,8 @@ DecodeResult decodeGlobalLoadU16Vglobal(const MachineInst *opcode,
 GlobalLoadI16Vglobal::GlobalLoadI16Vglobal(const MachineInst *inst)
     : Vglobal("global_load_i16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadI16Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
@@ -137,8 +150,9 @@ GlobalLoadI16Vglobal::GlobalLoadI16Vglobal(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -146,6 +160,8 @@ GlobalLoadI16Vglobal::GlobalLoadI16Vglobal(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_I16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -153,8 +169,9 @@ DecodeResult decodeGlobalLoadI16Vglobal(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_i16", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadI16Vglobal>(opcode);
 }
 } // namespace detail
@@ -162,8 +179,8 @@ DecodeResult decodeGlobalLoadI16Vglobal(const MachineInst *opcode,
 GlobalLoadB32Vglobal::GlobalLoadB32Vglobal(const MachineInst *inst)
     : Vglobal("global_load_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadB32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0) {
@@ -172,8 +189,9 @@ GlobalLoadB32Vglobal::GlobalLoadB32Vglobal(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -181,6 +199,8 @@ GlobalLoadB32Vglobal::GlobalLoadB32Vglobal(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -188,8 +208,9 @@ DecodeResult decodeGlobalLoadB32Vglobal(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_b32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadB32Vglobal>(opcode);
 }
 } // namespace detail
@@ -197,8 +218,8 @@ DecodeResult decodeGlobalLoadB32Vglobal(const MachineInst *opcode,
 GlobalLoadB64Vglobal::GlobalLoadB64Vglobal(const MachineInst *inst)
     : Vglobal("global_load_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadB64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0) {
@@ -207,8 +228,9 @@ GlobalLoadB64Vglobal::GlobalLoadB64Vglobal(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -216,6 +238,8 @@ GlobalLoadB64Vglobal::GlobalLoadB64Vglobal(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -223,8 +247,9 @@ DecodeResult decodeGlobalLoadB64Vglobal(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_b64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadB64Vglobal>(opcode);
 }
 } // namespace detail
@@ -232,8 +257,8 @@ DecodeResult decodeGlobalLoadB64Vglobal(const MachineInst *opcode,
 GlobalLoadB96Vglobal::GlobalLoadB96Vglobal(const MachineInst *inst)
     : Vglobal("global_load_b96", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadB96Vglobal)),
-      vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(96, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(96, OperandType::OPR_GPUMEM, 0) {
@@ -242,8 +267,9 @@ GlobalLoadB96Vglobal::GlobalLoadB96Vglobal(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -251,6 +277,8 @@ GlobalLoadB96Vglobal::GlobalLoadB96Vglobal(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -258,8 +286,9 @@ DecodeResult decodeGlobalLoadB96Vglobal(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_b96", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadB96Vglobal>(opcode);
 }
 } // namespace detail
@@ -267,8 +296,8 @@ DecodeResult decodeGlobalLoadB96Vglobal(const MachineInst *opcode,
 GlobalLoadB128Vglobal::GlobalLoadB128Vglobal(const MachineInst *inst)
     : Vglobal("global_load_b128", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadB128Vglobal)),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(128, OperandType::OPR_GPUMEM, 0) {
@@ -277,8 +306,9 @@ GlobalLoadB128Vglobal::GlobalLoadB128Vglobal(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -286,6 +316,8 @@ GlobalLoadB128Vglobal::GlobalLoadB128Vglobal(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -293,8 +325,9 @@ DecodeResult decodeGlobalLoadB128Vglobal(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_b128", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadB128Vglobal>(opcode);
 }
 } // namespace detail
@@ -302,9 +335,9 @@ DecodeResult decodeGlobalLoadB128Vglobal(const MachineInst *opcode,
 GlobalStoreB8Vglobal::GlobalStoreB8Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalStoreB8Vglobal)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -312,8 +345,9 @@ GlobalStoreB8Vglobal::GlobalStoreB8Vglobal(const MachineInst *inst)
   dst_operands_[0] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -321,6 +355,8 @@ GlobalStoreB8Vglobal::GlobalStoreB8Vglobal(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_STORE_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -328,8 +364,9 @@ DecodeResult decodeGlobalStoreB8Vglobal(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_store_b8", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalStoreB8Vglobal>(opcode);
 }
 } // namespace detail
@@ -337,9 +374,9 @@ DecodeResult decodeGlobalStoreB8Vglobal(const MachineInst *opcode,
 GlobalStoreB16Vglobal::GlobalStoreB16Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalStoreB16Vglobal)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -347,8 +384,9 @@ GlobalStoreB16Vglobal::GlobalStoreB16Vglobal(const MachineInst *inst)
   dst_operands_[0] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -356,6 +394,8 @@ GlobalStoreB16Vglobal::GlobalStoreB16Vglobal(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_STORE_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -363,8 +403,9 @@ DecodeResult decodeGlobalStoreB16Vglobal(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_store_b16", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalStoreB16Vglobal>(opcode);
 }
 } // namespace detail
@@ -372,9 +413,9 @@ DecodeResult decodeGlobalStoreB16Vglobal(const MachineInst *opcode,
 GlobalStoreB32Vglobal::GlobalStoreB32Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalStoreB32Vglobal)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -382,14 +423,17 @@ GlobalStoreB32Vglobal::GlobalStoreB32Vglobal(const MachineInst *inst)
   dst_operands_[0] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_STORE_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -397,8 +441,9 @@ DecodeResult decodeGlobalStoreB32Vglobal(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_store_b32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalStoreB32Vglobal>(opcode);
 }
 } // namespace detail
@@ -406,9 +451,9 @@ DecodeResult decodeGlobalStoreB32Vglobal(const MachineInst *opcode,
 GlobalStoreB64Vglobal::GlobalStoreB64Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalStoreB64Vglobal)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -416,14 +461,17 @@ GlobalStoreB64Vglobal::GlobalStoreB64Vglobal(const MachineInst *inst)
   dst_operands_[0] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_STORE_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -431,8 +479,9 @@ DecodeResult decodeGlobalStoreB64Vglobal(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_store_b64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalStoreB64Vglobal>(opcode);
 }
 } // namespace detail
@@ -440,9 +489,9 @@ DecodeResult decodeGlobalStoreB64Vglobal(const MachineInst *opcode,
 GlobalStoreB96Vglobal::GlobalStoreB96Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b96", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalStoreB96Vglobal)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(96, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(96, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -450,14 +499,17 @@ GlobalStoreB96Vglobal::GlobalStoreB96Vglobal(const MachineInst *inst)
   dst_operands_[0] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_STORE_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -465,8 +517,9 @@ DecodeResult decodeGlobalStoreB96Vglobal(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_store_b96", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalStoreB96Vglobal>(opcode);
 }
 } // namespace detail
@@ -474,9 +527,9 @@ DecodeResult decodeGlobalStoreB96Vglobal(const MachineInst *opcode,
 GlobalStoreB128Vglobal::GlobalStoreB128Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b128", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalStoreB128Vglobal)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(128, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -484,14 +537,17 @@ GlobalStoreB128Vglobal::GlobalStoreB128Vglobal(const MachineInst *inst)
   dst_operands_[0] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_STORE_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -499,8 +555,9 @@ DecodeResult decodeGlobalStoreB128Vglobal(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_store_b128", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalStoreB128Vglobal>(opcode);
 }
 } // namespace detail
@@ -508,8 +565,8 @@ DecodeResult decodeGlobalStoreB128Vglobal(const MachineInst *opcode,
 GlobalLoadD16U8Vglobal::GlobalLoadD16U8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadD16U8Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
@@ -518,14 +575,18 @@ GlobalLoadD16U8Vglobal::GlobalLoadD16U8Vglobal(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_D16_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -533,8 +594,9 @@ DecodeResult decodeGlobalLoadD16U8Vglobal(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_d16_u8", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadD16U8Vglobal>(opcode);
 }
 } // namespace detail
@@ -542,8 +604,8 @@ DecodeResult decodeGlobalLoadD16U8Vglobal(const MachineInst *opcode,
 GlobalLoadD16I8Vglobal::GlobalLoadD16I8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadD16I8Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
@@ -552,14 +614,18 @@ GlobalLoadD16I8Vglobal::GlobalLoadD16I8Vglobal(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_D16_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -567,8 +633,9 @@ DecodeResult decodeGlobalLoadD16I8Vglobal(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_d16_i8", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadD16I8Vglobal>(opcode);
 }
 } // namespace detail
@@ -576,8 +643,8 @@ DecodeResult decodeGlobalLoadD16I8Vglobal(const MachineInst *opcode,
 GlobalLoadD16B16Vglobal::GlobalLoadD16B16Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadD16B16Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
@@ -586,14 +653,18 @@ GlobalLoadD16B16Vglobal::GlobalLoadD16B16Vglobal(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_D16_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -601,8 +672,9 @@ DecodeResult decodeGlobalLoadD16B16Vglobal(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_d16_b16", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadD16B16Vglobal>(opcode);
 }
 } // namespace detail
@@ -610,8 +682,8 @@ DecodeResult decodeGlobalLoadD16B16Vglobal(const MachineInst *opcode,
 GlobalLoadD16HiU8Vglobal::GlobalLoadD16HiU8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadD16HiU8Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
@@ -620,14 +692,18 @@ GlobalLoadD16HiU8Vglobal::GlobalLoadD16HiU8Vglobal(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_D16_HI_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -635,8 +711,9 @@ DecodeResult decodeGlobalLoadD16HiU8Vglobal(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_d16_hi_u8", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadD16HiU8Vglobal>(opcode);
 }
 } // namespace detail
@@ -644,8 +721,8 @@ DecodeResult decodeGlobalLoadD16HiU8Vglobal(const MachineInst *opcode,
 GlobalLoadD16HiI8Vglobal::GlobalLoadD16HiI8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadD16HiI8Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
@@ -654,14 +731,18 @@ GlobalLoadD16HiI8Vglobal::GlobalLoadD16HiI8Vglobal(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_D16_HI_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -669,8 +750,9 @@ DecodeResult decodeGlobalLoadD16HiI8Vglobal(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_d16_hi_i8", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadD16HiI8Vglobal>(opcode);
 }
 } // namespace detail
@@ -678,8 +760,8 @@ DecodeResult decodeGlobalLoadD16HiI8Vglobal(const MachineInst *opcode,
 GlobalLoadD16HiB16Vglobal::GlobalLoadD16HiB16Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadD16HiB16Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
@@ -688,14 +770,18 @@ GlobalLoadD16HiB16Vglobal::GlobalLoadD16HiB16Vglobal(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_D16_HI_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -703,8 +789,9 @@ DecodeResult decodeGlobalLoadD16HiB16Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_d16_hi_b16", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadD16HiB16Vglobal>(opcode);
 }
 } // namespace detail
@@ -712,9 +799,9 @@ DecodeResult decodeGlobalLoadD16HiB16Vglobal(const MachineInst *opcode,
 GlobalStoreD16HiB8Vglobal::GlobalStoreD16HiB8Vglobal(const MachineInst *inst)
     : Vglobal("global_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalStoreD16HiB8Vglobal)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -722,8 +809,9 @@ GlobalStoreD16HiB8Vglobal::GlobalStoreD16HiB8Vglobal(const MachineInst *inst)
   dst_operands_[0] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -731,6 +819,9 @@ GlobalStoreD16HiB8Vglobal::GlobalStoreD16HiB8Vglobal(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_STORE_D16_HI_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -738,8 +829,9 @@ DecodeResult decodeGlobalStoreD16HiB8Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_store_d16_hi_b8", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalStoreD16HiB8Vglobal>(opcode);
 }
 } // namespace detail
@@ -747,9 +839,9 @@ DecodeResult decodeGlobalStoreD16HiB8Vglobal(const MachineInst *opcode,
 GlobalStoreD16HiB16Vglobal::GlobalStoreD16HiB16Vglobal(const MachineInst *inst)
     : Vglobal("global_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalStoreD16HiB16Vglobal)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -757,8 +849,9 @@ GlobalStoreD16HiB16Vglobal::GlobalStoreD16HiB16Vglobal(const MachineInst *inst)
   dst_operands_[0] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -766,6 +859,9 @@ GlobalStoreD16HiB16Vglobal::GlobalStoreD16HiB16Vglobal(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_STORE_D16_HI_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -773,8 +869,9 @@ DecodeResult decodeGlobalStoreD16HiB16Vglobal(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_store_d16_hi_b16", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalStoreD16HiB16Vglobal>(opcode);
 }
 } // namespace detail
@@ -782,21 +879,24 @@ DecodeResult decodeGlobalStoreD16HiB16Vglobal(const MachineInst *opcode,
 GlobalLoadAddtidB32Vglobal::GlobalLoadAddtidB32Vglobal(const MachineInst *inst)
     : Vglobal("global_load_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadAddtidB32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &gpumem;
   num_src_ = 1;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_ADDTID_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -804,8 +904,9 @@ DecodeResult decodeGlobalLoadAddtidB32Vglobal(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_addtid_b32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadAddtidB32Vglobal>(opcode);
 }
 } // namespace detail
@@ -813,20 +914,23 @@ DecodeResult decodeGlobalLoadAddtidB32Vglobal(const MachineInst *opcode,
 GlobalStoreAddtidB32Vglobal::GlobalStoreAddtidB32Vglobal(const MachineInst *inst)
     : Vglobal("global_store_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalStoreAddtidB32Vglobal)),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vsrc;
   dst_operands_[0] = &gpumem;
   num_src_ = 1;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_STORE_ADDTID_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -834,8 +938,9 @@ DecodeResult decodeGlobalStoreAddtidB32Vglobal(const MachineInst *opcode,
                                                const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_store_addtid_b32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalStoreAddtidB32Vglobal>(opcode);
 }
 } // namespace detail
@@ -846,6 +951,8 @@ GlobalInvVglobal::GlobalInvVglobal(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_INV);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Cache);
 }
 
 namespace detail {
@@ -853,8 +960,9 @@ DecodeResult decodeGlobalInvVglobal(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_inv", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalInvVglobal>(opcode);
 }
 } // namespace detail
@@ -865,6 +973,8 @@ GlobalWbVglobal::GlobalWbVglobal(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_WB);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Cache);
 }
 
 namespace detail {
@@ -872,8 +982,9 @@ DecodeResult decodeGlobalWbVglobal(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_wb", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalWbVglobal>(opcode);
 }
 } // namespace detail
@@ -881,10 +992,10 @@ DecodeResult decodeGlobalWbVglobal(const MachineInst *opcode,
 GlobalAtomicSwapB32Vglobal::GlobalAtomicSwapB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicSwapB32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -893,10 +1004,12 @@ GlobalAtomicSwapB32Vglobal::GlobalAtomicSwapB32Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -907,6 +1020,8 @@ GlobalAtomicSwapB32Vglobal::GlobalAtomicSwapB32Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_SWAP_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -914,8 +1029,9 @@ DecodeResult decodeGlobalAtomicSwapB32Vglobal(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_swap_b32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicSwapB32Vglobal>(opcode);
 }
 } // namespace detail
@@ -923,10 +1039,10 @@ DecodeResult decodeGlobalAtomicSwapB32Vglobal(const MachineInst *opcode,
 GlobalAtomicCmpswapB32Vglobal::GlobalAtomicCmpswapB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicCmpswapB32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -935,10 +1051,12 @@ GlobalAtomicCmpswapB32Vglobal::GlobalAtomicCmpswapB32Vglobal(const MachineInst *
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -949,6 +1067,8 @@ GlobalAtomicCmpswapB32Vglobal::GlobalAtomicCmpswapB32Vglobal(const MachineInst *
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_CMPSWAP_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -957,8 +1077,9 @@ DecodeResult decodeGlobalAtomicCmpswapB32Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("global_atomic_cmpswap_b32",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicCmpswapB32Vglobal>(opcode);
 }
 } // namespace detail
@@ -966,10 +1087,10 @@ DecodeResult decodeGlobalAtomicCmpswapB32Vglobal(const MachineInst *opcode,
 GlobalAtomicAddU32Vglobal::GlobalAtomicAddU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_add_u32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicAddU32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -978,10 +1099,12 @@ GlobalAtomicAddU32Vglobal::GlobalAtomicAddU32Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -992,6 +1115,8 @@ GlobalAtomicAddU32Vglobal::GlobalAtomicAddU32Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_ADD_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -999,8 +1124,9 @@ DecodeResult decodeGlobalAtomicAddU32Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_add_u32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicAddU32Vglobal>(opcode);
 }
 } // namespace detail
@@ -1008,10 +1134,10 @@ DecodeResult decodeGlobalAtomicAddU32Vglobal(const MachineInst *opcode,
 GlobalAtomicSubU32Vglobal::GlobalAtomicSubU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicSubU32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1020,10 +1146,12 @@ GlobalAtomicSubU32Vglobal::GlobalAtomicSubU32Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1034,6 +1162,8 @@ GlobalAtomicSubU32Vglobal::GlobalAtomicSubU32Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_SUB_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1041,8 +1171,9 @@ DecodeResult decodeGlobalAtomicSubU32Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_sub_u32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicSubU32Vglobal>(opcode);
 }
 } // namespace detail
@@ -1050,10 +1181,10 @@ DecodeResult decodeGlobalAtomicSubU32Vglobal(const MachineInst *opcode,
 GlobalAtomicSubClampU32Vglobal::GlobalAtomicSubClampU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicSubClampU32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1062,10 +1193,12 @@ GlobalAtomicSubClampU32Vglobal::GlobalAtomicSubClampU32Vglobal(const MachineInst
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1076,6 +1209,8 @@ GlobalAtomicSubClampU32Vglobal::GlobalAtomicSubClampU32Vglobal(const MachineInst
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_SUB_CLAMP_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1084,8 +1219,9 @@ DecodeResult decodeGlobalAtomicSubClampU32Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("global_atomic_sub_clamp_u32",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicSubClampU32Vglobal>(opcode);
 }
 } // namespace detail
@@ -1093,10 +1229,10 @@ DecodeResult decodeGlobalAtomicSubClampU32Vglobal(const MachineInst *opcode,
 GlobalAtomicMinI32Vglobal::GlobalAtomicMinI32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_i32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicMinI32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1105,10 +1241,12 @@ GlobalAtomicMinI32Vglobal::GlobalAtomicMinI32Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1119,6 +1257,8 @@ GlobalAtomicMinI32Vglobal::GlobalAtomicMinI32Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_MIN_I32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1126,8 +1266,9 @@ DecodeResult decodeGlobalAtomicMinI32Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_min_i32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicMinI32Vglobal>(opcode);
 }
 } // namespace detail
@@ -1135,10 +1276,10 @@ DecodeResult decodeGlobalAtomicMinI32Vglobal(const MachineInst *opcode,
 GlobalAtomicMinU32Vglobal::GlobalAtomicMinU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_u32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicMinU32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1147,10 +1288,12 @@ GlobalAtomicMinU32Vglobal::GlobalAtomicMinU32Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1161,6 +1304,8 @@ GlobalAtomicMinU32Vglobal::GlobalAtomicMinU32Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_MIN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1168,8 +1313,9 @@ DecodeResult decodeGlobalAtomicMinU32Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_min_u32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicMinU32Vglobal>(opcode);
 }
 } // namespace detail
@@ -1177,10 +1323,10 @@ DecodeResult decodeGlobalAtomicMinU32Vglobal(const MachineInst *opcode,
 GlobalAtomicMaxI32Vglobal::GlobalAtomicMaxI32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_i32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicMaxI32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1189,10 +1335,12 @@ GlobalAtomicMaxI32Vglobal::GlobalAtomicMaxI32Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1203,6 +1351,8 @@ GlobalAtomicMaxI32Vglobal::GlobalAtomicMaxI32Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_MAX_I32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1210,8 +1360,9 @@ DecodeResult decodeGlobalAtomicMaxI32Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_max_i32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicMaxI32Vglobal>(opcode);
 }
 } // namespace detail
@@ -1219,10 +1370,10 @@ DecodeResult decodeGlobalAtomicMaxI32Vglobal(const MachineInst *opcode,
 GlobalAtomicMaxU32Vglobal::GlobalAtomicMaxU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_u32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicMaxU32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1231,10 +1382,12 @@ GlobalAtomicMaxU32Vglobal::GlobalAtomicMaxU32Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1245,6 +1398,8 @@ GlobalAtomicMaxU32Vglobal::GlobalAtomicMaxU32Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_MAX_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1252,8 +1407,9 @@ DecodeResult decodeGlobalAtomicMaxU32Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_max_u32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicMaxU32Vglobal>(opcode);
 }
 } // namespace detail
@@ -1261,10 +1417,10 @@ DecodeResult decodeGlobalAtomicMaxU32Vglobal(const MachineInst *opcode,
 GlobalAtomicAndB32Vglobal::GlobalAtomicAndB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_and_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicAndB32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1273,10 +1429,12 @@ GlobalAtomicAndB32Vglobal::GlobalAtomicAndB32Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1287,6 +1445,8 @@ GlobalAtomicAndB32Vglobal::GlobalAtomicAndB32Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_AND_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1294,8 +1454,9 @@ DecodeResult decodeGlobalAtomicAndB32Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_and_b32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicAndB32Vglobal>(opcode);
 }
 } // namespace detail
@@ -1303,10 +1464,10 @@ DecodeResult decodeGlobalAtomicAndB32Vglobal(const MachineInst *opcode,
 GlobalAtomicOrB32Vglobal::GlobalAtomicOrB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_or_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicOrB32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1315,10 +1476,12 @@ GlobalAtomicOrB32Vglobal::GlobalAtomicOrB32Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1329,6 +1492,8 @@ GlobalAtomicOrB32Vglobal::GlobalAtomicOrB32Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_OR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1336,8 +1501,9 @@ DecodeResult decodeGlobalAtomicOrB32Vglobal(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_or_b32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicOrB32Vglobal>(opcode);
 }
 } // namespace detail
@@ -1345,10 +1511,10 @@ DecodeResult decodeGlobalAtomicOrB32Vglobal(const MachineInst *opcode,
 GlobalAtomicXorB32Vglobal::GlobalAtomicXorB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicXorB32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1357,10 +1523,12 @@ GlobalAtomicXorB32Vglobal::GlobalAtomicXorB32Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1371,6 +1539,8 @@ GlobalAtomicXorB32Vglobal::GlobalAtomicXorB32Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_XOR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1378,8 +1548,9 @@ DecodeResult decodeGlobalAtomicXorB32Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_xor_b32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicXorB32Vglobal>(opcode);
 }
 } // namespace detail
@@ -1387,10 +1558,10 @@ DecodeResult decodeGlobalAtomicXorB32Vglobal(const MachineInst *opcode,
 GlobalAtomicIncU32Vglobal::GlobalAtomicIncU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicIncU32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1399,10 +1570,12 @@ GlobalAtomicIncU32Vglobal::GlobalAtomicIncU32Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1413,6 +1586,8 @@ GlobalAtomicIncU32Vglobal::GlobalAtomicIncU32Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_INC_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1420,8 +1595,9 @@ DecodeResult decodeGlobalAtomicIncU32Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_inc_u32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicIncU32Vglobal>(opcode);
 }
 } // namespace detail
@@ -1429,10 +1605,10 @@ DecodeResult decodeGlobalAtomicIncU32Vglobal(const MachineInst *opcode,
 GlobalAtomicDecU32Vglobal::GlobalAtomicDecU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicDecU32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1441,10 +1617,12 @@ GlobalAtomicDecU32Vglobal::GlobalAtomicDecU32Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1455,6 +1633,8 @@ GlobalAtomicDecU32Vglobal::GlobalAtomicDecU32Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_DEC_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1462,8 +1642,9 @@ DecodeResult decodeGlobalAtomicDecU32Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_dec_u32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicDecU32Vglobal>(opcode);
 }
 } // namespace detail
@@ -1471,10 +1652,10 @@ DecodeResult decodeGlobalAtomicDecU32Vglobal(const MachineInst *opcode,
 GlobalAtomicSwapB64Vglobal::GlobalAtomicSwapB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_swap_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicSwapB64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1483,10 +1664,12 @@ GlobalAtomicSwapB64Vglobal::GlobalAtomicSwapB64Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1497,6 +1680,8 @@ GlobalAtomicSwapB64Vglobal::GlobalAtomicSwapB64Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_SWAP_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1504,8 +1689,9 @@ DecodeResult decodeGlobalAtomicSwapB64Vglobal(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_swap_b64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicSwapB64Vglobal>(opcode);
 }
 } // namespace detail
@@ -1513,10 +1699,10 @@ DecodeResult decodeGlobalAtomicSwapB64Vglobal(const MachineInst *opcode,
 GlobalAtomicCmpswapB64Vglobal::GlobalAtomicCmpswapB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicCmpswapB64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1525,10 +1711,12 @@ GlobalAtomicCmpswapB64Vglobal::GlobalAtomicCmpswapB64Vglobal(const MachineInst *
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1539,6 +1727,8 @@ GlobalAtomicCmpswapB64Vglobal::GlobalAtomicCmpswapB64Vglobal(const MachineInst *
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_CMPSWAP_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1547,8 +1737,9 @@ DecodeResult decodeGlobalAtomicCmpswapB64Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("global_atomic_cmpswap_b64",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicCmpswapB64Vglobal>(opcode);
 }
 } // namespace detail
@@ -1556,10 +1747,10 @@ DecodeResult decodeGlobalAtomicCmpswapB64Vglobal(const MachineInst *opcode,
 GlobalAtomicAddU64Vglobal::GlobalAtomicAddU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_add_u64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicAddU64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1568,10 +1759,12 @@ GlobalAtomicAddU64Vglobal::GlobalAtomicAddU64Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1582,6 +1775,8 @@ GlobalAtomicAddU64Vglobal::GlobalAtomicAddU64Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_ADD_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1589,8 +1784,9 @@ DecodeResult decodeGlobalAtomicAddU64Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_add_u64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicAddU64Vglobal>(opcode);
 }
 } // namespace detail
@@ -1598,10 +1794,10 @@ DecodeResult decodeGlobalAtomicAddU64Vglobal(const MachineInst *opcode,
 GlobalAtomicSubU64Vglobal::GlobalAtomicSubU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicSubU64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1610,10 +1806,12 @@ GlobalAtomicSubU64Vglobal::GlobalAtomicSubU64Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1624,6 +1822,8 @@ GlobalAtomicSubU64Vglobal::GlobalAtomicSubU64Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_SUB_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1631,8 +1831,9 @@ DecodeResult decodeGlobalAtomicSubU64Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_sub_u64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicSubU64Vglobal>(opcode);
 }
 } // namespace detail
@@ -1640,10 +1841,10 @@ DecodeResult decodeGlobalAtomicSubU64Vglobal(const MachineInst *opcode,
 GlobalAtomicMinI64Vglobal::GlobalAtomicMinI64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_i64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicMinI64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1652,10 +1853,12 @@ GlobalAtomicMinI64Vglobal::GlobalAtomicMinI64Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1666,6 +1869,8 @@ GlobalAtomicMinI64Vglobal::GlobalAtomicMinI64Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_MIN_I64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1673,8 +1878,9 @@ DecodeResult decodeGlobalAtomicMinI64Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_min_i64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicMinI64Vglobal>(opcode);
 }
 } // namespace detail
@@ -1682,10 +1888,10 @@ DecodeResult decodeGlobalAtomicMinI64Vglobal(const MachineInst *opcode,
 GlobalAtomicMinU64Vglobal::GlobalAtomicMinU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_u64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicMinU64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1694,10 +1900,12 @@ GlobalAtomicMinU64Vglobal::GlobalAtomicMinU64Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1708,6 +1916,8 @@ GlobalAtomicMinU64Vglobal::GlobalAtomicMinU64Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_MIN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1715,8 +1925,9 @@ DecodeResult decodeGlobalAtomicMinU64Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_min_u64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicMinU64Vglobal>(opcode);
 }
 } // namespace detail
@@ -1724,10 +1935,10 @@ DecodeResult decodeGlobalAtomicMinU64Vglobal(const MachineInst *opcode,
 GlobalAtomicMaxI64Vglobal::GlobalAtomicMaxI64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_i64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicMaxI64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1736,10 +1947,12 @@ GlobalAtomicMaxI64Vglobal::GlobalAtomicMaxI64Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1750,6 +1963,8 @@ GlobalAtomicMaxI64Vglobal::GlobalAtomicMaxI64Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_MAX_I64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1757,8 +1972,9 @@ DecodeResult decodeGlobalAtomicMaxI64Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_max_i64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicMaxI64Vglobal>(opcode);
 }
 } // namespace detail
@@ -1766,10 +1982,10 @@ DecodeResult decodeGlobalAtomicMaxI64Vglobal(const MachineInst *opcode,
 GlobalAtomicMaxU64Vglobal::GlobalAtomicMaxU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_u64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicMaxU64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1778,10 +1994,12 @@ GlobalAtomicMaxU64Vglobal::GlobalAtomicMaxU64Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1792,6 +2010,8 @@ GlobalAtomicMaxU64Vglobal::GlobalAtomicMaxU64Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_MAX_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1799,8 +2019,9 @@ DecodeResult decodeGlobalAtomicMaxU64Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_max_u64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicMaxU64Vglobal>(opcode);
 }
 } // namespace detail
@@ -1808,10 +2029,10 @@ DecodeResult decodeGlobalAtomicMaxU64Vglobal(const MachineInst *opcode,
 GlobalAtomicAndB64Vglobal::GlobalAtomicAndB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_and_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicAndB64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1820,10 +2041,12 @@ GlobalAtomicAndB64Vglobal::GlobalAtomicAndB64Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1834,6 +2057,8 @@ GlobalAtomicAndB64Vglobal::GlobalAtomicAndB64Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_AND_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1841,8 +2066,9 @@ DecodeResult decodeGlobalAtomicAndB64Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_and_b64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicAndB64Vglobal>(opcode);
 }
 } // namespace detail
@@ -1850,10 +2076,10 @@ DecodeResult decodeGlobalAtomicAndB64Vglobal(const MachineInst *opcode,
 GlobalAtomicOrB64Vglobal::GlobalAtomicOrB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_or_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicOrB64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1862,10 +2088,12 @@ GlobalAtomicOrB64Vglobal::GlobalAtomicOrB64Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1876,6 +2104,8 @@ GlobalAtomicOrB64Vglobal::GlobalAtomicOrB64Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_OR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1883,8 +2113,9 @@ DecodeResult decodeGlobalAtomicOrB64Vglobal(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_or_b64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicOrB64Vglobal>(opcode);
 }
 } // namespace detail
@@ -1892,10 +2123,10 @@ DecodeResult decodeGlobalAtomicOrB64Vglobal(const MachineInst *opcode,
 GlobalAtomicXorB64Vglobal::GlobalAtomicXorB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicXorB64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1904,10 +2135,12 @@ GlobalAtomicXorB64Vglobal::GlobalAtomicXorB64Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1918,6 +2151,8 @@ GlobalAtomicXorB64Vglobal::GlobalAtomicXorB64Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_XOR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1925,8 +2160,9 @@ DecodeResult decodeGlobalAtomicXorB64Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_xor_b64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicXorB64Vglobal>(opcode);
 }
 } // namespace detail
@@ -1934,10 +2170,10 @@ DecodeResult decodeGlobalAtomicXorB64Vglobal(const MachineInst *opcode,
 GlobalAtomicIncU64Vglobal::GlobalAtomicIncU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicIncU64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1946,10 +2182,12 @@ GlobalAtomicIncU64Vglobal::GlobalAtomicIncU64Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -1960,6 +2198,8 @@ GlobalAtomicIncU64Vglobal::GlobalAtomicIncU64Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_INC_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1967,8 +2207,9 @@ DecodeResult decodeGlobalAtomicIncU64Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_inc_u64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicIncU64Vglobal>(opcode);
 }
 } // namespace detail
@@ -1976,10 +2217,10 @@ DecodeResult decodeGlobalAtomicIncU64Vglobal(const MachineInst *opcode,
 GlobalAtomicDecU64Vglobal::GlobalAtomicDecU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicDecU64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1988,10 +2229,12 @@ GlobalAtomicDecU64Vglobal::GlobalAtomicDecU64Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2002,6 +2245,8 @@ GlobalAtomicDecU64Vglobal::GlobalAtomicDecU64Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_DEC_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2009,8 +2254,9 @@ DecodeResult decodeGlobalAtomicDecU64Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_dec_u64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicDecU64Vglobal>(opcode);
 }
 } // namespace detail
@@ -2021,6 +2267,8 @@ GlobalWbinvVglobal::GlobalWbinvVglobal(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_WBINV);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Cache);
 }
 
 namespace detail {
@@ -2028,8 +2276,9 @@ DecodeResult decodeGlobalWbinvVglobal(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_wbinv", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalWbinvVglobal>(opcode);
 }
 } // namespace detail
@@ -2037,10 +2286,10 @@ DecodeResult decodeGlobalWbinvVglobal(const MachineInst *opcode,
 GlobalAtomicCondSubU32Vglobal::GlobalAtomicCondSubU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicCondSubU32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2049,10 +2298,12 @@ GlobalAtomicCondSubU32Vglobal::GlobalAtomicCondSubU32Vglobal(const MachineInst *
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2063,6 +2314,8 @@ GlobalAtomicCondSubU32Vglobal::GlobalAtomicCondSubU32Vglobal(const MachineInst *
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_COND_SUB_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2071,8 +2324,9 @@ DecodeResult decodeGlobalAtomicCondSubU32Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("global_atomic_cond_sub_u32",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicCondSubU32Vglobal>(opcode);
 }
 } // namespace detail
@@ -2080,10 +2334,10 @@ DecodeResult decodeGlobalAtomicCondSubU32Vglobal(const MachineInst *opcode,
 GlobalAtomicMinNumF32Vglobal::GlobalAtomicMinNumF32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicMinNumF32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2092,10 +2346,12 @@ GlobalAtomicMinNumF32Vglobal::GlobalAtomicMinNumF32Vglobal(const MachineInst *in
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2106,6 +2362,8 @@ GlobalAtomicMinNumF32Vglobal::GlobalAtomicMinNumF32Vglobal(const MachineInst *in
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_MIN_NUM_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2114,8 +2372,9 @@ DecodeResult decodeGlobalAtomicMinNumF32Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("global_atomic_min_num_f32",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicMinNumF32Vglobal>(opcode);
 }
 } // namespace detail
@@ -2123,10 +2382,10 @@ DecodeResult decodeGlobalAtomicMinNumF32Vglobal(const MachineInst *opcode,
 GlobalAtomicMaxNumF32Vglobal::GlobalAtomicMaxNumF32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicMaxNumF32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2135,10 +2394,12 @@ GlobalAtomicMaxNumF32Vglobal::GlobalAtomicMaxNumF32Vglobal(const MachineInst *in
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2149,6 +2410,8 @@ GlobalAtomicMaxNumF32Vglobal::GlobalAtomicMaxNumF32Vglobal(const MachineInst *in
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_MAX_NUM_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2157,8 +2420,9 @@ DecodeResult decodeGlobalAtomicMaxNumF32Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("global_atomic_max_num_f32",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicMaxNumF32Vglobal>(opcode);
 }
 } // namespace detail
@@ -2166,8 +2430,8 @@ DecodeResult decodeGlobalAtomicMaxNumF32Vglobal(const MachineInst *opcode,
 GlobalLoadBlockVglobal::GlobalLoadBlockVglobal(const MachineInst *inst)
     : Vglobal("global_load_block", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadBlockVglobal)),
-      vdst(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(1024, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(1024, OperandType::OPR_GPUMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
@@ -2177,8 +2441,9 @@ GlobalLoadBlockVglobal::GlobalLoadBlockVglobal(const MachineInst *inst)
   src_operands_[2] = &m0;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2186,6 +2451,8 @@ GlobalLoadBlockVglobal::GlobalLoadBlockVglobal(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_BLOCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -2193,8 +2460,9 @@ DecodeResult decodeGlobalLoadBlockVglobal(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_block", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadBlockVglobal>(opcode);
 }
 } // namespace detail
@@ -2202,9 +2470,9 @@ DecodeResult decodeGlobalLoadBlockVglobal(const MachineInst *opcode,
 GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst)
     : Vglobal("global_store_block", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalStoreBlockVglobal)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(1024, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(1024, OperandType::OPR_GPUMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
   src_operands_[0] = &vaddr;
@@ -2213,8 +2481,9 @@ GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst)
   src_operands_[2] = &m0;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -2222,6 +2491,8 @@ GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_STORE_BLOCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -2229,8 +2500,9 @@ DecodeResult decodeGlobalStoreBlockVglobal(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_store_block", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalStoreBlockVglobal>(opcode);
 }
 } // namespace detail
@@ -2238,10 +2510,10 @@ DecodeResult decodeGlobalStoreBlockVglobal(const MachineInst *opcode,
 GlobalAtomicAddF64Vglobal::GlobalAtomicAddF64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_add_f64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicAddF64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2250,10 +2522,12 @@ GlobalAtomicAddF64Vglobal::GlobalAtomicAddF64Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2264,6 +2538,8 @@ GlobalAtomicAddF64Vglobal::GlobalAtomicAddF64Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_ADD_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2271,8 +2547,9 @@ DecodeResult decodeGlobalAtomicAddF64Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_add_f64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicAddF64Vglobal>(opcode);
 }
 } // namespace detail
@@ -2280,10 +2557,10 @@ DecodeResult decodeGlobalAtomicAddF64Vglobal(const MachineInst *opcode,
 GlobalAtomicAddF32Vglobal::GlobalAtomicAddF32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicAddF32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2292,10 +2569,12 @@ GlobalAtomicAddF32Vglobal::GlobalAtomicAddF32Vglobal(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2306,6 +2585,8 @@ GlobalAtomicAddF32Vglobal::GlobalAtomicAddF32Vglobal(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_ADD_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2313,8 +2594,9 @@ DecodeResult decodeGlobalAtomicAddF32Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_atomic_add_f32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicAddF32Vglobal>(opcode);
 }
 } // namespace detail
@@ -2322,8 +2604,8 @@ DecodeResult decodeGlobalAtomicAddF32Vglobal(const MachineInst *opcode,
 GlobalLoadTr16B128Vglobal::GlobalLoadTr16B128Vglobal(const MachineInst *inst)
     : Vglobal("global_load_tr16_b128", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadTr16B128Vglobal)),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(128, OperandType::OPR_GPUMEM, 0) {
@@ -2332,16 +2614,21 @@ GlobalLoadTr16B128Vglobal::GlobalLoadTr16B128Vglobal(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= GLOBAL_TRANSPOSE_LOAD;
+  flags_ |= COMPACT_WAVE64_MEMORY_RESULT;
   flags_ |= CONDITIONAL_MEMORY_LANES;
   flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_TR16_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -2349,8 +2636,9 @@ DecodeResult decodeGlobalLoadTr16B128Vglobal(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_tr16_b128", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadTr16B128Vglobal>(opcode);
 }
 } // namespace detail
@@ -2358,8 +2646,8 @@ DecodeResult decodeGlobalLoadTr16B128Vglobal(const MachineInst *opcode,
 GlobalLoadTr8B64Vglobal::GlobalLoadTr8B64Vglobal(const MachineInst *inst)
     : Vglobal("global_load_tr8_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadTr8B64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0) {
@@ -2368,16 +2656,21 @@ GlobalLoadTr8B64Vglobal::GlobalLoadTr8B64Vglobal(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= GLOBAL_TRANSPOSE_LOAD;
+  flags_ |= COMPACT_WAVE64_MEMORY_RESULT;
   flags_ |= CONDITIONAL_MEMORY_LANES;
   flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_TR8_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -2385,8 +2678,9 @@ DecodeResult decodeGlobalLoadTr8B64Vglobal(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_tr8_b64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadTr8B64Vglobal>(opcode);
 }
 } // namespace detail
@@ -2394,10 +2688,10 @@ DecodeResult decodeGlobalLoadTr8B64Vglobal(const MachineInst *opcode,
 GlobalAtomicPkAddF16Vglobal::GlobalAtomicPkAddF16Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicPkAddF16Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2406,10 +2700,12 @@ GlobalAtomicPkAddF16Vglobal::GlobalAtomicPkAddF16Vglobal(const MachineInst *inst
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2420,6 +2716,8 @@ GlobalAtomicPkAddF16Vglobal::GlobalAtomicPkAddF16Vglobal(const MachineInst *inst
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_PK_ADD_F16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2428,8 +2726,9 @@ DecodeResult decodeGlobalAtomicPkAddF16Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("global_atomic_pk_add_f16",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicPkAddF16Vglobal>(opcode);
 }
 } // namespace detail
@@ -2437,10 +2736,10 @@ DecodeResult decodeGlobalAtomicPkAddF16Vglobal(const MachineInst *opcode,
 GlobalAtomicPkAddBf16Vglobal::GlobalAtomicPkAddBf16Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicPkAddBf16Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2449,10 +2748,12 @@ GlobalAtomicPkAddBf16Vglobal::GlobalAtomicPkAddBf16Vglobal(const MachineInst *in
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2463,6 +2764,8 @@ GlobalAtomicPkAddBf16Vglobal::GlobalAtomicPkAddBf16Vglobal(const MachineInst *in
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_PK_ADD_BF16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2471,8 +2774,9 @@ DecodeResult decodeGlobalAtomicPkAddBf16Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("global_atomic_pk_add_bf16",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicPkAddBf16Vglobal>(opcode);
 }
 } // namespace detail
@@ -2480,10 +2784,10 @@ DecodeResult decodeGlobalAtomicPkAddBf16Vglobal(const MachineInst *opcode,
 GlobalAtomicMinNumF64Vglobal::GlobalAtomicMinNumF64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_num_f64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicMinNumF64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2492,10 +2796,12 @@ GlobalAtomicMinNumF64Vglobal::GlobalAtomicMinNumF64Vglobal(const MachineInst *in
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2506,6 +2812,8 @@ GlobalAtomicMinNumF64Vglobal::GlobalAtomicMinNumF64Vglobal(const MachineInst *in
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_MIN_NUM_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2514,8 +2822,9 @@ DecodeResult decodeGlobalAtomicMinNumF64Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("global_atomic_min_num_f64",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicMinNumF64Vglobal>(opcode);
 }
 } // namespace detail
@@ -2523,10 +2832,10 @@ DecodeResult decodeGlobalAtomicMinNumF64Vglobal(const MachineInst *opcode,
 GlobalAtomicMaxNumF64Vglobal::GlobalAtomicMaxNumF64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_num_f64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicMaxNumF64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2535,10 +2844,12 @@ GlobalAtomicMaxNumF64Vglobal::GlobalAtomicMaxNumF64Vglobal(const MachineInst *in
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  }
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdst;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2549,6 +2860,8 @@ GlobalAtomicMaxNumF64Vglobal::GlobalAtomicMaxNumF64Vglobal(const MachineInst *in
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_MAX_NUM_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2557,8 +2870,9 @@ DecodeResult decodeGlobalAtomicMaxNumF64Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("global_atomic_max_num_f64",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalAtomicMaxNumF64Vglobal>(opcode);
 }
 } // namespace detail
@@ -2566,7 +2880,7 @@ DecodeResult decodeGlobalAtomicMaxNumF64Vglobal(const MachineInst *opcode,
 GlobalPrefetchB8Vglobal::GlobalPrefetchB8Vglobal(const MachineInst *inst)
     : Vglobal("global_prefetch_b8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalPrefetchB8Vglobal)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
@@ -2574,11 +2888,14 @@ GlobalPrefetchB8Vglobal::GlobalPrefetchB8Vglobal(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 0;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_PREFETCH_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Prefetch);
 }
 
 namespace detail {
@@ -2586,8 +2903,9 @@ DecodeResult decodeGlobalPrefetchB8Vglobal(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_prefetch_b8", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalPrefetchB8Vglobal>(opcode);
 }
 } // namespace detail
@@ -2595,8 +2913,8 @@ DecodeResult decodeGlobalPrefetchB8Vglobal(const MachineInst *opcode,
 GlobalLoadAsyncToLdsB8Vglobal::GlobalLoadAsyncToLdsB8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_async_to_lds_b8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadAsyncToLdsB8Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       dsmem(8, OperandType::OPR_DSMEM, 0), gpumem(8, OperandType::OPR_GPUMEM, 0) {
@@ -2606,8 +2924,9 @@ GlobalLoadAsyncToLdsB8Vglobal::GlobalLoadAsyncToLdsB8Vglobal(const MachineInst *
   src_operands_[2] = &gpumem;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   dsmem.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2615,6 +2934,9 @@ GlobalLoadAsyncToLdsB8Vglobal::GlobalLoadAsyncToLdsB8Vglobal(const MachineInst *
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::ASYNCCNT, amdgpu::MemoryCompletionClass::ASYNC_LOAD}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_ASYNC_TO_LDS_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
+  flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -2623,8 +2945,9 @@ DecodeResult decodeGlobalLoadAsyncToLdsB8Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("global_load_async_to_lds_b8",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadAsyncToLdsB8Vglobal>(opcode);
 }
 } // namespace detail
@@ -2632,8 +2955,8 @@ DecodeResult decodeGlobalLoadAsyncToLdsB8Vglobal(const MachineInst *opcode,
 GlobalLoadAsyncToLdsB32Vglobal::GlobalLoadAsyncToLdsB32Vglobal(const MachineInst *inst)
     : Vglobal("global_load_async_to_lds_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadAsyncToLdsB32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       dsmem(32, OperandType::OPR_DSMEM, 0), gpumem(32, OperandType::OPR_GPUMEM, 0) {
@@ -2643,8 +2966,9 @@ GlobalLoadAsyncToLdsB32Vglobal::GlobalLoadAsyncToLdsB32Vglobal(const MachineInst
   src_operands_[2] = &gpumem;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   dsmem.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2652,6 +2976,9 @@ GlobalLoadAsyncToLdsB32Vglobal::GlobalLoadAsyncToLdsB32Vglobal(const MachineInst
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::ASYNCCNT, amdgpu::MemoryCompletionClass::ASYNC_LOAD}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_ASYNC_TO_LDS_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
+  flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -2660,8 +2987,9 @@ DecodeResult decodeGlobalLoadAsyncToLdsB32Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("global_load_async_to_lds_b32",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadAsyncToLdsB32Vglobal>(opcode);
 }
 } // namespace detail
@@ -2669,8 +2997,8 @@ DecodeResult decodeGlobalLoadAsyncToLdsB32Vglobal(const MachineInst *opcode,
 GlobalLoadAsyncToLdsB64Vglobal::GlobalLoadAsyncToLdsB64Vglobal(const MachineInst *inst)
     : Vglobal("global_load_async_to_lds_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadAsyncToLdsB64Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       dsmem(64, OperandType::OPR_DSMEM, 0), gpumem(64, OperandType::OPR_GPUMEM, 0) {
@@ -2680,8 +3008,9 @@ GlobalLoadAsyncToLdsB64Vglobal::GlobalLoadAsyncToLdsB64Vglobal(const MachineInst
   src_operands_[2] = &gpumem;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   dsmem.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2689,6 +3018,9 @@ GlobalLoadAsyncToLdsB64Vglobal::GlobalLoadAsyncToLdsB64Vglobal(const MachineInst
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::ASYNCCNT, amdgpu::MemoryCompletionClass::ASYNC_LOAD}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_ASYNC_TO_LDS_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
+  flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -2697,8 +3029,9 @@ DecodeResult decodeGlobalLoadAsyncToLdsB64Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("global_load_async_to_lds_b64",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadAsyncToLdsB64Vglobal>(opcode);
 }
 } // namespace detail
@@ -2706,8 +3039,8 @@ DecodeResult decodeGlobalLoadAsyncToLdsB64Vglobal(const MachineInst *opcode,
 GlobalLoadAsyncToLdsB128Vglobal::GlobalLoadAsyncToLdsB128Vglobal(const MachineInst *inst)
     : Vglobal("global_load_async_to_lds_b128", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadAsyncToLdsB128Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       dsmem(128, OperandType::OPR_DSMEM, 0), gpumem(128, OperandType::OPR_GPUMEM, 0) {
@@ -2717,8 +3050,9 @@ GlobalLoadAsyncToLdsB128Vglobal::GlobalLoadAsyncToLdsB128Vglobal(const MachineIn
   src_operands_[2] = &gpumem;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   dsmem.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2726,6 +3060,9 @@ GlobalLoadAsyncToLdsB128Vglobal::GlobalLoadAsyncToLdsB128Vglobal(const MachineIn
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::ASYNCCNT, amdgpu::MemoryCompletionClass::ASYNC_LOAD}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_ASYNC_TO_LDS_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
+  flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -2734,8 +3071,9 @@ DecodeResult decodeGlobalLoadAsyncToLdsB128Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("global_load_async_to_lds_b128",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadAsyncToLdsB128Vglobal>(opcode);
 }
 } // namespace detail
@@ -2743,9 +3081,9 @@ DecodeResult decodeGlobalLoadAsyncToLdsB128Vglobal(const MachineInst *opcode,
 GlobalStoreAsyncFromLdsB8Vglobal::GlobalStoreAsyncFromLdsB8Vglobal(const MachineInst *inst)
     : Vglobal("global_store_async_from_lds_b8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalStoreAsyncFromLdsB8Vglobal)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0), dsmem(8, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2754,8 +3092,9 @@ GlobalStoreAsyncFromLdsB8Vglobal::GlobalStoreAsyncFromLdsB8Vglobal(const Machine
   src_operands_[2] = &dsmem;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   dsmem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -2763,6 +3102,9 @@ GlobalStoreAsyncFromLdsB8Vglobal::GlobalStoreAsyncFromLdsB8Vglobal(const Machine
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::ASYNCCNT, amdgpu::MemoryCompletionClass::ASYNC_STORE}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_STORE_ASYNC_FROM_LDS_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Store);
+  flags_ |= MEMORY_FROM_LDS;
 }
 
 namespace detail {
@@ -2771,8 +3113,9 @@ DecodeResult decodeGlobalStoreAsyncFromLdsB8Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("global_store_async_from_lds_b8",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalStoreAsyncFromLdsB8Vglobal>(opcode);
 }
 } // namespace detail
@@ -2780,9 +3123,9 @@ DecodeResult decodeGlobalStoreAsyncFromLdsB8Vglobal(const MachineInst *opcode,
 GlobalStoreAsyncFromLdsB32Vglobal::GlobalStoreAsyncFromLdsB32Vglobal(const MachineInst *inst)
     : Vglobal("global_store_async_from_lds_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalStoreAsyncFromLdsB32Vglobal)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), dsmem(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2791,8 +3134,9 @@ GlobalStoreAsyncFromLdsB32Vglobal::GlobalStoreAsyncFromLdsB32Vglobal(const Machi
   src_operands_[2] = &dsmem;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   dsmem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -2800,6 +3144,9 @@ GlobalStoreAsyncFromLdsB32Vglobal::GlobalStoreAsyncFromLdsB32Vglobal(const Machi
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::ASYNCCNT, amdgpu::MemoryCompletionClass::ASYNC_STORE}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_STORE_ASYNC_FROM_LDS_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Store);
+  flags_ |= MEMORY_FROM_LDS;
 }
 
 namespace detail {
@@ -2808,8 +3155,9 @@ DecodeResult decodeGlobalStoreAsyncFromLdsB32Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("global_store_async_from_lds_b32",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalStoreAsyncFromLdsB32Vglobal>(opcode);
 }
 } // namespace detail
@@ -2817,9 +3165,9 @@ DecodeResult decodeGlobalStoreAsyncFromLdsB32Vglobal(const MachineInst *opcode,
 GlobalStoreAsyncFromLdsB64Vglobal::GlobalStoreAsyncFromLdsB64Vglobal(const MachineInst *inst)
     : Vglobal("global_store_async_from_lds_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalStoreAsyncFromLdsB64Vglobal)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), dsmem(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2828,8 +3176,9 @@ GlobalStoreAsyncFromLdsB64Vglobal::GlobalStoreAsyncFromLdsB64Vglobal(const Machi
   src_operands_[2] = &dsmem;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   dsmem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -2837,6 +3186,9 @@ GlobalStoreAsyncFromLdsB64Vglobal::GlobalStoreAsyncFromLdsB64Vglobal(const Machi
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::ASYNCCNT, amdgpu::MemoryCompletionClass::ASYNC_STORE}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_STORE_ASYNC_FROM_LDS_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Store);
+  flags_ |= MEMORY_FROM_LDS;
 }
 
 namespace detail {
@@ -2845,8 +3197,9 @@ DecodeResult decodeGlobalStoreAsyncFromLdsB64Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("global_store_async_from_lds_b64",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalStoreAsyncFromLdsB64Vglobal>(opcode);
 }
 } // namespace detail
@@ -2854,9 +3207,9 @@ DecodeResult decodeGlobalStoreAsyncFromLdsB64Vglobal(const MachineInst *opcode,
 GlobalStoreAsyncFromLdsB128Vglobal::GlobalStoreAsyncFromLdsB128Vglobal(const MachineInst *inst)
     : Vglobal("global_store_async_from_lds_b128", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalStoreAsyncFromLdsB128Vglobal)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(128, OperandType::OPR_GPUMEM, 0), dsmem(128, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2865,8 +3218,9 @@ GlobalStoreAsyncFromLdsB128Vglobal::GlobalStoreAsyncFromLdsB128Vglobal(const Mac
   src_operands_[2] = &dsmem;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   dsmem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -2874,6 +3228,9 @@ GlobalStoreAsyncFromLdsB128Vglobal::GlobalStoreAsyncFromLdsB128Vglobal(const Mac
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::ASYNCCNT, amdgpu::MemoryCompletionClass::ASYNC_STORE}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_STORE_ASYNC_FROM_LDS_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Store);
+  flags_ |= MEMORY_FROM_LDS;
 }
 
 namespace detail {
@@ -2882,8 +3239,9 @@ DecodeResult decodeGlobalStoreAsyncFromLdsB128Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("global_store_async_from_lds_b128",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalStoreAsyncFromLdsB128Vglobal>(opcode);
 }
 } // namespace detail
@@ -2891,8 +3249,8 @@ DecodeResult decodeGlobalStoreAsyncFromLdsB128Vglobal(const MachineInst *opcode,
 ClusterLoadB32Vglobal::ClusterLoadB32Vglobal(const MachineInst *inst)
     : Vglobal("cluster_load_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ClusterLoadB32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
@@ -2902,8 +3260,9 @@ ClusterLoadB32Vglobal::ClusterLoadB32Vglobal(const MachineInst *inst)
   src_operands_[2] = &m0;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2912,6 +3271,8 @@ ClusterLoadB32Vglobal::ClusterLoadB32Vglobal(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::CLUSTER_LOAD_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Cluster, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -2919,8 +3280,9 @@ DecodeResult decodeClusterLoadB32Vglobal(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "cluster_load_b32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ClusterLoadB32Vglobal>(opcode);
 }
 } // namespace detail
@@ -2928,8 +3290,8 @@ DecodeResult decodeClusterLoadB32Vglobal(const MachineInst *opcode,
 ClusterLoadB64Vglobal::ClusterLoadB64Vglobal(const MachineInst *inst)
     : Vglobal("cluster_load_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ClusterLoadB64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
@@ -2939,8 +3301,9 @@ ClusterLoadB64Vglobal::ClusterLoadB64Vglobal(const MachineInst *inst)
   src_operands_[2] = &m0;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2949,6 +3312,8 @@ ClusterLoadB64Vglobal::ClusterLoadB64Vglobal(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::CLUSTER_LOAD_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Cluster, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -2956,8 +3321,9 @@ DecodeResult decodeClusterLoadB64Vglobal(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "cluster_load_b64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ClusterLoadB64Vglobal>(opcode);
 }
 } // namespace detail
@@ -2965,8 +3331,8 @@ DecodeResult decodeClusterLoadB64Vglobal(const MachineInst *opcode,
 ClusterLoadB128Vglobal::ClusterLoadB128Vglobal(const MachineInst *inst)
     : Vglobal("cluster_load_b128", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ClusterLoadB128Vglobal)),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(128, OperandType::OPR_GPUMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
@@ -2976,8 +3342,9 @@ ClusterLoadB128Vglobal::ClusterLoadB128Vglobal(const MachineInst *inst)
   src_operands_[2] = &m0;
   num_src_ = 3;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -2986,6 +3353,8 @@ ClusterLoadB128Vglobal::ClusterLoadB128Vglobal(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::CLUSTER_LOAD_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Cluster, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -2993,8 +3362,9 @@ DecodeResult decodeClusterLoadB128Vglobal(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "cluster_load_b128", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ClusterLoadB128Vglobal>(opcode);
 }
 } // namespace detail
@@ -3002,8 +3372,8 @@ DecodeResult decodeClusterLoadB128Vglobal(const MachineInst *opcode,
 ClusterLoadAsyncToLdsB8Vglobal::ClusterLoadAsyncToLdsB8Vglobal(const MachineInst *inst)
     : Vglobal("cluster_load_async_to_lds_b8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ClusterLoadAsyncToLdsB8Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       dsmem(8, OperandType::OPR_DSMEM, 0), gpumem(8, OperandType::OPR_GPUMEM, 0),
@@ -3015,8 +3385,9 @@ ClusterLoadAsyncToLdsB8Vglobal::ClusterLoadAsyncToLdsB8Vglobal(const MachineInst
   src_operands_[3] = &m0;
   num_src_ = 4;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   dsmem.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
@@ -3025,6 +3396,9 @@ ClusterLoadAsyncToLdsB8Vglobal::ClusterLoadAsyncToLdsB8Vglobal(const MachineInst
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::ASYNCCNT, amdgpu::MemoryCompletionClass::ASYNC_LOAD}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::CLUSTER_LOAD_ASYNC_TO_LDS_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Cluster, amdgpu::MemoryKind::Load);
+  flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -3033,8 +3407,9 @@ DecodeResult decodeClusterLoadAsyncToLdsB8Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("cluster_load_async_to_lds_b8",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ClusterLoadAsyncToLdsB8Vglobal>(opcode);
 }
 } // namespace detail
@@ -3042,8 +3417,8 @@ DecodeResult decodeClusterLoadAsyncToLdsB8Vglobal(const MachineInst *opcode,
 ClusterLoadAsyncToLdsB32Vglobal::ClusterLoadAsyncToLdsB32Vglobal(const MachineInst *inst)
     : Vglobal("cluster_load_async_to_lds_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ClusterLoadAsyncToLdsB32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       dsmem(32, OperandType::OPR_DSMEM, 0), gpumem(32, OperandType::OPR_GPUMEM, 0),
@@ -3055,8 +3430,9 @@ ClusterLoadAsyncToLdsB32Vglobal::ClusterLoadAsyncToLdsB32Vglobal(const MachineIn
   src_operands_[3] = &m0;
   num_src_ = 4;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   dsmem.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
@@ -3065,6 +3441,9 @@ ClusterLoadAsyncToLdsB32Vglobal::ClusterLoadAsyncToLdsB32Vglobal(const MachineIn
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::ASYNCCNT, amdgpu::MemoryCompletionClass::ASYNC_LOAD}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::CLUSTER_LOAD_ASYNC_TO_LDS_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Cluster, amdgpu::MemoryKind::Load);
+  flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -3073,8 +3452,9 @@ DecodeResult decodeClusterLoadAsyncToLdsB32Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("cluster_load_async_to_lds_b32",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ClusterLoadAsyncToLdsB32Vglobal>(opcode);
 }
 } // namespace detail
@@ -3082,8 +3462,8 @@ DecodeResult decodeClusterLoadAsyncToLdsB32Vglobal(const MachineInst *opcode,
 ClusterLoadAsyncToLdsB64Vglobal::ClusterLoadAsyncToLdsB64Vglobal(const MachineInst *inst)
     : Vglobal("cluster_load_async_to_lds_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ClusterLoadAsyncToLdsB64Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       dsmem(64, OperandType::OPR_DSMEM, 0), gpumem(64, OperandType::OPR_GPUMEM, 0),
@@ -3095,8 +3475,9 @@ ClusterLoadAsyncToLdsB64Vglobal::ClusterLoadAsyncToLdsB64Vglobal(const MachineIn
   src_operands_[3] = &m0;
   num_src_ = 4;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   dsmem.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
@@ -3105,6 +3486,9 @@ ClusterLoadAsyncToLdsB64Vglobal::ClusterLoadAsyncToLdsB64Vglobal(const MachineIn
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::ASYNCCNT, amdgpu::MemoryCompletionClass::ASYNC_LOAD}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::CLUSTER_LOAD_ASYNC_TO_LDS_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Cluster, amdgpu::MemoryKind::Load);
+  flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -3113,8 +3497,9 @@ DecodeResult decodeClusterLoadAsyncToLdsB64Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("cluster_load_async_to_lds_b64",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ClusterLoadAsyncToLdsB64Vglobal>(opcode);
 }
 } // namespace detail
@@ -3122,8 +3507,8 @@ DecodeResult decodeClusterLoadAsyncToLdsB64Vglobal(const MachineInst *opcode,
 ClusterLoadAsyncToLdsB128Vglobal::ClusterLoadAsyncToLdsB128Vglobal(const MachineInst *inst)
     : Vglobal("cluster_load_async_to_lds_b128", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ClusterLoadAsyncToLdsB128Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       dsmem(128, OperandType::OPR_DSMEM, 0), gpumem(128, OperandType::OPR_GPUMEM, 0),
@@ -3135,8 +3520,9 @@ ClusterLoadAsyncToLdsB128Vglobal::ClusterLoadAsyncToLdsB128Vglobal(const Machine
   src_operands_[3] = &m0;
   num_src_ = 4;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   dsmem.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
@@ -3145,6 +3531,9 @@ ClusterLoadAsyncToLdsB128Vglobal::ClusterLoadAsyncToLdsB128Vglobal(const Machine
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::ASYNCCNT, amdgpu::MemoryCompletionClass::ASYNC_LOAD}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::CLUSTER_LOAD_ASYNC_TO_LDS_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Cluster, amdgpu::MemoryKind::Load);
+  flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -3153,8 +3542,9 @@ DecodeResult decodeClusterLoadAsyncToLdsB128Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("cluster_load_async_to_lds_b128",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ClusterLoadAsyncToLdsB128Vglobal>(opcode);
 }
 } // namespace detail
@@ -3162,8 +3552,8 @@ DecodeResult decodeClusterLoadAsyncToLdsB128Vglobal(const MachineInst *opcode,
 GlobalLoadMonitorB32Vglobal::GlobalLoadMonitorB32Vglobal(const MachineInst *inst)
     : Vglobal("global_load_monitor_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadMonitorB32Vglobal)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0) {
@@ -3172,8 +3562,9 @@ GlobalLoadMonitorB32Vglobal::GlobalLoadMonitorB32Vglobal(const MachineInst *inst
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -3181,6 +3572,8 @@ GlobalLoadMonitorB32Vglobal::GlobalLoadMonitorB32Vglobal(const MachineInst *inst
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_MONITOR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -3188,8 +3581,9 @@ DecodeResult decodeGlobalLoadMonitorB32Vglobal(const MachineInst *opcode,
                                                const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_monitor_b32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadMonitorB32Vglobal>(opcode);
 }
 } // namespace detail
@@ -3197,8 +3591,8 @@ DecodeResult decodeGlobalLoadMonitorB32Vglobal(const MachineInst *opcode,
 GlobalLoadMonitorB64Vglobal::GlobalLoadMonitorB64Vglobal(const MachineInst *inst)
     : Vglobal("global_load_monitor_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadMonitorB64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0) {
@@ -3207,8 +3601,9 @@ GlobalLoadMonitorB64Vglobal::GlobalLoadMonitorB64Vglobal(const MachineInst *inst
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -3216,6 +3611,8 @@ GlobalLoadMonitorB64Vglobal::GlobalLoadMonitorB64Vglobal(const MachineInst *inst
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_MONITOR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -3223,8 +3620,9 @@ DecodeResult decodeGlobalLoadMonitorB64Vglobal(const MachineInst *opcode,
                                                const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_monitor_b64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadMonitorB64Vglobal>(opcode);
 }
 } // namespace detail
@@ -3232,8 +3630,8 @@ DecodeResult decodeGlobalLoadMonitorB64Vglobal(const MachineInst *opcode,
 GlobalLoadMonitorB128Vglobal::GlobalLoadMonitorB128Vglobal(const MachineInst *inst)
     : Vglobal("global_load_monitor_b128", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadMonitorB128Vglobal)),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(128, OperandType::OPR_GPUMEM, 0) {
@@ -3242,8 +3640,9 @@ GlobalLoadMonitorB128Vglobal::GlobalLoadMonitorB128Vglobal(const MachineInst *in
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -3251,6 +3650,8 @@ GlobalLoadMonitorB128Vglobal::GlobalLoadMonitorB128Vglobal(const MachineInst *in
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_MONITOR_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -3259,8 +3660,9 @@ DecodeResult decodeGlobalLoadMonitorB128Vglobal(const MachineInst *opcode,
   Result validation =
       Vglobal::validate_encoding("global_load_monitor_b128",
                                  reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadMonitorB128Vglobal>(opcode);
 }
 } // namespace detail
@@ -3268,8 +3670,8 @@ DecodeResult decodeGlobalLoadMonitorB128Vglobal(const MachineInst *opcode,
 GlobalLoadTr4B64Vglobal::GlobalLoadTr4B64Vglobal(const MachineInst *inst)
     : Vglobal("global_load_tr4_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadTr4B64Vglobal)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0) {
@@ -3278,16 +3680,20 @@ GlobalLoadTr4B64Vglobal::GlobalLoadTr4B64Vglobal(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= GLOBAL_TRANSPOSE_LOAD;
   flags_ |= CONDITIONAL_MEMORY_LANES;
   flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_TR4_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -3295,8 +3701,9 @@ DecodeResult decodeGlobalLoadTr4B64Vglobal(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_tr4_b64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadTr4B64Vglobal>(opcode);
 }
 } // namespace detail
@@ -3304,8 +3711,8 @@ DecodeResult decodeGlobalLoadTr4B64Vglobal(const MachineInst *opcode,
 GlobalLoadTr6B96Vglobal::GlobalLoadTr6B96Vglobal(const MachineInst *inst)
     : Vglobal("global_load_tr6_b96", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadTr6B96Vglobal)),
-      vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(96, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(96, OperandType::OPR_GPUMEM, 0) {
@@ -3314,16 +3721,20 @@ GlobalLoadTr6B96Vglobal::GlobalLoadTr6B96Vglobal(const MachineInst *inst)
   src_operands_[1] = &gpumem;
   num_src_ = 2;
   num_dst_ = 1;
-  if (inst_.saddr != OPR_SREG_NULL)
+  if (inst_.saddr != OPR_SREG_NULL) {
     src_operands_[num_src_++] = &saddr;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= GLOBAL_TRANSPOSE_LOAD;
   flags_ |= CONDITIONAL_MEMORY_LANES;
   flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_LOAD_TR6_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -3331,8 +3742,9 @@ DecodeResult decodeGlobalLoadTr6B96Vglobal(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vglobal::validate_encoding(
       "global_load_tr6_b96", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<GlobalLoadTr6B96Vglobal>(opcode);
 }
 } // namespace detail

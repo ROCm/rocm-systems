@@ -136,7 +136,7 @@ def test_a_missing_changelog_line_and_a_missing_doc_entry_are_errors() -> None:
     pages = f"{gate.ENV_DOCS[0]} or {gate.ENV_DOCS[1]}"
     changelog, docs = gate._annotations(finding)
     assert changelog.startswith(f"::error file={SRC},line=1::")
-    assert f"Name it in {gate.CHANGELOG}, or put {gate.SKIP_TOKEN}" in changelog
+    assert f"Name it in {gate.CHANGELOG} or in a new file under {gate.CHANGELOG_FRAGMENTS}, or put" in changelog
     assert docs.startswith(f"::error file={SRC},line=1::")
     assert f"Describe this change in {pages}, or put {gate.INTERNAL_TOKEN}" in docs
     assert gate._annotations(replace(finding, needs_changelog=False)) == [docs]
@@ -228,7 +228,7 @@ def test_removed_param_reports_only_its_old_default() -> None:
     assert [(item.kind, item.primary_env, item.old_default, item.new_default) for item in pending] == [
         ("removed", "NCCL_RMA_DISABLE", "0", None)
     ]
-    assert "| removed | `0` |  |" in gate._summary(pending, [])
+    assert "| removed | `0` |  |" in gate._summary(pending, [], [])
     annotations = gate._annotations(pending[0])
     assert len(annotations) == 2
     assert annotations[0].startswith(f"::error file={SRC}::")
@@ -285,7 +285,7 @@ def test_one_entry_per_variable_lists_every_file() -> None:
     assert [item.primary_env for item in pending] == ["NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME"]
     assert pending[0].places == (gate.Place(init, 1), gate.Place(scheduler, 1))
 
-    summary = gate._summary(pending, [])
+    summary = gate._summary(pending, [], [])
     assert f"| CHANGELOG, docs | `{init}:1`<br>`{scheduler}:1` |" in summary
     assert summary.count("* `NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME`: <why>") == 1
     assert summary.count("* `NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME`\n") == 1
@@ -669,6 +669,104 @@ def test_check_passes_when_the_changelog_and_either_env_page_name_it(tmp_path: P
     )
 
     assert gate.check(repo, "HEAD^", []) == 0
+
+
+def test_check_passes_when_a_changelog_fragment_names_it(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _commit(
+        repo,
+        {
+            SRC: f"int x;\n{NEW_PARAM}\n",
+            f"{gate.CHANGELOG_FRAGMENTS}12345-rma.added.md": "* `NCCL_RMA_DISABLE` (default `0`): off\n",
+            gate.ENV_DOCS[0]: "NCCL_RMA_DISABLE\n    Turns RMA off.\n",
+        },
+        "add RMA disable",
+    )
+
+    assert gate.check(repo, "HEAD^", []) == 0
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["12345-rma.fixed.md", "12345-rma.md", "12345-rma.Added.md", "12345-rma.added.txt", "sub/12345-rma.added.md"],
+)
+def test_a_fragment_the_nightly_fold_cannot_use_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], name: str
+) -> None:
+    repo = _repo(tmp_path)
+    _commit(
+        repo,
+        {
+            SRC: f"int x;\n{NEW_PARAM}\n",
+            f"{gate.CHANGELOG_FRAGMENTS}{name}": "* `NCCL_RMA_DISABLE` (default `0`): off\n",
+            gate.ENV_DOCS[0]: "NCCL_RMA_DISABLE\n    Turns RMA off.\n",
+        },
+        "add RMA disable",
+    )
+
+    assert gate.check(repo, "HEAD^", []) == 1
+    assert f"::error file={gate.CHANGELOG_FRAGMENTS}{name}::Name a changelog fragment" in capsys.readouterr().out
+
+
+def test_deleting_fragments_passes(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _commit(repo, {f"{gate.CHANGELOG_FRAGMENTS}12345-docs.fixed.md": "* Fixed a typo.\n"}, "typo")
+    (repo / gate.CHANGELOG_FRAGMENTS / "12345-docs.fixed.md").unlink()
+    _commit(repo, {gate.CHANGELOG: "# Changelog\n* Fixed a typo.\n"}, "fold")
+
+    assert gate.check(repo, "HEAD^", []) == 0
+
+
+def test_a_badly_named_fragment_replaces_an_old_failure_comment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    _commit(repo, {f"{gate.CHANGELOG_FRAGMENTS}12345-docs.fixed.md": "* Fixed a typo.\n"}, "typo")
+    comments = [_comment(f"{gate.COMMENT_MARKER}\nold failure\n", "https://api.example/comments/1")]
+    _fake_github(monkeypatch, comments)
+
+    assert gate.check(repo, "HEAD^", [f"typo {gate.SKIP_TOKEN}"]) == 1
+    body = str(comments[0]["body"])
+    assert gate.PASS_MESSAGE not in body
+    assert f"`{gate.CHANGELOG_FRAGMENTS}12345-docs.fixed.md`" in body
+
+
+def test_a_symlinked_fragment_fails(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    (repo / gate.CHANGELOG_FRAGMENTS).mkdir(parents=True)
+    (repo / gate.CHANGELOG_FRAGMENTS / "12345-docs.added.md").symlink_to("../../../.git/config")
+    _commit(repo, {}, "link")
+
+    assert gate.check(repo, "HEAD^", []) == 1
+
+
+def test_a_fragment_with_a_non_ascii_name_passes(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _commit(repo, {f"{gate.CHANGELOG_FRAGMENTS}12345-café.resolved.md": "* Fixed a typo.\n"}, "typo")
+
+    assert gate.check(repo, "HEAD^", []) == 0
+
+
+def test_a_badly_named_fragment_fails_without_an_env_var_change(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _commit(repo, {f"{gate.CHANGELOG_FRAGMENTS}12345-docs.fixed.md": "* Fixed a typo.\n"}, "typo")
+
+    assert gate.check(repo, "HEAD^", []) == 1
+
+
+def test_the_fragment_readme_does_not_count_as_a_changelog_entry(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _commit(
+        repo,
+        {
+            SRC: f"int x;\n{NEW_PARAM}\n",
+            f"{gate.CHANGELOG_FRAGMENTS}README.md": "* `NCCL_RMA_DISABLE` (default `0`): off\n",
+            gate.ENV_DOCS[0]: "NCCL_RMA_DISABLE\n    Turns RMA off.\n",
+        },
+        "add RMA disable",
+    )
+
+    assert gate.check(repo, "HEAD^", []) == 1
 
 
 def test_a_missing_doc_entry_fails_and_comments(

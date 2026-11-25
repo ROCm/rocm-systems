@@ -8,13 +8,25 @@ Known issues
 
 This page documents known issues with hipFile.
 
-Asynchronous operations that use the fastpath backend will not retry on the fallback backend
-============================================================================================
+.. _hipfile-greatest-priority-streams:
 
-If asynchronous operations satisfy fastpath prerequisites, they now run on the
-fastpath backend. If the fastpath device lookup fails or the p2pdma transfer
-is not supported between the devices, the asynchronous operation will now
-fail.
+Fallback I/O can hang behind an application's blocked greatest-priority stream
+==============================================================================
+
+The fallback path copies data through the GPU on streams that hipFile creates
+at the device's greatest priority, which gives them hardware queues that
+streams of other priorities don't use. If an application blocks a stream of its
+own at that priority, for example on a stream wait value, a hipFile call that
+uses the fallback path can hang: its copy can be queued behind the blocked
+stream on a shared hardware queue and never run.
+
+hipFile rejects asynchronous I/O on streams at the greatest priority (see
+:doc:`/reference/api-async`), so this cannot happen through the asynchronous
+API. It can still happen when an application blocks its own greatest-priority
+stream and then issues synchronous fallback I/O.
+
+To work around this issue, don't block a greatest-priority stream while hipFile
+I/O that may use the fallback path is in progress.
 
 Poor performance with GPU Virtual Functions
 ===========================================
@@ -50,6 +62,40 @@ hipFile's fastpath is only supported on GPU physical functions (PFs).
 
 ``ais-check`` also detects virtual functions via ``amd-smi`` and prints a warning
 when one is present. This warning won't change the exit code.
+
+Memory corruption on RHEL 9.8 and RHEL 10.2 kernels
+===================================================
+
+A change was backported to RHEL 9.8 and 10.2 that broke DMA mapping for P2PDMA pages that are transferred through the host bridge. These two kernels report ``CONFIG_PCI_P2PDMA=y``, but using P2PDMA on them can cause memory corruption, so don't use the fastpath on these kernels.
+
+RHEL 9.9 and RHEL 10.3, which are in development, contain a fix. See `dma-mapping: direct: fix missing mapping for THRU_HOST_BRIDGE segments <https://github.com/torvalds/linux/commit/560000d619ef162568746ce287f0c725e24ea967>`_.
+
+.. _hipfile-ubuntu-2204-fastpath:
+
+The Ubuntu 22.04 default kernel does not support the fastpath
+=============================================================
+
+On Ubuntu 22.04 LTS, hipFile I/O runs entirely on the fallback path and never
+uses the fastpath even when ``ais-check`` reports fastpath-capable volumes.
+
+Ubuntu 22.04 LTS is a supported ROCm distribution, but its default 5.15 kernel is
+built without ``CONFIG_PCI_P2PDMA``. hipFile's fastpath requires that option in
+order to perform peer-to-peer DMA between the GPU and the storage device.
+
+``ais-check`` reports this condition as ``Kernel P2PDMA support : False``. To
+confirm it from the kernel configuration, see :ref:`hipfile-check-p2pdma`.
+
+To work around this issue, install the Ubuntu 22.04 hardware enablement (HWE)
+kernel, which is based on 6.8 and enables the option:
+
+.. code-block:: none
+
+  $ sudo apt install linux-generic-hwe-22.04
+  $ sudo systemctl reboot
+
+See :ref:`hipfile-check-p2pdma` for how to check the running kernel on other
+distributions, and :doc:`/reference/hipFile-kernel-p2pdma-support` for the
+kernels AMD has tested.
 
 High memory utilization with hipFile
 ====================================

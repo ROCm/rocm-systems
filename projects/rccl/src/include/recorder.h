@@ -1,5 +1,8 @@
 /* Copyright © Advanced Micro Devices, Inc., or its affiliates. */
 
+#ifndef RCCL_RECORDER_H_
+#define RCCL_RECORDER_H_
+
 #include <fstream>
 #include <sstream>
 #include <vector>
@@ -103,7 +106,7 @@ private:
   // std::string           hostname;
   int pid = -1;
   [[maybe_unused]] int numCall = 0; // reserved for future record format/debug
-  bool skipped = false; // number of sendrecv calls to skip for gather/scatter/a2a(v)
+  static thread_local bool skipped;
   static __thread int rcclReplayThreadIdx;
   static int depth; // for indentation purpose, will need thread safty later
 
@@ -121,6 +124,7 @@ private:
 public:
   static Recorder& instance();
   void skip(bool b);
+  bool isSkipped() const { return skipped; }
   void record(const char* name); // non-replayable calls
   ncclResult_t record(rcclApiCall& call);
   ncclResult_t record(rcclCall_t type, const ncclInfo& info); // collective
@@ -146,3 +150,5 @@ public:
 void parseJsonEntry(const char* entry, std::vector<rcclApiCall>& calls);
 void parseBinLog();
 } // namespace rccl
+
+#endif // RCCL_RECORDER_H_

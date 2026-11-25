@@ -4,8 +4,7 @@
 # SPDX-License-Identifier: MIT
 
 import os
-import sys
-import time
+
 import rocprofsys
 import roctx
 from roctx.context_decorators import RoctxRange
@@ -37,7 +36,7 @@ except ImportError as e:
     import random
 
     def _sum(arr):
-        print(f"----  in _sum")
+        print("----  in _sum")
         return sum(arr)
 
     def inefficient(n):

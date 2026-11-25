@@ -89,6 +89,9 @@ function(add_kernel_replay_sample NAME CLIENT_SRC)
     if(arg_ATT AND NOT attdecoder_FOUND)
         set(_disabled ON)
     endif()
+    set(_skip_regex
+        "PC sampling unavailable|SPM unavailable|ATT unavailable|device-only snapshot unavailable"
+        )
     set_tests_properties(
         ${NAME}
         PROPERTIES TIMEOUT
@@ -100,7 +103,9 @@ function(add_kernel_replay_sample NAME CLIENT_SRC)
                    FAIL_REGULAR_EXPRESSION
                    "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                    SKIP_REGULAR_EXPRESSION
-                   "PC sampling unavailable|SPM unavailable|ATT unavailable"
+                   "${_skip_regex}"
+                   RUN_SERIAL
+                   ON
                    DISABLED
                    "${_disabled}")
 endfunction()
@@ -112,6 +117,16 @@ add_kernel_replay_sample(kernel-replay-counters-then-pc-sampling
                          counters_then_pc_sampling_client.cpp PC_SAMPLING)
 add_kernel_replay_sample(kernel-replay-att att_client.cpp ATT)
 add_kernel_replay_sample(kernel-replay-spm spm_client.cpp SPM)
+
+# This replay sample aborts during KFD acquisition on gfx120x CI runners. Tracking issue:
+# https://github.com/ROCm/rocm-systems/issues/13606
+foreach(_gfx IN LISTS rocprofiler-sdk-samples-gfx-info)
+    if(_gfx MATCHES "^gfx120[0-9](-strict)?$")
+        set_tests_properties(kernel-replay-spm PROPERTIES DISABLED ON)
+        break()
+    endif()
+endforeach()
+
 add_kernel_replay_sample(
     kernel-replay-services-first service_sequence_client.cpp PC_SAMPLING SPM ATT
     ENVIRONMENT "KR_SERVICE_ORDER=services-first")
@@ -119,3 +134,27 @@ add_kernel_replay_sample(kernel-replay-services-last service_sequence_client.cpp
                          PC_SAMPLING SPM ATT ENVIRONMENT "KR_SERVICE_ORDER=services-last")
 add_kernel_replay_sample(kernel-replay-opt-out opt_out_client.cpp)
 add_kernel_replay_sample(kernel-replay-early-exit early_exit_client.cpp)
+
+# The same samples with hashed restores forced: their snapshots are far too small for the
+# automatic choice to hash. The basic ones dispatch their kernel three times, so the
+# replays after the first, which reuse the blit state it set up, are covered too.
+add_kernel_replay_sample(
+    kernel-replay-basic-hash-once basic_client.cpp ENVIRONMENT
+    "ROCPROFILER_INTERNAL_REPLAY_RESTORE_FORCE_MODE=hash-once" "KR_REPLAYS=3")
+add_kernel_replay_sample(
+    kernel-replay-basic-hash-every-pass basic_client.cpp ENVIRONMENT
+    "ROCPROFILER_INTERNAL_REPLAY_RESTORE_FORCE_MODE=hash-every-pass" "KR_REPLAYS=3")
+add_kernel_replay_sample(kernel-replay-basic-host-pinned-snapshot basic_client.cpp
+                         ENVIRONMENT "KR_SNAPSHOT=host-pinned")
+add_kernel_replay_sample(kernel-replay-basic-device-snapshot basic_client.cpp ENVIRONMENT
+                         "KR_SNAPSHOT=device")
+add_kernel_replay_sample(
+    kernel-replay-basic-device-and-host-pinned-snapshot basic_client.cpp ENVIRONMENT
+    "KR_SNAPSHOT=device-and-host-pinned")
+add_kernel_replay_sample(kernel-replay-basic-unknown-option basic_client.cpp ENVIRONMENT
+                         "KR_SNAPSHOT=unknown-flag")
+add_kernel_replay_sample(kernel-replay-counters-hash-once counters_client.cpp ENVIRONMENT
+                         "ROCPROFILER_INTERNAL_REPLAY_RESTORE_FORCE_MODE=hash-once")
+add_kernel_replay_sample(
+    kernel-replay-early-exit-hash-once early_exit_client.cpp ENVIRONMENT
+    "ROCPROFILER_INTERNAL_REPLAY_RESTORE_FORCE_MODE=hash-once")

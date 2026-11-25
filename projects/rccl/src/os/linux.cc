@@ -24,7 +24,6 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <cstring>
-#include <cstdbool>
 #include "socket.h"
 #include "utils.h"
 #include "checks.h"
@@ -703,12 +702,31 @@ ncclResult_t ncclOsGetPciDeviceComputePartitionByBusId(const char* busId, char* 
 }
 
 ncclResult_t ncclOsGetBcmLinks(const char* busId, int* nlinks, char** peers) {
+  ncclResult_t ret = ncclSuccess;
   *nlinks = 0;
   *peers = NULL;
 
-  // Path to Broadcom switch virtual links in sysfs
-  char dirPath[] = "/sys/kernel/pci_switch_link/virtual_switch_links/0000:00:00.0";
-  memcpylower(dirPath + sizeof("/sys/kernel/pci_switch_link/virtual_switch_links/") - 1, busId, BUSID_SIZE - 1);
+  // Default sysfs path populated by switch_discovery kernel module.
+  // When this directory exists the kernel module is the authoritative
+  // source and RCCL_BCM_LINKS_PATH is intentionally not consulted —
+  // the kernel module has a complete, always-current view of the
+  // switch topology.  The env-var fallback is only for systems where
+  // the kernel module is not available and the userspace tool
+  // (rccl_bcm_isl_discover.sh) populates an equivalent directory.
+  static const char defaultBase[] = "/sys/kernel/pci_switch_link/virtual_switch_links";
+  const char* base = defaultBase;
+  struct stat st;
+  if (stat(defaultBase, &st) != 0 || !S_ISDIR(st.st_mode)) {
+    const char* envBase = ncclGetEnv("RCCL_BCM_LINKS_PATH");
+    if (envBase && stat(envBase, &st) == 0 && S_ISDIR(st.st_mode)) {
+      base = envBase;
+    }
+  }
+
+  char dirPath[PATH_MAX];
+  int n = snprintf(dirPath, sizeof(dirPath), "%s/%s", base, "0000:00:00.0");
+  if (n < 0 || n >= (int)sizeof(dirPath)) return ncclSuccess;  // path too long, no links
+  memcpylower(dirPath + strlen(base) + 1, busId, BUSID_SIZE - 1);
 
   DIR* dir = opendir(dirPath);
   if (dir) {
@@ -723,13 +741,15 @@ ncclResult_t ncclOsGetBcmLinks(const char* busId, int* nlinks, char** peers) {
       free(path);
 
       // Add to peers list
-      NCCLCHECK(ncclRealloc(peers, (*nlinks) * BUSID_SIZE, ((*nlinks) + 1) * BUSID_SIZE));
+      NCCLCHECKGOTO(ncclRealloc(peers, (*nlinks) * BUSID_SIZE, ((*nlinks) + 1) * BUSID_SIZE), ret, exit);
       memcpy((*peers) + BUSID_SIZE * (*nlinks)++, file->d_name, BUSID_SIZE);
     }
-    closedir(dir);
   }
 
-  return ncclSuccess;
+exit:
+  if (dir) closedir(dir);  // also on the realloc failure path
+
+  return ret;
 }
 
 ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int numaId, char* affinityStr, size_t maxLen, int* cpuOffset) {

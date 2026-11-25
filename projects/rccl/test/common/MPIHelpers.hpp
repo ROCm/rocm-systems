@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <mpi.h>
 #include <memory>
 #include <optional>
 #include <string>
@@ -36,6 +37,23 @@
  */
 namespace MPIHelpers
 {
+
+// Collective predicates used by capability-gated MPI tests. Keeping these in
+// the common infrastructure prevents tests from open-coding MPI_Allreduce with
+// inconsistent MIN/MAX conventions.
+inline bool allRanksTrue(bool localValue, MPI_Comm comm = MPI_COMM_WORLD)
+{
+    int value = localValue ? 1 : 0;
+    MPI_Allreduce(MPI_IN_PLACE, &value, 1, MPI_INT, MPI_MIN, comm);
+    return value != 0;
+}
+
+inline bool anyRankTrue(bool localValue, MPI_Comm comm = MPI_COMM_WORLD)
+{
+    int value = localValue ? 1 : 0;
+    MPI_Allreduce(MPI_IN_PLACE, &value, 1, MPI_INT, MPI_MAX, comm);
+    return value != 0;
+}
 
 // Returns the MPI world rank as a string for diagnostic messages.
 // Probes OpenMPI, MPICH/PMIx, and SLURM env vars in order; returns "?" if none set.

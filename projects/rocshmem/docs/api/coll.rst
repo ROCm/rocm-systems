@@ -36,6 +36,23 @@ across all PEs in the system. The operation is enqueued on the specified stream 
 asynchronously. The caller must synchronize the stream (e.g., using ``hipStreamSynchronize``)
 to ensure completion.
 
+ROCSHMEM_BARRIER_ON_STREAM
+--------------------------
+
+.. cpp:function:: __host__ void rocshmem_barrier_on_stream(rocshmem_team_t team, hipStream_t stream)
+
+  :param team:   Team participating in the barrier. Passing
+                 ``ROCSHMEM_TEAM_INVALID`` is a no-op.
+  :param stream: HIP stream on which to enqueue the operation.
+  :returns:      None.
+
+**Description:**
+Team-scoped form of ``rocshmem_barrier_all_on_stream``: enqueues a collective
+barrier across the PEs in ``team`` rather than across all PEs. The caller must
+synchronize the stream to ensure completion. For the weaker, store-visibility
+only variant, see ``rocshmem_team_sync_on_stream`` in
+:ref:`rocshmem-api-teams`.
+
 ROCSHMEM_CTX_BARRIER
 --------------------
 
@@ -101,8 +118,12 @@ ROSHMEM_ALLTOALL
 ----------------
 
 .. cpp:function:: __device__ void rocshmem_TYPENAME_alltoall_wg(rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems)
+.. cpp:function:: __device__ int rocshmem_TYPENAME_alltoall_wave(rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems)
+.. cpp:function:: __device__ void rocshmem_alltoallmem_wg(rocshmem_team_t team, void *dest, const void *source, int nelems)
+.. cpp:function:: __device__ int rocshmem_alltoallmem_wave(rocshmem_team_t team, void *dest, const void *source, int nelems)
 .. cpp:function:: __device__ void rocshmem_ctx_TYPENAME_alltoall_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems)
 .. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_alltoall_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems)
+.. cpp:function:: __device__ void rocshmem_ctx_alltoallmem_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source, int nelems)
 .. cpp:function:: __device__ int rocshmem_ctx_alltoallmem_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source, int nelems)
 
   :param ctx:    Context with which to perform this operation.
@@ -113,15 +134,16 @@ ROSHMEM_ALLTOALL
                  heap.
   :param nelems: Number of elements transferred per pair of PEs (typed ``TYPENAME``
                  variants); number of bytes transferred per pair of PEs
-                 (``alltoallmem_wave``).
+                 (``alltoallmem_wg`` / ``alltoallmem_wave``).
   :returns:      None (``_wg`` variants). Zero on successful local completion, nonzero otherwise (``_wave`` variants).
 
 **Description:**
 This routine exchanges a fixed amount of contiguous data blocks between all pairs
 of PEs participating in the collective routine.
 The ``_wg`` variants must be called as a work-group collective; the ``_wave`` variants
-must be called as a wave-level collective. ``alltoallmem_wave`` operates on untyped
-bytes rather than a typed element count.
+must be called as a wave-level collective. ``alltoallmem_wg`` and ``alltoallmem_wave``
+operate on untyped bytes rather than a typed element count. The undecorated (non-``ctx``)
+variants operate on the default context.
 
 Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`RMA_TYPES`.
 
@@ -171,9 +193,15 @@ Valid TYPENAME and TYPE values are listed in :ref:`RMA_TYPES`.
 ROCSHMEM_BROADCAST
 ------------------
 
+.. cpp:function:: __device__ void rocshmem_TYPENAME_broadcast_wg(rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int pe_root)
+.. cpp:function:: __device__ int rocshmem_TYPENAME_broadcast_wave(rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int pe_root)
+.. cpp:function:: __device__ void rocshmem_broadcastmem_wg(rocshmem_team_t team, void *dest, const void *source, int nelems, int pe_root)
+.. cpp:function:: __device__ int rocshmem_broadcastmem_wave(rocshmem_team_t team, void *dest, const void *source, int nelems, int pe_root)
 .. cpp:function:: __device__ void rocshmem_ctx_TYPENAME_broadcast_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int pe_root)
 .. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int pe_root)
+.. cpp:function:: __device__ void rocshmem_ctx_broadcastmem_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source, int nelems, int pe_root)
 .. cpp:function:: __device__ int rocshmem_ctx_broadcastmem_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source, int nelems, int pe_root)
+.. cpp:function:: __host__ void rocshmem_ctx_TYPENAME_broadcast(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int pe_root)
 
   :param ctx:     Context with which to perform this collective.
   :param team:    The team participating in the collective.
@@ -182,16 +210,21 @@ ROCSHMEM_BROADCAST
   :param source:  Source address. Must be an address on the symmetric
                   heap.
   :param nelems:  Number of elements to broadcast (``_wg`` / ``_wave`` variants);
-                  number of bytes to broadcast (``broadcastmem_wave``).
+                  number of bytes to broadcast (``broadcastmem_wg`` / ``broadcastmem_wave``).
   :param pe_root: Root PE (relative to team) from which to broadcast.
-  :returns:       None (``_wg`` variant). Zero on successful local completion, nonzero otherwise (``_wave`` variants).
+  :returns:       None (``_wg`` variants). Zero on successful local completion, nonzero otherwise (``_wave`` variants).
 
 **Description:**
 This routine performs a broadcast across PEs in the team.
 The caller is blocked until the broadcast completes.
-The ``_wg`` variant must be called as a work-group collective; the ``_wave`` variants
-must be called as a wave-level collective. ``broadcastmem_wave`` operates on untyped
-bytes rather than a typed element count.
+The ``_wg`` variants must be called as a work-group collective; the ``_wave`` variants
+must be called as a wave-level collective. The undecorated ``__host__`` overload
+performs the broadcast from the host and requires an MPI-backed team
+communicator; the host reductions below have the same requirement. These host
+collectives are unsupported with MPI-free IPC or GDA initialization.
+``broadcastmem_wg`` and ``broadcastmem_wave``
+operate on untyped bytes rather than a typed element count. The undecorated (non-``ctx``)
+variants operate on the default context.
 
 Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`RMA_TYPES`.
 
@@ -223,6 +256,7 @@ ROCSHMEM_FCOLLECT
 .. cpp:function:: __device__ void rocshmem_ctx_TYPENAME_fcollect_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems)
 .. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_fcollect_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems)
 .. cpp:function:: __device__ int rocshmem_ctx_fcollectmem_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source, int nelems)
+.. cpp:function:: __device__ void rocshmem_ctx_fcollectmem_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source, int nelems)
 
   :param ctx:    Context with which to perform this collective.
   :param team:   The team participating in the collective.
@@ -230,16 +264,17 @@ ROCSHMEM_FCOLLECT
                  symmetric heap.
   :param source: Source address. Must be an address on the symmetric
                  heap.
-  :param nelems: Number of data elements contributed by each PE (``_wg`` / ``_wave`` variants);
-                 number of bytes contributed by each PE (``fcollectmem_wave``).
-  :returns:      None (``_wg`` variant). Zero on successful local completion, nonzero otherwise (``_wave`` variants).
+  :param nelems: Number of data elements contributed by each PE (typed variants);
+                 number of bytes contributed by each PE (``fcollectmem_wg`` /
+                 ``fcollectmem_wave``).
+  :returns:      None (``_wg`` variants). Zero on successful local completion, nonzero otherwise (``_wave`` variants).
 
 **Description:**
 This routine concatenates blocks of data from multiple PEs to an array in every
 PE participating in the collective routine.
-The ``_wg`` variant must be called as a work-group collective; the ``_wave`` variants
-must be called as a wave-level collective. ``fcollectmem_wave`` operates on untyped
-bytes rather than a typed element count.
+The ``_wg`` variants must be called as a work-group collective; the ``_wave`` variants
+must be called as a wave-level collective. ``fcollectmem_wg`` and
+``fcollectmem_wave`` operate on untyped bytes rather than a typed element count.
 
 ROCSHMEM_REDUCE_SCATTER
 -----------------------
@@ -272,6 +307,7 @@ ROCSHMEM_REDUCTION
 ------------------
 .. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_OPNAME_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nreduce)
 .. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_OPNAME_reduce_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nreduce)
+.. cpp:function:: __host__ int rocshmem_ctx_TYPENAME_OPNAME_reduce(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nreduce)
 
   :param ctx:     Context with which to perform this collective.
   :param team:    The team participating in the collective.
@@ -285,7 +321,30 @@ ROCSHMEM_REDUCTION
 **Description:**
 This routine performs an allreduce operation across PEs in the team.
 The ``_wg`` variant must be called as a work-group collective; the ``_wave`` variant
-must be called as a wave-level collective.
+must be called as a wave-level collective; the undecorated variant is a
+host-side call and requires an MPI-backed team communicator, so it is
+unsupported with MPI-free IPC or GDA initialization.
+
+Valid ``TYPENAME``, ``TYPE``, and ``OPNAME`` values are listed in :ref:`REDUCE_TYPES`.
+
+ROCSHMEM_REDUCTION_ON_STREAM
+----------------------------
+.. cpp:function:: __host__ int rocshmem_ctx_TYPENAME_OPNAME_reduce_on_stream(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nreduce, hipStream_t stream)
+
+  :param ctx:     Context with which to perform this collective.
+  :param team:    The team participating in the collective.
+  :param dest:    Destination address. Must be an address on the
+                  symmetric heap.
+  :param source:  Source address. Must be an address on the symmetric
+                  heap.
+  :param nreduce: Number of elements to reduce.
+  :param stream:  HIP stream on which to enqueue the operation.
+  :returns:       Zero on successful enqueue. Nonzero otherwise.
+
+**Description:**
+Stream-ordered form of the allreduce. The reduction is enqueued on ``stream``
+and executes asynchronously; the caller must synchronize the stream (for
+example with ``hipStreamSynchronize``) before reading ``dest``.
 
 Valid ``TYPENAME``, ``TYPE``, and ``OPNAME`` values are listed in :ref:`REDUCE_TYPES`.
 
@@ -304,94 +363,102 @@ Supported reduction types and operations
       - Supported
     * - char
       - char
-      - max, min, sum, prod
-      - No
+      - and, or, xor, max, min, sum, prod
+      - Yes
     * - signed char
       - schar
-      - max, min, sum, prod
-      - No
+      - and, or, xor, max, min, sum, prod
+      - Yes
     * - short
       - short
-      - max, min, sum, prod
+      - and, or, xor, max, min, sum, prod
       - Yes
     * - int
       - int
-      - max, min, sum, prod
+      - and, or, xor, max, min, sum, prod
       - Yes
     * - long
       - long
-      - max, min, sum, prod
+      - and, or, xor, max, min, sum, prod
       - Yes
     * - long long
       - longlong
-      - max, min, sum, prod
+      - and, or, xor, max, min, sum, prod
       - Yes
     * - ptrdiff_t
       - ptrdiff
-      - max, min, sum, prod
-      - No
+      - and, or, xor, max, min, sum, prod
+      - Yes
     * - unsigned char
       - uchar
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - unsigned short
       - ushort
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - unsigned int
       - uint
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - unsigned long
       - ulong
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - unsigned long long
       - ulonglong
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - int8_t
       - int8
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - int16_t
       - int16
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - int32_t
       - int32
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - int64_t
       - int64
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - uint8_t
       - uint8
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - uint16_t
       - uint16
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - uint32_t
       - uint32
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - uint64_t
       - uint64
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - size_t
       - size
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - float
       - float
       - max, min, sum, prod
       - Yes
     * - double
       - double
+      - max, min, sum, prod
+      - Yes
+    * - __half
+      - half
+      - max, min, sum, prod
+      - Yes
+    * - __hip_bfloat16
+      - bfloat16
       - max, min, sum, prod
       - Yes
     * - long double

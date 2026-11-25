@@ -8,9 +8,12 @@
 
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/legacy_address_space.h"
+#include "util/diagnostic.h"
+#include "util/distributed_shared_mutex.h"
 
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <unordered_map>
 
 namespace rocjitsu::amdgpu {
@@ -35,9 +38,16 @@ public:
   [[nodiscard]] bool set_memory(GpuMemory *memory);
   [[nodiscard]] bool set_memory(std::shared_ptr<GpuMemory> memory);
 
+  /// @brief Register a legacy binding, returning an empty handle on failure.
+  /// @details Rejecting cached page-table policies without a shared request mutex
+  /// installs no binding and delivers one diagnostic after releasing the adapter
+  /// mutex, so the sink may query the adapter. Other failures return an empty
+  /// handle without emitting a diagnostic.
+  /// @param emit_error Destination for the cached page-table policy diagnostic.
   [[nodiscard]] AddressSpaceHandle
   register_address_space(uint32_t vmid, LegacyAddressSpaceRegistration registration,
-                         std::shared_ptr<void> frontend_lifetime = {});
+                         std::shared_ptr<void> frontend_lifetime = {},
+                         util::DiagnosticEmitter emit_error = {});
   [[nodiscard]] AddressSpaceHandle
   register_address_space(uint32_t vmid, LegacyPageTable *page_table,
                          util::DistributedSharedMutex *page_table_mutex,
@@ -61,6 +71,8 @@ public:
   address_space_snapshot(uint32_t vmid) const;
 
 private:
+  friend class LegacyGpuVmAdapterTestAccess;
+
   class Binding;
 
   class Entry {
@@ -70,13 +82,14 @@ private:
   };
 
   static void revoke_binding(const std::shared_ptr<Binding> &binding);
+  [[nodiscard]] bool has_stale_locked() const;
   void remove_stale_locked();
   [[nodiscard]] Entry *find_locked(AddressSpaceHandle handle);
   [[nodiscard]] const Entry *find_locked(AddressSpaceHandle handle) const;
 
   GpuVm *gpu_vm_ = nullptr;
   std::shared_ptr<GpuMemory> memory_;
-  mutable std::mutex mutex_;
+  mutable util::DistributedSharedMutex mutex_;
   std::unordered_map<uint32_t, Entry> bindings_;
 };
 
