@@ -53,7 +53,7 @@ A process that never configures the domain does not pay that tracking cost. Only
 subscribe; a second configure call returns ``ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED``.
 
 Set ``replay_pass_count``
-=====================
+=========================
 
 ``CONFIG`` ``PHASE_ENTER`` is where the tool installs the pass-count callback. The SDK calls
 that callback after ``CONFIG`` ``PHASE_ENTER`` returns:
@@ -214,9 +214,70 @@ allowing writes outside the snapshot to accumulate across passes. Scalar values 
 false declines. Selected runtime copy/fill kernels bypass the guard; overlapping copies are not
 detected. Guard warnings are diagnostic, not a per-dispatch replay-status API.
 
-Capture is a **full in-memory copy** of every tracked region into host RAM. Cost is
-``O(tracked_bytes × passes)``, not kernel time alone. The last executed pass is **not** restored,
-so the application sees the memory the kernel actually produced.
+Capture is a **full copy** of every tracked region, by default into device memory with pinned host
+memory for what does not fit (see :ref:`kernel-replay-snapshot-placement`). Restores between passes
+copy back what the kernel changed, or everything when that is cheaper. The last executed pass is
+**not** restored, so the application sees the memory the kernel actually produced.
+
+.. _kernel-replay-snapshot-placement:
+
+Choose where the snapshot is kept
+=================================
+
+Keeping the snapshot in device memory makes restores fastest, but an application that allocates
+device memory as it runs can then run out of it. A tool that knows this can keep the snapshot in
+pinned host memory instead. During ``CONFIG`` ``PHASE_ENTER``, ``replay_options`` points to options
+the SDK owns, holding its defaults, and the tool changes the flags through it:
+
+.. code-block:: cpp
+
+   if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
+      record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+   {
+       payload->replay_pass_count = tool_pass_count_callback;
+       // An older SDK's record ends before replay_options.
+       if(payload->size >= offsetof(rocprofiler_callback_tracing_kernel_replay_data_t,
+                                    replay_options) +
+                               sizeof(payload->replay_options))
+           payload->replay_options->flags = ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED;
+   }
+
+.. list-table::
+   :header-rows: 1
+   :widths: 45 55
+
+   * - ``flags``
+     - Snapshot
+   * - ``ROCPROFILER_KERNEL_REPLAY_OPTION_NONE``
+     - The SDK chooses: device memory first, pinned host memory for what does not fit, using at
+       most half of the device's memory and half of the host's available memory. It keeps that
+       memory for later replays.
+   * - ``ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED``
+     - Pinned host memory only, as much as the snapshot needs, so restores are usually slower.
+       Pinned memory cannot be swapped out, so a large snapshot leaves the rest of the system that
+       much less memory. The restore kernels still keep a work list in device memory between
+       replays, about 0.2% of the snapshot's size and at least 2 MiB.
+   * - ``ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE``
+     - Device memory only, as much as the snapshot needs, leaving the application 5% of what is
+       free (memory kept from earlier replays counts as free) for the replayed kernel's scratch.
+       This needs the SDK's copy kernels for the GPU. They are built into the SDK library for the
+       GPUs in ``GPU_TARGETS`` that the SDK's compiler supports, or for every GPU it supports from
+       gfx8 on when ``GPU_TARGETS`` is empty.
+   * - ``SNAPSHOT_DEVICE | SNAPSHOT_HOST_PINNED``
+     - Device memory first, as above, and pinned host memory for what does not fit, as much as
+       the snapshot needs.
+   * - ``ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PAGEABLE`` or
+       ``ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DISK``
+     - Not supported yet. Options that set either one are not honored.
+
+With flags set, the SDK applies no limit of its own beyond that reserve, so the tool decides
+whether the application can spare the memory. The SDK frees that memory when the replay ends,
+including memory it kept there from earlier replays, so a tool that switches flags between
+dispatches makes it allocate again. A replay limited to pinned host memory also frees device memory
+kept by earlier replays. If the snapshot does not fit in the memory allowed, or the SDK cannot honor
+the options (an unknown flag, or a flag for memory it cannot use yet), it warns and the dispatch
+runs once without replay.
+``samples/kernel_replay/basic_client.cpp`` sets the options from ``KR_SNAPSHOT``.
 
 .. _kernel-replay-limitations:
 
@@ -230,13 +291,20 @@ Limitations
 * **Only single-packet, single-dispatch submissions** are replayed. Multi-packet batches warn once
   and run once.
 * **Writer lock serializes the agent** for the whole replay window. Different GPUs use different
-  locks (multi-GPU concurrent at the SDK), but there is no in-tree multi-GPU test and no MPI
-  coordination.
+  locks, so they replay concurrently (``test-kernel-replay-multi-agent`` replays on two at once),
+  but there is no MPI coordination.
+* **Tool callbacks must not allocate or free device memory during a replay.** The PASS callbacks,
+  and the callbacks of services such as dispatch counting for the replayed passes, run while the
+  SDK holds the allocation inventory's read lock, so such a call waits on that lock, and the replay
+  hangs or aborts when its drain times out.
 * **Async copies are not fenced.** ``hsa_amd_memory_async_copy`` (or HIP async memcpy) on another
   thread can mutate device memory during the replay window.
-* **Stuck drains abort the process** rather than hanging (roughly 60 s bounds inside the window).
-* **Host RAM duplication** of the tracked device footprint for the duration of the replay. Under
-  host memory pressure the snapshot is declined and the dispatch runs once rather than aborting.
+* **Stuck drains and internal blit kernels abort the process** rather than hanging (roughly 60 s
+  bounds inside the window).
+* **Snapshot memory** as large as the tracked device footprint, in device and pinned host memory by
+  default (see :ref:`kernel-replay-snapshot-placement`), and kept for later replays unless the
+  tool limits the snapshot to one memory. A snapshot that does not fit is declined and the dispatch
+  runs once rather than aborting.
 
 See also
 ========
