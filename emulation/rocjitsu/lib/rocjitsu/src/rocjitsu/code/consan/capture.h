@@ -7,6 +7,7 @@
 #include "util/sha256.h"
 
 #include <map>
+#include <optional>
 
 namespace rocjitsu::consan {
 
@@ -17,26 +18,50 @@ inline constexpr uint32_t kExecutionSingleQueue = 1;
 inline constexpr uint32_t kExecutionNonoverlapping = 2;
 inline constexpr uint32_t kExecutionProfilingDisabled = 4;
 inline constexpr uint32_t kExecutionSystemFineGrain = 8;
-inline constexpr uint32_t kSupportedExecutionConditions =
+inline constexpr uint32_t kControlledExecutionConditions =
     kExecutionSingleQueue | kExecutionNonoverlapping | kExecutionProfilingDisabled |
     kExecutionSystemFineGrain;
-inline constexpr uint32_t kApplicationTraceExecutionConditions = kExecutionSystemFineGrain;
-// Evidence of completion, host visibility and signal forwarding. The contract
-// accepts only this complete value; individual bits are not separate states.
+inline constexpr uint32_t kApplicationExecutionConditions = kExecutionSystemFineGrain;
+// Evidence of completion, host visibility and signal forwarding. Each execution
+// must match the mode recorded by its capture header, independently of analysis.
 inline constexpr uint32_t kCompletionVisibleForwarded = 7;
 inline constexpr uint32_t kCompletionVisible = 3;
 
-[[nodiscard]] inline uint32_t completion_evidence(ScopeKind scope) {
-  return scope == ScopeKind::ExecutionTrace ? kCompletionVisible : kCompletionVisibleForwarded;
+enum class ExecutionMode { Controlled, Application };
+
+[[nodiscard]] constexpr uint32_t capture_execution_conditions(ExecutionMode mode) {
+  switch (mode) {
+  case ExecutionMode::Controlled:
+    return kControlledExecutionConditions;
+  case ExecutionMode::Application:
+    return kApplicationExecutionConditions;
+  }
+  return 0;
 }
 
-[[nodiscard]] uint32_t capture_execution_conditions(const ImageFacts &image);
+[[nodiscard]] constexpr std::optional<ExecutionMode> capture_execution_mode(uint32_t conditions) {
+  if (conditions == kControlledExecutionConditions)
+    return ExecutionMode::Controlled;
+  if (conditions == kApplicationExecutionConditions)
+    return ExecutionMode::Application;
+  return std::nullopt;
+}
+
+[[nodiscard]] constexpr uint32_t completion_evidence(ExecutionMode mode) {
+  switch (mode) {
+  case ExecutionMode::Controlled:
+    return kCompletionVisibleForwarded;
+  case ExecutionMode::Application:
+    return kCompletionVisible;
+  }
+  return 0;
+}
 
 class CaptureHeader {
 public:
   std::array<uint8_t, 16> run_identity{};
   ImageFacts image;
-  uint32_t execution_conditions = kSupportedExecutionConditions;
+  uint32_t execution_conditions = kControlledExecutionConditions;
   bool operator==(const CaptureHeader &) const = default;
 };
 
@@ -80,6 +105,7 @@ struct Capture {
 /// @brief Check the saved context, launch and ownership without inspecting GPU rows.
 [[nodiscard]] Result validate_captured_execution(const Manifest &manifest,
                                                  const CapturedExecution &execution,
+                                                 ExecutionMode mode,
                                                  util::DiagnosticEmitter diagnostic = {},
                                                  const CaptureLimits &limits = {});
 

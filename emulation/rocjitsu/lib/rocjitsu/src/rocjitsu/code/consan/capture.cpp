@@ -31,12 +31,13 @@ bool all_zero(std::span<const uint8_t> bytes) {
 }
 
 bool valid_header(const CaptureHeader &header) {
-  const uint32_t expected = capture_execution_conditions(header.image);
-  return expected != 0 && header.execution_conditions == expected && !all_zero(header.run_identity);
+  return capture_execution_mode(header.execution_conditions).has_value() &&
+         !all_zero(header.run_identity);
 }
 
 Result validate_execution(const Manifest &manifest, const CapturedExecution &execution,
-                          util::DiagnosticEmitter diagnostic, const CaptureLimits &limits) {
+                          ExecutionMode mode, util::DiagnosticEmitter diagnostic,
+                          const CaptureLimits &limits) {
   const FailureOr<LaunchLayout> layout =
       plan_launch(manifest, execution.dimensions, execution.group_bytes, execution.private_bytes,
                   diagnostic, limits.contract);
@@ -48,7 +49,7 @@ Result validate_execution(const Manifest &manifest, const CapturedExecution &exe
   }
   if (execution.entry_key != manifest.entry.original_descriptor_offset || execution.serial == 0 ||
       execution.storage_slot == 0 || execution.storage_generation == 0 ||
-      execution.completion != completion_evidence(manifest.scope) ||
+      completion_evidence(mode) == 0 || execution.completion != completion_evidence(mode) ||
       execution.arguments.size() != manifest.entry.original_kernarg_bytes ||
       execution.report.size() != layout.value().report_bytes ||
       execution.group_bytes != layout.value().group_bytes ||
@@ -108,7 +109,7 @@ std::vector<uint8_t> encode_execution(const CapturedExecution &execution) {
 }
 
 FailureOr<CapturedExecution> decode_execution(std::span<const uint8_t> payload,
-                                              const ImageFacts &image,
+                                              const ImageFacts &image, ExecutionMode mode,
                                               util::DiagnosticEmitter diagnostic,
                                               const CaptureLimits &limits) {
   if (payload.size() < kExecutionBytes || !all_zero(payload.subspan(52, 4)) ||
@@ -144,7 +145,7 @@ FailureOr<CapturedExecution> decode_execution(std::span<const uint8_t> payload,
   execution.arguments.assign(payload.begin() + kExecutionBytes,
                              payload.begin() + kExecutionBytes + argument_bytes);
   execution.report.assign(payload.begin() + kExecutionBytes + argument_bytes, payload.end());
-  if (validate_execution(*manifest, execution, diagnostic, limits).failed()) {
+  if (validate_execution(*manifest, execution, mode, diagnostic, limits).failed()) {
     return Result::failure();
   }
   return execution;
@@ -152,23 +153,10 @@ FailureOr<CapturedExecution> decode_execution(std::span<const uint8_t> payload,
 
 } // namespace
 
-uint32_t capture_execution_conditions(const ImageFacts &image) {
-  const std::optional<ScopeKind> scope = selected_scope(image);
-  if (!scope)
-    return 0;
-  if (*scope == ScopeKind::ExecutionTrace)
-    return kApplicationTraceExecutionConditions;
-  return *scope == ScopeKind::NativeLdsNoSynchronization ||
-                 *scope == ScopeKind::NativeLdsWorkgroupBarrier ||
-                 *scope == ScopeKind::NativeLdsWorkgroupBarrierLoop
-             ? kSupportedExecutionConditions
-             : 0;
-}
-
 Result validate_captured_execution(const Manifest &manifest, const CapturedExecution &execution,
-                                   util::DiagnosticEmitter diagnostic,
+                                   ExecutionMode mode, util::DiagnosticEmitter diagnostic,
                                    const CaptureLimits &limits) {
-  return validate_execution(manifest, execution, diagnostic, limits);
+  return validate_execution(manifest, execution, mode, diagnostic, limits);
 }
 
 FailureOr<std::vector<uint8_t>> CaptureEncoder::start(const CaptureHeader &header,
@@ -208,7 +196,9 @@ FailureOr<std::vector<uint8_t>> CaptureEncoder::append(const CapturedExecution &
   if (manifest == nullptr) {
     return diagnostic.emit() << "unknown or native capture entry key";
   }
-  if (validate_execution(*manifest, execution, diagnostic, limits).failed()) {
+  if (validate_execution(*manifest, execution,
+                         *capture_execution_mode(header_.execution_conditions), diagnostic, limits)
+          .failed()) {
     return Result::failure();
   }
   const std::map<uint32_t, uint32_t>::iterator generation =
@@ -308,8 +298,9 @@ FailureOr<Capture> decode_capture(std::span<const uint8_t> bytes,
     if (!std::equal(frame_hash.begin(), frame_hash.end(), bytes.begin() + offset + 16)) {
       return diagnostic.emit() << "execution frame checksum mismatch";
     }
-    FailureOr<CapturedExecution> execution =
-        decode_execution(payload, capture.header.image, diagnostic, limits);
+    FailureOr<CapturedExecution> execution = decode_execution(
+        payload, capture.header.image, *capture_execution_mode(capture.header.execution_conditions),
+        diagnostic, limits);
     if (execution.failed()) {
       return Result::failure();
     }

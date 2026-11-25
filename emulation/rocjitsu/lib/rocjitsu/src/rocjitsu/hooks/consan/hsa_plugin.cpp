@@ -947,7 +947,8 @@ private:
     }
     CaptureHeader header;
     header.image = facts;
-    header.execution_conditions = capture_execution_conditions(facts);
+    header.execution_conditions = capture_execution_conditions(
+        application_profile_ ? ExecutionMode::Application : ExecutionMode::Controlled);
     const FailureOr<std::vector<uint8_t>> encoded_facts = encode_image_facts(facts);
     if (encoded_facts.failed()) {
       fail_locked(RuntimeStatus::InvalidFacts, "cannot encode capture facts");
@@ -1179,7 +1180,9 @@ private:
     envelope.arguments.assign(wrapper.begin(),
                               wrapper.begin() + facts.entry.original_kernarg_bytes);
     launch->original = packet.completion_signal;
-    launch->lifecycle = std::make_unique<DispatchLifecycle>(binding->facts, std::move(envelope));
+    launch->lifecycle = std::make_unique<DispatchLifecycle>(
+        binding->facts, std::move(envelope),
+        application_profile_ ? ExecutionMode::Application : ExecutionMode::Controlled);
     if (launch->lifecycle->submitted() != RuntimeStatus::Success) {
       reject_packet_locked(packet, "dispatch ownership initialization failed before submission");
       return false;
@@ -1568,11 +1571,14 @@ private:
       RuntimeStatus observed_status;
       {
         std::lock_guard lock(mutex_);
-        observed_status = launch->lifecycle->observe(true, true, [&] {
-          if (launch->original.handle != 0)
+        std::function<bool()> forward;
+        if (launch->original.handle != 0) {
+          forward = [&] {
             core_.hsa_signal_subtract_screlease_fn(launch->original, 1);
-          return true;
-        });
+            return true;
+          };
+        }
+        observed_status = launch->lifecycle->observe(true, true, forward);
         if (observed_status != RuntimeStatus::Success)
           fail_locked(observed_status, "completion forwarding failed");
         if (launch->original.handle != 0) {

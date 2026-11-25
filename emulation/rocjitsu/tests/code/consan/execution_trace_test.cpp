@@ -23,8 +23,8 @@ protected:
     Capture capture;
     capture.header = test::trace_capture_header();
     const Manifest &facts = test::manifest(capture.header);
-    capture.executions.push_back(
-        test::execution(facts, 1, 1, {{groups * threads, 1, 1}, {threads, 1, 1}}));
+    capture.executions.push_back(test::execution(
+        facts, 1, 1, {{groups * threads, 1, 1}, {threads, 1, 1}}, ExecutionMode::Application));
     std::vector<uint8_t> &report = capture.executions[0].report;
     const uint32_t waves = (threads + 31) / 32;
     for (uint32_t index = 0; index < groups * waves; ++index) {
@@ -175,7 +175,7 @@ TEST_F(ConSanExecutionTraceAnalysis, InvalidTypedEnvelopesRejectBeforeInspecting
       wire::write_u64(execution.context, wire::kContextSerial, 2);
       break;
     case 8:
-      changed.header.execution_conditions = kSupportedExecutionConditions;
+      changed.header.execution_conditions = kControlledExecutionConditions;
       break;
     case 9:
       changed.header.run_identity = {};
@@ -196,7 +196,7 @@ TEST_F(ConSanExecutionTraceAnalysis, InvalidTypedEnvelopesRejectBeforeInspecting
                   .failed());
 }
 
-TEST_F(ConSanExecutionTraceAnalysis, QBarrierAndLoopCapturesKeepTheirOwnConditionsAndReader) {
+TEST_F(ConSanExecutionTraceAnalysis, BarrierAndLoopAnalysisRemainIndependentOfExecutionTransport) {
   for (const ScopeKind scope :
        {ScopeKind::NativeLdsWorkgroupBarrier, ScopeKind::NativeLdsWorkgroupBarrierLoop}) {
     Capture capture;
@@ -214,8 +214,9 @@ TEST_F(ConSanExecutionTraceAnalysis, QBarrierAndLoopCapturesKeepTheirOwnConditio
                        .probe_size = 32}};
     test::refresh_image(capture.header);
     EXPECT_EQ(profile_options_digest(scope), mvp_options_digest());
-    EXPECT_EQ(capture_execution_conditions(capture.header.image), kSupportedExecutionConditions);
-    EXPECT_EQ(completion_evidence(scope), kCompletionVisibleForwarded);
+    EXPECT_EQ(capture_execution_conditions(ExecutionMode::Controlled),
+              kControlledExecutionConditions);
+    EXPECT_EQ(completion_evidence(ExecutionMode::Controlled), kCompletionVisibleForwarded);
     capture.executions.push_back(test::execution(facts, 1, 1, {{256, 1, 1}, {64, 1, 1}}));
     const FailureOr<Capture> decoded = roundtrip(capture);
     ASSERT_TRUE(decoded.succeeded()) << error_.message();
@@ -226,12 +227,32 @@ TEST_F(ConSanExecutionTraceAnalysis, QBarrierAndLoopCapturesKeepTheirOwnConditio
     EXPECT_EQ(lds.value().executions.front().workgroup_count, 4u);
     EXPECT_EQ(lds.value().executions.front().waves_per_workgroup, 2u);
     EXPECT_TRUE(analyze_execution_trace_capture(decoded.value(), error_.emitter()).failed());
-    capture.header.execution_conditions = kApplicationTraceExecutionConditions;
+    capture.header.execution_conditions = kApplicationExecutionConditions;
     EXPECT_TRUE(roundtrip(capture).failed());
-    capture.header.execution_conditions = kSupportedExecutionConditions;
     capture.executions.front().completion = kCompletionVisible;
+    const FailureOr<Capture> application = roundtrip(capture);
+    ASSERT_TRUE(application.succeeded()) << error_.message();
+    const FailureOr<LdsRaceResult> application_lds =
+        analyze_capture(application.value(), {}, error_.emitter());
+    ASSERT_TRUE(application_lds.succeeded()) << error_.message();
+    EXPECT_EQ(application_lds.value().scope, scope);
+    EXPECT_EQ(application_lds.value().execution_conditions, kApplicationExecutionConditions);
+    capture.header.execution_conditions = kControlledExecutionConditions;
     EXPECT_TRUE(roundtrip(capture).failed());
   }
+}
+
+TEST_F(ConSanExecutionTraceAnalysis, ControlledTransportRetainsForwardingEvidenceForTrace) {
+  Capture capture = make_capture();
+  capture.header.execution_conditions = capture_execution_conditions(ExecutionMode::Controlled);
+  capture.executions.front().completion = completion_evidence(ExecutionMode::Controlled);
+  const FailureOr<Capture> decoded = roundtrip(capture);
+  ASSERT_TRUE(decoded.succeeded()) << error_.message();
+  const FailureOr<ExecutionTraceResult> result =
+      analyze_execution_trace_capture(decoded.value(), error_.emitter());
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  EXPECT_TRUE(result.value().transport_complete);
+  EXPECT_EQ(result.value().completed_rows, 16u);
 }
 
 TEST_F(ConSanExecutionTraceAnalysis, EmptyExecutionMembershipCannotCertifyTransport) {

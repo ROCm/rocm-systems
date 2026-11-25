@@ -124,13 +124,14 @@ void rehash(std::vector<uint8_t> &bytes) {
 TEST(ConSanImageFacts, EncodingPreservesKnownWireIdentity) {
   // Pin the image envelope, selected manifests and native entry for the
   // current producer contract and a historical options profile, including
-  // its token and empty boundary count in each nested LDS manifest.
-  const Digest expected = {0x06, 0xeb, 0x18, 0x63, 0x69, 0xb5, 0x72, 0x49, 0x8f, 0xe7, 0xb7,
-                           0xb1, 0x74, 0xb6, 0x01, 0xe0, 0x61, 0xf4, 0x19, 0x09, 0x68, 0x11,
-                           0x04, 0x91, 0x57, 0xf4, 0x86, 0x31, 0xf0, 0x1d, 0x6c, 0x6b};
+  // its token, absent proof flags and empty boundary count in each nested LDS
+  // manifest. Derived independently with struct/hashlib.
+  const Digest expected = {0xa7, 0x75, 0x7f, 0xad, 0x5d, 0x2c, 0x0c, 0xce, 0xc2, 0x51, 0xde,
+                           0x2c, 0xd5, 0x87, 0x78, 0x34, 0xca, 0x1c, 0x4a, 0x53, 0x56, 0x01,
+                           0x82, 0x5e, 0x42, 0xb8, 0x2b, 0x4b, 0xb0, 0xbf, 0xdf, 0xa1};
   const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(example_image(kPriorOptions));
   ASSERT_TRUE(encoded.succeeded());
-  EXPECT_EQ(encoded.value().size(), 1399u);
+  EXPECT_EQ(encoded.value().size(), 1411u);
   EXPECT_EQ(digest(encoded.value()), expected);
 }
 
@@ -188,6 +189,80 @@ TEST(ConSanImageFacts, NativeOwnershipRoundTripsAcrossAnotherEntry) {
   const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value(), error.emitter());
   ASSERT_TRUE(decoded.succeeded()) << error.message();
   EXPECT_EQ(decoded.value(), image);
+}
+
+TEST(ConSanImageFacts, NativeNoProbesCertificateRoundTripsWithoutClaimingSelectedExecution) {
+  ImageFacts image = example_image();
+  ImageEntryFacts &native = image.entries.back();
+  NoProbesNeededProof proof = {.instruction_count = 1, .code_bytes = 4};
+  proof.code_sha256[0] = 1;
+  native.no_probes_needed = proof;
+  const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(image);
+  ASSERT_TRUE(encoded.succeeded());
+  const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value());
+  ASSERT_TRUE(decoded.succeeded());
+  EXPECT_EQ(decoded.value(), image);
+  EXPECT_EQ(decoded.value().entries.back().disposition, EntryDisposition::Native);
+  EXPECT_FALSE(decoded.value().entries.back().selected.has_value());
+  ContractLimits limits;
+  limits.metadata_bytes = encoded.value().size();
+  EXPECT_TRUE(encode_image_facts(image, {}, limits).succeeded());
+  --limits.metadata_bytes;
+  EXPECT_TRUE(encode_image_facts(image, {}, limits).failed());
+
+  // Recompute the framing checksum after lying about the certified decoded
+  // instruction count. A valid envelope cannot make impossible proof facts valid.
+  std::vector<uint8_t> forged = encoded.value();
+  const size_t native_start = forged.size() - (128 + native.binding.name.size() + 24 + 56);
+  const size_t proof_start = native_start + 16;
+  ASSERT_EQ(wire::read_u32(forged, native_start + 12), 1u);
+  ASSERT_EQ(wire::read_u64(forged, proof_start + 8), 1u);
+  ASSERT_TRUE(wire::write_u64(forged, proof_start + 8, 2));
+  rehash(forged);
+  util::StringDiagnostic error;
+  EXPECT_TRUE(decode_image_facts(forged, error.emitter()).failed());
+  EXPECT_EQ(error.message(), "invalid no-probes-needed certificate");
+}
+
+TEST(ConSanImageFacts, NoProbesCertificateRequiresCompleteBoundedLdsNativeEvidence) {
+  ImageFacts baseline = example_image();
+  NoProbesNeededProof proof = {.instruction_count = 1, .code_bytes = 4};
+  proof.code_sha256[0] = 1;
+  baseline.entries.back().no_probes_needed = proof;
+  ASSERT_TRUE(validate_image_facts(baseline).succeeded());
+  for (uint32_t kind = 0; kind < 7; ++kind) {
+    ImageFacts image = baseline;
+    NoProbesNeededProof &changed = *image.entries.back().no_probes_needed;
+    if (kind == 0)
+      changed.version = 2;
+    else if (kind == 1)
+      changed.scope = ScopeKind::ExecutionTrace;
+    else if (kind == 2)
+      changed.instruction_count = 0;
+    else if (kind == 3)
+      changed.instruction_count = 2;
+    else if (kind == 4)
+      changed.code_bytes = 8;
+    else if (kind == 5)
+      changed.code_bytes = 0;
+    else
+      changed.code_sha256 = {};
+    EXPECT_TRUE(validate_image_facts(image).failed()) << kind;
+  }
+  ImageFacts selected = example_image();
+  selected.entries.front().no_probes_needed = proof;
+  EXPECT_TRUE(validate_image_facts(selected).failed());
+}
+
+TEST(ConSanImageFacts, DecoderRejectsUnknownProofPresenceInsteadOfGuessingNativeCoverage) {
+  const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(example_image());
+  ASSERT_TRUE(encoded.succeeded());
+  std::vector<uint8_t> bytes = encoded.value();
+  wire::write_u32(bytes, 64 + 144 + 8 + 4, 2);
+  rehash(bytes);
+  util::StringDiagnostic error;
+  EXPECT_TRUE(decode_image_facts(bytes, error.emitter()).failed());
+  EXPECT_EQ(error.message(), "invalid or truncated image entry certificate flag");
 }
 
 TEST(ConSanImageFacts, NativeKernargAlignmentPreservesSmallPowersOfTwo) {
@@ -728,6 +803,14 @@ TEST(ConSanImageFacts, TraceScopeKeepsBoundaryBudgetAndSelectionSeparateFromQLds
   const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value());
   ASSERT_TRUE(decoded.succeeded());
   EXPECT_EQ(decoded.value(), image);
+  ImageFacts with_lds_certificate = image;
+  NoProbesNeededProof proof = {.instruction_count = 1, .code_bytes = 4};
+  proof.code_sha256[0] = 1;
+  with_lds_certificate.entries.back().no_probes_needed = proof;
+  util::StringDiagnostic profile_error;
+  EXPECT_TRUE(validate_image_facts(with_lds_certificate, profile_error.emitter()).failed());
+  EXPECT_EQ(profile_error.message(),
+            "LDS no-probes-needed certificate cannot qualify execution trace");
   ContractLimits limits;
   limits.metadata_bytes = encoded.value().size();
   EXPECT_TRUE(encode_image_facts(image, {}, limits).succeeded());

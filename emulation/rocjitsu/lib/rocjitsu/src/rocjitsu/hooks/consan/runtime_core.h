@@ -38,23 +38,25 @@ struct OwnedSnapshot {
 
 /// @brief One dispatch's observer/collector handoff, independent of HSA handles.
 /// @details The owner synchronizes these calls between its observer and collector.
-/// A failure never certifies reuse. Forwarding precedes the potentially slow
-/// copy, is attempted once, and is independent of writer progress.
+/// A failure never certifies reuse. Controlled-mode forwarding precedes the
+/// potentially slow copy, is attempted once, and is independent of writer progress.
 class DispatchLifecycle {
 public:
-  DispatchLifecycle(std::shared_ptr<const Manifest> facts, CapturedExecution envelope);
+  DispatchLifecycle(std::shared_ptr<const Manifest> facts, CapturedExecution envelope,
+                    ExecutionMode mode = ExecutionMode::Controlled);
 
   /// @brief Validate and arm a prepared envelope without submitting an HSA packet.
   /// @details Success fixes the required snapshot extent. Invalid facts leave
   /// the phase unchanged; the owner must not publish a packet on failure.
   [[nodiscard]] RuntimeStatus submitted();
-  /// @brief Observe completion and system visibility before forwarding once.
+  /// @brief Observe completion and visibility, forwarding once in controlled mode.
   /// @details Pending results allow another observation. Success is idempotent
-  /// after forwarding/copying; a failed or throwing forward callback is terminal
+  /// after observing/copying. Application mode requires an empty forward callback;
+  /// controlled mode requires one. A failed or throwing forward callback is terminal
   /// because it may already have affected the application's completion signal.
   [[nodiscard]] RuntimeStatus observe(bool completed, bool system_visible,
                                       const std::function<bool()> &forward);
-  /// @brief Copy a forwarded execution into independent owning host storage.
+  /// @brief Copy a completed, visible execution into independent owning host storage.
   /// @details Success alone permits the owner to release the report lease,
   /// before any blocking capture write. Failure or an exception is terminal;
   /// neither forwarding nor a partial copy certifies reuse or permits retry.
@@ -66,12 +68,13 @@ private:
     Prepared,
     Submitted, // Envelope admitted; the owner may not have published its packet yet.
     Completed, // Completion observed, but system visibility may still be pending.
-    Forwarded, // Visibility established and the forwarding callback succeeded.
+    Observed,  // Visibility established; forwarding succeeded when required.
     Copied,    // Independent bytes/facts handed to the collector's destination.
     Failed,    // Ambiguous forwarding/copy attempts must never be retried.
   };
   std::shared_ptr<const Manifest> facts_;
   CapturedExecution envelope_;
+  ExecutionMode mode_;
   Phase phase_ = Phase::Prepared;
   size_t report_bytes_ = 0;
 };

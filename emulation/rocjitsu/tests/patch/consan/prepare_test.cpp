@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 
@@ -90,6 +91,49 @@ TEST_F(ConSanPrepareImage, ExecutionTraceOwnsBoundariesAndADistinctSelectionIden
   const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value());
   ASSERT_TRUE(decoded.succeeded());
   EXPECT_EQ(decoded.value(), trace.value().facts);
+}
+
+TEST_F(ConSanPrepareImage, NativeNoProbesCertificateBindsOriginalCodeBeforeArtifactAdmission) {
+  const std::filesystem::path path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() /
+      "multi-entry-native-scalar.hsaco";
+  const std::vector<uint8_t> original = test::read_fixture(path);
+  ASSERT_FALSE(original.empty());
+  const std::array<std::string_view, 3> requested = {"mk_a", "mk_b", "mk_c"};
+  const FailureOr<PreparationResult> result =
+      prepare_image_best_effort(original, *target_profile("gfx1250"), requested, error_);
+  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.value().artifact);
+  ASSERT_EQ(result.value().entries.size(), 3u);
+  ASSERT_TRUE(result.value().entries.back().no_probes_needed);
+  const PreparedImageArtifact &artifact = *result.value().artifact;
+  const ImageEntryFacts *native =
+      find_image_entry(artifact.facts, result.value().entries.back().key);
+  ASSERT_NE(native, nullptr);
+  EXPECT_EQ(native->disposition, EntryDisposition::Native);
+  EXPECT_FALSE(native->selected);
+  EXPECT_EQ(native->no_probes_needed, result.value().entries.back().no_probes_needed);
+  util::StringDiagnostic diagnostic;
+  ASSERT_TRUE(verify_artifact_images(artifact.facts, original, artifact.image, diagnostic.emitter())
+                  .succeeded())
+      << diagnostic.message();
+  const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(artifact.facts);
+  ASSERT_TRUE(encoded.succeeded());
+  FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value());
+  ASSERT_TRUE(decoded.succeeded());
+  EXPECT_EQ(decoded.value(), artifact.facts);
+  // Valid wire shape and checksums alone cannot bind an invented certificate to
+  // this original body. Runtime artifact admission rechecks its canonical hash.
+  ImageFacts forged = decoded.value();
+  forged.entries.back().no_probes_needed->code_sha256[0] ^= 1;
+  ASSERT_TRUE(validate_image_facts(forged).succeeded());
+  EXPECT_TRUE(
+      verify_artifact_images(forged, original, artifact.image, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "no-probes-needed certificate differs from original code");
+  // Moving the same proof onto a sibling entry cannot change its ownership.
+  forged = decoded.value();
+  forged.entries.front().no_probes_needed = native->no_probes_needed;
+  EXPECT_TRUE(validate_image_facts(forged).failed());
 }
 
 TEST_F(ConSanPrepareImage, ExecutionTraceAdmitsAnEntryWithoutLdsSites) {

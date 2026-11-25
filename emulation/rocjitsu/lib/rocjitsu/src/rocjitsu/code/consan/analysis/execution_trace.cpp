@@ -29,8 +29,9 @@ FailureOr<ExecutionTraceResult>
 analyze_execution_trace_capture(const Capture &capture, util::DiagnosticEmitter diagnostic) {
   if (validate_image_facts(capture.header.image, diagnostic).failed())
     return Result::failure();
-  if (selected_scope(capture.header.image) != ScopeKind::ExecutionTrace ||
-      capture.header.execution_conditions != kApplicationTraceExecutionConditions ||
+  const std::optional<ExecutionMode> mode =
+      capture_execution_mode(capture.header.execution_conditions);
+  if (selected_scope(capture.header.image) != ScopeKind::ExecutionTrace || !mode ||
       all_zero(capture.header.run_identity) ||
       capture.executions.size() > CaptureLimits{}.executions)
     return diagnostic.emit() << "invalid execution-trace scope, conditions, identity or budget";
@@ -51,7 +52,7 @@ analyze_execution_trace_capture(const Capture &capture, util::DiagnosticEmitter 
     if (facts == nullptr || execution.serial != result.executions.size() + 1 ||
         execution.storage_generation <= generations[execution.storage_slot])
       return diagnostic.emit() << "invalid capture entry or execution identity";
-    if (validate_captured_execution(*facts, execution, diagnostic).failed())
+    if (validate_captured_execution(*facts, execution, *mode, diagnostic).failed())
       return Result::failure();
     generations[execution.storage_slot] = execution.storage_generation;
     const LaunchLayout layout =
