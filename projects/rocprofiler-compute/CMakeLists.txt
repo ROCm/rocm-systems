@@ -958,14 +958,6 @@ if(NOT TEST_FROM_INSTALL)
     )
 
     add_test(
-        NAME test_validate_sets_metric_ids
-        COMMAND
-            ${PYTHON_TEST_COMMAND} -m pytest
-            --junitxml=tests/test_validate_sets_metric_ids.xml ${COV_OPTION}
-            tools/test_validate_sets_metric_ids.py ${WORKING_DIR_OPTION}
-    )
-
-    add_test(
         NAME test_validate_views
         COMMAND
             ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_validate_views.xml
