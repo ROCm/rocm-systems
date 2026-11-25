@@ -151,8 +151,11 @@ TEST(ConSanInput, StrictRejectsConditionalOnlyImageAndRevalidatesTheSavedPolicy)
 }
 
 TEST(ConSanInput, ScalarFlatAppliesTheSitePolicyToTheAllocatedScalarPair) {
-  const auto image =
-      test::read_fixture(test::target_fixture_path({"gfx1250", 32}, "width-flat-load-backward"));
+  const std::filesystem::path fixture =
+      test::target_fixture_path({"gfx1250", 32}, "width-flat-load-backward");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  const std::vector<uint8_t> image = test::read_fixture(fixture);
   const auto &target = *target_profile(1250);
   InputError error;
   const auto valid = build_input_program(image, target, "lds_producer_consumer", error);
