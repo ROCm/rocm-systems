@@ -25,9 +25,9 @@
 // Records for asynchronous operations are written by the runtime's own threads once the operation
 // retires, so a tool that runs one, waits on the device and flushes can get nothing back: the
 // record lands in the window after the one that earned it. This call waits for record production
-// to catch up, then flushes the context's buffers unless told not to.
+// to catch up, then flushes unless told not to.
 //
-// Five checks, each a function named for the property it proves:
+// Five checks, each named for the property it proves:
 //
 //   every_window_sees_its_own_record    the regression guard: many short windows, each requiring
 //                                       its own operation's record back inside the window.
@@ -38,9 +38,10 @@
 //                                       cannot report a timeout.
 //
 // The window loop alternates kernel dispatch and memory copy so a regression in either tracing
-// domain fails. Every window is asserted on its own and never in aggregate: a late record still
+// domain fails. Windows are asserted individually, never in aggregate: a late record still
 // arrives one window later, so totals reconcile even when every window came up short.
 
+#include "sync_test_workload.h"
 #include "test_support.hpp"
 
 #include <rocprofiler-sdk/buffer.h>
@@ -51,8 +52,6 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
-
-#include <hip/hip_runtime.h>
 
 #include <atomic>
 #include <cstdint>
@@ -66,27 +65,25 @@ namespace
 constexpr const char* kTestTag = "synchronize-contexts";
 
 // Enough that passing with the wait removed is not a realistic outcome, while still running in a
-// couple of seconds. Too few and an unloaded machine passes against a broken build.
+// couple of seconds.
 constexpr uint64_t kWindows = 1000;
 
-// Window labels for the checks that run after the loop. Past kWindows so a record left over from
-// the loop can never be mistaken for one of theirs.
+// Window labels for the checks that run after the loop. Past kWindows, so a record left over from
+// the loop cannot be mistaken for one of theirs.
 constexpr uint64_t kNoflushTag = kWindows + 1;
 constexpr uint64_t kNohangTag  = kWindows + 2;
 
-constexpr size_t kCopyBytes     = 8 * 1024 * 1024;
-constexpr size_t kScratchFloats = 1024;
-
 using sync_test::make_options;
 using sync_test::make_result;
+using sync_test::scoped_lane;
 
 // Tool: one lossless buffer carrying both of the traced domains.
 
 rocprofiler_context_id_t g_context = {};
 rocprofiler_buffer_id_t  g_buffer  = {};
 
-// `tag` is the external correlation id pushed when the operation was launched, which is how a
-// record is attributed back to the window that earned it.
+// `tag` is the external correlation id pushed when the operation was launched, attributing a
+// record back to the window that earned it.
 struct delivered_record
 {
     uint64_t                          tag;
@@ -96,8 +93,8 @@ struct delivered_record
 std::mutex                    g_delivered_mutex;
 std::vector<delivered_record> g_delivered;
 
-// Guards against a vacuous pass: a build that stops delivering records entirely looks like one
-// that merely delivers them late, since every window comes up short either way.
+// Guards against a vacuous pass: a build delivering no records at all looks like one merely
+// delivering them late, since every window comes up short either way.
 std::atomic<bool> g_callback_ran{false};
 
 void
@@ -136,19 +133,19 @@ buffer_callback(rocprofiler_context_id_t /*context*/,
 int
 tool_init(rocprofiler_client_finalize_t /*fini_func*/, void* /*tool_data*/)
 {
-    CHECK_ROCP(rocprofiler_create_context(&g_context));
-    CHECK_ROCP(rocprofiler_create_buffer(g_context,
-                                         256 * 1024,
-                                         128 * 1024,
-                                         ROCPROFILER_BUFFER_POLICY_LOSSLESS,
-                                         buffer_callback,
-                                         nullptr,
-                                         &g_buffer));
-    CHECK_ROCP(rocprofiler_configure_buffer_tracing_service(
+    ROCPROFILER_CHECK(rocprofiler_create_context(&g_context));
+    ROCPROFILER_CHECK(rocprofiler_create_buffer(g_context,
+                                                256 * 1024,
+                                                128 * 1024,
+                                                ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                                buffer_callback,
+                                                nullptr,
+                                                &g_buffer));
+    ROCPROFILER_CHECK(rocprofiler_configure_buffer_tracing_service(
         g_context, ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH, nullptr, 0, g_buffer));
-    CHECK_ROCP(rocprofiler_configure_buffer_tracing_service(
+    ROCPROFILER_CHECK(rocprofiler_configure_buffer_tracing_service(
         g_context, ROCPROFILER_BUFFER_TRACING_MEMORY_COPY, nullptr, 0, g_buffer));
-    CHECK_ROCP(rocprofiler_start_context(g_context));
+    ROCPROFILER_CHECK(rocprofiler_start_context(g_context));
     return 0;
 }
 
@@ -156,19 +153,22 @@ void
 tool_fini(void* /*tool_data*/)
 {}
 
-// Workload
-
-__global__ void
-touch_kernel(float* ptr)
-{
-    if(threadIdx.x == 0) ptr[0] += 1.0F;
-}
+// Which of the application's operations a window drives, and the record it is owed in return.
 
 enum class operation
 {
     kernel_dispatch,
     memory_copy,
 };
+
+void
+launch(const scoped_lane& lane, operation op)
+{
+    if(op == operation::kernel_dispatch)
+        lane.launch_kernel();
+    else
+        lane.launch_copy();
+}
 
 rocprofiler_buffer_tracing_kind_t
 record_kind_of(operation op)
@@ -177,74 +177,27 @@ record_kind_of(operation op)
                                               : ROCPROFILER_BUFFER_TRACING_MEMORY_COPY;
 }
 
-// The copy source is pinned host memory and large enough that the runtime uses the copy engine.
-// A small copy, or one between two device allocations, is serviced by a blit kernel instead,
-// which emits a dispatch record and leaves the memory copy domain untested while appearing to
-// pass.
-class gpu_workload
-{
-public:
-    gpu_workload()
-    {
-        CHECK_HIP(hipMalloc(&m_scratch, kScratchFloats * sizeof(float)));
-        CHECK_HIP(hipMemset(m_scratch, 0, kScratchFloats * sizeof(float)));
-        CHECK_HIP(hipMalloc(&m_copy_dst, kCopyBytes));
-        CHECK_HIP(hipHostMalloc(reinterpret_cast<void**>(&m_copy_src), kCopyBytes));
-    }
-
-    ~gpu_workload()
-    {
-        CHECK_HIP(hipHostFree(m_copy_src));
-        CHECK_HIP(hipFree(m_copy_dst));
-        CHECK_HIP(hipFree(m_scratch));
-    }
-
-    gpu_workload(const gpu_workload&) = delete;
-    gpu_workload& operator=(const gpu_workload&) = delete;
-
-    void launch(operation op) const
-    {
-        if(op == operation::kernel_dispatch)
-        {
-            touch_kernel<<<1, 64>>>(m_scratch);
-            CHECK_HIP(hipGetLastError());
-        }
-        else
-        {
-            CHECK_HIP(
-                hipMemcpyAsync(m_copy_dst, m_copy_src, kCopyBytes, hipMemcpyHostToDevice, nullptr));
-        }
-    }
-
-    static void wait_on_device() { CHECK_HIP(hipDeviceSynchronize()); }
-
-private:
-    float* m_scratch  = nullptr;
-    float* m_copy_dst = nullptr;
-    float* m_copy_src = nullptr;
-};
-
 // Window bookkeeping
 
 void
 push_tag(uint64_t tag)
 {
     auto thread_id = rocprofiler_thread_id_t{0};
-    CHECK_ROCP(rocprofiler_get_thread_id(&thread_id));
+    ROCPROFILER_CHECK(rocprofiler_get_thread_id(&thread_id));
 
     auto external  = rocprofiler_user_data_t{};
     external.value = tag;
-    CHECK_ROCP(rocprofiler_push_external_correlation_id(g_context, thread_id, external));
+    ROCPROFILER_CHECK(rocprofiler_push_external_correlation_id(g_context, thread_id, external));
 }
 
 void
 pop_tag()
 {
     auto thread_id = rocprofiler_thread_id_t{0};
-    CHECK_ROCP(rocprofiler_get_thread_id(&thread_id));
+    ROCPROFILER_CHECK(rocprofiler_get_thread_id(&thread_id));
 
     auto popped = rocprofiler_user_data_t{};
-    CHECK_ROCP(rocprofiler_pop_external_correlation_id(g_context, thread_id, &popped));
+    ROCPROFILER_CHECK(rocprofiler_pop_external_correlation_id(g_context, thread_id, &popped));
 }
 
 struct delivery_tally
@@ -253,8 +206,8 @@ struct delivery_tally
     uint64_t wrong_kind = 0;  ///< records carrying `tag` but some other kind
 };
 
-// Consume everything delivered and report what belonged to `tag`. Draining is what keeps each
-// window's verdict independent of the ones before it.
+// Consume everything delivered and report what belonged to `tag`. Draining keeps each window's
+// verdict independent of the ones before it.
 delivery_tally
 take_delivered(uint64_t tag, rocprofiler_buffer_tracing_kind_t expected_kind)
 {
@@ -281,12 +234,12 @@ discard_delivered()
     g_delivered.clear();
 }
 
-// Checks. Each returns a count of failed expectations, so main can report every problem at once.
+// Checks. Each returns a count of failed expectations, so one run reports every problem.
 
 // The regression guard. The synchronize flushes as part of the call, so the window deliberately
 // does not flush the buffer itself -- that would mask a regression in half the contract.
 uint64_t
-every_window_sees_its_own_record(const gpu_workload& workload)
+every_window_sees_its_own_record(const scoped_lane& lane)
 {
     auto failures = uint64_t{0};
 
@@ -296,12 +249,12 @@ every_window_sees_its_own_record(const gpu_workload& workload)
         const auto expected_kind = record_kind_of(op);
 
         push_tag(window);
-        workload.launch(op);
-        gpu_workload::wait_on_device();
+        launch(lane, op);
+        lane.wait();
 
         auto options = make_options(ROCPROFILER_SYNCHRONIZE_CONTEXT_NONE);
         auto result  = make_result();
-        CHECK_ROCP(rocprofiler_synchronize_context(g_context, &options, &result));
+        ROCPROFILER_CHECK(rocprofiler_synchronize_context(g_context, &options, &result));
         pop_tag();
 
         // Success means the drain reported nothing outstanding, so a nonzero count is the
@@ -367,27 +320,27 @@ nohang_without_result_is_rejected()
                          rocprofiler_synchronize_context(g_context, &options, nullptr));
 }
 
-// NOFLUSH drops the flush but keeps the wait, and the wait is the part that can be asserted: the
-// record has been written by the time the call returns, so a later explicit flush produces it.
+// NOFLUSH drops the flush but keeps the wait: the record has been written by the time the call
+// returns, so a later explicit flush produces it.
 //
 // Deliberately not asserted: that the buffer is still unflushed on return. NOFLUSH promises only
-// that this call will not flush, not that nothing else will, so requiring an empty buffer would
-// be testing a race. Delivery is counted on both sides of the flush and the total is what matters.
+// that this call will not flush, not that nothing else will, so an empty-buffer assertion would
+// be a race. Delivery is counted on both sides of the flush and the total is what matters.
 uint64_t
-noflush_still_waits_for_records(const gpu_workload& workload)
+noflush_still_waits_for_records(const scoped_lane& lane)
 {
     push_tag(kNoflushTag);
-    workload.launch(operation::kernel_dispatch);
-    gpu_workload::wait_on_device();
+    lane.launch_kernel();
+    lane.wait();
 
     auto options = make_options(ROCPROFILER_SYNCHRONIZE_CONTEXT_NOFLUSH);
     auto result  = make_result();
-    CHECK_ROCP(rocprofiler_synchronize_context(g_context, &options, &result));
+    ROCPROFILER_CHECK(rocprofiler_synchronize_context(g_context, &options, &result));
     pop_tag();
 
     auto delivered =
         take_delivered(kNoflushTag, ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH).matching;
-    CHECK_ROCP(rocprofiler_flush_buffer(g_buffer));
+    ROCPROFILER_CHECK(rocprofiler_flush_buffer(g_buffer));
     delivered += take_delivered(kNoflushTag, ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH).matching;
 
     if(delivered == 1) return 0;
@@ -402,14 +355,14 @@ noflush_still_waits_for_records(const gpu_workload& workload)
 
 // NOHANG reads the outstanding work and returns instead of waiting, so it cannot report a timeout
 // even under a deadline far too short for a real wait. The operation is left in flight on
-// purpose: a device synchronize first would remove the thing being measured.
+// purpose: synchronizing first would remove what is being measured.
 uint64_t
-nohang_never_reports_timeout(const gpu_workload& workload)
+nohang_never_reports_timeout(const scoped_lane& lane)
 {
     auto failures = uint64_t{0};
 
     push_tag(kNohangTag);
-    workload.launch(operation::kernel_dispatch);
+    lane.launch_kernel();
 
     auto options = make_options(ROCPROFILER_SYNCHRONIZE_CONTEXT_NOHANG, /* timeout_ns = */ 1);
     auto result  = make_result();
@@ -428,15 +381,15 @@ nohang_never_reports_timeout(const gpu_workload& workload)
     }
 
     // Settle the operation left in flight, taking the documented both-arguments-NULL path.
-    gpu_workload::wait_on_device();
-    CHECK_ROCP(rocprofiler_synchronize_context(g_context, nullptr, nullptr));
+    lane.wait();
+    ROCPROFILER_CHECK(rocprofiler_synchronize_context(g_context, nullptr, nullptr));
     discard_delivered();
 
     return failures;
 }
 }  // namespace
 
-extern "C" __attribute__((visibility("default"))) rocprofiler_tool_configure_result_t*
+extern "C" rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t /*version*/,
                       const char* /*runtime_version*/,
                       uint32_t /*priority*/,
@@ -448,24 +401,30 @@ rocprofiler_configure(uint32_t /*version*/,
     return &_cfg;
 }
 
-int
-main(int, char**)
+extern "C" __attribute__((visibility("default"))) uint64_t
+sync_test_run(const sync_test_workload_t* workload)
 {
-    auto workload = gpu_workload{};
+    if(!sync_test::workload_is_usable(workload,
+                                      /* required_lanes = */ 1, /* requires_copy = */
+                                      true,
+                                      kTestTag))
+        return 1;
+
+    auto lane = scoped_lane{*workload};
 
     // Warm up the lazy paths -- module load, signal pool, first touch -- then start clean.
     for(int i = 0; i < 10; ++i)
-        workload.launch(operation::kernel_dispatch);
-    gpu_workload::wait_on_device();
-    CHECK_ROCP(rocprofiler_synchronize_context(g_context, nullptr, nullptr));
+        lane.launch_kernel();
+    lane.wait();
+    ROCPROFILER_CHECK(rocprofiler_synchronize_context(g_context, nullptr, nullptr));
     discard_delivered();
 
     auto failures = uint64_t{0};
-    failures += every_window_sees_its_own_record(workload);
+    failures += every_window_sees_its_own_record(lane);
     failures += unknown_context_is_rejected();
     failures += nohang_without_result_is_rejected();
-    failures += noflush_still_waits_for_records(workload);
-    failures += nohang_never_reports_timeout(workload);
+    failures += noflush_still_waits_for_records(lane);
+    failures += nohang_never_reports_timeout(lane);
 
     if(!g_callback_ran.load())
     {
@@ -483,7 +442,7 @@ main(int, char**)
                 kTestTag,
                 static_cast<unsigned long>(failures),
                 static_cast<unsigned long>(kWindows));
-        return EXIT_FAILURE;
+        return failures;
     }
 
     fprintf(stderr,
@@ -491,5 +450,5 @@ main(int, char**)
             "behaved as documented\n",
             kTestTag,
             static_cast<unsigned long>(kWindows));
-    return EXIT_SUCCESS;
+    return 0;
 }

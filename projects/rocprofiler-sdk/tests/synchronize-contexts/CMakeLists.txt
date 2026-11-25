@@ -1,3 +1,4 @@
+#
 # MIT License
 #
 # Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
@@ -21,11 +22,14 @@
 # SOFTWARE.
 
 #
-# Tests for rocprofiler_synchronize_context. One executable per route records take out of
-# the runtime -- tracing_window.cpp, counter_window.cpp, signal_less_window.cpp -- plus
-# no_late_records.cpp, which enables all of them at once to assert that nothing arrives
-# after a window closes. Each tool and its workload share a binary because the assertion
-# is about the ordering between them, so the exit status is the whole verdict.
+# Tests for rocprofiler_synchronize_context. Each test is a tool preloaded into an
+# application: the tool configures the services, drives the windows and holds every
+# assertion; the application supplies the GPU work. They meet at sync_test_workload.h, so
+# no tool here includes HIP and no application here includes rocprofiler.
+#
+# Five tools, one per record route or asserted property. Two applications, differing only
+# in the GPU work they offer -- one lane on the default stream, or many lanes each with
+# its own stream -- so the four single-lane tools share one binary.
 #
 cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
@@ -58,161 +62,145 @@ find_package(rocprofiler-sdk REQUIRED)
 find_package(Threads REQUIRED)
 
 #
-# Buffer tracing records, plus the flag and argument validation common to the API.
+# Applications. HIP only: they are profiled, they do not profile. Each resolves its tool
+# out of the process with dlsym, hence the link against the dl library.
 #
-add_executable(synchronize-contexts-tracing-window)
-target_sources(synchronize-contexts-tracing-window PRIVATE tracing_window.cpp)
-set_source_files_properties(tracing_window.cpp PROPERTIES LANGUAGE HIP)
+function(synchronize_contexts_add_app NAME SOURCE)
+    set(_TARGET synchronize-contexts-${NAME}-testapp)
 
-target_link_libraries(
-    synchronize-contexts-tracing-window
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-            Threads::Threads)
+    set_source_files_properties(${SOURCE} PROPERTIES LANGUAGE HIP)
+    add_executable(${_TARGET})
+    target_sources(${_TARGET} PRIVATE ${SOURCE})
+    target_link_libraries(${_TARGET} PRIVATE rocprofiler-sdk::tests-build-flags
+                                             Threads::Threads ${CMAKE_DL_LIBS})
+endfunction()
 
-# rocprofiler_configure is resolved by dlsym on the executable, so it has to be in the
-# dynamic symbol table rather than merely defined.
-set_target_properties(synchronize-contexts-tracing-window PROPERTIES ENABLE_EXPORTS ON)
+# One lane on the default stream, with a kernel and a host-to-device copy. The workload
+# behind every tool that does not need concurrency.
+synchronize_contexts_add_app(serial apps/serial_app.cpp)
 
-# Queue interposition is pinned rather than left to runtime qualification, so the code
-# path under test is the same on every run.
+# Many lanes, each with its own stream and scratch, so dispatches from different threads
+# are genuinely in flight at once.
+synchronize_contexts_add_app(concurrent apps/concurrent_app.cpp)
+
+#
+# Tools. Preloaded into an application, so rocprofiler_configure is found in the library
+# rather than needing the executable's dynamic symbol table exported.
+#
+function(synchronize_contexts_add_client NAME SOURCE)
+    set(_TARGET synchronize-contexts-${NAME}-client)
+
+    add_library(${_TARGET} SHARED)
+    target_sources(${_TARGET} PRIVATE ${SOURCE})
+    target_link_libraries(
+        ${_TARGET} PRIVATE rocprofiler-sdk::rocprofiler-sdk
+                           rocprofiler-sdk::tests-build-flags Threads::Threads)
+endfunction()
+
+synchronize_contexts_add_client(tracing-window tracing_window_client.cpp)
+synchronize_contexts_add_client(counter-window counter_window_client.cpp)
+synchronize_contexts_add_client(signal-less-window signal_less_window_client.cpp)
+synchronize_contexts_add_client(no-late-records no_late_records_client.cpp)
+synchronize_contexts_add_client(concurrent-windows concurrent_windows_client.cpp)
+
+# Every tool prints its verdict under the same tag, so one expression covers all six
+# tests. No pass expression: a matched one makes the exit status advisory, and these tests
+# assert on teardown, which runs after the verdict is printed.
+set(SYNC_CTX_FAIL_REGEX
+    "\\[synchronize-contexts\\] FAILED|${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+#
+# Buffer tracing records, plus the flag and argument validation common to the API.
+# Interposition is pinned so the path under test is the same on every run.
+#
 rocprofiler_add_integration_execute_test(
     synchronize-contexts-tracing-window
-    COMMAND $<TARGET_FILE:synchronize-contexts-tracing-window>
-    DEPENDS synchronize-contexts-tracing-window
+    COMMAND $<TARGET_FILE:synchronize-contexts-serial-testapp>
+    DEPENDS synchronize-contexts-tracing-window-client
     TIMEOUT 120
-    LABELS "integration-tests"
-    ENVIRONMENT
-        "ROCPROFILER_QUEUE_INTERPOSITION=1"
-        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
-    )
+    LABELS "integration-tests;synchronize-contexts"
+    PRELOAD "$<TARGET_FILE:synchronize-contexts-tracing-window-client>"
+    ENVIRONMENT "ROCPROFILER_QUEUE_INTERPOSITION=1"
+    FAIL_REGULAR_EXPRESSION "${SYNC_CTX_FAIL_REGEX}")
 
 #
 # Counter records are written on a consumer thread, later than the dispatch record tracing
-# produces, so this is a separate route the wait has to reach.
+# produces: a separate route the wait has to reach.
 #
-add_executable(synchronize-contexts-counter-window)
-target_sources(synchronize-contexts-counter-window PRIVATE counter_window.cpp)
-set_source_files_properties(counter_window.cpp PROPERTIES LANGUAGE HIP)
-
-target_link_libraries(
-    synchronize-contexts-counter-window
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-            Threads::Threads)
-
-set_target_properties(synchronize-contexts-counter-window PROPERTIES ENABLE_EXPORTS ON)
-
 rocprofiler_add_integration_execute_test(
     synchronize-contexts-counter-window
-    COMMAND $<TARGET_FILE:synchronize-contexts-counter-window>
-    DEPENDS synchronize-contexts-counter-window
+    COMMAND $<TARGET_FILE:synchronize-contexts-serial-testapp>
+    DEPENDS synchronize-contexts-counter-window-client
     TIMEOUT 300
-    LABELS "integration-tests"
-    ENVIRONMENT
-        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
-    )
+    LABELS "integration-tests;synchronize-contexts"
+    PRELOAD "$<TARGET_FILE:synchronize-contexts-counter-window-client>"
+    FAIL_REGULAR_EXPRESSION "${SYNC_CTX_FAIL_REGEX}")
 
 #
 # Signal-less kernel-dispatch completion: a third route, where a dispatch completes from a
-# firmware record instead of an SDK completion signal. The feature is read once per
-# process and changes completion semantics process-wide, so it cannot share a binary.
+# firmware record instead of an SDK completion signal. Eligibility is decided on the
+# interposed enqueue path, so interposition is pinned too.
 #
-add_executable(synchronize-contexts-signal-less-window)
-target_sources(synchronize-contexts-signal-less-window PRIVATE signal_less_window.cpp)
-set_source_files_properties(signal_less_window.cpp PROPERTIES LANGUAGE HIP)
-
-target_link_libraries(
-    synchronize-contexts-signal-less-window
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-            Threads::Threads)
-
-set_target_properties(synchronize-contexts-signal-less-window PROPERTIES ENABLE_EXPORTS
-                                                                         ON)
-
-# Signal-less eligibility is decided on the interposed enqueue path, so interposition is
-# pinned too -- without it the feature switch is on and unreachable.
+# The skip expression reads the SDK's teardown summary. A run that registered no batch
+# never reached this route and would otherwise pass by re-proving what tracing-window
+# proves; the cost is that it also swallows a failing run on such a machine.
 #
-# The skip expression reads the SDK's teardown summary: a run that registered no batch
-# never reached the path this test exists for, and would otherwise pass by re-proving what
-# the tracing-window test proves. The cost is that it also swallows a failing run on such
-# a machine -- but a failure there is a failure of the signal path, which that test
-# covers.
 rocprofiler_add_integration_execute_test(
     synchronize-contexts-signal-less-window
-    COMMAND $<TARGET_FILE:synchronize-contexts-signal-less-window>
-    DEPENDS synchronize-contexts-signal-less-window
+    COMMAND $<TARGET_FILE:synchronize-contexts-serial-testapp>
+    DEPENDS synchronize-contexts-signal-less-window-client
     TIMEOUT 120
-    LABELS "integration-tests"
-    ENVIRONMENT
-        "ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS=true"
-        "ROCPROFILER_QUEUE_INTERPOSITION=1"
-        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    LABELS "integration-tests;synchronize-contexts"
+    PRELOAD "$<TARGET_FILE:synchronize-contexts-signal-less-window-client>"
+    ENVIRONMENT "ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS=true"
+                "ROCPROFILER_QUEUE_INTERPOSITION=1"
+    FAIL_REGULAR_EXPRESSION "${SYNC_CTX_FAIL_REGEX}"
     SKIP_REGULAR_EXPRESSION "signal-less summary: registered=0 ")
 
 #
-# The complementary assertion: that no record arrives after the synchronize returns. Every
-# route is enabled on one context, because a drain reaching two of them and missing the
+# The complementary assertion: that no record arrives after the synchronize returns. All
+# three routes are enabled on one context, since a drain reaching two and missing the
 # third is the defect being looked for. Most of the runtime is deliberate idling.
 #
-add_executable(synchronize-contexts-no-late-records)
-target_sources(synchronize-contexts-no-late-records PRIVATE no_late_records.cpp)
-set_source_files_properties(no_late_records.cpp PROPERTIES LANGUAGE HIP)
-
-target_link_libraries(
-    synchronize-contexts-no-late-records
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-            Threads::Threads)
-
-set_target_properties(synchronize-contexts-no-late-records PROPERTIES ENABLE_EXPORTS ON)
-
-# Interposition is left to runtime qualification rather than pinned: the property under
-# test is that the drain reaches every route, whichever one the runtime picked.
+# Interposition is left to runtime qualification: the drain must reach every route,
+# whichever one the runtime picked.
+#
 rocprofiler_add_integration_execute_test(
     synchronize-contexts-no-late-records
-    COMMAND $<TARGET_FILE:synchronize-contexts-no-late-records>
-    DEPENDS synchronize-contexts-no-late-records
+    COMMAND $<TARGET_FILE:synchronize-contexts-serial-testapp>
+    DEPENDS synchronize-contexts-no-late-records-client
     TIMEOUT 120
-    LABELS "integration-tests"
-    ENVIRONMENT
-        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
-    )
+    LABELS "integration-tests;synchronize-contexts"
+    PRELOAD "$<TARGET_FILE:synchronize-contexts-no-late-records-client>"
+    FAIL_REGULAR_EXPRESSION "${SYNC_CTX_FAIL_REGEX}")
 
-# The windows above, but with dispatches in flight on other threads. The sibling tests are
-# single-threaded, so nothing else covers the drain's cross-thread behaviour.
-add_executable(synchronize-contexts-concurrent-windows)
-target_sources(synchronize-contexts-concurrent-windows PRIVATE concurrent_windows.cpp)
-set_source_files_properties(concurrent_windows.cpp PROPERTIES LANGUAGE HIP)
-
-target_link_libraries(
-    synchronize-contexts-concurrent-windows
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-            Threads::Threads)
-
-set_target_properties(synchronize-contexts-concurrent-windows PROPERTIES ENABLE_EXPORTS
-                                                                         ON)
-
-# Interposition is pinned so the enqueue path the concurrent synchronize contends with is
-# the same on every run.
+#
+# The windows above, but with dispatches in flight on other threads -- the only coverage
+# of the drain's cross-thread behaviour. Interposition is pinned so the enqueue path the
+# synchronize contends with is the same on every run.
+#
 rocprofiler_add_integration_execute_test(
     synchronize-contexts-concurrent-windows
-    COMMAND $<TARGET_FILE:synchronize-contexts-concurrent-windows>
-    DEPENDS synchronize-contexts-concurrent-windows
+    COMMAND $<TARGET_FILE:synchronize-contexts-concurrent-testapp>
+    DEPENDS synchronize-contexts-concurrent-windows-client
     TIMEOUT 120
-    LABELS "integration-tests"
-    ENVIRONMENT
-        "ROCPROFILER_QUEUE_INTERPOSITION=1"
-        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
-    )
+    LABELS "integration-tests;synchronize-contexts"
+    PRELOAD "$<TARGET_FILE:synchronize-contexts-concurrent-windows-client>"
+    ENVIRONMENT "ROCPROFILER_QUEUE_INTERPOSITION=1"
+    FAIL_REGULAR_EXPRESSION "${SYNC_CTX_FAIL_REGEX}")
 
-# The same binary with signal-less completion requested: the enqueue path differs between
+#
+# The same pair with signal-less completion requested: the enqueue path differs between
 # the two routes. Skipped when no batch registered, since the run never reached the route.
+#
 rocprofiler_add_integration_execute_test(
     synchronize-contexts-concurrent-windows-signal-less
-    COMMAND $<TARGET_FILE:synchronize-contexts-concurrent-windows>
-    DEPENDS synchronize-contexts-concurrent-windows
+    COMMAND $<TARGET_FILE:synchronize-contexts-concurrent-testapp>
+    DEPENDS synchronize-contexts-concurrent-windows-client
     TIMEOUT 120
-    LABELS "integration-tests"
-    ENVIRONMENT
-        "ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS=true"
-        "ROCPROFILER_QUEUE_INTERPOSITION=1"
-        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    LABELS "integration-tests;synchronize-contexts"
+    PRELOAD "$<TARGET_FILE:synchronize-contexts-concurrent-windows-client>"
+    ENVIRONMENT "ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS=true"
+                "ROCPROFILER_QUEUE_INTERPOSITION=1"
+    FAIL_REGULAR_EXPRESSION "${SYNC_CTX_FAIL_REGEX}"
     SKIP_REGULAR_EXPRESSION "signal-less summary: registered=0 ")

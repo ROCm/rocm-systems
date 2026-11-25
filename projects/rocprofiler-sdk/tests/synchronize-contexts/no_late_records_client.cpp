@@ -22,18 +22,18 @@
 
 // rocprofiler_synchronize_context as the closing act of a profiling window.
 //
-// The other tests here ask whether a window's own records arrive before it closes. This one asks
-// the complementary question, which no count of arrivals can answer: that nothing arrives after.
-// A record landing once the window has closed describes work the tool already reported on.
+// The other tools ask whether a window's own records arrive before it closes. This one asks the
+// complementary question, which no count of arrivals can answer: that nothing arrives after. A
+// record landing once the window has closed describes work the tool already reported on.
 //
-// Every route is enabled on the one context, because a drain reaching two of them and missing the
+// All three routes are enabled on the one context, since a drain reaching two and missing the
 // third is the defect being looked for.
 //
 // The context is deliberately left running across the idle stretch. Stopping it first is what a
-// real tool does, but it would also let the runtime discard a record still in flight -- which is
-// the record this is hunting.
+// real tool does, but it would also let the runtime discard the in-flight record this is hunting.
 
 #include "counter_config.hpp"
+#include "sync_test_workload.h"
 #include "test_support.hpp"
 
 #include <rocprofiler-sdk/buffer.h>
@@ -45,8 +45,6 @@
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include <hip/hip_runtime.h>
-
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -57,24 +55,22 @@
 
 namespace
 {
-constexpr const char* kTestTag = "no-late-records";
+constexpr const char* kTestTag = "synchronize-contexts";
 
 // Every operation outstanding when the window closes is a separate chance to leak one record.
 constexpr uint64_t kOperationPairs = 50;
 
-// How long the application sits idle after closing its window. Insurance rather than a
-// measurement: a consumer thread that merely lags has caught up many times over by the end of it.
+// How long the run sits idle after closing its window. Insurance, not a measurement: a consumer
+// thread that merely lags has caught up many times over by the end of it.
 constexpr auto kSettleDuration = std::chrono::seconds{5};
 
-constexpr size_t kCopyBytes     = 8 * 1024 * 1024;
-constexpr size_t kScratchFloats = 1024;
-
-// Counted per dispatch on every supported agent, so it is the cheapest counter that reliably
-// produces one record per dispatch.
+// Counted per dispatch on every supported agent: the cheapest counter that reliably produces one
+// record per dispatch.
 constexpr const char* kCounterName = "SQ_WAVES";
 
 using sync_test::make_options;
 using sync_test::make_result;
+using sync_test::scoped_lane;
 
 // Tool: one lossless buffer carrying every route, so one drain has to reach all of them.
 
@@ -94,7 +90,7 @@ std::mutex      g_counts_mutex;
 delivery_counts g_inside_window;
 delivery_counts g_after_window;
 
-// Everything delivered once this is set is late: the application issues no further GPU work.
+// Everything delivered once this is set is late: no further GPU work is issued.
 std::atomic<bool> g_window_closed{false};
 
 void
@@ -143,79 +139,27 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t data,
 int
 tool_init(rocprofiler_client_finalize_t /*fini_func*/, void* /*tool_data*/)
 {
-    CHECK_ROCP(rocprofiler_create_context(&g_context));
-    CHECK_ROCP(rocprofiler_create_buffer(g_context,
-                                         512 * 1024,
-                                         256 * 1024,
-                                         ROCPROFILER_BUFFER_POLICY_LOSSLESS,
-                                         buffer_callback,
-                                         nullptr,
-                                         &g_buffer));
-    CHECK_ROCP(rocprofiler_configure_buffer_tracing_service(
+    ROCPROFILER_CHECK(rocprofiler_create_context(&g_context));
+    ROCPROFILER_CHECK(rocprofiler_create_buffer(g_context,
+                                                512 * 1024,
+                                                256 * 1024,
+                                                ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                                buffer_callback,
+                                                nullptr,
+                                                &g_buffer));
+    ROCPROFILER_CHECK(rocprofiler_configure_buffer_tracing_service(
         g_context, ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH, nullptr, 0, g_buffer));
-    CHECK_ROCP(rocprofiler_configure_buffer_tracing_service(
+    ROCPROFILER_CHECK(rocprofiler_configure_buffer_tracing_service(
         g_context, ROCPROFILER_BUFFER_TRACING_MEMORY_COPY, nullptr, 0, g_buffer));
-    CHECK_ROCP(rocprofiler_configure_buffer_dispatch_counting_service(
+    ROCPROFILER_CHECK(rocprofiler_configure_buffer_dispatch_counting_service(
         g_context, g_buffer, dispatch_callback, nullptr));
-    CHECK_ROCP(rocprofiler_start_context(g_context));
+    ROCPROFILER_CHECK(rocprofiler_start_context(g_context));
     return 0;
 }
 
 void
 tool_fini(void* /*tool_data*/)
 {}
-
-// Workload
-
-__global__ void
-touch_kernel(float* ptr)
-{
-    if(threadIdx.x == 0) ptr[0] += 1.0F;
-}
-
-// The copy source is pinned host memory and large enough that the runtime uses the copy engine.
-// A small copy, or one between two device allocations, is serviced by a blit kernel instead,
-// which emits a dispatch record and leaves the memory copy route untested while appearing to pass.
-class gpu_workload
-{
-public:
-    gpu_workload()
-    {
-        CHECK_HIP(hipMalloc(&m_scratch, kScratchFloats * sizeof(float)));
-        CHECK_HIP(hipMemset(m_scratch, 0, kScratchFloats * sizeof(float)));
-        CHECK_HIP(hipMalloc(&m_copy_dst, kCopyBytes));
-        CHECK_HIP(hipHostMalloc(reinterpret_cast<void**>(&m_copy_src), kCopyBytes));
-    }
-
-    ~gpu_workload()
-    {
-        CHECK_HIP(hipHostFree(m_copy_src));
-        CHECK_HIP(hipFree(m_copy_dst));
-        CHECK_HIP(hipFree(m_scratch));
-    }
-
-    gpu_workload(const gpu_workload&) = delete;
-    gpu_workload& operator=(const gpu_workload&) = delete;
-
-    void dispatch_kernel() const
-    {
-        touch_kernel<<<1, 64>>>(m_scratch);
-        CHECK_HIP(hipGetLastError());
-    }
-
-    void copy_to_device() const
-    {
-        CHECK_HIP(
-            hipMemcpyAsync(m_copy_dst, m_copy_src, kCopyBytes, hipMemcpyHostToDevice, nullptr));
-    }
-
-    static void wait_on_device() { CHECK_HIP(hipDeviceSynchronize()); }
-
-private:
-    float* m_scratch  = nullptr;
-    float* m_copy_dst = nullptr;
-    float* m_copy_src = nullptr;
-};
 
 // Bookkeeping
 
@@ -235,7 +179,7 @@ reset_counts()
 }
 
 // Report one route that came up short and evaluate to 1. Without these the test passes on a build
-// that delivers nothing: no records means no late records, and silence is what it looks for.
+// delivering nothing: no records means no late records, and silence is what it looks for.
 uint64_t
 require_at_least(const char* route, uint64_t delivered, uint64_t expected)
 {
@@ -251,33 +195,33 @@ require_at_least(const char* route, uint64_t delivered, uint64_t expected)
     return 1;
 }
 
-// The application: open a window, run a batch, close the window, then go quiet.
+// Open a window, run a batch, close the window, then go quiet.
 
 uint64_t
-nothing_arrives_after_the_window_closes(const gpu_workload& workload)
+nothing_arrives_after_the_window_closes(const scoped_lane& lane)
 {
     auto failures = uint64_t{0};
 
     for(uint64_t i = 0; i < kOperationPairs; ++i)
     {
-        workload.dispatch_kernel();
-        workload.copy_to_device();
+        lane.launch_kernel();
+        lane.launch_copy();
     }
 
-    // A tool reporting on a finished phase waits for it first, so what the synchronize has to
-    // drain is record production and delivery, not the operations themselves.
-    gpu_workload::wait_on_device();
+    // A tool reporting on a finished phase waits for it first, leaving the synchronize to drain
+    // record production and delivery rather than the operations themselves.
+    lane.wait();
 
     auto options = make_options(ROCPROFILER_SYNCHRONIZE_CONTEXT_NONE);
     auto result  = make_result();
-    CHECK_ROCP(rocprofiler_synchronize_context(g_context, &options, &result));
+    ROCPROFILER_CHECK(rocprofiler_synchronize_context(g_context, &options, &result));
 
-    // Closed here and never reopened. A record delivered at this exact instant may land on
-    // either side of the flip, which can only under-report, never fail a build that drained.
+    // Closed here and never reopened. A record delivered at this exact instant may land on either
+    // side of the flip, which can only under-report, never fail a build that drained.
     g_window_closed.store(true);
 
     // Success means the drain reported nothing outstanding, so a nonzero count is the status and
-    // the result disagreeing -- and would explain any late record below as one it admitted to.
+    // the result disagreeing.
     if(result.num_timeout_records != 0)
     {
         ++failures;
@@ -296,7 +240,7 @@ nothing_arrives_after_the_window_closes(const gpu_workload& workload)
 
     // A record written to the buffer after the synchronize flushed it is still sitting there, so
     // the idle stretch alone would not reveal it.
-    CHECK_ROCP(rocprofiler_flush_buffer(g_buffer));
+    ROCPROFILER_CHECK(rocprofiler_flush_buffer(g_buffer));
 
     const auto late = read_counts(g_after_window);
     if(late.total() == 0) return failures;
@@ -315,7 +259,7 @@ nothing_arrives_after_the_window_closes(const gpu_workload& workload)
 }
 }  // namespace
 
-extern "C" __attribute__((visibility("default"))) rocprofiler_tool_configure_result_t*
+extern "C" rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t /*version*/,
                       const char* /*runtime_version*/,
                       uint32_t /*priority*/,
@@ -327,21 +271,25 @@ rocprofiler_configure(uint32_t /*version*/,
     return &_cfg;
 }
 
-int
-main(int, char**)
+extern "C" __attribute__((visibility("default"))) uint64_t
+sync_test_run(const sync_test_workload_t* workload)
 {
-    auto workload = gpu_workload{};
+    if(!sync_test::workload_is_usable(
+           workload, /* required_lanes = */ 1, /* requires_copy = */ true, kTestTag))
+        return 1;
+
+    auto lane = scoped_lane{*workload};
 
     // Warm up the lazy paths -- module load, signal pool, the counter configuration built on the
     // first dispatch -- then start from a known-empty slate.
     for(int i = 0; i < 10; ++i)
-        workload.dispatch_kernel();
-    workload.copy_to_device();
-    gpu_workload::wait_on_device();
-    CHECK_ROCP(rocprofiler_synchronize_context(g_context, nullptr, nullptr));
+        lane.launch_kernel();
+    lane.launch_copy();
+    lane.wait();
+    ROCPROFILER_CHECK(rocprofiler_synchronize_context(g_context, nullptr, nullptr));
     reset_counts();
 
-    const auto failures = nothing_arrives_after_the_window_closes(workload);
+    const auto failures = nothing_arrives_after_the_window_closes(lane);
 
     if(failures > 0)
     {
@@ -349,7 +297,7 @@ main(int, char**)
                 "[%s] FAILED: %lu failed expectations\n",
                 kTestTag,
                 static_cast<unsigned long>(failures));
-        return EXIT_FAILURE;
+        return failures;
     }
 
     fprintf(stdout,
@@ -359,5 +307,5 @@ main(int, char**)
             static_cast<unsigned long>(kOperationPairs),
             static_cast<unsigned long>(kOperationPairs),
             static_cast<unsigned long>(kSettleDuration.count()));
-    return EXIT_SUCCESS;
+    return 0;
 }

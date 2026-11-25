@@ -23,11 +23,10 @@
 #pragma once
 
 // The counter configuration the dispatch counting service asks for, looked up by name and cached
-// per agent: the service asks once per dispatch, and building one means iterating every counter
-// the agent supports and querying each by name.
+// per agent: the service asks once per dispatch, and building one iterates every counter the agent
+// supports.
 //
-// The test tag is an argument rather than the kTestTag each test defines, which is declared after
-// the include and so is not in scope here.
+// The test tag is an argument because each test's kTestTag is declared after this include.
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/counter_config.h>
@@ -44,8 +43,8 @@
 
 namespace sync_test
 {
-// Setup rather than the thing under test, so a failure takes the process down where it happened
-// instead of being reported as a failed expectation.
+// Setup, not the thing under test, so a failure exits where it happened rather than being
+// reported as a failed expectation.
 inline void
 abort_unless_success(rocprofiler_status_t status, const char* what, const char* test_tag)
 {

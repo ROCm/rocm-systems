@@ -23,26 +23,25 @@
 // rocprofiler_synchronize_context, over signal-less kernel-dispatch completion.
 //
 // An eligible batch publishes its packets untouched and completes from a firmware record rather
-// than an SDK completion signal -- a third route out of the runtime, alongside tracing_window.cpp
-// and counter_window.cpp. The feature is opt-in through ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS,
-// read once per process, and changes completion semantics process-wide, so it cannot be turned on
-// partway through a test: hence a binary and a ctest environment of its own.
+// than an SDK completion signal -- a third route out of the runtime, alongside
+// tracing_window_client.cpp and counter_window_client.cpp. ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS
+// is read once per process and changes completion semantics process-wide, so this needs a tool and
+// a ctest environment of its own.
 //
 //   every_window_sees_its_dispatch_record   many short windows, each requiring its own dispatch's
 //                                           record back inside the window.
-//   nohang_never_reports_timeout            NOHANG returns a reading instead of waiting, so it
-//                                           cannot report a timeout. The peek is separate code
-//                                           from the wait, and one blind to a signal-less packet
-//                                           in flight is wrong in a way the wait never shows.
+//   nohang_never_reports_timeout            the peek is separate code from the wait, and one
+//                                           blind to a signal-less packet in flight is wrong in
+//                                           a way the wait never shows.
 //
-// Option and argument validation common to the API is covered once, in tracing_window.cpp.
+// Option and argument validation common to the API is covered in tracing_window_client.cpp.
 //
-// COVERAGE BOUNDARY. Signal-less engages only on a kernel whose dispatch-log ABI matches the one
-// the SDK was built against; elsewhere the SDK falls back to signal-based completion and these
-// checks re-prove what tracing_window.cpp already proves rather than fail. Nothing inside the
-// process distinguishes the two, so the ctest registration gates on the SDK's teardown summary
-// and skips a run that registered no batch.
+// Coverage boundary: signal-less engages only where the kernel's dispatch-log ABI matches the one
+// the SDK was built against. Elsewhere the SDK falls back to signal-based completion and these
+// checks re-prove tracing_window_client.cpp rather than fail. Nothing inside the process
+// distinguishes the two, so the ctest registration gates on the SDK's teardown summary.
 
+#include "sync_test_workload.h"
 #include "test_support.hpp"
 
 #include <rocprofiler-sdk/buffer.h>
@@ -54,8 +53,6 @@
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include <hip/hip_runtime.h>
-
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
@@ -65,21 +62,21 @@
 
 namespace
 {
-constexpr const char* kTestTag = "synchronize-contexts-signal-less";
+constexpr const char* kTestTag = "synchronize-contexts";
 
 // Read here only to confirm it reached the process: the SDK reads it once, early, and never
-// reports what it decided, so a run that silently went without it looks like a passing one.
+// reports what it decided.
 constexpr const char* kFeatureEnvVar = "ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS";
 
-// Fewer than the tracing window loop: every dispatch here waits on a firmware record rather than
-// on a signal the SDK controls, which is the slower of the two.
+// Fewer than the tracing window loop: waiting on a firmware record is slower than waiting on a
+// signal the SDK controls.
 constexpr uint64_t kWindows = 500;
 
-constexpr uint64_t kNohangTag     = kWindows + 1;
-constexpr size_t   kScratchFloats = 1024;
+constexpr uint64_t kNohangTag = kWindows + 1;
 
 using sync_test::make_options;
 using sync_test::make_result;
+using sync_test::scoped_lane;
 
 // Tool: kernel dispatch only, the one domain signal-less completion changes.
 
@@ -89,8 +86,8 @@ rocprofiler_buffer_id_t  g_buffer  = {};
 std::mutex            g_delivered_mutex;
 std::vector<uint64_t> g_delivered;  ///< external correlation id of each dispatch record delivered
 
-// Guards against a vacuous pass: if the callback never ran, every window looks deficient for a
-// reason unrelated to ordering.
+// Guards against a vacuous pass: a callback that never ran makes every window look deficient for
+// a reason unrelated to ordering.
 std::atomic<bool> g_callback_ran{false};
 
 void
@@ -119,17 +116,17 @@ buffer_callback(rocprofiler_context_id_t /*context*/,
 int
 tool_init(rocprofiler_client_finalize_t /*fini_func*/, void* /*tool_data*/)
 {
-    CHECK_ROCP(rocprofiler_create_context(&g_context));
-    CHECK_ROCP(rocprofiler_create_buffer(g_context,
-                                         256 * 1024,
-                                         128 * 1024,
-                                         ROCPROFILER_BUFFER_POLICY_LOSSLESS,
-                                         buffer_callback,
-                                         nullptr,
-                                         &g_buffer));
-    CHECK_ROCP(rocprofiler_configure_buffer_tracing_service(
+    ROCPROFILER_CHECK(rocprofiler_create_context(&g_context));
+    ROCPROFILER_CHECK(rocprofiler_create_buffer(g_context,
+                                                256 * 1024,
+                                                128 * 1024,
+                                                ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                                buffer_callback,
+                                                nullptr,
+                                                &g_buffer));
+    ROCPROFILER_CHECK(rocprofiler_configure_buffer_tracing_service(
         g_context, ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH, nullptr, 0, g_buffer));
-    CHECK_ROCP(rocprofiler_start_context(g_context));
+    ROCPROFILER_CHECK(rocprofiler_start_context(g_context));
     return 0;
 }
 
@@ -137,65 +134,31 @@ void
 tool_fini(void* /*tool_data*/)
 {}
 
-// Workload
-
-__global__ void
-touch_kernel(float* ptr)
-{
-    if(threadIdx.x == 0) ptr[0] += 1.0F;
-}
-
-class gpu_workload
-{
-public:
-    gpu_workload()
-    {
-        CHECK_HIP(hipMalloc(&m_scratch, kScratchFloats * sizeof(float)));
-        CHECK_HIP(hipMemset(m_scratch, 0, kScratchFloats * sizeof(float)));
-    }
-
-    ~gpu_workload() { CHECK_HIP(hipFree(m_scratch)); }
-
-    gpu_workload(const gpu_workload&) = delete;
-    gpu_workload& operator=(const gpu_workload&) = delete;
-
-    void launch() const
-    {
-        touch_kernel<<<1, 64>>>(m_scratch);
-        CHECK_HIP(hipGetLastError());
-    }
-
-    static void wait_on_device() { CHECK_HIP(hipDeviceSynchronize()); }
-
-private:
-    float* m_scratch = nullptr;
-};
-
 // Window bookkeeping
 
 void
 push_tag(uint64_t tag)
 {
     auto thread_id = rocprofiler_thread_id_t{0};
-    CHECK_ROCP(rocprofiler_get_thread_id(&thread_id));
+    ROCPROFILER_CHECK(rocprofiler_get_thread_id(&thread_id));
 
     auto external  = rocprofiler_user_data_t{};
     external.value = tag;
-    CHECK_ROCP(rocprofiler_push_external_correlation_id(g_context, thread_id, external));
+    ROCPROFILER_CHECK(rocprofiler_push_external_correlation_id(g_context, thread_id, external));
 }
 
 void
 pop_tag()
 {
     auto thread_id = rocprofiler_thread_id_t{0};
-    CHECK_ROCP(rocprofiler_get_thread_id(&thread_id));
+    ROCPROFILER_CHECK(rocprofiler_get_thread_id(&thread_id));
 
     auto popped = rocprofiler_user_data_t{};
-    CHECK_ROCP(rocprofiler_pop_external_correlation_id(g_context, thread_id, &popped));
+    ROCPROFILER_CHECK(rocprofiler_pop_external_correlation_id(g_context, thread_id, &popped));
 }
 
-// Consume everything delivered and report how much carried `tag`. Draining is what keeps each
-// window's verdict independent of the ones before it.
+// Consume everything delivered and report how much carried `tag`. Draining keeps each window's
+// verdict independent of the ones before it.
 uint64_t
 take_delivered(uint64_t tag)
 {
@@ -216,24 +179,24 @@ discard_delivered()
     g_delivered.clear();
 }
 
-// Checks. Each returns a count of failed expectations, so main can report every problem at once.
+// Checks. Each returns a count of failed expectations, so one run reports every problem.
 
 // The regression guard. The synchronize flushes as part of the call, so the window deliberately
 // does not flush the buffer itself -- that would mask a regression in half the contract.
 uint64_t
-every_window_sees_its_dispatch_record(const gpu_workload& workload)
+every_window_sees_its_dispatch_record(const scoped_lane& lane)
 {
     auto failures = uint64_t{0};
 
     for(uint64_t window = 0; window < kWindows; ++window)
     {
         push_tag(window);
-        workload.launch();
-        gpu_workload::wait_on_device();
+        lane.launch_kernel();
+        lane.wait();
 
         auto options = make_options(ROCPROFILER_SYNCHRONIZE_CONTEXT_NONE);
         auto result  = make_result();
-        CHECK_ROCP(rocprofiler_synchronize_context(g_context, &options, &result));
+        ROCPROFILER_CHECK(rocprofiler_synchronize_context(g_context, &options, &result));
         pop_tag();
 
         // Success means the drain reported nothing outstanding, so a nonzero count is the
@@ -266,12 +229,12 @@ every_window_sees_its_dispatch_record(const gpu_workload& workload)
 // even under a deadline far too short for a real wait. The dispatch is left in flight on purpose:
 // an in-flight signal-less dispatch is exactly what the peek has to account for.
 uint64_t
-nohang_never_reports_timeout(const gpu_workload& workload)
+nohang_never_reports_timeout(const scoped_lane& lane)
 {
     auto failures = uint64_t{0};
 
     push_tag(kNohangTag);
-    workload.launch();
+    lane.launch_kernel();
 
     auto options = make_options(ROCPROFILER_SYNCHRONIZE_CONTEXT_NOHANG, /* timeout_ns = */ 1);
     auto result  = make_result();
@@ -290,8 +253,8 @@ nohang_never_reports_timeout(const gpu_workload& workload)
     }
 
     // Settle the dispatch left in flight, taking the documented both-arguments-NULL path.
-    gpu_workload::wait_on_device();
-    CHECK_ROCP(rocprofiler_synchronize_context(g_context, nullptr, nullptr));
+    lane.wait();
+    ROCPROFILER_CHECK(rocprofiler_synchronize_context(g_context, nullptr, nullptr));
 
     if(take_delivered(kNohangTag) == 0)
     {
@@ -306,7 +269,7 @@ nohang_never_reports_timeout(const gpu_workload& workload)
 }
 }  // namespace
 
-extern "C" __attribute__((visibility("default"))) rocprofiler_tool_configure_result_t*
+extern "C" rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t /*version*/,
                       const char* /*runtime_version*/,
                       uint32_t /*priority*/,
@@ -318,12 +281,11 @@ rocprofiler_configure(uint32_t /*version*/,
     return &_cfg;
 }
 
-int
-main(int, char**)
+extern "C" __attribute__((visibility("default"))) uint64_t
+sync_test_run(const sync_test_workload_t* workload)
 {
-    // The SDK read the variable before main, so an environment that never carried it produces a
-    // run that passes while testing the signal path. Fail rather than skip: that is a broken test
-    // registration, not an unsuitable machine.
+    // Without the variable the run would pass while testing the signal path. Fail rather than
+    // skip: that is a broken test registration, not an unsuitable machine.
     if(::getenv(kFeatureEnvVar) == nullptr)
     {
         fprintf(stderr,
@@ -331,22 +293,26 @@ main(int, char**)
                 "name of the signal-less test\n",
                 kTestTag,
                 kFeatureEnvVar);
-        return EXIT_FAILURE;
+        return 1;
     }
 
-    auto workload = gpu_workload{};
+    if(!sync_test::workload_is_usable(
+           workload, /* required_lanes = */ 1, /* requires_copy = */ false, kTestTag))
+        return 1;
+
+    auto lane = scoped_lane{*workload};
 
     // Warm up the lazy paths -- module load, dispatch-log session, first touch -- then start
     // clean.
     for(int i = 0; i < 10; ++i)
-        workload.launch();
-    gpu_workload::wait_on_device();
-    CHECK_ROCP(rocprofiler_synchronize_context(g_context, nullptr, nullptr));
+        lane.launch_kernel();
+    lane.wait();
+    ROCPROFILER_CHECK(rocprofiler_synchronize_context(g_context, nullptr, nullptr));
     discard_delivered();
 
     auto failures = uint64_t{0};
-    failures += every_window_sees_its_dispatch_record(workload);
-    failures += nohang_never_reports_timeout(workload);
+    failures += every_window_sees_its_dispatch_record(lane);
+    failures += nohang_never_reports_timeout(lane);
 
     if(!g_callback_ran.load())
     {
@@ -364,7 +330,7 @@ main(int, char**)
                 kTestTag,
                 static_cast<unsigned long>(failures),
                 static_cast<unsigned long>(kWindows));
-        return EXIT_FAILURE;
+        return failures;
     }
 
     fprintf(stderr,
@@ -372,5 +338,5 @@ main(int, char**)
             "completion requested\n",
             kTestTag,
             static_cast<unsigned long>(kWindows));
-    return EXIT_SUCCESS;
+    return 0;
 }

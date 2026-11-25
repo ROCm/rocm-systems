@@ -22,29 +22,27 @@
 
 #pragma once
 
-// Scaffolding shared by the rocprofiler_synchronize_context tests: the struct builders the API
-// requires, and the macros each test asserts with.
+// Scaffolding shared by the rocprofiler_synchronize_context tools: the struct builders the API
+// requires, the assertion macros, and the workload compatibility check. Tool side only, and free
+// of HIP.
 //
-// Every including file must define a tag naming itself, which prefixes every diagnostic:
+// Every including file must define the tag that prefixes its diagnostics:
 //
 //     namespace { constexpr const char* kTestTag = "my-test"; }
+
+#include "sync_test_workload.h"
 
 #include <rocprofiler-sdk/experimental/synchronize_contexts.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include <hip/hip_runtime.h>
-
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 
-// Setup rather than the thing under test: there is nothing useful to assert once one of these
-// fails, so it takes the process down at the point of failure.
-//
-// The do/while makes the macro a single statement, so it stays correct in an unbraced if/else
-// rather than silently attaching the failure branch to the wrong arm.
-#define CHECK_ROCP(...)                                                                            \
+// Setup, not the thing under test: nothing further is worth asserting once one of these fails,
+// so it exits at the point of failure.
+#define ROCPROFILER_CHECK(...)                                                                     \
     do                                                                                             \
     {                                                                                              \
         auto _status = (__VA_ARGS__);                                                              \
@@ -61,24 +59,7 @@
         }                                                                                          \
     } while(0)
 
-#define CHECK_HIP(...)                                                                             \
-    do                                                                                             \
-    {                                                                                              \
-        auto _err = (__VA_ARGS__);                                                                 \
-        if(_err != hipSuccess)                                                                     \
-        {                                                                                          \
-            fprintf(stderr,                                                                        \
-                    "[%s] %s:%d: %s failed: %s\n",                                                 \
-                    kTestTag,                                                                      \
-                    __FILE__,                                                                      \
-                    __LINE__,                                                                      \
-                    #__VA_ARGS__,                                                                  \
-                    hipGetErrorString(_err));                                                      \
-            exit(EXIT_FAILURE);                                                                    \
-        }                                                                                          \
-    } while(0)
-
-// Report one failed expectation and evaluate to 1, so a check can accumulate failures with
+// Report one failed expectation and evaluate to 1, so a check can accumulate with
 // `failures += EXPECT_STATUS(...)` and still run everything else.
 #define EXPECT_STATUS(EXPECTED, ...)                                                               \
     ([&]() -> uint64_t {                                                                           \
@@ -98,7 +79,7 @@
 namespace sync_test
 {
 // The caller stamps the size of each struct it hands the API, which is how the API tells an older
-// caller's layout from a newer one. The only way the tests build one, so no call site forgets.
+// caller's layout from a newer one.
 inline rocprofiler_synchronize_context_options_t
 make_options(uint64_t flags, uint64_t timeout_ns = 0)
 {
@@ -116,4 +97,77 @@ make_result()
     result.size = sizeof(rocprofiler_synchronize_context_result_t);
     return result;
 }
+
+/// True when the application can do what the tool is about to ask of it. A tool paired with the
+/// wrong application would serialize work it needs concurrent, or skip the domain it covers, and
+/// report a pass for doing so.
+inline bool
+workload_is_usable(const sync_test_workload_t* workload,
+                   uint64_t                    required_lanes,
+                   bool                        requires_copy,
+                   const char*                 test_tag)
+{
+    if(workload == nullptr || workload->size < sizeof(sync_test_workload_t))
+    {
+        fprintf(stderr,
+                "[%s] the application supplied no workload, or one built against an older "
+                "layout than this tool was built against\n",
+                test_tag);
+        return false;
+    }
+
+    if(workload->open_lane == nullptr || workload->close_lane == nullptr ||
+       workload->launch_kernel == nullptr || workload->wait == nullptr)
+    {
+        fprintf(stderr, "[%s] the application left a required workload entry unset\n", test_tag);
+        return false;
+    }
+
+    if(workload->lanes < required_lanes)
+    {
+        fprintf(stderr,
+                "[%s] this tool needs %lu independent lanes and the application offers %lu, so "
+                "the work it is meant to overlap would run in sequence\n",
+                test_tag,
+                static_cast<unsigned long>(required_lanes),
+                static_cast<unsigned long>(workload->lanes));
+        return false;
+    }
+
+    if(requires_copy && workload->launch_copy == nullptr)
+    {
+        fprintf(stderr,
+                "[%s] this tool covers the memory copy domain and the application cannot issue "
+                "a copy\n",
+                test_tag);
+        return false;
+    }
+
+    return true;
+}
+
+/// Holds a lane open for a scope, so an early return cannot leak the application's stream.
+class scoped_lane
+{
+public:
+    explicit scoped_lane(const sync_test_workload_t& workload, uint64_t index = 0)
+    : m_workload{&workload}
+    , m_lane{workload.open_lane(index)}
+    {}
+
+    ~scoped_lane() { m_workload->close_lane(m_lane); }
+
+    scoped_lane(const scoped_lane&) = delete;
+    scoped_lane& operator=(const scoped_lane&) = delete;
+
+    void* get() const { return m_lane; }
+
+    void launch_kernel() const { m_workload->launch_kernel(m_lane); }
+    void launch_copy() const { m_workload->launch_copy(m_lane); }
+    void wait() const { m_workload->wait(m_lane); }
+
+private:
+    const sync_test_workload_t* m_workload = nullptr;
+    void*                       m_lane     = nullptr;
+};
 }  // namespace sync_test
