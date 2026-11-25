@@ -75,7 +75,7 @@ template <rocjitsu::arith::Fp64 Op>
 // AcceptExact marks entry points whose results were checked against their architecture's
 // captures (gfx12 and RDNA3 arithmetic and rounding); the RDNA2 FMA entry stays loose-only.
 template <rocjitsu::arith::Fp64 Op, bool Rdna3 = false, bool Cdna = false, bool AcceptExact = false,
-          bool NativeMath = false>
+          bool NativeMath = false, bool LegacyRound = false>
 int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
          const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
   // The RDNA empirical model does not describe CDNA's inherited host-double core.
@@ -113,7 +113,7 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
     instruction_flags = uint32_t(rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags));
   }
   // gfx11 preserves signaling NaNs when IEEE mode is clear.
-  const bool quiet_snan = Cdna || !Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE);
+  const bool quiet_snan = Cdna || LegacyRound || !Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE);
   // CDNA native math obeys guest input flushing. Reciprocal also obeys output
   // flushing; the root cores retain their inherited output policy.
   if constexpr (NativeMath) {
@@ -357,11 +357,11 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
 // Evaluate FP64 arithmetic or selection for Wave64. Reject invalid controls before changing
 // outputs.
 template <rocjitsu::arith::Fp64 Op, bool Rdna3 = false, bool Cdna = false, bool AcceptExact = false,
-          bool NativeMath = false>
+          bool NativeMath = false, bool LegacyRound = false>
 int fp64_wave64(uint64_t flags, uint64_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
                 const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
-  if (int error = fp64<Op, Rdna3, Cdna, AcceptExact, NativeMath>(
+  if (int error = fp64<Op, Rdna3, Cdna, AcceptExact, NativeMath, LegacyRound>(
           flags, 0, instruction_flags, nullptr, nullptr, nullptr, nullptr)) {
     return error;
   }
@@ -382,7 +382,7 @@ int fp64_wave64(uint64_t flags, uint64_t exec_mask, uint32_t instruction_flags, 
         z[word] = c[word] + half * 32;
       }
     }
-    if (int error = fp64<Op, Rdna3, Cdna, AcceptExact, NativeMath>(
+    if (int error = fp64<Op, Rdna3, Cdna, AcceptExact, NativeMath, LegacyRound>(
             flags, uint32_t(exec_mask >> (half * 32)), instruction_flags, dest, x, y, z)) {
       return error;
     }
@@ -2176,4 +2176,124 @@ int rj_arith_v_fma_f64_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t in
     return error;
   }
   return rj_arith_v_fma_f64_w64(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
+}
+
+// Preserve legacy integral NaN quieting and guest output controls without new qualification.
+int rj_arith_v_trunc_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *state) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Trunc, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Preserve legacy integral NaN quieting and guest output controls without new qualification.
+int rj_arith_v_ceil_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   [[maybe_unused]] uint32_t *state) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Ceil, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Preserve legacy integral NaN quieting and guest output controls without new qualification.
+int rj_arith_v_rndne_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *state) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Rndne, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Preserve legacy integral NaN quieting and guest output controls without new qualification.
+int rj_arith_v_floor_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *state) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Floor, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Preserve legacy integral NaN quieting and guest output controls without new qualification.
+int rj_arith_v_trunc_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *state) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Trunc, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Preserve legacy integral NaN quieting and guest output controls without new qualification.
+int rj_arith_v_ceil_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   [[maybe_unused]] uint32_t *state) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Ceil, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Preserve legacy integral NaN quieting and guest output controls without new qualification.
+int rj_arith_v_rndne_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *state) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Rndne, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Preserve legacy integral NaN quieting and guest output controls without new qualification.
+int rj_arith_v_floor_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *state) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Floor, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
 }

@@ -1,9 +1,9 @@
-import pytest
-
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
 """Tests for packed execute code generation."""
+
+import pytest
 
 from amdisa.codegen.execute.packed import (
     gen_pk_binop,
@@ -116,27 +116,14 @@ def test_pk_u64_binop_rejects_unknown_operation():
         gen_pk_binop_u64(['vdst'], ['src0', 'src1'], 'mul')
 
 
-def test_pk_f64_binops_use_mode_aware_two_element_execution():
-    expected_operations = {
-        'add': 'Add',
-        'mul': 'Multiply',
-        'max_num': 'MaximumNumber',
-        'min_num': 'MinimumNumber',
-    }
-    for operation, enum_name in expected_operations.items():
+def test_pk_f64_binops_use_carrier_aware_arithmetic_adapter():
+    for operation in ('add', 'mul', 'min_num', 'max_num'):
         cpp = gen_pk_binop_f64(['vdst'], ['src0', 'src1'], operation)
-
-        assert 'const auto lhs = read_pk_u64_pair(src0, wf, lane);' in cpp
-        assert 'const auto rhs = read_pk_u64_pair(src1, wf, lane);' in cpp
-        assert f'BinaryF64Op::{enum_name}' in cpp
-        assert cpp.count('amdgpu::fp_mode::binary_f64(') == 1
-        assert 'wf.fp_round_mode_f16_f64()' in cpp
-        assert 'wf.fp_denorm_mode_f16_f64()' in cpp
-        assert 'lhs_bits ^= kSignBit' in cpp
-        assert 'rhs_bits ^= kSignBit' in cpp
-        assert 'amdgpu::fp_mode::finish_f64(' in cpp
-        assert 'inst_.clamp' in cpp
-        assert 'write_pk_u64_pair(vdst, wf, lane, {result_lo, result_hi});' in cpp
+        assert 'execute_packed_f64<false>' in cpp
+        assert f'rj_arith_v_pk_{operation}_f64_w32, modifiers, vdst, src0, src1' in cpp
+        assert 'inst_.neg | (uint64_t(inst_.neg_hi) << 3)' in cpp
+        assert 'inst_.clamp ? RJ_ARITH_PK_CLAMP : 0' in cpp
+        assert 'fp_mode::' not in cpp
 
 
 def test_pk_f64_binop_rejects_unknown_operation():
@@ -146,21 +133,12 @@ def test_pk_f64_binop_rejects_unknown_operation():
         gen_pk_binop_f64(['vdst'], ['src0', 'src1'], 'divide')
 
 
-def test_pk_f64_fma_uses_mode_aware_fused_two_element_execution():
+def test_pk_f64_fma_uses_guest_fp_adapter():
     cpp = gen_pk_ternary_f64(['vdst'], ['src0', 'src1', 'src2'], 'fma')
-
-    assert 'const auto multiplicand = read_pk_u64_pair(src0, wf, lane);' in cpp
-    assert 'const auto multiplier = read_pk_u64_pair(src1, wf, lane);' in cpp
-    assert 'const auto addend = read_pk_u64_pair(src2, wf, lane);' in cpp
-    assert cpp.count('amdgpu::fp_mode::fma_f64(') == 1
-    assert 'wf.fp_round_mode_f16_f64()' in cpp
-    assert 'wf.fp_denorm_mode_f16_f64()' in cpp
-    assert 'multiplicand_bits ^= kSignBit' in cpp
-    assert 'multiplier_bits ^= kSignBit' in cpp
-    assert 'addend_bits ^= kSignBit' in cpp
-    assert 'amdgpu::fp_mode::finish_f64(' in cpp
-    assert 'inst_.clamp' in cpp
-    assert 'write_pk_u64_pair(vdst, wf, lane, {result_lo, result_hi});' in cpp
+    assert 'execute_packed_f64<true>' in cpp
+    assert 'rj_arith_v_pk_fma_f64_w32, modifiers, vdst, src0, src1, &src2' in cpp
+    assert 'inst_.neg | (uint64_t(inst_.neg_hi) << 3)' in cpp
+    assert 'inst_.clamp ? RJ_ARITH_PK_CLAMP : 0' in cpp
 
 
 def test_pk_f64_ternary_rejects_unknown_operation():
