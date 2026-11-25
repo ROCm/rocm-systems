@@ -48,6 +48,7 @@ def _plotted_bandwidth_levels(gpu_arch: str) -> list[str]:
     ]
 
 
+@pytest.mark.roofline_validation
 @pytest.mark.parametrize("gpu_arch", _ROOFLINE_ARCHS)
 def test_roofline_config_covers_all_memory_levels(gpu_arch):
     """Table 402 must have an AI row for every plotted memory level.
@@ -117,13 +118,7 @@ def test_roofline_ai_points_mat_mul_max(
 
         model = embedded_roofline_model(html_files[0].read_text(encoding="utf-8"))
 
-        # The model embeds kernel data under each figure class (FLOP/OP).
-        # Find kernels from either figure class.
-        kernels = []
-        for fig_class in ("flops", "ops"):
-            fig = model.get(fig_class)
-            if fig and "kernels" in fig:
-                kernels.extend(fig["kernels"])
+        kernels = model.get("kernels", [])
         assert kernels, "No kernels in the roofline HTML model"
 
         # Each kernel has 'points', each point has an 'ai' (x-axis) and
