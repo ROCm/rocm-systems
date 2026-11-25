@@ -62,6 +62,20 @@ def cap_args(blob: str, max_len: int = _MAX_ARGS_LEN) -> str:
     return truncated + ("...)" if balanced else "...")
 
 
+def render_dtype_shape(obj: object) -> Optional[str]:
+    """Return dtype[dims] for an object with shape and dtype, else None."""
+    try:
+        shape = getattr(obj, "shape", None)
+        dtype = getattr(obj, "dtype", None)
+        if shape is None or dtype is None:
+            return None
+        dims = "x".join(str(int(d)) for d in shape)
+        dt = str(dtype).replace("torch.", "")
+        return f"{dt}[{dims}]"
+    except Exception:
+        return None
+
+
 def decode_marker_name(name: str) -> str:
     """Decode a percent-encoded marker segment ('%2F' -> '/', '%25' -> '%')."""
     return name.replace("%2F", "/").replace("%25", "%")

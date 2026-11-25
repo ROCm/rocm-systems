@@ -3,6 +3,8 @@
 
 """Unit tests for the shared ML API marker wire format."""
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -14,6 +16,7 @@ from ml_api_tracing.marker_format import (
     encode_args,
     encode_marker_name,
     parse_marker_function,
+    render_dtype_shape,
     split_operator_args,
     stacked_marker_function_cell,
 )
@@ -24,6 +27,30 @@ NATIVE_ENCODED_MARKER = (
     "aten::add%2F%25:n/a|seqNr=7|tid=11|ftid=13|ltid=17|scope=FUNCTION"
     "|args=(value=%25%7C%3B%0D%0A)|torch"
 )
+
+
+class FakeDType:
+    def __init__(self, name):
+        self._name = name
+
+    def __str__(self):
+        return self._name
+
+
+class RaisingShape:
+    dtype = "float32"
+
+    @property
+    def shape(self):
+        raise RuntimeError("shape unavailable")
+
+
+class RaisingDtype:
+    shape = (2, 3)
+
+    @property
+    def dtype(self):
+        raise ValueError("dtype unavailable")
 
 
 def test_encode_marker_name_wrap_chars():
@@ -282,3 +309,46 @@ def test_stacked_marker_function_cell_checks_only_legacy_first_token(
     function_value, expected
 ):
     assert stacked_marker_function_cell(function_value) == expected
+
+
+def test_render_dtype_shape_strips_torch_prefix():
+    obj = SimpleNamespace(shape=(2, 4), dtype=FakeDType("torch.float32"))
+    assert render_dtype_shape(obj) == "float32[2x4]"
+
+
+def test_render_dtype_shape_keeps_dtype_without_torch_prefix():
+    obj = SimpleNamespace(shape=(2, 4), dtype=FakeDType("float32"))
+    assert render_dtype_shape(obj) == "float32[2x4]"
+
+
+def test_render_dtype_shape_joins_three_dims():
+    obj = SimpleNamespace(shape=(2, 3, 4), dtype=FakeDType("torch.float32"))
+    assert render_dtype_shape(obj) == "float32[2x3x4]"
+
+
+@pytest.mark.parametrize(
+    "obj",
+    [
+        SimpleNamespace(dtype="float32"),
+        SimpleNamespace(shape=(2, 4)),
+        1,
+        "tensor",
+        RaisingShape(),
+        RaisingDtype(),
+    ],
+    ids=[
+        "missing-shape",
+        "missing-dtype",
+        "int",
+        "str",
+        "shape-raises",
+        "dtype-raises",
+    ],
+)
+def test_render_dtype_shape_returns_none_without_readable_metadata(obj):
+    assert render_dtype_shape(obj) is None
+
+
+def test_render_dtype_shape_empty_shape_is_scalar_brackets():
+    obj = SimpleNamespace(shape=(), dtype=FakeDType("torch.float64"))
+    assert render_dtype_shape(obj) == "float64[]"
