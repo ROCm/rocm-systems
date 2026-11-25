@@ -72,7 +72,8 @@ A description says what the metric counts. It follows the
    say "per second". A peak bandwidth says which peak it gives.
 5. **Percentages.** A percentage starts with "Percentage of".
 6. **Terms.** "wavefront", not "wave"; "for example", not "e.g." or "for instance";
-   "Graphics Level Arbiter", not "Graphic Level Arbiter"; "Scalable Data SOC (SDP)".
+   "Graphics Level Arbiter", not "Graphic Level Arbiter"; "Scalable Data Port (SDP)".
+   Spell out an abbreviation unless it is a well-known GPU profiling term.
 7. **Library text only.** No sentence about how a panel shows the metric ("also
    presented as a percent of the peak"), no see-reference, no `Equation:` sentence
    (`formula` holds the equation) and no TODO note. A note about the formula is a YAML

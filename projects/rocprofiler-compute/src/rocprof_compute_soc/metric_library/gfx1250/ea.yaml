@@ -69,57 +69,57 @@ ea.outstanding_req:
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_ALL_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: >-
-    Average number of in-flight requests from EA to the Scalable Data SOC (SDP).
+    Average number of in-flight requests from EA to the Scalable Data Port (SDP).
 ea.outstanding_req_dram_rd:
   name: EA Outstanding Requests - DRAM Read
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_DRAM_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: >-
-    Average in-flight HBM read requests from EA to the Scalable Data SOC (SDP).
+    Average in-flight HBM read requests from EA to the Scalable Data Port (SDP).
 ea.outstanding_req_dram_wr:
   name: EA Outstanding Requests - DRAM Write
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_DRAM_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: >-
-    Average in-flight HBM write requests from EA to the Scalable Data SOC (SDP).
+    Average in-flight HBM write requests from EA to the Scalable Data Port (SDP).
 ea.outstanding_req_gmi_rd:
   name: EA Outstanding Requests - GMI Read
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_GMI_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: >-
-    Average in-flight GMI read requests from EA to the Scalable Data SOC (SDP).
+    Average in-flight GMI read requests from EA to the Scalable Data Port (SDP).
 ea.outstanding_req_gmi_wr:
   name: EA Outstanding Requests - GMI Write
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_GMI_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: >-
-    Average in-flight GMI write requests from EA to the Scalable Data SOC (SDP).
+    Average in-flight GMI write requests from EA to the Scalable Data Port (SDP).
 ea.outstanding_req_hdm_rd:
   name: EA Outstanding Requests - HDM Read
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_HDM_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: >-
-    Average in-flight HDM read requests from EA to the Scalable Data SOC (SDP).
+    Average in-flight HDM read requests from EA to the Scalable Data Port (SDP).
 ea.outstanding_req_hdm_wr:
   name: EA Outstanding Requests - HDM Write
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_HDM_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: >-
-    Average in-flight HDM write requests from EA to the Scalable Data SOC (SDP).
+    Average in-flight HDM write requests from EA to the Scalable Data Port (SDP).
 ea.outstanding_req_io_rd:
   name: EA Outstanding Requests - IO Read
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_IO_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: >-
-    Average in-flight PCI-E and other IO read requests from EA to the Scalable Data SOC
+    Average in-flight PCI-E and other IO read requests from EA to the Scalable Data Port
     (SDP).
 ea.outstanding_req_io_wr:
   name: EA Outstanding Requests - IO Write
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_IO_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: >-
-    Average in-flight PCI-E and other IO write requests from EA to the Scalable Data SOC
-    (SDP).
+    Average in-flight PCI-E and other IO write requests from EA to the Scalable Data
+    Port (SDP).
 ea.outstanding_req_probe_req:
   name: EA Outstanding Requests - Probe Request
   formula: SUM(GC_EA_SE_PROBE_OUTSTANDING_REQ_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
