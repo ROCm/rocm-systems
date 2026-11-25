@@ -3523,8 +3523,8 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaScaleReadsUseSelectedByteMask) {
     EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
     const uint8_t expected_mask = static_cast<uint8_t>(1u << byte);
-    bool saw_scale_a = false;
-    bool saw_scale_b = false;
+    uint32_t scale_a_events = 0;
+    uint32_t scale_b_events = 0;
     std::map<uint32_t, std::pair<uint64_t, uint8_t>> read_unions;
     const auto reads = vgpr_read_events(*plugin);
     for (const auto &event : reads) {
@@ -3533,14 +3533,16 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaScaleReadsUseSelectedByteMask) {
       byte_mask |= event.byte_mask;
       if (event.physical_reg == vb + kScaleA) {
         EXPECT_EQ(event.byte_mask, expected_mask) << "A byte=" << byte;
-        saw_scale_a = true;
+        EXPECT_EQ(event.lane_mask, ~uint64_t{0}) << "A byte=" << byte;
+        ++scale_a_events;
       } else if (event.physical_reg == vb + kScaleB) {
         EXPECT_EQ(event.byte_mask, expected_mask) << "B byte=" << byte;
-        saw_scale_b = true;
+        EXPECT_EQ(event.lane_mask, ~uint64_t{0}) << "B byte=" << byte;
+        ++scale_b_events;
       }
     }
-    EXPECT_TRUE(saw_scale_a) << "byte=" << byte;
-    EXPECT_TRUE(saw_scale_b) << "byte=" << byte;
+    EXPECT_EQ(scale_a_events, 1u) << "byte=" << byte;
+    EXPECT_EQ(scale_b_events, 1u) << "byte=" << byte;
 
     std::map<uint32_t, std::pair<uint64_t, uint8_t>> expected_unions;
     for (uint32_t reg :

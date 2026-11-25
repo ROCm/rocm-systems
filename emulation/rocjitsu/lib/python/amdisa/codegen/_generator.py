@@ -6626,10 +6626,8 @@ class CodeGenerator:
                       }}
                       // Normalize selected scale bytes before arithmetic can overwrite aliased VGPRs.
                       uint32_t scales_a[64], scales_b[64];
-                      for (uint32_t lane = 0; lane < 64; ++lane) {{
-                        scales_a[lane] = amdgpu::read_mfma_scale_e8m0(wf, vb, scale_a, lane, scale_a_byte);
-                        scales_b[lane] = amdgpu::read_mfma_scale_e8m0(wf, vb, scale_b, lane, scale_b_byte);
-                      }}
+                      amdgpu::read_mfma_scales_e8m0(wf, vb, scale_a, scale_a_byte, scales_a);
+                      amdgpu::read_mfma_scales_e8m0(wf, vb, scale_b, scale_b_byte, scales_b);
                       uint64_t controls = inst_.cbsz | (uint64_t(inst_.blgp) << 3) |
                                           (uint64_t(c_modifier) << 10);
                       auto invoke = [&](uint64_t flags, uint64_t controls, uint32_t *const *d,

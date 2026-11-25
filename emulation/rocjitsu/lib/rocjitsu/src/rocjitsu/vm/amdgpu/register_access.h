@@ -899,6 +899,31 @@ public:
       return lo | (hi << 32);
     }
 
+    /// @brief Extract one observed byte from each lane of @p relative_reg into @p destination.
+    /// @details Enforces the region's byte mask so partial-byte regions never expose unobserved
+    /// bytes while avoiding per-lane raw-storage lookups.
+    Result copy_byte_to(uint32_t relative_reg, uint32_t byte_index,
+                        std::span<uint32_t> destination) const {
+      assert(relative_reg < reg_count_ && "relative VGPR outside read region");
+      if (byte_index >= sizeof(uint32_t) || (byte_mask_ & (uint8_t{1} << byte_index)) == 0) {
+        return reject("requested byte is outside VgprReadRegion byte mask");
+      }
+      if (destination.size() < wf_size_) {
+        return reject("destination is smaller than VgprReadRegion wave width");
+      }
+      if (!valid_ || !observed_) {
+        std::ranges::fill_n(destination.begin(), wf_size_, uint32_t{0});
+        return Result::success();
+      }
+      const auto *data =
+          reinterpret_cast<const uint32_t *>(cu_->raw_vgpr_data(base_ + relative_reg));
+      const uint32_t shift = byte_index * 8;
+      for (uint32_t lane = 0; lane < wf_size_; ++lane) {
+        destination[lane] = (data[lane] >> shift) & 0xffu;
+      }
+      return Result::success();
+    }
+
     /// @brief Snapshot dword registers into lane-major memory.
     /// @details The region acquisition has already reported one plugin read per
     /// register. This copies only selected lanes without repeating ownership

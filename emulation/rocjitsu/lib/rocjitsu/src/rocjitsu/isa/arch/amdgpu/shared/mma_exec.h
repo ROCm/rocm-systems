@@ -2187,6 +2187,21 @@ inline uint8_t read_mfma_scale_e8m0(auto &cu, uint32_t vgpr_base, uint32_t selec
   return static_cast<uint8_t>((raw >> (byte_index * 8)) & 0xffu);
 }
 
+inline void read_mfma_scales_e8m0(auto &cu, uint32_t vgpr_base, uint32_t selector,
+                                  uint32_t byte_index, uint32_t (&out)[64]) {
+  if (selector >= 240 && selector <= 248) {
+    std::ranges::fill(out, static_cast<uint32_t>(mfma_inline_scale_e8m0(selector)));
+    return;
+  }
+  const uint8_t byte_mask = static_cast<uint8_t>(1u << byte_index);
+  auto region = RegisterAccess(cu).read_vgpr_region(src_base(vgpr_base, selector), 1, ~uint64_t{0},
+                                                    byte_mask);
+  (void)region.copy_byte_to(0, byte_index, out);
+  if (region.wf_size() < 64) {
+    std::ranges::fill_n(out + region.wf_size(), 64 - region.wf_size(), uint32_t{0});
+  }
+}
+
 /// exec_i32_i8 for shapes and modes that try_exec_mfma_snapshot does not handle. Kept out of line
 /// so its staging frame is not live while the snapshot path runs.
 RJ_NOINLINE inline void exec_i32_i8_generic(auto &cu, uint32_t M, uint32_t N, uint32_t K,
