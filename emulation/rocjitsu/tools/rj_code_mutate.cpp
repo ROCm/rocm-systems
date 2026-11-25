@@ -43,8 +43,8 @@ constexpr std::string_view kMutationHelp =
     "Input: extracted little-endian AMDHSA ET_DYN ELF64, at most 256 MiB.\n"
     "Complete builtin split pairs: RDNA4 workgroup; CDNA5 workgroup/cluster.\n"
     "Full s_barrier singletons: RDNA3/CDNA3/CDNA4. See --capabilities for linked\n"
-    "concrete target/wave admission. Partial/named/dynamic barriers, shared\n"
-    "owners/helpers and multiple .text sections are not supported.\n"
+    "concrete target/wave admission. Drop rejects partial/named/dynamic barriers\n"
+    "and shared owners/helpers. Multiple .text sections are not supported.\n"
     "Trap-handler barrier IDs are rejected. Cluster barriers require a clustered\n"
     "dispatch that activates cluster semantics.\n"
     "LdsWrongAddress admits gfx1200/gfx1201 wave32/wave64 scalar and two-address\n"
@@ -55,6 +55,8 @@ constexpr std::string_view kMutationHelp =
     "See --capabilities for exact forms. It requires a distinct\n"
     "allocated --address-vgpr for mutation.\n"
     "This argument is an encoded selector; allocation uses the address bank.\n"
+    "LDS output lists every affected owner when a helper is shared.\n"
+    "Discovery can succeed while replacement growth or branch range prevents emission.\n"
     "The caller supplies its runtime value.\n"
     "Output must be new; existing files, aliases and in-place mutation are refused.\n"
     "Host transformation only; no GPU execution or detector qualification.\n";
@@ -284,7 +286,7 @@ int run(int argc, char **argv) {
     for (const LdsCapability &capability : lds_wrong_address_capabilities()) {
       const IsaTargetBinding *target = default_isa_target_registry().find_target(capability.target);
       std::cout << "kind=LdsWrongAddress target=" << target->id << " wave=" << capability.wave_size
-                << " form=" << capability.form << " admission=direct-single-owner\n";
+                << " form=" << capability.form << " admission=proven-all-owners\n";
     }
     return finish_stdout();
   }
@@ -344,7 +346,12 @@ int run(int argc, char **argv) {
       for (const LdsSite &site : inventory.value().sites()) {
         std::cout << "ordinal=" << index++ << " exact=" << site.offset
                   << " address_vgpr=" << site.address_vgpr << " address_bank=" << site.address_bank
-                  << " target=" << target->id << " form=" << site.form << '\n';
+                  << " target=" << target->id << " form=" << site.form
+                  << " affected_owners=" << site.affected_owners.size();
+        for (const FaultMutationOwner &owner : site.affected_owners)
+          std::cout << " owner=" << owner.entry << ':' << owner.entry_offset << ':'
+                    << owner.descriptor_file_offset;
+        std::cout << '\n';
       }
       return finish_stdout();
     }
@@ -377,7 +384,12 @@ int run(int argc, char **argv) {
     }
     std::cout << "kind=LdsWrongAddress target=" << target->id
               << " exact=" << selection.value().site().offset << " address_vgpr=" << *address_vgpr
-              << " logical_mutations=1 output_bytes=" << mutant.value().image.size() << '\n';
+              << " logical_mutations=1 output_bytes=" << mutant.value().image.size()
+              << " affected_owners=" << selection.value().site().affected_owners.size();
+    for (const FaultMutationOwner &owner : selection.value().site().affected_owners)
+      std::cout << " owner=" << owner.entry << ':' << owner.entry_offset << ':'
+                << owner.descriptor_file_offset;
+    std::cout << '\n';
     return finish_stdout();
   }
   const FailureOr<FaultBarrierInventory> inventory = discover_drop_barriers(context, kernel, error);

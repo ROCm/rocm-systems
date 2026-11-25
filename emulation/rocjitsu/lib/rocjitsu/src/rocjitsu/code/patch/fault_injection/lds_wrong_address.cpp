@@ -8,6 +8,7 @@
 #include "rocjitsu/code/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/code/analysis/instruction_boundaries.h"
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/kernel_scope.h"
 #include "rocjitsu/code/patch/fault_injection/fault_mutation_internal.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/encoded_fields.h"
@@ -26,7 +27,9 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -37,8 +40,13 @@ struct LdsRecord {
   FaultMutationSection section;
   FaultMutationOwner owner;
   uint32_t allocated_vgprs = 0;
+  std::unordered_map<uint64_t, uint32_t> site_allocations;
   std::vector<LdsSite> sites;
 };
+
+const FaultMutationOwner *LdsSelection::owner() const {
+  return record_ ? &record_->owner : nullptr;
+}
 
 namespace {
 using LdsAddressRewriter = std::optional<std::array<uint32_t, 2>> (*)(rj_code_target_id_t,
@@ -211,10 +219,65 @@ FailureOr<LdsInventory> discover_lds_wrong_address(const FaultMutationContext &c
                                  "target has no LDS profile");
   }
   FailureOr<const FaultSourceFacts *> found = context.source_facts(entry, error);
+  const KernelOwnership *ownership = nullptr;
+  std::optional<KernelOwnerFlow> selected_flow;
+  std::optional<std::span<const KernelDescriptorInfo>> owner_kernels;
+  FaultSourceFacts shared_facts;
+  size_t selected_owner = 0;
   if (found.failed()) {
-    return Result::failure();
+    if (!context.state_->complete_ownership_needed)
+      return Result::failure();
+    FailureOr<const KernelOwnership *> owner_result = context.execution_ownership(error);
+    if (owner_result.failed())
+      return Result::failure();
+    ownership = owner_result.value();
+    owner_kernels = ownership->kernels();
+    if (!owner_kernels)
+      return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
+                                   "expired LDS owner facts");
+    const std::ptrdiff_t matches =
+        std::ranges::count_if(*owner_kernels, [&](const KernelDescriptorInfo &kernel) {
+          return kernel.kernel_name == entry;
+        });
+    if (matches == 0) {
+      std::string message = "entry must match one exact kernel name; descriptor entries:";
+      for (const KernelDescriptorInfo &kernel : *owner_kernels)
+        message += " " + kernel.kernel_name;
+      return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity, std::move(message));
+    }
+    if (matches > 1)
+      return reject_fault_mutation(error, FaultMutationErrorCode::AmbiguousSelection,
+                                   "exact entry name identifies multiple descriptors");
+    const std::span<const KernelDescriptorInfo>::iterator kernel =
+        std::ranges::find_if(*owner_kernels, [&](const KernelDescriptorInfo &item) {
+          return item.kernel_name == entry;
+        });
+    selected_owner = static_cast<size_t>(kernel - owner_kernels->begin());
+    selected_flow = ownership->owner_flow(selected_owner);
+    if (!selected_flow)
+      return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
+                                   "missing LDS owner flow");
+    const Section &section = *context.source().text_sections().front();
+    TextEditError edit_error;
+    const InstructionBoundaries *boundaries =
+        context.state_->instrumentor->instruction_boundaries(edit_error);
+    if (!boundaries) {
+      error = translate_fault_mutation_edit_error(edit_error);
+      return Result::failure();
+    }
+    shared_facts = {.section = {.index = *section.sectionHeaderIndex(),
+                                .file_offset = section.sectionOffset(),
+                                .vaddr = section.vaddr(),
+                                .size = section.size()},
+                    .owner = {.entry = kernel->kernel_name,
+                              .entry_offset = kernel->entry_text_offset,
+                              .descriptor_file_offset = kernel->descriptor_file_offset},
+                    .descriptor = *kernel,
+                    .blocks = {selected_flow->blocks.begin(), selected_flow->blocks.end()},
+                    .boundaries = boundaries};
   }
-  const FaultSourceFacts &facts = *found.value();
+  error = {};
+  const FaultSourceFacts &facts = ownership ? shared_facts : *found.value();
   const bool cdna5 = target == ROCJITSU_CODE_TARGET_GFX1250;
   const uint32_t wave = kernel_wavefront_size(target_profile->arch, facts.descriptor.descriptor);
   const bool rdna4 = target_profile->arch == IsaFamily::Rdna4;
@@ -243,6 +306,9 @@ FailureOr<LdsInventory> discover_lds_wrong_address(const FaultMutationContext &c
     record->allocated_vgprs = std::min(record->allocated_vgprs, accum_base);
   }
   std::unique_ptr<Gfx1250VgprMsbAnalysis> banks;
+  std::vector<std::unique_ptr<Gfx1250VgprMsbAnalysis>> owner_banks;
+  if (cdna5 && owner_kernels)
+    owner_banks.resize(owner_kernels->size());
   if (cdna5) {
     const IsaTargetBinding *binding = default_isa_target_registry().find_target(target);
     const std::vector<BasicBlock *>::const_iterator entry_block =
@@ -256,8 +322,10 @@ FailureOr<LdsInventory> discover_lds_wrong_address(const FaultMutationContext &c
     const std::span<const uint8_t> text =
         context.image().subspan(facts.section.file_offset, facts.section.size);
     banks = std::make_unique<Gfx1250VgprMsbAnalysis>(
-        facts.blocks, *entry_block, std::span<const ScopedCfgEdge>{}, text,
-        std::span<BasicBlock *const>{}, binding->capabilities.setreg_vgpr_msb_fixup);
+        facts.blocks, *entry_block,
+        selected_flow ? selected_flow->call_return_edges : std::span<const ScopedCfgEdge>{}, text,
+        selected_flow ? selected_flow->roots.subspan(1) : std::span<BasicBlock *const>{},
+        binding->capabilities.setreg_vgpr_msb_fixup);
   }
   for (const BasicBlock *block : facts.blocks) {
     for (const Instruction &inst : block->instructions()) {
@@ -302,10 +370,77 @@ FailureOr<LdsInventory> discover_lds_wrong_address(const FaultMutationContext &c
           !replace_lds_address(*profile, words, address->index)) {
         continue;
       }
+      std::vector<FaultMutationOwner> affected;
+      uint32_t allocation = record->allocated_vgprs;
+      if (ownership) {
+        const std::optional<std::span<const KernelExecutionOwner>> owners =
+            ownership->owners_at(inst.src_loc());
+        if (!owners || std::ranges::none_of(*owners, [&](const KernelExecutionOwner &owner) {
+              return owner.kernel_index == selected_owner;
+            }))
+          continue;
+        bool valid = true;
+        for (const KernelExecutionOwner &owner : *owners) {
+          if (owner.kernel_index >= owner_kernels->size()) {
+            valid = false;
+            break;
+          }
+          const KernelDescriptorInfo &descriptor = (*owner_kernels)[owner.kernel_index];
+          const uint32_t owner_wave = kernel_wavefront_size(profile->arch, descriptor.descriptor);
+          if ((!rdna4 && owner_wave != (cdna5 ? 32u : 64u)) ||
+              (!rdna4 && !cdna5 &&
+               (descriptor.descriptor.kernel_code_properties &
+                amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32) != 0)) {
+            valid = false;
+            break;
+          }
+          uint32_t count =
+              (RJ_AMDHSA_BITS_GET(descriptor.descriptor.compute_pgm_rsrc1,
+                                  amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT) +
+               1) *
+              descriptor_vgpr_granularity_for_wavefront(profile->arch, owner_wave);
+          if (!rdna4 && !cdna5)
+            count =
+                std::min(count, (RJ_AMDHSA_BITS_GET(descriptor.descriptor.compute_pgm_rsrc3,
+                                                    amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
+                                 1) *
+                                    4);
+          allocation = std::min(allocation, count);
+          if (cdna5 && owner.kernel_index != selected_owner) {
+            const std::optional<KernelOwnerFlow> flow = ownership->owner_flow(owner.kernel_index);
+            const Instruction *other =
+                ownership->instruction_at(owner.kernel_index, inst.src_loc());
+            const IsaTargetBinding *binding = default_isa_target_registry().find_target(target);
+            if (!flow || flow->roots.empty() || !other || !other->src_operand(0) || !binding) {
+              valid = false;
+              break;
+            }
+            if (!owner_banks[owner.kernel_index])
+              owner_banks[owner.kernel_index] = std::make_unique<Gfx1250VgprMsbAnalysis>(
+                  flow->blocks, flow->roots.front(), flow->call_return_edges, flow->text,
+                  flow->roots.subspan(1), binding->capabilities.setreg_vgpr_msb_fixup);
+            const std::optional<uint8_t> other_bank = owner_banks[owner.kernel_index]->bank_before(
+                *other, other->src_operand(0)->vgpr_msb_role());
+            if (!other_bank || *other_bank != bank) {
+              valid = false;
+              break;
+            }
+          }
+          affected.push_back({.entry = descriptor.kernel_name,
+                              .entry_offset = descriptor.entry_text_offset,
+                              .descriptor_file_offset = descriptor.descriptor_file_offset});
+        }
+        if (!valid || (cdna5 && bank * 256u + address->index >= allocation))
+          continue;
+      } else {
+        affected.push_back(facts.owner);
+      }
+      record->site_allocations.emplace(inst.src_loc(), allocation);
       record->sites.push_back({.offset = inst.src_loc(),
                                .address_vgpr = address->index,
                                .address_bank = bank,
-                               .form = profile->form});
+                               .form = profile->form,
+                               .affected_owners = std::move(affected)});
     }
   }
   std::ranges::sort(record->sites, {}, &LdsSite::offset);
@@ -325,16 +460,20 @@ FailureOr<LdsSelection> select_lds_wrong_address(const LdsInventory &inventory,
   if (selector.exact) {
     const LdsSelection &exact = *selector.exact;
     if (!exact.record_ || exact.record_->source.lock() != inventory.record_->source.lock() ||
-        exact.record_->owner != inventory.record_->owner ||
         std::ranges::none_of(inventory.record_->sites, [&](const LdsSite &site) {
           return site.offset == exact.site_.offset &&
                  site.address_vgpr == exact.site_.address_vgpr &&
-                 site.address_bank == exact.site_.address_bank && site.form == exact.site_.form;
-        })) {
+                 site.address_bank == exact.site_.address_bank && site.form == exact.site_.form &&
+                 site.affected_owners == exact.site_.affected_owners &&
+                 std::ranges::find(site.affected_owners, inventory.record_->owner) !=
+                     site.affected_owners.end();
+        }))
       return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
                                    "exact LDS selection does not match source and owner");
-    }
-    return exact;
+    LdsSelection selection;
+    selection.record_ = inventory.record_;
+    selection.site_ = exact.site_;
+    return selection;
   }
   if (inventory.record_->sites.empty()) {
     return reject_fault_mutation(error, FaultMutationErrorCode::NoCandidates,
@@ -359,10 +498,14 @@ FailureOr<LdsResult> apply_lds_wrong_address(const FaultMutationContext &context
     return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
                                  "selection belongs to another or expired source");
   }
+  const std::unordered_map<uint64_t, uint32_t>::const_iterator allocation =
+      selection.record_->site_allocations.find(selection.site_.offset);
+  if (allocation == selection.record_->site_allocations.end())
+    return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
+                                 "missing LDS owner allocation");
   if (!replacement_selector || *replacement_selector > 255 ||
       *replacement_selector == selection.site_.address_vgpr ||
-      selection.site_.address_bank * 256u + *replacement_selector >=
-          selection.record_->allocated_vgprs) {
+      selection.site_.address_bank * 256u + *replacement_selector >= allocation->second) {
     return reject_fault_mutation(
         error, FaultMutationErrorCode::InvalidParameters,
         "replacement must be distinct, encoded, and allocated as an ordinary VGPR");
