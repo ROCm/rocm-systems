@@ -1135,6 +1135,10 @@ the same compiled type as ``jax.jit``, so they show as ``jax.jit.<fn>``.
 Kernels launched from another thread are not attributed. ROCTx correlation is
 thread-local, and there is no timestamp fallback in analyze.
 
+JAX tracing sets ``XLA_FLAGS=--xla_gpu_autotune_level=0`` in the workload
+process so PMC passes launch the same kernels. Other ``XLA_FLAGS`` tokens are
+kept.
+
 .. warning::
 
    JAX trace is currently an experimental feature. You must pass

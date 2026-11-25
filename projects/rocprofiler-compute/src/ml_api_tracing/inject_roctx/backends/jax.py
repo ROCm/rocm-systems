@@ -8,6 +8,7 @@ handles. Wraps those entry points with ROCTX ranges.
 """
 
 import importlib.util
+import os
 import threading
 import types
 from functools import partial
@@ -19,6 +20,7 @@ from ml_api_tracing.inject_roctx.backend_contract import register
 from utils.logger import console_log, console_warning
 
 _BACKEND_NAME = "jax"
+_XLA_GPU_AUTOTUNE_OFF = "--xla_gpu_autotune_level=0"
 _jax_thread_local = threading.local()
 
 
@@ -34,6 +36,7 @@ def _resolve_jax() -> bool:
     """Bind the jax handles on _CoreState. Returns True if jax is importable."""
     if importlib.util.find_spec("jax") is None:
         return False
+    _pin_xla_gpu_autotune_off()
     try:
         import jax
     except Exception as exc:
@@ -53,6 +56,23 @@ def _resolve_jax() -> bool:
     except Exception:
         _CoreState.primitive = None
     return True
+
+
+def _pin_xla_gpu_autotune_off() -> None:
+    """Set XLA_FLAGS so GPU autotune does not add extra kernels across PMC passes."""
+    existing = os.environ.get("XLA_FLAGS", "")
+    tokens = [
+        token
+        for token in existing.split()
+        if not token.startswith("--xla_gpu_autotune_level=")
+    ]
+    tokens.append(_XLA_GPU_AUTOTUNE_OFF)
+    os.environ["XLA_FLAGS"] = " ".join(tokens)
+    if _XLA_GPU_AUTOTUNE_OFF not in existing.split():
+        console_log(
+            "ml api trace",
+            "Pinned XLA_FLAGS --xla_gpu_autotune_level=0 for JAX tracing.",
+        )
 
 
 def _register_framework_root() -> None:
