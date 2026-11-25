@@ -1583,6 +1583,85 @@ TEST(Gfx1250ExecutionTest, VbufferB128LoadsZeroAndStoresDropPartialOobDwords) {
   EXPECT_EQ(sim.memory->read32(kAddr + 12), kInitial[3]);
 }
 
+TEST(Gfx1250ExecutionTest, VbufferCtsOobSelectDistinguishesResourceAndRecordBounds) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wave = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(1);
+  const uint32_t scalar_base = wave->sgpr_alloc().base;
+  const uint32_t vector_base = wave->vgpr_alloc().base;
+  constexpr uint64_t kAddress = 0xC000;
+  constexpr uint32_t kBytes = 64;
+  constexpr uint32_t kCanary = 0xd7;
+  // Match buffer_descriptor_modes_test.cpp: index 1, stride 16, offset 12.
+  // Resource bounds permit all four DWORDs; record bounds permit only the first.
+  for (bool record_bounds : {false, true}) {
+    SCOPED_TRACE(testing::Message() << "record_bounds=" << record_bounds);
+    const std::array<uint32_t, 4> resource = {
+        static_cast<uint32_t>(kAddress),
+        kBytes << 25,
+        0,
+        (16u << 12) | (record_bounds ? 1u << 29 : 0u),
+    };
+    for (uint32_t i = 0; i < resource.size(); ++i) {
+      cu->write_sgpr(scalar_base + 4 + i, resource[i]);
+    }
+    for (uint32_t i = 0; i < kBytes; ++i) {
+      sim.memory->write8(kAddress + i, static_cast<uint8_t>(1u + 17u * i + 29u * 33u));
+    }
+    cu->write_vgpr(vector_base + 4, 0, 1);
+    cu->write_vgpr(vector_base + 5, 0, 0);
+    auto decoder = Decoder::create(IsaFamily::Cdna5);
+    const auto load_words =
+        cdna5::build_vbuffer(cdna5::kBufferLoadB128Vbuffer, {.soffset = cdna5::OPR_SREG_NULL,
+                                                             .vdata = 8,
+                                                             .rsrc = 4,
+                                                             .scope = 3,
+                                                             .offen = 1,
+                                                             .idxen = 1,
+                                                             .vaddr = 4,
+                                                             .ioffset = 12});
+    std::unique_ptr<Instruction> load(decode_valid(*decoder, load_words.data()));
+    ASSERT_NE(load, nullptr);
+    amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
+    ASSERT_TRUE(cu->execute_instruction(load.get(), *wave).succeeded());
+    ASSERT_EQ(pipeline.issue(load.release(), *wave), amdgpu::VmAccessOutcome::Complete);
+    for (uint32_t i = 0; i < 4; ++i) {
+      const uint32_t expected =
+          record_bounds && i != 0 ? 0 : sim.memory->read32(kAddress + 28 + 4 * i);
+      EXPECT_EQ(cu->read_vgpr(vector_base + 8 + i, 0), expected) << "DWORD " << i;
+      cu->write_vgpr(vector_base + 8 + i, 0, 0x41000000u ^ ((22 + i) * 0x0103070bu));
+    }
+    for (uint32_t i = 0; i < kBytes; ++i) {
+      sim.memory->write8(kAddress + i, kCanary);
+    }
+    const auto store_words =
+        cdna5::build_vbuffer(cdna5::kBufferStoreB128Vbuffer, {.soffset = cdna5::OPR_SREG_NULL,
+                                                              .vdata = 8,
+                                                              .rsrc = 4,
+                                                              .scope = 3,
+                                                              .offen = 1,
+                                                              .idxen = 1,
+                                                              .vaddr = 4,
+                                                              .ioffset = 12});
+    std::unique_ptr<Instruction> store(decode_valid(*decoder, store_words.data()));
+    ASSERT_NE(store, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(store.get(), *wave).succeeded());
+    ASSERT_EQ(pipeline.issue(store.release(), *wave), amdgpu::VmAccessOutcome::Complete);
+    const uint32_t stored_bytes = record_bounds ? 4 : 16;
+    for (uint32_t offset = 0; offset < kBytes; ++offset) {
+      uint32_t expected = kCanary;
+      if (offset >= 28 && offset < 28 + stored_bytes) {
+        const uint32_t word = 0x41000000u ^ ((22 + (offset - 28) / 4) * 0x0103070bu);
+        expected = (word >> (8 * ((offset - 28) % 4))) & 0xff;
+      }
+      EXPECT_EQ(sim.memory->read8(kAddress + offset), expected) << "byte " << offset;
+    }
+  }
+}
+
 TEST(Gfx1250ExecutionTest, VbufferRawBoundsDistinguishWholeAndCrossingAccesses) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());

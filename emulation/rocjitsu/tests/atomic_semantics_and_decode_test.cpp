@@ -143,6 +143,42 @@ public:
   amdgpu::Wavefront *wave = nullptr;
   uint32_t base = 0;
 };
+TEST(AtomicSemanticsAndDecode, Gfx1250LdsCtsReturnsAndExceptionalFloatResults) {
+  InstructionPolicyMachine machine(rocjitsu::IsaFamily::Cdna5);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  struct Case {
+    uint16_t opcode;
+    uint32_t initial;
+    uint32_t source;
+    uint32_t expected;
+  };
+  // Preserve the LDS return/NaN/signed-zero cases from memory_atomic_test.cpp
+  // in rocjitsu-test-corpus, without compiling and dispatching a HIP kernel.
+  constexpr Case kCases[] = {
+      {cdna5::kDsAddRtnU32Vds, 41u, 1u, 42u},
+      {cdna5::kDsAddRtnF32Vds, 0x7f812345u, 0x7f854321u, 0x7fc54321u},
+      {cdna5::kDsMinNumRtnF32Vds, 0x80000000u, 0u, 0x80000000u},
+      {cdna5::kDsMaxNumRtnF32Vds, 0u, 0x80000000u, 0u},
+  };
+  constexpr uint32_t kAddress = 0x100;
+  amdgpu::LocalMemPipeline pipeline;
+  for (const Case &test_case : kCases) {
+    SCOPED_TRACE(testing::Message() << "opcode=" << test_case.opcode);
+    machine.wave->lds().write32(kAddress, test_case.initial);
+    machine.wave->set_mode_raw(0xf0);
+    machine.cu->write_vgpr(machine.base, 0, test_case.source);
+    machine.cu->write_vgpr(machine.base + 4, 0, kAddress);
+    machine.cu->write_vgpr(machine.base + 6, 0, 0xdeadbeef);
+    const auto words = cdna5::build_vds(test_case.opcode, {.addr = 4, .data0 = 0, .vdst = 6});
+    std::unique_ptr<Instruction> instruction(decode_valid(*machine.decoder, words.data()));
+    ASSERT_NE(instruction, nullptr);
+    ASSERT_TRUE(machine.cu->execute_instruction(instruction.get(), *machine.wave).succeeded());
+    pipeline.issue(instruction.release(), *machine.wave);
+    EXPECT_EQ(machine.cu->read_vgpr(machine.base + 6, 0), test_case.initial);
+    EXPECT_EQ(machine.wave->lds().read32(kAddress), test_case.expected);
+  }
+}
+
 TEST(AtomicSemanticsAndDecode, RejectsInvalidFixtureInstruction) {
   InstructionPolicyMachine machine(rocjitsu::IsaFamily::Cdna5);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
