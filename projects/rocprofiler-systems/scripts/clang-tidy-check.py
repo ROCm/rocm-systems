@@ -381,7 +381,10 @@ def parse_args() -> argparse.Namespace:
             f"Use '{MERGE_BASE_SELECTOR}' for the point where this "
             f"branch diverged from {BASE_REF}, or pass any ref/SHA. "
             "Covers committed changes since the ref plus any "
-            "staged/unstaged changes on top."
+            "staged/unstaged changes on top. "
+            f"'{MERGE_BASE_SELECTOR}' reads the local '{BASE_REF}' without "
+            "fetching, so run `git fetch` first; for stacked or fork-based "
+            "branches, pass the correct base ref/SHA explicitly."
         ),
     )
     parser.add_argument(
