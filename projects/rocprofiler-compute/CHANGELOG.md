@@ -7,11 +7,19 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* `--block` and `--list-metrics` accept metric IDs, which `--list-metrics` shows, and select every row that shows the metric. Numeric metric IDs still work but print a deprecation warning.
+
 ### Changed
 
 * Analyze, `--list-metrics`, and the CSV and DB exports show corrected metric names, units, peaks, and descriptions, and leave out rows that have no value. Some table and metric IDs change, so a numeric metric ID can select a different row.
 
 * `--block` rejects the alias of a block that the architecture doesn't have.
+
+* With one workload, analyze shows each bandwidth in TB/s, GB/s, MB/s, KB/s, or B/s, depending on its value.
+
+* `--set` selects metric IDs, which `--list-sets` lists, and analyze then shows only the set's metrics.
+
+* The System Speed-of-Light block shows three tables on every architecture: GPU Speed-of-Light, Compute Throughput, and Memory Throughput. Its metric IDs change, percentages show no peak, and some rows are shown only in their own blocks.
 
 ### Removed
 
@@ -21,9 +29,13 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed the gfx908 `compute_thruput_flops` set, whose metrics MI100 has no counters for.
 
+* Analyze no longer shows Wavefront Occupancy and a few other rows on gfx115x, gfx1201, and gfx1250.
+
 ### Optimized
 
 * Some profiles take fewer passes on AMD Instinct MI100, MI200, MI300, and MI350 Series.
+
+* Profiling with no filter collects fewer counters on gfx1151 and gfx1250, and takes fewer passes on gfx1250.
 
 ### Resolved issues
 
@@ -36,6 +48,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed the gfx1250 roofline missing its L0 and L2 points.
 
 ### Upcoming changes
+
+* Numeric metric IDs in `--block` will be removed in a future release. Use metric IDs instead.
 
 ### Known issues
 
