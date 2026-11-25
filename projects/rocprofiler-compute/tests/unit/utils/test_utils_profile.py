@@ -1303,3 +1303,27 @@ def test_get_rocm_version_near_path(tmp_path):
 
     assert utils_profile.get_rocm_version_near_path(str(library)) == "10.2.0"
     assert utils_profile.get_rocm_version_near_path(str(other_tree)) is None
+
+
+def test_require_container_rocm_at_least_host_path(tmp_path, monkeypatch):
+    """Resolve the host version from host_path, then compare to the target."""
+    host_bin = tmp_path / "host" / "bin" / "rocprofv3"
+    host_bin.parent.mkdir(parents=True)
+    host_bin.touch()
+    host_info = tmp_path / "host" / ".info"
+    host_info.mkdir()
+    (host_info / "version").write_text("10.3.0\n", encoding="utf-8")
+    target_root = make_container_target(tmp_path / "target", monkeypatch)
+    write_target_maps([
+        "7f20-7f30 r-xp 00000000 08:01 3 "
+        "/opt/rocm-container/lib/librocprofiler-sdk-attach.so.1"
+    ])
+    info_dir = target_root / "opt/rocm-container/.info"
+    info_dir.mkdir(parents=True)
+    (info_dir / "version").write_text("10.2.0\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        utils_profile.require_container_rocm_at_least_host_path(42, str(host_bin))
+
+    (info_dir / "version").write_text("10.3.0\n", encoding="utf-8")
+    utils_profile.require_container_rocm_at_least_host_path(42, str(host_bin))

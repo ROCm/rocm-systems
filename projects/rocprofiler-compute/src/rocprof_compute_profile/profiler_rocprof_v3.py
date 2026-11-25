@@ -3,13 +3,17 @@
 
 import argparse
 import shlex
+import shutil
 from typing import List
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils.logger import demarcate
-from utils.utils_common import PROFILE_OUTPUT_FORMAT
-from utils.utils_profile import pc_sampling_unit
+from utils.logger import console_error, demarcate
+from utils.utils_common import PROFILE_OUTPUT_FORMAT, get_rocprof_cmd
+from utils.utils_profile import (
+    pc_sampling_unit,
+    require_container_rocm_at_least_host_path,
+)
 
 
 class rocprof_v3_profiler(RocProfCompute_Base):
@@ -23,6 +27,14 @@ class rocprof_v3_profiler(RocProfCompute_Base):
 
     def _live_attach_options(self) -> List[str]:
         args = self.get_args()
+        # Use the rocprofv3 binary this backend will launch so the container
+        # check matches that install, not an unrelated ROCM_PATH value.
+        rocprof_path = shutil.which(get_rocprof_cmd())
+        if not rocprof_path:
+            console_error(
+                f"Unable to resolve path to {get_rocprof_cmd()} binary for live attach."
+            )
+        require_container_rocm_at_least_host_path(args.attach_pid, rocprof_path)
         options = ["--pid", str(args.attach_pid), "--attach-sync-output"]
         if args.attach_duration_msec:
             options += ["--attach-duration-msec", args.attach_duration_msec]

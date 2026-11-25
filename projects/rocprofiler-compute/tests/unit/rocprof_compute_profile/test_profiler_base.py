@@ -567,8 +567,28 @@ def test_ml_api_trace_enables_marker_tier_on_both_backends(
         assert "librocprofiler-sdk-roctx.so" in options["LD_PRELOAD"]
 
 
-def test_rocprofv3_live_attach_uses_sync_output():
+def _stub_rocprofv3_host_install(tmp_path, monkeypatch, version="10.3.0"):
+    """Point rocprofv3 live attach at a fake host binary with ROCm .info."""
+    rocprof_bin = tmp_path / "bin" / "rocprofv3"
+    rocprof_bin.parent.mkdir(parents=True, exist_ok=True)
+    rocprof_bin.touch()
+    info_dir = tmp_path / ".info"
+    info_dir.mkdir(exist_ok=True)
+    (info_dir / "version").write_text(f"{version}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "rocprof_compute_profile.profiler_rocprof_v3.get_rocprof_cmd",
+        lambda: "rocprofv3",
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_profile.profiler_rocprof_v3.shutil.which",
+        lambda _cmd: str(rocprof_bin),
+    )
+    return rocprof_bin
+
+
+def test_rocprofv3_live_attach_uses_sync_output(tmp_path, monkeypatch):
     """Unit test: rocprofv3 live attach requests synchronous output generation."""
+    _stub_rocprofv3_host_install(tmp_path, monkeypatch)
     args = _make_sanitize_args(
         ["/bin/true"],
         attach_pid="12345",
@@ -585,6 +605,35 @@ def test_rocprofv3_live_attach_uses_sync_output():
     duration_idx = options.index("--attach-duration-msec")
     assert options[duration_idx + 1] == "500"
     assert "--" not in options
+
+
+def test_rocprofv3_attach_runs_container_rocm_preflight(tmp_path, monkeypatch):
+    """rocprofv3 live attach uses the selected host binary for the version gate."""
+    rocprof_bin = _stub_rocprofv3_host_install(tmp_path, monkeypatch, version="10.3.0")
+    require_calls = []
+
+    def record_require(pid, host_path):
+        require_calls.append((pid, host_path))
+
+    monkeypatch.setattr(
+        "rocprof_compute_profile.profiler_rocprof_v3.require_container_rocm_at_least_host_path",
+        record_require,
+    )
+    args = _make_sanitize_args(
+        ["/bin/true"],
+        attach_pid="99",
+        attach_duration_msec=None,
+        output_directory=str(tmp_path / "out"),
+        pc_sampling_method="host_trap",
+        pc_sampling_interval=1000,
+    )
+    args.remaining = "-- /bin/true"
+    profiler = rocprof_v3_profiler(args, profiler_mode="rocprofv3", soc=None)
+
+    profiler.get_profiler_options()
+    profiler.get_pc_sampling_profiler_options()
+
+    assert require_calls == [("99", str(rocprof_bin)), ("99", str(rocprof_bin))]
 
 
 def test_kernel_iteration_range_translated_for_both_backends(tmp_path):
@@ -665,10 +714,12 @@ def test_sdk_pc_sampling_options(
     ],
 )
 def test_v3_pc_sampling_options(
-    tmp_path, method, expected_unit, attach_pid, attach_duration_msec
+    tmp_path, method, expected_unit, attach_pid, attach_duration_msec, monkeypatch
 ):
     """v3 PC sampling options build the CLI flags and append either the -- app
     cmd or the live-attach flags."""
+    if attach_pid:
+        _stub_rocprofv3_host_install(tmp_path, monkeypatch)
     args = _make_sanitize_args(
         ["./myapp", "arg1"],
         output_directory=str(tmp_path),

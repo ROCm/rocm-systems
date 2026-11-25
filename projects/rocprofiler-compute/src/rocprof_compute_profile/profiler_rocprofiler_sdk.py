@@ -16,9 +16,8 @@ from utils.utils_common import (
 )
 from utils.utils_profile import (
     find_attach_tool_library,
-    get_rocm_version_near_path,
     pc_sampling_unit,
-    require_container_rocm_at_least_host,
+    require_container_rocm_at_least_host_path,
 )
 
 
@@ -119,15 +118,9 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
                     "No live attach library found at "
                     f"{rocprofiler_attach_library_path}."
                 )
-            host_rocm_version = get_rocm_version_near_path(
-                rocprofiler_attach_library_path
+            require_container_rocm_at_least_host_path(
+                args.attach_pid, rocprofiler_attach_library_path
             )
-            if host_rocm_version is None:
-                console_error(
-                    "Cannot read the ROCm version next to the host attach "
-                    f"library {rocprofiler_attach_library_path}."
-                )
-            require_container_rocm_at_least_host(args.attach_pid, host_rocm_version)
             sdk_attach_tool = find_attach_tool_library(args.attach_pid)
             if sdk_attach_tool is None:
                 console_error(

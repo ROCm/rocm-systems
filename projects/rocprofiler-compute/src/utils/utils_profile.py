@@ -195,6 +195,21 @@ def get_target_rocm_version(pid: int) -> Optional[str]:
         return None
 
 
+def require_container_rocm_at_least_host_path(pid: int, host_path: str) -> None:
+    """Stop before attach when container ROCm is older than the host install.
+
+    Read the host ROCm version from .info next to host_path, then compare it to
+    the target. Both profiler backends call this with the host binary or library
+    that backend selected for attach.
+    """
+    host_rocm_version = get_rocm_version_near_path(host_path)
+    if host_rocm_version is None:
+        console_error(
+            f"Cannot read the ROCm version next to the host path {host_path}."
+        )
+    require_container_rocm_at_least_host(pid, host_rocm_version)
+
+
 def require_container_rocm_at_least_host(pid: int, host_rocm_version: str) -> None:
     """Stop before attach when a container ROCm is older than the host ROCm.
 
