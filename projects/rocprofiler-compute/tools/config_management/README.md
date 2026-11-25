@@ -26,7 +26,7 @@ rocprofiler-compute/
 │       ├── gfx942/
 │       ├── gfx950/
 │       ├── gfx115x/                     # RDNA 3.5 shared analysis configs
-│       ├── gfx1201/                     # Navi48 RDNA4 analysis configs
+│       ├── gfx120x/                     # RDNA 4 shared analysis configs
 │       ├── gfx1250/
 │       ├── gfx9_config_template.yaml    # CDNA (gfx9) panel contract
 │       ├── gfx11_config_template.yaml   # RDNA 3.5 (gfx115*) panel contract
