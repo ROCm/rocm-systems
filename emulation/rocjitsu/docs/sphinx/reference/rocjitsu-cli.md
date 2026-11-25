@@ -119,7 +119,7 @@ When `--attach <id_or_path>` is used, the launcher validates one existing daemon
 3.  A path selects that runtime directory directly.
 4.  A path ending in `daemon.sock` selects its parent directory. Use `--attach ./daemon.sock` to select a socket in the current directory.
 
-The launched application receives the selected runtime directory through `ROCJITSU_INVOCATION_DIR`, so descendants connect to the same daemon. A process using the interposer without a launcher still falls back to the default socket path order above.
+The launched application receives the selected runtime directory through `ROCJITSU_INVOCATION_DIR`, so descendants connect to the same daemon. To attach a second client to a daemon started by `rocjitsu --daemon -- ./app`, pass the full path to that launch's invocation directory, for example `<runtime>/invocations/4242` for an app with PID 4242. A bare `--attach 4242` looks for a named daemon at `<runtime>/4242/daemon.sock`, and `--attach invocations/4242` resolves relative to the client's working directory. A process using the interposer without a launcher still falls back to the default socket path order above.
 
 For additional environment variables that control simulation plugins, see [Environment variable reference](/reference/environment-variables.md).
 

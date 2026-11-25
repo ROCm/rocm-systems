@@ -208,12 +208,17 @@ The only shared state selected by attach is the runtime directory and its
 well-known daemon socket. The default runtime directory is selected from
 `ROCJITSU_RUNTIME_DIR`, then `$XDG_RUNTIME_DIR/rocjitsu`, then
 `/tmp/rocjitsu-<uid>`. `--attach` selects `default`, an ID under that default,
-or an explicit runtime/socket path. To run independent daemons for the same
-user, give each session its own runtime directory and pass that path to
-`--attach`. Daemon launch mode passes the exact daemon PID to the exec'd client
-for ptrace authorization. Plain attach mode cannot know a launcher-owned daemon
-PID, so after the daemon handshake it trusts the same-user socket peer in the
-selected runtime directory.
+or an explicit runtime/socket path. To attach a second client to a daemon
+started by `rocjitsu --daemon -- ./app`, pass the full path to that launch's
+invocation directory, for example `<runtime>/invocations/4242` for an app with
+PID 4242. A bare `--attach 4242` looks for a named daemon at
+`<runtime>/4242/daemon.sock`, and `--attach invocations/4242` resolves relative
+to the client's working directory. To run independent daemons for the same user,
+give each session its own runtime directory and pass that path to `--attach`.
+Daemon launch mode passes the exact daemon PID to the exec'd client for ptrace
+authorization. Plain attach mode cannot know a launcher-owned daemon PID, so
+after the daemon handshake it trusts the same-user socket peer in the selected
+runtime directory.
 
 A future `rocjitsu ps` command will list discoverable daemon targets; see
 ROCm/rocm-systems#16298.
