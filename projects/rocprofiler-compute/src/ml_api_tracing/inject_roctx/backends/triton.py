@@ -16,6 +16,7 @@ from typing import Any, Callable
 
 from ml_api_tracing.inject_roctx import marker_ranges
 from ml_api_tracing.inject_roctx.backend_contract import register
+from ml_api_tracing.marker_format import format_args_blob, render_dtype_shape
 from utils.logger import console_log, console_warning
 
 _BACKEND_NAME = "triton"
@@ -106,6 +107,56 @@ def _extract_kernel_name(obj: object, default: str = "<triton_kernel>") -> str:
         return fn_name
 
     return default
+
+
+def _format_triton_args(
+    instance: object, call_args: object, call_kwargs: object
+) -> str:
+    """Return the ROCTX args text for a Triton launch. Return n/a
+    when no operands remain."""
+    try:
+        names = []
+        for attr in ("params", "arg_names"):
+            collected = []
+            for param in getattr(instance, attr, None) or ():
+                if isinstance(param, str):
+                    if param:
+                        collected.append(param)
+                    continue
+                param_name = getattr(param, "name", None)
+                if isinstance(param_name, str) and param_name:
+                    collected.append(param_name)
+            if collected:
+                names = collected
+                break
+        if not names:
+            return "n/a"
+
+        positionals = tuple(call_args)
+        if positionals and positionals[0] is instance:
+            positionals = positionals[1:]
+        if len(positionals) > len(names):
+            positionals = positionals[-len(names) :]
+
+        parts = []
+        for index, name in enumerate(names):
+            if len(parts) >= 32:
+                break
+            if index < len(positionals):
+                value = positionals[index]
+            elif name in call_kwargs:
+                value = call_kwargs[name]
+            else:
+                continue
+            rendered = render_dtype_shape(value)
+            if rendered is None and isinstance(value, (int, float, bool, str)):
+                rendered = repr(value)
+            if rendered is None:
+                continue
+            parts.append(f"{name}={rendered}")
+        return format_args_blob(parts)
+    except Exception:
+        return "n/a"
 
 
 def _run_with_marker(

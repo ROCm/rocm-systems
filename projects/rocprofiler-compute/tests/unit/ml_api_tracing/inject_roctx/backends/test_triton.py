@@ -244,3 +244,72 @@ def test_launcher_marker_attributes_actual_recording_frames_to_user(monkeypatch)
         )
     ]
     assert pops == ["pop"]
+
+
+def test_format_triton_args_named_operands_keep_block_size_not_grid():
+    kernel = types.SimpleNamespace(params=["x_ptr", "n_elements", "BLOCK_SIZE"])
+    tensor = types.SimpleNamespace(shape=(2, 3), dtype="float32")
+    blob = triton_backend._format_triton_args(
+        kernel,
+        (tensor, 1024),
+        {"grid": (8,), "BLOCK_SIZE": 256},
+    )
+    assert blob == "(x_ptr=float32[2x3], n_elements=1024, BLOCK_SIZE=256)"
+    assert "grid" not in blob
+
+
+def test_format_triton_args_drops_bound_instance():
+    kernel = types.SimpleNamespace(params=["x_ptr", "n_elements", "BLOCK_SIZE"])
+    tensor = types.SimpleNamespace(shape=(2, 3), dtype="float32")
+    blob = triton_backend._format_triton_args(
+        kernel,
+        (kernel, tensor, 1024),
+        {"grid": (8,), "BLOCK_SIZE": 256},
+    )
+    assert blob == "(x_ptr=float32[2x3], n_elements=1024, BLOCK_SIZE=256)"
+
+
+def test_format_triton_args_takes_trailing_positionals():
+    kernel = types.SimpleNamespace(
+        params=["x_ptr", "out_ptr", "n_elements", "BLOCK_SIZE"]
+    )
+    tensor = types.SimpleNamespace(shape=(8,), dtype="float32")
+    blob = triton_backend._format_triton_args(
+        kernel,
+        (object(), object(), tensor, tensor, 8, 256),
+        {},
+    )
+    assert blob == (
+        "(x_ptr=float32[8], out_ptr=float32[8], n_elements=8, BLOCK_SIZE=256)"
+    )
+
+
+def test_format_triton_args_without_names_is_n_a():
+    blob = triton_backend._format_triton_args(
+        types.SimpleNamespace(),
+        (object(), 1024),
+        {"grid": (8,)},
+    )
+    assert blob == "n/a"
+
+
+def test_format_triton_args_encodes_pipe_in_string():
+    blob = triton_backend._format_triton_args(
+        types.SimpleNamespace(params=["msg"]),
+        ("a|b",),
+        {},
+    )
+    assert "%7C" in blob
+    assert "|" not in blob
+
+
+def test_format_triton_args_caps_at_32_items():
+    names = ["p%d" % index for index in range(40)]
+    blob = triton_backend._format_triton_args(
+        types.SimpleNamespace(params=names),
+        tuple(range(40)),
+        {},
+    )
+    assert blob.count("=") == 32
+    assert "p31=" in blob
+    assert "p32=" not in blob
