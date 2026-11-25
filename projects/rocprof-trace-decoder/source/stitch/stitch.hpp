@@ -215,9 +215,10 @@ public:
         if (bop) event.flags |= ROCPROF_TRACE_DECODER_EVENT_FLAGS_BOP;
         callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, &event, 1, cbdata);
     };
-    void sendDispatch(CSRegisterHandler& csregister, int64_t time, uint8_t me, uint8_t pipe)
+    void sendDispatch(CSRegisterHandler& csregister, int64_t time, uint8_t me, uint8_t pipe, uint64_t dispatch_id = 0)
     {
         auto event = csregister.PopulateDispatch(time, me, pipe);
+        event.dispatch_id = dispatch_id;
 
         callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_DISPATCH, &event, 1, cbdata);
     };

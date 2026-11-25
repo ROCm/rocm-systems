@@ -32,8 +32,10 @@
 #pragma once
 
 #include "palAssert.h"
+#include "palConcepts.h"
 #include "palStringUtil.h"
 #include <cctype>
+#include <concepts>
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
@@ -729,6 +731,25 @@ constexpr T BitfieldGenMask(
     return mask;
 }
 
+/// Generates a bitmask range. All bits in the defined range (inclusively) will be set to 1.
+///
+/// @param [in] startBit  First bit to set (starting at 0)
+/// @param [in] endBit    Last bit to set (starting at 0)
+///
+/// @returns Bitmask in storage of type T with bits [startBit:endBit] set.
+template <typename T>
+constexpr T BitfieldGenMaskRange(
+    T startBit,
+    T endBit)
+{
+    PAL_CONSTEXPR_ASSERT(startBit <= endBit);
+    PAL_CONSTEXPR_ASSERT(endBit < static_cast<T>(sizeof(T) * 8));
+
+    const T totalBits = endBit - startBit + 1;
+    const T mask = BitfieldGenMask<T>(totalBits) << startBit;
+    return mask;
+}
+
 /// Determines if a value is a power of two.
 ///
 /// @returns True if it is a power of two, false otherwise.
@@ -774,27 +795,6 @@ constexpr T Pow2Align(
     return ((value + static_cast<T>(alignment) - 1) & ~(static_cast<T>(alignment) - 1));
 }
 
-/// Rounds the specified uint 'value' up to the nearest power of 2
-///
-/// @param [in] value  The value to pad.
-///
-/// @returns Power of 2 padded value.
-template <typename T>
-T Pow2Pad(
-    T value)
-{
-    T ret = value;
-
-    if ((value & (value - 1)) != 0)
-    {
-        uint32 lastBitIndex = 0;
-        BitMaskScanReverse(&lastBitIndex, value);
-        ret = (static_cast<T>(0x2) << lastBitIndex);
-    }
-
-    return ret;
-}
-
 /// Casts a scoped enum value to it's underlying type.
 /// This is intended to be a shortcut to save from typing the pattern static_cast<underlying_type>.
 /// Will be deprecated by C++23's std::to_underlying
@@ -815,7 +815,8 @@ constexpr auto ToUnderlyingType(E e) noexcept
 
 /// Computes the base-2 logarithm of an unsigned integer.
 ///
-/// If the given integer is not a power of 2, this function will not provide an exact answer.
+/// If the given integer is not a power of 2, this function will not provide an exact answer. It will round down to the
+/// nearest integer value; for example, Log2(6) == 2.
 ///
 /// @param [in] u  Value to compute the logarithm of.
 ///
@@ -847,15 +848,28 @@ constexpr uint32 Log2(
 
 /// Computes the base-2 logarithm of an unsigned 64-bit integer based on ceiling
 ///
-/// If the given integer is not a power of 2, this function will not provide an exact answer.
+/// If the given integer is not a power of 2, this function will not provide an exact answer. It will round up to the
+/// nearest integer value; for example, Log2(6) == 3.
 ///
 /// @returns ceilLog_2(u)
 template <typename T>
-uint32 CeilLog2(
+constexpr uint32 CeilLog2(
     T u)  ///< Value to compute the ceil logarithm of.
 {
     const uint32 logValue = Log2(u);
     return ((static_cast<T>(0x1ul) << logValue) < u) ? (logValue + 1) : logValue;
+}
+
+/// Rounds the specified uint 'value' up to the nearest power of 2
+///
+/// @param [in] value  The value to pad.
+///
+/// @returns Power of 2 padded value.
+template <typename T>
+constexpr T Pow2Pad(
+    T value)
+{
+    return static_cast<T>(0x1) << CeilLog2(value);
 }
 
 /// Implements an alternative version of integer division in which the quotient is always rounded up instead of down.
@@ -1495,10 +1509,10 @@ inline void Wcstombs(
             PAL_ASSERT_ALWAYS();
             pDst[0] = '\0';
         }
-        else
+        else if (truncated == true)
         {
             // Let the caller know the string did not fit. pDst is still null terminated.
-            PAL_ALERT(truncated == true);
+            PAL_ALERT_ALWAYS_MSG("String was truncated during conversion.");
         }
     }
 }
@@ -1709,6 +1723,55 @@ inline void* Memcpy(
     return std::memcpy(pDest, source, sizeof(SourceType) * SourceSize);
 }
 
+///@{
+/// @internal Implementation namespace for @ref TruncateCast.
+namespace _detail
+{
+// This internal functor is required for TruncateCast because the implicit cast operator is the only way to infer
+// the caller's return type. The compiler should fully inline it and remove the temporary variable.
+template<std::integral LimitT, Concepts::EnumOrIntegral SrcT>
+class TruncateCastImpl
+{
+public:
+    constexpr explicit TruncateCastImpl(SrcT src) : m_src(src) {}
+
+    template<Concepts::EnumOrIntegral DstT>
+    constexpr operator DstT() const
+    {
+        static_assert(sizeof(DstT) >= sizeof(LimitT), "The truncated value cannot fit inside the destination.");
+
+        // Normalize a (possibly enum) src to its underlying integral type so std::cmp_* works correctly.
+        // srcVal's type is deduced via auto from decltype(ToUnderlyingType(src))
+        //   - For enum types it resolves to the enum's underlying integral type.
+        //   - For non-enum (integral) types it resolves to the type itself.
+        const auto srcVal = ToUnderlyingType(m_src);
+
+        // Lower-bound check: assert if src is below the minimum representable value of LimitT.
+        // std::cmp_less performs a sign-correct comparison, so a negative signed srcVal
+        // correctly fails when LimitT is unsigned (and vice versa) without signed/unsigned warnings.
+        PAL_CONSTEXPR_ASSERT_MSG(std::cmp_less(srcVal, std::numeric_limits<LimitT>::min()) == false,
+                      "TruncateCast: src value (0x%llx) is below the minimum value of LimitT (0x%llx); "
+                      "truncation would lose data.",
+                      static_cast<unsigned long long>(srcVal),
+                      static_cast<unsigned long long>(std::numeric_limits<LimitT>::min()));
+
+        // Upper-bound check: assert if src exceeds the maximum representable value of LimitT.
+        // std::cmp_greater likewise compares across differing signedness correctly.
+        PAL_CONSTEXPR_ASSERT_MSG(std::cmp_greater(srcVal, std::numeric_limits<LimitT>::max()) == false,
+                      "TruncateCast: src value (0x%llx) exceeds the maximum value of LimitT (0x%llx); "
+                      "truncation would lose data.",
+                      static_cast<unsigned long long>(srcVal),
+                      static_cast<unsigned long long>(std::numeric_limits<LimitT>::max()));
+
+        return static_cast<DstT>(m_src);
+    }
+
+private:
+    const SrcT m_src;
+};
+}
+///@}
+
 /// This function should be used to convert a larger integer to a smaller integer without generating a "possible loss
 /// of data" warning. The caller must manually specify the LimitT template parameter, which tells this function that
 /// the author of this code has explicitly verified that all possible "src" values fit in a LimitT. The DstT and SrcT
@@ -1723,53 +1786,25 @@ inline void* Memcpy(
 /// decrease the size of DstT without verifying that the new DstT fits all possible "src" values. TruncateCast's LimitT
 /// template parameter forces someone to manually re-certify that all possible "src" values fit inside the new DstT.
 ///
-/// TruncateCast also alerts if "src" is outside the representable range of LimitT (i.e. not between
-/// the minimum and maximum values of LimitT), which verifies at runtime that the explicitly certified assumption (all
-/// "src" values fit in a LimitT) actually holds. The lower and upper bounds are checked separately so that a firing
-/// alert clearly indicates which bound was violated. The comparisons use safe-compare helpers and normalize enums to
-/// their underlying integral type so that mixed-signedness and enum "src" values are handled correctly.
+/// TruncateCast also asserts if "src" is outside the representable range of LimitT (i.e. not between the minimum and
+/// maximum values of LimitT), which verifies at runtime that the explicitly certified assumption (all "src" values fit
+/// in a LimitT) actually holds. The lower and upper bounds are checked separately so that a firing assert clearly
+/// indicates which bound was violated. The comparisons use safe-compare helpers and normalize enums to their
+/// underlying integral type so that mixed-signedness and enum "src" values are handled correctly.
 ///
-/// @note Unlike a normal cast, TruncateCast needs to use an output reference instead of simply returning a value.
-///       It really must work this way because C++ disallows function overloading based on return types.
+/// @param [in] src  Truncate this SrcT value, which must fit within LimitT, and return it as a DstT.
 ///
-/// @param [out] dst  Write the truncated value to this location.
-/// @param [in]  src  Truncate this value and write it to "dst".
-template <typename LimitT, typename DstT, typename SrcT>
-inline void TruncateCast(
-    DstT& dst,
-    SrcT  src)
+/// @returns The truncated value as an instance of the implicit DstT type.
+template<std::integral LimitT, Concepts::EnumOrIntegral SrcT>
+constexpr auto TruncateCast(SrcT src)
 {
-    static_assert(std::is_integral_v<LimitT> && (std::is_integral_v<DstT> || std::is_enum_v<DstT>) &&
-                  (std::is_integral_v<SrcT> || std::is_enum_v<SrcT>),
-                  "TruncateCast expects an integer LimitT and integers or enums for DstT and SrcT.");
-
-    static_assert(sizeof(DstT) >= sizeof(LimitT), "The truncated value cannot fit inside the destination.");
-
-    // Normalize a (possibly enum) src to its underlying integral type so std::cmp_* works correctly.
-    // srcVal's type is deduced via auto from decltype(ToUnderlyingType(src))
-    //   - For enum types it resolves to the enum's underlying integral type.
-    //   - For non-enum (integral) types it resolves to the type itself.
-    const auto srcVal = ToUnderlyingType(src);
-
-    // Lower-bound check: alert if src is below the minimum representable value of LimitT.
-    // std::cmp_less performs a sign-correct comparison, so a negative signed srcVal
-    // correctly fails when LimitT is unsigned (and vice versa) without signed/unsigned warnings.
-    PAL_ALERT_MSG(std::cmp_less(srcVal, std::numeric_limits<LimitT>::min()),
-                  "TruncateCast: src value (0x%llx) is below the minimum value of LimitT (0x%llx); "
-                  "truncation would lose data.",
-                  static_cast<unsigned long long>(srcVal),
-                  static_cast<unsigned long long>(std::numeric_limits<LimitT>::min()));
-
-    // Upper-bound check: alert if src exceeds the maximum representable value of LimitT.
-    // std::cmp_greater likewise compares across differing signedness correctly.
-    PAL_ALERT_MSG(std::cmp_greater(srcVal, std::numeric_limits<LimitT>::max()),
-                  "TruncateCast: src value (0x%llx) exceeds the maximum value of LimitT (0x%llx); "
-                  "truncation would lose data.",
-                  static_cast<unsigned long long>(srcVal),
-                  static_cast<unsigned long long>(std::numeric_limits<LimitT>::max()));
-
-    dst = static_cast<DstT>(src);
+    return _detail::TruncateCastImpl<LimitT, SrcT>(src);
 }
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1013
+template <typename LimitT, typename DstT, typename SrcT>
+inline void TruncateCast(DstT& dst, SrcT src) { dst = TruncateCast<LimitT>(src); }
+#endif
 
 /// Assigns a range of elements from the fixed-size "src" array to another range in the fixed-size "dst" array.
 ///

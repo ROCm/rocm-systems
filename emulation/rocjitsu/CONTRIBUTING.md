@@ -30,6 +30,7 @@
 | Shared utility (bit ops, logging, SIMD, allocators) | `lib/util/` |
 | JSON config schema change | `schemas/` + `lib/rocjitsu/src/rocjitsu/config/` |
 | CLI changes | `tools/rocjitsu/` |
+| Python execution API | `python/` (tests in `python/tests/`) |
 | New GPU topology config | `configs/` |
 | Tests | `tests/` (mirror the source structure: `tests/dbt/`, `tests/analysis/`, `tests/patch/`, etc.) |
 
@@ -117,7 +118,20 @@ When modifying instruction semantics or adding instruction support:
 - Add tests for new functionality. Place them in `tests/` mirroring
   the source directory structure.
 - Run the test suite: `ctest --test-dir build`
-- Run Python tests: `cd lib/python && python -m pytest amdisa/tests/ -x`
+- Run ISA codegen tests from the rocjitsu project root in an active virtual
+  environment:
+  ```bash
+  python -m pip install -e 'lib/python[test]'
+  python -m pytest lib/python/amdisa/tests/ -x
+  ```
+  For a clean uv environment, use `uv pip install -e 'lib/python[test]'` to
+  install the dependencies. The `test` extra includes pip, setuptools, and wheel
+  because the installed-package test invokes pip with build isolation disabled.
+- Run Python API tests: `python -B python/tests/test_api.py -v` after installing
+  the package and native runtime as described in [python/README.md](python/README.md).
+  The CTest `PythonApiTest` entry uses the configured Python interpreter's native
+  installation, then `PATH` if none is installed. Reinstall native changes before
+  testing; adding a build to `PATH` does not override an installed runtime.
 - Ensure zero compiler warnings before submitting.
 
 ## Proposing architectural changes

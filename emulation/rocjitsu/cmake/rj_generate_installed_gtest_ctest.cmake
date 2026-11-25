@@ -17,6 +17,8 @@
 #   TEST_FILTER          --gtest_filter for discovery. Must be the SAME filter the
 #                        build tree uses, or a case excluded there is discovered here
 #                        and collides with its own manual registration.
+#   TEST_PREFIX/SUFFIX   Name decoration for separately registered variants.
+#   TEST_ENVIRONMENT     Additional environment entries applied to every case.
 function(rj_generate_installed_gtest_ctest)
     set(oneValueArgs
         TEST_EXECUTABLE
@@ -24,8 +26,9 @@ function(rj_generate_installed_gtest_ctest)
         OUTPUT_FILE
         TEST_FILTER
         TEST_PREFIX
+        TEST_SUFFIX
     )
-    cmake_parse_arguments(ARG "" "${oneValueArgs}" "" ${ARGN})
+    cmake_parse_arguments(ARG "" "${oneValueArgs}" "ENVIRONMENT" ${ARGN})
 
     if(NOT ARG_TEST_EXECUTABLE)
         message(FATAL_ERROR "TEST_EXECUTABLE is required")
@@ -59,6 +62,13 @@ function(rj_generate_installed_gtest_ctest)
         )
     endif()
 
+    set(_environment
+        "ROCJITSU_CONFIG_DIR=\${RJ_INSTALLED_CONFIG_DIR}"
+        "ROCJITSU_KERNEL_DIR=\${RJ_INSTALLED_KERNEL_DIR}"
+        ${ARG_ENVIRONMENT}
+    )
+    string(REPLACE "\\" "\\\\" _escaped_environment "${_environment}")
+    string(REPLACE "\"" "\\\"" _escaped_environment "${_escaped_environment}")
     file(WRITE "${ARG_OUTPUT_FILE}" "# Installed GoogleTest CTest tests\n")
     set(_suite)
     string(REPLACE "\n" ";" _lines "${_tests}")
@@ -84,7 +94,9 @@ function(rj_generate_installed_gtest_ctest)
                     "${_case_name}"
                 )
             endif()
-            set(_test_name "${ARG_TEST_PREFIX}${_suite}.${_pretty_case_name}")
+            set(_test_name
+                "${ARG_TEST_PREFIX}${_suite}.${_pretty_case_name}${ARG_TEST_SUFFIX}"
+            )
             set(_test_filter "${_suite}.${_case_name}")
             string(REPLACE "\\" "\\\\" _escaped_name "${_test_name}")
             string(REPLACE "\"" "\\\"" _escaped_name "${_escaped_name}")
@@ -95,7 +107,7 @@ function(rj_generate_installed_gtest_ctest)
                 "add_test(\"${_escaped_name}\" \"${ARG_INSTALLED_EXECUTABLE}\" \"--gtest_filter=${_escaped_filter}\")\n"
                 "set_tests_properties(\"${_escaped_name}\" PROPERTIES\n"
                 "  SKIP_REGULAR_EXPRESSION [=[\\[  SKIPPED \\]]=]\n"
-                "  ENVIRONMENT \"ROCJITSU_CONFIG_DIR=\${RJ_INSTALLED_CONFIG_DIR};ROCJITSU_KERNEL_DIR=\${RJ_INSTALLED_KERNEL_DIR}\")\n\n"
+                "  ENVIRONMENT \"${_escaped_environment}\")\n\n"
             )
         elseif(_line MATCHES "^Running main\\(\\) from .*/gtest_main\\.cc$")
             # GoogleTest's gtest_main emits this banner before the test list.
@@ -114,4 +126,6 @@ rj_generate_installed_gtest_ctest(
     OUTPUT_FILE "${OUTPUT_FILE}"
     TEST_FILTER "${TEST_FILTER}"
     TEST_PREFIX "${TEST_PREFIX}"
+    TEST_SUFFIX "${TEST_SUFFIX}"
+    ENVIRONMENT ${TEST_ENVIRONMENT}
 )

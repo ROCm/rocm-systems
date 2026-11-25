@@ -67,6 +67,7 @@ def merge_sqlite_dbs(
 
     uuids = []
     views = []
+    rocpd_views_sql = {}
     data_views = []
     schema_versions = []
 
@@ -215,6 +216,8 @@ def merge_sqlite_dbs(
                         name == _name for _name, _ in data_views
                     ):
                         data_views.append((name, create_sql))
+                    if name.startswith("rocpd_") and name not in rocpd_views_sql:
+                        rocpd_views_sql[name] = create_sql
                     existing_views.add(name)
 
                 views += [itr for itr in list(existing_views) if itr.startswith("rocpd_")]
@@ -252,10 +255,24 @@ def merge_sqlite_dbs(
             matching_tables = [
                 titr for titr in existing_tables if titr.startswith(f"{vitr}_")
             ]
-            tables_union = " UNION ALL ".join(
-                [f"SELECT * FROM {titr}" for titr in matching_tables]
-            )
-            conn.execute(f"CREATE VIEW {vitr} AS {tables_union}")
+            if matching_tables:
+                tables_union = " UNION ALL ".join(
+                    [f"SELECT * FROM {titr}" for titr in matching_tables]
+                )
+                conn.execute(f"CREATE VIEW {vitr} AS {tables_union}")
+                continue
+
+            # Some rocpd_ views are derived from other views and have no
+            # direct backing tables with the "<view>_" prefix.  A definition that
+            # names one recording's tables would hide every other recording.
+            sql_view = rocpd_views_sql.get(vitr)
+            if sql_view and not any(uuid in sql_view for uuid in uuids):
+                conn.execute(sql_view)
+            else:
+                log(
+                    f"Skipping view {vitr}: no matching tables and no "
+                    "recording-independent SQL definition"
+                )
         conn.commit()
 
         # Now that the rocpd_ views are created, re-create the data-views using all the data
@@ -270,6 +287,9 @@ def merge_sqlite_dbs(
 def add_args(parser):
     """Add arguments for merger."""
 
+    # temporary deprecation message for --output-path
+    from . import output_config
+
     io_options = parser.add_argument_group("I/O options")
 
     io_options.add_argument(
@@ -282,9 +302,20 @@ def add_args(parser):
     )
     io_options.add_argument(
         "-d",
-        "--output-path",
+        "--output-directory",
+        metavar="OUTPUT_DIRECTORY",
+        dest="output_path",
         help="Sets the output path where the output files will be saved (default path: `./rocpd-output-data`)",
         default=os.environ.get("ROCPD_OUTPUT_PATH", "./rocpd-output-data"),
+        type=str,
+        required=False,
+    )
+    io_options.add_argument(
+        "--output-path",
+        dest="output_path",
+        action=output_config._DeprecatedOutputPath,
+        help=argparse.SUPPRESS,
+        default=argparse.SUPPRESS,  # keeps the --output-directory / ROCPD_OUTPUT_PATH default intact
         type=str,
         required=False,
     )
@@ -353,7 +384,7 @@ def main(argv=None) -> int:
 
     args = parser.parse_args(argv)
 
-    merge_args = process_args(args)
+    merge_args = process_args(None, args)
 
     execute(args.input, **merge_args)
 

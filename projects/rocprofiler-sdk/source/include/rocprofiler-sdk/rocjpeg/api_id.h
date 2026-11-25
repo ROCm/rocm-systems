@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/rocjpeg/api_trace.h>
+
 /**
  * @brief ROCProfiler enumeration of rocJPEG API tracing operations
  */
@@ -38,6 +40,18 @@ typedef enum rocprofiler_rocjpeg_api_id_t  // NOLINT(performance-enum-size)
     ROCPROFILER_ROCJPEG_API_ID_rocJpegDecode,
     ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatched,
     ROCPROFILER_ROCJPEG_API_ID_rocJpegGetErrorName,
+
+#if ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION >= 1
+    ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeAsync,
+    ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeSync,
+#endif
+#if ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION >= 2
+    ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedAsync,
+    ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedSync,
+#endif
+#if ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION >= 3
+    ROCPROFILER_ROCJPEG_API_ID_rocJpegGetDecoderCaps,
+#endif
 
     ROCPROFILER_ROCJPEG_API_ID_LAST,
 } rocprofiler_rocjpeg_api_id_t;

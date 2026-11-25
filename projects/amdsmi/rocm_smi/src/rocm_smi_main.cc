@@ -19,6 +19,7 @@
 #include <sstream>
 #include <string>
 
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_exception.h"
@@ -27,20 +28,10 @@
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
-static const char* kPathDRMRoot = "/sys/class/drm";
 static const char* kPathHWMonRoot = "/sys/class/hwmon";
 static const char* kPathPowerRoot = "/sys/kernel/debug/dri";
-static const char* kPathNICRoot = "/sys/class/net";
-static const char* kPathSwitchRoot = "/sys/class/scsi_host";
 static const char* kPathDeviceMon = "/device/hwmon";
 static const char* kPathDeviceVendor = "/device/vendor";
-static const char* kPathVendor = "/vendor";
-static const char* kPathDevice = "/device";
-static const char* kPathPciDevices = "/sys/bus/pci/devices/";
-
-static const char* kNICPrefix =
-    "e";  // changed to 'e' since SLES syspath is 'eth' and RHEL/Ubuntu is 'en'
-static const char* kSwitchPrefix = "host";
 
 static const char* kAMDMonitorTypes[] = {"radeon", "amdgpu", ""};
 
@@ -294,6 +285,11 @@ void RocmSMI::Initialize(uint64_t flags) {
   // internal data structures.
   ret = DiscoverAmdgpuDevices();
   if (ret != 0) {
+    if (ret == 2) {
+      // DiscoverAmdgpuDevices returns 2 when GetLargestNodeNumber failed with ENOENT
+      throw amd::smi::rsmi_exception(RSMI_STATUS_DRIVER_NOT_LOADED,
+                                     "DiscoverAmdgpuDevices() did not detect a supported device.");
+    }
     throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR, "DiscoverAmdgpuDevices() failed.");
   }
 
@@ -391,132 +387,15 @@ void RocmSMI::Initialize(uint64_t flags) {
   ss << __PRETTY_FUNCTION__ << " | current device paths = " << amdGPUDeviceList;
   // std::cout << ss.str() << std::endl;
   LOG_DEBUG(ss);
-  {
-    /*
-     * Discover the BRCM NIC devices from the sysfs entry
-     * Construct the BDF for the discovered NIC devices
-     * Push NIC SMI Device object to nic_devices vector
-     */
-    ret = DiscoverBRCMnicDevices();
-    if (ret != 0) {
-      throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR, "DiscoverBRCMnicDevices() failed.");
-    }
-    uint64_t bdfid;
-    for (auto& device : nic_devices_) {
-      if (ConstructBDFID(device->path(), &bdfid) != 0) {
-        std::cerr << "Failed to construct BDFID." << std::endl;
-      } else if (device->bdfid() != UINT64_MAX && device->bdfid() != bdfid) {
-        // handles secondary partitions - compute partition feature nodes
-        ss << __PRETTY_FUNCTION__ << " | [before] device->path() = " << device->path()
-           << "\n | bdfid = " << bdfid << "\n | device->bdfid() = " << device->bdfid()
-           << "\n | (xgmi node) setting to setting "
-           << "device->set_bdfid(device->bdfid())";
-        LOG_TRACE(ss);
-        device->set_bdfid(device->bdfid());
-      } else {
-        // legacy & pcie card updates
-        ss << __PRETTY_FUNCTION__ << " | [before] device->path() = " << device->path()
-           << "\n | bdfid = " << bdfid << "\n | device->bdfid() = " << device->bdfid()
-           << "\n | (legacy/pcie card) setting device->set_bdfid(bdfid)";
-        LOG_TRACE(ss);
-        device->set_bdfid(bdfid);
-      }
-      ss << __PRETTY_FUNCTION__ << " | [after] device->path() = " << device->path()
-         << "\n | bdfid = " << bdfid << "\n | device->bdfid() = " << device->bdfid()
-         << "\n | final update: device->bdfid() holds correct device bdf";
-      LOG_TRACE(ss);
-    }
-
-    std::shared_ptr<amd::smi::Device> dev;
-    // Sort index based on the BDF, collect BDF id firstly.
-    BdfDeviceVector_t dv_to_id;
-    dv_to_id.reserve(nic_devices_.size());
-    for (uint32_t dv_ind = 0; dv_ind < nic_devices_.size(); ++dv_ind) {
-      dev = nic_devices_[dv_ind];
-      uint64_t bdfid = dev->bdfid();
-      dv_to_id.push_back({bdfid, dev});
-    }
-    ss << __PRETTY_FUNCTION__ << " Sort index based on BDF.";
-    LOG_DEBUG(ss);
-
-    // Stable sort to keep the order if bdf is equal.
-    stable_sort_suppress_deprecated(
-        dv_to_id.begin(), dv_to_id.end(),
-        [](const BDFDevicePair_t& p1, const BDFDevicePair_t& p2) { return p1.first < p2.first; });
-    nic_devices_.clear();
-    for (uint32_t dv_ind = 0; dv_ind < dv_to_id.size(); ++dv_ind) {
-      nic_devices_.push_back(dv_to_id[dv_ind].second);
-    }
-  }
-
-  {
-    /*
-     * Discover the BRCM switches from the sysfs entry
-     * Construct the BDF for the discovered switch devices
-     * Push SWITCH SMI Device object to switch_devices vector
-     */
-
-    ret = DiscoverBRCMswitchDevices();
-    if (ret != 0) {
-      throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
-                                     "DiscoverBRCMswitchDevices() failed.");
-    }
-    uint64_t bdfid;
-    for (auto& device : switch_devices_) {
-      if (ConstructBDFID(device->path(), &bdfid) != 0) {
-        std::cerr << "Failed to construct BDFID." << std::endl;
-      } else if (device->bdfid() != UINT64_MAX && device->bdfid() != bdfid) {
-        // handles secondary partitions - compute partition feature nodes
-        ss << __PRETTY_FUNCTION__ << " | [before] device->path() = " << device->path()
-           << "\n | bdfid = " << bdfid << "\n | device->bdfid() = " << device->bdfid()
-           << "\n | (xgmi node) setting to setting "
-           << "device->set_bdfid(device->bdfid())";
-        LOG_TRACE(ss);
-        device->set_bdfid(device->bdfid());
-      } else {
-        // legacy & pcie card updates
-        ss << __PRETTY_FUNCTION__ << " | [before] device->path() = " << device->path()
-           << "\n | bdfid = " << bdfid << "\n | device->bdfid() = " << device->bdfid()
-           << "\n | (legacy/pcie card) setting device->set_bdfid(bdfid)";
-        LOG_TRACE(ss);
-        device->set_bdfid(bdfid);
-      }
-      ss << __PRETTY_FUNCTION__ << " | [after] device->path() = " << device->path()
-         << "\n | bdfid = " << bdfid << "\n | device->bdfid() = " << device->bdfid()
-         << "\n | final update: device->bdfid() holds correct device bdf";
-      LOG_TRACE(ss);
-    }
-
-    std::shared_ptr<amd::smi::Device> dev;
-    // Sort index based on the BDF, collect BDF id firstly.
-    BdfDeviceVector_t dv_to_id;
-    dv_to_id.reserve(switch_devices_.size());
-    for (uint32_t dv_ind = 0; dv_ind < switch_devices_.size(); ++dv_ind) {
-      dev = switch_devices_[dv_ind];
-      uint64_t bdfid = dev->bdfid();
-      dv_to_id.push_back({bdfid, dev});
-    }
-    ss << __PRETTY_FUNCTION__ << " Sort index based on BDF.";
-    LOG_DEBUG(ss);
-
-    // Stable sort to keep the order if bdf is equal.
-    stable_sort_suppress_deprecated(
-        dv_to_id.begin(), dv_to_id.end(),
-        [](const BDFDevicePair_t& p1, const BDFDevicePair_t& p2) { return p1.first < p2.first; });
-    switch_devices_.clear();
-    for (uint32_t dv_ind = 0; dv_ind < dv_to_id.size(); ++dv_ind) {
-      switch_devices_.push_back(dv_to_id[dv_ind].second);
-    }
-  }
 }
 
 void RocmSMI::Cleanup() {
+  euid_ = 0;
+  kfd_node_map_.clear();
+  io_link_map_.clear();
+  dev_ind_to_node_ind_map_.clear();
   devices_.clear();
-  nic_devices_.clear();
-  switch_devices_.clear();
   monitors_.clear();
-  nic_monitors_.clear();
-  switch_monitors_.clear();
 
   if (kfd_notif_evt_fh() >= 0) {
     int ret = close(kfd_notif_evt_fh());
@@ -761,7 +640,7 @@ void RocmSMI::AddToDeviceList(const std::string& dev_name, uint64_t bdfid) {
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
 
-  auto dev_path = std::string(kPathDRMRoot);
+  auto dev_path = test_hooks::SysfsDrmRoot();
   dev_path += "/";
   dev_path += dev_name;
 
@@ -825,7 +704,7 @@ rsmi_status_t RocmSMI::AddToDeviceList2(RocmSMI::rsmi_device_enumeration_t devic
      << std::setw(1) << +(device.bdfid & static_cast<uint64_t>(0x7)) << "]\n";
   // std::cout << ss.str() << std::endl;
   LOG_TRACE(ss);
-  auto dev_path = std::string(kPathDRMRoot);
+  auto dev_path = test_hooks::SysfsDrmRoot();
 
   if (device.dev_name.empty()) {
     ss << __PRETTY_FUNCTION__ << " | dev_name is empty";
@@ -837,7 +716,7 @@ rsmi_status_t RocmSMI::AddToDeviceList2(RocmSMI::rsmi_device_enumeration_t devic
     uint32_t card_num = GetCard(dev_path);
     device.dev_name = "card" + std::to_string(card_num);
     device.drm_render_path = dev_path;
-    device.drm_card_path = std::string(kPathDRMRoot) + "/card" + std::to_string(card_num);
+    device.drm_card_path = test_hooks::SysfsDrmRoot() + "/card" + std::to_string(card_num);
     device.card_index = card_num;
   }
 
@@ -887,63 +766,7 @@ rsmi_status_t RocmSMI::AddToDeviceList2(RocmSMI::rsmi_device_enumeration_t devic
   return RSMI_STATUS_SUCCESS;
 }
 
-void RocmSMI::AddToNICDeviceList(const std::string& dev_name, uint64_t bdfid, uint32_t card_indx) {
-  std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
-  LOG_TRACE(ss);
-  auto dev_path = std::string(kPathNICRoot);
-  dev_path += "/";
-  dev_path += dev_name;
-
-  auto dev = std::make_shared<Device>(dev_path, &env_vars_);
-
-  std::shared_ptr<Monitor> m = FindMonitor(dev_path + kPathDeviceMon);
-  dev->set_monitor(m);
-
-  dev->set_card_index(card_indx);
-  GetSupportedEventGroups(card_indx, dev->supported_event_groups());
-  if (bdfid != 0) {
-    dev->set_bdfid(bdfid);
-  }
-
-  nic_devices_.push_back(dev);
-  ss << __PRETTY_FUNCTION__ << " | Adding to nic device list dev_name = " << dev_name
-     << " | path = " << dev_path << " | bdfid = " << bdfid
-     << " | card index = " << std::to_string(card_indx) << " | ";
-  LOG_DEBUG(ss);
-}
-
-void RocmSMI::AddToSWITCHDeviceList(const std::string& dev_name, uint64_t bdfid) {
-  std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
-  LOG_TRACE(ss);
-  auto dev_path = std::string(kPathSwitchRoot);
-  dev_path += "/";
-  dev_path += dev_name;
-
-  auto dev = std::make_shared<Device>(dev_path, &env_vars_);
-
-  std::shared_ptr<Monitor> m = FindMonitor(dev_path + kPathDeviceMon);
-  dev->set_monitor(m);
-
-  const std::string& d_name = dev_name;
-  uint32_t card_indx = GetDeviceIndex(d_name);
-  dev->set_card_index(card_indx);
-  GetSupportedEventGroups(card_indx, dev->supported_event_groups());
-  if (bdfid != 0) {
-    dev->set_bdfid(bdfid);
-  }
-
-  switch_devices_.push_back(dev);
-  ss << __PRETTY_FUNCTION__ << " | Adding to nic device list dev_name = " << dev_name
-     << " | path = " << dev_path << " | bdfid = " << bdfid
-     << " | card index = " << std::to_string(card_indx) << " | ";
-  LOG_DEBUG(ss);
-}
 static const uint32_t kAmdGpuId = 0x1002;
-static const uint32_t kBRCMnicId = 0x14e4;
-static const uint32_t kBRCMswitchId = 0x1000;
-static const uint32_t kBRCMswitchDId = 0x00b2;
 
 [[maybe_unused]] static bool isAMDGPU(std::string dev_path) {
   bool isAmdGpu = false;
@@ -981,97 +804,23 @@ static const uint32_t kBRCMswitchDId = 0x00b2;
   return isAmdGpu;
 }
 
-static bool isBRCMnic(std::string dev_path) {
-  bool isBRCMnic = false;
-  std::ostringstream ss;
-  std::string vend_path = dev_path + kPathDeviceVendor;
-  if (!FileExists(vend_path.c_str())) {
-    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is a BRCM NIC device - "
-       << (isBRCMnic ? "TRUE" : " FALSE");
-    LOG_DEBUG(ss);
-    return isBRCMnic;
-  }
-
-  std::ifstream fs;
-  fs.open(vend_path);
-
-  if (!fs.is_open()) {
-    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is a BRCM NIC device - "
-       << (isBRCMnic ? "TRUE" : " FALSE");
-    LOG_DEBUG(ss);
-    return isBRCMnic;
-  }
-
-  uint32_t vendor_id;
-
-  fs >> std::hex >> vendor_id;
-
-  fs.close();
-
-  if (vendor_id == kBRCMnicId) {
-    isBRCMnic = true;
-  }
-  ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is a BRCM NIC device - "
-     << (isBRCMnic ? "TRUE" : " FALSE");
-  LOG_DEBUG(ss);
-  return isBRCMnic;
-}
-
-static bool isBRCMswitch(std::string dev_path) {
-  bool isBRCMswitch = false;
-  std::ostringstream ss;
-  std::string vend_path = dev_path + kPathVendor;
-  std::string ldev_path = dev_path + kPathDevice;
-
-  if (!FileExists(vend_path.c_str()) || !FileExists(ldev_path.c_str())) {
-    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is a BRCM switch device - "
-       << (isBRCMswitch ? "TRUE" : " FALSE");
-    LOG_DEBUG(ss);
-    return isBRCMswitch;
-  }
-
-  std::ifstream vfs, dfs;
-  vfs.open(vend_path);
-  dfs.open(ldev_path);
-
-  if (!vfs.is_open() || !dfs.is_open()) {
-    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is a BRCM switch device - "
-       << (isBRCMswitch ? "TRUE" : " FALSE");
-    LOG_DEBUG(ss);
-    return isBRCMswitch;
-  }
-
-  uint32_t vendor_id;
-  uint32_t dev_id;
-
-  vfs >> std::hex >> vendor_id;
-  dfs >> std::hex >> dev_id;
-
-  vfs.close();
-  dfs.close();
-
-  if (vendor_id == kBRCMswitchId && dev_id == kBRCMswitchDId) {
-    isBRCMswitch = true;
-  }
-  ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is a BRCM switch device - "
-     << (isBRCMswitch ? "TRUE" : " FALSE");
-  LOG_DEBUG(ss);
-  return isBRCMswitch;
-}
-
-uint32_t GetLargestNodeNumber(const std::string& path = "/sys/class/kfd/kfd/topology/nodes/") {
+uint32_t GetLargestNodeNumber(const std::string& path = KFDNodesPathRoot()) {
   std::ostringstream ss;
   uint32_t largest_node_number = 0;
 
   // Open the directory
   DIR* dir = opendir(path.c_str());
   if (!dir) {
+    int error = errno;
     // Return UINT32_MAX on error
-    ss << __PRETTY_FUNCTION__ << " | Failed to open directory: " << path << " | errno = " << errno
-       << " | error = " << strerror(errno);
+    ss << __PRETTY_FUNCTION__ << " | Failed to open directory: " << path << " | errno = " << error
+       << " | error = " << strerror(error);
     // std::cout << ss.str() << std::endl;
     LOG_ERROR(ss);
-    return UINT32_MAX;
+    if (error == ENOENT)
+      return UINT32_MAX - 1;
+    else
+      return UINT32_MAX;
   }
 
   struct dirent* entry;
@@ -1114,6 +863,12 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
      << " kfd nodes";
   // std::cout << ss.str() << std::endl;
   LOG_DEBUG(ss);
+  if (max_nodes == UINT32_MAX - 1) {
+    ss << __PRETTY_FUNCTION__ << " | Failed to get kfd directory";
+    // std::cout << ss.str() << std::endl;
+    LOG_ERROR(ss);
+    return 2;
+  }
   if (max_nodes == UINT32_MAX) {
     ss << __PRETTY_FUNCTION__ << " | Failed to get largest node number";
     // std::cout << ss.str() << std::endl;
@@ -1233,144 +988,6 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
   ss << "}";
   // std::cout << ss.str() << std::endl;
   LOG_DEBUG(ss);
-  return 0;
-}
-
-uint32_t RocmSMI::DiscoverBRCMnicDevices(void) {
-  std::string err_msg;
-  uint32_t count = 0;
-  std::ostringstream ss;
-
-  // If this gets called more than once, clear previous findings.
-  nic_devices_.clear();
-  nic_monitors_.clear();
-
-  if (!std::filesystem::exists(kPathNICRoot)) {
-    err_msg =
-        "Failed to open hwmon root directory, while DiscoverBRCMnicDevices and graceful exit.";
-    err_msg += kPathNICRoot;
-    err_msg += ".";
-    perror(err_msg.c_str());
-    return 0;
-  }
-
-  for (const auto& entry : std::filesystem::directory_iterator(kPathNICRoot)) {
-    if (memcmp(entry.path().filename().string().c_str(), kNICPrefix, strlen(kNICPrefix)) == 0) {
-      if ((entry.path().filename().string() == ".") || (entry.path().filename().string() == "..")) {
-        continue;
-      }
-      std::string path = kPathNICRoot;
-      path += "/" + entry.path().filename().string();
-      if (isBRCMnic(path)) {
-        AddToNICDeviceList(entry.path().filename().string(), UINT64_MAX, count);
-        count++;
-      }
-    }
-  }
-  ss << __PRETTY_FUNCTION__ << " | Discovered a potential of " << std::to_string(count) << " nic"
-     << " | ";
-  LOG_DEBUG(ss);
-
-  return 0;
-}
-
-uint32_t RocmSMI::DiscoverBRCMswitchDevices(void) {
-  std::string err_msg;
-  uint32_t count = 0;
-  std::ostringstream ss;
-
-  // If this gets called more than once, clear previous findings.
-  switch_devices_.clear();
-  switch_monitors_.clear();
-
-  auto scsi_host_dir = opendir(kPathSwitchRoot);
-  if (scsi_host_dir == nullptr) {
-    err_msg =
-        "Failed to open scsi_host root directory, while DiscoverBRCMswitchDevices and graceful "
-        "exit.";
-    err_msg += kPathSwitchRoot;
-    err_msg += ".";
-    perror(err_msg.c_str());
-    return 0;
-  }
-
-  auto dentry = readdir(scsi_host_dir);
-
-  while (dentry != nullptr) {
-    if (memcmp(dentry->d_name, kSwitchPrefix, strlen(kSwitchPrefix)) == 0) {
-      if ((strcmp(dentry->d_name, ".") == 0) || (strcmp(dentry->d_name, "..") == 0)) continue;
-      count++;
-    }
-    dentry = readdir(scsi_host_dir);
-  }
-  ss << __PRETTY_FUNCTION__ << " | Discovered a potential of " << std::to_string(count) << " host"
-     << " | ";
-  LOG_DEBUG(ss);
-
-  int numofretry = 0;
-  // Discover all root cards
-  for (uint32_t cardId = 0; cardId < count; cardId++) {
-    std::string path = kPathSwitchRoot;
-    path += "/" + std::string(kSwitchPrefix);
-    path += std::to_string(cardId);
-
-    // sometime cardId is not in correct increment order in sysfs
-    auto path_dir = opendir(path.c_str());
-    if (path_dir == nullptr) {
-      // move to the next index
-      static constexpr int kMaxRetries = 3;
-      if (numofretry == kMaxRetries) continue;
-      count++;
-      numofretry++;
-    } else {
-      closedir(path_dir);
-    }
-
-    // each identified switch node is a primary node for
-    // potential matching unique ids
-    std::vector<char> buf(512);
-    ssize_t len;
-
-    do {
-      buf.resize(buf.size() + 100);
-      len = ::readlink(path.c_str(), &(buf[0]), buf.size());
-    } while (static_cast<ssize_t>(buf.size()) == len);
-
-    if (len > 0) {
-      buf[static_cast<size_t>(len)] = '\0';
-      path = std::string(&(buf[0]));
-      std::string suffixDel =
-          "host" + std::to_string(cardId) + "/scsi_host/" + "host" + std::to_string(cardId) + "/";
-      if (path.length() >= suffixDel.length()) {
-        path.erase(path.length() - suffixDel.length());
-      }
-
-      constexpr auto MAX_BDF_LENGTH = std::size_t(12);
-      // Only erase prefix if path is longer than BDF length to avoid iterator UB
-      if (path.length() > MAX_BDF_LENGTH) {
-        auto first = path.begin();
-        auto end = path.begin() + static_cast<std::ptrdiff_t>(path.length() - MAX_BDF_LENGTH);
-        path.erase(first, end);
-      }
-
-      std::string prefixAdd = kPathPciDevices;
-      path = prefixAdd.append(path);
-    }
-
-    if (isBRCMswitch(path)) {
-      std::string d_name = kSwitchPrefix;
-      d_name += std::to_string(cardId);
-      AddToSWITCHDeviceList(d_name, UINT64_MAX);
-    }
-  }
-
-  if (closedir(scsi_host_dir)) {
-    err_msg =
-        "Failed to close switch root directory, while DiscoverBRCMswitchDevices and graceful exit.";
-    err_msg += kPathSwitchRoot;
-    err_msg += ".";
-    perror(err_msg.c_str());
-  }
   return 0;
 }
 

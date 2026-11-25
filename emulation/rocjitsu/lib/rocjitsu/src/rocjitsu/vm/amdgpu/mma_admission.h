@@ -42,8 +42,9 @@ public:
       : limit_(std::clamp(limit, 1u, 16u)), capacity_(std::max(size_t{1}, capacity)) {}
   size_t size() const { return plans_.size(); }
   void flush() {
-    if (!(stats.accept + stats.reject + stats.issuer))
+    if (!(stats.accept + stats.reject + stats.issuer)) {
       return;
+    }
     util::Logger::vm([&](auto &os) {
       os << std::format("RJ_ADMISSION decodes={} plans={} hits={} validations={} "
                         "accept={} reject={} issuer={} entries={} evictions={}",
@@ -71,9 +72,10 @@ public:
         vm_access ? vm_access->cache_namespace() : VmCacheNamespace{};
     const Key key{pc, vmid, num_vgprs, has_accvgprs, cache_namespace};
     const auto fetch_words = [&](uint64_t address, Words &words) {
-      if (vm_access)
+      if (vm_access) {
         return icache.fetch(*vm_access, address, reinterpret_cast<uint8_t *>(words.data())) ==
                VmAccessOutcome::Complete;
+      }
       icache.fetch(memory, address, reinterpret_cast<uint8_t *>(words.data()));
       return true;
     };
@@ -100,8 +102,9 @@ public:
         it = plans_.end();
         ++stats.evictions;
       }
-      if (it == plans_.end())
+      if (it == plans_.end()) {
         it = plans_.try_emplace(key).first;
+      }
       auto &plan = it->second;
       plan = {};
       plan.first = first;
@@ -116,19 +119,23 @@ public:
         for (unsigned count = 0; count != limit_; ++count) {
           // Stay in the already fetchable code page. Failure rejects speculation
           // without changing the ordinary execution fault boundary.
-          if ((pc % GpuMemory::PAGE_SIZE) + offset + sizeof(Words) > GpuMemory::PAGE_SIZE)
+          if ((pc % GpuMemory::PAGE_SIZE) + offset + sizeof(Words) > GpuMemory::PAGE_SIZE) {
             break;
+          }
           Words words;
-          if (!fetch_words(pc + offset, words))
+          if (!fetch_words(pc + offset, words)) {
             break;
+          }
           plan.lookahead.push_back({offset, words});
           auto next = decode(decoder, words);
-          if (!next || !async_execution::safe_inline(*next))
+          if (!next || !async_execution::safe_inline(*next)) {
             break;
+          }
           const auto access = async_execution::footprint(*next, num_vgprs, has_accvgprs);
-          if (!access || pending.conflicts(*access))
+          if (!access || pending.conflicts(*access)) {
             break;
-          if (matrix_coexecution::async_candidate(next->mnemonic())) {
+          }
+          if (matrix_coexecution::async_candidate(*next)) {
             plan.issuer_offset = offset;
             // Preserve wider independent groups: offload their prefix and
             // reserve the final MMA for useful work on the issuing thread.
@@ -181,7 +188,7 @@ private:
   };
   std::unique_ptr<Instruction> decode(Decoder &decoder, const Words &words) {
     ++stats.decodes;
-    auto result = decoder.decode(words.data());
+    auto result = decoder.decode_window(words);
     return result.succeeded() ? std::move(result).value() : nullptr;
   }
   unsigned limit_;

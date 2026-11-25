@@ -22,7 +22,7 @@ static ncclResult_t preTuningEnqueueRawTask(struct ncclComm* comm, struct ncclRa
                                             struct ncclTaskTuningInfoQueue* tiq);
 
 static ncclResult_t fillCollTuningInput(struct ncclComm* comm, struct ncclRawTaskColl* raw, ncclTuningInput_t* in) {
-  size_t elementSize;
+  size_t userElementSize;
   size_t sendbuffSize;
   size_t recvbuffSize;
   struct ncclDevrWindow* sendWin;
@@ -35,25 +35,28 @@ static ncclResult_t fillCollTuningInput(struct ncclComm* comm, struct ncclRawTas
   in->comm = comm;
   // disable ce temporarily
   in->tuningMask = NCCL_TUNING_MASK_SYM_KERNELS | NCCL_TUNING_MASK_GENERAL_KERNELS;
+  // [RCCL] Across trays AllGather symk runs only through the TDM window, which this path skips.
+  if (raw->func == ncclFuncAllGather && comm->spansTrays) in->tuningMask &= ~NCCL_TUNING_MASK_SYM_KERNELS;
   in->func = raw->func;
   in->redOp = raw->opHost;
   in->devRedOp = raw->opDev.op;
   in->datatype = raw->datatype;
   in->count = raw->count;
   in->countMax = raw->count;
+  in->chunkSteps = ncclDefaultChunkStep(raw->func);
+  in->sliceSteps = ncclDefaultSliceStep(raw->func);
   in->nWorks = 1;
   in->numPipeOps = 1;
-  elementSize = ncclTypeSize(in->datatype);
+  userElementSize = ncclTypeSize(raw->datatype);
   // Treat an AllGather as in-place when each rank sends from its own receive slice.
   in->inPlace = in->func == ncclFuncAllGather &&
-                ncclAllGatherIsInPlace(raw->sendbuff, raw->recvbuff, comm->rank, raw->count * elementSize);
-  if (in->func == ncclFuncAllGather || in->func == ncclFuncBroadcast) {
-    in->count *= elementSize;
+                ncclAllGatherIsInPlace(raw->sendbuff, raw->recvbuff, comm->rank, raw->count * userElementSize);
+  if (in->func == ncclFuncAllGather || in->func == ncclFuncBroadcast || in->func == ncclFuncAlltoAll) {
+    in->count *= userElementSize;
     in->datatype = ncclInt8;
     in->countMax = in->count;
-    elementSize = 1;
   }
-  in->nBytes = elementSize * ncclFuncMaxSendRecvCount(in->func, comm->nRanks, in->count);
+  in->nBytes = ncclTypeSize(in->datatype) * ncclFuncMaxSendRecvCount(in->func, comm->nRanks, in->count);
 
   NCCLCHECK(ncclDevrFindWindow(comm, raw->sendbuff, &sendWin));
   NCCLCHECK(ncclDevrFindWindow(comm, raw->recvbuff, &recvWin));
@@ -64,9 +67,13 @@ static ncclResult_t fillCollTuningInput(struct ncclComm* comm, struct ncclRawTas
                     (ncclNvlsSupported(raw->opDev.op, raw->datatype) || raw->func == ncclFuncAllGather);
   in->symAligned16B = ncclSymAligned16B(raw->func, comm->rank, raw->sendbuff, raw->recvbuff, sendWin, recvWin,
                                         raw->count * ncclTypeSize(raw->datatype));
+  in->ginWindowsUnregistered =
+    ncclDevrWindowMissingGinSegments(sendWin) || ncclDevrWindowMissingGinSegments(recvWin);
 
-  sendbuffSize = elementSize * ncclFuncSendCount(raw->func, comm->nRanks, raw->count);
-  recvbuffSize = elementSize * ncclFuncRecvCount(raw->func, comm->nRanks, raw->count);
+  // Registration covers the user buffers, whose element type is unchanged by
+  // the byte normalization above.
+  sendbuffSize = userElementSize * ncclFuncSendCount(raw->func, comm->nRanks, raw->count);
+  recvbuffSize = userElementSize * ncclFuncRecvCount(raw->func, comm->nRanks, raw->count);
   NCCLCHECK(ncclRegFind(comm, raw->sendbuff, sendbuffSize, &regSendBuf));
   NCCLCHECK(ncclRegFind(comm, raw->recvbuff, recvbuffSize, &regRecvBuf));
   NCCLCHECK(ncclRegLocalIsValid(regSendBuf, &isSendValid));
@@ -87,6 +94,7 @@ static ncclResult_t fillSendRecvTuningInput(struct ncclComm* comm, struct ncclRa
 
   in->comm = comm;
   in->tuningMask = NCCL_TUNING_MASK_ALL;
+  in->ginWindowsUnregistered = false;
   in->func = raw->func;
   in->datatype = raw->datatype;
   in->count = raw->count;
@@ -104,6 +112,7 @@ static ncclResult_t fillSendRecvTuningInput(struct ncclComm* comm, struct ncclRa
 static ncclResult_t fillRmaTuningInput(struct ncclComm* comm, struct ncclRawTaskRma* raw, ncclTuningInput_t* in) {
   in->comm = comm;
   in->tuningMask = NCCL_TUNING_MASK_ALL;
+  in->ginWindowsUnregistered = false;
   in->func = raw->func;
   in->nWorks = 1;
   in->numPipeOps = 1;
@@ -128,6 +137,7 @@ static ncclResult_t fillAllGatherVTuningInput(struct ncclComm* comm, struct nccl
 
   in->comm = comm;
   in->tuningMask = NCCL_TUNING_MASK_ALL;
+  in->ginWindowsUnregistered = false;
   in->func = ncclFuncAllGatherV;
   in->datatype = raw->datatype;
   in->nWorks = 1;

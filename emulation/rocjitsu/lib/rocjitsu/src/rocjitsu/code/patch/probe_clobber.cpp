@@ -72,16 +72,21 @@ std::optional<RegClass> special_class_from_name(std::string_view name) {
                          [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   const std::string_view n = lower;
   auto starts_with = [&](std::string_view prefix) { return n.substr(0, prefix.size()) == prefix; };
-  if (starts_with("exec"))
+  if (starts_with("exec")) {
     return RegClass::EXEC; // exec, exec_lo, exec_hi
-  if (starts_with("vcc"))
+  }
+  if (starts_with("vcc")) {
     return RegClass::VCC; // vcc, vcc_lo, vcc_hi
-  if (starts_with("flat_scratch"))
+  }
+  if (starts_with("flat_scratch")) {
     return RegClass::FLAT_SCRATCH; // flat_scratch_lo/hi/all
-  if (n == "m0")
+  }
+  if (n == "m0") {
     return RegClass::M0;
-  if (n == "scc" || n == "src_scc")
+  }
+  if (n == "scc" || n == "src_scc") {
     return RegClass::SCC;
+  }
   return std::nullopt;
 }
 
@@ -93,8 +98,9 @@ void note_operand(const Operand &op, ProbeClobberSummary &summary) {
     note_special_state(summary, ref->cls);
     return;
   }
-  if (auto cls = special_class_from_name(op.name()))
+  if (auto cls = special_class_from_name(op.name())) {
     note_special_state(summary, *cls);
+  }
 }
 
 // Scan every explicit operand and flag special-state register classes. This is
@@ -102,14 +108,19 @@ void note_operand(const Operand &op, ProbeClobberSummary &summary) {
 void scan_special_state(const Instruction &inst, ProbeClobberSummary &summary) {
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const Operand *op = inst.dst_operand(i);
-    if (op == nullptr)
+    if (op == nullptr) {
       continue;
+    }
     note_operand(*op, summary);
   }
   for (int i = 0; i < inst.num_src_operands(); ++i) {
-    const Operand *op = inst.src_operand(i);
-    if (op == nullptr)
+    if (!inst.tracks_explicit_source(i)) {
       continue;
+    }
+    const Operand *op = inst.src_operand(i);
+    if (op == nullptr) {
+      continue;
+    }
     note_operand(*op, summary);
   }
 }
@@ -117,11 +128,12 @@ void scan_special_state(const Instruction &inst, ProbeClobberSummary &summary) {
 } // namespace
 
 std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallable &callable,
+                                                               uint8_t wave_size,
                                                                std::string *error_out) {
   const auto &registry = default_isa_target_registry();
   if (callable.target != ROCJITSU_CODE_TARGET_INVALID) {
     const IsaTargetDescriptor *descriptor = registry.find(callable.target);
-    if (descriptor == nullptr || descriptor->architecture_id != callable.arch) {
+    if (descriptor == nullptr || descriptor->family != callable.arch) {
       report(error_out, "probe target does not match the probe architecture");
       return std::nullopt;
     }
@@ -161,7 +173,7 @@ std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallab
     // Ordinary clobbers (SGPR/VGPR/AccVGPR), including implicit defs. Special
     // singletons in du.defs are projected out — they are summarized separately
     // via scan_special_state below and must not enter ordinary_clobbers.
-    const InstDefUse du(*inst);
+    const InstDefUse du(*inst, wave_size);
     summary.ordinary_clobbers |= du.defs.ordinary_only();
 
     scan_special_state(*inst, summary);

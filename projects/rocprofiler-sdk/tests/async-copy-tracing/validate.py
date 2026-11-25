@@ -96,6 +96,34 @@ def groupby_corr_id(trace_item, op_id=None):
     return dotdict(ret)
 
 
+def test_completion_signal_lifecycle(completion_times):
+    application, trace = completion_times
+    assert application and trace
+    cases = {row["Case"] for row in application}
+    assert {"reuse", "overlap-first", "overlap-last", "rejected-submission"} <= cases
+    traced = []
+    for row in application:
+        frequency = int(row["Frequency"])
+        start = int(row["Start"]) * 10**9 // frequency
+        end = int(row["End"]) * 10**9 // frequency
+        assert start < end
+        if int(row["Traced"]):
+            traced.append(end - start)
+
+    assert len(trace) == len(traced)
+    for row in trace:
+        start = int(row["Start_Timestamp"])
+        end = int(row["End_Timestamp"])
+        assert start < end
+        # Clock-skew adjustment translates an interval without changing its duration.
+        duration = end - start
+        assert (
+            duration in traced
+        ), f"Trace duration missing from application queries: {row}"
+        traced.remove(duration)
+    assert not traced
+
+
 def test_data_structure(input_data):
     """verify minimum amount of expected data is present"""
     data = input_data

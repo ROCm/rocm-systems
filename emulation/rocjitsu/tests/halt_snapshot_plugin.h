@@ -44,10 +44,11 @@ struct WavefrontSnapshot {
   uint64_t exec = 0;
   uint64_t vcc = 0;
   uint32_t status = 0;
-  uint32_t mode_raw = 0;       ///< MODE register at halt.
-  uint8_t vgpr_msb_mode = 0;   ///< Decoded s_set_vgpr_msb layout at halt.
-  uint64_t lds_size_bytes = 0; ///< Size of the LDS region visible to this wave.
-  uint64_t scratch_base = 0;   ///< Per-wave scratch base after dispatch setup.
+  uint32_t mode_raw = 0;         ///< MODE register at halt.
+  uint8_t vgpr_msb_mode = 0;     ///< Decoded s_set_vgpr_msb layout at halt.
+  uint64_t lds_size_bytes = 0;   ///< Capacity of the CU or WGP backing store.
+  uint32_t lds_window_bytes = 0; ///< Accessible range assigned to this workgroup.
+  uint64_t scratch_base = 0;     ///< Per-wave scratch base after dispatch setup.
   uint32_t scratch_scoreboard_id = 0;
   uint32_t shader_engine_id = 0;
   uint32_t scratch_lane_size = 0;   ///< Private bytes per lane.
@@ -93,25 +94,31 @@ public:
   /// @brief Snapshots taken on a specific CU, in halt order.
   std::vector<const WavefrontSnapshot *> for_cu(const amdgpu::ComputeUnitCore *cu) const {
     std::vector<const WavefrontSnapshot *> out;
-    for (const auto &s : snapshots_)
-      if (cu && s.cu_id == cu->id())
+    for (const auto &s : snapshots_) {
+      if (cu && s.cu_id == cu->id()) {
         out.push_back(&s);
+      }
+    }
     return out;
   }
 
   /// @brief First snapshot matching a wavefront slot id, or nullptr.
   const WavefrontSnapshot *by_wf_id(uint32_t wf_id) const {
-    for (const auto &s : snapshots_)
-      if (s.wf_id == wf_id)
+    for (const auto &s : snapshots_) {
+      if (s.wf_id == wf_id) {
         return &s;
+      }
+    }
     return nullptr;
   }
 
   /// @brief First snapshot matching a workgroup id, or nullptr.
   const WavefrontSnapshot *by_wg_id(uint32_t wg_id) const {
-    for (const auto &s : snapshots_)
-      if (s.wg_id == wg_id)
+    for (const auto &s : snapshots_) {
+      if (s.wg_id == wg_id) {
         return &s;
+      }
+    }
     return nullptr;
   }
 
@@ -129,6 +136,7 @@ public:
     s.mode_raw = wf.mode_raw();
     s.vgpr_msb_mode = wf.vgpr_msb_mode();
     s.lds_size_bytes = wf.lds().size_bytes();
+    s.lds_window_bytes = wf.lds_size();
     s.scratch_base = wf.scratch_base();
     s.scratch_scoreboard_id = wf.scratch_scoreboard_id();
     s.shader_engine_id = wf.shader_engine_id();
@@ -146,21 +154,25 @@ public:
     const uint32_t sbase = wf.sgpr_alloc().base;
     const uint32_t sgpr_block = wf.cu().sgprs_per_wf();
     s.sgprs.reserve(sgpr_block);
-    for (uint32_t i = 0; i < sgpr_block; ++i)
+    for (uint32_t i = 0; i < sgpr_block; ++i) {
       s.sgprs.push_back(regs.read_sgpr(sbase + i));
+    }
 
     // TTMPs live in their own file, so capture them separately.
-    for (uint32_t i = 0; i < s.ttmps.size(); ++i)
+    for (uint32_t i = 0; i < s.ttmps.size(); ++i) {
       s.ttmps[i] = wf.ttmp(i);
+    }
 
     // Capture the full physical VGPR block (normal + AccVGPR bank) so tests can
     // inspect accumulator registers as well as ordinary VGPRs.
     s.vgpr_block = wf.cu().vgpr_allocation_block_size();
     const uint32_t vbase = wf.vgpr_alloc().base;
     s.vgprs.reserve(static_cast<size_t>(s.vgpr_block) * s.wf_size);
-    for (uint32_t r = 0; r < s.vgpr_block; ++r)
-      for (uint32_t lane = 0; lane < s.wf_size; ++lane)
+    for (uint32_t r = 0; r < s.vgpr_block; ++r) {
+      for (uint32_t lane = 0; lane < s.wf_size; ++lane) {
         s.vgprs.push_back(regs.read_vgpr(vbase + r, lane));
+      }
+    }
 
     // Serialize the append: concurrent halts from different partition threads
     // would otherwise race the vector.
@@ -209,8 +221,9 @@ public:
   }
   uint32_t for_cu(const amdgpu::ComputeUnitCore *cu) const {
     std::lock_guard<std::mutex> lk(mutex_);
-    if (!cu)
+    if (!cu) {
       return 0u;
+    }
     auto it = counts_.find(cu->id());
     return it == counts_.end() ? 0u : it->second;
   }

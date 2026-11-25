@@ -195,14 +195,13 @@ union GpuMemoryCreateFlags
         uint64 placeholder2                 :  1;
         uint64 startVaHintFlag              :  1; ///< startVaHintFlag is set to 1 for passing startVaHint address
                                                   ///  to set baseVirtAddr as startVaHint for memory allocation.
-#if PAL_AMDGPU_BUILD
         uint64 initializeToZero             :  1; ///< If set, PAL will request that the host OS zero-initializes
-                                                  ///  the allocation upon creation, currently, only GpuHeapLocal and
-                                                  ///  GpuHeapInvisible are supported.
+                                                  ///  the allocation upon creation.
+#if PAL_AMDGPU_BUILD
         uint64 discardable                  :  1; ///< If set, this gpu memory object can be discarded under memory
                                                   ///  pressure without keeping the content.
 #else
-        uint64 placeholder3                 :  2;
+        uint64 placeholder3                 :  1;
 #endif
         uint64 directCaptureSource          :  1; ///< Memory will be mapped to DirectCapture resource's KMD-managed
                                                   ///  private VA.
@@ -663,9 +662,8 @@ public:
     ///          + ErrorNotMappable if the memory object cannot be mapped due to some of its heaps not having the CPU
     ///            visible flag set.
     ///          + ErrorUnavailable if the memory object is not a real allocation.
-    virtual Result Map(
-        Util::ByteSpan* pSpan) = 0;
-
+    virtual Result Map(Util::ByteSpan* pSpan) = 0;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1012
     /// @deprecated This function is deprecated, use the ByteSpan variant of Map instead!
     Result Map(Util::Span<void>* pSpan)
     {
@@ -678,6 +676,7 @@ public:
         }
         return result;
     }
+#endif
 
     /// @deprecated This function is deprecated, use the ByteSpan variant of Map instead!
     Result Map(void** ppData)

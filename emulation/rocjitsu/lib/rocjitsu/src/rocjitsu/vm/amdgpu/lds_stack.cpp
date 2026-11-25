@@ -18,34 +18,42 @@ bool node_valid(uint32_t node) { return (node >> 3) != 0x1fffffffu; }
 // RDNA4 control state follows GPURT rtip3_ds_stack_emulation.hlsl, qualified against ISA probes.
 // https://github.com/GPUOpen-Drivers/gpurt/blob/7b226d48b46b7e92fec3b9ecc5712e5bf2bf3dd9/src/shaders/rtip3_ds_stack_emulation.hlsl
 struct Stack {
-  Lds &lds;
+  Wavefront &wave;
   uint32_t allocation, size, base, ring, valid, to_parent;
   bool parent, overflow, transition;
   void push(uint32_t node) {
     overflow |= valid == size;
-    lds.write32(allocation + base + ring * stack_slot_bytes, node);
+    const uint64_t address = uint64_t{allocation} + base + ring * stack_slot_bytes;
+    if (wave.contains_lds_range(address, 4)) {
+      wave.lds().write32(address, node);
+    }
     ring = ring == size - 1 ? 0 : (ring + 1) & 31;
-    if (to_parent == size)
+    if (to_parent == size) {
       parent = false;
+    }
     to_parent = std::min(to_parent + 1, size);
     valid = std::min(valid + 1, size);
   }
   uint32_t pop(bool second = false) {
-    if (second && (!valid || (parent && to_parent == 0)))
+    if (second && (!valid || (parent && to_parent == 0))) {
       return invalid;
+    }
     if (!second) {
       transition = parent && to_parent == 0;
-      if (transition)
+      if (transition) {
         parent = false;
+      }
       if (!valid) {
         transition = parent = false;
         return overflow ? invalid : terminal;
       }
     }
     const uint32_t next = ring ? ring - 1 : size - 1;
-    const uint32_t node = lds.read32(allocation + base + next * stack_slot_bytes);
-    if (second && (node & 7) == 6)
+    const uint64_t address = uint64_t{allocation} + base + next * stack_slot_bytes;
+    const uint32_t node = wave.contains_lds_range(address, 4) ? wave.lds().read32(address) : 0;
+    if (second && (node & 7) == 6) {
       return invalid;
+    }
     ring = next;
     to_parent -= to_parent != 0;
     --valid;
@@ -92,13 +100,15 @@ void prepare_lds_stack(Wavefront &wf, VectorMemState &d, uint32_t addr, uint32_t
   auto children = regs.read_vgpr_region(base + nodes, push, wf.exec());
   d.store_data.resize(wf.wf_size() * (push + 2) * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(wf.exec() & (uint64_t{1} << lane)))
+    if (!(wf.exec() & (uint64_t{1} << lane))) {
       continue;
+    }
     std::array<uint32_t, 10> data{};
     data[0] = pointers.lane(0, lane);
     data[1] = visited.lane(0, lane);
-    for (uint32_t i = 0; i < push; ++i)
+    for (uint32_t i = 0; i < push; ++i) {
       data[i + 2] = children.lane(i, lane);
+    }
     std::memcpy(d.store_data.data() + lane * (push + 2) * 4, data.data(), (push + 2) * 4);
     d.per_lane_addr[lane] =
         wf.lds_base() + (flags & 1 ? ((data[0] >> 15) & 0x3fff) * 4 : (data[0] >> 18) * 4);
@@ -113,8 +123,9 @@ void execute_lds_stack(Wavefront &wf, VectorMemState &d) {
   const bool primitive_range = d.lds_stack_flags & 4;
   const uint32_t count = d.lds_stack_inputs, size = d.lds_stack_size;
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-    if (!(d.lane_mask & (uint64_t{1} << lane)))
+    if (!(d.lane_mask & (uint64_t{1} << lane))) {
       continue;
+    }
     std::array<uint32_t, 10> data{};
     std::memcpy(data.data(), d.store_data.data() + lane * (count + 2) * 4, (count + 2) * 4);
     uint32_t ptr = data[0];
@@ -122,8 +133,9 @@ void execute_lds_stack(Wavefront &wf, VectorMemState &d) {
     // RDNA3 reserves only the all-ones pointer; RDNA4 has eight traversal-control values.
     const bool walkback = modern ? node_valid(last) : last != invalid;
     bool found = !walkback;
-    for (uint32_t i = 0; i < count; ++i)
+    for (uint32_t i = 0; i < count; ++i) {
       found |= data[i + 2] == last || (primitive_range && (data[i + 2] & 7) <= 3);
+    }
     std::array<uint32_t, 2> result{invalid, invalid};
     if (!modern) {
       uint32_t index = ptr & 0xffff;
@@ -131,36 +143,48 @@ void execute_lds_stack(Wavefront &wf, VectorMemState &d) {
       uint32_t first = count;
       if (found) {
         uint32_t after = 0;
-        if (walkback)
-          for (uint32_t i = 0; i < count; ++i)
-            if (data[i + 2] == last)
+        if (walkback) {
+          for (uint32_t i = 0; i < count; ++i) {
+            if (data[i + 2] == last) {
               after = i + 1;
-        for (uint32_t i = after; i < count; ++i)
+            }
+          }
+        }
+        for (uint32_t i = after; i < count; ++i) {
           if (data[i + 2] != invalid) {
             first = i;
             break;
           }
+        }
       }
       if (first != count) {
-        for (uint32_t i = count; i-- > first + 1;)
+        for (uint32_t i = count; i-- > first + 1;) {
           if (data[i + 2] != invalid) {
-            wf.lds().write32(static_cast<uint32_t>(d.per_lane_addr[lane]) +
-                                 (index % size) * stack_slot_bytes,
-                             data[i + 2]);
+            const uint32_t address =
+                static_cast<uint32_t>(d.per_lane_addr[lane]) + (index % size) * stack_slot_bytes;
+            if (wf.contains_lds_range(address, 4)) {
+              wf.lds().write32(address, data[i + 2]);
+            }
             index = (index + 1) & 0xffff;
           }
+        }
         result[0] = data[first + 2];
       } else if (index) {
         --index;
         const uint32_t address =
             static_cast<uint32_t>(d.per_lane_addr[lane]) + (index % size) * stack_slot_bytes;
-        result[0] = wf.lds().read32(address);
-        wf.lds().write32(address, invalid);
-      } else
+        if (!wf.contains_lds_range(address, 4)) {
+          result[0] = 0;
+        } else {
+          result[0] = wf.lds().read32(address);
+          wf.lds().write32(address, invalid);
+        }
+      } else {
         result[0] = terminal;
+      }
       ptr = (ptr & 0xffff0000u) | index;
     } else {
-      Stack s{wf.lds(),
+      Stack s{wf,
               wf.lds_base(),
               size,
               static_cast<uint32_t>(d.per_lane_addr[lane]) - wf.lds_base(),
@@ -171,25 +195,31 @@ void execute_lds_stack(Wavefront &wf, VectorMemState &d) {
               bool(ptr & (1u << 30)),
               false};
       const bool update = primitive_range && !walkback && !(last & 4);
-      if (primitive_range)
+      if (primitive_range) {
         found = (found || (last & 7) <= 3) && !(update && (last & 2));
+      }
       bool skip_low = false, skip_high = false;
       for (uint32_t i = count; i-- > 0;) {
         uint32_t node = data[i + 2];
         bool &skip = i >= 4 ? skip_high : skip_low;
         if (!node_valid(node) && found && !skip) {
           skip_low |= !(node & 2);
-          if (i >= 4)
+          if (i >= 4) {
             skip_high |= !(node & 4);
+          }
         }
-        if (update && count == 8 && i != count - 1)
+        if (update && count == 8 && i != count - 1) {
           skip_low = skip_high = true;
-        if (walkback && (node == last || (primitive_range && (node & 7) <= 3)))
+        }
+        if (walkback && (node == last || (primitive_range && (node & 7) <= 3))) {
           found = false;
-        if (!found || !node_valid(node) || skip)
+        }
+        if (!found || !node_valid(node) || skip) {
           continue;
-        if (update && count == 8)
+        }
+        if (update && count == 8) {
           node = last & 1 ? (node & ~15u) + 16 : (node & 15) == 3 ? node ^ 11 : node + 1;
+        }
         s.push(node);
       }
       result[0] = s.pop();

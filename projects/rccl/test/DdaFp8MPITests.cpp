@@ -28,6 +28,7 @@
 #ifdef MPI_TESTS_ENABLED
 
 #include "DdaFabricMPITestFixture.hpp"
+#include "DdaMPITestHelpers.hpp"
 #include "DeviceBufferHelpers.hpp"
 #include "ResourceGuards.hpp"
 #include "VerifiableFp8.hpp"
@@ -78,6 +79,7 @@ struct DdaKnob
 };
 const DdaKnob kDdaKnobs[] = {
     {"RCCL_DDA_LL", rcclParamDdaLL, 1},
+    {"RCCL_DDA_LL128", rcclParamDdaLL128, kDdaThresholdUnset},
     {"RCCL_DDA_LL_THRESHOLD", rcclParamDdaLLThreshold, kDdaThresholdUnset},
     {"RCCL_DDA_LL_ONESHOT_THRESHOLD", rcclParamDdaLLOneShotThreshold, 1 << 20},
     {"RCCL_DDA_LL128_ONESHOT_THRESHOLD", rcclParamDdaLL128OneShotThreshold, 4 << 20},
@@ -117,6 +119,7 @@ protected:
     std::vector<std::unique_ptr<MPIHelpers::MpiEnvGuard>> envGuards_;
     int                                                    rank_{};
     int                                                    nRanks_{};
+    uint8_t a2aCallSalt_{}; // distinct for each of the test's first 256 AlltoAll calls
 
     // RCCL_DDA_* settings that leave this fixture's tier as the one claiming the
     // sizes its tests use. Every other kDdaKnobs entry must be unset.
@@ -314,33 +317,60 @@ protected:
         const size_t totalCount = countPerPeer * static_cast<size_t>(nRanks_);
         void*        sendBuf    = nullptr;
         void*        recvBuf    = nullptr;
+        void*        sendBuf2   = nullptr;
+        void*        recvBuf2   = nullptr;
         ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, totalCount));
         DeviceBufferAutoGuard sendGuard(sendBuf);
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf2, totalCount));
+        DeviceBufferAutoGuard sendGuard2(sendBuf2);
         ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, totalCount));
         DeviceBufferAutoGuard recvGuard(recvBuf);
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf2, totalCount));
+        DeviceBufferAutoGuard recvGuard2(recvBuf2);
 
         expectAlgo(ncclFuncAlltoAll, countPerPeer, datatype, sendBuf, recvBuf, expectedAlgo);
 
-        // Element i of the chunk rank s sends to rank d is copyPattern(s * nRanks + d, i).
-        const int nRanks = nRanks_;
-        ASSERT_MPI_EQ(hipSuccess,
-                      initializeBufferWithPattern<uint8_t>(
-                          sendBuf, totalCount, [this, nRanks, countPerPeer](size_t i) {
-                              const int dest = static_cast<int>(i / countPerPeer);
-                              return copyPattern(rank_ * nRanks + dest, i % countPerPeer);
-                          }));
-        ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, totalCount));
+        // Element i of the chunk rank s sends to rank d is copyPattern(s * nRanks + d, i) XOR a salt
+        // that differs for every AlltoAll call in the test, so every byte differs from every
+        // earlier call's, whichever bank that call used.
+        const int     nRanks     = nRanks_;
+        const uint8_t firstSalt  = a2aCallSalt_++;
+        const uint8_t secondSalt = a2aCallSalt_++;
+        const auto    chunkByte  = [nRanks](int src, int dest, size_t i, uint8_t salt) {
+            return static_cast<uint8_t>(copyPattern(src * nRanks + dest, i) ^ salt);
+        };
+        for(void* buf : {sendBuf, sendBuf2})
+        {
+            const uint8_t salt = buf == sendBuf ? firstSalt : secondSalt;
+            ASSERT_MPI_EQ(hipSuccess,
+                          initializeBufferWithPattern<uint8_t>(
+                              buf, totalCount, [this, countPerPeer, chunkByte, salt](size_t i) {
+                                  return chunkByte(rank_, static_cast<int>(i / countPerPeer), i % countPerPeer,
+                                                   salt);
+                              }));
+        }
+        for(void* buf : {recvBuf, recvBuf2})
+            ASSERT_MPI_EQ(hipSuccess, hipMemset(buf, 0, totalCount));
+        // Back-to-back calls flip the scratch bank and both are checked, so a stale read of either
+        // bank fails, and the zeroed receive buffers catch a chunk a call never stores.
         ASSERT_MPI_EQ(ncclSuccess,
                       ncclAlltoAll(sendBuf, recvBuf, countPerPeer, datatype,
                                    getActiveCommunicator(), getActiveStream()));
+        ASSERT_MPI_EQ(ncclSuccess,
+                      ncclAlltoAll(sendBuf2, recvBuf2, countPerPeer, datatype,
+                                   getActiveCommunicator(), getActiveStream()));
         ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
-        EXPECT_TRUE(verifyBufferData<uint8_t>(
-            recvBuf, totalCount, [this, nRanks, countPerPeer](size_t i) {
-                const int src = static_cast<int>(i / countPerPeer);
-                return copyPattern(src * nRanks + rank_, i % countPerPeer);
-            }))
-            << "Rank " << rank_ << ": " << fp8Name(datatype) << " AlltoAll data mismatch";
+        for(void* buf : {recvBuf, recvBuf2})
+        {
+            const uint8_t salt = buf == recvBuf ? firstSalt : secondSalt;
+            EXPECT_TRUE(verifyBufferData<uint8_t>(
+                buf, totalCount, [this, countPerPeer, chunkByte, salt](size_t i) {
+                    return chunkByte(static_cast<int>(i / countPerPeer), rank_, i % countPerPeer, salt);
+                }))
+                << "Rank " << rank_ << ": " << fp8Name(datatype) << " AlltoAll call " << (buf == recvBuf ? 1 : 2)
+                << " data mismatch";
+        }
     }
 
     // Runs `body` for each fp8 format at each count. The ASSERT_MPI_* checks fail
@@ -440,9 +470,11 @@ protected:
     }
 };
 
+// The largest count is cut to the LL128 one-shot cap (4 MiB / nRanks with the peer-parallel kernels).
 TEST_F(DdaFp8MPI_LL128, AllReduceOneShot)
 {
-    forEachFp8AndCount({kLine, kPrimeLines, 64 * 1024}, [this](ncclDataType_t datatype, size_t count) {
+    const size_t bigCount = DdaMPITestHelpers::ll128OneShotBytes(64 * 1024, nRanks_);
+    forEachFp8AndCount({kLine, kPrimeLines, bigCount}, [this](ncclDataType_t datatype, size_t count) {
         runAllReduce(datatype, count, RCCL_DDA_FABRIC_LL128, ArVariant::LL128OneShot);
     });
 }
@@ -461,9 +493,11 @@ TEST_F(DdaFp8MPI_LL128, AllGather)
     });
 }
 
+// 256 KiB per peer gives each block several slices to move, and stays under the SPX 16 MiB LL128
+// ceiling at 32 ranks.
 TEST_F(DdaFp8MPI_LL128, AllToAll)
 {
-    forEachFp8AndCount({kLine, kPrimeLines, 1024}, [this](ncclDataType_t datatype, size_t count) {
+    forEachFp8AndCount({kLine, kPrimeLines, 1024, 256 * 1024}, [this](ncclDataType_t datatype, size_t count) {
         runAllToAll(datatype, count, RCCL_DDA_FABRIC_LL128);
     });
 }
@@ -491,8 +525,9 @@ TEST_F(DdaFp8MPI_LL128TwoShot, AllReduce)
 }
 
 // ---------------------------------------------------------------------------
-// VMM (SIMPLE): RCCL_DDA_LL=0 takes out both packet tiers, and a 64 MiB DDA
-// threshold opens the VMM tier for the collectives the gfx1250 table caps at 0.
+// VMM (SIMPLE): RCCL_DDA_LL=0 and RCCL_DDA_LL128=0 take out the packet tiers, and
+// a 64 MiB DDA threshold opens the VMM tier for the collectives the gfx1250 table
+// caps at 0.
 // AllReduce runs once under the 256 KiB flat/tree split and once over it.
 // ---------------------------------------------------------------------------
 
@@ -501,7 +536,7 @@ class DdaFp8MPI_Vmm : public DdaFp8MPITest
 protected:
     std::vector<std::pair<const char*, int64_t>> tierEnv() const override
     {
-        return {{"RCCL_DDA_LL", 0}, {"RCCL_DDA_THRESHOLD", 64 << 20}};
+        return {{"RCCL_DDA_LL", 0}, {"RCCL_DDA_LL128", 0}, {"RCCL_DDA_THRESHOLD", 64 << 20}};
     }
 };
 

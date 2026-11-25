@@ -17,7 +17,7 @@
  *   events.bin:
  *     [0..7]   hrr_file_header  { magic, version, reserved }
  *     [8..]    hrr_event_header (32 bytes) + payload bytes, repeated per event
- *   blobs/<2hex>/   content-addressed raw buffers (FNV-1a-128 hash)
+ *   blobs/<2hex>/   content-addressed raw buffers (128-bit content hash)
  *   code_objects/   .hsaco ELFs keyed by hash
  *
  * hrr_event_header fields (32 bytes, pack(1)):
@@ -85,8 +85,30 @@
  * taking the first compiler ID and shifting the compiler API IDs up by one.
  * A v8 reader would decode those events as the wrong API.
  * v10: a kernel launch event carries pinned host snapshot records after its
- * arguments (num_snapshots was always 0). A v9 reader would not restore them. */
-#define HRR_VERSION ((uint16_t)10u)
+ * arguments (num_snapshots was always 0). A v9 reader would not restore them.
+ * v11: hipKernelSetCacheConfig was appended to HipDispatchTable, taking the
+ * first compiler ID and shifting the compiler API IDs up by one.
+ * A v10 reader would decode those events as the wrong API.
+ * v12: hipExtMemcpyBatchAsync was appended to HipDispatchTable,
+ * shifting the compiler API IDs up by one. A v11 reader would decode
+ * those events as the wrong API.
+ * v13: a hipGraphLaunch or hipGraphLaunch_spt event carries pinned host
+ * snapshot records after its fixed fields. A v12 reader would launch the
+ * graph without restoring them.
+ * v14: hipMemcpyWithAttributesAsync, hipMemcpy3DWithAttributesAsync and
+ * hipArrayGetSparseProperties were appended to HipDispatchTable, shifting
+ * the compiler API IDs up by three. A v13 reader would decode those events
+ * as the wrong API.
+ * v15: four graph ID queries were appended to HipDispatchTable, shifting the
+ * compiler API IDs up by four. A v14 reader would decode those events as the
+ * wrong API.
+ * v16: hipDeviceGetExecAffinitySupport was appended to HipDispatchTable,
+ * shifting the compiler API IDs up by one. A v15 reader would decode
+ * those events as the wrong API.
+ * v17: hipArrayGetPlane was appended to HipDispatchTable, shifting the
+ * compiler API IDs up by one. A v16 reader would decode those events as
+ * the wrong API. */
+#define HRR_VERSION ((uint16_t)17u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -104,8 +126,15 @@ typedef struct {
  * the copied rows, packed end to end: width*height*depth bytes, whatever the
  * pitch. Without it, a blob spans the host rect from its base pointer through
  * the last copied byte, or holds the flat width*height*depth bytes from the
- * base pointer (3D and driver D2H, hipMemcpy3D H2D). */
+ * base pointer (3D and driver D2H, hipMemcpy3D H2D).
+ * HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS: hipExtModuleLaunchKernel records
+ * its start and stop events as hipEventRecord events around the launch.
+ * Without it, replay cannot tell a missing marker from a replay that failed to
+ * apply one, so only an archive without the flag may tolerate a
+ * hipEventElapsedTime that returns hipErrorInvalidHandle. No version bump: an
+ * older reader replays the extra hipEventRecord events like any others. */
 #define HRR_FILE_FLAG_PACKED_HOST_RECTS ((uint16_t)0x0001u)
+#define HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS ((uint16_t)0x0002u)
 
 #ifdef __cplusplus
 static_assert(sizeof(hrr_file_header) == 8, "hrr_file_header must be 8 bytes");
@@ -197,8 +226,8 @@ typedef struct {
 typedef struct {
     hrr_event_header hdr;
     uint64_t ret;
-    uint64_t blob_hash_lo;  /* FNV-1a-128 lo of fat binary */
-    uint64_t blob_hash_hi;  /* FNV-1a-128 hi */
+    uint64_t blob_hash_lo;  /* 128-bit content lo of fat binary */
+    uint64_t blob_hash_hi;  /* 128-bit content hi */
     uint64_t blob_size;  /* fat binary byte count */
 } hrr_args___hipRegisterFatBinary;
 
@@ -5868,6 +5897,144 @@ typedef struct {
     int32_t device;
 } hrr_args_hipKernelSetAttributeForDevice;
 
+/* hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hipDevice_t dev) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t kernel;
+    int32_t config;
+    uint64_t dev;
+} hrr_args_hipKernelSetCacheConfig;
+
+/* hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t* sizesDst, hipExtMemcpyWait* waits, hipExtMemcpySignal* signals, size_t count, hipExtMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs, hipStream_t stream) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t dsts;
+    uint64_t srcs;
+    uint64_t sizes;
+    uint64_t sizesDst;
+    uint64_t waits;
+    uint64_t signals;
+    uint64_t count;
+    uint64_t attrs;
+    uint64_t attrsIdxs;
+    uint64_t numAttrs;
+    uint64_t stream;
+    uint8_t dsts_bytes[128];  /* void*[16] inline copy */
+    uint8_t dsts_present;  /* 1 when dsts was non-null */
+    uint32_t dsts_n;  /* elements copied from dsts */
+    uint8_t srcs_bytes[128];  /* void*[16] inline copy */
+    uint8_t srcs_present;  /* 1 when srcs was non-null */
+    uint32_t srcs_n;  /* elements copied from srcs */
+    uint8_t sizes_bytes[128];  /* size_t[16] inline copy */
+    uint8_t sizes_present;  /* 1 when sizes was non-null */
+    uint32_t sizes_n;  /* elements copied from sizes */
+    uint8_t sizesDst_bytes[128];  /* size_t[16] inline copy */
+    uint8_t sizesDst_present;  /* 1 when sizesDst was non-null */
+    uint32_t sizesDst_n;  /* elements copied from sizesDst */
+    uint8_t waits_bytes[1024];  /* hipExtMemcpyWait[16] inline copy */
+    uint8_t waits_present;  /* 1 when waits was non-null */
+    uint32_t waits_n;  /* elements copied from waits */
+    uint8_t signals_bytes[1024];  /* hipExtMemcpySignal[16] inline copy */
+    uint8_t signals_present;  /* 1 when signals was non-null */
+    uint32_t signals_n;  /* elements copied from signals */
+    uint8_t attrs_bytes[896];  /* hipExtMemcpyAttributes[16] inline copy */
+    uint8_t attrs_present;  /* 1 when attrs was non-null */
+    uint32_t attrs_n;  /* elements copied from attrs */
+    uint8_t attrsIdxs_bytes[128];  /* size_t[16] inline copy */
+    uint8_t attrsIdxs_present;  /* 1 when attrsIdxs was non-null */
+    uint32_t attrsIdxs_n;  /* elements copied from attrsIdxs */
+} hrr_args_hipExtMemcpyBatchAsync;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(void*) <= 8, "hrr_args_hipExtMemcpyBatchAsync::dsts_bytes too small for void*");
+static_assert(sizeof(void*) <= 8, "hrr_args_hipExtMemcpyBatchAsync::srcs_bytes too small for void*");
+static_assert(sizeof(size_t) <= 8, "hrr_args_hipExtMemcpyBatchAsync::sizes_bytes too small for size_t");
+static_assert(sizeof(size_t) <= 8, "hrr_args_hipExtMemcpyBatchAsync::sizesDst_bytes too small for size_t");
+static_assert(sizeof(hipExtMemcpyWait) <= 64, "hrr_args_hipExtMemcpyBatchAsync::waits_bytes too small for hipExtMemcpyWait");
+static_assert(sizeof(hipExtMemcpySignal) <= 64, "hrr_args_hipExtMemcpyBatchAsync::signals_bytes too small for hipExtMemcpySignal");
+static_assert(sizeof(hipExtMemcpyAttributes) <= 56, "hrr_args_hipExtMemcpyBatchAsync::attrs_bytes too small for hipExtMemcpyAttributes");
+static_assert(sizeof(size_t) <= 8, "hrr_args_hipExtMemcpyBatchAsync::attrsIdxs_bytes too small for size_t");
+#endif
+
+/* hipError_t hipMemcpyWithAttributesAsync(void* dst, const void* src, size_t size, hipMemcpyAttributes* attr, hipStream_t stream) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t dst;
+    uint64_t src;
+    uint64_t size;
+    uint64_t attr;
+    uint64_t stream;
+} hrr_args_hipMemcpyWithAttributesAsync;
+
+/* hipError_t hipMemcpy3DWithAttributesAsync(struct hipMemcpy3DBatchOp* op, unsigned long long flags, hipStream_t stream) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t op;
+    uint64_t flags;
+    uint64_t stream;
+} hrr_args_hipMemcpy3DWithAttributesAsync;
+
+/* hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties, hipArray_t array) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t sparseProperties;
+    uint64_t array;
+} hrr_args_hipArrayGetSparseProperties;
+
+/* hipError_t hipGraphNodeGetLocalId(hipGraphNode_t node, unsigned int* nodeId) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t node;
+    uint64_t nodeId;
+} hrr_args_hipGraphNodeGetLocalId;
+
+/* hipError_t hipGraphNodeGetToolsId(hipGraphNode_t node, unsigned long long* toolsId) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t node;
+    uint64_t toolsId;
+} hrr_args_hipGraphNodeGetToolsId;
+
+/* hipError_t hipGraphGetId(hipGraph_t graph, unsigned int* graphId) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t graph;
+    uint64_t graphId;
+} hrr_args_hipGraphGetId;
+
+/* hipError_t hipGraphExecGetId(hipGraphExec_t graphExec, unsigned int* graphId) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t graphExec;
+    uint64_t graphId;
+} hrr_args_hipGraphExecGetId;
+
+/* hipError_t hipDeviceGetExecAffinitySupport(int* pi, hipExecAffinityType type, hipDevice_t dev) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t pi;
+    int32_t type;
+    uint64_t dev;
+} hrr_args_hipDeviceGetExecAffinitySupport;
+
+/* hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned int planeIdx) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t pPlaneArray;
+    uint64_t hArray;
+    uint32_t planeIdx;
+} hrr_args_hipArrayGetPlane;
+
 /* ---- API id enumeration ---- */
 typedef enum hrr_api_id {
     HRR_API_HIPAPINAME = 0,
@@ -6418,16 +6585,27 @@ typedef enum hrr_api_id {
     HRR_API_HIPDEVICEFLUSHGPUDIRECTRDMAWRITES = 545,
     HRR_API_HIPLIBRARYGETMODULE = 546,
     HRR_API_HIPKERNELSETATTRIBUTEFORDEVICE = 547,
-    HRR_API_HIPPOPCALLCONFIGURATION = 548,
-    HRR_API_HIPPUSHCALLCONFIGURATION = 549,
-    HRR_API_HIPREGISTERFATBINARY = 550,
-    HRR_API_HIPREGISTERFUNCTION = 551,
-    HRR_API_HIPREGISTERMANAGEDVAR = 552,
-    HRR_API_HIPREGISTERSURFACE = 553,
-    HRR_API_HIPREGISTERTEXTURE = 554,
-    HRR_API_HIPREGISTERVAR = 555,
-    HRR_API_HIPUNREGISTERFATBINARY = 556,
-    HRR_API_COUNT = 557
+    HRR_API_HIPKERNELSETCACHECONFIG = 548,
+    HRR_API_HIPEXTMEMCPYBATCHASYNC = 549,
+    HRR_API_HIPMEMCPYWITHATTRIBUTESASYNC = 550,
+    HRR_API_HIPMEMCPY3DWITHATTRIBUTESASYNC = 551,
+    HRR_API_HIPARRAYGETSPARSEPROPERTIES = 552,
+    HRR_API_HIPGRAPHNODEGETLOCALID = 553,
+    HRR_API_HIPGRAPHNODEGETTOOLSID = 554,
+    HRR_API_HIPGRAPHGETID = 555,
+    HRR_API_HIPGRAPHEXECGETID = 556,
+    HRR_API_HIPDEVICEGETEXECAFFINITYSUPPORT = 557,
+    HRR_API_HIPARRAYGETPLANE = 558,
+    HRR_API_HIPPOPCALLCONFIGURATION = 559,
+    HRR_API_HIPPUSHCALLCONFIGURATION = 560,
+    HRR_API_HIPREGISTERFATBINARY = 561,
+    HRR_API_HIPREGISTERFUNCTION = 562,
+    HRR_API_HIPREGISTERMANAGEDVAR = 563,
+    HRR_API_HIPREGISTERSURFACE = 564,
+    HRR_API_HIPREGISTERTEXTURE = 565,
+    HRR_API_HIPREGISTERVAR = 566,
+    HRR_API_HIPUNREGISTERFATBINARY = 567,
+    HRR_API_COUNT = 568
 } hrr_api_id_t;
 
 /* Array of API names indexed by hrr_api_id_t */
@@ -6981,6 +7159,17 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipDeviceFlushGPUDirectRDMAWrites",
     "hipLibraryGetModule",
     "hipKernelSetAttributeForDevice",
+    "hipKernelSetCacheConfig",
+    "hipExtMemcpyBatchAsync",
+    "hipMemcpyWithAttributesAsync",
+    "hipMemcpy3DWithAttributesAsync",
+    "hipArrayGetSparseProperties",
+    "hipGraphNodeGetLocalId",
+    "hipGraphNodeGetToolsId",
+    "hipGraphGetId",
+    "hipGraphExecGetId",
+    "hipDeviceGetExecAffinitySupport",
+    "hipArrayGetPlane",
     "__hipPopCallConfiguration",
     "__hipPushCallConfiguration",
     "__hipRegisterFatBinary",

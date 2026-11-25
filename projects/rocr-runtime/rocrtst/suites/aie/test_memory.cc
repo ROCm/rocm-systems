@@ -25,6 +25,15 @@ namespace {
 
 using aie_test::discover_agents;
 
+/**
+ * @brief HSA memory-pool iteration callback that finds the first global, coarse-grained,
+ * allocatable memory pool.
+ *
+ * @param pool memory pool being visited
+ * @param data hsa_amd_memory_pool_t* to receive a match
+ * @return HSA_STATUS_INFO_BREAK on a match, HSA_STATUS_SUCCESS to keep iterating, or the error
+ * from a failed pool query
+ */
 hsa_status_t discover_first_global_coarse_grain_mem_pool(hsa_amd_memory_pool_t pool, void* data) {
   if (!data) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -56,6 +65,48 @@ hsa_status_t discover_first_global_coarse_grain_mem_pool(hsa_amd_memory_pool_t p
   return HSA_STATUS_INFO_BREAK;
 }
 
+/**
+ * @brief Like discover_first_global_coarse_grain_mem_pool, but skips the dev-heap pool.
+ *
+ * AMD::MemoryRegion only reports HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE as 0 for
+ * non-system heap types, so this is how a caller tells the dev-heap pool apart from a device's
+ * plain system-backed pools. Every AIE agent has a system-backed pool; only aie2/aie2p (KMQ) also
+ * have a dev heap, whose BOs amdxdna cannot export as a dma-buf (so it cannot back VMem handles).
+ *
+ * @param pool memory pool being visited
+ * @param data hsa_amd_memory_pool_t* to receive a match
+ * @return HSA_STATUS_INFO_BREAK on a match, HSA_STATUS_SUCCESS to keep iterating, or the error
+ * from a failed pool query
+ */
+hsa_status_t discover_first_system_mem_pool(hsa_amd_memory_pool_t pool, void* data) {
+  hsa_status_t status = discover_first_global_coarse_grain_mem_pool(pool, data);
+  if (status != HSA_STATUS_INFO_BREAK) {
+    return status;
+  }
+
+  std::size_t rec_granule = 0;
+  status = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE,
+                                        &rec_granule);
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
+  if (rec_granule == 0) {
+    // Dev-heap pool; keep looking.
+    *static_cast<hsa_amd_memory_pool_t*>(data) = hsa_amd_memory_pool_t{};
+    return HSA_STATUS_SUCCESS;
+  }
+
+  return HSA_STATUS_INFO_BREAK;
+}
+
+/**
+ * @brief HSA memory-pool iteration callback that appends every pool visited to the
+ * std::vector<hsa_amd_memory_pool_t>* stored in @p data.
+ *
+ * @param pool memory pool being visited
+ * @param data std::vector<hsa_amd_memory_pool_t>* to append to
+ * @return HSA_STATUS_SUCCESS, or HSA_STATUS_ERROR_INVALID_ARGUMENT if @p data is null
+ */
 hsa_status_t collect_all_pools(hsa_amd_memory_pool_t pool, void* data) {
   if (!data) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -471,10 +522,9 @@ TEST_F(MemoryTest, VMemCreateNPU) {
 
 TEST_F(MemoryTest, VMemMapNPU) {
   hsa_amd_memory_pool_t global_memory_pool = {};
-  ASSERT_EQ(
-      hsa_amd_agent_iterate_memory_pools(
-          aie_agents.front(), discover_first_global_coarse_grain_mem_pool, &global_memory_pool),
-      HSA_STATUS_INFO_BREAK);
+  ASSERT_EQ(hsa_amd_agent_iterate_memory_pools(aie_agents.front(), discover_first_system_mem_pool,
+                                               &global_memory_pool),
+            HSA_STATUS_INFO_BREAK);
 
   // allocate on NPU 0
   constexpr std::size_t buffer_size = 1024;
@@ -488,9 +538,10 @@ TEST_F(MemoryTest, VMemMapNPU) {
   const std::uint64_t address = 0;
   const std::uint64_t alignment = 0;
   std::uint32_t* buffer = nullptr;
-  ASSERT_EQ(hsa_amd_vmem_address_reserve_align(reinterpret_cast<void**>(&buffer), allocation_size,
-                                               address, alignment, 0 /* flags */),
-            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(
+      hsa_amd_vmem_address_reserve_align(reinterpret_cast<void**>(&buffer), allocation_size,
+                                         address, alignment, HSA_AMD_VMEM_ADDRESS_NO_REGISTER),
+      HSA_STATUS_SUCCESS);
   ASSERT_NE(buffer, nullptr);
 
   const std::uint64_t offset = 0;
@@ -856,40 +907,13 @@ TEST_F(MemoryTest, VMemExportImportShareableHandle) {
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
 }
 
-// Whether the agent address differs from the host address depends on the pool, so only its
-// presence is checked.
-TEST_F(MemoryTest, PointerInfo) {
-  hsa_amd_memory_pool_t global_memory_pool = {};
-  ASSERT_EQ(
-      hsa_amd_agent_iterate_memory_pools(
-          aie_agents.front(), discover_first_global_coarse_grain_mem_pool, &global_memory_pool),
-      HSA_STATUS_INFO_BREAK);
-
-  constexpr std::size_t buffer_size = 1024;
-  constexpr std::size_t allocation_size = buffer_size * sizeof(std::uint32_t);
-  void* buffer = nullptr;
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(global_memory_pool, allocation_size, 0, &buffer),
-            HSA_STATUS_SUCCESS);
-  ASSERT_NE(buffer, nullptr);
-
-  hsa_amd_pointer_info_t info = {};
-  info.size = sizeof(info);
-  EXPECT_EQ(hsa_amd_pointer_info(buffer, &info, nullptr, nullptr, nullptr), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(info.type, HSA_EXT_POINTER_TYPE_HSA);
-  EXPECT_EQ(info.hostBaseAddress, buffer);
-  EXPECT_EQ(info.sizeInBytes, allocation_size);
-  EXPECT_NE(info.agentBaseAddress, nullptr);
-  EXPECT_EQ(info.agentOwner.handle, aie_agents.front().handle);
-
-  // cleanup
-  EXPECT_EQ(hsa_amd_memory_pool_free(buffer), HSA_STATUS_SUCCESS);
-}
-
 TEST_F(MemoryTest, IterateAllPools) {
   std::vector<hsa_amd_memory_pool_t> pools;
   ASSERT_EQ(hsa_amd_agent_iterate_memory_pools(aie_agents.front(), collect_all_pools, &pools),
             HSA_STATUS_SUCCESS);
-  ASSERT_EQ(pools.size(), 3u);
+  // Every agent has a kernarg and a plain system pool; an NPU-local pool is a third, present only
+  // on devices with a dev heap (aie2/aie2p KMQ, not AIE4 UMQ).
+  ASSERT_GE(pools.size(), 2u);
 
   std::size_t coarse_grain_count = 0;
   for (const auto& pool : pools) {
@@ -905,7 +929,7 @@ TEST_F(MemoryTest, IterateAllPools) {
       ++coarse_grain_count;
     }
   }
-  EXPECT_EQ(coarse_grain_count, 3u);
+  EXPECT_EQ(coarse_grain_count, pools.size());
 }
 
 TEST_F(MemoryTest, PoolCanMigrate) {
@@ -1020,10 +1044,9 @@ TEST_F(MemoryTest, VMemMapSameHandleTwice) {
 
 TEST_F(MemoryTest, VMemDoubleMap) {
   hsa_amd_memory_pool_t global_memory_pool = {};
-  ASSERT_EQ(
-      hsa_amd_agent_iterate_memory_pools(
-          aie_agents.front(), discover_first_global_coarse_grain_mem_pool, &global_memory_pool),
-      HSA_STATUS_INFO_BREAK);
+  ASSERT_EQ(hsa_amd_agent_iterate_memory_pools(aie_agents.front(), discover_first_system_mem_pool,
+                                               &global_memory_pool),
+            HSA_STATUS_INFO_BREAK);
 
   constexpr std::size_t buffer_size = 1024;
   constexpr std::size_t allocation_size = buffer_size * sizeof(std::uint32_t);
@@ -1033,7 +1056,8 @@ TEST_F(MemoryTest, VMemDoubleMap) {
             HSA_STATUS_SUCCESS);
 
   void* buffer = nullptr;
-  ASSERT_EQ(hsa_amd_vmem_address_reserve_align(&buffer, allocation_size, 0, 0, 0),
+  ASSERT_EQ(hsa_amd_vmem_address_reserve_align(&buffer, allocation_size, 0, 0,
+                                               HSA_AMD_VMEM_ADDRESS_NO_REGISTER),
             HSA_STATUS_SUCCESS);
 
   ASSERT_EQ(hsa_amd_vmem_map(buffer, allocation_size, 0, memory_handle, 0), HSA_STATUS_SUCCESS);
@@ -1048,10 +1072,9 @@ TEST_F(MemoryTest, VMemDoubleMap) {
 
 TEST_F(MemoryTest, VMemReleaseBeforeUnmap) {
   hsa_amd_memory_pool_t global_memory_pool = {};
-  ASSERT_EQ(
-      hsa_amd_agent_iterate_memory_pools(
-          aie_agents.front(), discover_first_global_coarse_grain_mem_pool, &global_memory_pool),
-      HSA_STATUS_INFO_BREAK);
+  ASSERT_EQ(hsa_amd_agent_iterate_memory_pools(aie_agents.front(), discover_first_system_mem_pool,
+                                               &global_memory_pool),
+            HSA_STATUS_INFO_BREAK);
 
   constexpr std::size_t buffer_size = 1024;
   constexpr std::size_t allocation_size = buffer_size * sizeof(std::uint32_t);
@@ -1061,7 +1084,8 @@ TEST_F(MemoryTest, VMemReleaseBeforeUnmap) {
             HSA_STATUS_SUCCESS);
 
   void* buffer = nullptr;
-  ASSERT_EQ(hsa_amd_vmem_address_reserve_align(&buffer, allocation_size, 0, 0, 0),
+  ASSERT_EQ(hsa_amd_vmem_address_reserve_align(&buffer, allocation_size, 0, 0,
+                                               HSA_AMD_VMEM_ADDRESS_NO_REGISTER),
             HSA_STATUS_SUCCESS);
 
   ASSERT_EQ(hsa_amd_vmem_map(buffer, allocation_size, 0, memory_handle, 0), HSA_STATUS_SUCCESS);

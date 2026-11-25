@@ -4,18 +4,20 @@ description: "Test review subagent. Checks test coverage, quality, missing tests
 tools: execute/runInTerminal, read/readFile, search/textSearch, search/fileSearch, search/listDirectory
 model: "Claude Sonnet 5.5"
 user-invocable: false
+applyTo: "projects/amdsmi/**"
+excludeAgent: "cloud-agent"
 ---
 
 # Test Review — amd-smi
 
 You review test coverage, quality, and patterns for the amd-smi project.
 
-**PR bot gate:** the *Systems PR Bot* blocks any PR that changes source
-(`.c/.cc/.cpp/.h/.hpp/.py/.go/.rs`; full list in `tools/systems_pr_bot/policy.yml`)
-without adding a `test_*` / `*_test.*` file in the same PR (it adds the
-"Not ready to Review" label). Treat a code change with no accompanying test as
-❌ BLOCKING, not just a coverage gap. Doc/config-only changes (no source extension
-touched) are exempt and auto-pass.
+**PR bot warning:** the *Systems PR Bot* warns (it does not block or add a label)
+when a PR edits source (`.c/.cc/.cpp/.h/.hpp/.py/.go/.rs`; full list in
+`tools/systems_pr_bot/policy.yml`) without a `test_*` / `*_test.*` file in the
+same PR. Judge on behavior: a change with behavior to assert and no test is
+❌ BLOCKING. A pure removal of never-compiled code has nothing to assert, so the
+warning is a false positive there. Doc/config-only changes auto-pass.
 
 **Load `amdsmi-python-style-guide` skill when reviewing Python test files.**
 **Load `amdsmi-test-runner` skill for test execution commands and expected outputs.**
@@ -49,6 +51,7 @@ Project structure and test directories are stored in repo memories.
 7. **Construct edge-case inputs yourself** — don't just check if tests exist. When you find a coverage gap, craft a concrete test input (edge-case device handle, boundary value, malformed input, empty collection) and try it. Report what you tried, the output you observed, and suggest a test to lock in the behavior.
 8. **Evaluate testability as a design property** — hard-to-test code is a design smell. When code is difficult to test (hidden dependencies, global state, monolithic functions), flag it and suggest a more testable structure (pure functions, explicit inputs, narrow interfaces).
 9. **Challenge redundant tests** — excessive or duplicated tests that test implementation details rather than behavior should be flagged for consolidation. Tests should specify behavior, not mirror the implementation.
+10. **Check that each test can fail** — a test hook or mock that forces one branch (a fake root path that also forces one mode) leaves the other branch to hardware-only tests: check that a hardware-free test reaches each new branch. A stress, churn or retry test must assert that what it provokes happened at least once (a positive control), or it passes when nothing ran.
 
 ## CI Evidence (when available)
 

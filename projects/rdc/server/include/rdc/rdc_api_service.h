@@ -24,7 +24,13 @@ THE SOFTWARE.
 
 #include <grpcpp/server_context.h>
 
-#include <thread>
+#include <atomic>
+#include <condition_variable>  // NOLINT
+#include <deque>
+#include <map>
+#include <memory>
+#include <mutex>  // NOLINT
+#include <vector>
 
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc/rdc.h"
@@ -127,13 +133,13 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
   ::grpc::Status RemoveAllJob(::grpc::ServerContext* context, const ::rdc::Empty* request,
                               ::rdc::RemoveAllJobResponse* reply) override;
 
-  ::grpc::Status DiagnosticRun(
-      ::grpc::ServerContext* context, const ::rdc::DiagnosticRunRequest* request,
-      ::grpc::ServerWriter< ::rdc::DiagnosticRunResponse>* writer) override;
+  ::grpc::Status DiagnosticRun(::grpc::ServerContext* context,
+                               const ::rdc::DiagnosticRunRequest* request,
+                               ::grpc::ServerWriter<::rdc::DiagnosticRunResponse>* writer) override;
 
   ::grpc::Status DiagnosticTestCaseRun(
       ::grpc::ServerContext* context, const ::rdc::DiagnosticTestCaseRunRequest* request,
-      ::grpc::ServerWriter< ::rdc::DiagnosticTestCaseRunResponse>* writer) override;
+      ::grpc::ServerWriter<::rdc::DiagnosticTestCaseRunResponse>* writer) override;
 
   ::grpc::Status GetMixedComponentVersion(::grpc::ServerContext* context,
                                           const ::rdc::GetMixedComponentVersionRequest* request,
@@ -151,7 +157,7 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
 
   ::grpc::Status RegisterPolicy(
       ::grpc::ServerContext* context, const ::rdc::RegisterPolicyRequest* request,
-      ::grpc::ServerWriter< ::rdc::RegisterPolicyResponse>* stream) override;
+      ::grpc::ServerWriter<::rdc::RegisterPolicyResponse>* stream) override;
 
   ::grpc::Status UnRegisterPolicy(::grpc::ServerContext* context,
                                   const ::rdc::UnRegisterPolicyRequest* request,
@@ -200,15 +206,61 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
   bool copy_gpu_usage_info(const rdc_gpu_usage_info_t& src, ::rdc::GpuUsageInfo* target);
   rdc_handle_t rdc_handle_;
 
-  struct policy_thread_context {
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
-    rdc_policy_callback_response_t response;
-    bool start;
+  // The most diagnostics rdcd runs at once, DiagnosticRun and DiagnosticTestCaseRun together,
+  // over all clients: any client can ask for one, and each keeps the GPUs busy. Another one
+  // gets RDC_ST_MAX_LIMIT.
+  static constexpr uint32_t kMaxDiagnosticRuns = 2;
+  // One of those runs: holds a slot from construction, if one is free, until destruction.
+  class DiagnosticSlot {
+   public:
+    explicit DiagnosticSlot(std::atomic<uint32_t>* runs);
+    ~DiagnosticSlot();
+    DiagnosticSlot(const DiagnosticSlot&) = delete;
+    DiagnosticSlot& operator=(const DiagnosticSlot&) = delete;
+    bool held() const { return held_; }
+
+   private:
+    std::atomic<uint32_t>* runs_;
+    bool held_ = false;
   };
-  // map for group_id and thread context
-  static std::map<uint32_t, struct policy_thread_context*> policy_threads_;
+  std::atomic<uint32_t> diagnostic_runs_{0};  // slots held
+  template <typename Response>
+  static ::grpc::Status reject_diagnostic(::grpc::ServerWriter<Response>* writer, const char* rpc);
+
+  // The most RegisterPolicy streams rdcd serves at once, over all clients and groups.
+  static constexpr size_t kMaxPolicyStreams = 64;
+  // The most notifications a stream holds for its client; a full stream drops its oldest.
+  // One check of a full group notifies up to 192 (64 GPUs, 3 conditions).
+  static constexpr size_t kMaxPendingNotifications = 1024;
+
+  // One RegisterPolicy stream. PolicyCallback() queues each notification in it; the
+  // stream's own handler thread writes them to the client in order.
+  struct PolicyStream {
+    std::mutex mutex;  // guards the fields below
+    std::condition_variable cv;
+    std::deque<rdc_policy_callback_response_t> pending;  // not written yet, oldest first
+    size_t dropped = 0;     // dropped from a full stream and not logged yet
+    bool stop = false;      // UnRegisterPolicy or shutdown ends the stream
+    bool shutdown = false;  // shutdown ended it: the client learns that rdcd stops
+    // The stream's call. Set before the stream is listed in policy_streams_; valid while it is
+    // listed, since the handler takes policy_mutex_ to unlist it before it returns.
+    ::grpc::ServerContext* context = nullptr;
+    bool writing = false;    // the handler is in Write(), or about to be
+    bool cancelled = false;  // a stop cancelled the call to end that Write()
+  };
+  static void stop_policy_stream(PolicyStream* stream);
+  // Removes a stream that ended; the last stream of a group drops its library registration.
+  void end_policy_stream(uint32_t group_id, const std::shared_ptr<PolicyStream>& stream);
   static int PolicyCallback(rdc_policy_callback_response_t* userData);
+
+  // Guards the policy state below, and RDC's policy register and unregister calls. RDC never
+  // calls PolicyCallback() while it holds its own policy lock, so PolicyCallback() can take it.
+  // The state is static because PolicyCallback() is; rdcd has one RdcAPIServiceImpl.
+  static std::mutex policy_mutex_;
+  // The streams of each group with a library registration.
+  static std::map<uint32_t, std::vector<std::shared_ptr<PolicyStream>>> policy_streams_;
+  static size_t policy_stream_count_;  // streams over all groups
+  static bool policy_shutdown_;        // set by Shutdown(); no stream starts after it
 };
 
 }  // namespace rdc

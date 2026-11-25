@@ -9,15 +9,16 @@ use std::ffi::{c_char, c_void};
 use rocloader::CodeObject as LoaderCodeObject;
 
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::loader::code_object::*;
 use crate::loader::*;
-use crate::runtime::{boundary, initialized_mut, lock};
+use crate::status::boundary;
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_code_object_deserialize")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Deserializes a code object and publishes its HSA handle.
 pub unsafe extern "C" fn hsa_code_object_deserialize(
     serialized_code_object: *mut c_void,
@@ -62,7 +63,7 @@ pub unsafe extern "C" fn hsa_code_object_deserialize(
         };
         runtime.loader.code_objects.insert(
             handle,
-            CodeObject {
+            CodeObjectRecord {
                 bytes: bytes.into(),
                 names: HashMap::new(),
                 symbol_handles: Vec::new(),
@@ -76,10 +77,10 @@ pub unsafe extern "C" fn hsa_code_object_deserialize(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_code_object_serialize")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Serializes a code object into caller-allocated storage.
 pub unsafe extern "C" fn hsa_code_object_serialize(
     code_object: HsaCodeObject,
@@ -129,10 +130,10 @@ pub unsafe extern "C" fn hsa_code_object_serialize(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_code_object_destroy")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Releases a deserialized code object and its symbols.
 pub unsafe extern "C" fn hsa_code_object_destroy(code_object: HsaCodeObject) -> Status {
     boundary(|| {
@@ -155,10 +156,10 @@ pub unsafe extern "C" fn hsa_code_object_destroy(code_object: HsaCodeObject) -> 
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_code_object_get_info")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Writes the requested code-object attribute.
 pub unsafe extern "C" fn hsa_code_object_get_info(
     code_object: HsaCodeObject,
@@ -210,9 +211,23 @@ pub unsafe extern "C" fn hsa_code_object_get_info(
                 CODE_OBJECT_INFO_MACHINE_MODEL => {
                     value.cast::<u32>().write(MACHINE_MODEL_LARGE);
                 }
-                CODE_OBJECT_INFO_PROFILE => value.cast::<u32>().write(PROFILE_BASE),
+                CODE_OBJECT_INFO_PROFILE => {
+                    let Some(profile) = object.contract().profile else {
+                        return INVALID_CODE_OBJECT;
+                    };
+                    value.cast::<u32>().write(match profile {
+                        rocloader::Profile::Base => PROFILE_BASE,
+                        rocloader::Profile::Full => PROFILE_FULL,
+                    })
+                }
                 CODE_OBJECT_INFO_DEFAULT_FLOAT_ROUNDING_MODE => {
-                    value.cast::<u32>().write(DEFAULT_FLOAT_ROUNDING_MODE_NEAR);
+                    value.cast::<u32>().write(match object.contract().rounding {
+                        rocloader::FloatRoundingMode::Default => {
+                            DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT
+                        }
+                        rocloader::FloatRoundingMode::Zero => DEFAULT_FLOAT_ROUNDING_MODE_ZERO,
+                        rocloader::FloatRoundingMode::Near => DEFAULT_FLOAT_ROUNDING_MODE_NEAR,
+                    });
                 }
                 _ => return INVALID_ARGUMENT,
             }
@@ -222,10 +237,10 @@ pub unsafe extern "C" fn hsa_code_object_get_info(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_code_object_get_symbol")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Finds a symbol in a code object by module and name.
 pub unsafe extern "C" fn hsa_code_object_get_symbol(
     code_object: HsaCodeObject,
@@ -237,10 +252,10 @@ pub unsafe extern "C" fn hsa_code_object_get_symbol(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_code_object_get_symbol_from_name")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Finds a code-object symbol by its qualified name.
 pub unsafe extern "C" fn hsa_code_object_get_symbol_from_name(
     code_object: HsaCodeObject,
@@ -253,10 +268,10 @@ pub unsafe extern "C" fn hsa_code_object_get_symbol_from_name(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_code_symbol_get_info")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Writes the requested code-symbol attribute.
 pub unsafe extern "C" fn hsa_code_symbol_get_info(
     code_symbol: HsaCodeSymbol,
@@ -341,10 +356,10 @@ pub unsafe extern "C" fn hsa_code_symbol_get_info(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_code_object_iterate_symbols")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Visits symbols in a deserialized code object.
 pub unsafe extern "C" fn hsa_code_object_iterate_symbols(
     code_object: HsaCodeObject,

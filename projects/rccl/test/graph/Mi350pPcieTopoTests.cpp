@@ -27,15 +27,12 @@
 #include <cstring>
 #include <memory>
 #include <string>
-#include <unistd.h>
 
 #include "graph.h"
 #include "graph/topo.h"
 #include "graph/xml.h"
 
-#ifndef RCCL_TEST_SOURCE_DIR
-#define RCCL_TEST_SOURCE_DIR "."
-#endif
+#include "../common/TopoFixtures.hpp"
 
 namespace RcclUnitTesting
 {
@@ -58,8 +55,7 @@ using TopoPtr = std::unique_ptr<ncclTopoSystem, decltype(&ncclTopoFree)>;
 
 std::string mi350pPcieTopoPath()
 {
-    return std::string(RCCL_TEST_SOURCE_DIR) +
-           "/../tools/topo_expl/models/topo_8p_950_pcie.xml";
+    return topoFixturePath("topo_8p_950_pcie.xml");
 }
 
 struct ncclXml* allocateXml(int maxNodes)
@@ -110,11 +106,7 @@ TopoPtr loadMi350pPcieTopo()
 
 TEST(Mi350pPcieTopo, EightGfx950GpusNoXgmi)
 {
-    const std::string path = mi350pPcieTopoPath();
-    if (access(path.c_str(), R_OK) != 0)
-    {
-        GTEST_SKIP() << "Topology model not found: " << path;
-    }
+    ASSERT_TRUE(topoFixtureReadable(mi350pPcieTopoPath()));
 
     TopoPtr system = loadMi350pPcieTopo();
     ASSERT_NE(system.get(), nullptr);

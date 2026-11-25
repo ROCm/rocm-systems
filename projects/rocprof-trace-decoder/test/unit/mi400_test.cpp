@@ -266,12 +266,24 @@ static std::array<uint8_t, 16> make_token_buffer(uint64_t raw, size_t num_bytes)
 TEST(MI400TokenGeneratorTest, ConstructorThrowsOnNullBuffer)
 {
     EXPECT_THROW(mi400::TokenGenerator(nullptr, 10, 0, 0), std::exception);
+    EXPECT_THROW(mi400::TokenGenerator(nullptr, 10, 0, 0, false), std::exception);
 }
 
 TEST(MI400TokenGeneratorTest, ConstructorThrowsOnZeroSize)
 {
     uint8_t dummy[10] = {0};
     EXPECT_THROW(mi400::TokenGenerator(dummy, 0, 0, 0), std::exception);
+    EXPECT_THROW(mi400::TokenGenerator(dummy, 0, 0, 0, false), std::exception);
+}
+
+TEST(MI400TokenGeneratorTest, ConstructorThrowsOnTruncatedHeader)
+{
+    std::array<uint8_t, sizeof(mi400::header_type)> buffer{};
+    for (size_t size = 1; size < buffer.size(); ++size)
+    {
+        EXPECT_THROW(mi400::TokenGenerator(buffer.data(), size, 0, 0), std::exception);
+        EXPECT_NO_THROW(mi400::TokenGenerator(buffer.data(), size, 0, 0, false));
+    }
 }
 
 TEST(MI400TokenGeneratorTest, UpdateFifoAndGetValuInst)
@@ -391,7 +403,7 @@ TEST(MI400TokenGeneratorTest, NextInstPathsUpdateFifo)
         buffer[offset + 1] = static_cast<uint8_t>((inst.raw >> 8) & 0xFF);
         buffer[offset + 2] = static_cast<uint8_t>((inst.raw >> 16) & 0xFF);
 
-        TestMI400TokenGenerator gen(buffer.data(), c.buffer_size, 0, 0);
+        TestMI400TokenGenerator gen(buffer.data(), c.buffer_size, 0, 0, false);
         auto token = gen.next();
 
         EXPECT_EQ(token.type, RdnaType::INST);
@@ -410,7 +422,7 @@ TEST(MI400TokenGeneratorTest, NextValuAndLongTokenPaths)
         valu.wavetm = 0;
 
         auto buffer = make_token_buffer(valu.raw, 1);
-        TestMI400TokenGenerator gen(buffer.data(), buffer.size(), 0, 0);
+        TestMI400TokenGenerator gen(buffer.data(), buffer.size(), 0, 0, false);
         gen.FIFO[0] = 9;
 
         auto token = gen.next();
@@ -427,7 +439,7 @@ TEST(MI400TokenGeneratorTest, NextValuAndLongTokenPaths)
         buffer[0] = 0x21; // NEW_PC_GFX12 encoding: {1,0,0,0,0,1,0}
         buffer[8] = 0xAB; // consumed by bits_toread > 64 path
 
-        TestMI400TokenGenerator gen(buffer.data(), buffer.size(), 0, 0);
+        TestMI400TokenGenerator gen(buffer.data(), buffer.size(), 0, 0, false);
         auto token = gen.next();
 
         EXPECT_EQ(token.type, RdnaType::NEW_PC_GFX12);
@@ -447,7 +459,7 @@ TEST(MI400TokenGeneratorTest, SafeReaderHandlesRealtimeValuAndExtendedPcTokens)
         std::array<uint8_t, sizeof(uint64_t)> buffer{};
         std::memcpy(buffer.data(), &ts.raw, sizeof(ts.raw));
 
-        mi400::TokenGenerator gen(buffer.data(), buffer.size(), 0, 0);
+        mi400::TokenGenerator gen(buffer.data(), buffer.size(), 0, 0, false);
         auto token = gen.next();
 
         EXPECT_EQ(token.type, RdnaType::TIMESTAMP);
@@ -462,7 +474,7 @@ TEST(MI400TokenGeneratorTest, SafeReaderHandlesRealtimeValuAndExtendedPcTokens)
         valu.wavetm = 0;
 
         std::array<uint8_t, 1> buffer{static_cast<uint8_t>(valu.raw)};
-        TestMI400TokenGenerator gen(buffer.data(), buffer.size(), 0, 0);
+        TestMI400TokenGenerator gen(buffer.data(), buffer.size(), 0, 0, false);
         gen.FIFO[0] = 9;
 
         auto token = gen.next();
@@ -479,7 +491,7 @@ TEST(MI400TokenGeneratorTest, SafeReaderHandlesRealtimeValuAndExtendedPcTokens)
         buffer[0] = 0x21; // NEW_PC_GFX12 encoding: {1,0,0,0,0,1,0}
         buffer[8] = 0xAB;
 
-        TestMI400TokenGenerator gen(buffer.data(), buffer.size(), 0, 0);
+        TestMI400TokenGenerator gen(buffer.data(), buffer.size(), 0, 0, false);
         auto token = gen.next();
 
         EXPECT_EQ(token.type, RdnaType::NEW_PC_GFX12);
@@ -490,7 +502,7 @@ TEST(MI400TokenGeneratorTest, SafeReaderHandlesRealtimeValuAndExtendedPcTokens)
 TEST(MI400TokenGeneratorTest, EmptyBufferTerminates)
 {
     uint8_t buffer[1] = {0};
-    mi400::TokenGenerator gen(buffer, 1, 0, 0);
+    mi400::TokenGenerator gen(buffer, 1, 0, 0, false);
 
     int count = 0;
     while (gen.nextValid() && count < 100)

@@ -34,7 +34,10 @@ constexpr uint64_t RJ_ARITH_CPU_FEATURES_MASK = 0xfff0ULL;
 // Mode 0 is loose. Mode 1 prefers exact results but permits loose fallback.
 // Mode 2 requires exact results. Mode 3 additionally requires FP status reporting.
 // Modes 0 through 2 never access FP status outputs. Values 4 through 6 are reserved.
-// Mode 7 is reserved for later compatibility support and is currently rejected.
+// Temporary migration mode 7 is outside this ordering: each instruction resolves
+// it to the behavior closest to old rocjitsu. Compatibility FP status follows
+// each instruction family's declaration, independently of its numeric mode;
+// supply valid storage whenever that family reports status.
 constexpr uint64_t RJ_ARITH_SEMANTICS_MASK = 7ULL << 16;
 constexpr uint64_t RJ_ARITH_SEMANTICS_LOOSE = 0ULL;
 constexpr uint64_t RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE = 1ULL << 16;
@@ -81,6 +84,14 @@ constexpr uint64_t RJ_ARITH_FP_INPUT_DENORMALS_F16_MASK = 3ULL << 26;
 constexpr uint64_t RJ_ARITH_FP_FLUSH_INPUT_DENORMALS_F16 = 1ULL << 26;
 constexpr uint64_t RJ_ARITH_FP_PRESERVE_INPUT_DENORMALS_F16 = 2ULL << 26;
 
+// FP32 intermediate rounding for mixed instructions that round again to FP16.
+// Uses the same enumeration as FP_ROUND_MASK, which controls the final result.
+// Availability is instruction-specific; no host FP controls are changed.
+constexpr uint64_t RJ_ARITH_FP_ROUND_INTERMEDIATE_F32_MASK = 3ULL << 28;
+constexpr uint64_t RJ_ARITH_FP_ROUND_INTERMEDIATE_F32_UP = 1ULL << 28;
+constexpr uint64_t RJ_ARITH_FP_ROUND_INTERMEDIATE_F32_DOWN = 2ULL << 28;
+constexpr uint64_t RJ_ARITH_FP_ROUND_INTERMEDIATE_F32_ZERO = 3ULL << 28;
+
 // Status codes returned by instruction emulation functions.
 constexpr int RJ_ARITH_SUCCESS = 0;
 constexpr int RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS = 1;
@@ -88,9 +99,6 @@ constexpr int RJ_ARITH_ERROR_INVALID_FLAGS = 2;
 
 // Required faithful FP status reporting is unavailable.
 constexpr int RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS = 3;
-
-// A non-FP architectural side effect requested by a register operation is unavailable.
-constexpr int RJ_ARITH_ERROR_UNSUPPORTED_REGISTER_STATE = 4;
 
 // Names retain ISA mnemonics. Wave and architecture suffixes follow corresponding
 // Clang AMDGPU builtins where available, with wave width before architecture.
@@ -108,10 +116,11 @@ constexpr int RJ_ARITH_ERROR_UNSUPPORTED_REGISTER_STATE = 4;
 // nearest-even rounding, denormals enabled, and exceptions masked. Implementations
 // never explicitly modify host FP state; ordinary arithmetic may raise sticky flags.
 
-// FP status outputs are appended to the operand list. Their use is controlled
-// solely by the semantics field. Modes 0 through 2 do not access these pointers:
-// null is allowed and supplied storage remains unchanged. Mode 3 requires valid
-// storage as a caller precondition; entry points do not check pointer nullness.
+// FP status outputs are appended to the operand list. Modes 0 through 2 do not
+// access these pointers: null is allowed and supplied storage remains unchanged.
+// Mode 3 requires valid storage. Compatibility follows the instruction-family
+// status contract, which may require storage even when its numeric mode is 2.
+// Entry points assume required storage is valid; they do not check nullness.
 // trapsts (RDNA3) or excp_flag_user (RDNA4) accumulates participating-lane FP
 // exception causes with bitwise OR, preserving all existing bits. Status storage
 // must not overlap operands unless an instruction explicitly permits it.
@@ -121,6 +130,36 @@ constexpr int RJ_ARITH_ERROR_UNSUPPORTED_REGISTER_STATE = 4;
 // Reserved semantics values are invalid and rejected before operand access.
 // Ordinary results, including comparison masks and SCC, are required in every
 // mode. Explicit register writes and non-FP side effects have separate contracts.
+
+// DPP8 permutes source A within each group of eight lanes before arithmetic
+// modifiers. Pack eight 3-bit lane indices into bits 40..63, index 0 first, and
+// set RJ_ARITH_DPP8. Without FI, an inactive source supplies positive zero; FI reads
+// its stored value. Inactive destinations remain unchanged. Instruction-family headers
+// specify which entry points and modifiers support DPP.
+constexpr uint64_t RJ_ARITH_DPP8 = 1ULL << 32;
+constexpr uint64_t RJ_ARITH_DPP_FI = 1ULL << 33;
+constexpr uint32_t RJ_ARITH_DPP8_SELECT_SHIFT = 40;
+constexpr uint64_t RJ_ARITH_DPP8_SELECT_MASK = 0xffffffULL << 40;
+
+// DPP16 permutes the same source as DPP8 within 16-lane rows before arithmetic
+// modifiers. Select
+// exactly one of RJ_ARITH_DPP8/RJ_ARITH_DPP16. DPP16 control is the architectural 9-bit
+// encoding: quad_perm 0x000..0x0ff; row_shl 0x101..0x10f; row_shr 0x111..0x11f;
+// row_ror 0x121..0x12f; row_mirror 0x140; row_half_mirror 0x141;
+// row_share 0x150..0x15f; row_xmask 0x160..0x16f. Other controls are invalid.
+// Row/bank fields enable destination rows of 16 lanes and banks of four lanes.
+// Use both full MASK constants to enable all destinations; zero fields disable
+// writes. FI permits inactive in-range sources. Without a readable source,
+// BOUND_CTRL supplies positive zero; otherwise the destination is preserved.
+// FI does not permit out-of-range sources. See instruction-family headers for DPP16 support.
+constexpr uint64_t RJ_ARITH_DPP16 = 1ULL << 34;
+constexpr uint64_t RJ_ARITH_DPP_BOUND_CTRL = 1ULL << 35;
+constexpr uint32_t RJ_ARITH_DPP_CTRL_SHIFT = 40;
+constexpr uint64_t RJ_ARITH_DPP_CTRL_MASK = 0x1ffULL << 40;
+constexpr uint32_t RJ_ARITH_DPP_ROW_SHIFT = 49;
+constexpr uint64_t RJ_ARITH_DPP_ROW_MASK = 0xfULL << 49;
+constexpr uint32_t RJ_ARITH_DPP_BANK_SHIFT = 53;
+constexpr uint64_t RJ_ARITH_DPP_BANK_MASK = 0xfULL << 53;
 
 // Arithmetic exception bits shared by RDNA3 TRAPSTS.EXCP[6:0] and RDNA4
 // WAVE_EXCP_FLAG_USER[6:0]. Other fields of these registers are not interchangeable.
@@ -132,9 +171,83 @@ constexpr uint32_t RJ_ARITH_EXCEPTION_UNDERFLOW = 1U << 4;
 constexpr uint32_t RJ_ARITH_EXCEPTION_INEXACT = 1U << 5;
 constexpr uint32_t RJ_ARITH_EXCEPTION_INT_DIV0 = 1U << 6;
 
+// Packed source negation: independent for the low and high result calculations.
+constexpr uint32_t RJ_ARITH_PK_NEG_LO_A = 1U << 0;
+constexpr uint32_t RJ_ARITH_PK_NEG_LO_B = 1U << 1;
+constexpr uint32_t RJ_ARITH_PK_NEG_LO_C = 1U << 2;
+constexpr uint32_t RJ_ARITH_PK_NEG_HI_A = 1U << 3;
+constexpr uint32_t RJ_ARITH_PK_NEG_HI_B = 1U << 4;
+constexpr uint32_t RJ_ARITH_PK_NEG_HI_C = 1U << 5;
+
+// Packed output clamp: floats to [0, 1], with NaNs and -0 to +0;
+// integer ADD/SUB/MAD saturate to their result range.
+constexpr uint32_t RJ_ARITH_PK_CLAMP = 1U << 6;
+
+// Packed half selectors flip the default choice for each result calculation.
+// Zero flags use low inputs for the low result and high inputs for the high one.
+// These flags can swap or replicate halves independently for each source.
+constexpr uint32_t RJ_ARITH_PK_LO_A_HIGH = 1U << 7;
+constexpr uint32_t RJ_ARITH_PK_LO_B_HIGH = 1U << 8;
+constexpr uint32_t RJ_ARITH_PK_LO_C_HIGH = 1U << 9;
+constexpr uint32_t RJ_ARITH_PK_HI_A_LOW = 1U << 10;
+constexpr uint32_t RJ_ARITH_PK_HI_B_LOW = 1U << 11;
+constexpr uint32_t RJ_ARITH_PK_HI_C_LOW = 1U << 12;
+
+// Floating ALU source modifiers: ABS precedes NEG.
+constexpr uint32_t RJ_ARITH_ALU_NEG_A = 1U << 0;
+constexpr uint32_t RJ_ARITH_ALU_NEG_B = 1U << 1;
+constexpr uint32_t RJ_ARITH_ALU_NEG_C = 1U << 2;
+constexpr uint32_t RJ_ARITH_ALU_ABS_A = 1U << 3;
+constexpr uint32_t RJ_ARITH_ALU_ABS_B = 1U << 4;
+constexpr uint32_t RJ_ARITH_ALU_ABS_C = 1U << 5;
+
+// Floating ALU output scaling precedes CLAMP. OMOD is a two-bit enumeration:
+// none, multiply by 2, multiply by 4, divide by 2.
+constexpr uint32_t RJ_ARITH_ALU_OMOD_SHIFT = 6;
+constexpr uint32_t RJ_ARITH_ALU_OMOD_MASK = 3U << RJ_ARITH_ALU_OMOD_SHIFT;
+constexpr uint32_t RJ_ARITH_ALU_OMOD_2 = 1U << 6;
+constexpr uint32_t RJ_ARITH_ALU_OMOD_4 = 2U << 6;
+constexpr uint32_t RJ_ARITH_ALU_OMOD_HALF = 3U << 6;
+
+// Result clamping where supported: floating results to [0,1] (NaNs become zero),
+// integer results to the representable signed/unsigned destination range.
+constexpr uint32_t RJ_ARITH_ALU_CLAMP = 1U << 8;
+
+// True16 source/destination half selectors. Zero selects the low half.
+constexpr uint32_t RJ_ARITH_ALU_HIGH_A = 1U << 9;
+constexpr uint32_t RJ_ARITH_ALU_HIGH_B = 1U << 10;
+constexpr uint32_t RJ_ARITH_ALU_HIGH_C = 1U << 11;
+constexpr uint32_t RJ_ARITH_ALU_HIGH_D = 1U << 12;
+
+// gfx942/gfx950 FP16 destinations accept inherited SDWA prescaling before rounding.
+// Unsuffixed F16-to-F32 accepts it for NaN quieting under active OMOD.
+// Source selection and destination byte placement remain separate.
+// BF16 widening accepts inherited output scaling and clamp.
+// Packed RTZ finalizes already-rounded halves without a second multiplier.
+constexpr uint32_t RJ_ARITH_CVT_SDWA = 1U << 16;
+// Select inherited SDWA output processing where the entry point documents support.
+// Depending on the instruction, this scales a rounded result or finalizes an already-scaled
+// result before CLAMP. Source and destination byte placement remain separate; excludes DPP.
+constexpr uint32_t RJ_ARITH_ALU_SDWA = 1U << 16;
+
+// Mixed FMA source formats: unset means FP32; set means FP16 in the half
+// selected by RJ_ARITH_ALU_HIGH_A/B/C. Half selectors are ignored for FP32 sources.
+constexpr uint32_t RJ_ARITH_MIX_F16_A = 1U << 13;
+constexpr uint32_t RJ_ARITH_MIX_F16_B = 1U << 14;
+constexpr uint32_t RJ_ARITH_MIX_F16_C = 1U << 15;
+
+// Mixed BF16/FP32 FMA uses the same format-selector positions as mixed FP16.
+// These names apply to BF16 entry points; they select BF16 rather than FP32.
+constexpr uint32_t RJ_ARITH_MIX_BF16_A = 1U << 13;
+constexpr uint32_t RJ_ARITH_MIX_BF16_B = 1U << 14;
+constexpr uint32_t RJ_ARITH_MIX_BF16_C = 1U << 15;
+
 // Returns CPU capability flags for features usable on this machine, accounting
 // for CPU and operating-system support. All non-CPU flag bits are zero.
 uint64_t rj_arith_init_cpu_flags(void);
+
+// Limit detected CPU flags to the highest compiled level at or below max_level.
+uint64_t rj_arith_limit_cpu_flags(uint64_t detected_flags, uint64_t max_level);
 
 // Returns a static CPU-level name, ignoring bits outside RJ_ARITH_CPU_MASK.
 // Unknown levels return "unknown". The returned string must not be modified.

@@ -3,11 +3,14 @@
 
 #pragma once
 
+#include <gtest/gtest.h>
+
+#include <cerrno>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -19,11 +22,30 @@ namespace rocjitsu::test {
 
 class ScopedTempFile {
 public:
-  explicit ScopedTempFile(std::string_view prefix) : path_(make_pattern(prefix)) {
-    const int fd = ::mkstemp(path_.data());
-    if (fd == -1)
-      throw std::runtime_error("Failed to create temporary file");
+  ScopedTempFile() = default;
+
+  /// @brief Create the resource; check success before using path().
+  /// @details An initial creation failure leaves the path empty. Reinitializing
+  /// an owned resource fails and preserves its existing path.
+  [[nodiscard]] testing::AssertionResult initialize(std::string_view prefix) {
+    if (!path_.empty()) {
+      return testing::AssertionFailure() << "Temporary resource is already initialized";
+    }
+    std::error_code error;
+    const std::filesystem::path directory = std::filesystem::temp_directory_path(error);
+    if (error) {
+      return testing::AssertionFailure()
+             << "Failed to locate temporary directory: " << error.message();
+    }
+    std::string pattern = (directory / (std::string(prefix) + "XXXXXX")).string();
+    const int fd = ::mkstemp(pattern.data());
+    if (fd == -1) {
+      return testing::AssertionFailure()
+             << "Failed to create temporary file: " << std::strerror(errno);
+    }
     (void)::close(fd);
+    path_ = std::move(pattern);
+    return testing::AssertionSuccess();
   }
 
   ~ScopedTempFile() { cleanup(); }
@@ -46,21 +68,25 @@ public:
 
   [[nodiscard]] const std::string &path() const { return path_; }
 
-  void write(std::string_view contents) const {
+  /// @brief Write an initialized file; check success before consuming its contents.
+  [[nodiscard]] testing::AssertionResult write(std::string_view contents) const {
+    if (path_.empty()) {
+      return testing::AssertionFailure() << "Temporary file is not initialized";
+    }
     std::ofstream output(path_, std::ios::binary | std::ios::trunc);
     output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
-    if (!output)
-      throw std::runtime_error("Failed to write temporary file");
+    output.close();
+    if (!output) {
+      return testing::AssertionFailure() << "Failed to write temporary file: " << path_;
+    }
+    return testing::AssertionSuccess();
   }
 
 private:
-  static std::string make_pattern(std::string_view prefix) {
-    return (std::filesystem::temp_directory_path() / (std::string(prefix) + "XXXXXX")).string();
-  }
-
   void cleanup() noexcept {
-    if (path_.empty())
+    if (path_.empty()) {
       return;
+    }
     std::error_code error;
     std::filesystem::remove(path_, error);
   }
@@ -70,9 +96,31 @@ private:
 
 class ScopedTempDirectory {
 public:
-  explicit ScopedTempDirectory(std::string_view prefix) : path_(make_pattern(prefix)) {
-    if (::mkdtemp(path_.data()) == nullptr)
-      throw std::runtime_error("Failed to create temporary directory");
+  ScopedTempDirectory() = default;
+
+  /// @brief Create the resource; check success before using path().
+  /// @details An initial creation failure leaves the path empty. Reinitializing
+  /// an owned resource fails and preserves its existing path.
+  [[nodiscard]] testing::AssertionResult initialize(std::string_view prefix,
+                                                    std::filesystem::path parent = {}) {
+    if (!path_.empty()) {
+      return testing::AssertionFailure() << "Temporary resource is already initialized";
+    }
+    if (parent.empty()) {
+      std::error_code error;
+      parent = std::filesystem::temp_directory_path(error);
+      if (error) {
+        return testing::AssertionFailure()
+               << "Failed to locate temporary directory: " << error.message();
+      }
+    }
+    std::string pattern = (parent / (std::string(prefix) + "XXXXXX")).string();
+    if (::mkdtemp(pattern.data()) == nullptr) {
+      return testing::AssertionFailure()
+             << "Failed to create temporary directory: " << std::strerror(errno);
+    }
+    path_ = std::move(pattern);
+    return testing::AssertionSuccess();
   }
 
   ~ScopedTempDirectory() { cleanup(); }
@@ -96,19 +144,25 @@ public:
   [[nodiscard]] const std::string &path() const { return path_; }
 
 private:
-  static std::string make_pattern(std::string_view prefix) {
-    return (std::filesystem::temp_directory_path() / (std::string(prefix) + "XXXXXX")).string();
-  }
-
   void cleanup() noexcept {
-    if (path_.empty())
+    if (path_.empty()) {
       return;
+    }
     std::error_code error;
     std::filesystem::remove_all(path_, error);
   }
 
   std::string path_;
 };
+
+/// @brief Create an isolated runtime directory for a Unix-domain socket.
+[[nodiscard]] inline testing::AssertionResult
+initialize_runtime_directory(ScopedTempDirectory &directory, std::string_view prefix) {
+  if (const char *runtime_dir = std::getenv("XDG_RUNTIME_DIR"); runtime_dir && *runtime_dir) {
+    return directory.initialize(prefix, runtime_dir);
+  }
+  return directory.initialize(prefix);
+}
 
 /// @brief Sets an environment variable for the current scope and restores it on exit.
 /// @details Tests that steer config discovery through the environment share one process
@@ -118,16 +172,18 @@ private:
 class ScopedEnvironmentVariable {
 public:
   ScopedEnvironmentVariable(const char *name, const std::string &value) : name_(name) {
-    if (const char *original = std::getenv(name))
+    if (const char *original = std::getenv(name)) {
       original_ = original;
+    }
     setenv(name_.c_str(), value.c_str(), 1);
   }
 
   ~ScopedEnvironmentVariable() {
-    if (original_)
+    if (original_) {
       setenv(name_.c_str(), original_->c_str(), 1);
-    else
+    } else {
       unsetenv(name_.c_str());
+    }
   }
 
   ScopedEnvironmentVariable(const ScopedEnvironmentVariable &) = delete;

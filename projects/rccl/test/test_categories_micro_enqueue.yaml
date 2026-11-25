@@ -1,13 +1,17 @@
-# CTest categories for the host-only src/enqueue.cc microtests.
+# CTest categories for host-only src/enqueue/ microtests.
 #
-# gtest's `*` does not match across the literal `.`, so a suite with no pattern
-# here builds and passes locally but never runs under CTest. Keep this in sync
-# with the TEST_F suite names in enqueue-test.cc.
+# Suites start with their source unit's stem; task_sched/'s seven files share TaskSched.
 test_categories:
   quick: &micro_enqueue_quick
-    description: "Smoke - host-only src/enqueue.cc micro-tests (tuning, chunking, plan packing), sub-second."
+    description: "Smoke - host-only src/enqueue/ micro-tests, sub-second."
     test_patterns:
-      - "EnqueueMicrotest.*"
+      - "Enqueue*"
+      - "MgmtTaskEnq*"
+      - "TaskClassify*"
+      - "TaskPostTuning*"
+      - "TaskPreTuning*"
+      - "TaskPrep*"
+      - "TaskSched*"
     exclude_windows:
       - "*"
     labels:

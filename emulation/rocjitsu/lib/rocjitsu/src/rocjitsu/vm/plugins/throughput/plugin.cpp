@@ -88,24 +88,28 @@ std::string_view ThroughputPlugin::family_name(InstructionFamily family) {
 
 uint64_t ThroughputPlugin::total(const InstructionCounts &counts) {
   uint64_t result = 0;
-  for (const uint64_t count : counts)
+  for (const uint64_t count : counts) {
     result += count;
+  }
   return result;
 }
 
 void ThroughputPlugin::add(InstructionCounts &destination, const InstructionCounts &source) {
-  for (size_t i = 0; i < destination.size(); ++i)
+  for (size_t i = 0; i < destination.size(); ++i) {
     destination[i] += source[i];
+  }
 }
 
 void ThroughputPlugin::finish_instruction(ThroughputWavefrontState &state, Clock::time_point end) {
-  if (!state.instruction_active)
+  if (!state.instruction_active) {
     return;
+  }
   const auto elapsed =
       std::chrono::duration_cast<std::chrono::nanoseconds>(end - state.instruction_begin).count();
-  if (elapsed > 0)
+  if (elapsed > 0) {
     state.execution_nanoseconds[family_index(state.active_family)] +=
         static_cast<uint64_t>(elapsed);
+  }
   state.instruction_active = false;
 }
 
@@ -164,8 +168,9 @@ void ThroughputPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
 void ThroughputPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
   const Clock::time_point end = Clock::now();
   auto iter = dispatches_.find(dispatch_id);
-  if (iter == dispatches_.end())
+  if (iter == dispatches_.end()) {
     return;
+  }
 
   DispatchState &state = iter->second;
   const double wall_seconds = state.begun ? seconds_between(state.begin, end) : 0.0;
@@ -188,8 +193,9 @@ void ThroughputPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
 }
 
 void ThroughputPlugin::onShutdown() {
-  if (summary_emitted_)
+  if (summary_emitted_) {
     return;
+  }
   summary_emitted_ = true;
   const double wall_seconds = have_active_window_ ? seconds_between(first_begin_, last_end_) : 0.0;
   emit_record("summary", nullptr, aggregate_counts_, aggregate_execution_nanoseconds_,
@@ -222,8 +228,9 @@ void ThroughputPlugin::emit_record(std::string_view record, const KernelDispatch
                         wall_seconds, instruction_count, mips(instruction_count, wall_seconds));
 
   for (size_t i = 0; i < counts.size(); ++i) {
-    if (i != 0)
+    if (i != 0) {
       output += ',';
+    }
     const double execution_seconds = nanoseconds_to_seconds(execution_nanoseconds[i]);
     const bool complete = untimed_instructions[i] == 0;
     output += std::format(

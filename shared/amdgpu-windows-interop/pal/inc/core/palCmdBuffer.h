@@ -72,16 +72,10 @@ class IMsaaState;
 class IPerfExperiment;
 class IQueue;
 class IQueryPool;
-#if PAL_WORK_LISTS_SUPPORT
-class IWorkList;
-#endif
 
 enum class PerfTraceMarkerType : uint32;
 enum class PointOrigin : uint32;
 
-#if PAL_WORK_LISTS_SUPPORT
-struct DispatchListInputParams;
-#endif
 struct VideoCodecInfo;
 struct VideoCodecAuxInfo;
 
@@ -1546,16 +1540,6 @@ typedef void (PAL_STDCALL *CmdDispatchOffsetFunc)(
     DispatchDims launchSize,
     DispatchDims logicalSize);
 
-#if PAL_WORK_LISTS_SUPPORT
-/// @internal Function pointer type definition for issuing work-list dispatch operations.
-///
-/// @see ICmdBuffer::CmdDispatchList().
-typedef void (PAL_STDCALL* CmdDispatchListFunc)(
-    ICmdBuffer*                    pCmdBuffer,
-    const IWorkList&               workList,
-    const DispatchListInputParams& input);
-#endif
-
 /// @internal Function pointer type definition for issuing direct mesh dispatches.
 ///
 /// @see ICmdBuffer::CmdDispatchMesh().
@@ -2416,20 +2400,6 @@ public:
     ///          + ErrorUnknown if an internal PAL error occurs.
     virtual Result Reset(ICmdAllocator* pCmdAllocator, bool returnGpuMemory) = 0;
 
-    /// Queries how many DWORDs of embedded data the command buffer can allocate in one call to CmdAllocateEmbeddedData.
-    ///
-    /// This a property of the command buffer and its associated command allocator; it may change if the caller
-    /// specifies a different command allocator on Reset().
-    ///
-    /// @returns How many DWORDs of embedded data the command buffer can allocate at once.
-    virtual uint32 GetEmbeddedDataLimit() const = 0;
-
-    /// Queries how many DWORDs of embedded data the command buffer can allocate in one call to
-    /// CmdAllocateLargeEmbeddedData.
-    ///
-    /// @returns Number of DWORDs that can be allocated in one call to CmdAllocateLargeEmbeddedData
-    virtual uint32 GetLargeEmbeddedDataLimit() const = 0;
-
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1004
     /// Binds a graphics or compute pipeline to the current command buffer state.
     ///
@@ -3183,24 +3153,6 @@ public:
     {
         m_funcTable.pfnCmdDispatchMeshIndirectMulti(this, gpuVirtAddrAndStride, maximumCount, countGpuAddr);
     }
-
-#if PAL_WORK_LISTS_SUPPORT
-    /// Dispatches a set of input data which send either Dispatches or Draws to one or more @ref IStateBlock objects.
-    ///
-    /// @see DispatchListInputParams
-    ///
-    /// @param [in] workList  The Work List to use for this dispatch.
-    /// @param [in] input     Defines the Work List and input data to consume.
-    ///
-    /// @note Any state _not_ overridden by the state blocks invoked by the dispatch is inherited from the current
-    /// state which is active at the time of this operation.
-    void CmdDispatchList(
-        const IWorkList&               workList,
-        const DispatchListInputParams& input)
-    {
-        m_funcTable.pfnCmdDispatchList(this, workList, input);
-    }
-#endif
 
     /// Copies multiple regions from one GPU memory allocation to another.
     ///
@@ -4699,37 +4651,81 @@ public:
         const IGpuMemory&      dstGpuMemory,
         gpusize                dstOffset) = 0;
 
-    /// Allocates a chunk of command space that the client can use to embed constant data directly in the command
-    /// buffer's backing memory. The returned CPU address is valid until ICmdBuffer::End() is called. The GPU address
-    /// is valid until ICmdBuffer::Reset() or ICmdBuffer::Begin() and must only be referenced by work contained within
-    /// this command buffer (e.g., as an SRD table address).
+    /// Queries how many bytes of embedded data the command buffer can allocate in one call to CmdAllocateEmbeddedData.
     ///
-    /// @param [in]  sizeInDwords       Size of the embedded data space in DWORDs. It must be less than or equal to the
-    ///                                 value reported by GetEmbeddedDataLimit().
-    /// @param [in]  alignmentInDwords  Minimum GPU address alignment of the embedded space in DWORDs.
-    /// @param [out] pGpuAddress        The GPU address of the embedded space.
+    /// This a property of the command buffer and its associated command allocator; it may change if the caller
+    /// specifies a different command allocator on Reset().
     ///
-    /// @returns The DWORD-aligned CPU address of the embedded space.
-    virtual uint32* CmdAllocateEmbeddedData(
-        uint32   sizeInDwords,
-        uint32   alignmentInDwords,
-        gpusize* pGpuAddress) = 0;
+    /// @returns How many bytes of embedded data the command buffer can allocate at once.
+    virtual uint32 GetMaxEmbeddedDataSize() const = 0;
+
+    /// @deprecated This function is deprecated, use the new byte-based GetMaxEmbeddedDataSize() instead!
+    uint32 GetEmbeddedDataLimit() const { return GetMaxEmbeddedDataSize() / sizeof(uint32); }
+
+    /// @deprecated This function is deprecated, use the new byte-based GetMaxEmbeddedDataSize() instead!
+    uint32 GetLargeEmbeddedDataLimit() const { return GetEmbeddedDataLimit(); }
 
     /// Allocates a chunk of command space that the client can use to embed constant data directly in the command
-    /// buffer's backing memory. The returned CPU address is valid until ICmdBuffer::End() is called. The GPU address
-    /// is valid until ICmdBuffer::Reset() or ICmdBuffer::Begin() and must only be referenced by work contained within
-    /// this command buffer (e.g., as an SRD table address).
+    /// buffer's backing memory.
     ///
-    /// @param [in]  sizeInDwords       Size of the embedded data space in DWORDs. It must be less than or equal to the
-    ///                                 value reported by GetLargeEmbeddedDataLimit().
-    /// @param [in]  alignmentInDwords  Minimum GPU address alignment of the embedded space in DWORDs.
-    /// @param [out] pGpuAddress        The GPU address of the embedded space.
+    /// The CPU address is valid until ICmdBuffer::End() is called. The GPU address is valid until ICmdBuffer::Reset()
+    /// or ICmdBuffer::Begin() and must only be referenced by work contained within this command buffer (e.g., as an
+    /// SRD table address).
     ///
-    /// @returns The DWORD-aligned CPU address of the embedded space.
-    virtual uint32* CmdAllocateLargeEmbeddedData(
+    /// Note that the GPU address is guaranteed to reside in the DescriptorTable @ref VaRange.
+    ///
+    /// @param [in]  size       Size of the embedded data in bytes. It must be less than or equal to the
+    ///                         value reported by @ref GetMaxEmbeddedDataSize.
+    /// @param [in]  alignment  Minimum byte alignment of both the CPU address and the GPU address.
+    /// @param [out] pSpan      The allocated Span of aligned embedded data. Must not be nullptr.
+    ///
+    /// @returns The GPU address of the aligned embedded data.
+    virtual gpusize CmdAllocateEmbeddedData(
+        uint32          size,
+        uint32          alignment,
+        Util::ByteSpan* pSpan) = 0;
+
+    /// @deprecated This function is deprecated, use the Span variant of CmdAllocateEmbeddedData instead!
+    uint32* CmdAllocateEmbeddedData(
         uint32   sizeInDwords,
         uint32   alignmentInDwords,
-        gpusize* pGpuAddress) = 0;
+        gpusize* pGpuAddress)
+    {
+        Util::ByteSpan span;
+        *pGpuAddress = CmdAllocateEmbeddedData(sizeInDwords*sizeof(uint32), alignmentInDwords*sizeof(uint32), &span);
+        return reinterpret_cast<uint32*>(span.Data());
+    }
+
+    /// @deprecated This function is deprecated, use the Span variant of CmdAllocateEmbeddedData instead!
+    uint32* CmdAllocateLargeEmbeddedData(
+        uint32   sizeInDwords,
+        uint32   alignmentInDwords,
+        gpusize* pGpuAddress)
+    {
+        return CmdAllocateEmbeddedData(sizeInDwords, alignmentInDwords, pGpuAddress);
+    }
+
+    /// A convenient CmdAllocateEmbeddedData wrapper which allocates properly aligned space for one "T" value.
+    /// For example, the client might wish to allocate space for a struct which represents a shader's constant buffer.
+    /// This function automatically computes the correct embedded data size and alignment, and safely casts the Span.
+    ///
+    /// @param [out] ppValue    The CPU address of the embedded data is written here. Must not be nullptr.
+    /// @param [in]  alignment  Minimum GPU address alignment of the embedded data in bytes, defaults to "alignof(T)".
+    ///                         This should only be manually specified when the GPU requires higher alignment. The
+    ///                         provided alignment is always clamped to at least "alignof(T)" to satisfy CPU alignment.
+    ///
+    /// @returns The GPU address of the aligned embedded data.
+    template<typename T>
+    gpusize CmdAllocateEmbeddedValue(
+        T**    ppValue,
+        uint32 alignment = alignof(T))
+    {
+        Util::ByteSpan mappedMem;
+        const uint32   alignT  = Util::Max<uint32>(alignment, alignof(T));
+        const gpusize  gpuAddr = CmdAllocateEmbeddedData(sizeof(T), alignT, &mappedMem);
+        *ppValue = mappedMem.Cast<T>();
+        return gpuAddr;
+    }
 
     /// Get memory from scratch memory and bind to GPU event. For now only GpuEventPool and CmdBuffer's internal
     /// GpuEvent use this path to allocate and bind GPU memory. These usecases assume the bound GPU memory is GPU access
@@ -5298,9 +5294,6 @@ protected:
         CmdDispatchMeshFunc              pfnCmdDispatchMesh;              ///< CmdDispatchmesh function pointer.
         CmdDispatchMeshIndirectMultiFunc pfnCmdDispatchMeshIndirectMulti; ///< CmdDispatchMeshIndirect function pointer.
         CmdDispatchAqlFunc               pfnCmdDispatchAql;                ///< CmdDispatchAql function pointer.
-#if PAL_WORK_LISTS_SUPPORT
-        CmdDispatchListFunc              pfnCmdDispatchList;               ///< CmdDispatchList function pointer
-#endif
     } m_funcTable;     ///< Function pointer table for Cmd* functions.
 
 private:

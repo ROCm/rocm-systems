@@ -313,6 +313,7 @@ class HostQueue : public CommandQueue {
   Command* head_;    //!< Head of the batch list
   Command* tail_;    //!< Tail of the batch list
   size_t size_ = 0;  //!< The current batch size
+  const size_t batch_limit_;  //!< Batch size above which a marker completes the batch
 
   //! True if this command queue is active
   std::atomic<bool>  isActive_;

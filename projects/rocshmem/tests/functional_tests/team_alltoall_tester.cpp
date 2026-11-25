@@ -51,6 +51,8 @@ TEAM_ALLTOALL_DEF_GEN(unsigned short, ushort)
 TEAM_ALLTOALL_DEF_GEN(unsigned int, uint)
 TEAM_ALLTOALL_DEF_GEN(unsigned long, ulong)
 TEAM_ALLTOALL_DEF_GEN(unsigned long long, ulonglong)
+TEAM_ALLTOALL_DEF_GEN(__half, half)
+TEAM_ALLTOALL_DEF_GEN(__hip_bfloat16, bfloat16)
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -66,9 +68,9 @@ __global__ void TeamAlltoallTest(int loop, int skip, long long int *start_time,
 
   rocshmem_wg_team_create_ctx(teams[wg_id], ctx_type, &ctx);
 
-  // In no-TDM build, rocshmem_query_tdm_lds_bytes() returns 0.
+  // Without an LDS-staged build (USE_LDS_STAGE/USE_TDM) this returns 0.
   extern __shared__ uint8_t tdm_lds[];
-  rocshmem_set_tdm_lds(tdm_lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
   int n_pes = rocshmem_ctx_n_pes(ctx);
 
@@ -149,7 +151,7 @@ void TeamAlltoallTester<T1>::preLaunchKernel() {
 template <typename T1>
 void TeamAlltoallTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
                                           int loop, size_t size) {
-  size_t shared_bytes = rocshmem_query_tdm_lds_bytes();
+  size_t shared_bytes = rocshmem_query_lds_stage_bytes();
 
   int num_elems = size / sizeof(T1);
 
@@ -185,6 +187,10 @@ void TeamAlltoallTester<T1>::resetBuffers(size_t size) {
                       std::is_same<T1, unsigned char>::value) {
           source_buf[idx] = static_cast<T1>('a' + my_pe + pe + wg_id);
         }
+        else if constexpr (std::is_same<T1, __half>::value ||
+                           std::is_same<T1, __hip_bfloat16>::value) {
+          source_buf[idx] = static_cast<T1>(3.5f + my_pe + pe + wg_id);
+        }
         else if constexpr (std::is_floating_point<T1>::value) {
           source_buf[idx] = static_cast<T1>(3.14 + my_pe + pe + wg_id);
         }
@@ -209,8 +215,14 @@ void TeamAlltoallTester<T1>::verifyResults(size_t size) {
         idx = (wg_id * n_pes + pe) * num_elems + static_cast<int>(i);
         if (dest_buf[idx] != source_buf[idx]) {
           std::cerr << "Data validation error at idx " << idx << std::endl;
-          std::cerr << "PE " << my_pe << " Got " << dest_buf[idx]
-          << ", Expected " << source_buf[idx] << std::endl;
+          if constexpr (std::is_same<T1, __half>::value ||
+                        std::is_same<T1, __hip_bfloat16>::value) {
+            std::cerr << "PE " << my_pe << " Got " << static_cast<float>(dest_buf[idx])
+            << ", Expected " << static_cast<float>(source_buf[idx]) << std::endl;
+          } else {
+            std::cerr << "PE " << my_pe << " Got " << dest_buf[idx]
+            << ", Expected " << source_buf[idx] << std::endl;
+          }
           exit(-1);
         }
       }

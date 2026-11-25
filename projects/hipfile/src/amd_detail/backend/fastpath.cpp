@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "async.h"
 #include "buffer.h"
 #include "configuration.h"
 #include "context.h"
@@ -33,10 +32,24 @@ using namespace std;
 static bool
 fastpathFallbackEligibleErrno(int err)
 {
-    return err == ENODEV || err == EREMOTEIO;
+    // ENOTTY: the KFD does not implement the AIS ioctl.
+    return err == ENODEV || err == EREMOTEIO || err == ENOTTY;
+}
+
+// Stop trying the fastpath for the rest of the process if the error means it
+// can never succeed.
+static void
+maybeDisableFastpath(int err)
+{
+    // ENOTTY: the GPU driver has no AIS ioctl.
+    if (err == ENOTTY) {
+        Context<Configuration>::get()->fastpath(false);
+    }
 }
 
 /* The fastpath backend is used when:
+ *  - Configuration::fastpath() is true. Among other things, this is false when
+ *    ROCr is running on WSL2 (/dev/dxg), where AIS is not implemented
  *  - The file has been opened with the O_DIRECT flag
  *  - if statx contains direct io information
  *      - statx indicates the file descriptor supports direct IO (see statx (2))
@@ -68,6 +81,8 @@ fastpathFallbackEligibleErrno(int err)
  *      - returns
  *          - hipErrorInvalidDevice if unable to lookup current device
  *          - hipErrorUnknown if rocr runtime does not return success
+ *      - On ROCm >= 10.3 (HIP 7.18), a failure also sets the thread's last HIP
+ *        error (see hipGetLastError())
  *  - ROCR Runtime (userspace)
  *      - repository: rocm-systems
  *      - file: projects/clr/rocclr/device/rocm/rocdevice.cpp
@@ -91,7 +106,11 @@ fastpathFallbackEligibleErrno(int err)
  *      - functions: hsaKmtAisReadWriteFile(...),
  *      - If the buffer pointer, and io_size combination are invalid, return HSAKMT_STATUS_INVALID_PARAMETER
  *          - converts buffer pointer + io_size to a buffer handle (no alignment check)
- *      - size_copied and status are untouched
+ *      - size_copied and status are untouched if the call fails before the ioctl
+ *      - otherwise, size_copied and status are set from the ioctl
+ *          - if the ioctl fails before the AIS handler runs (e.g. ENOTTY when the
+ *            KFD does not implement the AIS ioctl), status is set to -errno and
+ *            size_copied to 0
  *      - returns
  *          - HSAKMT_STATUS_INVALID_PARAMETER if
  *              - the buffer pointer + size combination are invalid
@@ -152,9 +171,10 @@ Fastpath::score(const shared_ptr<IFile> &file, const shared_ptr<IBuffer> &buffer
     bool is_block_device{file->isBlockDevice()};
     bool on_ext4_ordered{file->onExt4Ordered()};
     bool on_xfs{file->onXfs()};
+    bool on_nfs_rdma{file->onNfsRdma()};
     bool unsupported_file_systems{Context<Configuration>::get()->unsupportedFileSystems()};
-    accept_io &=
-        is_block_device || (is_regular_file && (unsupported_file_systems || on_ext4_ordered || on_xfs));
+    accept_io &= is_block_device ||
+                 (is_regular_file && (unsupported_file_systems || on_ext4_ordered || on_xfs || on_nfs_rdma));
 
     const uint32_t dio_offset_align{file->dioOffsetAlign()};
     accept_io &= dio_offset_align && !(file_offset & (dio_offset_align - 1));
@@ -218,52 +238,16 @@ Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buff
                 throw std::runtime_error("Invalid IoType");
         }
     }
+    catch (const std::system_error &e) {
+        Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size, buffer->getGpuId());
+        maybeDisableFastpath(e.code().value());
+        throw;
+    }
     catch (...) {
         Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size, buffer->getGpuId());
         throw;
     }
     return static_cast<ssize_t>(nbytes);
-}
-
-void
-Fastpath::enqueueAsyncIo(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer,
-                         size_t *size_p, hoff_t *file_offset_p, hoff_t *buffer_offset_p,
-                         ssize_t *bytes_transferred_p, std::shared_ptr<IStream> stream,
-                         std::shared_ptr<AsyncFailoverState> failover)
-{
-    size_t limited_size = min(*size_p, hipFile::getMaxRwCount());
-
-    if (!paramsValid(buffer, limited_size, *file_offset_p, *buffer_offset_p)) {
-        throw std::invalid_argument("The selected file or buffer region is invalid");
-    }
-
-    if (buffer->getGpuId() != stream->getHipDevice()) {
-        throw std::invalid_argument("Buffer GPU ID does not match Stream GPU ID");
-    }
-
-    *bytes_transferred_p = 0;
-
-    auto op      = std::shared_ptr<AsyncOp>(new AsyncOp(type, std::move(file), buffer, stream, size_p,
-                                                        file_offset_p, buffer_offset_p, bytes_transferred_p));
-    op->failover = std::move(failover);
-    Context<AsyncMonitor>::get()->addOp(op);
-
-    try {
-        auto stream_lock = stream->getLock();
-        Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_fastpath_copy, op.get());
-        Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_cleanup, op.get());
-    }
-    catch (...) {
-        // If something threw, still try to enqueue cleanup function
-        try {
-            Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_cleanup, op.get());
-        }
-        catch (...) {
-            Context<Sys>::get()->syslog(LOG_CRIT,
-                                        "Unable to enqueue async cleanup function. This will leak memory.");
-        }
-        throw;
-    }
 }
 
 bool
@@ -276,66 +260,24 @@ Fastpath::is_fallback_eligible(std::exception_ptr e_ptr, ssize_t nbytes) const
     catch (const std::system_error &sys_err) {
         return fastpathFallbackEligibleErrno(sys_err.code().value());
     }
+    catch (const BackendDisabled &) {
+        // Configuration::fastpath() can change while an IO is in flight, e.g.
+        // another thread hit ENOTTY after score() accepted this IO. Any check
+        // of it after score() that finds it off must end in a fallback
+        // eligible exception.
+        return true;
+    }
     catch (...) {
         // Thrown exception not eligible for fallback.
         return false;
     }
 }
 
-extern "C" {
 void
-async_fastpath_copy(void *userArgs)
+Fastpath::on_fallback() const
 {
-    auto op = static_cast<AsyncOp *>(userArgs);
-
-    const hoff_t buffer_offset = *get_variant_ptr(op->buffer_offset);
-    const hoff_t file_offset   = *get_variant_ptr(op->file_offset);
-    const size_t size          = std::min(*get_variant_ptr(op->size), hipFile::getMaxRwCount());
-
-    if (!paramsValid(op->buffer, size, file_offset, buffer_offset)) {
-        op->bytes_transferred_internal = -hipFileInvalidValue;
-        return;
-    }
-
-    // Ensure HIP Runtime is initialized. This is a temporary fix to a SEGFAULT
-    // in the HIP Runtime when hipFileRead/hipFileWrite is the first HIP API
-    // call of a new thread.
-    thread_local bool hip_inited{false};
-    if (!hip_inited) {
-        Context<Hip>::get()->hipInit();
-        hip_inited = true;
-    }
-
-    hipAmdFileHandle_t handle{};
-    handle.fd = op->file->unbufferedFd().value();
-    void *devptr =
-        reinterpret_cast<void *>(reinterpret_cast<intptr_t>(op->buffer->getBuffer()) + buffer_offset);
-
-    try {
-        ssize_t nbytes = 0;
-        switch (op->io_type) {
-            case IoType::Read:
-                nbytes = static_cast<ssize_t>(
-                    Context<Hip>::get()->hipAmdFileRead(handle, devptr, size, file_offset));
-                break;
-            case IoType::Write:
-                nbytes = static_cast<ssize_t>(
-                    Context<Hip>::get()->hipAmdFileWrite(handle, devptr, size, file_offset));
-                break;
-            default:
-                op->bytes_transferred_internal = -hipFileInternalError;
-                return;
-        }
-        op->bytes_transferred_internal = nbytes;
-    }
-    catch (const std::system_error &sys_err) {
-        op->bytes_transferred_internal = -hipFileInternalError;
-        if (op->failover && fastpathFallbackEligibleErrno(sys_err.code().value())) {
-            op->failover->fallback_needed = true;
-        }
-    }
-    catch (...) {
-        op->bytes_transferred_internal = -hipFileInternalError;
-    }
-}
+    // Clear the HIP error set by a failed hipAmdFile{Read,Write}
+    // If the fallback backend successfully completes IO, we don't want a set
+    // HIP Runtime Error left around.
+    (void)Context<Hip>::get()->hipGetLastError();
 }

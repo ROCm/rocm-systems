@@ -20,6 +20,8 @@ subtrees:
     title: Compile and run applications
   - file: docker.rst
     title: Deploy with Docker
+  - file: analysis_tools.rst
+    title: Analysis and debugging tools
 
 - caption: Library constants
   entries:
@@ -55,6 +57,8 @@ subtrees:
     title: Memory ordering routines
   - file: api/tile.rst
     title: Tile routines
+  - file: api/lds_stage.rst
+    title: LDS-staged copy routines
 
 - caption: About
   entries:

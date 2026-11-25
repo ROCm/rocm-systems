@@ -23,6 +23,7 @@ struct TranslationContext;
 enum class SemanticScratchFailure : uint8_t {
   None,
   InvalidRequest,
+  LivenessUnavailable,
   NoRegisterWindow,
   DynamicStackUnsupported,
   SpillOffsetUnencodable,

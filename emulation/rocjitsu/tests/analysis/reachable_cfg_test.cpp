@@ -1,12 +1,16 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "../checked_instruction_test_util.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/target_registry.h"
 #include "util/diagnostic.h"
 
@@ -26,11 +30,12 @@ namespace {
 using Blocks = std::vector<std::unique_ptr<BasicBlock>>;
 using Issue = BasicBlock::SuccessorIssue;
 using Range = BasicBlock::CodeRange;
-constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
-constexpr uint32_t kNop = build_s_nop(0, kArch);
-constexpr uint32_t kEnd = build_s_endpgm(kArch);
+constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
+
+constexpr uint32_t kNop = build_s_nop(0, kArch).value();
+constexpr uint32_t kEnd = build_s_endpgm(kArch).value();
 constexpr uint32_t kInvalid = 0xffffffffu;
-constexpr uint32_t branch(int16_t delta) { return build_s_branch(delta, kArch); }
+constexpr uint32_t branch(int16_t delta) { return build_s_branch(delta, kArch).value(); }
 constexpr uint32_t conditional(int16_t delta) {
   return pack_sopp(5, static_cast<uint16_t>(delta)); // s_cbranch_scc0.
 }
@@ -40,8 +45,9 @@ public:
   explicit TestTextSection(std::span<const uint32_t> words, size_t trailing_bytes = 0)
       : Section(".text", std::make_unique<char[]>(words.size_bytes() + trailing_bytes)),
         size_(words.size_bytes() + trailing_bytes) {
-    if (!words.empty())
+    if (!words.empty()) {
       std::memcpy(data_.get(), words.data(), words.size_bytes());
+    }
   }
   size_t size() const override { return size_; }
   uint32_t sectionHeaderNameIdx() const override { return 0; }
@@ -65,7 +71,7 @@ protected:
   FailureOr<Blocks> build_reachable(const std::vector<uint32_t> &words,
                                     const std::vector<uint64_t> &entries = {0},
                                     const std::vector<Range> &ranges = {},
-                                    rj_code_arch_t arch = kArch,
+                                    rocjitsu::IsaFamily arch = kArch,
                                     const std::vector<uint64_t> &decode_seeds = {},
                                     const std::vector<uint64_t> &split_points = {}) {
     error_("");
@@ -86,15 +92,17 @@ protected:
 
   static std::vector<uint64_t> offsets(const Blocks &blocks) {
     std::vector<uint64_t> result;
-    for (const auto &block : blocks)
+    for (const auto &block : blocks) {
       result.push_back(block->start_offset());
+    }
     return result;
   }
 
   static std::vector<uint64_t> successors(const BasicBlock &block) {
     std::vector<uint64_t> result;
-    for (const auto *successor : block.successors())
+    for (const auto *successor : block.successors()) {
       result.push_back(successor->start_offset());
+    }
     std::ranges::sort(result);
     return result;
   }
@@ -118,6 +126,10 @@ protected:
 
 std::vector<uint32_t> target_sensitive_lane_stash_words(uint8_t initial_banks, uint16_t hwreg,
                                                         uint32_t literal) {
+  constexpr util::FailureOr<uint32_t> kEndpgmCdna5Result =
+      build_s_endpgm(rocjitsu::IsaFamily::Cdna5);
+  static_assert(kEndpgmCdna5Result.succeeded());
+
   const auto set_banks = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = initial_banks});
   const auto setreg = cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = hwreg});
   return {
@@ -135,16 +147,17 @@ std::vector<uint32_t> target_sensitive_lane_stash_words(uint8_t initial_banks, u
       0xD7600000u,
       0x0201012Cu, // 0x2c: v_readlane_b32 s0, encoded v44, 0.
       0xD7600001u,
-      0x0201032Cu,                              // 0x34: v_readlane_b32 s1, encoded v44, 1.
-      0xBE9E4900u,                              // 0x3c: s_swap_pc_i64 s[30:31], s[0:1].
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x40: target/continuation.
+      0x0201032Cu,                // 0x34: v_readlane_b32 s1, encoded v44, 1.
+      0xBE9E4900u,                // 0x3c: s_swap_pc_i64 s[30:31], s[0:1].
+      kEndpgmCdna5Result.value(), // 0x40: target/continuation.
   };
 }
 
 size_t static_fixup_count(const Blocks &blocks) {
   size_t count = 0;
-  for (const auto &block : blocks)
+  for (const auto &block : blocks) {
     count += block->static_indirect_call_fixups().size();
+  }
   return count;
 }
 
@@ -212,7 +225,9 @@ TEST_F(ReachableCfg, SelfLoopTerminatesDiscovery) {
 
 TEST_F(ReachableCfg, DirectCallIncludesCalleeAndContinuation) {
   // Callee returns with s_setpc_b64 s[4:5] (0xbe801d04).
-  const auto result = build_reachable({build_s_call_b64(4, 2, kArch), kEnd, kInvalid, 0xbe801d04u});
+  util::FailureOr<uint32_t> maybe_s_call_b64 = build_s_call_b64(4, 2, kArch);
+  ASSERT_TRUE(maybe_s_call_b64.succeeded());
+  const auto result = build_reachable({maybe_s_call_b64.value(), kEnd, kInvalid, 0xbe801d04u});
   ASSERT_TRUE(result.succeeded()) << error_.message();
   const auto &blocks = result.value();
   ASSERT_EQ(offsets(blocks), (std::vector<uint64_t>{0, 4, 12}));
@@ -242,7 +257,9 @@ TEST_F(ReachableCfg, IndirectCallKeepsPossibleContinuation) {
 
 TEST_F(ReachableCfg, MissingBranchTargetsRemainVisible) {
   for (int16_t delta : {-2, 5}) {
-    const auto result = build_reachable({branch(delta)});
+    const auto branch_result = build_s_branch(delta, kArch);
+    ASSERT_TRUE(branch_result.succeeded());
+    const auto result = build_reachable({branch_result.value()});
     ASSERT_TRUE(result.succeeded()) << error_.message();
     ASSERT_EQ(result.value().size(), 1u);
     EXPECT_EQ(result.value()[0]->successor_issue(), Issue::MissingBranchTarget);
@@ -251,11 +268,15 @@ TEST_F(ReachableCfg, MissingBranchTargetsRemainVisible) {
 
 TEST_F(ReachableCfg, MissingCallTargetAndContinuationAreDistinguished) {
   {
-    const auto result = build_reachable({build_s_call_b64(4, 4, kArch), kEnd});
+    util::FailureOr<uint32_t> maybe_s_call_b64_2 = build_s_call_b64(4, 4, kArch);
+    ASSERT_TRUE(maybe_s_call_b64_2.succeeded());
+    const auto result = build_reachable({maybe_s_call_b64_2.value(), kEnd});
     ASSERT_TRUE(result.succeeded()) << error_.message();
     EXPECT_EQ(result.value()[0]->successor_issue(), Issue::MissingCallTarget);
   }
-  const auto result = build_reachable({kEnd, build_s_call_b64(4, -2, kArch)}, {4});
+  util::FailureOr<uint32_t> maybe_s_call_b64_3 = build_s_call_b64(4, -2, kArch);
+  ASSERT_TRUE(maybe_s_call_b64_3.succeeded());
+  const auto result = build_reachable({kEnd, maybe_s_call_b64_3.value()}, {4});
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().back()->successor_issue(), Issue::MissingCallContinuation);
 }
@@ -290,15 +311,17 @@ TEST_F(ReachableCfg, DisjointRangesAllowBranchAcrossGap) {
 }
 
 TEST_F(ReachableCfg, RejectsInvalidEntries) {
-  for (uint64_t entry : std::array<uint64_t, 3>{1, 4, std::numeric_limits<uint64_t>::max()})
+  for (uint64_t entry : std::array<uint64_t, 3>{1, 4, std::numeric_limits<uint64_t>::max()}) {
     expect_failure({kEnd}, {entry});
+  }
   expect_failure({kEnd, kEnd}, {0}, {{4, 4}});
 }
 
 TEST_F(ReachableCfg, RejectsMalformedRanges) {
   for (Range range : {Range{1, 4}, Range{0, 3}, Range{0, 0}, Range{4, 4},
-                      Range{0, std::numeric_limits<uint64_t>::max() - 3}})
+                      Range{0, std::numeric_limits<uint64_t>::max() - 3}}) {
     expect_failure({kEnd}, {0}, {range});
+  }
 }
 
 TEST_F(ReachableCfg, ReachableMalformedInstructionsFailWithOffset) {
@@ -321,8 +344,10 @@ TEST_F(ReachableCfg, RejectsTargetsInsideInstructionsInEitherDiscoveryOrder) {
 }
 
 TEST_F(ReachableCfg, Gfx1250FallthroughStopsAtPadding) {
-  const auto result = build_reachable({build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5), 0, kInvalid}, {0},
-                                      {}, ROCJITSU_CODE_ARCH_CDNA5);
+  util::FailureOr<uint32_t> maybe_s_nop = build_s_nop(0, rocjitsu::IsaFamily::Cdna5);
+  ASSERT_TRUE(maybe_s_nop.succeeded());
+  const auto result =
+      build_reachable({maybe_s_nop.value(), 0, kInvalid}, {0}, {}, rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(result.succeeded()) << error_.message();
   ASSERT_EQ(result.value().size(), 1u);
   EXPECT_TRUE(result.value()[0]->has_implicit_terminator());
@@ -330,24 +355,34 @@ TEST_F(ReachableCfg, Gfx1250FallthroughStopsAtPadding) {
 }
 
 TEST_F(ReachableCfg, Gfx1250ExplicitPaddingTargetFails) {
-  const auto result = build_reachable({build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA5), 0}, {0}, {},
-                                      ROCJITSU_CODE_ARCH_CDNA5);
+  util::FailureOr<uint32_t> maybe_s_branch = build_s_branch(0, rocjitsu::IsaFamily::Cdna5);
+  ASSERT_TRUE(maybe_s_branch.succeeded());
+  const auto result =
+      build_reachable({maybe_s_branch.value(), 0}, {0}, {}, rocjitsu::IsaFamily::Cdna5);
   EXPECT_TRUE(result.failed());
   EXPECT_NE(error_.message().find("padding"), std::string::npos);
 }
 
 TEST_F(ReachableCfg, RangeBoundaryIsNotAnImplicitPaddingTerminator) {
-  const auto result = build_reachable({build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5), 0}, {0}, {{0, 4}},
-                                      ROCJITSU_CODE_ARCH_CDNA5);
+  util::FailureOr<uint32_t> maybe_s_nop_2 = build_s_nop(0, rocjitsu::IsaFamily::Cdna5);
+  ASSERT_TRUE(maybe_s_nop_2.succeeded());
+  const auto result =
+      build_reachable({maybe_s_nop_2.value(), 0}, {0}, {{0, 4}}, rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_FALSE(result.value()[0]->has_implicit_terminator());
   EXPECT_EQ(result.value()[0]->successor_issue(), Issue::MissingFallthrough);
 }
 
 TEST_F(ReachableCfg, ClippedCalleeDoesNotDiscardCallContinuation) {
-  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna5;
+  util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(arch);
+  ASSERT_TRUE(maybe_s_endpgm.succeeded());
+  util::FailureOr<uint32_t> maybe_s_nop_3 = build_s_nop(0, arch);
+  ASSERT_TRUE(maybe_s_nop_3.succeeded());
+  util::FailureOr<uint32_t> maybe_s_call_b64_4 = build_s_call_b64(4, 2, arch);
+  ASSERT_TRUE(maybe_s_call_b64_4.succeeded());
   const auto result = build_reachable(
-      {build_s_call_b64(4, 2, arch), build_s_endpgm(arch), kInvalid, build_s_nop(0, arch), 0}, {0},
+      {maybe_s_call_b64_4.value(), maybe_s_endpgm.value(), kInvalid, maybe_s_nop_3.value(), 0}, {0},
       {{0, 8}, {12, 4}}, arch);
   ASSERT_TRUE(result.succeeded()) << error_.message();
   ASSERT_EQ(offsets(result.value()), (std::vector<uint64_t>{0, 4, 12}));
@@ -368,16 +403,27 @@ TEST_F(ReachableCfg, RejectsAmbiguousSectionsAndReachedPartialWords) {
 }
 
 TEST_F(ReachableCfg, FullAndReachableConstructionAgreeOnClosedGraphs) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
-    const uint32_t nop = build_s_nop(0, arch);
-    const uint32_t end = build_s_endpgm(arch);
+  for (auto arch : {rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5}) {
+    util::FailureOr<uint32_t> maybe_s_nop_4 = build_s_nop(0, arch);
+    ASSERT_TRUE(maybe_s_nop_4.succeeded());
+    const uint32_t nop = maybe_s_nop_4.value();
+    util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(arch);
+    ASSERT_TRUE(maybe_s_endpgm_2.succeeded());
+    const uint32_t end = maybe_s_endpgm_2.value();
+    const auto branch_result = build_s_branch(-1, arch);
+    ASSERT_TRUE(branch_result.succeeded());
+    const auto call_result = build_s_call_b64(4, 1, arch);
+    ASSERT_TRUE(call_result.succeeded());
+    const auto return_result = build_s_setpc_b64(4, arch);
+    ASSERT_TRUE(return_result.succeeded());
     std::vector<std::vector<uint32_t>> programs{
-        {nop, build_s_branch(-1, arch)},
-        {build_s_call_b64(4, 1, arch), end, build_s_setpc_b64(4, arch)},
+        {nop, branch_result.value()},
+        {call_result.value(), end, return_result.value()},
         {nop, end},
     };
-    if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+    if (arch == rocjitsu::IsaFamily::Cdna5) {
       programs.push_back({nop, 0}); // Existing implicit termination at zero padding.
+    }
     for (const auto &words : programs) {
       const auto reachable = build_reachable(words, {0}, {}, arch);
       ASSERT_TRUE(reachable.succeeded()) << error_.message();
@@ -416,10 +462,14 @@ TEST_F(ReachableCfg, FullAndReachableConstructionAgreeOnClosedGraphs) {
 
 TEST_F(ReachableCfg, SupportsTargetSpecificDirectBranchEncodings) {
   for (auto arch :
-       {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
-        ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
-    const auto result =
-        build_reachable({build_s_branch(1, arch), kInvalid, build_s_endpgm(arch)}, {0}, {}, arch);
+       {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna3,
+        rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
+    util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(arch);
+    ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
+    util::FailureOr<uint32_t> maybe_s_branch_2 = build_s_branch(1, arch);
+    ASSERT_TRUE(maybe_s_branch_2.succeeded());
+    const auto result = build_reachable(
+        {maybe_s_branch_2.value(), kInvalid, maybe_s_endpgm_3.value()}, {0}, {}, arch);
     ASSERT_TRUE(result.succeeded()) << error_.message();
     ASSERT_EQ(offsets(result.value()), (std::vector<uint64_t>{0, 8}));
     EXPECT_EQ(successors(*result.value()[0]), (std::vector<uint64_t>{8}));
@@ -428,11 +478,20 @@ TEST_F(ReachableCfg, SupportsTargetSpecificDirectBranchEncodings) {
 
 // A CDNA4 getpc/add/addc/setpc chain targeting byte 24, across an undecodable gap.
 static std::vector<uint32_t> indirect_branch_words() {
-  return {build_s_getpc_b64(8, kArch),
-          build_s_add_u32(8, 8, 255, kArch),
+  constexpr util::FailureOr<uint32_t> kGetpcS8Result = build_s_getpc_b64(8, kArch);
+  static_assert(kGetpcS8Result.succeeded());
+  constexpr util::FailureOr<uint32_t> kAddS8LiteralResult = build_s_add_u32(8, 8, 255, kArch);
+  static_assert(kAddS8LiteralResult.succeeded());
+  constexpr util::FailureOr<uint32_t> kAddcS9ZeroResult = build_s_addc_u32(9, 9, 128, kArch);
+  static_assert(kAddcS9ZeroResult.succeeded());
+  constexpr util::FailureOr<uint32_t> kSetpcS8Result = build_s_setpc_b64(8, kArch);
+  static_assert(kSetpcS8Result.succeeded());
+
+  return {kGetpcS8Result.value(),
+          kAddS8LiteralResult.value(),
           20,
-          build_s_addc_u32(9, 9, 128, kArch),
-          build_s_setpc_b64(8, kArch),
+          kAddcS9ZeroResult.value(),
+          kSetpcS8Result.value(),
           kInvalid,
           kEnd};
 }
@@ -450,11 +509,67 @@ TEST_F(ReachableCfg, DiscoversIndirectTargetAcrossMalformedGap) {
   expect_inverse_edges(result.value());
 }
 
+TEST_F(ReachableCfg, RelativeScalarDestinationInvalidatesRecoveredPcBuilder) {
+  const std::array<uint32_t, 1> relative =
+      cdna4::build_sop1(cdna4::kSMovreldB32Sop1, {.ssrc0 = 0, .sdst = 0});
+  const std::vector<uint32_t> words = {build_s_getpc_b64(8, kArch).value(),
+                                       build_s_add_u32(8, 8, 255, kArch).value(),
+                                       24,
+                                       build_s_addc_u32(9, 9, 128, kArch).value(),
+                                       relative[0],
+                                       build_s_setpc_b64(8, kArch).value(),
+                                       kInvalid,
+                                       kEnd};
+  const FailureOr<Blocks> result = build_reachable(words);
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const BasicBlock *consumer = nullptr;
+  for (const std::unique_ptr<BasicBlock> &block : result.value()) {
+    if (block->terminator() && block->terminator()->src_loc() == 20) {
+      consumer = block.get();
+    }
+  }
+  ASSERT_NE(consumer, nullptr);
+  EXPECT_TRUE(consumer->static_indirect_call_fixups().empty());
+  EXPECT_EQ(consumer->successor_issue(), Issue::IndirectControlFlow);
+}
+
+TEST_F(ReachableCfg, DroppedOutOfSectionTargetMakesRetainedFixupIncomplete) {
+  std::vector<uint32_t> words(129, kNop);
+  words[0] = conditional(7); // 0 -> 32.
+  for (uint32_t offset : {4u, 32u}) {
+    const size_t index = offset / sizeof(uint32_t);
+    words[index] = build_s_getpc_b64(8, kArch).value();
+    words[index + 1] = build_s_add_u32(8, 8, 255, kArch).value();
+    words[index + 2] = (offset == 4 ? 512u : 4096u) - offset - 4;
+    words[index + 3] = build_s_addc_u32(9, 9, 128, kArch).value();
+    words[index + 4] = branch(static_cast<int16_t>((64 - offset - 20) / 4));
+  }
+  words[16] = build_s_setpc_b64(8, kArch).value();
+  words[128] = kEnd;
+  const FailureOr<Blocks> result = build_reachable(words);
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const BasicBlock *consumer = nullptr;
+  for (const std::unique_ptr<BasicBlock> &block : result.value()) {
+    if (block->start_offset() == 64) {
+      consumer = block.get();
+    }
+  }
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(consumer->static_indirect_call_fixups().front().source_target_offset, 512u);
+  EXPECT_TRUE(consumer->static_indirect_call_fixups().front().source_incomplete);
+  expect_inverse_edges(result.value());
+}
+
 TEST_F(ReachableCfg, DiscoversReturningCallAndContinuation) {
   auto words = indirect_branch_words();
-  words[4] = build_s_swappc_b64(30, 8, kArch);
+  util::FailureOr<uint32_t> maybe_s_swappc_b64 = build_s_swappc_b64(30, 8, kArch);
+  ASSERT_TRUE(maybe_s_swappc_b64.succeeded());
+  words[4] = maybe_s_swappc_b64.value();
   words[5] = kEnd;
-  words[6] = build_s_setpc_b64(30, kArch);
+  util::FailureOr<uint32_t> maybe_s_setpc_b64_7 = build_s_setpc_b64(30, kArch);
+  ASSERT_TRUE(maybe_s_setpc_b64_7.succeeded());
+  words[6] = maybe_s_setpc_b64_7.value();
   const auto result = build_reachable(words);
   ASSERT_TRUE(result.succeeded()) << error_.message();
   const BasicBlock &consumer = *result.value()[1];
@@ -480,16 +595,11 @@ TEST_F(ReachableCfg, RepeatsDiscoveryThroughNewlyDecodedCode) {
 TEST_F(ReachableCfg, LowerAddressCalleeKeepsCallerFacts) {
   // The helper at zero consumes s[8:9] built by the real entry at byte 8.
   // Marking the lowest decoded instruction as external would poison that fact.
-  const std::vector<uint32_t> words = {build_s_setpc_b64(8, kArch),
-                                       kInvalid,
-                                       build_s_getpc_b64(8, kArch),
-                                       build_s_add_u32(8, 8, 255, kArch),
-                                       24,
-                                       build_s_addc_u32(9, 9, 128, kArch),
-                                       branch(-7),
-                                       kInvalid,
-                                       kInvalid,
-                                       kEnd};
+  std::vector<uint32_t> words;
+  ASSERT_TRUE(test_support::append_checked_words(
+      words, {build_s_setpc_b64(8, kArch), kInvalid, build_s_getpc_b64(8, kArch),
+              build_s_add_u32(8, 8, 255, kArch), 24, build_s_addc_u32(9, 9, 128, kArch), branch(-7),
+              kInvalid, kInvalid, kEnd}));
   const auto result = build_reachable(words, {8});
   ASSERT_TRUE(result.succeeded()) << error_.message();
   const BasicBlock &consumer = *result.value().front();
@@ -500,14 +610,11 @@ TEST_F(ReachableCfg, LowerAddressCalleeKeepsCallerFacts) {
 }
 
 TEST_F(ReachableCfg, DecodeSeedDoesNotBecomeExternalEntry) {
-  const std::vector<uint32_t> words = {build_s_getpc_b64(8, kArch),
-                                       build_s_add_u32(8, 8, 255, kArch),
-                                       24,
-                                       build_s_addc_u32(9, 9, 128, kArch),
-                                       branch(0),
-                                       build_s_setpc_b64(8, kArch),
-                                       kInvalid,
-                                       kEnd};
+  std::vector<uint32_t> words;
+  ASSERT_TRUE(test_support::append_checked_words(
+      words, {build_s_getpc_b64(8, kArch), build_s_add_u32(8, 8, 255, kArch), 24,
+              build_s_addc_u32(9, 9, 128, kArch), branch(0), build_s_setpc_b64(8, kArch), kInvalid,
+              kEnd}));
   const auto result = build_reachable(words, {0}, {}, kArch, {20});
   ASSERT_TRUE(result.succeeded()) << error_.message();
   const auto &fixups = result.value()[1]->static_indirect_call_fixups();
@@ -517,14 +624,11 @@ TEST_F(ReachableCfg, DecodeSeedDoesNotBecomeExternalEntry) {
 }
 
 TEST_F(ReachableCfg, IndependentDecodeSeedCompletesCrossBlockIndirectClosure) {
-  const std::vector<uint32_t> words = {build_s_getpc_b64(8, kArch),
-                                       build_s_add_u32(8, 8, 255, kArch),
-                                       24,
-                                       build_s_addc_u32(9, 9, 128, kArch),
-                                       branch(0),
-                                       build_s_setpc_b64(8, kArch),
-                                       kInvalid,
-                                       kEnd};
+  std::vector<uint32_t> words;
+  ASSERT_TRUE(test_support::append_checked_words(
+      words, {build_s_getpc_b64(8, kArch), build_s_add_u32(8, 8, 255, kArch), 24,
+              build_s_addc_u32(9, 9, 128, kArch), branch(0), build_s_setpc_b64(8, kArch), kInvalid,
+              kEnd}));
   const auto result = build_reachable(words, {}, {}, kArch, {0});
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(offsets(result.value()), (std::vector<uint64_t>{0, 20, 28}));
@@ -539,16 +643,13 @@ TEST_F(ReachableCfg, IndependentDecodeSeedCompletesCrossBlockIndirectClosure) {
 }
 
 TEST_F(ReachableCfg, IndependentSeedClosurePrecedesAnOptionalLiteralSeed) {
-  const std::vector<uint32_t> words = {build_s_getpc_b64(8, kArch),
-                                       build_s_add_u32(8, 8, 255, kArch),
-                                       24,
-                                       build_s_addc_u32(9, 9, 128, kArch),
-                                       branch(0),
-                                       build_s_setpc_b64(8, kArch),
-                                       kInvalid,
-                                       build_s_add_u32(0, 0, 255, kArch),
-                                       kEnd, // Literal also encodes an instruction.
-                                       kEnd};
+  std::vector<uint32_t> words;
+  ASSERT_TRUE(test_support::append_checked_words(
+      words, {build_s_getpc_b64(8, kArch), build_s_add_u32(8, 8, 255, kArch), 24,
+              build_s_addc_u32(9, 9, 128, kArch), branch(0), build_s_setpc_b64(8, kArch), kInvalid,
+              build_s_add_u32(0, 0, 255, kArch),
+              kEnd, // Literal also encodes an instruction.
+              kEnd}));
   const auto result = build_reachable(words, {}, {}, kArch, {32, 0, 20});
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(offsets(result.value()), (std::vector<uint64_t>{0, 20, 28}));
@@ -558,28 +659,36 @@ TEST_F(ReachableCfg, IndependentSeedClosurePrecedesAnOptionalLiteralSeed) {
 }
 
 TEST_F(ReachableCfg, IndependentSeedPropagatesLaneStateWithoutAssumingAnEntryMode) {
-  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr auto arch = rocjitsu::IsaFamily::Cdna5;
   constexpr auto bank_zero = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0});
   for (bool set_mode : {false, true}) {
     SCOPED_TRACE(set_mode);
+    util::FailureOr<uint32_t> maybe_s_nop_5 = build_s_nop(0, arch);
+    ASSERT_TRUE(maybe_s_nop_5.succeeded());
+    util::FailureOr<uint32_t> maybe_s_endpgm_4 = build_s_endpgm(arch);
+    ASSERT_TRUE(maybe_s_endpgm_4.succeeded());
+    util::FailureOr<uint32_t> maybe_s_endpgm_5 = build_s_endpgm(arch);
+    ASSERT_TRUE(maybe_s_endpgm_5.succeeded());
+    util::FailureOr<uint32_t> maybe_s_branch_3 = build_s_branch(0, arch);
+    ASSERT_TRUE(maybe_s_branch_3.succeeded());
     const std::vector<uint32_t> words = {
-        set_mode ? bank_zero[0] : build_s_nop(0, arch), // 0: establish banking explicitly.
-        0xBE804700u,                                    // 4: getpc s[0:1], PC=8.
+        set_mode ? bank_zero[0] : maybe_s_nop_5.value(), // 0: establish banking explicitly.
+        0xBE804700u,                                     // 4: getpc s[0:1], PC=8.
         0xA980FE00u,
         56u,
         0u, // 8: add target delta -> 64.
         0xD761002Cu,
         0x02010000u, // 20: v44 lane 0 <- s0.
         0xD761002Cu,
-        0x02010201u,             // 28: v44 lane 1 <- s1.
-        build_s_branch(0, arch), // 36: branch to 40.
+        0x02010201u,              // 28: v44 lane 1 <- s1.
+        maybe_s_branch_3.value(), // 36: branch to 40.
         0xD7600000u,
         0x0201012Cu, // 40: s0 <- v44 lane 0.
         0xD7600001u,
-        0x0201032Cu,          // 48: s1 <- v44 lane 1.
-        0xBE9E4900u,          // 56: swappc s[30:31], s[0:1].
-        build_s_endpgm(arch), // 60: continuation.
-        build_s_endpgm(arch), // 64: indirect target.
+        0x0201032Cu,              // 48: s1 <- v44 lane 1.
+        0xBE9E4900u,              // 56: swappc s[30:31], s[0:1].
+        maybe_s_endpgm_4.value(), // 60: continuation.
+        maybe_s_endpgm_5.value(), // 64: indirect target.
     };
     // Mark the restore block as another seed to ensure it preserves the stash
     // from its real predecessor instead of adding an empty external lane state.
@@ -663,15 +772,11 @@ TEST_F(ReachableCfg, DiscoveryRoundLimitReturnsFailure) {
 TEST_F(ReachableCfg, PartialIndirectTargetsRetainIncompleteStatus) {
   // The taken arm reaches setpc with an unconstrained PC; the fallthrough arm
   // contributes one concrete target. Finding that target must not hide the unknown arm.
-  const std::vector<uint32_t> words = {conditional(4),
-                                       build_s_getpc_b64(8, kArch),
-                                       build_s_add_u32(8, 8, 255, kArch),
-                                       24,
-                                       build_s_addc_u32(9, 9, 128, kArch),
-                                       build_s_setpc_b64(8, kArch),
-                                       kInvalid,
-                                       kInvalid,
-                                       kEnd};
+  std::vector<uint32_t> words;
+  ASSERT_TRUE(test_support::append_checked_words(
+      words,
+      {conditional(4), build_s_getpc_b64(8, kArch), build_s_add_u32(8, 8, 255, kArch), 24,
+       build_s_addc_u32(9, 9, 128, kArch), build_s_setpc_b64(8, kArch), kInvalid, kInvalid, kEnd}));
   const auto result = build_reachable(words);
   ASSERT_TRUE(result.succeeded()) << error_.message();
   const auto consumer = std::ranges::find_if(
@@ -685,17 +790,28 @@ TEST_F(ReachableCfg, PartialIndirectTargetsRetainIncompleteStatus) {
 
 // Two paths produce targets at bytes 40 and 44 for the consumer at byte 32.
 static std::vector<uint32_t> mixed_indirect_targets(bool call) {
+  constexpr util::FailureOr<uint32_t> kGetpcS8Result = build_s_getpc_b64(8, kArch);
+  static_assert(kGetpcS8Result.succeeded());
+  constexpr util::FailureOr<uint32_t> kAddS8LiteralResult = build_s_add_u32(8, 8, 255, kArch);
+  static_assert(kAddS8LiteralResult.succeeded());
+  constexpr util::FailureOr<uint32_t> kSetpcS8Result = build_s_setpc_b64(8, kArch);
+  static_assert(kSetpcS8Result.succeeded());
+  constexpr util::FailureOr<uint32_t> kSwappcS30S8Result = build_s_swappc_b64(30, 8, kArch);
+  static_assert(kSwappcS30S8Result.succeeded());
+  constexpr util::FailureOr<uint32_t> kSetpcS30Result = build_s_setpc_b64(30, kArch);
+  static_assert(kSetpcS30Result.succeeded());
+
   return {conditional(4),
-          build_s_getpc_b64(8, kArch),
-          build_s_add_u32(8, 8, 255, kArch),
+          kGetpcS8Result.value(),
+          kAddS8LiteralResult.value(),
           32,
           branch(3),
-          build_s_getpc_b64(8, kArch),
-          build_s_add_u32(8, 8, 255, kArch),
+          kGetpcS8Result.value(),
+          kAddS8LiteralResult.value(),
           20,
-          call ? build_s_swappc_b64(30, 8, kArch) : build_s_setpc_b64(8, kArch),
+          call ? kSwappcS30S8Result.value() : kSetpcS8Result.value(),
           kEnd,
-          build_s_setpc_b64(30, kArch),
+          kSetpcS30Result.value(),
           kEnd};
 }
 
@@ -703,8 +819,9 @@ TEST_F(ReachableCfg, ExcludedIndirectCallTargetKeepsContinuation) {
   for (bool exclude_last : {false, true}) {
     SCOPED_TRACE(exclude_last);
     auto words = mixed_indirect_targets(true);
-    if (exclude_last)
+    if (exclude_last) {
       std::swap(words[10], words[11]);
+    }
     const std::vector<Range> ranges =
         exclude_last ? std::vector<Range>{{0, 44}} : std::vector<Range>{{0, 40}, {44, 4}};
     const auto result = build_reachable(words, {0}, ranges);
@@ -720,11 +837,14 @@ TEST_F(ReachableCfg, ExcludedIndirectCallTargetKeepsContinuation) {
 }
 
 TEST_F(ReachableCfg, ExcludedIndirectTargetsKeepOuterCallContinuation) {
+  constexpr util::FailureOr<uint32_t> kCallS4Plus1Result = build_s_call_b64(4, 1, kArch);
+  static_assert(kCallS4Plus1Result.succeeded());
+
   // Exercise both a nested swappc and a tail setpc in the directly called helper.
   for (bool nested_call : {false, true}) {
     SCOPED_TRACE(nested_call);
     auto words = mixed_indirect_targets(nested_call);
-    words.insert(words.begin(), {build_s_call_b64(4, 1, kArch), kEnd});
+    words.insert(words.begin(), {kCallS4Plus1Result.value(), kEnd});
     const auto result = build_reachable(words, {0}, {{0, 48}, {52, 4}});
     ASSERT_TRUE(result.succeeded()) << error_.message();
     const auto &caller = *result.value().front();
@@ -735,8 +855,11 @@ TEST_F(ReachableCfg, ExcludedIndirectTargetsKeepOuterCallContinuation) {
 }
 
 TEST_F(ReachableCfg, OptionalSeedInsideIndirectlyReachedInstructionIsIgnored) {
+  constexpr util::FailureOr<uint32_t> kAddS0LiteralResult = build_s_add_u32(0, 0, 255, kArch);
+  static_assert(kAddS0LiteralResult.succeeded());
+
   auto words = indirect_branch_words();
-  words.back() = build_s_add_u32(0, 0, 255, kArch);
+  words.back() = kAddS0LiteralResult.value();
   words.push_back(kEnd); // Literal word also happens to encode a standalone endpgm.
   words.push_back(kEnd);
   const auto result = build_reachable(words, {0}, {}, kArch, {28});
@@ -746,8 +869,11 @@ TEST_F(ReachableCfg, OptionalSeedInsideIndirectlyReachedInstructionIsIgnored) {
 }
 
 TEST_F(ReachableCfg, OptionalSeedInsideAnotherSeedsIndirectClosureIsIgnored) {
+  constexpr util::FailureOr<uint32_t> kAddS0LiteralResult = build_s_add_u32(0, 0, 255, kArch);
+  static_assert(kAddS0LiteralResult.succeeded());
+
   auto words = indirect_branch_words();
-  words.back() = build_s_add_u32(0, 0, 255, kArch);
+  words.back() = kAddS0LiteralResult.value();
   words.push_back(kEnd);
   words.push_back(kEnd);
   const auto result = build_reachable(words, {}, {}, kArch, {0, 28});
@@ -759,8 +885,9 @@ TEST_F(ReachableCfg, OptionalSeedInsideAnotherSeedsIndirectClosureIsIgnored) {
 TEST_F(ReachableCfg, IndependentSeedsDoNotExhaustTheIndirectClosureBudget) {
   const std::vector<uint32_t> words(80, kEnd);
   std::vector<uint64_t> seeds;
-  for (size_t index = 0; index < words.size(); ++index)
+  for (size_t index = 0; index < words.size(); ++index) {
     seeds.push_back(index * sizeof(uint32_t));
+  }
   const auto result = build_reachable(words, {}, {}, kArch, seeds);
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().size(), words.size());
@@ -775,7 +902,7 @@ TEST_F(ReachableCfg, RealTargetCannotBeHiddenByOptionalSeed) {
 }
 
 TEST_F(ReachableCfg, SeedOnlyPaddingReturnsEmptyGraph) {
-  const auto result = build_reachable({0, 0}, {}, {}, ROCJITSU_CODE_ARCH_CDNA5, {0});
+  const auto result = build_reachable({0, 0}, {}, {}, rocjitsu::IsaFamily::Cdna5, {0});
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_TRUE(result.value().empty());
 }
@@ -798,15 +925,11 @@ TEST_F(ReachableCfg, SharedDecodePoliciesKeepDistinctCoverage) {
 
 TEST_F(ReachableCfg, FullSectionPolicyRetainsImplicitFirstEntry) {
   TestCodeObject object;
-  const std::vector<uint32_t> words = {build_s_getpc_b64(8, kArch),
-                                       build_s_add_u32(8, 8, 255, kArch),
-                                       28,
-                                       build_s_addc_u32(9, 9, 128, kArch),
-                                       branch(0),
-                                       build_s_setpc_b64(8, kArch),
-                                       kEnd,
-                                       kEnd,
-                                       kEnd};
+  std::vector<uint32_t> words;
+  ASSERT_TRUE(test_support::append_checked_words(
+      words, {build_s_getpc_b64(8, kArch), build_s_add_u32(8, 8, 255, kArch), 28,
+              build_s_addc_u32(9, 9, 128, kArch), branch(0), build_s_setpc_b64(8, kArch), kEnd,
+              kEnd, kEnd}));
   object.add_text(words);
   auto decoder = Decoder::create(kArch);
   const std::array<uint64_t, 1> entries = {24};
@@ -816,8 +939,9 @@ TEST_F(ReachableCfg, FullSectionPolicyRetainsImplicitFirstEntry) {
       error_.emitter());
   ASSERT_TRUE(eager.succeeded()) << error_.message();
   size_t fixup_count = 0;
-  for (const auto &block : eager.value())
+  for (const auto &block : eager.value()) {
     fixup_count += block->static_indirect_call_fixups().size();
+  }
   EXPECT_EQ(fixup_count, 1u);
   const auto reachable = BasicBlock::build_cfg(object, *decoder, kArch, {.entries = entries});
   ASSERT_TRUE(reachable.succeeded());
@@ -855,7 +979,7 @@ TEST_F(ReachableCfg, FullSectionBuildPreservesExplicitTargetForTargetlessObject)
   ASSERT_NE(decoder, nullptr);
 
   const auto result = BasicBlock::build(
-      object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, error_.emitter(), {},
+      object, *decoder, rocjitsu::IsaFamily::Cdna5, error_.emitter(), {},
       ExternalEntryPolicy::InferPredecessorless, {}, ROCJITSU_CODE_TARGET_GFX1251);
 
   ASSERT_TRUE(result.succeeded()) << error_.message();
@@ -874,12 +998,57 @@ TEST_F(ReachableCfg, ReachableBuildPreservesExplicitTargetForTargetlessObject) {
   const std::array<uint64_t, 1> entries = {0};
 
   const auto result = BasicBlock::build_cfg(
-      object, *decoder, ROCJITSU_CODE_ARCH_CDNA5,
+      object, *decoder, rocjitsu::IsaFamily::Cdna5,
       {.target = ROCJITSU_CODE_TARGET_GFX1251, .entries = entries}, error_.emitter());
 
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(static_fixup_count(result.value()), 0u)
       << "gfx1251 must not recover the bank-zero stash after MODE selects source bank one";
+}
+
+const BasicBlock *block_at(const Blocks &blocks, uint64_t offset) {
+  const auto it = std::ranges::find(blocks, offset, &BasicBlock::start_offset);
+  return it == blocks.end() ? nullptr : it->get();
+}
+
+TEST_F(ReachableCfg, JoinKeepsItsFallthroughEdge) {
+  // If/else through S_CBRANCH_I_FORK. The join's resume target comes from SGPRs,
+  // but its second arrival falls through to the code after it.
+  const auto result = build_reachable({
+      0xB8A21741u, // 0x00 s_getreg_b32 s34, hwreg(HW_REG_MODE, 29, 3)
+      0xBEA0017Eu, // 0x04 s_mov_b64 s[32:33], exec
+      0xB86A0002u, // 0x08 s_cbranch_i_fork vcc, THEN
+      0x7E000282u, // 0x0C v_mov_b32 v0, 2
+      0xBF820001u, // 0x10 s_branch JOIN
+      0x7E000281u, // 0x14 THEN: v_mov_b32 v0, 1
+      0xBE802E22u, // 0x18 JOIN: s_cbranch_join s34
+      0xBEFE0120u, // 0x1C s_mov_b64 exec, s[32:33]
+      kEnd,        // 0x20
+  });
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const Blocks &blocks = result.value();
+  ASSERT_EQ(offsets(blocks), (std::vector<uint64_t>{0x00, 0x0C, 0x14, 0x18, 0x1C}));
+  EXPECT_EQ(successors(*block_at(blocks, 0x00)), (std::vector<uint64_t>{0x0C, 0x14}));
+  const BasicBlock *join = block_at(blocks, 0x18);
+  EXPECT_EQ(successors(*join), (std::vector<uint64_t>{0x1C}));
+  // The SGPR-held resume target is still unknown.
+  EXPECT_EQ(join->successor_issue(), Issue::IndirectControlFlow);
+}
+
+TEST_F(ReachableCfg, GForkKeepsItsFallthroughEdge) {
+  const auto result = build_reachable({
+      0x9480246Au, // 0x00 s_cbranch_g_fork vcc, s[36:37]
+      0x7E000282u, // 0x04 v_mov_b32 v0, 2
+      0xBE802E22u, // 0x08 s_cbranch_join s34
+      kEnd,        // 0x0C
+  });
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const Blocks &blocks = result.value();
+  ASSERT_EQ(offsets(blocks), (std::vector<uint64_t>{0x00, 0x04, 0x0C}));
+  const BasicBlock *fork = block_at(blocks, 0x00);
+  EXPECT_EQ(successors(*fork), (std::vector<uint64_t>{0x04}));
+  EXPECT_EQ(fork->successor_issue(), Issue::IndirectControlFlow);
+  EXPECT_EQ(successors(*block_at(blocks, 0x04)), (std::vector<uint64_t>{0x0C}));
 }
 
 } // namespace

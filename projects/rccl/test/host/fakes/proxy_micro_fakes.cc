@@ -211,6 +211,7 @@ ncclResult_t ncclShmOpen(char* shmPath, size_t shmPathSize, size_t shmSize, void
                          ncclShmHandle_t* handle) {
   g_shm.opens++;
   g_shm.lastRefcount = refcount;
+  g_shm.lastSize = shmSize;
   if (g_shm.openResult != ncclSuccess) return g_shm.openResult;
   if (shmPath[0] == '\0') std::snprintf(shmPath, shmPathSize, "/dev/shm/nccl-AbC123");
   g_shm.lastPath = shmPath;
@@ -244,16 +245,16 @@ ncclResult_t ncclProfilerStartProxyOpEvent(int, struct ncclProxyArgs*) {
   g_profOpStarts++;
   return ncclSuccess;
 }
-ncclResult_t ncclProfilerStartProxyCtrlEvent(void*, void** eHandle) {
+ncclResult_t ncclProfilerStartProxyCtrlEvent(void*, struct ncclProfilerEventRef* eHandle) {
   g_profCtrlStarts++;
-  *eHandle = nullptr;
+  *eHandle = ncclProfilerEventRef{};
   return ncclSuccess;
 }
-ncclResult_t ncclProfilerStopProxyCtrlEvent(void*) {
+ncclResult_t ncclProfilerStopProxyCtrlEvent(struct ncclProfilerEventRef*) {
   g_profCtrlStops++;
   return ncclSuccess;
 }
-ncclResult_t ncclProfilerRecordProxyCtrlEventState(void*, int, ncclProfilerEventState_t state) {
+ncclResult_t ncclProfilerRecordProxyCtrlEventState(struct ncclProfilerEventRef*, int, ncclProfilerEventState_t state) {
   if (state == ncclProfilerProxyCtrlSleep) g_profSleeps++;
   g_profCtrlStates.push_back(state);
   return ncclSuccess;

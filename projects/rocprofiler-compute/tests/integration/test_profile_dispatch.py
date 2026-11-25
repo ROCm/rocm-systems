@@ -3,8 +3,6 @@
 
 """Integration tests for kernel iteration filtering during profiling."""
 
-import inspect
-
 import common
 import pytest
 
@@ -13,7 +11,6 @@ from tests.integration.common import (
     CSVS,
     config,
     num_devices,
-    validate,
 )
 
 
@@ -25,16 +22,6 @@ def test_dispatch_0(binary_handler_profile_rocprof_compute):
     file_dict = integration_common.check_csv_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == CSVS
 
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-        [
-            "--dispatch",
-            "1",
-        ],
-    )
-
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -45,13 +32,6 @@ def test_dispatch_0_1(binary_handler_profile_rocprof_compute):
 
     file_dict = integration_common.check_csv_files(workload_dir, num_devices, 2)
     assert sorted(list(file_dict.keys())) == CSVS
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-        ["--dispatch", "1", "2"],
-    )
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 

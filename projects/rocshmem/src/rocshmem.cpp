@@ -58,6 +58,8 @@
 #include "util.hpp"
 #include "bootstrap/bootstrap.hpp"
 
+#include <hip/hip_version.h>
+
 #include <cstdlib>
 #include <cstring>
 #include <cstdint>
@@ -706,12 +708,17 @@ __host__ void rocshmem_query_thread(int *provided) {
   *provided = ROCSHMEM_THREAD_MULTIPLE;
 }
 
-__host__ size_t rocshmem_query_tdm_lds_bytes() {
-#if defined(USE_TDM)
-  return tdm::lds_bytes_for_tile(backend->tdm_resolved_tile_bytes);
+__host__ size_t rocshmem_query_lds_stage_bytes() {
+#if defined(USE_LDS_STAGE) || defined(USE_TDM)
+  return lds_stage::lds_bytes_for_tile(backend->lds_stage_resolved_tile_bytes);
 #else
   return 0;
 #endif
+}
+
+// Deprecated: Use rocshmem_query_lds_stage_bytes() instead
+__host__ size_t rocshmem_query_tdm_lds_bytes() {
+  return rocshmem_query_lds_stage_bytes();
 }
 
 __host__ void rocshmem_global_exit(int status) {
@@ -800,8 +807,7 @@ __host__ int rocshmem_team_split_strided(
                                stride_in_world, size);
 
   MPI_Comm team_comm{MPI_COMM_NULL};
-  if (parent_team_obj->mpi_comm != MPI_COMM_NULL &&
-      parent_team_obj->mpi_comm != static_cast<MPI_Comm>(0)) {
+  if (parent_team_obj->mpi_comm != MPI_COMM_NULL) {
     /* Create a new MPI communicator for this team */
     int color;
     if (my_pe_in_new_team < 0) {
@@ -830,7 +836,7 @@ __host__ int rocshmem_team_split_strided(
     backend->team_tracker.track(*new_team);
   }
 
-  if (team_comm != MPI_COMM_NULL && team_comm != static_cast<MPI_Comm>(0)) {
+  if (team_comm != MPI_COMM_NULL) {
     mpilib_ftable_.Comm_free (&team_comm);
   }
   return 0;
@@ -1116,6 +1122,39 @@ __host__ void rocshmem_ctx_putmem(rocshmem_ctx_t ctx, void *dest,
   get_internal_ctx(ctx)->putmem(dest, source, nelems, pe);
 }
 
+__host__ void rocshmem_ctx_putmem_signal(rocshmem_ctx_t ctx, void *dest,
+                                         const void *source, size_t nelems,
+                                         uint64_t *sig_addr, uint64_t signal,
+                                         int sig_op, int pe) {
+  LOG_API("host::ctx_putmem_signal (ctx=%p, dest=%p, source=%p, nelems=%zd, "
+          "sig_addr=%p, sig_op=%d, pe=%d)",
+          ctx.ctx_opaque, dest, source, nelems, sig_addr, sig_op, pe);
+
+  get_internal_ctx(ctx)->putmem_signal(dest, source, nelems, sig_addr, signal,
+                                       sig_op, pe);
+}
+
+__host__ void rocshmem_putmem_signal(void *dest, const void *source,
+                                     size_t nelems, uint64_t *sig_addr,
+                                     uint64_t signal, int sig_op, int pe) {
+  rocshmem_ctx_putmem_signal(ROCSHMEM_HOST_CTX_DEFAULT, dest, source, nelems,
+                             sig_addr, signal, sig_op, pe);
+}
+
+__host__ uint64_t rocshmem_signal_fetch(const uint64_t *sig_addr) {
+  LOG_API("host::signal_fetch (sig_addr=%p)", sig_addr);
+
+  return get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->signal_fetch(sig_addr);
+}
+
+__host__ void rocshmem_signal_wait_until(uint64_t *sig_addr, int cmp,
+                                         uint64_t cmp_value) {
+  LOG_API("host::signal_wait_until (sig_addr=%p, cmp=%d)", sig_addr, cmp);
+
+  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
+      ->signal_wait_until(sig_addr, cmp, cmp_value);
+}
+
 template <typename T>
 __host__ void rocshmem_p(rocshmem_ctx_t ctx, T *dest, T value, int pe) {
   LOG_API("host::p (ctx=%p, dest=%p, pe=%d)", ctx.ctx_opaque, dest, pe);
@@ -1366,6 +1405,18 @@ __host__ void rocshmem_putmem_signal_on_stream(void *dest, const void *source,
                                                int pe, hipStream_t stream) {
   RocshmemGetFunctionTable()->putmem_signal_on_stream_fn(dest, source, nelems, sig_addr, signal, sig_op,
                                 pe, stream);
+}
+
+__host__ void rocshmem_signal_add_on_stream(uint64_t *sig_addr, uint64_t signal,
+                                            int pe, hipStream_t stream) {
+  RocshmemGetFunctionTable()->signal_add_on_stream_fn(sig_addr, signal, pe,
+                                                      stream);
+}
+
+__host__ void rocshmem_signal_set_on_stream(uint64_t *sig_addr, uint64_t signal,
+                                            int pe, hipStream_t stream) {
+  RocshmemGetFunctionTable()->signal_set_on_stream_fn(sig_addr, signal, pe,
+                                                      stream);
 }
 
 __host__ void rocshmem_signal_wait_until_on_stream(uint64_t *sig_addr, int cmp,
@@ -1953,8 +2004,19 @@ INT_REDUCTION_GEN(int)
 INT_REDUCTION_GEN(short)
 INT_REDUCTION_GEN(long)
 INT_REDUCTION_GEN(long long)
+INT_REDUCTION_GEN(char)
+INT_REDUCTION_GEN(signed char)
+INT_REDUCTION_GEN(unsigned char)
+INT_REDUCTION_GEN(unsigned short)
+INT_REDUCTION_GEN(unsigned int)
+INT_REDUCTION_GEN(unsigned long)
+INT_REDUCTION_GEN(unsigned long long)
 FLOAT_REDUCTION_GEN(float)
 FLOAT_REDUCTION_GEN(double)
+FLOAT_REDUCTION_GEN(__half)
+#if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
+FLOAT_REDUCTION_GEN(__hip_bfloat16)
+#endif
 // long double reduction fails. hipcc/device may not support long double.
 // so disable it for now.
 // FLOAT_REDUCTION_GEN(long double)
@@ -1973,6 +2035,8 @@ RMA_GEN(unsigned short)
 RMA_GEN(unsigned int)
 RMA_GEN(unsigned long)
 RMA_GEN(unsigned long long)
+RMA_GEN(__half)
+RMA_GEN(__hip_bfloat16)
 
 AMO_STANDARD_GEN(int)
 AMO_STANDARD_GEN(long)
@@ -2009,13 +2073,37 @@ WAIT_GEN(long long)
 WAIT_GEN(unsigned int)
 WAIT_GEN(unsigned long)
 WAIT_GEN(unsigned long long)
+WAIT_GEN(__half)
+WAIT_GEN(__hip_bfloat16)
 
 INT_REDUCTION_DEF_GEN(int, int)
 INT_REDUCTION_DEF_GEN(short, short)
 INT_REDUCTION_DEF_GEN(long, long)
 INT_REDUCTION_DEF_GEN(long long, longlong)
+INT_REDUCTION_DEF_GEN(char, char)
+INT_REDUCTION_DEF_GEN(signed char, schar)
+INT_REDUCTION_DEF_GEN(unsigned int, uint)
+INT_REDUCTION_DEF_GEN(unsigned char, uchar)
+INT_REDUCTION_DEF_GEN(unsigned short, ushort)
+INT_REDUCTION_DEF_GEN(unsigned long, ulong)
+INT_REDUCTION_DEF_GEN(unsigned long long, ulonglong)
+INT_REDUCTION_DEF_GEN(int8_t, int8)
+INT_REDUCTION_DEF_GEN(int16_t, int16)
+INT_REDUCTION_DEF_GEN(int32_t, int32)
+INT_REDUCTION_DEF_GEN(int64_t, int64)
+INT_REDUCTION_DEF_GEN(uint8_t, uint8)
+INT_REDUCTION_DEF_GEN(uint16_t, uint16)
+INT_REDUCTION_DEF_GEN(uint32_t, uint32)
+INT_REDUCTION_DEF_GEN(uint64_t, uint64)
+INT_REDUCTION_DEF_GEN(size_t, size)
+INT_REDUCTION_DEF_GEN(ptrdiff_t, ptrdiff)
+
 FLOAT_REDUCTION_DEF_GEN(float, float)
 FLOAT_REDUCTION_DEF_GEN(double, double)
+FLOAT_REDUCTION_DEF_GEN(__half, half)
+#if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
+FLOAT_REDUCTION_DEF_GEN(__hip_bfloat16, bfloat16)
+#endif
 // long double reduction fails. hipcc/device may not support long double.
 // so disable it for now.
 // FLOAT_REDUCTION_DEF_GEN(long double, longdouble)
@@ -2044,6 +2132,8 @@ RMA_DEF_GEN(uint32_t, uint32)
 RMA_DEF_GEN(uint64_t, uint64)
 RMA_DEF_GEN(size_t, size)
 RMA_DEF_GEN(ptrdiff_t, ptrdiff)
+RMA_DEF_GEN(__half, half)
+RMA_DEF_GEN(__hip_bfloat16, bfloat16)
 
 AMO_STANDARD_DEF_GEN(int, int)
 AMO_STANDARD_DEF_GEN(long, long)
@@ -2095,15 +2185,47 @@ WAIT_DEF_GEN(unsigned short, ushort)
 WAIT_DEF_GEN(unsigned int, uint)
 WAIT_DEF_GEN(unsigned long, ulong)
 WAIT_DEF_GEN(unsigned long long, ulonglong)
+WAIT_DEF_GEN(int8_t, int8)
+WAIT_DEF_GEN(int16_t, int16)
+WAIT_DEF_GEN(int32_t, int32)
+WAIT_DEF_GEN(int64_t, int64)
+WAIT_DEF_GEN(uint8_t, uint8)
+WAIT_DEF_GEN(uint16_t, uint16)
+WAIT_DEF_GEN(uint32_t, uint32)
 WAIT_DEF_GEN(uint64_t, uint64)
+WAIT_DEF_GEN(size_t, size)
+WAIT_DEF_GEN(ptrdiff_t, ptrdiff)
+WAIT_DEF_GEN(__half, half)
+WAIT_DEF_GEN(__hip_bfloat16, bfloat16)
 
 INT_REDUCTION_ON_STREAM_GEN_IMP(int, int)
 INT_REDUCTION_ON_STREAM_GEN_IMP(long, long)
 INT_REDUCTION_ON_STREAM_GEN_IMP(long long, longlong)
 INT_REDUCTION_ON_STREAM_GEN_IMP(short, short)
+INT_REDUCTION_ON_STREAM_GEN_IMP(char, char)
+INT_REDUCTION_ON_STREAM_GEN_IMP(signed char, schar)
+INT_REDUCTION_ON_STREAM_GEN_IMP(unsigned char, uchar)
+INT_REDUCTION_ON_STREAM_GEN_IMP(unsigned short, ushort)
+INT_REDUCTION_ON_STREAM_GEN_IMP(unsigned int, uint)
+INT_REDUCTION_ON_STREAM_GEN_IMP(unsigned long, ulong)
+INT_REDUCTION_ON_STREAM_GEN_IMP(unsigned long long, ulonglong)
+INT_REDUCTION_ON_STREAM_GEN_IMP(int8_t, int8)
+INT_REDUCTION_ON_STREAM_GEN_IMP(int16_t, int16)
+INT_REDUCTION_ON_STREAM_GEN_IMP(int32_t, int32)
+INT_REDUCTION_ON_STREAM_GEN_IMP(int64_t, int64)
+INT_REDUCTION_ON_STREAM_GEN_IMP(uint8_t, uint8)
+INT_REDUCTION_ON_STREAM_GEN_IMP(uint16_t, uint16)
+INT_REDUCTION_ON_STREAM_GEN_IMP(uint32_t, uint32)
+INT_REDUCTION_ON_STREAM_GEN_IMP(uint64_t, uint64)
+INT_REDUCTION_ON_STREAM_GEN_IMP(size_t, size)
+INT_REDUCTION_ON_STREAM_GEN_IMP(ptrdiff_t, ptrdiff)
 
 FLOAT_REDUCTION_ON_STREAM_GEN_IMP(float, float)
 FLOAT_REDUCTION_ON_STREAM_GEN_IMP(double, double)
+FLOAT_REDUCTION_ON_STREAM_GEN_IMP(__half, half)
+#if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
+FLOAT_REDUCTION_ON_STREAM_GEN_IMP(__hip_bfloat16, bfloat16)
+#endif
 // clang-format on
 
 }  // namespace rocshmem

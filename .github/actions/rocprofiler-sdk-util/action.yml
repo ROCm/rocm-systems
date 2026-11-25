@@ -134,10 +134,13 @@ runs:
       run: |
         export HIP_DIR=$PWD/hip
         export CLR_DIR=$PWD/clr
+        # Required by CLR's profiling API generator.
+        python3 -m pip install cxxheaderparser
         echo "Install HIP..."
         cd $CLR_DIR
         cmake \
           -DHIP_COMMON_DIR=$HIP_DIR \
+          -DPython3_EXECUTABLE="$(command -v python3)" \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_C_COMPILER=${{ inputs.rocm-path }}/llvm/bin/clang \
           -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/llvm/bin/clang++ \
@@ -238,7 +241,7 @@ runs:
           -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/lib/llvm/bin/amdclang++ \
           -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
           -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
-          ${GITHUB_WORKSPACE}/rocDecode
+          ${GITHUB_WORKSPACE}/projects/rocdecode
         cmake --build build-rocdecode --target all --parallel ${{ inputs.build-jobs }}
         cmake --build build-rocdecode --target install
         echo "✅ ROCDecode Installation complete!"
@@ -255,7 +258,7 @@ runs:
           -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/lib/llvm/bin/amdclang++ \
           -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
           -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
-          ${GITHUB_WORKSPACE}/rocJPEG
+          ${GITHUB_WORKSPACE}/projects/rocjpeg
         cmake --build build-rocjpeg --target all --parallel ${{ inputs.build-jobs }}
         cmake --build build-rocjpeg --target install
         echo "✅ ROCJPEG Installation complete!"

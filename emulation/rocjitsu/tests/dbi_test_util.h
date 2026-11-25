@@ -30,6 +30,10 @@
 
 namespace rocjitsu::test {
 
+// Declare 40 SGPRs for a callable returning through s[30:31]. The gfx942
+// 32-SGPR allocation aliases that pair to VCC.
+inline constexpr uint32_t kCallableProbeGranulatedSgprCount = 40 / 8 - 1;
+
 // Instruction word constants (gfx950)
 
 // VOP1 v_mov_b32 encodings (gfx950: [31:25]=0x3F, vdst[24:17], op=1<<9,
@@ -121,10 +125,9 @@ inline constexpr uint32_t kProbeMarkerMovS6 = 0xbe860080u; // s_mov_b32 s6, 0
 
 inline uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
   const uint32_t offset = static_cast<uint32_t>(names.size());
-  names.resize(offset + name.size() + 1);
-  if (!name.empty()) {
-    std::memcpy(names.data() + offset, name.data(), name.size());
-  }
+  for (char byte : name)
+    names.push_back(static_cast<uint8_t>(byte));
+  names.push_back('\0');
   return offset;
 }
 
@@ -206,8 +209,9 @@ inline std::vector<uint8_t> make_amdgpu_kernel_elf(
   ehdr.e_shentsize = sizeof(Elf64_Shdr);
   ehdr.e_shnum = section_count;
   ehdr.e_shstrndx = 5;
-  if (wrap_section_header_table)
+  if (wrap_section_header_table) {
     ehdr.e_shoff = UINT64_MAX - 8; // e_shoff + e_shnum * sizeof(Elf64_Shdr) overflows
+  }
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
 
   std::array<Elf64_Phdr, phdr_count> phdrs{};
@@ -316,8 +320,9 @@ inline std::vector<uint8_t> make_amdgpu_kernel_elf(
   shdrs[5].sh_size = shstrtab.size();
   shdrs[5].sh_addralign = 1;
 
-  if (wrap_symtab_range)
+  if (wrap_symtab_range) {
     shdrs[3].sh_offset = UINT64_MAX - 4; // sh_offset + sh_size overflows
+  }
 
   std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
   return image;
@@ -432,12 +437,15 @@ make_gfx950_kd_crossing_section_elf(const std::vector<uint32_t> &text_words,
                                 /*kd_crosses_section=*/true);
 }
 
-// Like make_gfx950_kernel_elf but exports *two* `.kd` descriptors (both entering
+// Like make_amdgpu_kernel_elf but exports *two* `.kd` descriptors (both entering
 // .text at offset 0) so kernel_descriptors() returns two kernels, exercising the
-// orchestrator's single-kernel spill guard. Only the count matters here.
-inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_t> &text_words,
+// orchestrator's multi-kernel guards. `wave32[i]` sets kernel i's Wave32 bit, which
+// only RDNA has.
+inline std::vector<uint8_t> make_amdgpu_two_kernel_elf(const std::vector<uint32_t> &text_words,
                                                        uint32_t private_bytes,
-                                                       uint32_t granulated_sgpr_count = 3) {
+                                                       uint32_t granulated_sgpr_count,
+                                                       uint32_t e_flags,
+                                                       std::array<bool, 2> wave32 = {}) {
   namespace kd = rocjitsu::amdhsa;
   using KD = kd::kernel_descriptor_t;
 
@@ -480,7 +488,7 @@ inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_
   ehdr.e_version = 1;
   ehdr.e_phoff = sizeof(Elf64_Ehdr);
   ehdr.e_shoff = shoff;
-  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
+  ehdr.e_flags = e_flags;
   ehdr.e_ehsize = sizeof(Elf64_Ehdr);
   ehdr.e_phentsize = sizeof(Elf64_Phdr);
   ehdr.e_phnum = phdr_count;
@@ -521,6 +529,10 @@ inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_
     RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1,
                        kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                        granulated_sgpr_count);
+    if (wave32[i]) {
+      RJ_AMDHSA_BITS_SET(desc.kernel_code_properties,
+                         kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
+    }
     std::memcpy(image.data() + rodata_offset + i * sizeof(KD), &desc, sizeof(desc));
   }
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
@@ -580,6 +592,14 @@ inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_
 
   std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
   return image;
+}
+
+// CDNA4 (gfx950) two-kernel target ELF.
+inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_t> &text_words,
+                                                       uint32_t private_bytes,
+                                                       uint32_t granulated_sgpr_count = 3) {
+  return make_amdgpu_two_kernel_elf(text_words, private_bytes, granulated_sgpr_count,
+                                    EF_AMDGPU_MACH_AMDGCN_GFX950);
 }
 
 // Probe ELF: one exported STT_FUNC symbol
@@ -693,8 +713,9 @@ inline std::vector<uint8_t> make_gfx1200_probe_elf(std::string_view symbol,
 // Copy a named section's bytes out of a reparsed code object as 32-bit words.
 inline std::vector<uint32_t> section_words(const AmdGpuCodeObject &obj, std::string_view name) {
   for (const auto &sec : obj.all_sections()) {
-    if (sec->name() != name)
+    if (sec->name() != name) {
       continue;
+    }
     std::vector<uint32_t> words(sec->size() / sizeof(uint32_t));
     std::memcpy(words.data(), sec->data(), words.size() * sizeof(uint32_t));
     return words;
@@ -706,8 +727,9 @@ inline std::vector<uint32_t> section_words(const AmdGpuCodeObject &obj, std::str
 // which are byte payloads rather than instruction words.
 inline std::vector<uint8_t> section_bytes(const AmdGpuCodeObject &obj, std::string_view name) {
   for (const auto &sec : obj.all_sections()) {
-    if (sec->name() != name)
+    if (sec->name() != name) {
       continue;
+    }
     const auto *data = reinterpret_cast<const uint8_t *>(sec->data());
     return std::vector<uint8_t>(data, data + sec->size());
   }
@@ -716,8 +738,9 @@ inline std::vector<uint8_t> section_bytes(const AmdGpuCodeObject &obj, std::stri
 
 // Read back the (single) kernel's scratch size from a patched ELF.
 inline uint32_t patched_private_segment_size(const AmdGpuCodeObject &obj) {
-  if (obj.text_sections().empty())
+  if (obj.text_sections().empty()) {
     return 0xFFFFFFFFu;
+  }
   const Section *text = obj.text_sections().front();
   const auto kernels = scan_kernel_descriptors(
       {reinterpret_cast<const uint8_t *>(obj.image_data()), obj.image_size()},
@@ -728,14 +751,16 @@ inline uint32_t patched_private_segment_size(const AmdGpuCodeObject &obj) {
 /// @brief .text-relative entry of a patched object's single kernel, or nullopt
 ///        unless exactly one kernel is found.
 inline std::optional<uint64_t> patched_entry_text_offset(const AmdGpuCodeObject &obj) {
-  if (obj.text_sections().empty())
+  if (obj.text_sections().empty()) {
     return std::nullopt;
+  }
   const Section *text = obj.text_sections().front();
   const auto kernels = scan_kernel_descriptors(
       {reinterpret_cast<const uint8_t *>(obj.image_data()), obj.image_size()},
       text->sectionOffset(), text->size());
-  if (kernels.size() != 1)
+  if (kernels.size() != 1) {
     return std::nullopt;
+  }
   return kernels.front().entry_text_offset;
 }
 

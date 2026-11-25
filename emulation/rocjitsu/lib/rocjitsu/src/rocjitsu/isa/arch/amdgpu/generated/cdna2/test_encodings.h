@@ -1246,7 +1246,7 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"buffer_store_format_d16_hi_x", {0xE09C0000U, 0x00000000U}},
     {"buffer_wbl2", {0xE0A00000U, 0x00000000U}},
     {"buffer_invl2", {0xE0A40000U, 0x00000000U}},
-    {"buffer_store_lds_dword", {0xE0F40000U, 0x00000000U}},
+    {"buffer_store_lds_dword", {0xE0F50000U, 0x00000000U}},
     {"buffer_wbinvl1", {0xE0F80000U, 0x00000000U}},
     {"buffer_wbinvl1_vol", {0xE0FC0000U, 0x00000000U}},
     {"buffer_atomic_swap", {0xE1000000U, 0x00000000U}},

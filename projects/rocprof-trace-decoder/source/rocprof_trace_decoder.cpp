@@ -53,7 +53,7 @@ static_assert(
     sizeof(rocprofiler_thread_trace_decoder_event_t) == 40, "Unexpected rocprofiler_thread_trace_decoder_event_t size"
 );
 static_assert(
-    sizeof(rocprofiler_thread_trace_decoder_dispatch_t) == 80,
+    sizeof(rocprofiler_thread_trace_decoder_dispatch_t) == 88,
     "Unexpected rocprofiler_thread_trace_decoder_dispatch_t size"
 );
 

@@ -21,6 +21,13 @@
 
 namespace rocprofsys::container
 {
+/**
+ * @brief Chunked vector whose elements keep their addresses when it grows.
+ *
+ * Not safe for concurrent writers: concurrent emplace_back()/push_back() calls on the
+ * same instance can race in last_chunk()'s chunk-selection step. External
+ * synchronization is required if writes to the same instance may be concurrent.
+ */
 template <typename Tp, size_t ChunkSizeV = ROCPROFSYS_MAX_THREADS,
           size_t AlignN = alignof(Tp)>
 class stable_vector

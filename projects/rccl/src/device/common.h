@@ -487,6 +487,7 @@ __device__ __forceinline__ void progressCounterPublishCompletedSlot(int slot, ui
 
 __device__ __forceinline__ void profiler(int action) {
   if (threadIdx.x == 0) {
+    const bool profOn = ncclShmem.args.devFlags & RCCL_DEV_FLAG_PROFILER;
     int idx = 0;
     uint64_t wc = ncclShmem.channel.workCounter + 1;
     if (action == START) {
@@ -497,7 +498,7 @@ __device__ __forceinline__ void profiler(int action) {
         int slot = progressCounterBatchSlot();
         if (slot >= 0) ncclShmem.comm.progressCounters->collOpActive[ncclShmem.channelId] = 1ull << slot;
       }
-      for (; wc <= ncclShmem.channel.workCounter + ncclShmem.nWorks; wc++) {
+      for (; profOn && wc <= ncclShmem.channel.workCounter + ncclShmem.nWorks; wc++) {
         if (!profilerEnabled(idx++)) continue;
         uint64_t ts = globaltimer();
         int slot = wc % MAX_PROFILER_EVENTS_PER_CHANNEL;
@@ -505,7 +506,7 @@ __device__ __forceinline__ void profiler(int action) {
         ncclShmem.comm.workStarted[ncclShmem.channelId].data[slot].counter = wc;
       }
     } else {
-      for (; wc <= ncclShmem.channel.workCounter + ncclShmem.nWorks; wc++) {
+      for (; profOn && wc <= ncclShmem.channel.workCounter + ncclShmem.nWorks; wc++) {
         if (!profilerEnabled(idx++)) continue;
         uint64_t ts = globaltimer();
         int slot = wc % MAX_PROFILER_EVENTS_PER_CHANNEL;
@@ -529,6 +530,8 @@ __device__ __forceinline__ void profiler(int action) {
 
 template <int SpecializedFnId, typename SpecializedRunWorkBatch, int COLL_UNROLL>
 __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* args) {
+  // From kernel args, not shmem: keeps the guards below on a register.
+  const bool progressOn = args->devFlags & RCCL_DEV_FLAG_PROGRESS;
   const int tid = threadIdx.x;
   int tn = blockDim.x;
 #ifdef ENABLE_WARP_SPEED
@@ -705,12 +708,16 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     }
     profiler(STOP);
     // Keep workStorage stable until thread 0 finishes counting.
-    if (ncclShmem.comm.progressCounters != nullptr) __syncthreads();
+    if (progressOn) __syncthreads();
     loadWorkBatchToShmem(tid % WARP_SIZE, tn, args, batchIx);
     __syncthreads();
   }
-  // Publish progress-counter completion for the last batch only after every thread has left the work body.
-  if (ncclShmem.comm.progressCounters != nullptr) __syncthreads();
+  // profiler(FINI) runs on thread 0 only: wait for every thread to leave the work body before
+  // timestamping the last batch's completion and publishing its progress counters.
+  // Kernel-arg flags gate the shmem profilerEnabled() read so disabled runs skip it.
+  if (progressOn ||
+      ((args->devFlags & RCCL_DEV_FLAG_PROFILER) && ncclShmem.nWorks > 0 && profilerEnabled(0)))
+    __syncthreads();
   profiler(FINI);
 }
 

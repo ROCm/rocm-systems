@@ -179,14 +179,16 @@ bool Sop1::has_encoded_literal32() const {
 
 Sop1::Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= SALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
-  if (has_encoded_literal64())
+  if (has_encoded_literal64()) {
     size_ += 2 * sizeof(MachineInst);
-  else if (has_encoded_literal32())
+  } else if (has_encoded_literal32()) {
     size_ += sizeof(MachineInst);
+  }
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
 }
@@ -307,14 +309,16 @@ bool Sopc::has_encoded_literal32() const {
 
 Sopc::Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= SALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
-  if (has_encoded_literal64())
+  if (has_encoded_literal64()) {
     size_ += 2 * sizeof(MachineInst);
-  else if (has_encoded_literal32())
+  } else if (has_encoded_literal32()) {
     size_ += sizeof(MachineInst);
+  }
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
 }
@@ -351,26 +355,31 @@ bool Sopc::has_lit64_0_and_has_lit64_1() {
 
 Sopp::Sopp(std::string_view mnemonic, const SoppMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= SALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
-  if (!default_encoding())
+  if (!default_encoding()) {
     size_ += sizeof(MachineInst);
+  }
 }
 
 bool Sopp::default_encoding() { return true; }
 
 Sopk::Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= SALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
-  if (!default_encoding() || hasImpliedLiteral())
+  if (!default_encoding() || hasImpliedLiteral()) {
     size_ += sizeof(MachineInst);
-  if (hasImpliedLiteral())
+  }
+  if (hasImpliedLiteral()) {
     literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
+  }
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
 }
@@ -545,16 +554,19 @@ bool Sop2::has_encoded_literal32() const {
 
 Sop2::Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= SALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
-  if (has_encoded_literal64())
+  if (has_encoded_literal64()) {
     size_ += 2 * sizeof(MachineInst);
-  else if (has_encoded_literal32() || hasImpliedLiteral())
+  } else if (has_encoded_literal32() || hasImpliedLiteral()) {
     size_ += sizeof(MachineInst);
-  if (hasImpliedLiteral())
+  }
+  if (hasImpliedLiteral()) {
     literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
+  }
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
 }
@@ -593,6 +605,7 @@ bool Sop2::hasImpliedLiteral() { return inst_.op == 69 || inst_.op == 70; }
 
 Smem::Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= SMEM;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -600,8 +613,9 @@ Smem::Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exe
 }
 
 bool Vop1::has_encoded_dpp() const {
-  if (!(inst_.src0 == amdgpu::SRC_DPP))
+  if (!(inst_.src0 == amdgpu::SRC_DPP)) {
     return false;
+  }
   return inst_.op == 1 || (inst_.op >= 3 && inst_.op <= 8) || (inst_.op >= 10 && inst_.op <= 26) ||
          (inst_.op >= 28 && inst_.op <= 37) || inst_.op == 39 ||
          (inst_.op >= 42 && inst_.op <= 43) || inst_.op == 46 || inst_.op == 51 ||
@@ -612,8 +626,9 @@ bool Vop1::has_encoded_dpp() const {
 }
 
 bool Vop1::has_encoded_dpp8() const {
-  if (!(amdgpu::dpp::is_src_dpp8(inst_.src0)))
+  if (!(amdgpu::dpp::is_src_dpp8(inst_.src0))) {
     return false;
+  }
   return inst_.op == 1 || (inst_.op >= 5 && inst_.op <= 8) || (inst_.op >= 10 && inst_.op <= 14) ||
          (inst_.op >= 17 && inst_.op <= 20) || inst_.op == 28 ||
          (inst_.op >= 30 && inst_.op <= 37) || inst_.op == 39 ||
@@ -849,19 +864,22 @@ bool Vop1::has_encoded_literal32() const {
 
 Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
-  if (has_encoded_literal64())
+  if (has_encoded_literal64()) {
     size_ += 2 * sizeof(MachineInst);
-  else if (has_encoded_dpp() || has_encoded_dpp8() || has_encoded_literal32())
+  } else if (has_encoded_dpp() || has_encoded_dpp8() || has_encoded_literal32()) {
     size_ += sizeof(MachineInst);
+  }
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
-  if (has_encoded_dpp())
+  if (has_encoded_dpp()) {
     dpp_modifiers_ = amdgpu::dpp::SourceModifiers::decode(
         *reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst));
+  }
 }
 
 void Vop1::implicit_uses(RegisterSet &uses) const {
@@ -871,12 +889,17 @@ void Vop1::implicit_uses(RegisterSet &uses) const {
       inst_.src0 == amdgpu::SRC_DPP &&
       (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
        (dpp_bound_ctrl_ == 0 && (amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_) || dpp_fi_ == 0)));
-  if (sdwa_preserve || dpp_partial)
-    for (int i = 0; i < num_dst_operands(); ++i)
-      if (const auto *dst = dst_operand(i))
-        if (auto ref = dst->to_register_ref())
-          if (ref->cls == RegClass::VGPR)
+  if (sdwa_preserve || dpp_partial) {
+    for (int i = 0; i < num_dst_operands(); ++i) {
+      if (const auto *dst = dst_operand(i)) {
+        if (auto ref = dst->to_register_ref()) {
+          if (ref->cls == RegClass::VGPR) {
             uses.expand(*ref);
+          }
+        }
+      }
+    }
+  }
 }
 
 void Vop1::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
@@ -886,12 +909,17 @@ void Vop1::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &opera
       inst_.src0 == amdgpu::SRC_DPP &&
       (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
        (dpp_bound_ctrl_ == 0 && (amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_) || dpp_fi_ == 0)));
-  if (sdwa_preserve || dpp_partial)
-    for (int i = 0; i < num_dst_operands(); ++i)
-      if (const auto *dst = dst_operand(i))
-        if (auto ref = dst->to_register_ref())
-          if (ref->cls == RegClass::VGPR)
+  if (sdwa_preserve || dpp_partial) {
+    for (int i = 0; i < num_dst_operands(); ++i) {
+      if (const auto *dst = dst_operand(i)) {
+        if (auto ref = dst->to_register_ref()) {
+          if (ref->cls == RegClass::VGPR) {
             operands.push_back(dst);
+          }
+        }
+      }
+    }
+  }
 }
 
 bool Vop1::default_encoding() {
@@ -1276,19 +1304,22 @@ bool Vopc::has_encoded_literal32() const {
 
 Vopc::Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
-  if (has_encoded_literal64())
+  if (has_encoded_literal64()) {
     size_ += 2 * sizeof(MachineInst);
-  else if (has_encoded_dpp() || has_encoded_dpp8() || has_encoded_literal32())
+  } else if (has_encoded_dpp() || has_encoded_dpp8() || has_encoded_literal32()) {
     size_ += sizeof(MachineInst);
+  }
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
-  if (has_encoded_dpp())
+  if (has_encoded_dpp()) {
     dpp_modifiers_ = amdgpu::dpp::SourceModifiers::decode(
         *reinterpret_cast<const VopcVopDpp16MachineInst *>(inst));
+  }
 }
 
 bool Vopc::default_encoding() {
@@ -1305,16 +1336,18 @@ bool Vopc::has_dpp8() { return (inst_.src0 == 233 || inst_.src0 == 234); }
 bool Vopc::has_dpp16() { return (inst_.src0 == 250); }
 
 bool Vop2::has_encoded_dpp() const {
-  if (!(inst_.src0 == amdgpu::SRC_DPP))
+  if (!(inst_.src0 == amdgpu::SRC_DPP)) {
     return false;
+  }
   return (inst_.op >= 1 && inst_.op <= 14) || (inst_.op >= 17 && inst_.op <= 34) ||
          (inst_.op >= 37 && inst_.op <= 41) || inst_.op == 43 ||
          (inst_.op >= 47 && inst_.op <= 54) || inst_.op == 59;
 }
 
 bool Vop2::has_encoded_dpp8() const {
-  if (!(amdgpu::dpp::is_src_dpp8(inst_.src0)))
+  if (!(amdgpu::dpp::is_src_dpp8(inst_.src0))) {
     return false;
+  }
   return inst_.op == 1 || (inst_.op >= 3 && inst_.op <= 5) || (inst_.op >= 7 && inst_.op <= 12) ||
          (inst_.op >= 17 && inst_.op <= 22) || (inst_.op >= 24 && inst_.op <= 30) ||
          (inst_.op >= 32 && inst_.op <= 34) || (inst_.op >= 37 && inst_.op <= 39) ||
@@ -1458,23 +1491,27 @@ bool Vop2::has_encoded_literal32() const {
 
 Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
-  if (hasImpliedLiteral())
+  if (hasImpliedLiteral()) {
     size_ += impliedLiteralWordCount() * sizeof(MachineInst);
-  else if (hasImpliedLiteral64() || has_encoded_literal64())
+  } else if (hasImpliedLiteral64() || has_encoded_literal64()) {
     size_ += 2 * sizeof(MachineInst);
-  else if (has_encoded_dpp() || has_encoded_dpp8() || has_encoded_literal32())
+  } else if (has_encoded_dpp() || has_encoded_dpp8() || has_encoded_literal32()) {
     size_ += sizeof(MachineInst);
-  if (hasImpliedLiteral())
+  }
+  if (hasImpliedLiteral()) {
     literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
+  }
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
-  if (has_encoded_dpp())
+  if (has_encoded_dpp()) {
     dpp_modifiers_ = amdgpu::dpp::SourceModifiers::decode(
         *reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst));
+  }
 }
 
 void Vop2::implicit_uses(RegisterSet &uses) const {
@@ -1484,12 +1521,17 @@ void Vop2::implicit_uses(RegisterSet &uses) const {
       inst_.src0 == amdgpu::SRC_DPP &&
       (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
        (dpp_bound_ctrl_ == 0 && (amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_) || dpp_fi_ == 0)));
-  if (sdwa_preserve || dpp_partial)
-    for (int i = 0; i < num_dst_operands(); ++i)
-      if (const auto *dst = dst_operand(i))
-        if (auto ref = dst->to_register_ref())
-          if (ref->cls == RegClass::VGPR)
+  if (sdwa_preserve || dpp_partial) {
+    for (int i = 0; i < num_dst_operands(); ++i) {
+      if (const auto *dst = dst_operand(i)) {
+        if (auto ref = dst->to_register_ref()) {
+          if (ref->cls == RegClass::VGPR) {
             uses.expand(*ref);
+          }
+        }
+      }
+    }
+  }
 }
 
 void Vop2::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
@@ -1499,12 +1541,17 @@ void Vop2::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &opera
       inst_.src0 == amdgpu::SRC_DPP &&
       (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
        (dpp_bound_ctrl_ == 0 && (amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_) || dpp_fi_ == 0)));
-  if (sdwa_preserve || dpp_partial)
-    for (int i = 0; i < num_dst_operands(); ++i)
-      if (const auto *dst = dst_operand(i))
-        if (auto ref = dst->to_register_ref())
-          if (ref->cls == RegClass::VGPR)
+  if (sdwa_preserve || dpp_partial) {
+    for (int i = 0; i < num_dst_operands(); ++i) {
+      if (const auto *dst = dst_operand(i)) {
+        if (auto ref = dst->to_register_ref()) {
+          if (ref->cls == RegClass::VGPR) {
             operands.push_back(dst);
+          }
+        }
+      }
+    }
+  }
 }
 
 bool Vop2::default_encoding() {
@@ -1538,8 +1585,9 @@ uint32_t Vop2::impliedLiteralWordCount() {
 }
 
 bool Vop3::has_encoded_dpp() const {
-  if (!(inst_.src0 == amdgpu::SRC_DPP))
+  if (!(inst_.src0 == amdgpu::SRC_DPP)) {
     return false;
+  }
   return (inst_.op >= 1 && inst_.op <= 14) || (inst_.op >= 17 && inst_.op <= 30) ||
          (inst_.op >= 49 && inst_.op <= 54) || (inst_.op >= 57 && inst_.op <= 62) ||
          (inst_.op >= 65 && inst_.op <= 70) || (inst_.op >= 73 && inst_.op <= 78) ||
@@ -1573,8 +1621,9 @@ bool Vop3::has_encoded_dpp() const {
 }
 
 bool Vop3::has_encoded_dpp8() const {
-  if (!(amdgpu::dpp::is_src_dpp8(inst_.src0)))
+  if (!(amdgpu::dpp::is_src_dpp8(inst_.src0))) {
     return false;
+  }
   return (inst_.op >= 1 && inst_.op <= 14) || (inst_.op >= 17 && inst_.op <= 30) ||
          (inst_.op >= 49 && inst_.op <= 54) || (inst_.op >= 57 && inst_.op <= 62) ||
          (inst_.op >= 65 && inst_.op <= 70) || (inst_.op >= 73 && inst_.op <= 78) ||
@@ -1611,8 +1660,9 @@ bool Vop3::has_encoded_dpp8() const {
 
 void Vop3::append_mnemonic(std::string &out) const {
   out += mnemonic_;
-  if (has_encoded_dpp() || has_encoded_dpp8())
+  if (has_encoded_dpp() || has_encoded_dpp8()) {
     out += "_e64_dpp";
+  }
 }
 
 bool Vop3::displays_vop3_op_sel() const {
@@ -1641,13 +1691,16 @@ bool Vop3::displays_vop3_op_sel() const {
 uint32_t Vop3::vop3_encoded_source_count() const {
   uint32_t count = 0;
   for (uint8_t src = 0; src < num_src_; ++src) {
-    if (src_operands_[src]->is_fieldless())
+    if (src_operands_[src]->is_fieldless()) {
       continue;
+    }
     bool repeats_dst = false;
-    for (uint8_t dst = 0; dst < num_dst_; ++dst)
+    for (uint8_t dst = 0; dst < num_dst_; ++dst) {
       repeats_dst |= src_operands_[src] == dst_operands_[dst];
-    if (!repeats_dst)
+    }
+    if (!repeats_dst) {
       ++count;
+    }
   }
   return count;
 }
@@ -1655,18 +1708,22 @@ uint32_t Vop3::vop3_encoded_source_count() const {
 int32_t Vop3::vop3_encoded_source_index(uint8_t operand_index) const {
   int32_t encoded_index = 0;
   for (uint8_t src = 0; src <= operand_index; ++src) {
-    if (src_operands_[src]->is_fieldless())
-      continue;
-    bool repeats_dst = false;
-    for (uint8_t dst = 0; dst < num_dst_; ++dst)
-      repeats_dst |= src_operands_[src] == dst_operands_[dst];
-    if (repeats_dst) {
-      if (src == operand_index)
-        return -1;
+    if (src_operands_[src]->is_fieldless()) {
       continue;
     }
-    if (src == operand_index)
+    bool repeats_dst = false;
+    for (uint8_t dst = 0; dst < num_dst_; ++dst) {
+      repeats_dst |= src_operands_[src] == dst_operands_[dst];
+    }
+    if (repeats_dst) {
+      if (src == operand_index) {
+        return -1;
+      }
+      continue;
+    }
+    if (src == operand_index) {
       return encoded_index;
+    }
     ++encoded_index;
   }
   return -1;
@@ -2210,14 +2267,17 @@ bool Vop3::has_encoded_literal32() const {
 
 Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
-  if (has_encoded_literal32())
+  if (has_encoded_literal32()) {
     size_ += sizeof(MachineInst);
-  if (has_encoded_dpp() || has_encoded_dpp8())
+  }
+  if (has_encoded_dpp() || has_encoded_dpp8()) {
     size_ += sizeof(MachineInst);
+  }
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
 }
@@ -2227,12 +2287,17 @@ void Vop3::implicit_uses(RegisterSet &uses) const {
       inst_.src0 == amdgpu::SRC_DPP &&
       (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
        (dpp_bound_ctrl_ == 0 && (amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_) || dpp_fi_ == 0)));
-  if (dpp_partial)
-    for (int i = 0; i < num_dst_operands(); ++i)
-      if (const auto *dst = dst_operand(i))
-        if (auto ref = dst->to_register_ref())
-          if (ref->cls == RegClass::VGPR)
+  if (dpp_partial) {
+    for (int i = 0; i < num_dst_operands(); ++i) {
+      if (const auto *dst = dst_operand(i)) {
+        if (auto ref = dst->to_register_ref()) {
+          if (ref->cls == RegClass::VGPR) {
             uses.expand(*ref);
+          }
+        }
+      }
+    }
+  }
 }
 
 void Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
@@ -2240,12 +2305,17 @@ void Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &opera
       inst_.src0 == amdgpu::SRC_DPP &&
       (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
        (dpp_bound_ctrl_ == 0 && (amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_) || dpp_fi_ == 0)));
-  if (dpp_partial)
-    for (int i = 0; i < num_dst_operands(); ++i)
-      if (const auto *dst = dst_operand(i))
-        if (auto ref = dst->to_register_ref())
-          if (ref->cls == RegClass::VGPR)
+  if (dpp_partial) {
+    for (int i = 0; i < num_dst_operands(); ++i) {
+      if (const auto *dst = dst_operand(i)) {
+        if (auto ref = dst->to_register_ref()) {
+          if (ref->cls == RegClass::VGPR) {
             operands.push_back(dst);
+          }
+        }
+      }
+    }
+  }
 }
 
 bool Vop3::has_lit_0() {
@@ -2304,20 +2374,24 @@ bool Vop3p::has_encoded_dpp8() const {
 
 void Vop3p::append_mnemonic(std::string &out) const {
   out += mnemonic_;
-  if (has_encoded_dpp() || has_encoded_dpp8())
+  if (has_encoded_dpp() || has_encoded_dpp8()) {
     out += "_e64_dpp";
+  }
 }
 
 uint32_t Vop3p::vop3p_encoded_source_count() const {
   uint32_t count = 0;
   for (uint8_t src = 0; src < num_src_; ++src) {
-    if (src_operands_[src]->is_fieldless())
+    if (src_operands_[src]->is_fieldless()) {
       continue;
+    }
     bool repeats_dst = false;
-    for (uint8_t dst = 0; dst < num_dst_; ++dst)
+    for (uint8_t dst = 0; dst < num_dst_; ++dst) {
       repeats_dst |= src_operands_[src] == dst_operands_[dst];
-    if (!repeats_dst)
+    }
+    if (!repeats_dst) {
       ++count;
+    }
   }
   return count;
 }
@@ -2393,15 +2467,18 @@ bool Vop3p::has_encoded_literal32() const {
 Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn,
              ExtensionDecodePolicy extension_policy)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
   if (extension_policy == ExtensionDecodePolicy::Decode) {
-    if (has_encoded_literal32())
+    if (has_encoded_literal32()) {
       size_ += sizeof(MachineInst);
-    if (has_encoded_dpp() || has_encoded_dpp8())
+    }
+    if (has_encoded_dpp() || has_encoded_dpp8()) {
       size_ += sizeof(MachineInst);
+    }
     std::memcpy(raw_words_.data(), inst, size_);
     raw_encoding_ = raw_words_.data();
   }
@@ -2412,12 +2489,17 @@ void Vop3p::implicit_uses(RegisterSet &uses) const {
       inst_.src0 == amdgpu::SRC_DPP &&
       (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
        (dpp_bound_ctrl_ == 0 && (amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_) || dpp_fi_ == 0)));
-  if (dpp_partial)
-    for (int i = 0; i < num_dst_operands(); ++i)
-      if (const auto *dst = dst_operand(i))
-        if (auto ref = dst->to_register_ref())
-          if (ref->cls == RegClass::VGPR)
+  if (dpp_partial) {
+    for (int i = 0; i < num_dst_operands(); ++i) {
+      if (const auto *dst = dst_operand(i)) {
+        if (auto ref = dst->to_register_ref()) {
+          if (ref->cls == RegClass::VGPR) {
             uses.expand(*ref);
+          }
+        }
+      }
+    }
+  }
 }
 
 void Vop3p::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
@@ -2425,12 +2507,17 @@ void Vop3p::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &oper
       inst_.src0 == amdgpu::SRC_DPP &&
       (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
        (dpp_bound_ctrl_ == 0 && (amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_) || dpp_fi_ == 0)));
-  if (dpp_partial)
-    for (int i = 0; i < num_dst_operands(); ++i)
-      if (const auto *dst = dst_operand(i))
-        if (auto ref = dst->to_register_ref())
-          if (ref->cls == RegClass::VGPR)
+  if (dpp_partial) {
+    for (int i = 0; i < num_dst_operands(); ++i) {
+      if (const auto *dst = dst_operand(i)) {
+        if (auto ref = dst->to_register_ref()) {
+          if (ref->cls == RegClass::VGPR) {
             operands.push_back(dst);
+          }
+        }
+      }
+    }
+  }
 }
 
 bool Vop3p::has_lit_0() {
@@ -2477,6 +2564,7 @@ bool Vop3p::has_dpp16() {
 
 Vds::Vds(std::string_view mnemonic, const VdsMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= LDS;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -2485,6 +2573,7 @@ Vds::Vds(std::string_view mnemonic, const VdsMachineInst *inst, ExecuteFn exec_f
 
 Vbuffer::Vbuffer(std::string_view mnemonic, const VbufferMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VMEM;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -2493,6 +2582,7 @@ Vbuffer::Vbuffer(std::string_view mnemonic, const VbufferMachineInst *inst, Exec
 
 Vimage::Vimage(std::string_view mnemonic, const VimageMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VMEM;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -2501,6 +2591,7 @@ Vimage::Vimage(std::string_view mnemonic, const VimageMachineInst *inst, Execute
 
 Vflat::Vflat(std::string_view mnemonic, const VflatMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VMEM;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -2509,6 +2600,7 @@ Vflat::Vflat(std::string_view mnemonic, const VflatMachineInst *inst, ExecuteFn 
 
 Vscratch::Vscratch(std::string_view mnemonic, const VscratchMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VMEM;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -2517,6 +2609,7 @@ Vscratch::Vscratch(std::string_view mnemonic, const VscratchMachineInst *inst, E
 
 Vglobal::Vglobal(std::string_view mnemonic, const VglobalMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VMEM;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -2524,33 +2617,39 @@ Vglobal::Vglobal(std::string_view mnemonic, const VglobalMachineInst *inst, Exec
 }
 
 bool Vop3SdstEnc::has_encoded_dpp() const {
-  if (!(inst_.src0 == amdgpu::SRC_DPP))
+  if (!(inst_.src0 == amdgpu::SRC_DPP)) {
     return false;
+  }
   return (inst_.op >= 288 && inst_.op <= 290) || (inst_.op >= 765 && inst_.op <= 770);
 }
 
 bool Vop3SdstEnc::has_encoded_dpp8() const {
-  if (!(amdgpu::dpp::is_src_dpp8(inst_.src0)))
+  if (!(amdgpu::dpp::is_src_dpp8(inst_.src0))) {
     return false;
+  }
   return (inst_.op >= 288 && inst_.op <= 290) || (inst_.op >= 768 && inst_.op <= 770);
 }
 
 void Vop3SdstEnc::append_mnemonic(std::string &out) const {
   out += mnemonic_;
-  if (has_encoded_dpp() || has_encoded_dpp8())
+  if (has_encoded_dpp() || has_encoded_dpp8()) {
     out += "_e64_dpp";
+  }
 }
 
 uint32_t Vop3SdstEnc::vop3_encoded_source_count() const {
   uint32_t count = 0;
   for (uint8_t src = 0; src < num_src_; ++src) {
-    if (src_operands_[src]->is_fieldless())
+    if (src_operands_[src]->is_fieldless()) {
       continue;
+    }
     bool repeats_dst = false;
-    for (uint8_t dst = 0; dst < num_dst_; ++dst)
+    for (uint8_t dst = 0; dst < num_dst_; ++dst) {
       repeats_dst |= src_operands_[src] == dst_operands_[dst];
-    if (!repeats_dst)
+    }
+    if (!repeats_dst) {
       ++count;
+    }
   }
   return count;
 }
@@ -2558,18 +2657,22 @@ uint32_t Vop3SdstEnc::vop3_encoded_source_count() const {
 int32_t Vop3SdstEnc::vop3_encoded_source_index(uint8_t operand_index) const {
   int32_t encoded_index = 0;
   for (uint8_t src = 0; src <= operand_index; ++src) {
-    if (src_operands_[src]->is_fieldless())
-      continue;
-    bool repeats_dst = false;
-    for (uint8_t dst = 0; dst < num_dst_; ++dst)
-      repeats_dst |= src_operands_[src] == dst_operands_[dst];
-    if (repeats_dst) {
-      if (src == operand_index)
-        return -1;
+    if (src_operands_[src]->is_fieldless()) {
       continue;
     }
-    if (src == operand_index)
+    bool repeats_dst = false;
+    for (uint8_t dst = 0; dst < num_dst_; ++dst) {
+      repeats_dst |= src_operands_[src] == dst_operands_[dst];
+    }
+    if (repeats_dst) {
+      if (src == operand_index) {
+        return -1;
+      }
+      continue;
+    }
+    if (src == operand_index) {
       return encoded_index;
+    }
     ++encoded_index;
   }
   return -1;
@@ -2597,14 +2700,17 @@ bool Vop3SdstEnc::has_encoded_literal32() const {
 Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst,
                          ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
-  if (has_encoded_literal32())
+  if (has_encoded_literal32()) {
     size_ += sizeof(MachineInst);
-  if (has_encoded_dpp() || has_encoded_dpp8())
+  }
+  if (has_encoded_dpp() || has_encoded_dpp8()) {
     size_ += sizeof(MachineInst);
+  }
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
 }
@@ -2614,12 +2720,17 @@ void Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
       inst_.src0 == amdgpu::SRC_DPP &&
       (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
        (dpp_bound_ctrl_ == 0 && (amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_) || dpp_fi_ == 0)));
-  if (dpp_partial)
-    for (int i = 0; i < num_dst_operands(); ++i)
-      if (const auto *dst = dst_operand(i))
-        if (auto ref = dst->to_register_ref())
-          if (ref->cls == RegClass::VGPR)
+  if (dpp_partial) {
+    for (int i = 0; i < num_dst_operands(); ++i) {
+      if (const auto *dst = dst_operand(i)) {
+        if (auto ref = dst->to_register_ref()) {
+          if (ref->cls == RegClass::VGPR) {
             uses.expand(*ref);
+          }
+        }
+      }
+    }
+  }
 }
 
 void Vop3SdstEnc::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
@@ -2627,12 +2738,17 @@ void Vop3SdstEnc::implicit_use_operands(std::vector<const ::rocjitsu::Operand *>
       inst_.src0 == amdgpu::SRC_DPP &&
       (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
        (dpp_bound_ctrl_ == 0 && (amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_) || dpp_fi_ == 0)));
-  if (dpp_partial)
-    for (int i = 0; i < num_dst_operands(); ++i)
-      if (const auto *dst = dst_operand(i))
-        if (auto ref = dst->to_register_ref())
-          if (ref->cls == RegClass::VGPR)
+  if (dpp_partial) {
+    for (int i = 0; i < num_dst_operands(); ++i) {
+      if (const auto *dst = dst_operand(i)) {
+        if (auto ref = dst->to_register_ref()) {
+          if (ref->cls == RegClass::VGPR) {
             operands.push_back(dst);
+          }
+        }
+      }
+    }
+  }
 }
 
 bool Vop3SdstEnc::has_lit_0() {

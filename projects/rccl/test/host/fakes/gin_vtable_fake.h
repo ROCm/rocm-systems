@@ -25,6 +25,7 @@ struct FakeGinVtable {
   int getPropertiesCalls = 0;
   int listenCalls = 0;
   int connectCalls = 0;
+  volatile uint32_t* connectAbortFlag = nullptr;  // last abortFlag connect() was given
   int createContextCalls = 0;
   int regMrSymCalls = 0;
   int regMrSymDmaBufCalls = 0;
@@ -57,6 +58,7 @@ struct FakeGinVtable {
   // finalize() frees the ctx it is handed. Leave init null in the vtable when
   // initNullFn is set.
   int ndev = 0;
+  int netDeviceType = 0;  // reported by getProperties()
   void* lastCtx = nullptr;
   bool initNullFn = false;
   bool lastError = false;
@@ -109,7 +111,10 @@ struct FakeGinVtable {
   static ncclResult_t GetProperties(int /*dev*/, ncclNetProperties_t* props) {
     FakeGinVtable& self = current();
     ++self.getPropertiesCalls;
-    if (self.getPropertiesResult == ncclSuccess && props) std::memset(props, 0, sizeof(*props));
+    if (self.getPropertiesResult == ncclSuccess && props) {
+      std::memset(props, 0, sizeof(*props));
+      props->netDeviceType = static_cast<decltype(props->netDeviceType)>(self.netDeviceType);
+    }
     return self.getPropertiesResult;
   }
 
@@ -122,8 +127,9 @@ struct FakeGinVtable {
   }
 
   static ncclResult_t Connect(void* /*ctx*/, void* /*handles*/[], int /*nranks*/, int /*rank*/,
-                              void* /*listenComm*/, void** collComm) {
+                              void* /*listenComm*/, void** collComm, volatile uint32_t* abortFlag) {
     FakeGinVtable& self = current();
+    self.connectAbortFlag = abortFlag;
     if (++self.connectCalls == self.connectFailOnCall) return ncclSystemError;
     if (self.connectResult != ncclSuccess) return self.connectResult;
     if (collComm) *collComm = reinterpret_cast<void*>(self.nextCollComm++);

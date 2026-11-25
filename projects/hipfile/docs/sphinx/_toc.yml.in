@@ -58,6 +58,8 @@ subtrees:
         title: Environment variables
       - file: reference/hipFile-cuFile-compatibility.rst
         title: cuFile compatibility
+      - file: reference/hipFile-integrations.rst
+        title: Frameworks and applications
       - file: reference/hipFile-api-reference.rst
         title: API reference
         subtrees:

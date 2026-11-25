@@ -102,6 +102,7 @@ struct YFromPackedYUYVBatchParams {
     const uint8_t *src_image;
     uint32_t src_image_stride_in_bytes;
     uint32_t dst_width_in_8px_blocks; // Destination width in 8-pixel-wide blocks; each thread writes 8 luma samples of one row.
+    uint32_t dst_width;               // Destination width in pixels; the last block of a row is clipped to it.
 };
 void ExtractYFromPackedYUYVBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
     const YFromPackedYUYVBatchParams *d_params, uint32_t n_images);
@@ -116,6 +117,7 @@ struct PackedYUYVToPlanarYUVBatchParams {
     const uint8_t *src_image;
     uint32_t src_image_stride_in_bytes;
     uint32_t dst_width_in_8px_blocks; // Destination width in 8-pixel-wide blocks; each thread writes 8 luma samples of one row.
+    uint32_t dst_width;               // Destination luma width in pixels (chroma width is dst_width >> 1); the last block of a row is clipped to it.
 };
 void ConvertPackedYUYVToPlanarYUVBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
     const PackedYUYVToPlanarYUVBatchParams *d_params, uint32_t n_images);
@@ -149,6 +151,8 @@ struct YUVToRGBBatchParams {
     uint32_t       src_chroma_image_stride_in_bytes; // NV12
     uint32_t       dst_width_in_8px_blocks;  // ceil(dst_width / 8)
     uint32_t       dst_height_in_2row_blocks; // ceil(dst_height / 2)
+    uint32_t       dst_width;                 // Destination size in pixels; blocks on the right or bottom edge
+    uint32_t       dst_height;                // are clipped to it.
 };
 
 struct YUVToRGBPlanarBatchParams {
@@ -167,6 +171,8 @@ struct YUVToRGBPlanarBatchParams {
     uint32_t       src_chroma_image_stride_in_bytes;
     uint32_t       dst_width_in_8px_blocks;  // ceil(dst_width / 8)
     uint32_t       dst_height_in_2row_blocks; // ceil(dst_height / 2)
+    uint32_t       dst_width;                 // Destination size in pixels; blocks on the right or bottom edge
+    uint32_t       dst_height;                // are clipped to it.
 };
 
 void ColorConvertYUVToRGBBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,

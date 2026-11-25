@@ -107,7 +107,8 @@ static std::vector<fs::path> find_pid_subarchives(const fs::path& root) {
 // already parsed is kept — rather than a reason to reject the whole file.
 // ---------------------------------------------------------------------------
 
-RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out) {
+RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out,
+                             ByteBudget* budget) {
   const uint16_t hdr_size = static_cast<uint16_t>(sizeof(hrr_event_header));
   out.resize(hdr_size);
 
@@ -132,12 +133,16 @@ RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out) {
             total, kMaxRecordBytes);
     return RecordStatus::Torn;
   }
+  // The record is held whole until it is stored, so charge it before it is
+  // allocated. `out` is only the header so far.
+  if (budget && !budget->try_charge(total)) return RecordStatus::OverBudget;
   if (total > hdr_size) {
     out.resize(total);
     const uint32_t pl_size = total - hdr_size;
     if (fread(out.data() + hdr_size, 1, pl_size, f) != pl_size) {
       fprintf(stderr, "[HRR] Truncated event payload (expected %u bytes) at tail\n",
               pl_size);
+      if (budget) budget->release(total);
       return RecordStatus::Torn;
     }
   }
@@ -236,9 +241,38 @@ static bool resolve_archive_path(const std::string& input, std::string& resolved
 //   per snapshot (v10, 41 bytes): see BufferSnapshot; the attribute tail follows
 // ---------------------------------------------------------------------------
 
+// What an unordered_map node costs beyond its pair: the next pointer, the cached
+// hash and the bucket slot, rounded up.
+constexpr uint64_t kMapNodeOverhead = 32;
+
+// The least a malloc takes: glibc's smallest chunk is 32 bytes on a 64-bit target.
+constexpr uint64_t kMinAllocation = 32;
+
+// Charges what a parse keeps against the load budget before it allocates it.
+// A record's bytes expand when parsed (a 3-byte argument header becomes a
+// KernelArg, a 41-byte snapshot a BufferSnapshot), so the raw-record charge
+// alone does not cover it. `total` is what was charged, so a parse that fails
+// can give it back.
+struct ParseCharge {
+  ByteBudget& budget;
+  uint64_t total = 0;
+  bool refused = false;
+  bool charge(uint64_t n) {
+    if (!budget.try_charge(n)) { refused = true; return false; }
+    total += n;
+    return true;
+  }
+  // A non-empty vector's buffer is its own malloc, which takes at least
+  // kMinAllocation whatever it holds, so a record full of one-byte arguments
+  // is not charged its byte count alone.
+  bool charge_buffer(uint64_t n) {
+    return charge(n ? std::max<uint64_t>(n, kMinAllocation) : 0);
+  }
+};
+
 static bool parse_kernel_launch(const uint8_t* data, size_t len,
                                 uint64_t& out_stream_handle,
-                                KernelLaunchEvent& kl) {
+                                KernelLaunchEvent& kl, ParseCharge& pc) {
   const uint8_t* p   = data;
   const uint8_t* end = data + len;
 
@@ -251,6 +285,7 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
   uint16_t name_len;
   memcpy(&name_len, p, 2); p += 2;
   if (p + name_len > end) return false;
+  if (!pc.charge(name_len)) return false;
   kl.kernel_name.assign(reinterpret_cast<const char*>(p), name_len);
   p += name_len;
 
@@ -272,17 +307,22 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
   memcpy(&num_snapshots, p, 2); p += 2;
 
   // args
+  if (!pc.charge(uint64_t(num_args) * sizeof(KernelArg))) return false;
+  kl.args.reserve(num_args);
   for (uint16_t i = 0; i < num_args; i++) {
     if (p + 3 > end) return false;
     KernelArg arg;
     arg.value_kind = *p++;
     memcpy(&arg.size, p, 2); p += 2;
     if (p + arg.size > end) return false;
+    if (!pc.charge_buffer(arg.size)) return false;
     arg.data.assign(p, p + arg.size);
     p += arg.size;
     if (arg.value_kind == 3) {  // trailing embedded-pointer offset list
       if (p + 2 > end) return false;
       uint16_t n_ptrs; memcpy(&n_ptrs, p, 2); p += 2;
+      if (!pc.charge_buffer(uint64_t(n_ptrs) * sizeof(uint16_t))) return false;
+      arg.ptr_offsets.reserve(n_ptrs);
       for (uint16_t k = 0; k < n_ptrs; k++) {
         if (p + 2 > end) return false;
         uint16_t off; memcpy(&off, p, 2); p += 2;
@@ -293,6 +333,8 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
   }
 
   // pinned host snapshots
+  if (!pc.charge(uint64_t(num_snapshots) * sizeof(BufferSnapshot))) return false;
+  kl.snapshots.reserve(num_snapshots);
   for (uint16_t i = 0; i < num_snapshots; i++) {
     if (p + 41 > end) return false;
     BufferSnapshot snap;
@@ -312,7 +354,8 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
 // Archive loader
 // ---------------------------------------------------------------------------
 
-bool load_archive(const std::string& path, Archive& archive) {
+bool load_archive(const std::string& path, Archive& archive,
+                  ByteBudget* bytes) {
   std::string archive_dir;
   if (!resolve_archive_path(path, archive_dir))
     return false;
@@ -326,6 +369,38 @@ bool load_archive(const std::string& path, Archive& archive) {
   archive.version = file_version;
   archive.flags = file_flags;
 
+  // The budget is the caller's when given: the archive keeps its bytes charged
+  // on success, and a failed load gives back what it charged since `start`
+  // (the load is single-threaded and nothing else charges the budget meanwhile).
+  ByteBudget own_budget;
+  ByteBudget& budget = bytes ? *bytes : own_budget;
+  const uint64_t start = budget.used();
+  auto fail = [&](const char* what) {
+    fprintf(stderr,
+            "[HRR] Refusing %s: %s; stopped reading after %zu events\n",
+            events_path.c_str(), what, archive.events.size());
+    budget.release(budget.used() - start);
+    if (f) fclose(f);
+    return false;
+  };
+  auto over_budget = [&] {
+    std::string why = "loading needs more than " + std::to_string(budget.cap()) +
+                      " bytes of host memory (--max-host-bytes)";
+    return fail(why.c_str());
+  };
+  // Event slots: the vector's capacity is what is held, and a growth holds the
+  // old and the new buffer at once, so the new one is charged before the old is
+  // given back.
+  uint64_t slots_charged = 0;
+  auto grow_events = [&] {
+    const size_t cap = std::max<size_t>(archive.events.capacity() * 2, 64);
+    if (!budget.try_charge(uint64_t(cap) * sizeof(Event))) return false;
+    archive.events.reserve(cap);
+    budget.release(slots_charged);
+    slots_charged = uint64_t(cap) * sizeof(Event);
+    return true;
+  };
+
   // Read events sequentially. read_raw_record handles the framing and the
   // torn-tail recovery; a torn record means the capture was interrupted, and
   // everything parsed before it is kept. The clean-shutdown trailer
@@ -338,7 +413,8 @@ bool load_archive(const std::string& path, Archive& archive) {
   const uint16_t hdr_size = static_cast<uint16_t>(sizeof(hrr_event_header));
   while (true) {
     Event ev;
-    const RecordStatus st = read_raw_record(f, ev.raw_payload);
+    const RecordStatus st = read_raw_record(f, ev.raw_payload, &budget);
+    if (st == RecordStatus::OverBudget) return over_budget();
     if (st == RecordStatus::EndOfStream) break;
     if (st == RecordStatus::Torn) {
       fprintf(stderr, "[HRR] Recovered %zu events before the torn record\n",
@@ -359,6 +435,8 @@ bool load_archive(const std::string& path, Archive& archive) {
       if (er->eof_magic == HRR_EOF_MAGIC) {
         trailer = true;
         trailer_count = er->total_events;
+        // Not stored, so not held: give back what it was charged.
+        budget.release(ev.raw_payload.size());
         break;  // the trailer is not a replay event, and nothing after it is
       }
     }
@@ -511,15 +589,19 @@ bool load_archive(const std::string& path, Archive& archive) {
       case HRR_API_HIPLAUNCHKERNEL:
       case HRR_API_HIPLAUNCHBYPTR: {
         auto* kl = new KernelLaunchEvent();
+        ParseCharge pc{budget};
+        pc.charge(sizeof(KernelLaunchEvent));
         uint64_t sh = 0;
         const uint8_t* kl_data = ev.raw_payload.data() + hdr_size;
         size_t         kl_len  = static_cast<size_t>(total) - hdr_size;
-        if (parse_kernel_launch(kl_data, kl_len, sh, *kl)) {
+        if (parse_kernel_launch(kl_data, kl_len, sh, *kl, pc)) {
           ev.stream_handle  = sh;
           ev.kernel_launch  = kl;
           archive.kernel_count++;
         } else {
           delete kl;
+          budget.release(pc.total);
+          if (pc.refused) return over_budget();
         }
         break;
       }
@@ -605,14 +687,12 @@ bool load_archive(const std::string& path, Archive& archive) {
     #undef SIZE_OK
 
     if (archive.events.size() >= max_events()) {
-      fprintf(stderr,
-              "[HRR] Refusing %s: more than %llu events (--max-events); stopped "
-              "reading after %zu\n",
-              events_path.c_str(), (unsigned long long)max_events(),
-              archive.events.size());
-      fclose(f);
-      return false;
+      const std::string why = "more than " + std::to_string(max_events()) +
+                              " events (--max-events)";
+      return fail(why.c_str());
     }
+    if (archive.events.size() == archive.events.capacity() && !grow_events())
+      return over_budget();
     archive.events.push_back(std::move(ev));
   }
 
@@ -630,6 +710,7 @@ bool load_archive(const std::string& path, Archive& archive) {
   }
 
   fclose(f);
+  f = nullptr;
 
   if (trailer) {
     complete = trailer_count == archive.events.size();
@@ -655,10 +736,15 @@ bool load_archive(const std::string& path, Archive& archive) {
   // Multi-threaded captures write events from different threads in file-arrival
   // order, which may differ from the logical call order. sequence_id is assigned
   // atomically by the writer, so sorting by it restores the true call sequence.
+  // stable_sort takes a scratch buffer of up to half the events, so it is
+  // charged while the sort runs.
+  const uint64_t sort_scratch = uint64_t(archive.events.size() / 2 + 1) * sizeof(Event);
+  if (!budget.try_charge(sort_scratch)) return over_budget();
   std::stable_sort(archive.events.begin(), archive.events.end(),
     [](const Event& a, const Event& b) {
       return a.header().sequence_id < b.header().sequence_id;
     });
+  budget.release(sort_scratch);
 
   archive.event_count = archive.events.size();
 
@@ -672,11 +758,20 @@ bool load_archive(const std::string& path, Archive& archive) {
     }
   }
 
+  // One map node per file: the key (the stem), the value (the path) and the
+  // node itself. A file count alone can then set the memory, so it is charged.
+  auto charge_map_node = [&](const fs::path& p) {
+    return budget.try_charge(sizeof(std::pair<const std::string, std::string>) +
+                             kMapNodeOverhead + p.stem().string().size() +
+                             p.string().size());
+  };
+
   // Enumerate blobs
   std::string blobs_dir = archive_dir + "/blobs";
   if (fs::exists(blobs_dir)) {
     for (auto& entry : fs::recursive_directory_iterator(blobs_dir)) {
       if (entry.is_regular_file() && entry.path().extension() == ".blob") {
+        if (!charge_map_node(entry.path())) return over_budget();
         archive.blobs[entry.path().stem().string()] = entry.path().string();
         archive.blob_count++;
       }
@@ -688,6 +783,7 @@ bool load_archive(const std::string& path, Archive& archive) {
   if (fs::exists(co_dir)) {
     for (auto& entry : fs::directory_iterator(co_dir)) {
       if (entry.is_regular_file() && entry.path().extension() == ".hsaco") {
+        if (!charge_map_node(entry.path())) return over_budget();
         archive.code_objects[entry.path().stem().string()] = entry.path().string();
         archive.code_object_count++;
       }

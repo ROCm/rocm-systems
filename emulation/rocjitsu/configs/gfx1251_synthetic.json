@@ -6,16 +6,19 @@
     "target": "gfx1251",
     "gpu": {
       "device": {
+        "gpu_id": 1251,
         "gfx_target_version": 120501,
         "marketing_name": "Synthetic gfx1251 functional simulator target",
         "simd_count": 4,
+        "max_waves_per_simd": 8,
         "num_sdma_engines": 1,
         "num_sdma_queues_per_engine": 1,
         "num_shader_engines": 1,
         "num_shader_arrays_per_engine": 1,
         "num_cu_per_sh": 1,
         "simd_per_cu": 4,
-        "wave_front_size": 32
+        "wave_front_size": 32,
+        "local_mem_size": 1073741824
       }
     }
   },
@@ -43,7 +46,7 @@
                 "name": "cu0",
                 "type": "compute_unit",
                 "config": [
-                  { "key": "num_wf_slots", "value": "2" },
+                  { "key": "num_wf_slots", "value": "32" },
                   { "key": "sgprs_per_wf", "value": "128" },
                   { "key": "vgprs_per_wf", "value": "32" },
                   { "key": "lds_size_kb", "value": "64" }

@@ -11,15 +11,19 @@ import pytest
 class TestGoogleTestSuite:
     """Run the rdctst GoogleTest binary and report results."""
 
-    def test_rdctst_embedded_batch(self, rdctst_path, rdcd_path, has_gpu):
+    def test_rdctst_embedded_batch(self, rdctst_path, has_gpu, request):
         if not has_gpu:
             pytest.skip("No AMD GPU -- cannot run rdctst")
+        # rdctst's standalone tests connect to localhost:50051, where the session rdcd
+        # listens. --start_rdcd= (no path) has rdctst test that rdcd instead of starting
+        # its own, which would find the port taken.
+        request.getfixturevalue("rdcd_server")
 
         env = os.environ.copy()
         env["RDC_DISABLE_ROCP"] = "yes"
 
         result = subprocess.run(
-            [rdctst_path, "-b", f"--start_rdcd={rdcd_path}"],
+            [rdctst_path, "-b", "--start_rdcd="],
             capture_output=True,
             text=True,
             timeout=300,
@@ -113,6 +117,74 @@ class TestGoogleTestSuite:
 
         assert result.returncode == 0, (
             f"rdc_metric_fetcher_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
+        )
+
+    def test_rdc_cache_bounds(self, rocm_dir, rdctst_path):
+        # rdctst_path skips this test unless the RDC test package is installed, and
+        # every build that installs rdctst also installs rdc_cache_bounds_tests.
+        binary = os.path.join(rocm_dir, "share", "rdc", "rdctst_tests", "rdc_cache_bounds_tests")
+        assert os.path.isfile(binary), f"{binary} is missing from the RDC test package"
+
+        result = subprocess.run([binary], capture_output=True, text=True, timeout=120)
+
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+
+        assert result.returncode == 0, (
+            f"rdc_cache_bounds_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
+        )
+
+    def test_rdc_rocr_lifetime(self, rocm_dir, rdctst_path):
+        # rdctst_path skips this test unless the RDC test package is installed. Needs no GPU: the
+        # binary runs the ROCr diagnostic module against fake HSA calls. It is built with the
+        # module, so it is in every RDC test package that ships the module.
+        module = os.path.join(rocm_dir, "lib", "rdc", "librdc_rocr.so")
+        if not os.path.exists(module):
+            pytest.skip("RDC was built without the ROCr diagnostic module")
+        binary = os.path.join(rocm_dir, "share", "rdc", "rdctst_tests", "rdc_rocr_lifetime_tests")
+        assert os.path.isfile(binary), f"{binary} is missing from the RDC test package"
+
+        result = subprocess.run([binary], capture_output=True, text=True, timeout=120)
+
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+
+        assert result.returncode == 0, (
+            f"rdc_rocr_lifetime_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
+        )
+
+    def test_rdc_updater(self, rocm_dir, rdctst_path):
+        # rdctst_path skips this test unless the RDC test package is installed,
+        # which also installs rdc_updater_tests.
+        binary = os.path.join(rocm_dir, "share", "rdc", "rdctst_tests", "rdc_updater_tests")
+        assert os.path.isfile(binary), f"{binary} is missing from the RDC test package"
+
+        result = subprocess.run([binary], capture_output=True, text=True, timeout=120)
+
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+
+        assert result.returncode == 0, (
+            f"rdc_updater_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
+        )
+
+    def test_rdc_gpu_table(self, rocm_dir, rdctst_path):
+        # rdctst_path skips this test unless the RDC test package is installed,
+        # which also installs rdc_gpu_table_tests.
+        binary = os.path.join(rocm_dir, "share", "rdc", "rdctst_tests", "rdc_gpu_table_tests")
+        assert os.path.isfile(binary), f"{binary} is missing from the RDC test package"
+
+        result = subprocess.run([binary], capture_output=True, text=True, timeout=120)
+
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+
+        assert result.returncode == 0, (
+            f"rdc_gpu_table_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
         )
 
     def test_rdctst_help(self, rdctst_path):

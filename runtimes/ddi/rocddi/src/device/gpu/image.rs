@@ -1,12 +1,55 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! GFX12 image formats, linear layouts, and texture resource descriptors.
+//! GFX9 through GFX12 image formats, layouts, and resource descriptors.
 //!
-//! The encodings below follow `ROCr`'s gfx12 image resource definition;
-//! the linear row alignment follows `AddrLib3`'s GFX12 surface calculation.
+//! Hardware register encoding is independent of frontend handles and statuses.
+//! Layout inputs retain the device-qualified surface calculation.
 
 use crate::topology::GpuInfo;
+
+mod resource;
+mod sampler;
+
+pub use sampler::{
+    SamplerAddressMode, SamplerAnisotropy, SamplerCoordinates, SamplerDescription, SamplerFilter,
+    SamplerMipFilter, sampler_descriptor,
+};
+
+/// Resource-descriptor generation; GFX10.3 adds explicit linear row pitches.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Generation {
+    /// GFX9 separate numeric and data formats.
+    Gfx9,
+    /// GFX10.1 inferred linear pitch.
+    Gfx10,
+    /// GFX10.3 explicit linear pitch.
+    Gfx103,
+    /// GFX11 compact combined formats and 14-bit texture dimensions.
+    Gfx11,
+    /// GFX12 wider dimensions and mip fields.
+    Gfx12,
+}
+
+impl Generation {
+    /// Selects the register interface implemented for a GPU generation.
+    #[must_use]
+    pub fn from_gpu(info: &GpuInfo) -> Option<Self> {
+        match (info.gfx_major, info.gfx_minor) {
+            (9, _) => Some(Self::Gfx9),
+            (10, 1) => Some(Self::Gfx10),
+            (10, 3) => Some(Self::Gfx103),
+            (11, _) => Some(Self::Gfx11),
+            (12, _) => Some(Self::Gfx12),
+            _ => None,
+        }
+    }
+}
+
+pub use resource::{
+    base_mip_level, descriptor_for, imported_descriptor_for, imported_mip_chain_for,
+    mip_level_view_for, native_mip_descriptor_for,
+};
 
 /// Required base alignment for a GFX12 texture resource.
 pub const BASE_ALIGNMENT: usize = 256;
@@ -16,13 +59,10 @@ pub const ROW_ALIGNMENT: usize = 256;
 /// Largest element count representable by every supported buffer format.
 pub const BUFFER_MAX_ELEMENTS: u32 = u32::MAX / 16;
 
-/// Whether this GPU has a qualified GFX12 image descriptor path.
+/// Whether this GPU has an implemented image descriptor and transfer path.
 #[must_use]
 pub fn supported_gpu(info: &GpuInfo) -> bool {
-    matches!(
-        (info.gfx_major, info.gfx_minor, info.gfx_stepping),
-        (12, 0, 0 | 1)
-    )
+    info.target_profile.supports_image_sampler()
 }
 
 /// Encoded GFX12 image format and channel-selection fields.
@@ -107,12 +147,22 @@ pub enum ChannelOrder {
     Rg,
     /// Red and alpha.
     Ra,
+    /// Packed red, green, and blue.
+    Rgb,
     /// Red, green, blue, and alpha.
     Rgba,
     /// Blue, green, red, and alpha.
     Bgra,
     /// Alpha, red, green, and blue.
     Argb,
+    /// Standard-RGB color with linear alpha.
+    Srgba,
+    /// One intensity replicated to every access component.
+    Intensity,
+    /// One luminance replicated to RGB with opaque alpha.
+    Luminance,
+    /// Depth in the first access component.
+    Depth,
 }
 
 /// Numeric interpretation of each format component.
@@ -126,6 +176,12 @@ pub enum ChannelType {
     Unorm8,
     /// Unsigned normalized 16-bit integer.
     Unorm16,
+    /// Packed unsigned normalized 5:5:5 RGB.
+    Unorm555,
+    /// Packed unsigned normalized 5:6:5 RGB.
+    Unorm565,
+    /// Packed unsigned normalized 10:10:10 RGB or 10:10:10:2 RGBA.
+    Unorm101010,
     /// Signed 8-bit integer.
     Sint8,
     /// Signed 16-bit integer.
@@ -162,19 +218,53 @@ fn align_up(value: usize, alignment: usize) -> Option<usize> {
 }
 
 /// Returns the GFX12 combined format and component selectors for HIP formats.
-/// Unsupported packed, depth, and sRGB formats stay absent from capability
-/// queries until their access and conversion rules are implemented.
+/// Matches the format combinations in `ROCr`'s GFX12 image property table.
 #[must_use]
 pub fn format(order: ChannelOrder, channel_type: ChannelType) -> Option<Format> {
     let (channels, swizzle, bc_swizzle) = match order {
-        ChannelOrder::A => (1, [0, 0, 0, 4], 3),    // A
-        ChannelOrder::R => (1, [4, 0, 0, 1], 1),    // R
-        ChannelOrder::Rg => (2, [4, 5, 0, 1], 0),   // RG
-        ChannelOrder::Ra => (2, [4, 0, 0, 5], 1),   // RA
-        ChannelOrder::Rgba => (4, [4, 5, 6, 7], 0), // RGBA
+        ChannelOrder::A => (1, [0, 0, 0, 4], 3),   // A
+        ChannelOrder::R => (1, [4, 0, 0, 1], 1),   // R
+        ChannelOrder::Rg => (2, [4, 5, 0, 1], 0),  // RG
+        ChannelOrder::Ra => (2, [4, 0, 0, 5], 1),  // RA
+        ChannelOrder::Rgb => (3, [6, 5, 4, 1], 4), // Packed BGR storage.
+        ChannelOrder::Rgba | ChannelOrder::Srgba => (4, [4, 5, 6, 7], 0),
         ChannelOrder::Bgra => (4, [6, 5, 4, 7], 4), // BGRA
         ChannelOrder::Argb => (4, [5, 6, 7, 4], 3), // ARGB
+        ChannelOrder::Intensity => (1, [4, 4, 4, 4], 0),
+        ChannelOrder::Luminance => (1, [4, 4, 4, 1], 1),
+        ChannelOrder::Depth => (1, [4, 0, 0, 0], 1),
     };
+    let special = match (order, channel_type) {
+        (ChannelOrder::Rgb, ChannelType::Unorm555) => Some((2, 69)),
+        (ChannelOrder::Rgb, ChannelType::Unorm565) => Some((2, 68)),
+        (ChannelOrder::Rgb | ChannelOrder::Rgba, ChannelType::Unorm101010) => Some((4, 36)),
+        (ChannelOrder::Srgba, ChannelType::Unorm8) => Some((4, 66)),
+        _ => None,
+    };
+    if let Some((bytes, code)) = special {
+        return Some(Format {
+            bytes,
+            code,
+            swizzle,
+            bc_swizzle,
+        });
+    }
+    if matches!(order, ChannelOrder::Rgb | ChannelOrder::Srgba)
+        || (matches!(order, ChannelOrder::Intensity | ChannelOrder::Luminance)
+            && !matches!(
+                channel_type,
+                ChannelType::Snorm8
+                    | ChannelType::Snorm16
+                    | ChannelType::Unorm8
+                    | ChannelType::Unorm16
+                    | ChannelType::Float16
+                    | ChannelType::Float32
+            ))
+        || (order == ChannelOrder::Depth
+            && !matches!(channel_type, ChannelType::Unorm16 | ChannelType::Float32))
+    {
+        return None;
+    }
     if matches!(order, ChannelOrder::Bgra | ChannelOrder::Argb)
         && !matches!(
             channel_type,

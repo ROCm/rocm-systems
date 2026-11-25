@@ -7,15 +7,18 @@ Counter grouping inspector for rocprofiler-compute.
 Parses GFX architecture YAML configs and outputs counter grouping analysis
 without requiring GPU, rocprofiler, or full rocprof-compute initialization.
 
-Counter discovery uses ``OmniSoC_Base.detect_counters``; perfmon layout and
-YAML emission use ``OmniSoC_Base.perfmon_coalesce`` (which calls
-``_allocate_perfmon_counter_files`` and writes under ``<workload>/perfmon/``),
-matching the profiling path in ``soc_base.py``. ``get_rocprof_supported_counters``
+Counter discovery uses `OmniSoC_Base.detect_counters`; perfmon layout and
+YAML emission use `OmniSoC_Base.perfmon_coalesce` (which calls
+`_allocate_perfmon_counter_files` and writes under `<workload>/perfmon/`),
+matching the profiling path in `soc_base.py`. `get_rocprof_supported_counters`
 is stubbed so the tool runs without rocprofiler. Bucket views reuse a second
-``_allocate_perfmon_counter_files`` call on the same counter set (same result as
+`_allocate_perfmon_counter_files` call on the same counter set (same result as
 the coalesce pass).
 
-Usage (from the ``rocprofiler-compute`` project root):
+Each plan summary ends with the arch's counter limits per block and a note on
+which table columns are real packing blocks.
+
+Usage (from the `rocprofiler-compute` project root):
     ./tools/counter_grouping_inspector.py --arch gfx942
     ./tools/counter_grouping_inspector.py --arch gfx942 --block 2 3 4
     ./tools/counter_grouping_inspector.py --arch gfx942 --output plan.txt
@@ -26,11 +29,10 @@ import argparse
 import logging
 import sys
 import tempfile
-from collections.abc import Iterator
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import Optional
 
 from rich.console import Console
 
@@ -40,19 +42,21 @@ if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
 # Import from existing modules to maintain single source of truth
-from rocprof_compute_soc.soc_base import (  # noqa: E402
-    CounterFile,
+import config
+from rocprof_compute_soc.soc_base import (
     OmniSoC_Base,
-    flat_counters_in_perfmon_file,
     is_tcc_channel_counter,
+    iter_analysis_config_metrics,
 )
-from utils.logger import console_error  # noqa: E402
-from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
-from utils.utils_common import canonical_config_arch  # noqa: E402
-from utils.utils_counter_defs import (  # noqa: E402
-    extract_counters_and_variables,
+from utils.counters.allocator import metric_counter_sets, reads_one_pass
+from utils.counters.counter_file import (
+    CounterFile,
+    flat_counters_in_perfmon_file,
 )
-from vendored import yaml  # noqa: E402
+from utils.logger import console_error
+from utils.mi_gpu_spec import mi_gpu_specs
+from utils.utils_common import canonical_config_arch
+from utils.utils_counter_defs import BLOCK_REMAP, Collectables
 
 
 def _counter_display_ip_prefix(counter: str) -> str:
@@ -75,50 +79,6 @@ def _counters_grouped_by_ip_sorted(counters: list[str]) -> dict[str, list[str]]:
     return by_ip
 
 
-def iter_yaml_metrics(
-    config_dir: Path,
-    gpu_arch: str,
-) -> Iterator[tuple[str, Any, int, str, str]]:
-    """Iterate over all metrics in analysis YAML files."""
-    config_root = config_dir / canonical_config_arch(gpu_arch)
-    if not config_root.is_dir():
-        return
-
-    for ypath in sorted(config_root.glob("*.yaml")):
-        stem_id = ypath.name.split("_")[0]
-        try:
-            with open(ypath, encoding="utf-8") as stream:
-                doc = yaml.safe_load(stream)
-        except (OSError, UnicodeError, yaml.YAMLError):
-            continue
-        if not isinstance(doc, dict):
-            continue
-        panel_cfg = doc.get("Panel Config")
-        if not isinstance(panel_cfg, dict):
-            continue
-        sources = panel_cfg.get("data source")
-        if not isinstance(sources, list):
-            continue
-        for section in sources:
-            if not isinstance(section, dict) or "metric_table" not in section:
-                continue
-            mt = section["metric_table"]
-            if not isinstance(mt, dict):
-                continue
-            metrics = mt.get("metric")
-            if not isinstance(metrics, dict):
-                continue
-            panel_id = mt.get("id")
-            for idx, (metric_name, metric_body) in enumerate(metrics.items()):
-                try:
-                    metric_text = yaml.dump(
-                        metric_body, sort_keys=False, allow_unicode=True
-                    )
-                except (TypeError, yaml.YAMLError):
-                    continue
-                yield stem_id, panel_id, idx, metric_name, metric_text
-
-
 def _rocprof_supported_superset(counters: set[str]) -> set[str]:
     """Return a fake rocprofiler avail set.
 
@@ -133,14 +93,13 @@ def _rocprof_supported_superset(counters: set[str]) -> set[str]:
 
 def run_soc_detect_and_coalesce(
     arch: str,
-    config_dir: Path,
     filter_blocks: Optional[list[str]],
     perfmon_config: dict[str, int],
     workload_root: Path,
 ) -> tuple[set[str], list[CounterFile]]:
     """Run SoC counter detection and perfmon coalesce.
 
-    Writes YAML under ``workload_root/perfmon/``.
+    Writes YAML under `workload_root/perfmon/`.
     """
     machine_spec = SimpleNamespace(
         rocminfo_lines=None,
@@ -153,13 +112,9 @@ def run_soc_detect_and_coalesce(
     filter_block_list = list(filter_blocks) if filter_blocks else []
     cli_args = argparse.Namespace(
         output_directory=str(workload_root.resolve()),
-        config_dir=str(config_dir.resolve()),
         filter_blocks=filter_block_list,
         membw_analysis=False,
         set_selected=None,
-        roof_only=False,
-        no_roof=True,
-        device=0,
     )
 
     soc = OmniSoC_Base(cli_args, machine_spec)
@@ -167,10 +122,6 @@ def run_soc_detect_and_coalesce(
     soc.set_perfmon_config(perfmon_config)
 
     counters, _unused_filter_blocks = soc.detect_counters()
-    # Same as OmniSoC_Base.perfmon_filter before perfmon_coalesce: drop
-    # SQ_ACCUM_PREV_HIRES here; it is injected again when LEVEL counters are
-    # allocated so pass grouping matches profiling.
-    counters = counters - {"SQ_ACCUM_PREV_HIRES"}
     if not counters:
         return set(), []
 
@@ -180,9 +131,7 @@ def run_soc_detect_and_coalesce(
 
     soc.perfmon_coalesce(counters)
 
-    perfmon_counter_files, _unused_perfmon_files, _unused_accumulator_files = (
-        soc._allocate_perfmon_counter_files(counters)
-    )
+    perfmon_counter_files = soc._allocate_perfmon_counter_files(counters)
     return counters, perfmon_counter_files
 
 
@@ -245,6 +194,22 @@ def _format_bucket_markdown(
     return "\n".join(lines)
 
 
+def _format_hw_limits_line(perfmon_config: dict[str, int]) -> str:
+    """Format the counter limit of each perfmon block."""
+    limits = ", ".join(f"{block}: {cap}" for block, cap in perfmon_config.items())
+    return f"Counter limits per block: {limits}"
+
+
+def _format_display_column_comments() -> str:
+    """Explain which table columns are real packing blocks."""
+    remaps = ", ".join(f"{src}->{dst}" for src, dst in sorted(BLOCK_REMAP.items()))
+    return (
+        "Note: the table columns group counters by name prefix. Some blocks "
+        f"count against another block's limit ({remaps}); CPC and CPF have "
+        "their own limits."
+    )
+
+
 def generate_bucket_plan(
     output_files: list[CounterFile],
     arch: str,
@@ -269,8 +234,11 @@ def generate_bucket_plan(
 
     buf.write(
         f"Summary: {len(output_files)} bucket(s), "
-        f"{total_assignments} counter assignment(s).\n\n"
+        f"{total_assignments} counter assignment(s).\n"
     )
+    perfmon_config = mi_gpu_specs.get_perfmon_config(arch) or {}
+    buf.write(f"\n{_format_hw_limits_line(perfmon_config)}\n")
+    buf.write(f"{_format_display_column_comments()}\n\n")
 
     return buf.getvalue()
 
@@ -281,16 +249,16 @@ def print_bucket_plan(output_files: list[CounterFile], arch: str) -> None:
     print(output, end="")
 
 
-def _counter_to_bucket_map(
+def _bucket_counter_sets(
     output_files: list[CounterFile],
-) -> dict[str, str]:
-    """Map each PMC counter string to its perfmon bucket label."""
-    result: dict[str, str] = {}
-    for counter_file in output_files:
-        label = counter_file.name.replace(".txt", "")
-        for ctr in flat_counters_in_perfmon_file(counter_file):
-            result[ctr] = label
-    return result
+) -> dict[str, set[str]]:
+    """Map each perfmon bucket label to the PMC counters it collects."""
+    return {
+        counter_file.name.replace(".txt", ""): set(
+            flat_counters_in_perfmon_file(counter_file)
+        )
+        for counter_file in output_files
+    }
 
 
 def generate_bucket_metrics(
@@ -304,58 +272,68 @@ def generate_bucket_metrics(
     this function's name reflects the primary bucket analysis use case.
     """
     buf = StringIO()
-    counter_to_bucket = _counter_to_bucket_map(output_files)
+    bucket_counters = _bucket_counter_sets(output_files)
+    plan_counters = set().union(*bucket_counters.values())
 
     multi_rows: list[tuple[str, str, int, str, int, str]] = []
     single_rows: list[tuple[str, str, int, str, str]] = []
     total_metrics = 0
 
-    gpu_series = mi_gpu_specs.get_gpu_series(arch)
+    collectables = Collectables.of_arch(arch)
     config_arch = canonical_config_arch(arch)
-    for file_id, panel_id, metric_idx, metric_name, metric_yaml in iter_yaml_metrics(
-        config_dir, arch
-    ):
+    for metric in iter_analysis_config_metrics(config_dir / config_arch, set()):
         total_metrics += 1
-        hardware_counters, _unused_builtin_vars = extract_counters_and_variables(
-            metric_yaml, gpu_series, include_supported_denom=False
+        metric_sets = metric_counter_sets(
+            [metric.expressions], collectables, plan_counters
         )
-        buckets: set[str] = set()
-        for formula_counter in hardware_counters:
-            bucket_label = counter_to_bucket.get(formula_counter)
-            if bucket_label is not None:
-                buckets.add(bucket_label)
+        if not metric_sets:
+            continue
+        metric_set = metric_sets[0]
+        panel_label = str(metric.table_id) if metric.table_id is not None else "-"
 
-        panel_label = str(panel_id) if panel_id is not None else "-"
-        bucket_count = len(buckets)
-        if bucket_count > 1:
-            multi_rows.append((
-                file_id,
-                panel_label,
-                metric_idx,
-                metric_name,
-                bucket_count,
-                ", ".join(sorted(buckets)),
-            ))
-        elif bucket_count == 1:
+        # A counter can sit in several buckets, so a metric is single-pass
+        # when one bucket holds all of its counters.
+        holders = [
+            label
+            for label, counters in bucket_counters.items()
+            if metric_set <= counters
+        ]
+        # A split metric reads each of its collectables from its own pass
+        if holders or reads_one_pass(
+            metric.expressions, collectables, list(bucket_counters.values())
+        ):
             single_rows.append((
-                file_id,
+                metric.stem_id,
                 panel_label,
-                metric_idx,
-                metric_name,
-                next(iter(buckets)),
+                metric.metric_idx,
+                metric.metric_name,
+                holders[0] if holders else "collectables",
             ))
+            continue
+        buckets = [
+            label
+            for label, counters in bucket_counters.items()
+            if metric_set & counters
+        ]
+        multi_rows.append((
+            metric.stem_id,
+            panel_label,
+            metric.metric_idx,
+            metric.metric_name,
+            len(buckets),
+            ", ".join(buckets),
+        ))
 
     multi_pct = (100.0 * len(multi_rows) / total_metrics) if total_metrics else 0.0
     single_pct = (100.0 * len(single_rows) / total_metrics) if total_metrics else 0.0
 
     buf.write(
-        f"Metrics with PMC counters assigned to more than one perfmon bucket "
+        f"Multi-pass metrics: no perfmon bucket holds all of their PMC counters "
         f"({len(multi_rows)} of {total_metrics} metrics, {multi_pct:.1f}%)\n"
     )
     buf.write(
-        "All *.yaml under the arch are scanned. Listed rows are metrics where at "
-        "least one formula counter is in this plan's collection and those "
-        "counters map to 2+ buckets in the layout above.\n"
+        "Lists every arch config metric that reads a collected counter. Buckets "
+        "are the ones holding any of its counters.\n"
     )
     buf.write(f"Config tree: {config_dir / config_arch}\n")
 
@@ -386,13 +364,12 @@ def generate_bucket_metrics(
 
     buf.write("\n")
     buf.write(
-        f"Metrics with PMC counters assigned to one perfmon bucket "
+        f"Single-pass metrics: one perfmon bucket holds all of their PMC counters "
         f"({len(single_rows)} of {total_metrics} metrics, {single_pct:.1f}%)\n"
     )
     buf.write(
-        "Listed rows are metrics where at least one formula counter is in this "
-        "plan's collection and every such counter maps to the same single "
-        "bucket above (metrics with no in-collection PMCs are omitted).\n"
+        "Lists every arch config metric that reads a collected counter. Bucket "
+        "is the first one holding all of its counters.\n"
     )
 
     if single_rows:
@@ -485,18 +462,18 @@ def render_perfmon_plan_svg(
 
     console.print(
         f"[bold]Summary:[/bold] {len(output_files)} bucket(s), "
-        f"{total_assignments} counter assignment(s).\n"
+        f"{total_assignments} counter assignment(s)."
     )
+    console.print()
+    perfmon_config = mi_gpu_specs.get_perfmon_config(arch) or {}
+    console.print(_format_hw_limits_line(perfmon_config))
+    console.print(_format_display_column_comments())
+    console.print()
 
     metrics_output = generate_bucket_metrics(output_files, config_dir, arch)
     console.print(metrics_output)
 
     return console.export_svg(title=title)
-
-
-def get_default_config_dir() -> Path:
-    """Get the default analysis configs directory."""
-    return _SRC_DIR / "rocprof_compute_soc" / "analysis_configs"
 
 
 def get_supported_archs() -> list[str]:
@@ -536,12 +513,6 @@ Examples:
         help="GPU architecture (e.g., gfx942, gfx950)",
     )
     parser.add_argument(
-        "--config-dir",
-        type=Path,
-        default=None,
-        help="Path to analysis_configs directory (default: auto-detect)",
-    )
-    parser.add_argument(
         "--block",
         "-b",
         nargs="+",
@@ -570,12 +541,9 @@ Examples:
             "  .svg - SVG image output (requires rich library)"
         ),
     )
-
     args = parser.parse_args()
 
-    config_dir = args.config_dir or get_default_config_dir()
-    if not config_dir.is_dir():
-        console_error(f"Error: Config directory not found: {config_dir}")
+    config_dir = config.analysis_configs_dir
 
     arch = args.arch
 
@@ -594,7 +562,7 @@ Examples:
     with tempfile.TemporaryDirectory(prefix="rocprof_counter_inspector_") as tmpdir:
         workload_root = Path(tmpdir)
         counters, output_files = run_soc_detect_and_coalesce(
-            arch, config_dir, args.block, perfmon_config, workload_root
+            arch, args.block, perfmon_config, workload_root
         )
 
         if not counters:
@@ -641,7 +609,10 @@ def _emit_inspector_output(
             bucket_output = generate_bucket_plan(output_files, arch)
             metrics_output = generate_bucket_metrics(output_files, config_dir, arch)
             try:
-                output_path.write_text(bucket_output + metrics_output, encoding="utf-8")
+                output_path.write_text(
+                    bucket_output + metrics_output,
+                    encoding="utf-8",
+                )
             except OSError as exc:
                 console_error(
                     f"Error: could not write text output to {output_path}: {exc}"

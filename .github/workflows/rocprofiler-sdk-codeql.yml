@@ -103,14 +103,6 @@ jobs:
 
     - uses: actions/checkout@v6
       with:
-        sparse-checkout: |
-          .github/actions/rocprofiler-sdk-util
-          projects/rocprofiler-sdk
-          shared/sha256
-          projects/clr
-          projects/hip
-          .github/workflows/rocprofiler-sdk-codeql.yml
-          .github/workflows/rocprofiler-sdk-formatting.yml
         submodules: 'false'
 
     - name: Init/Update submodules

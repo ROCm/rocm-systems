@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! Native rocddi contract checks for the first GPU target.
+#![cfg(target_os = "linux")]
 #![allow(unsafe_code)]
 #![allow(
     clippy::cast_possible_truncation,
@@ -19,12 +20,56 @@ use std::time::{Duration, Instant};
 
 use rocddi::device::gpu::queue::{
     KernelCommand, KernelQueueFormat, QueueAccessWidth, QueueParameters, QueuePriority,
-    QueueProducerMode, QueueRequest, QueueRingMemory, SdmaEngineSelection, ring_doorbell,
+    QueueProducerMode, QueueRequest, QueueRingMemory, SdmaEngineSelection, store_ordered_mmio64,
 };
 use rocddi::device::gpu::{CopyRect, GpuCopySequence};
-use rocddi::memory::device::{DeviceAccess, HostMappingPolicy, MemoryKind, VirtualAddress};
+use rocddi::memory::device::{
+    DeviceAccess, HostMappingPolicy, MemoryKind, VirtualAddress, VirtualMemoryOptions,
+};
 use rocddi::memory::interop::linux::{AisFileOperation, ais_transfer};
 use rocddi::session::{DriverContextLifetime, Session};
+
+#[test]
+#[ignore = "requires a GFX1201 GPU, KFD, and a bound DRM render node"]
+fn gfx1201_code_cache_publication_contract() -> Result<(), Box<dyn Error>> {
+    let mut session = Session::new(DriverContextLifetime::Process)?;
+    let mut selected = None;
+    session.enumerate(&mut |endpoint| {
+        if endpoint
+            .gpu()
+            .is_some_and(|gpu| (gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping) == (12, 0, 1))
+        {
+            selected = Some(endpoint);
+        }
+        Ok(())
+    })?;
+    let endpoint = selected.ok_or_else(|| io::Error::other("GFX1201 endpoint is unavailable"))?;
+    let device = session.activate(&endpoint)?;
+    let gpu = device.gpu()?;
+    let mut code = device.allocate(
+        MemoryKind::System,
+        4096,
+        4096,
+        DeviceAccess::READ | DeviceAccess::EXECUTE,
+    )?;
+    if let Err(failure) = gpu.invalidate_code_cache(
+        code.device_address(&device)?,
+        code.info().size,
+        &AtomicBool::new(false),
+    ) {
+        if failure.operands_may_be_live {
+            std::mem::forget(code);
+            std::mem::forget(device);
+            std::mem::forget(session);
+        }
+        return Err(Box::new(failure.error));
+    }
+    code.free()?;
+    drop(code);
+    drop(device);
+    session.destroy()?;
+    Ok(())
+}
 
 #[test]
 #[ignore = "requires a GFX1201 GPU, KFD, and a bound DRM render node"]
@@ -91,6 +136,7 @@ fn gfx1201_kernel_queue_refresh_contract() -> Result<(), Box<dyn Error>> {
     }
     assert_eq!(queue.status().retired_submission, submission);
     queue.destroy()?;
+    drop(queue);
     command.free()?;
     drop(command);
     drop(device);
@@ -213,7 +259,7 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     gpu.preload_linear_copy().map_err(|failure| failure.error)?;
     gpu.preload_linear_copy().map_err(|failure| failure.error)?;
     let counters = gpu.clock_counters()?;
-    assert!(counters.gpu_frequency > 0);
+    assert!(counters.gpu_info.frequency_hz > 0);
 
     let access = DeviceAccess::READ | DeviceAccess::WRITE;
     let mut source = device.allocate(MemoryKind::System, 4096, 4096, access)?;
@@ -314,7 +360,7 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     }
 
     destination_bytes[..64].fill(0xa5);
-    let before = gpu.clock_counters()?.gpu;
+    let before = gpu.clock_counters()?;
     let mut timed = GpuCopySequence::begin(gpu, &cancel).map_err(|failure| failure.error)?;
     timed.enable_timing().map_err(|failure| failure.error)?;
     // SAFETY: Both mapped allocations stay live until the timed copy retires.
@@ -342,8 +388,14 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     }
     let ticks = timed.finish_timing().map_err(|failure| failure.error)?;
     drop(timed);
-    let after = gpu.clock_counters()?.gpu;
-    assert!(before <= ticks.start && ticks.start <= ticks.end && ticks.end <= after);
+    let after = gpu.clock_counters()?;
+    assert!(
+        before.gpu <= ticks.start && ticks.start <= ticks.end && ticks.end <= after.gpu,
+        "SDMA timestamps are outside the surrounding clock samples: \
+         before={before:?}, start={}, end={}, after={after:?}",
+        ticks.start,
+        ticks.end
+    );
     assert_eq!(&destination_bytes[..64], &source_bytes[..64]);
 
     destination_bytes.fill(0xa5);
@@ -625,7 +677,7 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     drop(uncached);
 
     let mut virtual_memory =
-        device.create_virtual_memory(MemoryKind::System, 4096, false, false)?;
+        device.create_virtual_memory(MemoryKind::System, 4096, VirtualMemoryOptions::default())?;
     let mut reservation = VirtualAddress::reserve(&[&device], 4096, 4096, 0)?;
     let virtual_address = reservation.info().address;
     let mut mapping = device.map_virtual_memory(
@@ -679,8 +731,10 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
             contiguous: false,
         },
         4096,
-        false,
-        true,
+        VirtualMemoryOptions {
+            pinned: false,
+            uncached: true,
+        },
     )?;
     let mut uncached_reservation = VirtualAddress::reserve(&[&device], 4096, 4096, 0)?;
     let uncached_address = uncached_reservation.info().address;
@@ -1113,6 +1167,7 @@ fn gfx1201_user_sdma_queue(ring_memory: QueueRingMemory) -> Result<(), Box<dyn E
     // producer writes one complete packet and stops before destruction.
     let mut queue = unsafe {
         device.gpu()?.create_queue(QueueRequest {
+            control_memory: rocddi::device::gpu::queue::QueueRingMemory::System,
             ring_size_bytes: 4096,
             parameters: QueueParameters::SdmaByEngine {
                 selection: SdmaEngineSelection::Id(0),
@@ -1166,7 +1221,7 @@ fn gfx1201_user_sdma_queue(ring_memory: QueueRingMemory) -> Result<(), Box<dyn E
     unsafe {
         (&*(transport.write_index_host_address as *const AtomicU64))
             .store(PACKET_BYTES as u64, Ordering::Release);
-        ring_doorbell(transport.doorbell_host_address, PACKET_BYTES as u64);
+        store_ordered_mmio64(transport.doorbell_host_address, PACKET_BYTES as u64);
     }
 
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -1297,6 +1352,7 @@ fn gfx1201_aql_barrier(
     // doorbell. Its completion signal stays mapped until native retirement.
     let mut queue = unsafe {
         gpu.create_queue(QueueRequest {
+            control_memory: rocddi::device::gpu::queue::QueueRingMemory::System,
             ring_size_bytes: 4096,
             parameters: QueueParameters::Aql {
                 producer_mode: if global_work_sync {
@@ -1339,7 +1395,7 @@ fn gfx1201_aql_barrier(
         (&*(transport.ring_host_address as *const AtomicU16))
             .store(BARRIER_HEADER, Ordering::Release);
         (&*(transport.write_index_host_address as *const AtomicU64)).store(1, Ordering::Release);
-        ring_doorbell(transport.doorbell_host_address, 0);
+        store_ordered_mmio64(transport.doorbell_host_address, 0);
     }
 
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -1377,6 +1433,7 @@ fn gfx1201_aql_barrier(
         return Err(Box::new(error));
     }
     signal.free()?;
+    drop(signal);
     drop(queue);
     drop(device);
     session.destroy()?;

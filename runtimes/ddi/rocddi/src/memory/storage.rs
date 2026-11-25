@@ -15,11 +15,13 @@
 
 mod allocator;
 mod owners;
+mod retention;
 mod vector;
 
 pub use allocator::AllocationError;
-pub use allocator::{AllocateFn, Allocator, AllocatorScope, FreeFn, InvalidAllocator, ResizeFn};
+pub use allocator::{AllocateFn, Allocator, FreeFn, InvalidAllocator, ResizeFn};
 pub use owners::{Owned, Shared, UninitOwned, UninitShared};
+pub use retention::RetainOnDrop;
 pub use vector::OwnerVec;
 
 /// Creates a standard vector after fallibly reserving its initial capacity.

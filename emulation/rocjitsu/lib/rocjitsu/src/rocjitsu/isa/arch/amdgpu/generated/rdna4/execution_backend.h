@@ -103,6 +103,7 @@ enum class InstructionExecutionId : size_t {
   SFloorF16Sop1,
   STruncF16Sop1,
   SRndneF16Sop1,
+  SGetBarrierStateSop1,
   SCmpEqI32Sopc,
   SCmpLgI32Sopc,
   SCmpGtI32Sopc,

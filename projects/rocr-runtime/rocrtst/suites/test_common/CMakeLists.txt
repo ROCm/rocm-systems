@@ -464,6 +464,12 @@ set(ENABLE_COPY_NUMA_MEMBIND_NODESET OFF CACHE BOOL "Enable libnuma membind in N
 include_directories(${ROCRTST_ROOT})
 include_directories(${ROCRTST_ROOT}/gtest/include)
 
+# kfd_ioctl.h bundled with libhsakmt, matching the KFD ABI ROCr is built against
+if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+  include_directories(${ROCRTST_ROOT}/../libhsakmt/include
+                      ${ROCRTST_ROOT}/../libhsakmt/include/hsakmt/linux)
+endif()
+
 # Custom command set for code objects.
 set (HSACO_TARG_LIST "")
 
@@ -733,17 +739,17 @@ add_custom_target(rocrtst_links ALL DEPENDS ${ROCRTST_LINKS_LIST} )
 # This works for SHARED IMPORTED targets (numa) found via pkg-config
 set_target_properties(${ROCRTST} PROPERTIES
   LINK_FLAGS "-Wl,--enable-new-dtags"
-  INSTALL_RPATH "$ORIGIN/../lib/rocrtst/lib;$ORIGIN/../lib/rocm_sysdeps/lib"
+  INSTALL_RPATH "$ORIGIN/lib;$ORIGIN/../rocm_sysdeps/lib;$ORIGIN/../../lib"
   BUILD_RPATH "$ORIGIN/../../dist/lib/rocm_sysdeps/lib;$ORIGIN/../lib/rocrtst/lib"
 )
 
 install(TARGETS ${ROCRTST}
-        ARCHIVE DESTINATION lib
-        LIBRARY DESTINATION lib
-        RUNTIME DESTINATION bin)
+        ARCHIVE DESTINATION lib/rocrtst
+        LIBRARY DESTINATION lib/rocrtst
+        RUNTIME DESTINATION lib/rocrtst)
 
 install(TARGETS intercept_queue_logic_test
-        RUNTIME DESTINATION bin)
+        RUNTIME DESTINATION lib/rocrtst)
 
 # Install platform configuration file
 install(FILES ${ROCRTST_ROOT}/config/platform_config.yaml

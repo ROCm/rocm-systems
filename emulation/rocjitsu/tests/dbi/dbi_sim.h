@@ -5,18 +5,16 @@
 /// @brief Minimal single-CU simulator harness shared by the DBI simulator tests.
 ///
 /// Lays out a kernel descriptor plus code in GPU memory (AMDHSA ABI), dispatches
-/// one workgroup, runs to completion, and reads VGPRs back from the halt
+/// one workgroup by default, runs to completion, and reads VGPRs back from the halt
 /// snapshot. A wavefront frees its register file at s_endpgm, so the final
 /// register state has to come from a HaltSnapshotPlugin captured at halt rather
 /// than from the CU. Guest memory can be seeded with write_memory() and read back
 /// with run_and_read_memory().
 ///
 /// @warning The descriptor this dispatches is **not** the patched code object's.
-/// write_kernel() synthesizes a fresh one with 256 VGPRs and 104 SGPRs, taking
-/// only private_segment_fixed_size from the caller. So a test that patches an
-/// ELF whose descriptor advertises a small allocation still executes with the
-/// full register file: the orchestrator's register-ownership gates are exercised
-/// statically, at patch time, and never by execution here.
+/// write_kernel() creates a descriptor with 256 vector registers. CDNA spill
+/// probes use 128 ordinary VGPRs and 128 AccVGPRs. The caller supplies the
+/// private segment size and initialize() selects the fixture's SGPR allocation.
 ///
 /// The kernarg segment pointer is one place the two descriptors do have to
 /// agree, since the DBI entry prologue reads it at a slot fixed at patch time
@@ -28,17 +26,19 @@
 /// starts at the original entry and skips the prologue. The simulator does not
 /// check the entry's 256-byte alignment, so this cannot catch a misplaced stub.
 ///
-/// Wave size is a place they do **not** agree: the synthesized descriptor never
-/// sets ENABLE_WAVEFRONT_SIZE32, so kernel_wavefront_size() reports 64 and an
-/// RDNA target dispatches Wave64 however its patched ELF was planned. The
-/// wave_size constructor argument only says how many lanes to read back. A test
-/// whose correctness depends on the executing wave size cannot get it here.
+/// Wave size agrees only when a test asks: the synthesized descriptor sets
+/// ENABLE_WAVEFRONT_SIZE32 only after set_wave32_dispatch(). Otherwise
+/// kernel_wavefront_size() reports 64 and an RDNA target dispatches Wave64
+/// however its patched ELF was planned, and initialize()'s wave_size only says
+/// how many lanes to dispatch and read back.
 
 #pragma once
 
 #include "../aql_queue.h"
 #include "../config_test_util.h"
+#include "../dbi_test_util.h"
 #include "../halt_snapshot_plugin.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
@@ -69,8 +69,12 @@ class DbiSim {
 public:
   /// @param arch Config/VM arch string: "cdna3", "cdna4", or "rdna4".
   /// @param wave_size 64 for CDNA, 32 for RDNA4.
-  void initialize(std::string_view arch, uint32_t wave_size) {
+  /// @param granulated_sgpr_count SGPR allocation field from the synthetic target descriptor.
+  void initialize(std::string_view arch, uint32_t wave_size,
+                  uint32_t granulated_sgpr_count = kCallableProbeGranulatedSgprCount) {
+    util::StringDiagnostic admission_diagnostic;
     wave_size_ = wave_size;
+    granulated_sgpr_count_ = granulated_sgpr_count;
     const std::string json =
         std::string(R"({"max_ticks":100000,"num_threads":1,"vm":{"arch":")") + std::string(arch) +
         R"("},)"
@@ -94,13 +98,23 @@ public:
     mem_ = loaded_.memory();
     engine_ = std::make_unique<simdojo::SimulationEngine>(loaded_.engine_config);
     engine_->topology().set_root(loaded_.take_root());
-    loaded_.wire_links(engine_->topology());
-    engine_->create();
+    ASSERT_TRUE(loaded_.wire_links(engine_->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(engine_->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     plugin_group_ = make_halt_snapshot_group(&snapshot_plugin_);
     soc_->set_plugin_group(plugin_group_);
   }
 
   amdgpu::CommandProcessor *cp() { return soc_->xcd(0)->command_processor(); }
+
+  /// @brief Register an additional test plugin after initialize() and before dispatch.
+  bool add_plugin(std::unique_ptr<ExecutionPlugin> plugin) {
+    return plugin_group_->add(std::move(plugin));
+  }
+
+  /// @brief Address of the synthesized descriptor; code follows immediately.
+  static constexpr uint64_t KERNEL_ADDR = 0x1000;
 
   /// @brief Address the kernarg image passed to set_kernarg() is loaded at, and
   ///        therefore the value the CP places in the kernarg SGPR pair.
@@ -139,9 +153,22 @@ public:
     mem_->load_image(bytes.data(), bytes.size(), addr);
   }
 
+  /// @brief Dispatch Wave32 on an RDNA target, matching a patched descriptor
+  ///        with the Wave32 bit set. Requires an initialize() wave_size of 32.
+  void set_wave32_dispatch() {
+    EXPECT_EQ(wave_size_, 32u) << "set_wave32_dispatch() needs initialize(arch, 32)";
+    wave32_dispatch_ = true;
+  }
+
   /// @brief Offset into the code passed to run_*() that dispatch enters at, as
   ///        the patched descriptor's .text-relative entry. Defaults to 0.
   void set_entry_offset(uint64_t offset) { entry_offset_ = offset; }
+
+  /// @brief Dispatch this many workgroups along X, each containing one wave.
+  void set_workgroup_count_x(uint32_t count) {
+    ASSERT_GT(count, 0u);
+    workgroup_count_x_ = count;
+  }
 
   /// @brief Write a kernel_descriptor_t (entry at the set_entry_offset() offset
   ///        into the code) followed by @p code, with @p private_bytes of
@@ -156,11 +183,17 @@ public:
         static_cast<int64_t>(sizeof(kernel_descriptor_t) + entry_offset_);
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                        ((256 / 8) - 1));
-    // 104 SGPRs is ample for the probe link pair s[30:31] and envelope temps.
+    if (soc_->arch() == rocjitsu::IsaFamily::Cdna3 || soc_->arch() == rocjitsu::IsaFamily::Cdna4) {
+      RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 128 / 4 - 1);
+    }
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                       ((104 / 8) - 1));
+                       granulated_sgpr_count_);
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgpr_count_);
     kd.kernel_code_properties = kernarg_properties_;
+    if (wave32_dispatch_) {
+      RJ_AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+                         1);
+    }
     kd.kernarg_size = static_cast<uint32_t>(kernarg_bytes_.size());
     kd.private_segment_fixed_size = private_bytes;
 
@@ -170,27 +203,52 @@ public:
     return addr;
   }
 
-  /// @brief Dispatch @p code over one wave and return, for each register in
-  ///        @p regs, its per-lane values after the kernel halts.
+  /// @brief Dispatch @p code and return, for each register in @p regs, its
+  ///        per-lane values from @p workgroup_id after the kernel halts.
   ///
   /// @details Reading several registers from one dispatch rather than one each
   /// keeps assertions about them statements about a single execution.
   ///
   /// @return One vector per entry of @p regs, each @p wave_size long; empty when
-  ///   no wave halted (the kernel did not run to completion). Callers must check
-  ///   the size before indexing per lane.
+  ///   the selected workgroup did not halt. Callers must check the size before
+  ///   indexing per lane.
   std::vector<std::vector<uint32_t>> run_and_read_vgprs(const std::vector<uint32_t> &code,
                                                         uint32_t private_bytes,
-                                                        const std::vector<uint32_t> &regs) {
-    const WavefrontSnapshot *wf = run(code, private_bytes);
-    if (wf == nullptr)
+                                                        const std::vector<uint32_t> &regs,
+                                                        uint32_t workgroup_id = 0) {
+    const WavefrontSnapshot *wf = run(code, private_bytes, 0, workgroup_id);
+    if (wf == nullptr) {
       return std::vector<std::vector<uint32_t>>(regs.size());
+    }
 
     std::vector<std::vector<uint32_t>> out(regs.size());
     for (size_t i = 0; i < regs.size(); ++i) {
       out[i].resize(wave_size_);
-      for (uint32_t lane = 0; lane < wave_size_; ++lane)
+      for (uint32_t lane = 0; lane < wave_size_; ++lane) {
         out[i][lane] = wf->vgpr(regs[i], lane);
+      }
+    }
+    return out;
+  }
+
+  /// @brief Dispatch one workgroup and read each requested VGPR from all waves
+  ///        that halted in this dispatch.
+  /// @return One vector per register, containing one wave_size block per halted
+  ///   wave in halt order. No ordering by wave index is guaranteed.
+  std::vector<std::vector<uint32_t>> run_and_read_workgroup_vgprs(const std::vector<uint32_t> &code,
+                                                                  uint32_t private_bytes,
+                                                                  const std::vector<uint32_t> &regs,
+                                                                  uint32_t workgroup_size) {
+    const size_t halts_before = snapshot_plugin_->snapshots().size();
+    run(code, private_bytes, workgroup_size);
+    const std::vector<WavefrontSnapshot> &snapshots = snapshot_plugin_->snapshots();
+    std::vector<std::vector<uint32_t>> out(regs.size());
+    for (size_t wave = halts_before; wave < snapshots.size(); ++wave) {
+      for (size_t i = 0; i < regs.size(); ++i) {
+        for (uint32_t lane = 0; lane < wave_size_; ++lane) {
+          out[i].push_back(snapshots[wave].vgpr(regs[i], lane));
+        }
+      }
     }
     return out;
   }
@@ -208,8 +266,9 @@ public:
   std::optional<uint64_t> run_and_read_sgpr64(const std::vector<uint32_t> &code,
                                               uint32_t private_bytes, uint32_t base) {
     const WavefrontSnapshot *wf = run(code, private_bytes);
-    if (wf == nullptr)
+    if (wf == nullptr) {
       return std::nullopt;
+    }
     return wf->sgpr64(base);
   }
 
@@ -227,8 +286,9 @@ public:
     // dispatch added one.
     const size_t halts_before = snapshot_plugin_->snapshots().size();
     run(code, private_bytes);
-    if (snapshot_plugin_->snapshots().size() == halts_before)
+    if (snapshot_plugin_->snapshots().size() == halts_before) {
       return std::nullopt;
+    }
     // This topology's caches already write stores through to GpuMemory, so the
     // flush changes nothing today. It is SoC's documented visibility point, and
     // keeps the read-back correct if a cache here starts holding dirty lines.
@@ -239,15 +299,15 @@ public:
   }
 
 private:
-  /// @brief Write the kernel and its kernargs, dispatch one wave, and run to
-  ///        completion.
-  /// @return The halt snapshot, or nullptr when no wave halted (the kernel did
-  ///   not run to completion). The plugin never drops a snapshot, so a DbiSim
-  ///   reused for several dispatches still reports the first one here.
-  const WavefrontSnapshot *run(const std::vector<uint32_t> &code, uint32_t private_bytes) {
-    const uint64_t ko = write_kernel(0x1000, code, private_bytes);
-    if (!kernarg_bytes_.empty())
+  /// @brief Dispatch workgroups and return the selected group's first halt snapshot.
+  /// @details A zero workgroup_size selects one wave. Repeated runs retain
+  /// snapshots, so the first matching snapshot may be from an earlier run.
+  const WavefrontSnapshot *run(const std::vector<uint32_t> &code, uint32_t private_bytes,
+                               uint32_t workgroup_size = 0, uint32_t workgroup_id = 0) {
+    const uint64_t ko = write_kernel(KERNEL_ADDR, code, private_bytes);
+    if (!kernarg_bytes_.empty()) {
       mem_->load_image(kernarg_bytes_.data(), kernarg_bytes_.size(), KERNARG_ADDR);
+    }
     // Callers reuse one DbiSim for several dispatches, and each AqlQueue leaves
     // its registration behind on the CP, so every run needs its own queue --
     // its own id, since two live queues sharing one on a CP are rejected (fan-out
@@ -258,17 +318,24 @@ private:
     const uint64_t ring = AqlQueue::DEFAULT_RING_ADDR + uint64_t{queue_id} * 0x100000ULL;
     AqlQueue queue(mem_, cp(), ring, AqlQueue::DEFAULT_RING_SIZE, ring + 0x10000, ring + 0x10008,
                    ring + 0x10010, /*xcd_fanout=*/false, /*queue_id=*/queue_id);
-    queue.dispatch(ko, /*grid_size_x=*/wave_size_, /*workgroup_size_x=*/wave_size_,
-                   kernarg_bytes_.empty() ? 0 : KERNARG_ADDR);
+    const uint32_t threads = workgroup_size == 0 ? wave_size_ : workgroup_size;
+    queue.dispatch(ko, /*grid_size_x=*/threads * workgroup_count_x_,
+                   /*workgroup_size_x=*/threads, kernarg_bytes_.empty() ? 0 : KERNARG_ADDR);
     engine_->run();
 
-    if (snapshot_plugin_->snapshots().empty())
-      return nullptr;
-    return &snapshot_plugin_->snapshots().front();
+    for (const WavefrontSnapshot &snapshot : snapshot_plugin_->snapshots()) {
+      if (snapshot.wg_id == workgroup_id) {
+        return &snapshot;
+      }
+    }
+    return nullptr;
   }
 
   uint32_t wave_size_ = 64;
+  uint32_t granulated_sgpr_count_ = kCallableProbeGranulatedSgprCount;
+  bool wave32_dispatch_ = false;
   uint32_t queue_seq_ = 0;
+  uint32_t workgroup_count_x_ = 1;
   uint64_t entry_offset_ = 0;
   uint32_t kernarg_properties_ = 0;
   uint32_t user_sgpr_count_ = 2;

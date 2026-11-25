@@ -31,12 +31,11 @@ ExecStart=rdcd $RDC_OPTS
 # If we need to start anything after rdcd use this
 # ExecStartPost=
 
-# If we want to change the default time out for the ExecStop (90 sec),
-# we can modify that time limit with TimeoutStopSec
+# systemd stops rdcd with one SIGTERM (KillSignal=), then SIGKILL if rdcd
+# still runs after TimeoutStopSec (90 sec by default). An ExecStop= that
+# signals rdcd would make systemd send a second SIGTERM.
 # TimeoutStopSec=
 
-# Note, we can have multiple ExecStop commands if necessary
-ExecStop=/bin/kill -15 $MAINPID
 #ExecReload=
 #ExecStartPost=
 #ExecStopPost=

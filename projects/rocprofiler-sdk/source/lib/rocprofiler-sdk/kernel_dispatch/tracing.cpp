@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -60,7 +60,8 @@ emit_kernel_dispatch_record(tracing::tracing_data&                              
                             context::correlation_id*                             _corr_id,
                             rocprofiler_thread_id_t                              _tid,
                             uint64_t                                             start_timestamp,
-                            uint64_t                                             end_timestamp)
+                            uint64_t                                             end_timestamp,
+                            int32_t                                              pipe_id)
 {
     using kernel_dispatch_record_t = rocprofiler_buffer_tracing_kernel_dispatch_record_t;
 
@@ -73,6 +74,7 @@ emit_kernel_dispatch_record(tracing::tracing_data&                              
 
     callback_record.start_timestamp = start_timestamp;
     callback_record.end_timestamp   = end_timestamp;
+    callback_record.pipe_id         = pipe_id;
 
     if(!tracing_data_v.callback_contexts.empty())
     {
@@ -96,7 +98,8 @@ emit_kernel_dispatch_record(tracing::tracing_data&                              
                                                _tid,
                                                callback_record.start_timestamp,
                                                callback_record.end_timestamp,
-                                               callback_record.dispatch_info};
+                                               callback_record.dispatch_info,
+                                               callback_record.pipe_id};
 
         tracing::execute_buffer_record_emplace(tracing_data_v.buffered_contexts,
                                                _tid,
@@ -121,7 +124,8 @@ dispatch_complete(queue_info_session_t& session,
                                 session.correlation_id,
                                 session.tid,
                                 dispatch_time.start,
-                                dispatch_time.end);
+                                dispatch_time.end,
+                                ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE);
 }
 }  // namespace kernel_dispatch
 }  // namespace rocprofiler

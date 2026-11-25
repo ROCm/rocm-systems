@@ -5,9 +5,9 @@
  ************************************************************************/
 
 // Profiler plugin that records Coll, P2p, KernelCh and KernelPhase events for
-// ProfilerKernelChMPITests. It builds against the standalone headers an external
-// plugin ships with (plugins/profiler/example/nccl), so it sees the same ABI an
-// out-of-tree plugin would.
+// ProfilerKernelChMPITests and PatForcedMPITests. It builds against the standalone
+// headers an external plugin ships with (plugins/profiler/example/nccl), so it sees
+// the same ABI an out-of-tree plugin would.
 //
 // Every handle it hands out stays valid until rcclKchRecorderReset(). That is a
 // requirement, not a convenience: RCCL stops a Coll or P2p event in the host task
@@ -87,9 +87,13 @@ Record* newRecord(uint64_t type, const Context* ctx, void* parentObj) {
   return r;
 }
 
-void copyFunc(char* dst, const char* src) {
-  if (src == nullptr) return;
-  strncpy(dst, src, sizeof(((RcclKchRecord*)nullptr)->func) - 1);
+// dst is zeroed by newRecord, so copying at most N - 1 bytes keeps it terminated.
+template <size_t N>
+void copyField(char (&dst)[N], const char* src) {
+  if (src == nullptr) {
+    return;
+  }
+  strncpy(dst, src, N - 1);
 }
 
 ncclResult_t recorderInit(void** context, uint64_t commId, int* eActivationMask, const char* /*commName*/,
@@ -115,7 +119,9 @@ ncclResult_t recorderStartEvent(void* context, void** eHandle, ncclProfilerEvent
     }
     case ncclProfileColl: {
       Record* r = newRecord(eDescr->type, ctx, nullptr);
-      copyFunc(r->view.func, eDescr->coll.func);
+      copyField(r->view.func, eDescr->coll.func);
+      copyField(r->view.algo, eDescr->coll.algo);
+      copyField(r->view.proto, eDescr->coll.proto);
       r->view.seqNumber = eDescr->coll.seqNumber;
       r->view.count = eDescr->coll.count;
       r->view.nChannels = eDescr->coll.nChannels;
@@ -125,7 +131,7 @@ ncclResult_t recorderStartEvent(void* context, void** eHandle, ncclProfilerEvent
     }
     case ncclProfileP2p: {
       Record* r = newRecord(eDescr->type, ctx, nullptr);
-      copyFunc(r->view.func, eDescr->p2p.func);
+      copyField(r->view.func, eDescr->p2p.func);
       r->view.count = eDescr->p2p.count;
       r->view.nChannels = eDescr->p2p.nChannels;
       r->view.peer = eDescr->p2p.peer;

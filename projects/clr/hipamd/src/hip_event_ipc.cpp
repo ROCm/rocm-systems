@@ -7,11 +7,8 @@
 #include <hip/hip_runtime.h>
 
 #include "hip_event.hpp"
-#if !defined(_MSC_VER)
-#include <unistd.h>
-#else
-#include <io.h>
-#endif
+#include <cstring>
+#include <random>
 
 // ================================================================================================
 namespace hip {
@@ -27,22 +24,27 @@ bool IPCEventEmulated::createIpcEventShmemIfNeeded() {
     return true;
   }
 
-  // Generate unique IPC name
-#if !defined(_MSC_VER)
-  static std::atomic<int> counter{0};
-  ipc_evt_.ipc_name_ = "/hip_" + std::to_string(getpid()) + "_" + std::to_string(counter++);
-#else
-  char name_template[] = "/hip_XXXXXX";
-  _mktemp_s(name_template, sizeof(name_template));
-  ipc_evt_.ipc_name_ = name_template;
-  ipc_evt_.ipc_name_.replace(0, 5, "/hip_");
-#endif
-
-  // Create memory-mapped file for shared memory
+  // Generate a name unique per event: "/hip_<pid>_<counter>" (at most 27 chars, fits the handle).
+  // The name may already exist: a dead process with the same pid may have left it behind, a
+  // live process in another PID namespace sharing /dev/shm may own it, or on Windows a peer may
+  // still hold the mapping open. Never remove an object this process did not create; on a
+  // collision move on to the next counter value. The counter starts at a random value so
+  // processes that share a pid don't walk the same sequence of names.
+  static std::atomic<uint32_t> counter{std::random_device{}()};
+  constexpr int kMaxCreateAttempts = 16;
   auto** shmem_ptr = reinterpret_cast<void**>(&ipc_evt_.ipc_shmem_);
-  if (!amd::Os::MemoryMapFileTruncated(ipc_evt_.ipc_name_.c_str(),
-                                       const_cast<const void**>(shmem_ptr),
-                                       sizeof(hip::ihipIpcEventShmem_t))) {
+  bool created = false;
+  for (int attempt = 0; attempt < kMaxCreateAttempts && !created; ++attempt) {
+    ipc_evt_.ipc_name_ = "/hip_" + std::to_string(amd::Os::getProcessId()) + "_" +
+        std::to_string(counter++);
+    // Create memory-mapped file for shared memory; never reuse an existing object
+    created = amd::Os::MemoryMapFileTruncated(ipc_evt_.ipc_name_.c_str(),
+                                              const_cast<const void**>(shmem_ptr),
+                                              sizeof(hip::ihipIpcEventShmem_t),
+                                              amd::Os::ShmMode::kCreateNew);
+  }
+  if (!created) {
+    ipc_evt_.ipc_name_.clear();  // not ours: the destructor must not unlink it
     return false;
   }
 
@@ -59,14 +61,21 @@ bool IPCEventEmulated::createIpcEventShmemIfNeeded() {
   return status == hipSuccess;
 }
 
+// Indices live in shared memory (a peer can write any value) and start at -1; % keeps the
+// sign, so map into [0, N). Arithmetic on them is done in 64 bits so it can't overflow.
+static inline int ihipSignalSlot(int idx) {
+  const int slot = idx % IPC_SIGNALS_PER_EVENT;
+  return slot < 0 ? slot + IPC_SIGNALS_PER_EVENT : slot;
+}
+
 // ================================================================================================
 hipError_t IPCEventEmulated::query() {
   std::scoped_lock lock(lock_);
   if (ipc_evt_.ipc_shmem_) {
     const int prev_read_idx = ipc_evt_.ipc_shmem_->read_index;
-    const int offset = prev_read_idx % IPC_SIGNALS_PER_EVENT;
+    const int offset = ihipSignalSlot(prev_read_idx);
 
-    if (ipc_evt_.ipc_shmem_->read_index < prev_read_idx + IPC_SIGNALS_PER_EVENT &&
+    if (ipc_evt_.ipc_shmem_->read_index < int64_t{prev_read_idx} + IPC_SIGNALS_PER_EVENT &&
         ipc_evt_.ipc_shmem_->signal[offset] != 0) {
       return hipErrorNotReady;
     }
@@ -80,8 +89,8 @@ hipError_t IPCEventEmulated::synchronize() {
   if (ipc_evt_.ipc_shmem_) {
     int prev_read_idx = ipc_evt_.ipc_shmem_->read_index;
     if (prev_read_idx >= 0) {
-      int offset = (prev_read_idx % IPC_SIGNALS_PER_EVENT);
-      while ((ipc_evt_.ipc_shmem_->read_index < prev_read_idx + IPC_SIGNALS_PER_EVENT) &&
+      int offset = ihipSignalSlot(prev_read_idx);
+      while ((ipc_evt_.ipc_shmem_->read_index < int64_t{prev_read_idx} + IPC_SIGNALS_PER_EVENT) &&
              (ipc_evt_.ipc_shmem_->signal[offset] != 0)) {
         amd::Os::sleep(1);
       }
@@ -93,7 +102,7 @@ hipError_t IPCEventEmulated::synchronize() {
 // ================================================================================================
 hipError_t IPCEventEmulated::streamWait(hip::Stream* stream, uint flags) {
   std::scoped_lock lock(lock_);
-  const int offset = ipc_evt_.ipc_shmem_->read_index % IPC_SIGNALS_PER_EVENT;
+  const int offset = ihipSignalSlot(ipc_evt_.ipc_shmem_->read_index);
   return ihipStreamOperation(
       reinterpret_cast<hipStream_t>(stream),
       ROCCLR_COMMAND_STREAM_WAIT_VALUE,
@@ -121,7 +130,7 @@ hipError_t IPCEventEmulated::enqueueRecordCommand(hip::Stream* stream, amd::Comm
   // Allocate signal slot for this event
   auto* const shmem = ipc_evt_.ipc_shmem_;
   const int write_index = shmem->write_index++;
-  const int offset = write_index % IPC_SIGNALS_PER_EVENT;
+  const int offset = ihipSignalSlot(write_index);
   auto& signal = shmem->signal[offset];
 
   // Wait for signal slot to become available
@@ -149,7 +158,7 @@ hipError_t IPCEventEmulated::enqueueRecordCommand(hip::Stream* stream, amd::Comm
   }
 
   // Update read index to indicate new signal
-  int expected = write_index - 1;
+  int expected = static_cast<int>(int64_t{write_index} - 1);  // wraps like write_index does
   while (!shmem->read_index.compare_exchange_weak(expected, write_index)) {
     amd::Os::sleep(1);
   }
@@ -175,13 +184,21 @@ hipError_t IPCEventEmulated::GetHandle(ihipIpcEventHandle_t* handle) {
 // ================================================================================================
 hipError_t IPCEventEmulated::OpenHandle(ihipIpcEventHandle_t* handle) {
   std::scoped_lock lock(lock_);
-  ipc_evt_.ipc_name_ = handle->shmem_name;
+  // shmem_name comes from the peer and may not be NUL-terminated.
+  const size_t name_len = strnlen(handle->shmem_name, IHIP_IPC_EVENT_HANDLE_SIZE);
+  if (name_len == IHIP_IPC_EVENT_HANDLE_SIZE ||
+      std::strncmp(handle->shmem_name, "/hip_", 5) != 0) {
+    return hipErrorInvalidValue;
+  }
+  ipc_evt_.ipc_name_.assign(handle->shmem_name, name_len);
 
   // Map shared memory from IPC handle
   auto** shmem_ptr = reinterpret_cast<void**>(&ipc_evt_.ipc_shmem_);
   if (!amd::Os::MemoryMapFileTruncated(ipc_evt_.ipc_name_.c_str(),
                                        const_cast<const void**>(shmem_ptr),
-                                       sizeof(ihipIpcEventShmem_t))) {
+                                       sizeof(ihipIpcEventShmem_t),
+                                       amd::Os::ShmMode::kOpenExisting)) {
+    ipc_evt_.ipc_name_.clear();  // not opened: the destructor must not unlink it
     return hipErrorInvalidValue;
   }
 

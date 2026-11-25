@@ -25,49 +25,54 @@ pub(crate) unsafe fn with_queue_index<R>(
     index: QueueIndex,
     operation: impl for<'a> FnOnce(&'a AtomicU64) -> R,
 ) -> Option<R> {
-    if queue.is_null() {
-        return None;
-    }
-    let address = if queue as usize & COUNTED_QUEUE_HANDLE_BIT != 0 {
-        // SAFETY: A live counted handle points at CountedQueuePublic::header,
-        // whose preceding word holds the stable hardware queue address.
-        let hardware = unsafe {
-            (*queue
-                .cast::<u8>()
-                .sub(COUNTED_QUEUE_HANDLE_BIT)
-                .cast::<CountedQueuePublic>())
-            .hardware_queue
+    let admission = crate::admission::enter_public_raw_handle()?;
+    crate::admission::ApiLeaseScope::run(admission, || {
+        if queue.is_null() {
+            return None;
+        }
+        let address = if queue as usize & COUNTED_QUEUE_HANDLE_BIT != 0 {
+            // SAFETY: A live counted handle points at CountedQueuePublic::header,
+            // whose preceding word holds the stable hardware queue address.
+            let public = unsafe {
+                &*queue
+                    .cast::<u8>()
+                    .sub(COUNTED_QUEUE_HANDLE_BIT)
+                    .cast::<CountedQueuePublic>()
+            };
+            let hardware = public.hardware_queue;
+            // SAFETY: The counted handle retains this validated hardware control.
+            match index {
+                QueueIndex::Read => unsafe { AqlControlRegion::read_index_address_at(hardware) },
+                QueueIndex::Write => unsafe { AqlControlRegion::write_index_address_at(hardware) },
+            }
+        } else if queue as usize & SDMA_QUEUE_HANDLE_BIT != 0 {
+            // SAFETY: A live SDMA header begins 128 bytes into its private
+            // control. The private words borrow rocddi's aligned index mappings.
+            let control = unsafe {
+                &*queue
+                    .cast::<u8>()
+                    .sub(SDMA_QUEUE_HANDLE_BIT)
+                    .cast::<SdmaQueueControl>()
+            };
+            match index {
+                QueueIndex::Read => control.read_index_host_address,
+                QueueIndex::Write => control.write_index_host_address,
+            }
+        } else {
+            // SAFETY: The public AQL or soft handle retains its complete control.
+            match index {
+                QueueIndex::Read => unsafe {
+                    AqlControlRegion::read_index_address_at(queue as usize)
+                },
+                QueueIndex::Write => unsafe {
+                    AqlControlRegion::write_index_address_at(queue as usize)
+                },
+            }
         };
-        // SAFETY: The counted handle retains this validated hardware control.
-        match index {
-            QueueIndex::Read => unsafe { AqlControlRegion::read_index_address_at(hardware) },
-            QueueIndex::Write => unsafe { AqlControlRegion::write_index_address_at(hardware) },
-        }
-    } else if queue as usize & SDMA_QUEUE_HANDLE_BIT != 0 {
-        // SAFETY: A live SDMA header begins 128 bytes into its private
-        // control. The private words borrow rocddi's aligned index mappings.
-        let control = unsafe {
-            &*queue
-                .cast::<u8>()
-                .sub(SDMA_QUEUE_HANDLE_BIT)
-                .cast::<SdmaQueueControl>()
-        };
-        match index {
-            QueueIndex::Read => control.read_index_host_address,
-            QueueIndex::Write => control.write_index_host_address,
-        }
-    } else {
-        // SAFETY: The public AQL or soft handle retains its complete control.
-        match index {
-            QueueIndex::Read => unsafe { AqlControlRegion::read_index_address_at(queue as usize) },
-            QueueIndex::Write => unsafe {
-                AqlControlRegion::write_index_address_at(queue as usize)
-            },
-        }
-    };
-    // SAFETY: The caller retains a live queue handle. AQL and soft controls
-    // expose named indices; counted and SDMA handles resolve to
-    // the native index mapping retained by their queue owner.
-    let index = unsafe { &*(address as *const AtomicU64) };
-    Some(operation(index))
+        // SAFETY: The caller retains a live queue handle. AQL and soft controls
+        // expose named indices; counted and SDMA handles resolve to
+        // the native index mapping retained by their queue owner.
+        let index = unsafe { &*(address as *const AtomicU64) };
+        Some(operation(index))
+    })
 }

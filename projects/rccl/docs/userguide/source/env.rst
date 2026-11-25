@@ -286,6 +286,7 @@ Note that the total time spent waiting for a response is the product of
 Values accepted
 ^^^^^^^^^^^^^^^
 The default value used by NCCL is 20 (since 2.23; it was 18 since 2.14, and 14 before that).
+Since 2.32u1, invalid values fall back to the default value of 20.
 
 Values can be 0-31.
 
@@ -306,6 +307,7 @@ For more information, see section 12.7.38 of the InfiniBand specification Volume
 Values accepted
 ^^^^^^^^^^^^^^^
 The default value is 7. Valid values are 0-7.
+Since 2.32u1, invalid values fall back to the default value of 7.
 
 NCCL_IB_GID_INDEX
 -----------------
@@ -319,7 +321,9 @@ or vendor documentation.
 
 Values accepted
 ^^^^^^^^^^^^^^^
-The default value is -1.
+The default value is AUTO (since 2.32u1), which lets NCCL automatically determine the GID.
+-1 is a legacy alias for AUTO, retained for backward compatibility.
+Since 2.32u1, invalid values fall back to the default value of AUTO.
 
 NCCL_IB_ADDR_FAMILY
 -------------------
@@ -358,6 +362,7 @@ unset.
 Values accepted
 ^^^^^^^^^^^^^^^
 The default value is 2.
+Since 2.32u1, invalid values fall back to the default value of 2.
 
 NCCL_IB_PKEY
 ------------
@@ -377,6 +382,7 @@ or vendor documentation.
 Values accepted
 ^^^^^^^^^^^^^^^
 The default value is 0 (the first entry of the PKey table).
+Since 2.32u1, invalid values fall back to the default value of 0.
 
 NCCL_IB_PKEY_VALUE
 ------------------
@@ -409,7 +415,11 @@ or vendor documentation.
 
 Values accepted
 ^^^^^^^^^^^^^^^
-The default value is 0.
+The default value is AUTO (since 2.32u1).
+If set to AUTO, NCCL uses 0 as the Service Level unless the communicator's traffic class is configured,
+in which case it uses that value as the Service Level.
+-1 is a legacy alias for AUTO, retained for backward compatibility.
+Since 2.32u1, invalid values fall back to the default value of AUTO.
 
 NCCL_IB_TC
 ----------
@@ -422,7 +432,11 @@ or vendor documentation.
 
 Values accepted
 ^^^^^^^^^^^^^^^
-The default value is 0.
+The default value is AUTO (since 2.32u1).
+If set to AUTO, NCCL uses a traffic class of 0 unless the communicator's traffic class is configured,
+in which case it uses that value.
+-1 is a legacy alias for AUTO, retained for backward compatibility.
+Since 2.32u1, invalid values fall back to the default value of AUTO.
 
 NCCL_IB_FIFO_TC
 ---------------
@@ -437,7 +451,10 @@ avoid being delayed by the rest of the traffic.
 
 Values accepted
 ^^^^^^^^^^^^^^^
-The default value is the traffic class set by NCCL_IB_TC, which defaults to 0 if not set.
+The default value is AUTO (since 2.32u1).
+If set to AUTO, NCCL will use communicator's traffic class which is determined by NCCL_IB_TC.
+-1 is a legacy alias for AUTO, retained for backward compatibility.
+Since 2.32u1, invalid values fall back to the default value of AUTO.
 
 NCCL_GIN_IB_TC
 --------------
@@ -645,14 +662,21 @@ Plugin suffix, plugin file name, or "none".
 NCCL_PROFILER_PLUGIN
 --------------------
 
-Set it to either a suffix string or to a library name to choose among multiple NCCL profiler plugins. This setting will cause NCCL to look for the profiler plugin library using the following strategy:
- - If NCCL_PROFILER_PLUGIN is set, attempt loading the library with name specified by NCCL_PROFILER_PLUGIN;
- - If NCCL_PROFILER_PLUGIN is set and previous failed, attempt loading librccl-profiler-<NCCL_PROFILER_PLUGIN>.so;
- - If NCCL_PROFILER_PLUGIN is not set, attempt loading librccl-profiler.so;
+Set it to a comma-separated list of up to two suffix strings or library names. NCCL loads the
+entries in list order and sends each event to the plugins that enabled that event type. Empty,
+missing, unsupported, and duplicate entries are skipped without preventing later entries from
+loading. Whitespace around commas is ignored. This setting causes NCCL to look for each profiler
+plugin library using the following strategy:
+
+ - For each entry, attempt loading the library with the specified name;
+ - If that fails, attempt loading librccl-profiler-<entry>.so;
+ - If NCCL_PROFILER_PLUGIN is unset or empty, attempt loading librccl-profiler.so;
  - If no plugin was found (neither user defined nor default), do not enable profiling.
  - If NCCL_PROFILER_PLUGIN is set to ``STATIC_PLUGIN``, the plugin symbols are searched in the program binary.
+ - If every explicit entry fails, NCCL tries the profiler symbol exported by the network plugin as a final entry.
 
-For example, setting ``NCCL_PROFILER_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``librccl-profiler-foo.so`` (provided that it exists on the system).
+For example, ``NCCL_PROFILER_PLUGIN=telemetry,librccl-profiler-trace.so`` loads the telemetry
+suffix plugin (``librccl-profiler-telemetry.so``) followed by the explicitly named trace plugin.
 
 The RCCL Inspector plugin (since RCCL 2.29) is loaded by pointing this variable
 at ``librccl-profiler-inspector.so`` and setting ``NCCL_INSPECTOR_ENABLE=1``.
@@ -663,7 +687,8 @@ Prometheus textfile mode is ``NCCL_INSPECTOR_PROM_DUMP=1``. Metric names stay
 Values accepted
 ^^^^^^^^^^^^^^^
 
-Plugin suffix, plugin file name, or "none".
+Comma-separated plugin suffixes or plugin file names, or ``none``.
+Unset or empty loads ``librccl-profiler.so``.
 
 NCCL_ENV_PLUGIN
 ---------------
@@ -807,8 +832,8 @@ ALLOC (non-host memory allocations, typically device-side), ALLOC_HOST (host mem
 CALL (stands for function calls), PROXY (stands for the proxy thread operations), NVLS
 (stands for NVLink SHARP), BOOTSTRAP (stands for early initialization), REG (stands for memory registration), PROFILE
 (stands for coarse-grained profiling of initialization), RAS (stands for reliability, availability, and serviceability
-subsystem), DESTROY (stands for communicator destroy, abort, revoke, and plugin unload/close operations)
-and ALL (includes every subsystem).
+subsystem), DESTROY (stands for communicator destroy, abort, revoke, and plugin unload/close operations),
+DIAG (stands for detailed information from active and RAS diagnostics) and ALL (includes every subsystem).
 
 .. _NCCL_DEBUG_TIMESTAMP_FORMAT:
 
@@ -978,7 +1003,9 @@ exhaustion.
 Finally, NVLS is currently not compatible with multiple ranks within the same communicator using
 the same GPU. If ``NCCL_NVLS_ENABLE`` is set to 1, communicator initialization will fail when
 multiple ranks per GPU are detected. If ``NCCL_NVLS_ENABLE`` is set to 2 (the default), NVLS will
-be silently disabled.
+be silently disabled. This applies to NCCL only. RCCL does not implement NVLS, so
+``NCCL_NVLS_ENABLE`` has no effect and multiple ranks per GPU never cause an NVLS initialization
+failure (see :ref:`env_NCCL_NVLS_ENABLE`).
 
 Disclaimer: This is currently an experimental feature, and is still being tuned. It is not
 compatible with all configurations. It may exhaust resources and lock NCCL.
@@ -1023,7 +1050,7 @@ A path to a file which will be created or overwritten.
 
 The dumped file reflects the topology as seen by NCCL. For multi-node NVLink systems, the file
 contains the topology from all the hosts that are part of the same NVLink domain. This file is
-useful for debugging and inspection, but should be reduced to a sigle host before use with
+useful for debugging and inspection, but should be reduced to a single host before use with
 ``NCCL_TOPO_FILE`` (see the notes above).
 
 
@@ -1291,6 +1318,7 @@ NetworkDirect reuses this variable as the QP count per physical adapter in a con
 Values accepted
 ^^^^^^^^^^^^^^^
 Number between 1 and 128, default is 1. With the ``IB`` network transport, GIN connections (the proxy bootstrap ring and the per-context proxy links) use one queue pair per device and do not follow this variable. Collective and point-to-point IB connections do.
+Since 2.32u1, invalid values fall back to the default value of 1.
 
 NCCL_IB_SPLIT_DATA_ON_QPS
 -------------------------
@@ -1347,6 +1375,9 @@ Enable the use of Enhanced Connection Establishment (ECE) on IB/RoCE Verbs netwo
 Values accepted
 ^^^^^^^^^^^^^^^
 Enabled (1) by default (since 2.19). Set to 0 to disable use of ECE network capabilities.
+Since 2.32u1, accepts 1/T/TRUE as enabled, 0/F/FALSE as disabled, strings are case-insensitive.
+
+Since 2.32u1, invalid values fall back to the default value of enabled (1).
 
 Note: Incorrect configuration of the ECE parameters on a system can adversely affect NCCL performance. Administrators should ensure ECE is correctly configured if it is enabled at the system level.
 
@@ -1561,6 +1592,8 @@ The default is dependent on the number of ranks.
 
 Values are integers, in bytes.
 
+.. _NCCL_ALGO:
+
 NCCL_ALGO
 ----------
 (since 2.5)
@@ -1625,6 +1658,8 @@ algorithms available except tree.
 The default is unset, which causes NCCL to automatically choose the available
 algorithms based on the node topology and architecture.
 
+.. _NCCL_PROTO:
+
 NCCL_PROTO
 ----------
 (since 2.5)
@@ -1648,7 +1683,7 @@ The default behavior enables all supported algorithms: equivalent to
 otherwise.
 
 (since 2.24) The accepted values are expanded to allow more flexibility,
-just as decribed for ``NCCL_ALGO`` above, allowing the user to specify
+just as described for ``NCCL_ALGO`` above, allowing the user to specify
 protocols for each function.
 
 NCCL_NVB_DISABLE
@@ -1700,7 +1735,7 @@ NCCL_RUNTIME_CONNECT
 --------------------
 (since 2.22)
 
-Dynamically connect peers during runtime (e.g., calling `ncclAllreduce()`) instead of init stage.
+Dynamically connect peers during runtime (e.g., calling `ncclAllReduce()`) instead of init stage.
 
 Value accepted
 ^^^^^^^^^^^^^^
@@ -1792,7 +1827,7 @@ NCCL_GRAPH_MIXING_SUPPORT
 -------------------------
 (since 2.13)
 
-Enable/disable support for multiple outstanding NCCL calls from parallel CUDA graphs or a CUDA graph and non-captured NCCL calls. NCCL calls are considered outstanding starting from their host-side launch (e.g., a call to `ncclAllreduce()` for non-captured calls or `cudaGraphLaunch()` for captured calls) and ending when the device kernel execution completes. With graph mixing support disabled, the following use cases are NOT supported:
+Enable/disable support for multiple outstanding NCCL calls from parallel CUDA graphs or a CUDA graph and non-captured NCCL calls. NCCL calls are considered outstanding starting from their host-side launch (e.g., a call to `ncclAllReduce()` for non-captured calls or `cudaGraphLaunch()` for captured calls) and ending when the device kernel execution completes. With graph mixing support disabled, the following use cases are NOT supported:
 
 1. Using a NCCL communicator (or split-shared communicators) from parallel graph launches, where parallel means on different streams without dependencies that would serialize their execution.
 
@@ -1800,9 +1835,32 @@ Enable/disable support for multiple outstanding NCCL calls from parallel CUDA gr
 
 The ability to disable support is motivated by observed hangs in the CUDA launches when support is enabled and multiple ranks have work launched via cudaGraphLaunch from the same thread.
 
+To turn mixing off while keeping graph use supported, leave this variable unset,
+set ``graphUsageMode=1`` and use one graph at a time. Setting the variable to
+``0`` forces ``graphUsageMode=0``, under which capturing collectives is not
+supported, so it only suits applications that stop capturing.
+
+Support is in effect only on a communicator whose ``graphUsageMode`` (see
+:ref:`ncclconfig`) is ``2``. Set ``2`` on every communicator involved, including
+each one that shares resources through ``ncclCommSplit``: the interlock only
+holds when both the capturing and the non-captured side use ``2``.
+
+When set to ``0`` or ``1``, this variable overrides ``graphUsageMode``: ``1``
+sets it to ``2`` and ``0`` sets it to ``0``. Any other value is ignored and
+leaves the field in effect.
+
+``graphUsageMode=2`` cannot be combined with :ref:`NCCL_GRAPH_STREAM_ORDERING`
+``0`` (see :c:macro:`graphStreamOrdering <ncclConfig_t.graphStreamOrdering>`).
+Do not rely on the fallback described there: keep the two settings apart on
+every communicator, including those created by ``ncclCommSplit``,
+``ncclCommShrink`` or ``ncclCommGrow`` without a config, which inherit their
+parent's settings; joining ranks of ``ncclCommGrow`` use defaults instead.
+
 Value accepted
 ^^^^^^^^^^^^^^
-0 or 1. Default is 1 (enabled).
+``0`` or ``1``. Unset by default, in which case the communicator's ``graphUsageMode``
+applies. In RCCL that defaults to ``0``, so graph mixing support is
+**disabled** by default.
 
 .. _NCCL_GRAPH_STREAM_ORDERING:
 
@@ -1819,8 +1877,8 @@ CUDA graph capture.
 .. warning::
 
    ``NCCL_GRAPH_STREAM_ORDERING=0`` together with **graph mixing** (communicator
-   ``graphUsageMode=2``; see :ref:`ncclconfig`) is **not supported**. NCCL emits
-   a warning, forces ``graphStreamOrdering`` to ``1``, and continues communicator
+   ``graphUsageMode=2``; see :ref:`ncclconfig`) is **not supported**. RCCL logs
+   an INFO message (visible with ``NCCL_DEBUG=INFO``), forces ``graphStreamOrdering`` to ``1``, and continues communicator
    creation successfully. If stream ordering is disabled for a communicator,
    **graph mixing must be off**—use ``graphUsageMode`` ``0`` or ``1`` (and note
    that :ref:`NCCL_GRAPH_MIXING_SUPPORT` ``1`` forces ``graphUsageMode=2`` at init,
@@ -1933,19 +1991,40 @@ The ``NCCL_P2P_NET_CHUNKSIZE`` controls the size of messages sent through the ne
 
 Values accepted
 ^^^^^^^^^^^^^^^
-The default is 131072 (128 K).
+The default is 131072 (128 K). In RCCL, on multi-node gfx942 the default is 524288 (512 K) from 64 ranks, and on gfx950 it is 524288 (512 K) from 32 ranks and 262144 (256 K) from 16 ranks; setting the variable overrides these defaults.
 
 Values are integers, in bytes. The recommendation is to use powers of 2, hence 262144 would be the next value.
+A value of 0 or less selects the default.
+
+NCCL_P2P_PCI_CHUNKSIZE
+----------------------
+
+The ``NCCL_P2P_PCI_CHUNKSIZE`` controls the size of messages sent within a single node whose GPUs are not all connected by direct links, for ncclSend/ncclRecv operations.
+
+Values accepted
+^^^^^^^^^^^^^^^
+The default is 131072 (128 K). Values are integers, in bytes. A value of 0 or less selects the default.
+
+NCCL_P2P_NVL_CHUNKSIZE
+----------------------
+
+The ``NCCL_P2P_NVL_CHUNKSIZE`` controls the size of messages sent within a single node whose GPUs are all connected by direct links (NVLink on NVIDIA, xGMI on AMD), for ncclSend/ncclRecv operations.
+
+Values accepted
+^^^^^^^^^^^^^^^
+The default is 524288 (512 K). Values are integers, in bytes. A value of 0 or less selects the default.
 
 NCCL_P2P_LL_THRESHOLD
 ---------------------
 (since 2.14)
 
-The ``NCCL_P2P_LL_THRESHOLD`` is the maximum per-channel message size (in bytes) at or below which RCCL uses the legacy LL low-latency protocol for P2P (send/recv) operations. Above this size, RCCL uses the SIMPLE protocol. This threshold applies when the P2P latency path uses the legacy LL protocol (i.e. when the LL128 path is not active for the communicator). Because legacy LL carries roughly 2x wire overhead, it stops beating SIMPLE at relatively small sizes, so this defaults lower than ``NCCL_P2P_LL128_THRESHOLD``.
+The ``NCCL_P2P_LL_THRESHOLD`` is the per-channel message size threshold (in bytes) that RCCL uses when selecting the legacy LL low-latency protocol for P2P (send/recv) operations. The effective cutoff depends on the number of P2P channels considered by the protocol selector. The cutoff selects LL for eligible transfers at or below it, but it is not a strict upper bound: larger transfers may still use LL when they fit in one LL data step across the selected P2P channels. Otherwise RCCL uses the SIMPLE protocol. For collective operations implemented with P2P transfers, the size compared against this cutoff is the per-peer P2P transfer size, not the total collective buffer size. This threshold applies when the P2P latency path uses the legacy LL protocol (i.e. when the LL128 path is not active for the communicator). Because legacy LL carries roughly 2x wire overhead, it stops beating SIMPLE at relatively small sizes, so this defaults lower than ``NCCL_P2P_LL128_THRESHOLD``.
+
+On single-node all-XGMI gfx942 and gfx950, an unset or empty value does not use that per-channel product. The SIMPLE channel estimate is 1 for messages up to the SIMPLE part size, so ``nChannels * 4096`` would not select LL. RCCL instead allows legacy LL up to the smaller of that part size (``NCCL_P2P_NVL_CHUNKSIZE / 8``, 64 KiB with the default 512 KiB chunk) and 64 KiB per peer. A non-empty value keeps the per-channel rule on every architecture. The LL128 path uses ``NCCL_P2P_LL128_THRESHOLD`` instead and is not widened.
 
 Values accepted
 ^^^^^^^^^^^^^^^
-Decimal number. Default is 4096.
+Decimal number. Default is 4096. An empty value is treated as unset.
 
 NCCL_P2P_LL128_THRESHOLD
 ------------------------
@@ -1955,7 +2034,7 @@ The ``NCCL_P2P_LL128_THRESHOLD`` is the maximum per-channel message size (in byt
 
 Values accepted
 ^^^^^^^^^^^^^^^
-Decimal number. Default is 16384.
+Decimal number, in bytes. Default is 16384.
 
 NCCL_P2P_LL128_ENABLE
 ---------------------
@@ -2074,6 +2153,9 @@ NCCL_NVLS_ENABLE
 
 Enable the use of NVLink SHARP (NVLS). NVLink SHARP is available in third-generation NVSwitch systems (NVLink4) with Hopper and later GPU architectures, allowing collectives such as ``ncclAllReduce`` to be offloaded to the NVSwitch domain.
 The default value is 2.
+
+In RCCL, this variable has no effect. RCCL does not implement NVLink SHARP, so no value allocates NVLink SHARP
+resources, and communicator initialization never fails because of them. The values below describe NCCL.
 
 Values accepted
 ^^^^^^^^^^^^^^^
@@ -2203,7 +2285,8 @@ socket timeouts.
 
 Values accepted
 ^^^^^^^^^^^^^^^
-Default is 1. A positive floating-point number. Values less than or equal to 0 are ignored and replaced with 1.
+Default is 1. A floating-point number between 0.001 and 1000000 (inclusive). Values outside this range, or that are
+not valid numbers, are ignored and replaced with 1.
 
 NCCL_PROGRESS_COUNTERS
 ----------------------
@@ -2257,6 +2340,40 @@ initialization. The check only runs when the communicator spans at least two nod
 Values accepted
 ^^^^^^^^^^^^^^^
 Default is 5. Values below 1 are replaced with 5.
+
+.. _env_NCCL_RUN_RAS_DIAGNOSTICS:
+
+NCCL_RUN_RAS_DIAGNOSTICS
+------------------------
+(since 2.31)
+
+Run the passive RAS diagnostics automatically at each communicator initialization. The diagnostics collect and compare
+system information across ranks without exercising NCCL data paths, and print a report whose lines are prefixed with
+``NCCL DIAG`` (see :ref:`ras_diagnostics`). This variable only controls the automatic init-time trigger; RAS diagnostics
+can still be requested on demand through the ``ncclras`` client regardless of its value. Requires the RAS subsystem to
+be enabled (see :ref:`env_NCCL_RAS_ENABLE`). This variable is independent of :ref:`env_NCCL_RUN_DIAGNOSTICS`; set both
+to 1 to run both levels.
+
+Values accepted
+^^^^^^^^^^^^^^^
+Default is 0 (disabled). Set to 1 to run RAS diagnostics at every communicator initialization.
+
+.. _env_NCCL_RUN_DIAGNOSTICS:
+
+NCCL_RUN_DIAGNOSTICS
+--------------------
+(since 2.31)
+
+Run the active diagnostics synchronously during communicator initialization, before the application can issue operations
+on the communicator. Active diagnostics exercise the actual communication paths between GPUs (e.g., the P2P check and,
+across hosts, the network bandwidth check) and report the results in ``NCCL DIAG`` lines on the standard output of the
+process hosting rank 0 of the communicator (see :doc:`troubleshooting/diagnostics`). Diagnostics are informational only
+and never abort initialization. They add to initialization time. This variable is independent of
+:ref:`env_NCCL_RUN_RAS_DIAGNOSTICS`; set both to 1 to run both levels.
+
+Values accepted
+^^^^^^^^^^^^^^^
+Default is 0 (disabled). Set to 1 to run active diagnostics at every communicator initialization.
 
 .. _NCCL_LAUNCH_ORDER_IMPLICIT:
 

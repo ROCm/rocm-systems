@@ -6,13 +6,13 @@
 #include <cstdint>
 
 #include "amd_smi/amdsmi.h"
+#include "test_fixture_utils.h"
 
 namespace {
 
-// A CPU-only init needs no AMD hardware: without the HSMP driver it initializes
-// with no processors, which is enough to reach the argument checks.
+// An init without discovery is enough to reach the argument checks.
 TEST(SystemUnit, ProcessorCountFromHandlesRejectsNullOutputs) {
-  ASSERT_EQ(amdsmi_init(AMDSMI_INIT_AMD_CPUS), AMDSMI_STATUS_SUCCESS);
+  ScopedAmdsmiInit smi_init;
 
   amdsmi_processor_handle handles[1] = {};
   uint32_t count = 0;
@@ -35,8 +35,6 @@ TEST(SystemUnit, ProcessorCountFromHandlesRejectsNullOutputs) {
   EXPECT_EQ(sockets, 0u);
   EXPECT_EQ(cores, 0u);
   EXPECT_EQ(gpus, 0u);
-
-  EXPECT_EQ(amdsmi_shut_down(), AMDSMI_STATUS_SUCCESS);
 }
 
 }  // namespace

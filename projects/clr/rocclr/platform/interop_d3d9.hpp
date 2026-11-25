@@ -104,6 +104,12 @@ class D3D9Object : public InteropObject {
       }
     }
   }
+  //! True when surfaces from this adapter type can actually be shared with OpenCL.
+  //! The single source of truth for the supported adapter types: both the surface path and
+  //! clGetDeviceIDsFromDX9MediaAdapterKHR consult it, so a device is never reported for an
+  //! adapter whose surfaces would then be refused.
+  static bool isAdapterTypeSupported(cl_dx9_media_adapter_type_khr adapter_type);
+
   static int initD3D9Object(const Context& amdContext, cl_dx9_media_adapter_type_khr adapter_type,
                             cl_dx9_surface_info_khr* cl_surf_info, cl_uint plane, D3D9Object& obj);
   cl_uint getMiscFlag(void);

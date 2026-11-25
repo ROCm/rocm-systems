@@ -15,9 +15,9 @@
 # On one 8-GPU node:
 #   1. consume ROCm (provisioned on the head node) via .ci-out/rocm.env
 #   2. lib/build-ompi.sh     build OpenMPI (--with-rocm) -> ompi.env
-#   3. projects/rccl/install.sh   build RCCL (--rocshmem-gin). install.sh builds
-#                                  the sibling rocSHMEM checkout into
-#                                  projects/rccl/ext/rocshmem -> rocshmem.env
+#   3. projects/rccl/install.sh   build RCCL (--rocshmem-gin). GIN host code is
+#                                  compiled from the in-tree rocSHMEM source; no
+#                                  rocshmem library is built -> librccl is self-contained
 #   4. rccl-tests (install.sh)    ENABLE_DEVICE_API=1, no ENABLE_ROCSHMEM_GIN
 #                                  (AR/AG/RS -R 2 + LSA all_reduce -D 1/-D 2)
 #   5. rccl-tests (cmake)         ENABLE_DEVICE_API + ENABLE_ROCSHMEM_GIN
@@ -117,13 +117,12 @@ echo "==> verified hipcc = ${resolved_hipcc}"
 # shellcheck source=/dev/null
 source "${ci_dir}/lib/ensure-python-yaml.sh"
 
-# 3) RCCL with GIN / rocSHMEM. Leave ROCSHMEM_INSTALL_DIR unset so install.sh
-# builds the sibling projects/rocshmem checkout (gda + USE_SDMA) and installs
-# it at projects/rccl/ext/rocshmem. A pre-set install dir skips that build.
+# 3) RCCL with GIN. install.sh --rocshmem-gin compiles the GIN host code it needs
+# straight from the in-tree projects/rocshmem *source* and builds no rocshmem
+# library -- librccl.so is self-contained, so no ROCSHMEM_INSTALL_DIR is needed.
 # --prefix is required: without an install tree, lib/cmake/rccl/*config.cmake is
 # never written and the rccl_cfg check below fails the job before any test.
 echo "==> [3/6] build RCCL (GIN, targets=${amdgpu_targets})"
-unset ROCSHMEM_INSTALL_DIR
 rccl_prefix="${workdir}/.ci-out/rccl-install"
 rm -rf "${rccl_prefix}"
 (
@@ -133,18 +132,6 @@ rm -rf "${rccl_prefix}"
        --prefix="${rccl_prefix}" \
        --rocshmem-gin --no_clean
 )
-rocshmem_prefix="${workdir}/projects/rccl/ext/rocshmem"
-if [[ ! -f "${rocshmem_prefix}/lib/librocshmem.a" ]]; then
-  echo "ERROR: --rocshmem-gin did not install librocshmem.a under ${rocshmem_prefix}/lib" >&2
-  ls -la "${rocshmem_prefix}/lib" 2>/dev/null >&2 || true
-  exit 1
-fi
-ROCSHMEM_INSTALL_DIR="${rocshmem_prefix}"
-export ROCSHMEM_INSTALL_DIR
-{
-  printf 'export ROCSHMEM_INSTALL_DIR=%q\n' "${ROCSHMEM_INSTALL_DIR}"
-} > "${workdir}/.ci-out/rocshmem.env"
-echo "    rocSHMEM install: ${ROCSHMEM_INSTALL_DIR}"
 if [[ ! -f "${rccl_prefix}/lib/librccl.so" && ! -f "${rccl_prefix}/lib/librccl.so.1" ]]; then
   echo "ERROR: no librccl.so under ${rccl_prefix}/lib" >&2
   ls -la "${rccl_prefix}/lib" 2>/dev/null >&2 || true
@@ -185,11 +172,11 @@ for perf_bin in "${required_nongin_bins[@]}"; do
   fi
 done
 
-# 5) rccl-tests via cmake so the GIN matrix binary RDC-links rocshmem
-# (install.sh/Makefile path does not enable ENABLE_ROCSHMEM_GIN). Needed because
-# this job's librccl.so is --rocshmem-gin. RCCL_TESTS_BIN_DIR is consumed by
-# run-device-api-ci.sh for the GIN matrix. ROCSHMEM_INSTALL_DIR is the
-# install.sh rocSHMEM tree (projects/rccl/ext/rocshmem).
+# 5) rccl-tests via cmake with ENABLE_ROCSHMEM_GIN so the GIN matrix binary builds
+# the device-API GIN path (install.sh/Makefile path does not enable it).
+# RCCL_TESTS_BIN_DIR is consumed by run-device-api-ci.sh for the GIN matrix.
+# rccl-tests consumes GIN entirely through roc::rccl (self-contained librccl):
+# no rocshmem find_package, no roc::rocshmem link, no ROCSHMEM_INSTALL_DIR.
 echo "==> [5/6] build rccl-tests (ENABLE_DEVICE_API + ENABLE_ROCSHMEM_GIN)"
 rccl_tests_build="${workdir}/.ci-out/rccl-tests-build"
 rm -rf "${rccl_tests_build}"; mkdir -p "${rccl_tests_build}"
@@ -197,7 +184,6 @@ rm -rf "${rccl_tests_build}"; mkdir -p "${rccl_tests_build}"
   cd "${rccl_tests_build}"
   cmake -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON \
     -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM_GIN=ON \
-    -DROCSHMEM_INSTALL_DIR="${ROCSHMEM_INSTALL_DIR}" \
     -DRCCL_DIR="${rccl_cmake_dir}" \
     -DCMAKE_PREFIX_PATH="${rccl_prefix};${MPI_HOME}" \
     -DGPU_TARGETS="${amdgpu_targets}" \
@@ -243,15 +229,13 @@ if [[ "${build_rc}" -ne 0 ]]; then
 fi
 
 # --- test phase -> test-%j.{out,err} ---
-# Source build fragments so ROCM_PATH / MPI_HOME / ROCSHMEM / RCCL paths are set
+# Source build fragments so ROCM_PATH / MPI_HOME / RCCL paths are set
 # even though the build ran in a subshell.
 set -a
 # shellcheck source=/dev/null
 source "${workdir}/.ci-out/rocm.env"
 # shellcheck source=/dev/null
 source "${workdir}/.ci-out/ompi.env"
-# shellcheck source=/dev/null
-source "${workdir}/.ci-out/rocshmem.env"
 # shellcheck source=/dev/null
 source "${workdir}/.ci-out/rccl.env"
 set +a

@@ -11,6 +11,8 @@
 #include <functional>
 #include <utility>
 
+#include "fakes/signature-drift.h"
+
 // ScopedHook -- RAII wrapper around a controllable seam
 //
 // Three jobs in one type:
@@ -68,5 +70,10 @@ private:
 // call sites don't have to spell out the signature.
 template <typename R, typename... Args, typename Callable>
 ScopedHook(std::function<R(Args...)>&, Callable) -> ScopedHook<R(Args...)>;
+
+// CTAD does not apply to members, so a scene names its hooks by slot:
+//   HookOf<decltype(g_ibvSymbols)> ibvSymbols{g_ibvSymbols, [] { return ncclSuccess; }};
+template <typename Slot>
+using HookOf = ScopedHook<rccl_test_host::FnSigOf_t<Slot>>;
 
 #endif  // RCCL_TEST_HOST_SCOPEDHOOK_H_

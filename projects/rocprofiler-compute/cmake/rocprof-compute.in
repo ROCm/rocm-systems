@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 TARGET = (
-    Path(__file__).parent.parent
+    Path(__file__).resolve().parent.parent
     / "@CMAKE_INSTALL_LIBEXECDIR@"
     / "@PROJECT_NAME@"
     / "@EXECUTABLE_NAME@"

@@ -8,7 +8,7 @@
 # find libhipfile.so at runtime without LD_LIBRARY_PATH even from a non-standard
 # install location.
 
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.25.2)
 
 project(api_examples LANGUAGES CXX)
 

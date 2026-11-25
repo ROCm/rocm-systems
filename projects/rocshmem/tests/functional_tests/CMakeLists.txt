@@ -75,6 +75,7 @@ target_sources(
     buffer_register_symmetric_tester.cpp
     fence_ordering_tester.cpp
     tile_rma_tester.cpp
+    tile_nd_rma_tester.cpp
     host_team_sync_barrier_tester.cpp
     host_rma_tester.cpp
     tile_broadcast_tester.cpp
@@ -125,6 +126,8 @@ target_link_libraries(
     $<TARGET_NAME_IF_EXISTS:PMIx::pmix>
     hiprtc
 )
+
+_rocshmem_set_native_link_jobs(${PROJECT_NAME})
 
 ###############################################################################
 # ASAN SETTINGS
@@ -214,6 +217,8 @@ if(BUILD_CTESTS)
         if(COMMAND apply_ctest_category_labels AND EXISTS "${_test_categories_yaml}")
             # Apply tier labels to build-time tests
             apply_ctest_category_labels("${_test_categories_yaml}")
+            # Hand comprehensive/full tiers of typed tests to their _typesfull twins
+            split_types_full_tier_labels()
         endif()
 
         # Apply tier labels to install-time CTest file

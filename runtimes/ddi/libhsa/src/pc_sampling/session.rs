@@ -22,9 +22,11 @@ use rocddi::topology::GpuInfo;
 
 use super::sampling_error;
 use crate::callback_arg::CallbackArg;
+use crate::debugger::TrapRestore;
+use crate::events::CallbackScope;
 use crate::ffi::*;
-use crate::runtime::{CallbackScope, map_error};
 use crate::signal::AmdSignal;
+use crate::status::map_error;
 
 /// Sample size in bytes.
 const SAMPLE_BYTES: usize = 64;
@@ -48,11 +50,6 @@ thread_local! {
     /// Active callback context for one PC sampling copy invocation.
     static ACTIVE_COPY: RefCell<Option<CopyContext>> = const { RefCell::new(None) };
 }
-
-/// Embedded PC sampling trap program for GFX1200.
-const TRAP_GFX1200: &[u8] = include_bytes!("trap_gfx1200.bin");
-/// Embedded PC sampling trap program for GFX1250.
-const TRAP_GFX1250: &[u8] = include_bytes!("trap_gfx1250.bin");
 
 /// Trap-visible control record for one double-buffered XCC sample stream.
 #[repr(C, align(64))]
@@ -146,6 +143,17 @@ impl XccBuffer {
     }
 }
 
+/// Retirement state of the command publishing trap instructions.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CodePublication {
+    /// No successful native instruction-cache invalidation has completed.
+    Pending,
+    /// The instruction-cache invalidation completed and retired.
+    Complete,
+    /// Native command retirement could not be confirmed.
+    Uncertain,
+}
+
 /// Native registration, trap backing, and delivery state for one session.
 pub(super) struct Resources {
     /// Activated GPU whose VM retains these resources.
@@ -177,8 +185,14 @@ pub(super) struct Resources {
     lost: usize,
     /// Whether sampling is currently started.
     active: bool,
+    /// Final callback delivery has completed before legacy tool unload.
+    callbacks_quiesced: bool,
     /// Keeps backing alive when a handler update may have taken effect.
     trap_may_be_installed: bool,
+    /// A cache-command failure with uncertain retirement requires quarantine.
+    publication: CodePublication,
+    /// Retains the runtime's original trap while this sampling trap overrides it.
+    restore: Option<TrapRestore>,
 }
 
 /// Rounds a size up to the required alignment, checking overflow.
@@ -189,16 +203,15 @@ fn align_up(value: usize, alignment: usize) -> Option<usize> {
 }
 
 /// Selects the embedded trap code for a supported GPU generation.
-fn trap_code(info: GpuInfo) -> Option<&'static [u8]> {
+fn trap_code(info: &GpuInfo) -> Option<&'static [u8]> {
     match (info.gfx_major, info.gfx_minor, info.gfx_stepping) {
-        (12, 0, 0 | 1) => Some(TRAP_GFX1200),
-        (12, 5, 0) => Some(TRAP_GFX1250),
+        (12, 0, 0 | 1) | (12, 5, 0) => crate::debugger::trap_bytes(info),
         _ => None,
     }
 }
 
 /// Checks whether embedded trap code exists for this GPU revision.
-pub(crate) fn supported_gpu(info: GpuInfo) -> bool {
+pub(crate) fn supported_gpu(info: &GpuInfo) -> bool {
     trap_code(info).is_some()
 }
 
@@ -207,13 +220,14 @@ impl Resources {
     /// Allocates trap backing and validates a sampling request.
     pub(super) fn prepare(
         device: Device,
-        info: GpuInfo,
+        info: &GpuInfo,
         request: PcSamplingRequest,
         trace_id: Option<NonZeroU32>,
         buffer_size: usize,
         page_size: usize,
         callback: PcSamplingDataReadyCallback,
         callback_data: CallbackArg,
+        restore: TrapRestore,
     ) -> Result<Self, Status> {
         let code = trap_code(info).ok_or(NOT_SUPPORTED)?;
         let callback = callback.ok_or(INVALID_ARGUMENT)?;
@@ -353,7 +367,10 @@ impl Resources {
             pending: VecDeque::new(),
             lost: 0,
             active: false,
+            callbacks_quiesced: false,
             trap_may_be_installed: false,
+            publication: CodePublication::Pending,
+            restore: Some(restore),
         })
     }
 
@@ -372,8 +389,27 @@ impl Resources {
 
     /// Registers the trap handler and sampling trace with the GPU.
     fn activate(&mut self) -> Status {
+        let cache = self.device.gpu().map_err(sampling_error).and_then(|gpu| {
+            let size = self.allocations.first().ok_or(ERROR)?.info().size;
+            gpu.invalidate_code_cache(self.code_address, size, &AtomicBool::new(false))
+                .map_err(|failure| {
+                    if failure.operands_may_be_live {
+                        self.publication = CodePublication::Uncertain;
+                    }
+                    sampling_error(failure.error)
+                })
+        });
+        if let Err(status) = cache {
+            return status;
+        }
+        self.publication = CodePublication::Complete;
         let trace = self.device.gpu().and_then(|gpu| match self.trace_id {
-            Some(id) => gpu.adopt_pc_sampling(self.request, id),
+            Some(id) => {
+                // SAFETY: The admitted HSA create-from-ID call transfers sole
+                // control of the stopped matching trace. Resources retains
+                // trap/sample backing through use and uncertain teardown.
+                unsafe { crate::platform::profiling::adopt(&gpu, self.request, id) }
+            }
             None => gpu.create_pc_sampling(self.request),
         });
         let trace = match trace {
@@ -440,12 +476,22 @@ impl Resources {
 
     /// Stops sampling and retires the native trace and handler.
     fn destroy(&mut self) -> Status {
-        let status = self.stop();
-        if status != SUCCESS {
-            return status;
+        if self.publication == CodePublication::Uncertain {
+            return ERROR;
+        }
+        if !self.callbacks_quiesced {
+            let status = self.stop();
+            if status != SUCCESS {
+                return status;
+            }
         }
         if self.trap_may_be_installed {
-            if let Err(status) = self.set_handler(0, 0) {
+            if let Err(status) = self
+                .restore
+                .as_ref()
+                .ok_or(ERROR)
+                .and_then(|restore| restore.restore(&self.device))
+            {
                 return status;
             }
             self.trap_may_be_installed = false;
@@ -540,6 +586,9 @@ impl Resources {
 
     /// Delivers accumulated samples when the threshold or force flag is met.
     fn deliver(&mut self, force: bool) {
+        if self.callbacks_quiesced {
+            return;
+        }
         deliver_pending(
             &mut self.pending,
             &mut self.lost,
@@ -552,6 +601,7 @@ impl Resources {
 
     /// Moves native allocations into a retired owner for safe later release.
     fn retire(&mut self) -> RetiredAssets {
+        self.restore = None;
         RetiredAssets {
             _allocations: std::mem::take(&mut self.allocations),
         }
@@ -561,7 +611,7 @@ impl Resources {
 impl Drop for Resources {
     /// Retains uncertain trap backing if native handler removal could fail.
     fn drop(&mut self) {
-        if self.trap_may_be_installed {
+        if self.trap_may_be_installed || self.publication == CodePublication::Uncertain {
             // Native failure may have published these addresses to a GPU.
             std::mem::forget(std::mem::take(&mut self.allocations));
         }
@@ -665,10 +715,9 @@ fn deliver_pending(
             break;
         };
         let lost_count = std::mem::take(lost);
-        let _callback_scope = CallbackScope::enter();
         // SAFETY: Pending bytes and the thread-local copy context remain live
         // through this synchronous callback. The token is invalidated below.
-        unsafe {
+        CallbackScope::run(|| unsafe {
             callback(
                 callback_data,
                 available,
@@ -676,7 +725,7 @@ fn deliver_pending(
                 Some(copy_samples),
                 copy.opaque_token(),
             );
-        }
+        });
         let progress = copy.progress();
         drop(copy);
         let Some((consumed, aborted)) = progress else {
@@ -749,7 +798,7 @@ impl SessionHandle {
     pub(super) fn create(
         resources: Resources,
         agent: HsaAgent,
-        quarantine: &AtomicBool,
+        quarantine: &crate::session::SessionHealth,
     ) -> Result<Arc<Self>, Status> {
         let session = Arc::new(Self {
             agent,
@@ -769,11 +818,21 @@ impl SessionHandle {
                     if session.stop_worker.load(Ordering::Acquire) {
                         break;
                     }
-                    let Ok(mut resources) = session.resources.lock() else {
-                        break;
+                    let Some(token) = crate::admission::enter_runtime_service() else {
+                        continue;
                     };
-                    if resources.active && resources.drain_all() == SUCCESS {
-                        resources.deliver(false);
+                    if crate::admission::ApiLeaseScope::run(token, || {
+                        let Ok(mut resources) = session.resources.lock() else {
+                            return std::ops::ControlFlow::Break(());
+                        };
+                        if resources.active && resources.drain_all() == SUCCESS {
+                            resources.deliver(false);
+                        }
+                        std::ops::ControlFlow::Continue(())
+                    })
+                    .is_break()
+                    {
+                        break;
                     }
                 }
             });
@@ -787,13 +846,17 @@ impl SessionHandle {
         let (status, trap_may_be_installed) = match session.resources.lock() {
             Ok(mut resources) => {
                 let status = resources.activate();
-                (status, resources.trap_may_be_installed)
+                (
+                    status,
+                    resources.trap_may_be_installed
+                        || resources.publication == CodePublication::Uncertain,
+                )
             }
             Err(_) => (ERROR, true),
         };
         if status != SUCCESS {
             if trap_may_be_installed {
-                quarantine.store(true, Ordering::Release);
+                quarantine.quarantine();
             }
             session.quarantine();
             return Err(status);
@@ -803,6 +866,9 @@ impl SessionHandle {
 
     /// Starts this session.
     pub(crate) fn start(&self) -> Status {
+        if self.stop_worker.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         self.resources
             .lock()
             .map_or(ERROR, |mut resources| resources.start())
@@ -810,6 +876,9 @@ impl SessionHandle {
 
     /// Stops this session.
     pub(crate) fn stop(&self) -> Status {
+        if self.stop_worker.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         self.resources
             .lock()
             .map_or(ERROR, |mut resources| resources.stop())
@@ -817,9 +886,35 @@ impl SessionHandle {
 
     /// Flushes pending samples through the synchronized session.
     pub(crate) fn flush(&self) -> Status {
+        if self.stop_worker.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         self.resources
             .lock()
             .map_or(ERROR, |mut resources| resources.flush())
+    }
+
+    /// Stops callback delivery while native resources and public handles remain
+    /// available to a legacy tool's `OnUnload` callback.
+    pub(crate) fn quiesce_for_tool_unload(&self) -> Status {
+        self.stop_worker.store(true, Ordering::Release);
+        let worker = match self.worker.lock() {
+            Ok(mut worker) => worker.take(),
+            Err(_) => return ERROR,
+        };
+        if let Some(worker) = worker {
+            if worker.join().is_err() {
+                return ERROR;
+            }
+        }
+        let Ok(mut resources) = self.resources.lock() else {
+            return ERROR;
+        };
+        let status = resources.stop();
+        if status == SUCCESS {
+            resources.callbacks_quiesced = true;
+        }
+        status
     }
 
     /// Destroys the session and returns assets requiring deferred release.

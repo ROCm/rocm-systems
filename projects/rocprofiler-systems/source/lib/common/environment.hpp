@@ -32,6 +32,10 @@
 
 namespace rocprofsys::inline common
 {
+/// Runtime-provided environment variables holding the global MPI rank, in lookup order.
+inline constexpr auto k_mpi_rank_env_names =
+    std::to_array<std::string_view>({ "MPI_RANKID", "PMI_RANK", "MV2_COMM_WORLD_RANK",
+                                      "OMPI_COMM_WORLD_RANK", "SLURM_PROCID" });
 
 /// @brief Production environment backend that forwards to the real POSIX
 ///        ::getenv / ::setenv. Used as the default @p EnvType of @ref environment;
@@ -117,30 +121,13 @@ private:
             return fallback;
         }
 
-#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
-        // Locale-independent, non-throwing parse mirroring the integral path: a
-        // trailing-garbage or unparsable value falls back to the default.
-        Tp          value{};
-        const auto* end      = token.data() + token.size();
-        const auto [ptr, ec] = std::from_chars(token.data(), end, value);
-        if(ec == std::errc{} && ptr == end)
+        const auto parsed = utility::string::safe_from_chars<Tp>(token);
+        if(parsed.is_ok())
         {
-            return value;
+            return parsed.value();
         }
-#else
-        // Fallback for standard libraries without floating-point from_chars
-        // (libstdc++ < 11). std::stod is locale-sensitive (assumes C/POSIX locale).
-        try
-        {
-            std::size_t       pos = 0;
-            const std::string str{ token };
-            const double      parsed = std::stod(str, &pos);
-            if(pos == str.size()) return static_cast<Tp>(parsed);
-        } catch(const std::exception&)
-        {}
-#endif
-        LOG_ERROR("[get_env] Failed to convert getenv(\"{}\") = \"{}\" to float", env_id,
-                  raw);
+        LOG_ERROR("[get_env] Failed to convert getenv(\"{}\") = \"{}\" to float: {}",
+                  env_id, raw, parsed.error());
         return fallback;
     }
 
@@ -162,20 +149,16 @@ private:
             return fallback;
         }
 
-        // std::from_chars parses against the exact target type: it rejects a
-        // leading '-' for unsigned Tp and reports result_out_of_range, so
-        // negative or overflowing input falls back to the default instead of
-        // silently wrapping or truncating. Signed Tp still accepts '-'.
-        Tp          value{};
-        const auto* end      = token.data() + token.size();
-        const auto [ptr, ec] = std::from_chars(token.data(), end, value);
-        if(ec == std::errc{} && ptr == end)
+        // Parses against the exact target type: negative input for unsigned Tp and
+        // overflow are errors, so they fall back to the default instead of wrapping.
+        const auto parsed = utility::string::safe_from_chars<Tp>(token);
+        if(parsed.is_ok())
         {
-            return value;
+            return parsed.value();
         }
 
-        LOG_ERROR("[get_env] Failed to convert getenv(\"{}\") = \"{}\" to integer",
-                  env_id, raw);
+        LOG_ERROR("[get_env] Failed to convert getenv(\"{}\") = \"{}\" to integer: {}",
+                  env_id, raw, parsed.error());
         return fallback;
     }
 
@@ -375,20 +358,18 @@ inline void
 remove_env(std::vector<std::string>& env_list, std::string_view env_variable,
            const std::unordered_set<std::string>& original_envs)
 {
-    auto key = fmt::format("{}=", env_variable);
-
-    env_list.erase(
-        std::ranges::remove_if(env_list,
-                               [&key](const std::string& entry) {
-                                   return std::string_view{ entry }.starts_with(key);
-                               })
-            .begin(),
-        env_list.end());
+    env_list.erase(std::ranges::remove_if(env_list,
+                                          [&env_variable](const std::string& entry) {
+                                              return utility::string::has_env_key(
+                                                  entry, env_variable);
+                                          })
+                       .begin(),
+                   env_list.end());
 
     // Restore from original_envs if previously existed
     for(const auto& orig : original_envs)
     {
-        if(std::string_view{ orig }.starts_with(key))
+        if(utility::string::has_env_key(orig, env_variable))
         {
             env_list.emplace_back(orig);
         }
@@ -509,8 +490,7 @@ is_python_interpreter(std::string_view executable)
 
     const auto version_digits = basename.substr(python3_prefix.size());
 
-    return std::ranges::all_of(version_digits,
-                               [](unsigned char c) { return std::isdigit(c); });
+    return utility::string::is_numeric(version_digits);
 }
 
 /// @brief Discover the PyTorch library directory for a given Python interpreter.
@@ -668,10 +648,9 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
     _updated_envs.emplace(updated_value_t{ _env_var });
 
     const auto _env_val_str = to_env_string(std::forward<Tp>(_env_val));
-    const auto _key         = fmt::format("{}=", _env_var);
 
-    const auto matches_key = [&_key](const std::string& entry) {
-        return std::string_view{ entry }.starts_with(_key);
+    const auto matches_key = [&_env_var](const std::string& entry) {
+        return utility::string::has_env_key(entry, _env_var);
     };
 
     auto const first = std::find_if(_environ.begin(), _environ.end(), matches_key);
@@ -698,11 +677,11 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
             {
                 return;
             }
-            auto _val = first->substr(_key.size());
+            auto val = first->substr(std::string_view{ _env_var }.size() + 1);
             *first =
                 (_mode == update_mode::prepend)
-                    ? fmt::format("{}={}{}{}", _env_var, _env_val_str, _join_delim, _val)
-                    : fmt::format("{}={}{}{}", _env_var, _val, _join_delim, _env_val_str);
+                    ? fmt::format("{}={}{}{}", _env_var, _env_val_str, _join_delim, val)
+                    : fmt::format("{}={}{}{}", _env_var, val, _join_delim, _env_val_str);
             return;
         }
 
@@ -824,18 +803,7 @@ consolidate_env_entries(std::vector<std::string>& envp)
         }
     };
 
-    /// Parses an environment entry string into key and value components.
-    /// @param entry String in "KEY=VALUE" format
-    /// @return Optional pair of (key, value) views, or nullopt if no '=' found
-    auto const parse_entry = [](std::string_view entry)
-        -> std::optional<std::pair<std::string_view, std::string_view>> {
-        auto const eq_pos = entry.find('=');
-        if(eq_pos == std::string_view::npos)
-        {
-            return std::nullopt;
-        }
-        return std::make_pair(entry.substr(0, eq_pos), entry.substr(eq_pos + 1));
-    };
+    auto const parse_entry = utility::string::split_key_value;
 
     /// Reconstructs an environment entry string from key and value parts.
     /// @param key   The environment variable name

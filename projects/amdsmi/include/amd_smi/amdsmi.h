@@ -210,7 +210,7 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_MAJOR 27
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 2
+#define AMDSMI_LIB_VERSION_MINOR 3
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point
 //! release
@@ -323,8 +323,8 @@ typedef enum {
                                            within the CPU */
   AMDSMI_PROCESSOR_TYPE_AMD_APU,   //!< AMD Accelerated processor type, GPU and CPU on a single die
   AMDSMI_PROCESSOR_TYPE_AMD_NIC,   //!< AMD Network Interface Card processor type
-  AMDSMI_PROCESSOR_TYPE_BRCM_NIC,  //!< Broadcom Network Interface Card type
-  AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH  //!< Broadcom Switch type
+  AMDSMI_PROCESSOR_TYPE_BRCM_NIC,  //!< Deprecated: baremetal lists Broadcom NICs as AMD_NIC
+  AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH  //!< Deprecated: no processor reports this type
 } amdsmi_processor_type_t;
 
 /**
@@ -1135,18 +1135,19 @@ typedef struct {
                                               //!< not supported
   char asic_serial[AMDSMI_MAX_STRING_LENGTH]; /**< The socket's unique serial number, 0xFFFFFFFF if
                                                    not supported */
-  uint32_t oam_id;                   //!< Corresponds to socket number, 0xFFFFFFFF if not supported
-  uint32_t num_of_compute_units;     //!< 0xFFFFFFFF if not supported
-  uint64_t target_graphics_version;  //!< 0xFFFFFFFFFFFFFFFF if not supported
-  uint32_t subsystem_id;             //!> The subsystem ID
-  uint64_t flags;                    //!< Chip flags
-  uint32_t physical_acc_id;          //!< Physical accelerator ID, 0xFFFFFFFF if not supported
-  uint32_t chip_rev_id;              /**< amdgpu chip_rev: internal chip revision (stepping)
-                                          as the driver reports it, not decoded.
-                                          0xFFFFFFFF if not supported */
-  uint32_t external_rev_id;          /**< amdgpu external_rev. Family-scoped, so the same value
-                                          recurs across unrelated ASIC families; pair it with
-                                          device_id. 0xFFFFFFFF if not supported */
+  uint32_t oam_id;                            //!< XGMI physical node ID within the hive, 0-based;
+                                              //!< 0xFFFFFFFF if not supported
+  uint32_t num_of_compute_units;              //!< 0xFFFFFFFF if not supported
+  uint64_t target_graphics_version;           //!< 0xFFFFFFFFFFFFFFFF if not supported
+  uint32_t subsystem_id;                      //!> The subsystem ID
+  uint64_t flags;                             //!< Chip flags
+  uint32_t physical_acc_id;  //!< Physical accelerator ID, 0xFFFFFFFF if not supported
+  uint32_t chip_rev_id;      /**< amdgpu chip_rev: internal chip revision (stepping)
+                                  as the driver reports it, not decoded.
+                                  0xFFFFFFFF if not supported */
+  uint32_t external_rev_id;  /**< amdgpu external_rev. Family-scoped, so the same value
+                                  recurs across unrelated ASIC families; pair it with
+                                  device_id. 0xFFFFFFFF if not supported */
   uint32_t reserved[15];
 } amdsmi_asic_info_t;
 
@@ -1318,6 +1319,18 @@ typedef struct {
 } amdsmi_link_metrics_t;
 
 /**
+ * @brief One GPU<->CPU link, of any link type (e.g. an XGMI-typed
+ * GPU-to-CPU-socket connection, or a PCIe-typed one).
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+  uint32_t package_id;           //!< The connected CPU's real physical socket id
+  amdsmi_link_type_t link_type;  //!< e.g. ::AMDSMI_LINK_TYPE_XGMI, ::AMDSMI_LINK_TYPE_PCIE.
+  uint64_t reserved[4];
+} amdsmi_cpu_link_t;
+
+/**
  * @brief VRam Information
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -1334,6 +1347,9 @@ typedef struct {
 /**
  * @brief Driver Information
  *
+ * @deprecated On Linux bare metal and Linux guests this struct is planned for
+ * removal in a future major release; use amdsmi_driver_info_v2_t instead
+ *
  * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{host} @endcond
  */
 typedef struct {
@@ -1341,6 +1357,49 @@ typedef struct {
   char driver_date[AMDSMI_MAX_STRING_LENGTH];
   char driver_name[AMDSMI_MAX_STRING_LENGTH];
 } amdsmi_driver_info_t;
+
+/**
+ * @brief Installed amdgpu driver package that has the kernel version of the
+ * loaded driver
+ *
+ * New values may be added; code that switches on it needs a default case.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{guest_1vf} @tag{guest_mvf} @endcond
+ */
+typedef enum {
+  AMDSMI_DRIVER_PACKAGE_NONE = 0,  //!< No matching installed package was found
+  AMDSMI_DRIVER_PACKAGE_DKMS = 1,  //!< amdgpu-dkms
+  AMDSMI_DRIVER_PACKAGE_KMOD = 2   //!< amdgpu-kmod
+} amdsmi_driver_package_t;
+
+/**
+ * @brief Driver Information, version 2
+ *
+ * driver_version, driver_date and driver_name are those of
+ * amdsmi_driver_info_t. Any other string that is not available is empty.
+ * The library zero-fills the whole struct, reserved included, before it
+ * writes the fields it has.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{guest_1vf} @tag{guest_mvf} @endcond
+ */
+typedef struct {
+  char driver_version[AMDSMI_MAX_STRING_LENGTH];         //!< amdgpu module version, such as
+                                                         //!< 6.19.14.31400000, or N/A when the
+                                                         //!< module has none
+  char driver_date[AMDSMI_MAX_STRING_LENGTH];            //!< Driver date
+  char driver_name[AMDSMI_MAX_STRING_LENGTH];            //!< Driver name
+  char driver_kernel_version[AMDSMI_MAX_STRING_LENGTH];  //!< Kernel version of the amdgpu
+                                                         //!< source, such as 6.19.14
+  char amdgpu_driver_version[AMDSMI_MAX_STRING_LENGTH];  //!< amdgpu release, such as 31400000
+  char driver_build_version[AMDSMI_MAX_STRING_LENGTH];   //!< Build of driver_package, such
+                                                         //!< as 2370381
+  char driver_full_version[AMDSMI_MAX_STRING_LENGTH];    //!< driver_version followed by the
+                                                         //!< build, such as
+                                                         //!< 6.19.14.31400000-2370381
+  amdsmi_driver_package_t driver_package;                //!< Installed package that matches
+                                                         //!< the loaded driver
+  uint32_t reserved[575];                                //!< Reserved for future fields
+} amdsmi_driver_info_v2_t;
 
 /**
  * @brief Board Information
@@ -3067,7 +3126,39 @@ typedef struct {
 } amdsmi_nic_stat_t;
 
 /**
+ * @brief NIC capability bits
+ *
+ * Bitmask describing what a NIC exposes. A device may set more than one bit
+ * (e.g. an AMD POLLARA exposes both a firmware-control management function and
+ * host network ports).
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+  AMDSMI_NIC_CAP_FWCTL = (1u << 0),   //!< exposes a firmware-control management function
+  AMDSMI_NIC_CAP_NETDEV = (1u << 1),  //!< exposes host network port(s)
+} amdsmi_nic_capability_bits_t;
+
+/**
+ * @brief NIC type
+ *
+ * Which kind of NIC a handle refers to. Use the vendor name to tell apart devices reported as
+ * ::AMDSMI_NIC_TYPE_OTHER.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+  AMDSMI_NIC_TYPE_UNKNOWN = 0,  //!< the type could not be determined
+  AMDSMI_NIC_TYPE_AINIC = 1,    //!< AMD Pensando AINIC
+  AMDSMI_NIC_TYPE_UALOE = 2,    //!< UALoE accelerator-fabric endpoint
+  AMDSMI_NIC_TYPE_OTHER = 3,    //!< any other vendor
+} amdsmi_nic_type_t;
+
+/**
  * @brief NIC asic information
+ *
+ * Integer fields are set to the maximum value of their type (0xFF / 0xFFFF)
+ * when the corresponding attribute is unavailable.
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
@@ -3087,6 +3178,9 @@ typedef struct {
 /**
  * @brief NIC bus information
  *
+ * Integer fields are set to the maximum value of their type (0xFF / 0xFFFFFFFF)
+ * when the corresponding attribute is unavailable.
+ *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
@@ -3099,6 +3193,8 @@ typedef struct {
 
 /**
  * @brief NIC NUMA information
+ *
+ * @p node is set to 0xFF when the NUMA node is unavailable.
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
@@ -3128,7 +3224,133 @@ typedef struct {
 } amdsmi_nic_fw_info_t;
 
 /**
+ * @brief NIC health state.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+  AMDSMI_NIC_HEALTH_UNKNOWN = 0,  //!< reserved: reporter present, state indeterminate
+  AMDSMI_NIC_HEALTH_HEALTHY = 1,
+  AMDSMI_NIC_HEALTH_WARNING = 2,  //!< reserved: no producing path yet
+  AMDSMI_NIC_HEALTH_ERROR = 3,
+  AMDSMI_NIC_HEALTH_UNSUPPORTED = 4,  //!< no health reporter exposed (distinct from UNKNOWN)
+} amdsmi_nic_health_state_t;
+
+/**
+ * @brief NIC health summary.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+  uint8_t state;         //!< an amdsmi_nic_health_state_t value
+  uint32_t error_count;  //!< UINT32_MAX when unavailable; real counts saturate to UINT32_MAX-1
+  char reporter[64];     //!< devlink reporter name, NUL-terminated; "" if none
+  uint64_t reserved[4];
+} amdsmi_nic_health_t;
+
+/**
+ * @brief NIC port-split configuration; UINT8_MAX when unknown.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+  uint8_t splittable;
+  uint8_t split_count;
+  uint64_t reserved[1];
+} amdsmi_nic_port_split_t;
+
+/**
+ * @brief Aggregate live NIC telemetry.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+  amdsmi_nic_health_t health;
+  amdsmi_nic_port_split_t port_split;
+  uint64_t reserved[4];
+} amdsmi_nic_telemetry_t;
+
+/**
+ * @brief Unit of an hwmon-backed metric value.
+ *
+ * Numeric values match the host library; only the units the NIC sensors report are defined.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+  AMDSMI_METRIC_UNIT_BOOL = 2,
+  AMDSMI_METRIC_UNIT_MILLIVOLT = 5,
+  AMDSMI_METRIC_UNIT_MILLIDEGREE_CELSIUS = 15,
+  AMDSMI_METRIC_UNIT_MICROWATT = 16,
+} amdsmi_metric_unit_t;
+
+/**
+ * @brief Category of an hwmon-backed metric.
+ *
+ * Numeric values match the host library; only the categories the NIC sensors report are defined.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+  AMDSMI_METRIC_CATEGORY_TEMPERATURE = 3,
+  AMDSMI_METRIC_CATEGORY_POWER = 4,
+  AMDSMI_METRIC_CATEGORY_VOLTAGE = 14,
+} amdsmi_metric_category_t;
+
+/**
+ * @brief hwmon attribute a NIC sensor record carries.
+ *
+ * The category of the record disambiguates, for example, a temperature @c max from a power
+ * @c max. The @c ALARM_* attributes are 0 or 1 flags in ::AMDSMI_METRIC_UNIT_BOOL.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+  AMDSMI_NIC_SENSOR_NAME_UNKNOWN = 0,
+  AMDSMI_NIC_SENSOR_NAME_INPUT = 1,
+  AMDSMI_NIC_SENSOR_NAME_MIN = 2,
+  AMDSMI_NIC_SENSOR_NAME_MAX = 3,
+  AMDSMI_NIC_SENSOR_NAME_LCRIT = 4,
+  AMDSMI_NIC_SENSOR_NAME_CRIT = 5,
+  AMDSMI_NIC_SENSOR_NAME_EMERGENCY = 6,
+  AMDSMI_NIC_SENSOR_NAME_SHUTDOWN = 7,
+  AMDSMI_NIC_SENSOR_NAME_CAP = 8,
+  AMDSMI_NIC_SENSOR_NAME_ALARM_MIN = 9,
+  AMDSMI_NIC_SENSOR_NAME_ALARM_MAX = 10,
+  AMDSMI_NIC_SENSOR_NAME_ALARM_LCRIT = 11,
+  AMDSMI_NIC_SENSOR_NAME_ALARM_CRIT = 12,
+  AMDSMI_NIC_SENSOR_NAME_ALARM_EMERGENCY = 13,
+  AMDSMI_NIC_SENSOR_NAME_ALARM_SHUTDOWN = 14,
+  AMDSMI_NIC_SENSOR_NAME_ALARM_CAP = 15,
+} amdsmi_nic_sensor_name_t;
+
+/**
+ * @brief One hwmon attribute of a NIC sensor.
+ *
+ * Each record is one sysfs file under the NIC's hwmon node. @c instance scopes @c channel, so
+ * @c temp1 of two hwmon nodes of one NIC stays distinguishable. Group records that share
+ * @c instance, @c category and @c channel to rebuild a sensor with its thresholds.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+  amdsmi_metric_category_t category;
+  amdsmi_nic_sensor_name_t name;
+  amdsmi_metric_unit_t unit;
+  uint32_t channel;                      //!< the N in tempN_, inN_, powerN_
+  uint32_t instance;                     //!< the N in hwmon<N>
+  char label[AMDSMI_MAX_STRING_LENGTH];  //!< driver label, "" when the driver gives none
+  int64_t value;                         //!< raw hwmon integer in @c unit
+  uint64_t reserved[4];
+} amdsmi_nic_sensor_t;
+
+/**
  * @brief NIC port information
+ *
+ * Integer fields are set to the maximum value of their type (0xFF / 0xFFFF /
+ * 0xFFFFFFFF) when the corresponding attribute is unavailable, except @p ifindex
+ * which is 0 when unavailable or when the interface index does not fit in a byte (a valid Linux
+ * ifindex starts at 1); amdsmi_get_nic_port_ifindex() returns the full value.
  *
  * Active FEC Modes:
  * The active_fec field provides a bitmask representation of Active FEC (Active Forward Error
@@ -3190,6 +3412,10 @@ typedef struct {
 
 /**
  * @brief NIC RDMA port information
+ *
+ * Integer fields are set to the maximum value of their type (0xFF / 0xFFFF)
+ * when the corresponding attribute is unavailable. The MTU values are read once, the first time
+ * they are needed, and do not follow a later change.
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
@@ -3584,8 +3810,8 @@ amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_han
  *
  *  @ingroup tagProcDiscovery
  *
- *  The derived CUID that ::amdsmi_get_gpu_cuid_info reports, without its
- *  provenance.
+ *  The CUID that ::amdsmi_get_gpu_cuid_info reports in `derived`, without
+ *  its provenance.
  *
  *  @platform{gpu_bm_linux}
  *
@@ -3606,14 +3832,10 @@ amdsmi_status_t amdsmi_get_gpu_device_cuid(amdsmi_processor_handle processor_han
 /**
  *  @brief Source that answered a CUID lookup.
  *
- *  The staged lookup tries the driver, then its own computation. Only a
- *  driver-sourced value is authoritative, because only the driver reads the
- *  privileged identity.
- *
- *  libamdcuid records the answering stage through AMDCUID_QUERY_SOURCE, so
- *  amd-smi reports DRIVER or LIBRARY, and UNKNOWN only when that query fails.
- *  Treat ::AMDSMI_CUID_SOURCE_UNKNOWN as "not known to be driver-published"
- *  rather than as "locally computed".
+ *  In this release the library computes every CUID, so the source is
+ *  ::AMDSMI_CUID_SOURCE_LIBRARY, or ::AMDSMI_CUID_SOURCE_UNKNOWN when the
+ *  query fails. Whether a CUID is permanent is told by `auxiliary`, not by
+ *  the source.
  */
 typedef enum {
   AMDSMI_CUID_SOURCE_UNKNOWN = 0,  //!< Source could not be determined
@@ -3624,12 +3846,12 @@ typedef enum {
 /**
  *  @brief CUID Component Type, on the specification's on-wire values.
  *
- *  These are the values that appear in payload bits 118:121, so they can be
- *  compared directly against a decoded CUID with no translation step. All
- *  assigned values are named, so that a CUID from a component amd-smi does not
- *  manage still arrives as a named value; 0xb through 0xe are reserved by the
- *  specification and have no enumerator, so the assigned range is not
- *  contiguous.
+ *  The values are the specification's Component Type codes. The type is
+ *  metadata reported beside the CUID: only a constructed PrimaryID carries it
+ *  in its payload (bits 118:121), and a temporary CUID or a DerivedID cannot
+ *  be decoded to find it. All assigned values are named, so that a CUID from a component amd-smi
+ * does not manage still arrives as a named value; 0xb through 0xe are reserved by the specification
+ * and have no enumerator, so the assigned range is not contiguous.
  *
  *  ::AMDSMI_CUID_COMPONENT_UNKNOWN is outside the range a 4-bit field can hold,
  *  so the sentinel can never be mistaken for a Component Type. The values match
@@ -3661,23 +3883,27 @@ typedef enum {
  *  device rescan.
  */
 typedef struct {
-  //! Canonical CUID as a UUIDv8 string. Empty when the caller lacks the
-  //! privilege to read it: the primary payload embeds the raw serial number, so
-  //! it is CAP_SYS_ADMIN-gated at the source. Also empty when the derived CUID
-  //! is temporary and the component has no primary. An empty primary is not an
-  //! error; the derived CUID below is still populated.
+  //! Primary CUID as a UUIDv8 string. Always empty in this release: every
+  //! CUID is temporary, and a temporary CUID has no primary. Reserved for
+  //! permanent CUIDs, whose primary payload embeds the raw serial number and
+  //! is readable only by root. An empty primary is not an error;
+  //! `derived` below is still populated.
   char primary[AMDSMI_GPU_CUID_SIZE];
-  //! Derived CUID as a UUIDv8 string. Names the component without
-  //! disclosing its serial, and is the value to record.
+  //! The component's CUID as a UUIDv8 string: its DerivedID when it has a
+  //! permanent CUID, otherwise its temporary CUID (always, in this release).
+  //! Names the component without disclosing its serial.
   char derived[AMDSMI_GPU_CUID_SIZE];
-  //! Component Type field of the payload.
+  //! Component Type of the component, reported beside the CUID; not decoded
+  //! from it.
   amdsmi_cuid_component_type_t component_type;
-  //! Which stage of the staged lookup answered.
+  //! Which stage of the staged lookup answered. Always
+  //! ::AMDSMI_CUID_SOURCE_LIBRARY in this release.
   amdsmi_cuid_source_t source;
-  //! Non-zero for a temporary CUID, payload bit 117: the identity was built
+  //! Non-zero for a temporary CUID, payload bit 117; always 1 in this
+  //! release. amd-smi reports it as `temporary`. The identity was built
   //! from the machine ID and world-readable device information, so it changes
   //! when the machine ID changes and is not unique across nodes. Do not
-  //! record it in the same column as a canonical CUID. Meaningful only
+  //! record it in the same column as a permanent CUID. Meaningful only
   //! on ::AMDSMI_STATUS_SUCCESS: there is no encoding for "undetermined", so a
   //! call that cannot establish this flag fails rather than reporting zero.
   uint8_t auxiliary;
@@ -3701,11 +3927,7 @@ typedef struct {
  *  reports that partition's own CUID, never the whole GPU's; a partition
  *  whose UnitID cannot be determined gets ::AMDSMI_STATUS_NOT_SUPPORTED.
  *
- *  On failure @p info comes back cleared, never partly filled: a caller that
- *  may not read the auxiliary flag gets ::AMDSMI_STATUS_NO_PERM rather than a
- *  zero it cannot distinguish from a determined "not auxiliary". A caller
- *  privileged to read the primary CUID of a derived CUID that is not temporary
- *  gets the failure that kept it from doing so, not an empty primary.
+ *  On failure @p info comes back cleared, never partly filled.
  *
  *  @platform{gpu_bm_linux}
  *
@@ -3715,11 +3937,8 @@ typedef struct {
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *          ::AMDSMI_STATUS_NOT_SUPPORTED when built without CUID support, when
- *          no CUID exists for this device, for a partition the driver
- *          publishes, or for a partition other than partition 0 whose driver
- *          publishes nothing,
- *          ::AMDSMI_STATUS_NO_PERM when this caller may not read
- *          a field the snapshot must report, non-zero on other failures
+ *          no CUID exists for this device, or for a partition whose UnitID
+ *          cannot be determined, non-zero on other failures
  */
 amdsmi_status_t amdsmi_get_gpu_cuid_info(amdsmi_processor_handle processor_handle,
                                          amdsmi_cuid_info_t* info);
@@ -5225,7 +5444,7 @@ amdsmi_status_t amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
                                     amdsmi_clk_type_t clk_type, amdsmi_frequencies_t* f);
 
 /**
- *  @brief Triggers a chain that resets all GPUs.
+ *  @brief Resets the specified GPU (mode-1 reset).
  *  It is not supported on virtual machine guest
  *
  *  @ingroup tagClkPowerPerfQuery
@@ -5236,7 +5455,16 @@ amdsmi_status_t amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
  *  any other AMD SMI API functions to allow the GPU reset to complete. Calling other APIs
  *  too soon may result in AMDSMI_STATUS_BUSY or undefined behavior.
  *
- *  @details Given a processor handle @p processor_handle, this function will reset the GPU
+ *  @details Given a processor handle @p processor_handle, this function will reset the GPU.
+ *
+ *  Reset behavior depends on the GPU fabric interconnect:
+ *  - **XGMI hive**: Resets all GPUs in the same hive (hive-wide reset).
+ *  - **UALink**: Resets only the specified GPU (individual reset).
+ *  - **Standalone GPU**: Resets only the specified GPU.
+ *
+ *  Mode-1 reset does **not** reset all GPUs connected by fabric; only XGMI hives
+ *  trigger a multi-GPU reset. UALink GPUs reset independently even when they share
+ *  a KFD hive ID.
  *
  *  @param[in] processor_handle a processor handle
  *
@@ -6114,12 +6342,8 @@ amdsmi_status_t amdsmi_free_fabric_telemetry(amdsmi_processor_handle processor_h
  */
 typedef enum {
   AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE =
-      32,                              //!< Maximum active accelerator IDs reported per vPoD
-  AMDSMI_FABRIC_MAX_LOCAL_GPUS = 16,   //!< Maximum local GPUs in fabric
-  AMDSMI_FABRIC_MAX_BITMAP_SIZE = 64,  //!< Maximum bitmap size (64 bytes = 512 bits)
-  AMDSMI_FABRIC_INFO_V2_RESERVED_WORDS =
-      37  //!< Growth window in ::amdsmi_fabric_info_v2_t (148 bytes). New fields are carved
-          //!< from here so ::amdsmi_fabric_info_t never changes size again
+      32,  //!< Active accelerators bitmap size (32 x 32-bit words = 1024 bits)
+  AMDSMI_FABRIC_MAX_LOCAL_GPUS = 16  //!< Maximum local GPUs in fabric
 } amdsmi_fabric_size_constants_t;
 
 /**
@@ -6161,77 +6385,7 @@ typedef enum {
 } amdsmi_fabric_accelerator_vpod_state_t;
 
 /**
- * @brief Physical PoD (PPOD) data payload
- *
- * @details Shared data members embedded in both ::amdsmi_fabric_ppod_config_t and
- * ::amdsmi_fabric_info_v2_t
- *
- * Fields with no data present read back at a sentinel: numeric fields at their maximum
- * representable value (ie: accelerator_id at 0xFFFFFFFF), and the ppod_id byte array at the
- * guard byte 0x99
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef struct {
-  uint32_t accelerator_id;                    //!< Accelerator identifier (range 0 to 1023)
-  uint8_t ppod_id[AMDSMI_MAX_UUID_ELEMENTS];  //!< Physical PoD Identifier (16 bytes; not all-zero
-                                              //!< nor all-0x99)
-  uint32_t ppod_size;                         //!< Physical PoD size
-  uint32_t local_accelerators[AMDSMI_FABRIC_MAX_LOCAL_GPUS];  //!< Local Accelerator IDs
-  uint32_t local_accelerator_count;                           //!< Count of valid local accelerators
-  uint32_t bandwidth;                                         //!< Station bandwidth share in Mb/s
-  uint32_t latency;  //!< Latency in nanoseconds (depends on switch presence and type)
-} amdsmi_fabric_ppod_data_t;
-
-/**
- * @brief Virtual PoD (VPOD) data payload
- *
- * @details Shared data members embedded in both ::amdsmi_fabric_vpod_config_t and
- * ::amdsmi_fabric_info_v2_t
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef struct {
-  uint32_t vpod_id;    //!< Virtual PoD Identifier (nonzero; 0 is not a valid pod ID)
-  uint32_t vpod_size;  //!< Virtual PoD size
-  uint32_t vpod_active_accelerators
-      [AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE];  //!< Active accelerator IDs; unused slots
-                                                        //!< read UINT32_MAX (UNSET), as with
-                                                        //!< local_accelerators. A longer list than
-                                                        //!< this array holds is reported as absent
-                                                        //!< rather than truncated
-  amdsmi_fabric_npa_address_mode_t addr_mode;           //!< Source aliasing or identification mode
-} amdsmi_fabric_vpod_data_t;
-
-/**
- * @brief DF/station data payload
- *
- * @details Shared data members embedded in both ::amdsmi_fabric_station_config_t and
- * ::amdsmi_fabric_info_v2_t
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef struct {
-  uint32_t station_flags;  //!< DF/station flags
-  uint8_t num_stations;    //!< Number of stations (0 to 255). The driver reports this count in 32
-                           //!< bits (ualoe_lib.h, up to 1016 stations); a larger value is reported
-                           //!< as absent rather than truncated
-  uint8_t lane_en_bitmap[AMDSMI_FABRIC_MAX_BITMAP_SIZE];  //!< Per-lane enable bitmap (64 bytes =
-                                                          //!< 512 bits); reads 0 (lanes disabled)
-                                                          //!< when absent
-} amdsmi_fabric_station_data_t;
-
-/**
  * @brief Fabric device configuration information (version 1)
- *
- * @details Flat layout. Frozen: the field order and offsets below are relied on by
- * binaries already linked against this library and must never change
- *
- * Presence/configured-ness is conveyed by the top-level return of
- * ::amdsmi_get_gpu_fabric_info (SUCCESS / NOT_SUPPORTED / NO_DATA) and by the
- * accel_state field
- *
- * Fields with no data are left at their sentinel value
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
@@ -6246,62 +6400,12 @@ typedef struct {
   uint32_t vpod_id;    //!< Virtual PoD Identifier
   uint32_t vpod_size;  //!< Virtual PoD size
   uint32_t vpod_active_accelerators
-      [AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE];  //!< Active accelerator IDs; unused slots
-                                                        //!< read UINT32_MAX (UNSET), as with
-                                                        //!< local_accelerators
+      [AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE];  //!< 1024-bit list (32 x 32-bit words): bit
+                                                        //!< N set = accelerator ID N is active
   uint32_t local_accelerators[AMDSMI_FABRIC_MAX_LOCAL_GPUS];  //!< Local Accelerator IDs
   amdsmi_fabric_npa_address_mode_t addr_mode;          //!< Source aliasing or identification mode
   amdsmi_fabric_accelerator_vpod_state_t accel_state;  //!< Accelerator vPoD State
 } amdsmi_fabric_info_v1_t;
-
-/**
- * @brief Fabric device configuration information (version 2)
- *
- * @details Groups the version 1 fields into the ppod/vpod/station payloads shared with
- * ::amdsmi_set_gpu_fabric_ppod_config and friends, and adds the DF/station data that has
- * no version 1 equivalent
- *
- * Presence/configured-ness is conveyed by the top-level return of
- * ::amdsmi_get_gpu_fabric_info (SUCCESS / NOT_SUPPORTED / NO_DATA) and by the
- * accel_state field
- *
- * Fields with no data are left at their sentinel value, except lane_en_bitmap,
- * which reads 0 (lanes disabled) when absent
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef struct {
-  amdsmi_fabric_type_t fabric_type;                    //!< UALOE or UALINK
-  amdsmi_fabric_accelerator_vpod_state_t accel_state;  //!< Accelerator vPoD State
-  amdsmi_fabric_ppod_data_t ppod;                      //!< Physical PoD data
-  amdsmi_fabric_vpod_data_t vpod;                      //!< Virtual PoD data
-  amdsmi_fabric_station_data_t station;                //!< DF/station data
-  uint32_t ppod_mask;     //!< ::amdsmi_fabric_ppod_field_t bits actually read into @p ppod; a clear
-                          //!< bit means that field holds its sentinel
-  uint32_t vpod_mask;     //!< ::amdsmi_fabric_vpod_field_t bits actually read into @p vpod
-  uint32_t station_mask;  //!< ::amdsmi_fabric_df_field_t bits actually read into @p station
-  uint32_t reserved[AMDSMI_FABRIC_INFO_V2_RESERVED_WORDS];  //!< Reserved for future use. New
-                                                            //!< fields are carved from here rather
-                                                            //!< than added as a new version
-} amdsmi_fabric_info_v2_t;
-
-/**
- * @brief Fabric device information layout selector
- *
- * @details Written to ::amdsmi_fabric_info_t::fabric_version before calling
- * ::amdsmi_get_gpu_fabric_info to choose which union member is filled
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef enum {
-  AMDSMI_FABRIC_INFO_VERSION_1 = 0x00000000u,  //!< Flat layout. What zero-initialization yields,
-                                               //!< so it is the default for a caller that does not
-                                               //!< set the field
-  AMDSMI_FABRIC_INFO_VERSION_2 = 0xFAB10002u   //!< Nested layout. Deliberately high-entropy: an
-                                               //!< uninitialized fabric_version must not be able
-                                               //!< to select a member larger than the caller
-                                               //!< allocated
-} amdsmi_fabric_info_version_t;
 
 /**
  * @brief Fabric device information structure
@@ -6309,18 +6413,12 @@ typedef enum {
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
-  amdsmi_bdf_t bdf;         //!< BDF (Bus, Device, Function) of the Fabric device
-  uint32_t fabric_version;  //!< IN: ::amdsmi_fabric_info_version_t selecting the union member to
-                            //!< fill. Any value other than ::AMDSMI_FABRIC_INFO_VERSION_2 selects
-                            //!< v1. OUT: the member actually filled
+  amdsmi_bdf_t bdf;  //!< BDF (Bus, Device, Function) of the Fabric device
+  uint32_t fabric_version;
   union fabric_info_ {
-    amdsmi_fabric_info_v1_t v1;  //!< Filled when fabric_version is not
-                                 //!< ::AMDSMI_FABRIC_INFO_VERSION_2
-    amdsmi_fabric_info_v2_t v2;  //!< Filled when fabric_version is
-                                 //!< ::AMDSMI_FABRIC_INFO_VERSION_2
+    amdsmi_fabric_info_v1_t v1;
   } fabric_info;
-  uint32_t reserved[15];  //!< Reserved for future use. Not written by
-                          //!< ::amdsmi_get_gpu_fabric_info
+  uint32_t reserved[15];  //!< Reserved for future use
 } amdsmi_fabric_info_t;
 
 /**
@@ -6330,213 +6428,31 @@ typedef struct {
  *
  *  @platform{gpu_bm_linux} @platform{host}
  *
- *  @details Reads optional UALoE fabric attributes
- *  Missing/unreadable files are skipped so the call can return partial data:
- *      - any field that was not updated from sysfs keeps its sentinel value (ie:
- *      numeric fields at their maximum representable value, the ppod_id byte array at
- *      the guard byte 0x99, and unknown enumeration values where documented for
- *      ::amdsmi_fabric_info_v1_t and ::amdsmi_fabric_info_v2_t)
- *      - The device BDF in @p info is always filled when the call completes
- *      successfully or returns ::AMDSMI_STATUS_NO_DATA
- *
- *  Request the nested layout, which is the only one carrying the DF/station fields:
- *  @code
- *    amdsmi_fabric_info_t info = {0};  // C++: amdsmi_fabric_info_t info = {};
- *    info.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
- *    amdsmi_get_gpu_fabric_info(handle, &info);
- *  @endcode
+ *  @details Reads optional UALoE fabric attributes from sysfs (one file per field).
+ *  Missing or unreadable files are skipped so the call can return partial data:
+ *    - any field that was not updated from sysfs keeps its sentinel value (ie:
+ *      numeric fields at their maximum representable value, and unknown enumeration
+ *      values where documented for ::amdsmi_fabric_info_v1_t).
+ *    - The device BDF in @p info is always filled when the call completes successfully
+ *      or returns ::AMDSMI_STATUS_NO_DATA.
  *
  *  @param[in] processor_handle - Handle for the target processor
  *
- *  @param[in,out] info - Pointer to Fabric information structure to be populated
+ *  @param[out] info - Pointer to Fabric information structure to be populated.
  *  Must be allocated by the caller. Written on every return except errors such
- *  as ::AMDSMI_STATUS_INVAL
- *
- *  On input, @p info->fabric_version selects the union member to fill. Any value other
- *  than ::AMDSMI_FABRIC_INFO_VERSION_2 selects ::amdsmi_fabric_info_v1_t, so a
- *  zero-initialized structure and one left uninitialized both yield the flat layout and
- *  no byte past the v1 member is written. An unrecognized value is not an error
- *
- *  On output, @p info->fabric_version reports the member filled. The reserved trailing
- *  words of @p info are never written
+ *  as ::AMDSMI_STATUS_INVAL.
  *
  *  @return ::amdsmi_status_t
- *  - ::AMDSMI_STATUS_SUCCESS if at least one attribute yielded usable content
- *  - ::AMDSMI_STATUS_NO_DATA if no attribute yielded usable data (output still
- *    contains BDF and default/sentinel fabric fields)
- *  - Other codes (e.g. ::AMDSMI_STATUS_INVAL for an invalid processor handle) on
- *    failure
+ *  - ::AMDSMI_STATUS_SUCCESS if at least one sysfs file yielded usable content.
+ *  - ::AMDSMI_STATUS_NO_DATA if no sysfs file yielded usable lines (output still
+ *    contains BDF and default/sentinel fabric fields).
+ *  - Other codes (e.g. invalid processor handle) on failure.
  *
- *  An unconfigured accelerator is not an error: the read returns
- *  ::AMDSMI_STATUS_SUCCESS and the accel_state field reports the unconfigured state
- *
+ *  @note This path reads sysfs only. It does not require UALoE netlink
+ *  (::ualoe_open) to succeed; that handle is still needed for fabric telemetry APIs.
  */
 amdsmi_status_t amdsmi_get_gpu_fabric_info(amdsmi_processor_handle processor_handle,
                                            amdsmi_fabric_info_t* info);
-
-/**
- * @brief UALink fabric configuration struct versions
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef enum {
-  AMDSMI_FABRIC_PPOD_CONFIG_V1 = 1,
-  AMDSMI_FABRIC_VPOD_CONFIG_V1 = 1,
-  AMDSMI_FABRIC_STATION_CONFIG_V1 = 1
-} amdsmi_fabric_config_version_t;
-
-/**
- * @brief PPOD config field mask bits (::amdsmi_fabric_ppod_config_t::mask)
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef enum {
-  AMDSMI_FABRIC_PPOD_FIELD_ACCEL_ID = (1u << 0),
-  AMDSMI_FABRIC_PPOD_FIELD_PPOD_ID = (1u << 1),
-  AMDSMI_FABRIC_PPOD_FIELD_PPOD_SIZE = (1u << 2),
-  AMDSMI_FABRIC_PPOD_FIELD_LOCAL_ACCELS = (1u << 3),
-  AMDSMI_FABRIC_PPOD_FIELD_BANDWIDTH = (1u << 4),
-  AMDSMI_FABRIC_PPOD_FIELD_LATENCY = (1u << 5)
-} amdsmi_fabric_ppod_field_t;
-
-/**
- * @brief VPOD config field mask bits (::amdsmi_fabric_vpod_config_t::mask)
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef enum {
-  AMDSMI_FABRIC_VPOD_FIELD_VPOD_ID = (1u << 0),
-  AMDSMI_FABRIC_VPOD_FIELD_VPOD_SIZE = (1u << 1),
-  AMDSMI_FABRIC_VPOD_FIELD_VPOD_ACTIVE_ACCELS = (1u << 2),
-  AMDSMI_FABRIC_VPOD_FIELD_ADDR_MODE = (1u << 3)
-} amdsmi_fabric_vpod_field_t;
-
-/**
- * @brief DF/station config field mask bits (::amdsmi_fabric_station_config_t::mask)
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef enum {
-  AMDSMI_FABRIC_DF_FIELD_STATION_FLAGS = (1u << 0),
-  AMDSMI_FABRIC_DF_FIELD_LANE_EN_BITMAP = (1u << 1),
-  AMDSMI_FABRIC_DF_FIELD_NUM_STATIONS = (1u << 2)
-} amdsmi_fabric_df_field_t;
-
-/**
- * @brief PPOD setup request
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef struct {
-  uint32_t version;  //!< Must be ::AMDSMI_FABRIC_PPOD_CONFIG_V1
-  uint32_t mask;     //!< ::AMDSMI_FABRIC_PPOD_FIELD_* bits for parameters to write (32 bits)
-  bool commit;       //!< When true, write the masked parameters then setup/commit; when false,
-                     //!< validate the request and write nothing
-  amdsmi_fabric_ppod_data_t data;  //!< PPOD data payload
-} amdsmi_fabric_ppod_config_t;
-
-/**
- * @brief VPOD configuration request
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef struct {
-  uint32_t version;  //!< Must be ::AMDSMI_FABRIC_VPOD_CONFIG_V1
-  uint32_t mask;
-  bool commit;
-  amdsmi_fabric_vpod_data_t data;  //!< VPOD data payload
-} amdsmi_fabric_vpod_config_t;
-
-/**
- * @brief DF/Station reconfiguration request
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef struct {
-  uint32_t version;  //!< Must be ::AMDSMI_FABRIC_STATION_CONFIG_V1
-  uint32_t mask;
-  bool commit;
-  amdsmi_fabric_station_data_t data;  //!< DF/station data payload
-} amdsmi_fabric_station_config_t;
-
-/**
- *  @brief Apply PPOD configuration
- *
- *  @ingroup tagFabric
- *
- *  @platform{gpu_bm_linux} @platform{host}
- *
- *  @details When @p config->commit is true, writes setup/accel_id, setup/ppod_id, setup/ppod_size,
- *  setup/local_accels, setup/bandwidth, and setup/latency for each bit set in @p config->mask
- *  (fixed order), then setup/commit. When false, the request is validated and nothing is written:
- *  the driver ignores the staging files unless a commit follows
- *
- *  @note Masked fields are written one sysfs file at a time. A failure part way through leaves the
- *  earlier fields staged, and a commit applies everything staged rather than only what its own mask
- *  named, so a later unrelated commit will pick up that residue. There is no discard primitive:
- *  re-issue the full field set before committing again
- *
- *  @param[in] processor_handle Handle for the target GPU
- *  @param[in] config Non-NULL request; @p config->mask must select at least one field
- *
- *  @return ::amdsmi_status_t
- */
-amdsmi_status_t amdsmi_set_gpu_fabric_ppod_config(amdsmi_processor_handle processor_handle,
-                                                  const amdsmi_fabric_ppod_config_t* config);
-
-/**
- *  @brief Apply VPOD configuration
- *
- *  @ingroup tagFabric
- *
- *  @platform{gpu_bm_linux} @platform{host}
- *
- *  @details When @p config->commit is true, writes config/vpod_id, config/vpod_size,
- *  config/vpod_active_accels, and config/addr_mode for each bit set in @p config->mask, then
- *  config/commit. When false, the request is validated and nothing is written: the driver
- *  ignores the staging files unless a commit follows
- *
- *  @note vpod_active_accelerators has no count field: unused slots hold the UNSET
- *  sentinel (UINT32_MAX). Serialization emits the leading run of IDs and stops at
- *  the first UINT32_MAX. Fill unused slots with UINT32_MAX; 0 is a valid accelerator ID.
- *
- *  @note Masked fields are written one sysfs file at a time. A failure part way through leaves the
- *  earlier fields staged, and a commit applies everything staged rather than only what its own mask
- *  named, so a later unrelated commit will pick up that residue. There is no discard primitive:
- *  re-issue the full field set before committing again
- *
- *  @param[in] processor_handle Handle for the target GPU
- *  @param[in] config Non-NULL request; @p config->mask must select at least one field
- *
- *  @return ::amdsmi_status_t
- */
-amdsmi_status_t amdsmi_set_gpu_fabric_vpod_config(amdsmi_processor_handle processor_handle,
-                                                  const amdsmi_fabric_vpod_config_t* config);
-
-/**
- *  @brief Apply DF/Station configuration
- *
- *  @ingroup tagFabric
- *
- *  @platform{gpu_bm_linux} @platform{host}
- *
- *  @details When @p config->commit is true, writes stations/station_flags, stations/num_stations,
- *  and stations/lane_en_bitmap for each bit set in @p config->mask, then stations/commit. When
- *  false, the request is validated and nothing is written: the driver ignores the staging files
- *  unless a commit follows
- *
- *  @note Masked fields are written one sysfs file at a time. A failure part way through leaves the
- *  earlier fields staged, and a commit applies everything staged rather than only what its own mask
- *  named, so a later unrelated commit will pick up that residue. There is no discard primitive:
- *  re-issue the full field set before committing again
- *
- *  @param[in] processor_handle Handle for the target GPU
- *  @param[in] config Non-NULL request; @p config->mask must select at least one field
- *
- *  @return ::amdsmi_status_t
- */
-amdsmi_status_t amdsmi_set_gpu_fabric_station_config(amdsmi_processor_handle processor_handle,
-                                                     const amdsmi_fabric_station_config_t* config);
 
 /** @} End tagFabric */
 
@@ -7493,21 +7409,33 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
 
 // clang-format off
 /**
- *  @brief Retrieve the hops and the connection type between 2 GPUs
+ *  @brief Retrieve the hops and the connection type between 2 processors
  *
  *  @ingroup tagHWTopology
  *
- *  @platform{gpu_bm_linux}
+ *  @platform{gpu_bm_linux} @platform{host}
  *
  *  @details Given a source processor handle @p processor_handle_src and
- *  a destination processor handle @p processor_handle_dst, and a pointer to an
- *  uint64_t @p hops and a pointer to an ::amdsmi_link_type_t @p type,
- *  this function will write the number of hops and the connection type
- *  between the device @p processor_handle_src and @p processor_handle_dst to the memory
- *  pointed to by @p hops and @p type.
+ *  a destination processor handle @p processor_handle_dst, this function
+ *  writes the connection type to @p type.  If @p hops is non-NULL, the
+ *  number of hops for the connection is also written.
  *
- *  @note The value written to @p hops is an <b>abstracted topology step count</b>,
- *  not the number of physical xGMI links traversed. The possible values are:
+ *  For GPU-to-GPU queries, @p type returns one of INTERNAL, PCIE, XGMI,
+ *  NOT_APPLICABLE, or UNKNOWN, and @p hops returns the hop count.
+ *
+ *  For queries involving a NIC processor (NIC-to-GPU or NIC-to-NIC),
+ *  @p type returns one of PCIE (same PCIe switch), NUMA (same NUMA node,
+ *  different PCIe switch), XNUMA (different NUMA nodes), or UNKNOWN.  The
+ *  @p hops parameter is not meaningful for NIC queries; callers should pass
+ *  NULL.  If non-NULL, @p hops is set to UINT64_MAX.
+ *
+ *  @note This is a lightweight query that returns only the link type and
+ *  hop count, and is available on both @platform{gpu_bm_linux} and
+ *  @platform{host} for GPU-to-GPU, NIC-to-GPU and NIC-to-NIC pairs.
+ *
+ *  @note For GPU-to-GPU queries the value written to @p hops is an <b>abstracted
+ *  topology step count</b>, not the number of physical xGMI links traversed.
+ *  The possible values are:
  *
  *  | Value | Meaning |
  *  |-------|---------|
@@ -7525,11 +7453,11 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
  *
  *  @param[in] processor_handle_dst the destination processor handle
  *
- *  @param[in,out] hops A pointer to an uint64_t to which the
- *  abstracted hop count for the connection should be written.
+ *  @param[in,out] hops A pointer to uint64_t to receive the hop count,
+ *  or NULL if hop count is not needed.
  *
- *  @param[in,out] type A pointer to an ::amdsmi_link_type_t to which the
- *  type for the connection should be written.
+ *  @param[in,out] type A pointer to an ::amdsmi_link_type_t to receive
+ *  the link type.  Must not be NULL.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -7537,6 +7465,47 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
 amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_handle_src,
                                           amdsmi_processor_handle processor_handle_dst,
                                           uint64_t* hops, amdsmi_link_type_t* type);
+
+/**
+ *  @brief Retrieve a GPU's directly-connected CPU link(s), of any link type
+ *
+ *  @ingroup tagHWTopology
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Discovers @p processor_handle's directly-connected CPU
+ *  link(s) -- regardless of link type -- and writes up to
+ *  @p *num_cpu_links of them to @p cpu_links. On return, @p *num_cpu_links
+ *  holds the number of links found, which may be larger than the caller's
+ *  buffer. Each entry's @p link_type field (e.g. ::AMDSMI_LINK_TYPE_XGMI,
+ *  ::AMDSMI_LINK_TYPE_PCIE) tells the caller what kind of connection it is;
+ *  callers that only care about one link type (e.g. a feature specific to
+ *  XGMI) should filter @p cpu_links by @p link_type themselves.
+ *
+ *  @note If @p processor_handle has no CPU link of any kind, this returns
+ *  ::AMDSMI_STATUS_SUCCESS with @p *num_cpu_links set to 0 -- that is a
+ *  normal, successful answer ("no such links exist"), not an error.
+ *
+ *  @param[in] processor_handle the GPU processor handle
+ *
+ *  @param[in,out] num_cpu_links As input, the value passed through this
+ *  parameter is the number of ::amdsmi_cpu_link_t that may be safely
+ *  written to the memory pointed to by @p cpu_links. On return,
+ *  @p num_cpu_links contains the number of entries written to @p cpu_links,
+ *  or the number that could have been written if enough memory had been
+ *  provided. If @p cpu_links is NULL, as output @p num_cpu_links will
+ *  contain how many CPU links this GPU has, with nothing written.
+ *
+ *  @param[out] cpu_links A pointer to a block of memory to which the
+ *  ::amdsmi_cpu_link_t values will be written. This value may be NULL, in
+ *  which case this function can be used to query how many CPU links this
+ *  GPU has.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success (including
+ *  when zero links are found), non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_gpu_cpu_links(amdsmi_processor_handle processor_handle,
+                                         uint32_t* num_cpu_links, amdsmi_cpu_link_t* cpu_links);
 
 /**
  *  @brief Retrieve the unified link topology information between 2 GPUs
@@ -7588,6 +7557,8 @@ amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handl
  *  @param[in] processor_handle The identifier of the given device.
  *
  *  @param[in] link_type The amdsmi_link_type_t level to search for nearest GPUs.
+ *             ::AMDSMI_LINK_TYPE_NUMA and ::AMDSMI_LINK_TYPE_XNUMA only relate a NIC to a GPU,
+ *             so they return ::AMDSMI_STATUS_INVAL here.
  *
  *  @param[in,out] topology_nearest_info
  *                 .count;
@@ -7936,6 +7907,10 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processo
  *  On @platform{gpu_bm_linux} AMDGPU driver restart is REQUIRED to complete updating to
  *  the new memory partition setting.
  *
+ *  Requesting the current mode cancels a different mode requested since the driver was
+ *  loaded. Older amdgpu drivers ignore that request because of a driver bug, so the next
+ *  driver reload still applies the other mode.
+ *
  *  @param[in] processor_handle Device which to query
  *
  *  @param[in] memory_partition using enum ::amdsmi_memory_partition_type_t,
@@ -7989,6 +7964,10 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle p
  *
  *  On @platform{gpu_bm_linux} AMDGPU driver restart is REQUIRED to complete updating to
  *  the new memory partition setting.
+ *
+ *  Requesting the current mode cancels a different mode requested since the driver was
+ *  loaded. Older amdgpu drivers ignore that request because of a driver bug, so the next
+ *  driver reload still applies the other mode.
  *
  *  @param[in] processor_handle A processor handle
  *
@@ -8206,6 +8185,10 @@ amdsmi_status_t amdsmi_stop_gpu_event_notification(amdsmi_processor_handle proce
 /**
  *  @brief Returns the driver version information
  *
+ *  @deprecated On Linux bare metal and Linux guests this API is planned for
+ *  removal in a future major release; ::amdsmi_get_gpu_driver_info_v2() should
+ *  be used instead
+ *
  *  @ingroup tagSoftwareVersion
  *
  *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_mvf}
@@ -8220,6 +8203,53 @@ amdsmi_status_t amdsmi_stop_gpu_event_notification(amdsmi_processor_handle proce
  */
 amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_handle,
                                            amdsmi_driver_info_t* info);
+
+/**
+ *  @brief Returns the driver version information, the parts of the amdgpu
+ *  version and the build of the driver package
+ *
+ *  @ingroup tagSoftwareVersion
+ *
+ *  @platform{gpu_bm_linux} @platform{guest_1vf} @platform{guest_mvf}
+ *  @platform{guest_windows}
+ *
+ *  @details Returns the same status as ::amdsmi_get_gpu_driver_info(), and the
+ *  same driver_version, driver_date and driver_name. The amdgpu module version
+ *  is split into driver_kernel_version and amdgpu_driver_version.
+ *
+ *  The driver package is the amdgpu-dkms package installed for the running
+ *  kernel, or else its amdgpu-kmod RPM. It is reported only when it has the
+ *  kernel version of the loaded module. Its build is then
+ *  driver_build_version, and driver_full_version is driver_version followed by
+ *  that build. Without such a package driver_full_version is driver_version,
+ *  or empty when driver_version is N/A. The lookup is best effort and does not
+ *  change the status.
+ *
+ *  The build is read from the installed package, which is matched to the
+ *  loaded module by kernel version only. After a package upgrade it is the
+ *  build of the loaded module only once the module has been reloaded.
+ *
+ *  When the loaded module has an amdgpu version (A.B.C or A.B.C.D) that no
+ *  amdgpu-dkms package matches, the first call in a process runs /usr/bin/rpm
+ *  to look for amdgpu-kmod and waits up to about 5 seconds for it. An rpm that
+ *  has not answered by then is left to finish, and no amdgpu-kmod package is
+ *  reported. A found amdgpu-kmod package, or an answer that none is installed,
+ *  is kept until the process exits, also after a package upgrade. A failed
+ *  lookup is asked again after 5 seconds, and not while that rpm still runs.
+ *  amdgpu-dkms is read on every call.
+ *
+ *  @note The WSL backend has no amdgpu version or driver package to report;
+ *  driver_full_version is then the WDDM driver version.
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @param[out] info Reference to driver information structure. Must be
+ *              allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_gpu_driver_info_v2(amdsmi_processor_handle processor_handle,
+                                              amdsmi_driver_info_v2_t* info);
 
 /** @} End tagSoftwareVersion */
 
@@ -8241,7 +8271,8 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
  *           the revision ID and the serial number.
  *
  *  @note The processor_handle that contains amdsmi_asic_info_t member oam_id = 0
- *        corresponds to the socket that contains baseboard information.
+ *        corresponds to the GPU at XGMI physical node ID 0, which contains
+ *        baseboard information.
  *
  *  @param[in] processor_handle Device which to query
  *
@@ -8340,6 +8371,11 @@ amdsmi_status_t amdsmi_get_power_cap_info(amdsmi_processor_handle processor_hand
  *
  *  @param[out] info Reference to the PCIe information
  *  returned by the library. Must be allocated by user.
+ *
+ *  @note pcie_static.max_pcie_width, max_pcie_speed and pcie_interface_version describe the
+ *  GPU's PCIe host link, its PCIe connection to the host CPU. When KFD reports that the GPU
+ *  connects to the CPU over xGMI instead, there is no PCIe host link and these fields are set to
+ *  the maximum value of their type.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -10346,6 +10382,41 @@ amdsmi_status_t amdsmi_get_nic_asic_info(amdsmi_processor_handle processor_handl
                                          amdsmi_nic_asic_info_t* info);
 
 /**
+ *  @brief Retrieves the type of the NIC
+ *
+ *  Reports the kind of NIC; see ::amdsmi_nic_type_t.
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] type reference to the NIC type. Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_type(amdsmi_processor_handle processor_handle,
+                                    amdsmi_nic_type_t* type);
+
+/**
+ *  @brief Retrieves the capability bitmask of the NIC
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] capability reference to a bitmask of ::amdsmi_nic_capability_bits_t. Must be
+ *  allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_capability(amdsmi_processor_handle processor_handle,
+                                          uint32_t* capability);
+
+/**
  *  @brief Retrieves BUS information for the NIC
  *
  *  @ingroup tagNicInfo
@@ -10389,12 +10460,36 @@ amdsmi_status_t amdsmi_get_nic_numa_info(amdsmi_processor_handle processor_handl
  *  @param[in] processor_handle NIC for which to query
  *
  *  @param[out] info reference to the nic port info struct.
- *  Must be allocated by user.
+ *  Must be allocated by user. `ports[i]` is the port the statistics calls take as
+ *  `port_index` i. A port with no driver bound keeps its `bdf`, `port_num` and `netdev`;
+ *  its other fields read N/A.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_nic_port_info(amdsmi_processor_handle processor_handle,
                                          amdsmi_nic_port_info_t* info);
+
+/**
+ *  @brief Retrieves the full interface index of a NIC port
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  amdsmi_nic_port_t::ifindex holds one byte; this returns the whole value.
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[in] port_index index of the NIC port, as for amdsmi_get_nic_port_statistics()
+ *
+ *  @param[out] ifindex reference to the Linux interface index, 0 when unavailable. Must be
+ *  allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, ::AMDSMI_STATUS_NOT_FOUND if
+ *  @p port_index is past the last port, non-zero on other failure
+ */
+amdsmi_status_t amdsmi_get_nic_port_ifindex(amdsmi_processor_handle processor_handle,
+                                            uint32_t port_index, uint32_t* ifindex);
 
 /**
  *  @brief Retrieves RDMA devices information for the NIC
@@ -10429,16 +10524,28 @@ amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_h
  *  1. First call with stats=NULL to get the count of available statistics
  *  2. Second call with allocated array to retrieve all statistics
  *
+ *  The counters are the driver's RDMA hardware counters, as listed by
+ *  `rdma statistic show link DEV/PORT`, and are read on every call.
+ *
+ *  @note Setting optional counters (`rdma statistic set link DEV/PORT optional-counters`)
+ *  is not supported.
+ *
  *  @param[in] processor_handle NIC for which to query
- *  @param[in] rdma_port_index index of the NIC RDMA port to query
+ *  @param[in] rdma_port_index index of the RDMA port to query, counted from 0 across the
+ *    NIC's RDMA devices in the order of ::amdsmi_nic_rdma_devices_info_t (each device's
+ *    ports in turn)
  *  @param[in,out] num_stats pointer to the number of statistics
- *    - Input: maximum number of statistics that stats array can hold
- *    - Output: actual number of statistics available/returned
+ *    - Input: maximum number of statistics that stats array can hold; ignored if stats is NULL
+ *    - Output: number of statistics available
  *  @param[out] stats pointer to array of amdsmi_nic_stat_t structures to be filled
  *    - If NULL, only num_stats is filled with the count of available statistics
- *    - If not NULL, must be allocated by user with at least num_stats elements
+ *    - If not NULL, must be allocated by user with at least num_stats elements. When there are
+ *      more statistics, the first num_stats are filled and ::AMDSMI_STATUS_INSUFFICIENT_SIZE
+ *      is returned
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, including a port with no
+ *    counters (num_stats is 0), non-zero on fail.
+ *    ::AMDSMI_STATUS_NOT_SUPPORTED if the NIC has no RDMA port at @p rdma_port_index
  */
 amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle processor_handle,
                                                     uint32_t rdma_port_index, uint32_t* num_stats,
@@ -10451,18 +10558,71 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
  *
  *  @platform{host} @platform{gpu_bm_linux}
  *
- *  @note This API depends on libmnl. If libmnl is not installed on the
- *  system, this function returns ::AMDSMI_STATUS_NOT_SUPPORTED.
+ *  @note This API reads firmware versions over devlink (libnl3). If libnl3 is
+ *  not available on the system, this function returns
+ *  ::AMDSMI_STATUS_NOT_SUPPORTED.
  *
  *  @param[in] processor_handle NIC for which to query
  *
  *  @param[out] info reference to the nic firmware info struct.
- *  Must be allocated by user.
+ *  Must be allocated by user. At most ::AMDSMI_MAX_NIC_FW entries are returned, and a
+ *  version that repeats an earlier entry's name carries its kind (fixed, running or stored)
+ *  in parentheses after the name.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
                                        amdsmi_nic_fw_info_t* info);
+
+/**
+ *  @brief Retrieve live telemetry (health, port-split) for a NIC.
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @note Health and port-split are read over devlink (libnl3). Temperatures come from
+ *  amdsmi_get_nic_hwmon_sensors(). A metric the NIC does not expose is reported through
+ *  reserved values in its sub-struct (per-width max value), not a failed call. The call fails
+ *  only when the handle is not a NIC.
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] info reference to the nic telemetry struct.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_telemetry(amdsmi_processor_handle processor_handle,
+                                         amdsmi_nic_telemetry_t* info);
+
+/**
+ *  @brief Retrieve every hwmon sensor attribute of a NIC (temperature, voltage and power
+ *  with their thresholds).
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details One record is returned per readable hwmon attribute (input, min, max, lcrit, crit,
+ *  emergency, shutdown, cap and the matching alarm flags). Values are the raw hwmon integers in
+ *  the record's unit. A NIC with no hwmon node reports zero records and
+ *  ::AMDSMI_STATUS_SUCCESS.
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[in,out] num_sensors As input, the number of ::amdsmi_nic_sensor_t entries @p sensors
+ *  can hold. On return, the number of records available, which can exceed the input. At most
+ *  128 records are returned for one NIC.
+ *
+ *  @param[out] sensors Array to fill, or NULL to only query the record count. When the array is
+ *  too small, as many records as fit are written and ::AMDSMI_STATUS_INSUFFICIENT_SIZE is
+ *  returned.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_hwmon_sensors(amdsmi_processor_handle processor_handle,
+                                             uint32_t* num_sensors, amdsmi_nic_sensor_t* sensors);
 
 /**
  *  @brief Retrieve PORT statistics for the specified NIC port
@@ -10478,17 +10638,35 @@ amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
  *  @param[in] processor_handle NIC for which to query
  *  @param[in] port_index index of the NIC port to query
  *  @param[in,out] num_stats pointer to the number of statistics
- *    - Input: maximum number of statistics that stats array can hold
- *    - Output: actual number of statistics available/returned
+ *    - Input: maximum number of statistics that stats array can hold; ignored if stats is NULL
+ *    - Output: number of statistics available
  *  @param[out] stats pointer to array of amdsmi_nic_stat_t structures to be filled
  *    - If NULL, only num_stats is filled with the count of available statistics
- *    - If not NULL, must be allocated by user with at least num_stats elements
+ *    - If not NULL, must be allocated by user with at least num_stats elements. When there are
+ *      more statistics, the first num_stats are filled and ::AMDSMI_STATUS_INSUFFICIENT_SIZE
+ *      is returned
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, including a port with no
+ *    statistics (num_stats is 0). ::AMDSMI_STATUS_NOT_FOUND if @p port_index is past the last
+ *    port, non-zero on other failure
  */
 amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor_handle,
                                                uint32_t port_index, uint32_t* num_stats,
                                                amdsmi_nic_stat_t* stats);
+
+/**
+ *  @brief Which tier of vendor statistics to return
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  AMDSMI_NIC_STAT_SCOPE_EXTENDED is a superset of AMDSMI_NIC_STAT_SCOPE_DEFAULT.
+ *
+ *  @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+  AMDSMI_NIC_STAT_SCOPE_DEFAULT = 0,
+  AMDSMI_NIC_STAT_SCOPE_EXTENDED = 1
+} amdsmi_nic_stat_scope_t;
 
 /**
  *  @brief Retrieve vendor specific statistics for the NIC port
@@ -10505,20 +10683,61 @@ amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor
  *  between different NIC vendors and driver/fw versions. The statistic names are
  *  preserved as provided by the underlying driver implementation.
  *
+ *  Reads the AMDSMI_NIC_STAT_SCOPE_DEFAULT counter set. Use
+ *  amdsmi_get_nic_vendor_statistics_with_scope() to choose the tier.
+ *
  *  @param[in] processor_handle NIC for which to query
  *  @param[in] port_index index of the NIC port to query
  *  @param[in,out] num_stats pointer to the number of statistics
- *    - Input: maximum number of statistics that stats array can hold
- *    - Output: actual number of statistics available/returned
+ *    - Input: maximum number of statistics that stats array can hold; ignored if stats is NULL
+ *    - Output: number of statistics available
  *  @param[out] stats pointer to array of amdsmi_nic_stat_t structures to be filled
  *    - If NULL, only num_stats is filled with the count of available statistics
- *    - If not NULL, must be allocated by user with at least num_stats elements
+ *    - If not NULL, must be allocated by user with at least num_stats elements. When there are
+ *      more statistics, the first num_stats are filled and ::AMDSMI_STATUS_INSUFFICIENT_SIZE
+ *      is returned
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, including a driver with no
+ *    statistics (num_stats is 0). ::AMDSMI_STATUS_NOT_FOUND if @p port_index is past the last
+ *    port, ::AMDSMI_STATUS_API_FAILED if the driver's statistics could not be read, non-zero on
+ *    other failure
  */
 amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle processor_handle,
                                                  uint32_t port_index, uint32_t* num_stats,
                                                  amdsmi_nic_stat_t* stats);
+
+/**
+ *  @brief Retrieve vendor specific statistics for the NIC port in the given tier
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  Same as amdsmi_get_nic_vendor_statistics(), with the tier passed in the call instead of
+ *  fixed to the default.
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *  @param[in] port_index index of the NIC port to query
+ *  @param[in,out] num_stats pointer to the number of statistics
+ *    - Input: maximum number of statistics that stats array can hold; ignored if stats is NULL
+ *    - Output: number of statistics available
+ *  @param[out] stats pointer to array of amdsmi_nic_stat_t structures to be filled
+ *    - If NULL, only num_stats is filled with the count of available statistics
+ *    - If not NULL, must be allocated by user with at least num_stats elements. When there are
+ *      more statistics, the first num_stats are filled and ::AMDSMI_STATUS_INSUFFICIENT_SIZE
+ *      is returned
+ *  @param[in] scope AMDSMI_NIC_STAT_SCOPE_DEFAULT for the driver's default counter set,
+ *  AMDSMI_NIC_STAT_SCOPE_EXTENDED for the full set (a superset). Any other value returns
+ *  ::AMDSMI_STATUS_INVAL
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, including a driver with no
+ *    statistics (num_stats is 0). ::AMDSMI_STATUS_NOT_FOUND if @p port_index is past the last
+ *    port, ::AMDSMI_STATUS_API_FAILED if the driver's statistics could not be read, non-zero on
+ *    other failure
+ */
+amdsmi_status_t amdsmi_get_nic_vendor_statistics_with_scope(
+    amdsmi_processor_handle processor_handle, uint32_t port_index, uint32_t* num_stats,
+    amdsmi_nic_stat_t* stats, amdsmi_nic_stat_scope_t scope);
 
 /** @} End tagNicInfo */
 
@@ -10641,6 +10860,9 @@ amdsmi_status_t amdsmi_get_ampp_profiles(amdsmi_processor_handle processor_handl
  *  app_modes/<profile_name>/, merging in guidance bounds from
  *  limits/min/<field> and limits/max/<field> when present. Field names are
  *  not a fixed compile-time list; treat each as an opaque string from sysfs.
+ *  A "node_"-prefixed field (e.g. "node_power_limit") is node-wide rather
+ *  than per-GPU, and is only returned for the primary GPU of the node
+ *  (oam_id == 0); it is silently omitted on any other GPU.
  *  Follows the "query size first" idiom: call once with @p fields == NULL to
  *  learn the required array size.
  *
@@ -10723,6 +10945,11 @@ amdsmi_status_t amdsmi_activate_ampp_profile(amdsmi_processor_handle processor_h
  *  function requires @p fields to be non-NULL with @p num_fields >= 1 and
  *  returns ::AMDSMI_STATUS_INVAL proactively rather than relying on that
  *  kernel -EINVAL bubbling up uninterpreted.
+ *
+ *  A "node_"-prefixed field (e.g. "node_power_limit") is node-wide rather
+ *  than per-GPU, and can only be staged/committed from the primary GPU of
+ *  the node (oam_id == 0); on any other GPU, @p fields containing such a
+ *  name is rejected with ::AMDSMI_STATUS_INVAL before any sysfs write.
  *
  *  @param[in] processor_handle Device to modify
  *
@@ -10953,6 +11180,148 @@ amdsmi_status_t amdsmi_set_ttm_pages_limit(uint64_t pages);
 amdsmi_status_t amdsmi_reset_ttm_pages_limit(void);
 
 /** @} End tagMemConfig */
+
+/** @defgroup tagPowerStabilization Power Stabilization
+ *  These functions configure Power Stabilization (HAWK dummy-compute
+ *  insertion plus Ramp Management), which holds GPU power draw above a
+ *  Power Floor to reduce grid-visible power swings during workloads such
+ *  as LLM training.
+ *
+ *  @note Available only when the platform firmware implements Power
+ *  Stabilization; never available for multi-VF devices.
+ *  @{
+ */
+
+/**
+ * @brief HAWK dummy-compute insertion priority
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+  AMDSMI_HAWK_INSERTION_PRIORITY_OPPORTUNISTIC = 0,  //!< Insert only when otherwise idle
+  AMDSMI_HAWK_INSERTION_PRIORITY_GUARANTEED = 1,     //!< Always insert to hold the Power Floor
+  AMDSMI_HAWK_INSERTION_PRIORITY_DYNAMIC = 2,        //!< Firmware chooses based on conditions
+  AMDSMI_HAWK_INSERTION_PRIORITY_LAST =
+      AMDSMI_HAWK_INSERTION_PRIORITY_DYNAMIC  //!< Highest valid priority value
+} amdsmi_hawk_insertion_priority_t;
+
+/**
+ * @brief Identifies a single Power Stabilization parameter for
+ * amdsmi_set_power_stabilization_param(). Every parameter, including the two
+ * ramp rates below, is a plain int64_t.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+  AMDSMI_POWER_STABILIZATION_PARAM_ENABLE = 0,   //!< Enable/disable Power Stabilization (0/1)
+  AMDSMI_POWER_STABILIZATION_PARAM_POWER_FLOOR,  //!< Power Floor, % of power limit (0-100;
+                                                 //!< 0 disables Power Stabilization)
+  AMDSMI_POWER_STABILIZATION_PARAM_DELAY,        //!< Insertion delay, milliseconds
+  AMDSMI_POWER_STABILIZATION_PARAM_INSERTION_PRIORITY,     //!< ::amdsmi_hawk_insertion_priority_t
+                                                           //!< value
+  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_ENABLE,            //!< Enable/disable Ramp Management (0/1)
+  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE,  //!< Max ramp-up rate, %PL/sec
+                                                           //!< (100 disables ramp-up management)
+  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE,       //!< Max ramp-down rate, %PL/sec
+                                                                  //!< (100 disables ramp-down
+                                                                  //!< management)
+  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MIN_TIME_AT_POWER_FLOOR,  //!< Minimum time at Power Floor,
+                                                                  //!< seconds
+  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY,               //!< Ramp stop delay, seconds
+  AMDSMI_POWER_STABILIZATION_PARAM_LAST =
+      AMDSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY  //!< Highest valid parameter ID
+} amdsmi_power_stabilization_param_id_t;
+
+/**
+ * @brief Snapshot of all Power Stabilization and Ramp Management state for
+ * a device, as returned by amdsmi_get_power_stabilization_info().
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+  bool host_control_enabled;  //!< Read-only: true if host has control of
+                              //!< Power Stabilization
+  bool enabled;               //!< Power Stabilization enabled
+  uint32_t power_floor;       //!< Power Floor, % of power limit (0-100)
+  uint32_t delay;             //!< Insertion delay, milliseconds
+  amdsmi_hawk_insertion_priority_t
+      insertion_priority;                 //!< HAWK insertion priority. If the driver
+                                          //!< reports a value outside OPPORTUNISTIC..
+                                          //!< LAST, amdsmi_get_power_stabilization_info()
+                                          //!< returns ::AMDSMI_STATUS_UNEXPECTED_DATA
+                                          //!< and leaves this field unwritten
+  bool ramp_enabled;                      //!< Ramp Management enabled
+  uint32_t ramp_max_ramp_up_rate;         //!< Max ramp-up rate, %PL/sec
+  uint32_t ramp_max_ramp_down_rate;       //!< Max ramp-down rate, %PL/sec
+  uint32_t ramp_min_time_at_power_floor;  //!< Minimum time at Power Floor, seconds
+  uint32_t ramp_stop_delay;               //!< Ramp stop delay, seconds
+  uint64_t reserved[11];                  //!< Reserved for future use
+} amdsmi_power_stabilization_info_t;
+
+/**
+ *  @brief Get Power Stabilization info
+ *
+ *  @ingroup tagPowerStabilization
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details A read returns the current effective
+ *  value of each parameter, which can differ from the last value written,
+ *  regardless of host_control_enabled or enabled state.
+ *
+ *  @param[in] processor_handle GPU device handle
+ *  @param[out] info Pointer to receive the Power Stabilization info
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if Power Stabilization is not
+ *          implemented on this device, or the device is multi-VF,
+ *          ::AMDSMI_STATUS_INVAL if info is nullptr,
+ *          ::AMDSMI_STATUS_NO_PERM if amd-smi lacks permission to read this info,
+ *          ::AMDSMI_STATUS_FILE_ERROR if a field could not be read,
+ *          ::AMDSMI_STATUS_UNEXPECTED_DATA if a field's content does
+ *          not parse as the documented type or range
+ */
+amdsmi_status_t amdsmi_get_power_stabilization_info(amdsmi_processor_handle processor_handle,
+                                                    amdsmi_power_stabilization_info_t* info);
+
+/**
+ *  @brief Set a single Power Stabilization parameter
+ *
+ *  @ingroup tagPowerStabilization
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Applies exactly one parameter per call; a batch of calls is not
+ *  rolled back if a later call fails. When NPM (Node-level Power Management)
+ *  coordination is active on a node, param_id may become node-wide
+ *  rather than per-GPU; amdsmi does not detect NPM state or reroute the
+ *  write on the caller's behalf, so the caller is responsible for
+ *  selecting the node's primary GPU handle (OAM ID 0) before calling this
+ *  function. Any parameter dependency is enforced by the
+ *  underlying driver write itself; this function performs no
+ *  client-side dependency or range validation.
+ *
+ *  @param[in] processor_handle GPU device handle
+ *  @param[in] param_id Parameter to set
+ *  @param[in] value New value. Every parameter, including
+ *  ::AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE and
+ *  ::AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE despite being a
+ *  %PL/sec rate, is a plain int64_t; this parameter's sysfs node does not
+ *  accept floating-point values.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if Power Stabilization is not
+ *          implemented on this device, the device is multi-VF, or the
+ *          driver rejects the write due to an unmet dependency,
+ *          ::AMDSMI_STATUS_NO_PERM if amd-smi lacks permission to write this parameter,
+ *          ::AMDSMI_STATUS_INVAL if param_id is invalid or the driver rejects the value,
+ *          ::AMDSMI_STATUS_FILE_ERROR if the write could not complete
+ */
+amdsmi_status_t amdsmi_set_power_stabilization_param(amdsmi_processor_handle processor_handle,
+                                                     amdsmi_power_stabilization_param_id_t param_id,
+                                                     int64_t value);
+
+/** @} End tagPowerStabilization */
 
 #ifdef __cplusplus
 }

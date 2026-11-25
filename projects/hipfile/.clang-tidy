@@ -1,30 +1,256 @@
 # Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 #
 # SPDX-License-Identifier: MIT
-#
-# Since LLVM 22, `clang-analyzer-*` has been removed from the default checks
-# in clang-tidy. The LLVM 22 release notes state:
-#
-#   "Removed `clang-analyzer-*` checks from default checks in clang-tidy.
-#    From now on, users should specify explicitly that they want CSA checks to
-#    run in clang-tidy via `clang-analyzer-*`."
-#
-# Since clang-analyzer-* was clang-tidy's entire default check set, an
-# unqualified clang-tidy on LLVM 22+ enables nothing and exits with
-# "Error: no checks enabled."
-#
-# If clang-tidy reports "Error: no checks enabled." with this config, the wrong
-# clang-tidy was selected -- a ROCm-built one, which has no clang-analyzer-*
-# checks compiled in. Set HIPFILE_CLANG_TIDY_EXECUTABLE to an upstream
-# clang-tidy instead. Do NOT "fix" it with --allow-no-checks or by loosening the
-# globs below; that silently lints nothing.
 
-# `clang-diagnostic-*` is silently prepended to this list. It re-reports compiler
-# warnings that get flagged in the normal build process. `-*` suppresses these
-# warnings to only report warnings from the static analyzer.
-Checks: >-
-  -*,
-  clang-analyzer-*
+# clang-tidy configuration for hipFile
+#
+# Build with -DHIPFILE_USE_CLANG_TIDY=ON (and Clang as the C++ compiler)
+# to run these checks. Every finding is an error.
+#
+# The checks lean toward security and modern C++: whole groups are
+# enabled, and individual checks are turned off below. Later entries
+# override earlier ones.
+#
+# This needs clang-tidy 19 or later, for ExcludeHeaderFilterRegex. CI
+# (hipfile-clang-tidy.yml) uses upstream clang-tidy 23. ROCm's clang-tidy
+# is built without the clang-analyzer-* checks and silently skips them, so
+# set HIPFILE_CLANG_TIDY_EXECUTABLE to an upstream clang-tidy.
+#
+# Some checks have more than one name (aliases), and some were renamed
+# between LLVM releases (hicpp-signed-bitwise became
+# bugprone-signed-bitwise), so a check that's turned off is listed under
+# each of its names. Each alias follows the check it's an alias of.
+---
+Checks:
+  - -*
+  - android-cloexec-*
+  - bugprone-*
+  - cert-*
+  - clang-analyzer-*
+  - concurrency-*
+  - cppcoreguidelines-*
+  - google-explicit-constructor
+  - google-runtime-int
+  # LLVM 23 removed the hicpp checks, and these moved to the bugprone
+  # and portability groups
+  - hicpp-exception-baseclass
+  - hicpp-ignored-remove-result
+  - hicpp-multiway-paths-covered
+  - hicpp-no-assembler
+  - hicpp-signed-bitwise
+  - misc-*
+  - modernize-*
+  - performance-*
+  - portability-*
+  - readability-*
 
+  # Not wanted: style-only checks that contradict hipFile's conventions
+  # or tooling, and checks whose fixes would make the code worse than
+  # what the build already does. Turn them on now and then, such as
+  # before a release, and fix whatever they report that's easy to fix,
+  # without committing to fixing all of it
+
+  # IWYU checks the includes, and its suggestions are advisory
+  - -misc-include-cleaner
+  # Every header uses #pragma once (see STYLEGUIDE.md)
+  - -portability-avoid-pragma-once
+  - -readability-identifier-length
+  - -modernize-use-trailing-return-type
+  # Its fix, return {...}, can call a different constructor than the
+  # explicit call it replaces: braces prefer an initializer_list
+  # constructor, as std::string and std::vector have
+  - -modernize-return-braced-init-list
+  # It reports every function with adjacent parameters of the same type,
+  # such as a pair of sizes or offsets. Telling them apart would take a
+  # separate type for each, which would make those functions harder to
+  # call without catching anything the names and the tests don't
+  - -bugprone-easily-swappable-parameters
+  # It reports zero-initializing an enum, or a struct holding one, whose
+  # enumerators don't include 0, such as hipFileFileHandleType,
+  # hipFileStatus, and hipFileBatchMode. hipFile zeroes the structs it
+  # hands to the kernel and the HIP runtime before filling them in (see
+  # AGENTS.md), and the tests and examples do the same with the public
+  # structs, then set the fields they use
+  - -bugprone-invalid-enum-default-initialization
+  # It reports every enum whose values fit in a smaller type than int,
+  # whether or not its size matters. hipFile's enums aren't kept in large
+  # arrays, and padding takes up most of what a smaller type would save in
+  # a struct
+  - -performance-enum-size
+
+  # TODO: These checks report problems in the current code. Fix the code
+  # and delete the check's line here, or move it to "Not wanted" with a
+  # reason. The count is the number of places clang-tidy 23 reports, not
+  # counting the examples' findings that examples/.clang-tidy turns off.
+  # An alias can report a different number of places than the check it's
+  # an alias of when their default options differ, as cert-dcl16-c's do
+  - -android-cloexec-accept  # TODO(1)
+  - -android-cloexec-dup  # TODO(1)
+  - -android-cloexec-open  # TODO(9)
+  - -bugprone-crtp-constructor-accessibility  # TODO(1)
+  - -bugprone-derived-method-shadowing-base-method  # TODO(2)
+  - -bugprone-empty-catch  # TODO(2)
+  - -bugprone-exception-escape  # TODO(34)
+  - -bugprone-implicit-widening-of-multiplication-result  # TODO(27)
+  - -bugprone-multi-level-implicit-pointer-conversion  # TODO(4)
+  - -bugprone-narrowing-conversions  # TODO(1)
+  - -cppcoreguidelines-narrowing-conversions  # TODO(1)
+  - -bugprone-reserved-identifier  # TODO(2)
+  - -cert-dcl37-c  # TODO(2)
+  - -cert-dcl51-cpp  # TODO(2)
+  - -bugprone-signed-bitwise  # TODO(57)
+  - -hicpp-signed-bitwise  # TODO(57)
+  - -bugprone-std-exception-baseclass  # TODO(3)
+  - -hicpp-exception-baseclass  # TODO(3)
+  - -bugprone-suspicious-string-compare  # TODO(2)
+  - -bugprone-throwing-static-initialization  # TODO(19)
+  - -cert-err58-cpp  # TODO(19)
+  - -bugprone-unchecked-optional-access  # TODO(9)
+  - -bugprone-unchecked-string-to-number-conversion  # TODO(15)
+  - -cert-err34-c  # TODO(15)
+  - -bugprone-unused-local-non-trivial-variable  # TODO(7)
+  - -bugprone-use-after-move  # TODO(6)
+  - -cert-err33-c  # TODO(128)
+  - -concurrency-mt-unsafe  # TODO(20)
+  - -cppcoreguidelines-avoid-const-or-ref-data-members  # TODO(5)
+  - -cppcoreguidelines-avoid-do-while  # TODO(3)
+  - -cppcoreguidelines-avoid-goto  # TODO(189)
+  - -cppcoreguidelines-avoid-non-const-global-variables  # TODO(11)
+  - -cppcoreguidelines-init-variables  # TODO(151)
+  - -cppcoreguidelines-macro-usage  # TODO(12)
+  - -cppcoreguidelines-no-malloc  # TODO(27)
+  - -cppcoreguidelines-owning-memory  # TODO(29)
+  - -cppcoreguidelines-prefer-member-initializer  # TODO(2)
+  - -cppcoreguidelines-pro-bounds-array-to-pointer-decay  # TODO(30)
+  - -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access  # TODO(236)
+  - -cppcoreguidelines-pro-bounds-constant-array-index  # TODO(102)
+  - -cppcoreguidelines-pro-bounds-pointer-arithmetic  # TODO(51)
+  - -cppcoreguidelines-pro-type-const-cast  # TODO(34)
+  - -cppcoreguidelines-pro-type-cstyle-cast  # TODO(4)
+  - -cppcoreguidelines-pro-type-member-init  # TODO(22)
+  - -cppcoreguidelines-pro-type-reinterpret-cast  # TODO(214)
+  - -cppcoreguidelines-pro-type-union-access  # TODO(136)
+  - -cppcoreguidelines-pro-type-vararg  # TODO(160)
+  - -cppcoreguidelines-rvalue-reference-param-not-moved  # TODO(1)
+  - -cppcoreguidelines-special-member-functions  # TODO(44)
+  - -cppcoreguidelines-use-enum-class  # TODO(2)
+  - -cppcoreguidelines-virtual-class-destructor  # TODO(1)
+  - -google-runtime-int  # TODO(4)
+  - -misc-anonymous-namespace-in-header  # TODO(1)
+  - -cert-dcl59-cpp  # TODO(1)
+  - -misc-const-correctness  # TODO(808)
+  - -misc-explicit-constructor  # TODO(7)
+  - -google-explicit-constructor  # TODO(7)
+  - -cppcoreguidelines-explicit-constructor  # TODO(7)
+  - -misc-misplaced-const  # TODO(9)
+  - -misc-multiple-inheritance  # TODO(10)
+  - -misc-non-private-member-variables-in-classes  # TODO(19)
+  - -cppcoreguidelines-non-private-member-variables-in-classes  # TODO(19)
+  - -misc-override-with-different-visibility  # TODO(29)
+  - -misc-use-anonymous-namespace  # TODO(56)
+  - -misc-use-internal-linkage  # TODO(150)
+  - -modernize-avoid-c-arrays  # TODO(26)
+  - -cppcoreguidelines-avoid-c-arrays  # TODO(26)
+  - -modernize-avoid-c-style-cast  # TODO(8)
+  - -modernize-avoid-variadic-functions  # TODO(1)
+  - -cert-dcl50-cpp  # TODO(1)
+  - -modernize-deprecated-headers  # TODO(3)
+  - -modernize-macro-to-enum  # TODO(3)
+  - -cppcoreguidelines-macro-to-enum  # TODO(3)
+  - -modernize-make-shared  # TODO(10)
+  - -modernize-redundant-void-arg  # TODO(7)
+  - -modernize-use-auto  # TODO(50)
+  - -modernize-use-default-member-init  # TODO(31)
+  - -cppcoreguidelines-use-default-member-init  # TODO(31)
+  - -modernize-use-designated-initializers  # TODO(172)
+  - -modernize-use-emplace  # TODO(2)
+  - -modernize-use-equals-default  # TODO(10)
+  - -modernize-use-equals-delete  # TODO(4)
+  - -modernize-use-integer-sign-comparison  # TODO(10)
+  - -modernize-use-nodiscard  # TODO(137)
+  - -modernize-use-nullptr  # TODO(16)
+  - -modernize-use-override  # TODO(39)
+  - -cppcoreguidelines-explicit-virtual-functions  # TODO(39)
+  - -modernize-use-ranges  # TODO(4)
+  - -modernize-use-scoped-lock  # TODO(39)
+  - -modernize-use-string-view  # TODO(1)
+  - -modernize-use-using  # TODO(4)
+  - -performance-avoid-endl  # TODO(20)
+  - -performance-inefficient-vector-operation  # TODO(4)
+  - -performance-move-const-arg  # TODO(3)
+  - -performance-no-int-to-ptr  # TODO(25)
+  - -performance-unnecessary-copy-initialization  # TODO(1)
+  - -performance-unnecessary-value-param  # TODO(3)
+  - -performance-use-std-move  # TODO(1)
+  - -readability-avoid-const-params-in-decls  # TODO(5)
+  - -readability-avoid-nested-conditional-operator  # TODO(1)
+  - -readability-braces-around-statements  # TODO(98)
+  - -readability-container-contains  # TODO(3)
+  - -readability-container-data-pointer  # TODO(5)
+  - -readability-container-size-empty  # TODO(11)
+  - -readability-convert-member-functions-to-static  # TODO(33)
+  - -readability-else-after-return  # TODO(11)
+  - -readability-function-cognitive-complexity  # TODO(40)
+  - -readability-implicit-bool-conversion  # TODO(199)
+  - -readability-inconsistent-declaration-parameter-name  # TODO(4)
+  - -readability-isolate-declaration  # TODO(34)
+  - -readability-magic-numbers  # TODO(481)
+  - -cppcoreguidelines-avoid-magic-numbers  # TODO(481)
+  - -readability-make-member-function-const  # TODO(7)
+  - -readability-math-missing-parentheses  # TODO(4)
+  - -readability-named-parameter  # TODO(15)
+  - -readability-non-const-parameter  # TODO(3)
+  - -readability-qualified-auto  # TODO(76)
+  - -readability-redundant-declaration  # TODO(2)
+  - -readability-redundant-inline-specifier  # TODO(5)
+  - -readability-redundant-lambda-parameter-list  # TODO(24)
+  - -readability-redundant-member-init  # TODO(50)
+  - -readability-redundant-nested-if  # TODO(18)
+  - -readability-redundant-parentheses  # TODO(1)
+  - -readability-redundant-typename  # TODO(5)
+  - -readability-simplify-subscript-expr  # TODO(5)
+  - -readability-suspicious-call-argument  # TODO(2)
+  - -readability-trailing-comma  # TODO(46)
+  - -readability-trivial-switch  # TODO(1)
+  - -readability-uppercase-literal-suffix  # TODO(46)
+  - -cert-dcl16-c  # TODO(1)
+  - -readability-use-concise-preprocessor-directives  # TODO(41)
 WarningsAsErrors: '*'
-HeaderFilterRegex: '.*/(include|src|examples|tools)/.*'
+
+CheckOptions:
+  # std::from_chars takes an end pointer, so it never needs the
+  # string_view's data() to be NUL-terminated
+  bugprone-suspicious-stringview-data-usage.AllowedCallees: '::std::from_chars'
+  # hipFile only builds with glibc, so report the functions that glibc
+  # documents as thread-unsafe. The default adds POSIX's list, which
+  # includes getenv() and dlerror(): glibc's getenv() only races with
+  # changes to the environment, and its dlerror() keeps per-thread state.
+  # Revisit this if hipFile is built with another C library.
+  concurrency-mt-unsafe.FunctionSet: glibc
+  # A mutable global in an anonymous namespace (or declared static) can
+  # only be reached from its own file, so it doesn't couple distant code.
+  # Hiding one in a function that returns a reference to a static local
+  # would satisfy the check without changing that. Make such a variable
+  # thread-safe (atomic, thread_local, or guarded by a lock), and constinit
+  # where it's constant-initialized
+  cppcoreguidelines-avoid-non-const-global-variables.AllowInternalLinkage: true
+  # A lock guard is only declared for what its constructor and destructor
+  # do, so const would say nothing about it
+  misc-const-correctness.AllowedTypes: '::std::scoped_lock;::std::lock_guard'
+  # A class whose data members are all public is a struct, a set of values
+  # with no invariant to protect, even with a constructor, so only mixed
+  # and protected data are reported, as the cppcoreguidelines alias of
+  # this check does by default
+  misc-non-private-member-variables-in-classes.IgnoreClassesWithAllMemberVariablesBeingPublic: true
+  # The default, Remove, mistakes the comma after an empty {} argument for
+  # a trailing comma, as in {a, b, {}, c}, and its fix doesn't compile.
+  # Multi-line lists still need a trailing comma, which also keeps
+  # clang-format from packing several elements onto a line
+  readability-trailing-comma.SingleLineCommaPolicy: Ignore
+
+# Report problems in every header that isn't a system header, except:
+#   - Third-party code that FetchContent pulls into the build directory
+#   - The public headers, which are C (C++ checks don't apply to them)
+HeaderFilterRegex: '.*'
+ExcludeHeaderFilterRegex: '.*/(_deps/.*|include/hipfile\.h|include/hipfile-api-trace\.h)$'
+SystemHeaders: false

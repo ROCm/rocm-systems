@@ -25,14 +25,37 @@ enum class BufferStoreMissingChannel { Zero, ReplicateFirst };
 enum class BufferNumberFormat { Unorm, Snorm, Uscaled, Sscaled, Uint, Sint, Float };
 
 /// Decoded once at instruction setup and retained through memory completion.
-struct BufferFormat {
+class BufferFormat {
+public:
   std::array<uint32_t, 4> widths{};
   BufferNumberFormat number = BufferNumberFormat::Uint;
+
+  uint32_t byte_size() const {
+    uint32_t bits = 0;
+    for (uint32_t width : widths) {
+      bits += width;
+    }
+    return bits / 8;
+  }
+  uint32_t component_count() const {
+    uint32_t count = 0;
+    for (uint32_t width : widths) {
+      count += width != 0;
+    }
+    return count;
+  }
 };
+
+/// @brief Whether an image store's descriptor selectors have measured inverse routing.
+bool image_store_selectors_supported(const BufferFormat &format, uint32_t selectors,
+                                     bool gfx10 = false);
 
 /// @brief Decode @p state format/encoding, retaining channel widths and texel size.
 /// @returns False for an invalid resource format and failure for reserved encodings.
 util::FailureOr<bool> prepare_buffer_format_state(VectorMemState &state);
+util::FailureOr<bool> prepare_gfx10_image_format(VectorMemState &state);
+util::FailureOr<BufferFormat>
+decode_buffer_format(uint32_t format, BufferFormatEncoding encoding = BufferFormatEncoding::Gfx11);
 
 /// GFX9 combines DFMT | (NFMT << 4); RDNA uses its generation's FORMAT table.
 /// The memory footprint is independent of the instruction's VGPR count.
@@ -41,7 +64,11 @@ buffer_format_bytes(uint32_t format, BufferFormatEncoding encoding = BufferForma
 util::FailureOr<std::array<uint32_t, 4>>
 unpack_buffer_format(uint32_t format, uint32_t selectors, std::span<const uint8_t> bytes,
                      BufferFormatEncoding encoding = BufferFormatEncoding::Gfx11);
-/// Packs an untyped descriptor-selected store, including DST_SEL qualification.
+/// @brief Pack an untyped descriptor-selected store, including DST_SEL qualification.
+/// @details Native gfx1100/gfx1201 single-channel FLOAT32 buffer stores resolve all-zero
+/// DST_SEL to A8: W supplies R when present; otherwise @p missing supplies R.
+/// This routing is extrapolated to the other supported targets and does not
+/// apply to image stores.
 util::Result
 pack_buffer_format(uint32_t format, uint32_t selectors, std::span<const uint32_t> components,
                    std::span<uint8_t> bytes,
@@ -52,7 +79,8 @@ pack_buffer_format(uint32_t format, uint32_t selectors, std::span<const uint32_t
 /// selects the resource's FORMAT/DST_SEL fields; MTBUF supplies its own format.
 util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &state, uint32_t resource,
                                             int format, uint32_t components);
-void capture_buffer_format_store(Wavefront &wf, VectorMemState &state, uint32_t data_base);
+void capture_buffer_format_store(Wavefront &wf, VectorMemState &state, uint32_t data_base,
+                                 bool raw = false);
 void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemState &state);
 } // namespace rocjitsu::amdgpu
 

@@ -528,9 +528,113 @@ hsa_ven_amd_loader_iterate_executables(
 //===----------------------------------------------------------------------===//
 
 /**
+ * @brief Query the number of bytes of device memory that a code object
+ * occupies once loaded.
+ *
+ * @details The result is the value that
+ * ::HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE reports after the code
+ * object in @p code_object_reader is loaded. It depends only on that code
+ * object, not on the agent. Options that substitute a different image are
+ * applied at load time and are not part of this result.
+ *
+ * @param[in] code_object_reader A code object reader that holds the code
+ * object.
+ *
+ * @param[out] load_size Memory location to store the size. Must not be NULL.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER @p code_object_reader
+ * is invalid.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_CODE_OBJECT The code object is invalid,
+ * or is code object version 1.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p load_size is NULL.
+ */
+hsa_status_t hsa_ven_amd_loader_code_object_reader_get_load_size(
+    hsa_code_object_reader_t code_object_reader, size_t* load_size);
+
+/**
+ * @brief Load an agent code object into executable memory the application
+ * already mapped.
+ *
+ * @details Behaves like ::hsa_executable_load_agent_code_object, except that
+ * the loaded image is placed at @p address. On success,
+ * ::HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_BASE is @p address.
+ *
+ * @p address is an application-owned range, for example a virtual-memory
+ * mapping or an mmap allocation. It must be aligned to 256 bytes, the
+ * alignment the runtime uses when it allocates code itself. The runtime does
+ * not check that the range is mapped or executable, and it does not change the
+ * range's access permissions. The agent's mapping must be writable, so the
+ * image can be copied there when @p executable is frozen, and executable, so
+ * the agent can dispatch it. The host mapping need not be writable. The bytes
+ * occupied by the code object in @p code_object_reader, as reported by
+ * ::hsa_ven_amd_loader_code_object_reader_get_load_size, must fit in @p size.
+ * An option that substitutes a different image is applied before that check,
+ * and ::HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE then reports the
+ * image that was loaded. The range stays owned by the application. Destroying
+ * @p executable does not unmap it.
+ *
+ * Only supported for GPU agents and code object version 2 and later. Other
+ * error conditions are as for ::hsa_executable_load_agent_code_object.
+ *
+ * @param[in] executable Executable.
+ *
+ * @param[in] agent Agent to load code object for.
+ *
+ * @param[in] code_object_reader A code object reader that holds the code
+ * object to load.
+ *
+ * @param[in] options Standard and vendor-specific options. May be NULL.
+ *
+ * @param[in] address Address at which to place the loaded code object. Must be
+ * aligned to 256 bytes.
+ *
+ * @param[in] size Number of bytes starting at @p address that the loaded code
+ * object may occupy.
+ *
+ * @param[out] loaded_code_object Pointer to a memory location where the HSA
+ * runtime stores the loaded code object handle. May be NULL.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_EXECUTABLE The executable is invalid.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The agent is invalid, is not a GPU,
+ * or has no coarse-grained local memory.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER @p code_object_reader
+ * is invalid.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p address is NULL, is not
+ * aligned to 256 bytes, or the code object does not fit in @p size.
+ *
+ * @retval ::HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS The code object is version
+ * 1, or is incompatible with @p agent.
+ *
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES The HSA runtime failed to
+ * allocate the required resources.
+ *
+ * @retval ::HSA_STATUS_ERROR_FROZEN_EXECUTABLE @p executable is frozen.
+ */
+hsa_status_t hsa_ven_amd_loader_executable_load_agent_code_object_at_address(
+    hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
+    const char* options, void* address, size_t size, hsa_loaded_code_object_t* loaded_code_object);
+
+//===----------------------------------------------------------------------===//
+
+/**
  * @brief Extension version.
  */
-#define hsa_ven_amd_loader 001003
+#define hsa_ven_amd_loader 001004
 
 /**
  * @brief Extension function table version 1.00.
@@ -659,6 +763,45 @@ typedef struct hsa_ven_amd_loader_1_03_pfn_s {
         void *data),
       void *data);
 } hsa_ven_amd_loader_1_03_pfn_t;
+
+/**
+ * @brief Extension function table version 1.04.
+ */
+typedef struct hsa_ven_amd_loader_1_04_pfn_s {
+  hsa_status_t (*hsa_ven_amd_loader_query_host_address)(const void* device_address,
+                                                        const void** host_address);
+
+  hsa_status_t (*hsa_ven_amd_loader_query_segment_descriptors)(
+      hsa_ven_amd_loader_segment_descriptor_t* segment_descriptors,
+      size_t* num_segment_descriptors);
+
+  hsa_status_t (*hsa_ven_amd_loader_query_executable)(const void* device_address,
+                                                      hsa_executable_t* executable);
+
+  hsa_status_t (*hsa_ven_amd_loader_executable_iterate_loaded_code_objects)(
+      hsa_executable_t executable,
+      hsa_status_t (*callback)(hsa_executable_t executable,
+                               hsa_loaded_code_object_t loaded_code_object, void* data),
+      void* data);
+
+  hsa_status_t (*hsa_ven_amd_loader_loaded_code_object_get_info)(
+      hsa_loaded_code_object_t loaded_code_object,
+      hsa_ven_amd_loader_loaded_code_object_info_t attribute, void* value);
+
+  hsa_status_t (*hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size)(
+      hsa_file_t file, size_t offset, size_t size, hsa_code_object_reader_t* code_object_reader);
+
+  hsa_status_t (*hsa_ven_amd_loader_iterate_executables)(
+      hsa_status_t (*callback)(hsa_executable_t executable, void* data), void* data);
+
+  hsa_status_t (*hsa_ven_amd_loader_code_object_reader_get_load_size)(
+      hsa_code_object_reader_t code_object_reader, size_t* load_size);
+
+  hsa_status_t (*hsa_ven_amd_loader_executable_load_agent_code_object_at_address)(
+      hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
+      const char* options, void* address, size_t size,
+      hsa_loaded_code_object_t* loaded_code_object);
+} hsa_ven_amd_loader_1_04_pfn_t;
 
 #ifdef __cplusplus
 }

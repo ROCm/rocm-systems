@@ -548,6 +548,22 @@ testResult_t AllReduceRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
   return testNotImplemented;
 }
 
+// Tier report for -D 1..4. These are rccl-Test device kernels that move data
+// purely over the LSA window (no GIN): -D 1/2 are load/store LSA kernels (scalar /
+// vectorized), -D 3/4 reduce through NVLS-style multimem pointers (scalar /
+// vectorized). algo = T-<kernel>, proto = transport; both fit the 8-char columns.
+testResult_t AllReduceGetDeviceImplInfo(int deviceImpl, size_t /*count*/, ncclDataType_t /*type*/,
+    int /*nRanks*/, int /*lsaSize*/, char* algoOut, char* protoOut) {
+  switch (deviceImpl) {
+  case 1: snprintf(algoOut, 16, "%s", "T-LSA");    snprintf(protoOut, 16, "%s", "LSA");      break;
+  case 2: snprintf(algoOut, 16, "%s", "T-LSAVEC"); snprintf(protoOut, 16, "%s", "LSA");      break;
+  case 3: snprintf(algoOut, 16, "%s", "T-MMEM");   snprintf(protoOut, 16, "%s", "MULTIMEM"); break;
+  case 4: snprintf(algoOut, 16, "%s", "T-MMEMV");  snprintf(protoOut, 16, "%s", "MULTIMEM"); break;
+  default: return testNotImplemented;
+  }
+  return testSuccess;
+}
+
 struct testColl allReduceTest = {
   "AllReduce",
   AllReduceGetCollByteCount,
@@ -556,7 +572,9 @@ struct testColl allReduceTest = {
   AllReduceRunColl,
   AllReduceGetAlgoProtoChannels,
   AllReduceGetSymkInfo,
-  AllReduceGetCollImplInfo
+  AllReduceGetCollImplInfo,
+  nullptr,  // deviceTime
+  AllReduceGetDeviceImplInfo
 };
 
 void AllReduceGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {

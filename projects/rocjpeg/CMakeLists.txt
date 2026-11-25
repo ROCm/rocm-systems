@@ -56,7 +56,7 @@ endif()
 
 # rocjpeg Version
 # NOTE: package version and rocjpeg_version.h is generated with this version
-set(VERSION "1.13.0")
+set(VERSION "1.14.0")
 
 # Set Project Version and Language
 project(rocjpeg VERSION ${VERSION} LANGUAGES CXX)
@@ -122,17 +122,20 @@ if(NOT GPU_TARGETS AND NOT AMDGPU_TARGETS)
 endif()
 
 # Set AMD GPU_TARGETS
-if((AMDGPU_TARGETS OR DEFINED ENV{AMDGPU_TARGETS}) AND (NOT GPU_TARGETS))
+string(STRIP "$ENV{AMDGPU_TARGETS}" ENV_AMDGPU_TARGETS)
+string(STRIP "$ENV{GPU_ARCHS}" ENV_GPU_ARCHS)
+
+if((AMDGPU_TARGETS OR NOT "${ENV_AMDGPU_TARGETS}" STREQUAL "") AND (NOT GPU_TARGETS))
   message("-- ${Red}${PROJECT_NAME} DEPRECATION -- AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS${ColourReset}")
-  if(DEFINED ENV{AMDGPU_TARGETS})
-    set(GPU_TARGETS $ENV{AMDGPU_TARGETS} CACHE STRING "List of specific machine types for library to target")
+  if(NOT "${ENV_AMDGPU_TARGETS}" STREQUAL "")
+    set(GPU_TARGETS ${ENV_AMDGPU_TARGETS} CACHE STRING "List of specific machine types for library to target")
   else()
     set(GPU_TARGETS ${AMDGPU_TARGETS})
   endif()
 endif()
 
-if(DEFINED ENV{GPU_ARCHS})
-  set(GPU_TARGETS $ENV{GPU_ARCHS} CACHE STRING "List of specific machine types for library to target")
+if(NOT "${ENV_GPU_ARCHS}" STREQUAL "")
+  set(GPU_TARGETS ${ENV_GPU_ARCHS} CACHE STRING "List of specific machine types for library to target")
 elseif(GPU_TARGETS)
   message("-- ${White}${PROJECT_NAME} -- GPU_TARGETS set with -D option${ColourReset}")
 else()
@@ -158,17 +161,11 @@ endif()
 if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   # HIP
   set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::device)
-  # LibVA - headers always needed for VA-API type definitions.
-  # On Linux TheRock builds, libva is loaded at runtime via dlopen with
-  # RTLD_LOCAL | RTLD_DEEPBIND (see rocjpeg_vaapi_loader.cpp) to prevent symbol
-  # collision with any system libva.so.2 in the same process; no direct
-  # link-time dependency is needed in that case.
-  # On non-TheRock builds, link directly as before.
+  # LibVA - headers only, needed for VA-API type definitions.
+  # libva is loaded at runtime via dlopen with RTLD_LOCAL | RTLD_DEEPBIND
+  # (see rocjpeg_vaapi_loader.cpp) to prevent symbol collision with any system
+  # libva.so.2 in the same process; no direct link-time dependency is needed.
   include_directories(${LIBVA_INCLUDE_DIR})
-  if(NOT (USING_THE_ROCK AND UNIX))
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY})
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
-  endif()
   # DRM_AMDGPU
   include_directories(${LIBDRM_AMDGPU_INCLUDE_DIR})
   set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBDRM_AMDGPU_LIBRARY})
@@ -209,15 +206,10 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE CXX)
   set_target_properties(${PROJECT_NAME} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
 
-  if(USING_THE_ROCK)
-    set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/rocm_sysdeps/lib" BUILD_WITH_INSTALL_RPATH TRUE)
-    if(UNIX)
-      # Enable dlopen-based VA isolation and link against libdl for dlopen/dlsym/dlclose.
-      # dlopen is Linux-only.
-      target_compile_definitions(${PROJECT_NAME} PRIVATE ROCJPEG_USE_DLOPEN_VA)
-      target_link_libraries(${PROJECT_NAME} dl)
-    endif()
-  endif()
+  set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/rocm_sysdeps/lib" BUILD_WITH_INSTALL_RPATH TRUE)
+  # Enable dlopen-based VA isolation and link against libdl for dlopen/dlsym/dlclose.
+  target_compile_definitions(${PROJECT_NAME} PRIVATE ROCJPEG_USE_DLOPEN_VA)
+  target_link_libraries(${PROJECT_NAME} dl)
 
   # rocprofiler
   if(rocprofiler-register_FOUND)

@@ -2,15 +2,19 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/entry_prologue.h"
+#include "rocjitsu/code/patch/error_report.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/analysis/free_registers.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/smem_builders.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "util/diagnostic.h"
 
 #include <algorithm>
 #include <array>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 
@@ -20,40 +24,44 @@ namespace {
 using KD = amdhsa::kernel_descriptor_t;
 } // namespace
 
-uint32_t dbi_entry_storage_floor(KernelBlockScope blocks, const KD &desc, rj_code_arch_t arch) {
-  return std::max(explicit_ordinary_sgpr_bound(blocks),
+uint32_t dbi_entry_storage_floor(KernelBlockScope blocks, const KD &desc,
+                                 rocjitsu::IsaFamily arch) {
+  return std::max(explicit_ordinary_sgpr_bound(blocks, kernel_wavefront_size(arch, desc)),
                   kernel_descriptor_initial_sgpr_count(arch, desc));
 }
 
 std::optional<DbiEntryStorage> plan_dbi_entry_storage(KernelBlockScope blocks, const KD &desc,
-                                                      rj_code_arch_t arch,
+                                                      rocjitsu::IsaFamily arch,
                                                       uint32_t kernel_sgpr_count,
                                                       const RegisterSet &reserved,
                                                       std::string *error_out) {
   // The floor is an operand scan, so an M0-displaced write can land above it,
   // including on the run chosen here, and clobber it before a probe reads it.
   if (accesses_sgprs_indirectly_via_movrel(blocks)) {
-    if (error_out != nullptr)
+    if (error_out != nullptr) {
       *error_out = "kernel has relative SGPR access (s_movrel*), so no SGPR can be shown free "
                    "for the entry prologue's reserved storage";
+    }
     return std::nullopt;
   }
 
   const uint32_t floor = dbi_entry_storage_floor(blocks, desc, arch);
   const uint32_t bound = ordinary_sgpr_bound(arch, kernel_sgpr_count);
   std::string limit = "below s" + std::to_string(bound);
-  if (bound < std::min<uint32_t>(kernel_sgpr_count, REGISTER_SET_ALLOCATABLE_SGPRS))
+  if (bound < std::min<uint32_t>(kernel_sgpr_count, REGISTER_SET_ALLOCATABLE_SGPRS)) {
     limit += " (the top " + std::to_string(kCdnaSpecialSgprTailReserve) + " of the kernel's " +
              std::to_string(kernel_sgpr_count) + " SGPRs hold special registers)";
+  }
 
   // find_free_run takes a uint16_t search start. Rejecting a floor at or past
   // the bound here keeps a floor that outgrew the type from narrowing into a low
   // index that looks available.
   if (floor >= bound) {
-    if (error_out != nullptr)
+    if (error_out != nullptr) {
       *error_out = "kernel and its ABI use SGPRs below s" + std::to_string(floor) +
                    ", leaving no room " + limit + " for the " +
                    std::to_string(kDbiEntryStorageRegisters) + " SGPRs the entry prologue reserves";
+    }
     return std::nullopt;
   }
 
@@ -63,10 +71,11 @@ std::optional<DbiEntryStorage> plan_dbi_entry_storage(KernelBlockScope blocks, c
   const auto base = find_free_run(reserved, RegClass::SGPR, kDbiEntryStorageRegisters,
                                   static_cast<uint16_t>(floor), /*base_alignment=*/2, bound);
   if (!base) {
-    if (error_out != nullptr)
+    if (error_out != nullptr) {
       *error_out = "no free run of " + std::to_string(kDbiEntryStorageRegisters) + " SGPRs from s" +
                    std::to_string(floor) + " " + limit +
                    " for the entry prologue's reserved storage";
+    }
     return std::nullopt;
   }
 
@@ -74,7 +83,7 @@ std::optional<DbiEntryStorage> plan_dbi_entry_storage(KernelBlockScope blocks, c
                          .entry_temp_base = static_cast<uint16_t>(*base + 2)};
 }
 
-std::optional<DbiEntryPrologue> build_dbi_entry_prologue(const KD &desc, rj_code_arch_t arch,
+std::optional<DbiEntryPrologue> build_dbi_entry_prologue(const KD &desc, rocjitsu::IsaFamily arch,
                                                          DbiEntryStorage storage,
                                                          std::string *error_out) {
   // The sequence, for storage s[res:res+3] and kernarg pair s[karg:karg+1]:
@@ -94,11 +103,11 @@ std::optional<DbiEntryPrologue> build_dbi_entry_prologue(const KD &desc, rj_code
   //
   // Everything before the emission is a guard on a case that would otherwise
   // miscompile silently. The register-field ones are also enforced by the
-  // builders, which throw; repeating them keeps a fail-closed caller from having
-  // to catch.
+  // builders; repeating them here gives the caller register-specific diagnostics.
   const auto fail = [error_out](std::string message) {
-    if (error_out != nullptr)
+    if (error_out != nullptr) {
       *error_out = std::move(message);
+    }
     return std::nullopt;
   };
 
@@ -117,8 +126,9 @@ std::optional<DbiEntryPrologue> build_dbi_entry_prologue(const KD &desc, rj_code
       {"entry temp storage", storage.entry_temp_base, kMaxSmemSdata, "data"},
   }};
   for (const auto &[name, base, limit, field] : pairs) {
-    if ((base % 2) != 0)
+    if ((base % 2) != 0) {
       return fail(std::string(name) + " pair base s" + std::to_string(base) + " is not even");
+    }
     if (base > limit) {
       return fail(std::string(name) + " pair base s" + std::to_string(base) + " exceeds the SMEM " +
                   field + " field");
@@ -149,43 +159,72 @@ std::optional<DbiEntryPrologue> build_dbi_entry_prologue(const KD &desc, rj_code
   const std::array<KernargExtensionPayloadLayout, 1> payloads{kDbiEntryPayloadLayout};
   const std::optional<KernargExtensionLayout> layout =
       make_kernarg_extension_layout(desc.kernarg_size, payloads);
-  if (!layout)
+  if (!layout) {
     return fail("kernarg wrapper layout overflows 32 bits for this kernel's kernarg_size");
+  }
 
   DbiEntryPrologue prologue;
   prologue.payload_byte_offset = layout->payload_offsets.front();
   prologue.original_kernarg_pointer_offset = layout->original_kernarg_pointer_offset;
 
-  const uint32_t offset_max = max_smem_byte_offset(arch);
+  // TODO: Accept a DiagnosticEmitter in the prologue APIs and remove this error_out adapter.
+  OptionalStringDiagnosticSink record_error(error_out);
+  const util::DiagnosticEmitter error(record_error);
+  // Delegated failures use the adapter to populate error_out before returning failure.
+  const auto offset_max = max_smem_byte_offset(arch, &error);
+  if (offset_max.failed()) {
+    return std::nullopt;
+  }
   for (const uint32_t offset :
        {prologue.payload_byte_offset, prologue.original_kernarg_pointer_offset}) {
-    if (offset > offset_max) {
+    if (offset > offset_max.value()) {
       return fail("kernarg wrapper offset " + std::to_string(offset) +
-                  " exceeds the target's SMEM immediate range of " + std::to_string(offset_max));
+                  " exceeds the target's SMEM immediate range of " +
+                  std::to_string(offset_max.value()));
     }
   }
 
-  const auto emit_load = [&](uint16_t sdst, uint32_t byte_offset) {
-    const std::array<uint32_t, 2> load =
-        build_s_load_dwordx2(sdst, *kernarg_base, byte_offset, arch);
-    prologue.words.push_back(load[0]);
-    prologue.words.push_back(load[1]);
+  const auto emit_load = [&](uint16_t sdst, uint32_t byte_offset) -> util::Result {
+    const auto load = build_s_load_dwordx2(sdst, *kernarg_base, byte_offset, arch, &error);
+    if (load.failed()) {
+      return util::Result::failure();
+    }
+    prologue.words.push_back(load.value()[0]);
+    prologue.words.push_back(load.value()[1]);
+    return util::Result::success();
   };
 
-  emit_load(storage.persistent_base, prologue.payload_byte_offset);
-  emit_load(storage.entry_temp_base, prologue.original_kernarg_pointer_offset);
+  if (emit_load(storage.persistent_base, prologue.payload_byte_offset).failed()) {
+    return std::nullopt;
+  }
+  if (emit_load(storage.entry_temp_base, prologue.original_kernarg_pointer_offset).failed()) {
+    return std::nullopt;
+  }
 
-  prologue.words.push_back(build_wait_scalar_loads_complete(arch));
+  const auto wait = build_wait_scalar_loads_complete(arch, &error);
+  if (wait.failed()) {
+    return std::nullopt;
+  }
+  prologue.words.push_back(wait.value());
 
-  prologue.words.push_back(build_s_mov_b32(*kernarg_base, storage.entry_temp_base, arch));
-  prologue.words.push_back(build_s_mov_b32(static_cast<uint16_t>(*kernarg_base + 1),
-                                           static_cast<uint16_t>(storage.entry_temp_base + 1),
-                                           arch));
+  util::FailureOr<uint32_t> restore_lo =
+      build_s_mov_b32(*kernarg_base, storage.entry_temp_base, arch, &error);
+  if (restore_lo.failed()) {
+    return std::nullopt;
+  }
+  util::FailureOr<uint32_t> restore_hi =
+      build_s_mov_b32(static_cast<uint16_t>(*kernarg_base + 1),
+                      static_cast<uint16_t>(storage.entry_temp_base + 1), arch, &error);
+  if (restore_hi.failed()) {
+    return std::nullopt;
+  }
+  prologue.words.push_back(restore_lo.value());
+  prologue.words.push_back(restore_hi.value());
   return prologue;
 }
 
 std::optional<DbiEntryProloguePlan> plan_dbi_entry_prologue(KernelBlockScope blocks, const KD &desc,
-                                                            rj_code_arch_t arch,
+                                                            rocjitsu::IsaFamily arch,
                                                             uint32_t kernel_sgpr_count,
                                                             const RegisterSet &reserved,
                                                             std::string *error_out) {
@@ -204,13 +243,15 @@ std::optional<DbiEntryProloguePlan> plan_dbi_entry_prologue(KernelBlockScope blo
 
   const std::optional<DbiEntryStorage> storage =
       plan_dbi_entry_storage(blocks, desc, arch, kernel_sgpr_count, reserved, error_out);
-  if (!storage)
+  if (!storage) {
     return std::nullopt;
+  }
 
   std::optional<DbiEntryPrologue> prologue =
       build_dbi_entry_prologue(desc, arch, *storage, error_out);
-  if (!prologue)
+  if (!prologue) {
     return std::nullopt;
+  }
 
   return DbiEntryProloguePlan{.storage = *storage, .prologue = std::move(*prologue)};
 }

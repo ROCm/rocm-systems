@@ -260,47 +260,47 @@ struct SdmaQueueDeviceHandle {
         // All stores inside the loop to avoid SIMD reconvergence deadlock:
         // the committedWptr update must complete before this lane becomes
         // inactive, so that other lanes in the same wavefront can proceed.
-#if defined(__GFX12__)
-        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
-#else
+#if defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__)
         __builtin_amdgcn_s_waitcnt(0);
+#else
+        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
 #endif
         __builtin_amdgcn_wave_barrier();
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
         __scoped_atomic_store_n(wptr, pendingWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 
-#if defined(__GFX12__)
-        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
-#else
+#if defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__)
         __builtin_amdgcn_s_waitcnt(0);
+#else
+        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
 #endif
         __builtin_amdgcn_wave_barrier();
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
         __scoped_atomic_store_n(doorbell, pendingWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
 
-#if defined(__GFX12__)
-        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
-#else
+#if defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__)
         __builtin_amdgcn_s_waitcnt(0);
+#else
+        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
 #endif
         __builtin_amdgcn_wave_barrier();
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
         __scoped_atomic_store_n(committedWptr, pendingWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 
-#if defined(__GFX12__)
-        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
-#else
+#if defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__)
         __builtin_amdgcn_s_waitcnt(0);
+#else
+        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
 #endif
         __builtin_amdgcn_wave_barrier();
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
-        // Relaxed device-scope atomic store writes directly to GL2, making
-        // maxWritePtr visible to quiet callers on other CUs.
-        __scoped_atomic_store_n(&maxWritePtr, pendingWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+        // committedWptr releases the next writer before this point, so a later writer can finish first.
+        // Take the max so maxWritePtr never moves back. Device scope makes it visible to quiet callers on other CUs.
+        __scoped_atomic_fetch_max(&maxWritePtr, pendingWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
         break;
       }
       __builtin_amdgcn_s_sleep(1);
@@ -314,24 +314,25 @@ struct SdmaQueueDeviceHandle {
     }
   }
 
+  // True once HW has consumed packets up to upToIndex
+  __device__ __forceinline__ bool isFlushed(uint64_t upToIndex) {
+    return __scoped_atomic_load_n(rptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE) >= upToIndex;
+  }
+
   // Spin-poll rptr until HW has consumed packets up to upToIndex
   __device__ __forceinline__ void flushTo(uint64_t upToIndex) {
-    uint64_t hw_read_index;
-    do {
-      hw_read_index = __scoped_atomic_load_n(rptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
-    } while (hw_read_index < upToIndex);
+    while (!isFlushed(upToIndex)) {
+    }
+  }
+
+  // Write index covering every packet submitted so far. An agent-scope load, since a different CU
+  // can set maxWritePtr.
+  __device__ __forceinline__ uint64_t quietTarget() {
+    return __scoped_atomic_load_n(&maxWritePtr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   }
 
   // Spin-poll rptr until HW has consumed all submitted packets
-  __device__ __forceinline__ void quietAll() {
-    // One agent-scope load to read maxWritePtr set by a potentially different CU.
-    // Held in a register for the loop — it does not need updated during quietAll.
-    uint64_t target = __scoped_atomic_load_n(&maxWritePtr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
-    uint64_t hw_read_index;
-    do {
-      hw_read_index = __scoped_atomic_load_n(rptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
-    } while (hw_read_index < target);
-  }
+  __device__ __forceinline__ void quietAll() { flushTo(quietTarget()); }
 
  private:
   __device__ __forceinline__ bool nontemporal_compare_exchange(uint64_t* vaddr, uint64_t expected,
@@ -417,10 +418,10 @@ struct SdmaQueueSingleProducerDeviceHandle : SdmaQueueDeviceHandle {
   __device__ __forceinline__ void submitPacket([[maybe_unused]] uint64_t base,
                                                uint64_t pendingWptr) {
     *wptr = pendingWptr;
-#if defined(__GFX12__)
-    asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
-#else
+#if defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__)
     __builtin_amdgcn_s_waitcnt(0);
+#else
+    asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
 #endif
     __builtin_amdgcn_wave_barrier();
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
@@ -599,6 +600,16 @@ __device__ __forceinline__ void quiet(SdmaQueueDeviceHandle& handle) {
 
 __device__ __forceinline__ void quiet(SdmaQueueSingleProducerDeviceHandle& handle) {
   handle.quietAll();
+}
+
+// Write index covering every packet submitted so far, the index quiet() waits for
+__device__ __forceinline__ uint64_t quietTarget(SdmaQueueDeviceHandle& handle) {
+  return handle.quietTarget();
+}
+
+// Non-blocking flush: true once HW has consumed up to upToIndex
+__device__ __forceinline__ bool isFlushed(SdmaQueueDeviceHandle& handle, uint64_t upToIndex) {
+  return handle.isFlushed(upToIndex);
 }
 
 // Assumes signal is allocated in device memory (kept for backward compat)

@@ -6,21 +6,11 @@ include_guard(GLOBAL)
 find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
 
 macro(runtime_rust_initialize)
-    if(WIN32)
-        message(
-            FATAL_ERROR
-            "Rust runtime Windows DLL/import-library staging is not implemented yet"
-        )
-    elseif(APPLE)
-        message(
-            FATAL_ERROR
-            "Rust runtime Darwin install-name staging is not implemented yet"
-        )
-    elseif(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        message(
-            FATAL_ERROR
-            "Rust runtime staging is not implemented for ${CMAKE_SYSTEM_NAME}"
-        )
+    if(NOT CMAKE_SYSTEM_NAME MATCHES "^(Linux|Windows)$")
+        message(FATAL_ERROR "Rust runtime staging is not implemented for ${CMAKE_SYSTEM_NAME}")
+    endif()
+    if(WIN32 AND NOT MSVC)
+        message(FATAL_ERROR "Windows runtimes require an MSVC-compatible toolchain")
     endif()
     if(CMAKE_CROSSCOMPILING)
         message(
@@ -33,7 +23,11 @@ macro(runtime_rust_initialize)
     set(_runtime_library_dir "${_runtime_binary_dir}/lib")
     find_program(ROCM_RUNTIMES_CARGO NAMES cargo REQUIRED)
     find_program(ROCM_RUNTIMES_RUSTC NAMES rustc REQUIRED)
-    find_program(ROCM_RUNTIMES_LLD NAMES ld.lld REQUIRED)
+    if(WIN32)
+        find_program(ROCM_RUNTIMES_LLD NAMES lld-link REQUIRED)
+    else()
+        find_program(ROCM_RUNTIMES_LLD NAMES ld.lld REQUIRED)
+    endif()
     set(ROCM_RUNTIMES_CARGO_HOME
         "${_runtime_binary_dir}/cargo-home"
         CACHE PATH
@@ -49,6 +43,11 @@ macro(runtime_rust_initialize)
         CACHE STRING
         "Optional Cargo parallel-job limit"
     )
+    set(ROCM_RUNTIMES_ADDRLIB_SOURCE_DIR
+        ""
+        CACHE PATH
+        "Optional AddrLib source tree (empty selects the pinned runtime copy)"
+    )
     execute_process(
         COMMAND
             "${Python3_EXECUTABLE}"
@@ -60,6 +59,7 @@ macro(runtime_rust_initialize)
             --system "${CMAKE_SYSTEM_NAME}" --build-type "${CMAKE_BUILD_TYPE}"
             --cargo-home "${ROCM_RUNTIMES_CARGO_HOME}" --cargo-config
             "${ROCM_RUNTIMES_CARGO_CONFIG}" --jobs "${ROCM_RUNTIMES_CARGO_JOBS}"
+            --addrlib-source "${ROCM_RUNTIMES_ADDRLIB_SOURCE_DIR}"
         COMMAND_ERROR_IS_FATAL ANY
     )
     include("${_runtime_binary_dir}/runtime-rust-config.cmake")
@@ -68,6 +68,12 @@ macro(runtime_rust_initialize)
         "${_runtime_cargo_config}"
         CACHE FILEPATH
         "Optional prepared Cargo configuration"
+        FORCE
+    )
+    set(ROCM_RUNTIMES_ADDRLIB_SOURCE_DIR
+        "${_runtime_addrlib_source}"
+        CACHE PATH
+        "Optional AddrLib source tree (empty selects the pinned runtime copy)"
         FORCE
     )
     file(
@@ -120,13 +126,21 @@ function(runtime_rust_library target)
             )
         endif()
     endforeach()
-    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if(NOT CMAKE_SYSTEM_NAME MATCHES "^(Linux|Windows)$")
         message(
             FATAL_ERROR
             "runtime_rust_library naming/linking is not implemented for ${CMAKE_SYSTEM_NAME}"
         )
     endif()
-    if(ARG_TYPE STREQUAL "SHARED")
+    if(ARG_TYPE STREQUAL "SHARED" AND CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        # Preserve Cargo's DLL basename: its import library records this name.
+        set(_suffix ".dll")
+        set(_filename "${ARG_LIBRARY}.dll")
+        set(_implib "${_runtime_library_dir}/${ARG_LIBRARY}.dll.lib")
+        set_property(GLOBAL APPEND PROPERTY _runtime_artifact_args
+            --artifact "${ARG_PACKAGE}" "${ARG_LIBRARY}" ".dll.lib" "${_implib}")
+        set_property(GLOBAL APPEND PROPERTY _runtime_byproducts "${_implib}")
+    elseif(ARG_TYPE STREQUAL "SHARED")
         foreach(required VERSION SOVERSION SONAME_ENV)
             if(NOT DEFINED ARG_${required})
                 message(
@@ -201,7 +215,11 @@ function(runtime_rust_library target)
     )
     add_dependencies(${target} rocm_runtime_rust)
     if(ARG_TYPE STREQUAL "SHARED")
-        set_target_properties(${target} PROPERTIES IMPORTED_SONAME "${_soname}")
+        if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+            set_target_properties(${target} PROPERTIES IMPORTED_IMPLIB "${_implib}")
+        else()
+            set_target_properties(${target} PROPERTIES IMPORTED_SONAME "${_soname}")
+        endif()
     else()
         set(_response "${_runtime_library_dir}/${target}-native-libs.rsp")
         set_property(
@@ -216,7 +234,11 @@ function(runtime_rust_library target)
         )
         set_property(GLOBAL APPEND PROPERTY _runtime_byproducts "${_response}")
         # GNU response-file contents must follow the archive, not precede it as options.
-        target_link_libraries(${target} INTERFACE "-Wl,@${_response}")
+        if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+            target_link_options(${target} INTERFACE "LINKER:@${_response}")
+        else()
+            target_link_libraries(${target} INTERFACE "-Wl,@${_response}")
+        endif()
         set_property(
             TARGET ${target}
             APPEND
@@ -247,21 +269,22 @@ function(runtime_rust_finalize)
     get_property(_byproducts GLOBAL PROPERTY _runtime_byproducts)
     get_property(_links GLOBAL PROPERTY _runtime_link_commands)
     get_property(_soname_env GLOBAL PROPERTY _runtime_soname_env)
+    # Preserve escaped semicolons until the final COMMAND list expansion.
     set(_command
         "${CMAKE_COMMAND}"
         -E
         env
-        ${_soname_env}
-        ${_runtime_cargo_command}
+        "${_soname_env}"
+        "${_runtime_cargo_command}"
     )
-    set(_runtime_cargo_command ${_command} PARENT_SCOPE)
+    set(_runtime_cargo_command "${_command}" PARENT_SCOPE)
     add_custom_target(
         rocm_runtime_rust
         ALL
         COMMAND
             "${Python3_EXECUTABLE}"
             "${_runtime_source_dir}/cmake/cargo_artifacts.py" --metadata
-            "${_runtime_binary_dir}/cargo-metadata.json" ${_artifacts}
+            "${_runtime_binary_dir}/cargo-metadata.json" --system "${CMAKE_SYSTEM_NAME}" ${_artifacts}
             ${_native_args} -- ${_command} build --workspace --frozen --profile
             "${_runtime_profile}" --message-format=json ${_links}
         BYPRODUCTS ${_byproducts}

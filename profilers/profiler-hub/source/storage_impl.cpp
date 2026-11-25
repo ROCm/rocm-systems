@@ -2,18 +2,34 @@
 // SPDX-License-Identifier: MIT
 
 #include "storage_impl.hpp"
-#include "profiler-hub/storage.hpp"
-#include "profiler-hub/version.hpp"
+#include "debug.hpp"
+#include "profiler-hub/cpp/storage.hpp"
+#include "profiler-hub/cpp/version.hpp"
 
 #include "data_storage/backends/sqlite_backend.hpp"
+#include "data_storage/backends/sqlite_backend_impl.hpp"
+#include "data_storage/schema_version.hpp"
+
+#include <fmt/format.h>
 
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace profiler_hub
 {
+
+namespace
+{
+struct metadata_row_t
+{
+    std::string tag;
+    std::string value;
+};
+}  // namespace
 
 struct storage_t::impl::database_factory_t
 {
@@ -42,10 +58,28 @@ struct storage_t::impl::database_factory_t
     }
 };
 
-storage_t::impl::impl(std::string database_path, std::string uuid)
+storage_t::impl::impl(std::string             database_path,
+                      std::string             uuid,
+                      profiler_hub::version_t schema_version)
 : m_database_path(std::move(database_path))
 , m_uuid(std::move(uuid))
-{}
+, m_library_version{ PROFILER_HUB_VERSION_MAJOR,
+                     PROFILER_HUB_VERSION_MINOR,
+                     PROFILER_HUB_VERSION_PATCH }
+{
+    // Store the schema the writer will create. version_t{} is unspecified and resolves
+    // to the newest writable schema. An embedded schema the writer cannot populate,
+    // such as 3.0.5, fails here before a database is created.
+    const auto* schema = resolve_writable_schema(schema_version);
+    if(schema == nullptr)
+    {
+        throw std::runtime_error(
+            "Unsupported rocpd schema version requested: " + schema_version.to_string() +
+            ". Writable schemas: " + supported_writable_schemas());
+    }
+    m_schema_version =
+        profiler_hub::version_t{ schema->major, schema->minor, schema->patch };
+}
 
 std::string
 storage_t::impl::get_database_path() const
@@ -62,11 +96,91 @@ storage_t::impl::get_uuid() const
 profiler_hub::version_t
 storage_t::impl::get_storage_version() const
 {
-    return m_version;
+    return m_library_version;
+}
+
+profiler_hub::version_t
+storage_t::impl::get_writer_schema_version() const
+{
+    return m_schema_version;
+}
+
+profiler_hub::version_t
+storage_t::impl::get_trace_schema_version() const
+{
+    if(m_version.has_value())
+    {
+        return m_version.value();
+    }
+
+    // rocprofiler-systems constructs storage_t{ "", "" } and reads this to
+    // learn which profiler-hub library was loaded. There is no trace schema
+    // to report, and a failed read must not look like library version 0.0.0.
+    if(m_database_path.empty())
+    {
+        m_version = profiler_hub::version_t{ .major = PROFILER_HUB_VERSION_MAJOR,
+                                             .minor = PROFILER_HUB_VERSION_MINOR,
+                                             .patch = PROFILER_HUB_VERSION_PATCH };
+        return m_version.value();
+    }
+
+    auto backend = create_database(storage_type_t::read);
+
+    const auto table = fmt::format("rocpd_metadata_{}", backend->get_uuid());
+    const auto query = fmt::format("SELECT tag, value FROM {} WHERE tag IN "
+                                   "('schema_version', 'schema_version_major', "
+                                   "'schema_version_minor', 'schema_version_patch')",
+                                   table);
+
+    profiler_hub::version_t version{ .major = 0, .minor = 0, .patch = 0 };
+    try
+    {
+        auto executor = backend->create_read_statement_executor<metadata_row_t>(
+            query, &metadata_row_t::tag, &metadata_row_t::value);
+
+        std::optional<std::string> version_text;
+        std::optional<std::string> major;
+        std::optional<std::string> minor;
+        std::optional<std::string> patch;
+        for(const auto& row : executor().to_vector())
+        {
+            if(row.tag == "schema_version")
+                version_text = row.value;
+            else if(row.tag == "schema_version_major")
+                major = row.value;
+            else if(row.tag == "schema_version_minor")
+                minor = row.value;
+            else if(row.tag == "schema_version_patch")
+                patch = row.value;
+        }
+        const auto text_view = [](const std::optional<std::string>& text) {
+            return text.has_value() ? std::optional<std::string_view>{ *text }
+                                    : std::nullopt;
+        };
+        const data_storage::schema_version_resolution_t resolved =
+            data_storage::resolve_schema_version({ text_view(version_text),
+                                                   text_view(major),
+                                                   text_view(minor),
+                                                   text_view(patch) });
+        if(resolved.status == data_storage::schema_version_status_t::resolved)
+        {
+            version = resolved.version;
+        }
+        else
+        {
+            LOG_ERROR("Failed to resolve schema version from '{}'", table);
+        }
+    } catch(const std::exception& err)
+    {
+        LOG_ERROR("Failed to read schema version from '{}': {}", table, err.what());
+    }
+
+    m_version = version;
+    return version;
 }
 
 std::shared_ptr<data_storage::sqlite_backend>
-storage_t::impl::create_database(const storage_type_t& storage_type)
+storage_t::impl::create_database(const storage_type_t& storage_type) const
 {
     if(!m_database)
     {

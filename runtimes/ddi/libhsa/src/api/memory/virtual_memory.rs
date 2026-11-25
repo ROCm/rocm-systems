@@ -6,21 +6,23 @@
 use std::collections::HashMap;
 use std::ffi::c_void;
 
-use rocddi::memory::device::{MemoryKind, VirtualAddress, VirtualMemoryPlacement};
+use rocddi::memory::device::{
+    MemoryKind, VirtualAddress, VirtualMemoryOptions, VirtualMemoryPlacement,
+};
 
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::memory::pool::*;
 use crate::memory::virtual_memory::*;
 use crate::memory::*;
-use crate::platform::fd::{AsFd, IntoRawFd};
-use crate::platform::memory as linux_interop;
-use crate::runtime::{HsaState, boundary, initialized_mut, lock, map_error};
+use crate::platform::memory as native_memory;
+use crate::status::{boundary, map_error};
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_address_reserve")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Reserves a virtual address range without backing memory.
 pub unsafe extern "C" fn hsa_amd_vmem_address_reserve(
     address: *mut *mut c_void,
@@ -28,19 +30,21 @@ pub unsafe extern "C" fn hsa_amd_vmem_address_reserve(
     requested: u64,
     flags: u64,
 ) -> Status {
-    // SAFETY: This entry point is the default-alignment form of the same ABI.
-    let page = match current_host_page() {
-        Ok(page) => page,
-        Err(status) => return status,
-    };
-    unsafe { hsa_amd_vmem_address_reserve_align(address, size, requested, page as u64, flags) }
+    boundary(|| {
+        // SAFETY: This entry point is the default-alignment form of the same ABI.
+        let page = match current_host_page() {
+            Ok(page) => page,
+            Err(status) => return status,
+        };
+        unsafe { hsa_amd_vmem_address_reserve_align(address, size, requested, page as u64, flags) }
+    })
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_address_reserve_align")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Reserves a virtual address range with explicit alignment.
 pub unsafe extern "C" fn hsa_amd_vmem_address_reserve_align(
     address: *mut *mut c_void,
@@ -72,6 +76,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_address_reserve_align(
             Err(status) => return status,
         };
         let devices = runtime
+            .agents
             .gpus
             .iter()
             .map(|gpu| &gpu.device)
@@ -96,10 +101,10 @@ pub unsafe extern "C" fn hsa_amd_vmem_address_reserve_align(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_address_free")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Releases the virtual memory address resource.
 pub extern "C" fn hsa_amd_vmem_address_free(address: *mut c_void, size: usize) -> Status {
     boundary(|| {
@@ -116,6 +121,9 @@ pub extern "C" fn hsa_amd_vmem_address_free(address: *mut c_void, size: usize) -
                 Err(status) => return status,
             };
             let key = address as usize;
+            if runtime.memory_state.copy_borrowed(key) {
+                return OUT_OF_RESOURCES;
+            }
             let Some(mut reservation) = runtime.memory_state.vmem_reservations.remove(&key) else {
                 return INVALID_ALLOCATION;
             };
@@ -157,10 +165,10 @@ pub extern "C" fn hsa_amd_vmem_address_free(address: *mut c_void, size: usize) -
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_handle_create")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Allocates backing for a virtual-memory handle.
 pub unsafe extern "C" fn hsa_amd_vmem_handle_create(
     pool: HsaMemoryPool,
@@ -191,34 +199,39 @@ pub unsafe extern "C" fn hsa_amd_vmem_handle_create(
             Err(status) => return status,
         };
         let uncached = flags & u64::from(ALLOC_UNCACHED) != 0;
-        let (device_index, kind) = if let Some((cpu_index, _)) = runtime.decode_cpu_pool(pool) {
-            (runtime.gpu_for_cpu(cpu_index), MemoryKind::System)
-        } else if let Some((index, pool_kind)) = runtime.decode_gpu_pool(pool) {
-            if pool_kind == GpuPoolKind::Group {
-                return INVALID_ALLOCATION;
-            }
-            (
-                index,
-                MemoryKind::DeviceLocal {
-                    host_visible: false,
-                    coherent: gpu_pool_coherent(pool_kind, uncached, false),
-                    extended_coherent: pool_kind == GpuPoolKind::ExtendedFine && !uncached,
-                    uncached,
-                    contiguous: false,
-                },
-            )
-        } else {
-            return INVALID_ARGUMENT;
-        };
+        let (device_index, kind) =
+            if let Some((cpu_index, _)) = runtime.agents.decode_cpu_pool(pool) {
+                (runtime.agents.gpu_for_cpu(cpu_index), MemoryKind::System)
+            } else if let Some((index, pool_kind)) = runtime.agents.decode_gpu_pool(pool) {
+                if pool_kind == GpuPoolKind::Group {
+                    return INVALID_ALLOCATION;
+                }
+                (
+                    index,
+                    MemoryKind::DeviceLocal {
+                        host_visible: false,
+                        coherent: gpu_pool_coherent(pool_kind, uncached, false),
+                        extended_coherent: pool_kind == GpuPoolKind::ExtendedFine && !uncached,
+                        uncached,
+                        contiguous: false,
+                    },
+                )
+            } else {
+                return INVALID_ARGUMENT;
+            };
         if runtime.memory_state.vmem_handles.try_reserve(1).is_err() {
             return OUT_OF_RESOURCES;
         }
-        let memory = match runtime.gpus[device_index].device.create_virtual_memory(
-            kind,
-            size as u64,
-            memory_type == MEMORY_TYPE_PINNED,
-            uncached,
-        ) {
+        let memory = match runtime.agents.gpus[device_index]
+            .device
+            .create_virtual_memory(
+                kind,
+                size as u64,
+                VirtualMemoryOptions {
+                    pinned: memory_type == MEMORY_TYPE_PINNED,
+                    uncached,
+                },
+            ) {
             Ok(memory) => memory,
             Err(error) => return map_error(error),
         };
@@ -237,10 +250,10 @@ pub unsafe extern "C" fn hsa_amd_vmem_handle_create(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_handle_release")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Releases the virtual memory handle resource.
 pub extern "C" fn hsa_amd_vmem_handle_release(memory_handle: HsaAmdVmemAllocHandle) -> Status {
     boundary(|| {
@@ -286,17 +299,17 @@ pub extern "C" fn hsa_amd_vmem_handle_release(memory_handle: HsaAmdVmemAllocHand
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_map")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Maps a virtual memory handle into a reserved address range.
 pub extern "C" fn hsa_amd_vmem_map(
     address: *mut c_void,
     size: usize,
     offset: usize,
     memory_handle: HsaAmdVmemAllocHandle,
-    flags: u64,
+    _flags: u64,
 ) -> Status {
     boundary(|| {
         let page = match current_host_page() {
@@ -308,7 +321,6 @@ pub extern "C" fn hsa_amd_vmem_map(
             || size == 0
             || size % page != 0
             || offset % page != 0
-            || flags != 0
         {
             return INVALID_ARGUMENT;
         }
@@ -328,6 +340,22 @@ pub extern "C" fn hsa_amd_vmem_map(
         let Some(reservation) = vmem_reservation_base(runtime, base, size) else {
             return INVALID_ARGUMENT;
         };
+        if runtime.memory_state.copy_borrowed(reservation) {
+            return OUT_OF_RESOURCES;
+        }
+        if runtime
+            .memory_state
+            .vmem_reservations
+            .get(&reservation)
+            .is_some_and(|record| {
+                record
+                    .svm_ranges
+                    .iter()
+                    .any(|&(start, length)| start < end && base < start + length)
+            })
+        {
+            return INVALID_ALLOCATION;
+        }
         let Some(handle) = runtime.memory_state.vmem_handles.get(&memory_handle.handle) else {
             return INVALID_ARGUMENT;
         };
@@ -398,10 +426,10 @@ pub extern "C" fn hsa_amd_vmem_map(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_unmap")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Unmaps backing memory from a virtual address range.
 pub extern "C" fn hsa_amd_vmem_unmap(address: *mut c_void, size: usize) -> Status {
     boundary(|| {
@@ -486,10 +514,10 @@ pub extern "C" fn hsa_amd_vmem_unmap(address: *mut c_void, size: usize) -> Statu
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_set_access")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Sets per-agent access permissions for virtual memory mappings.
 pub unsafe extern "C" fn hsa_amd_vmem_set_access(
     address: *mut c_void,
@@ -525,7 +553,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_set_access(
             std::slice::from_raw_parts(descriptors, descriptor_count)
         });
         for descriptor in &requested {
-            if !runtime.is_agent(descriptor.agent_handle) {
+            if !runtime.agents.is_agent(descriptor.agent_handle) {
                 return INVALID_AGENT;
             }
             if !valid_access_permissions(descriptor.permissions) {
@@ -555,10 +583,10 @@ pub unsafe extern "C" fn hsa_amd_vmem_set_access(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_get_access")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Reports an agent’s access permissions for a virtual address.
 pub unsafe extern "C" fn hsa_amd_vmem_get_access(
     address: *mut c_void,
@@ -576,7 +604,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_get_access(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        if !runtime.is_agent(agent) {
+        if !runtime.agents.is_agent(agent) {
             return INVALID_AGENT;
         }
         let Some((_, mapping)) = runtime
@@ -599,10 +627,10 @@ pub unsafe extern "C" fn hsa_amd_vmem_get_access(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_export_shareable_handle")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Exports virtual memory backing as a shareable OS handle.
 pub unsafe extern "C" fn hsa_amd_vmem_export_shareable_handle(
     descriptor: *mut i32,
@@ -629,9 +657,9 @@ pub unsafe extern "C" fn hsa_amd_vmem_export_shareable_handle(
         let Some(memory) = handle.owned_memory() else {
             return ERROR;
         };
-        let index = if let Some((cpu_index, _)) = runtime.decode_cpu_pool(handle.pool) {
-            runtime.gpu_for_cpu(cpu_index)
-        } else if let Some((index, _)) = runtime.decode_gpu_pool(handle.pool) {
+        let index = if let Some((cpu_index, _)) = runtime.agents.decode_cpu_pool(handle.pool) {
+            runtime.agents.gpu_for_cpu(cpu_index)
+        } else if let Some((index, _)) = runtime.agents.decode_gpu_pool(handle.pool) {
             index
         } else {
             return INVALID_ALLOCATION;
@@ -639,22 +667,22 @@ pub unsafe extern "C" fn hsa_amd_vmem_export_shareable_handle(
         if flags & DMABUF_MAPPING_PCIE != 0 && !gpu_pcie_dmabuf_supported(runtime, index) {
             return NOT_SUPPORTED;
         }
-        let dma_buf = match linux_interop::export_virtual_memory(memory) {
+        let dma_buf = match native_memory::export_virtual_memory(memory) {
             Ok(dma_buf) => dma_buf,
             Err(error) => return map_error(error),
         };
         // SAFETY: The caller supplied writable output storage and ownership of
         // the descriptor is transferred only after export succeeds.
-        unsafe { descriptor.write(dma_buf.into_fd().into_raw_fd()) };
+        unsafe { descriptor.write(dma_buf.into_descriptor()) };
         SUCCESS
     })
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_import_shareable_handle")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Imports virtual memory backing from a shareable OS handle.
 pub unsafe extern "C" fn hsa_amd_vmem_import_shareable_handle(
     descriptor: i32,
@@ -675,23 +703,28 @@ pub unsafe extern "C" fn hsa_amd_vmem_import_shareable_handle(
         if runtime.memory_state.vmem_handles.try_reserve(1).is_err() {
             return OUT_OF_RESOURCES;
         }
-        let descriptor = match linux_interop::duplicate_descriptor(descriptor) {
+        let descriptor = match native_memory::duplicate_descriptor(descriptor) {
             Ok(descriptor) => descriptor,
             Err(error) => return map_error(error),
         };
-        let memory =
-            match linux_interop::import_virtual_memory(&runtime.session, descriptor.as_fd()) {
-                Ok(memory) => memory,
-                Err(error) => return map_error(error),
-            };
+        let Some(session) = runtime.native_session() else {
+            return ERROR;
+        };
+        let memory = match native_memory::import_virtual_memory(session, &descriptor) {
+            Ok(memory) => memory,
+            Err(error) => return map_error(error),
+        };
         let pool = match memory.info().placement {
-            Some(VirtualMemoryPlacement::System) => HsaState::cpu_pool(0, CpuPoolKind::Fine),
+            Some(VirtualMemoryPlacement::System) => {
+                crate::agent::Agents::cpu_pool(0, CpuPoolKind::Fine)
+            }
             Some(VirtualMemoryPlacement::Device(id)) => runtime
+                .agents
                 .gpus
                 .iter()
-                .position(|gpu| gpu.info().native_gpu_id == id)
+                .position(|gpu| gpu.endpoint.id == id)
                 .map_or(HsaMemoryPool { handle: 0 }, |index| {
-                    HsaState::gpu_pool(index, GpuPoolKind::Coarse)
+                    crate::agent::Agents::gpu_pool(index, GpuPoolKind::Coarse)
                 }),
             None => HsaMemoryPool { handle: 0 },
         };
@@ -710,10 +743,10 @@ pub unsafe extern "C" fn hsa_amd_vmem_import_shareable_handle(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_retain_alloc_handle")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Retains the allocation handle backing a virtual address.
 pub unsafe extern "C" fn hsa_amd_vmem_retain_alloc_handle(
     memory_handle: *mut HsaAmdVmemAllocHandle,
@@ -731,7 +764,13 @@ pub unsafe extern "C" fn hsa_amd_vmem_retain_alloc_handle(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        let Some(mapping) = runtime.memory_state.vmem_mappings.get(&(address as usize)) else {
+        let Some((_, mapping)) = runtime
+            .memory_state
+            .vmem_mappings
+            .range(..=address as usize)
+            .next_back()
+            .filter(|(_, mapping)| mapping.contains(address as usize))
+        else {
             return INVALID_ALLOCATION;
         };
         let handle_id = mapping.handle;
@@ -749,10 +788,10 @@ pub unsafe extern "C" fn hsa_amd_vmem_retain_alloc_handle(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_get_alloc_properties_from_handle")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Writes allocation properties for a virtual memory handle.
 pub unsafe extern "C" fn hsa_amd_vmem_get_alloc_properties_from_handle(
     memory_handle: HsaAmdVmemAllocHandle,
@@ -783,10 +822,10 @@ pub unsafe extern "C" fn hsa_amd_vmem_get_alloc_properties_from_handle(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_get_vmem_info")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Writes metadata for a virtual memory reservation or mapping.
 pub unsafe extern "C" fn hsa_amd_vmem_get_vmem_info(
     memory_handle: HsaAmdVmemAllocHandle,
@@ -813,11 +852,11 @@ pub unsafe extern "C" fn hsa_amd_vmem_get_vmem_info(
         };
         let (size, agent) = match &handle.backing {
             VmemBacking::Owned(memory) => {
-                let agent = if let Some((index, _)) = runtime.decode_cpu_pool(handle.pool) {
+                let agent = if let Some((index, _)) = runtime.agents.decode_cpu_pool(handle.pool) {
                     HsaAgent {
                         handle: CPU_AGENT + index as u64,
                     }
-                } else if let Some((index, _)) = runtime.decode_gpu_pool(handle.pool) {
+                } else if let Some((index, _)) = runtime.agents.decode_gpu_pool(handle.pool) {
                     HsaAgent {
                         handle: GPU_AGENT_BASE + index as u64,
                     }
@@ -831,9 +870,10 @@ pub unsafe extern "C" fn hsa_amd_vmem_get_vmem_info(
                     Some(VirtualMemoryPlacement::System) => HsaAgent { handle: CPU_AGENT },
                     Some(VirtualMemoryPlacement::Device(id)) => {
                         let Some(index) = runtime
+                            .agents
                             .gpus
                             .iter()
-                            .position(|gpu| gpu.info().native_gpu_id == id)
+                            .position(|gpu| gpu.endpoint.id == id)
                         else {
                             return INVALID_ALLOCATION;
                         };
@@ -857,10 +897,10 @@ pub unsafe extern "C" fn hsa_amd_vmem_get_vmem_info(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_export_fabric_handle")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Exports virtual memory backing as a fabric handle.
 pub unsafe extern "C" fn hsa_amd_vmem_export_fabric_handle(
     fabric_handle: *mut HsaFabricHandle,
@@ -884,21 +924,21 @@ pub unsafe extern "C" fn hsa_amd_vmem_export_fabric_handle(
         if handle.imported() {
             return INCOMPATIBLE_ARGUMENTS;
         }
-        let Some((index, _)) = runtime.decode_gpu_pool(handle.pool) else {
+        let Some((index, _)) = runtime.agents.decode_gpu_pool(handle.pool) else {
             return INVALID_ARGUMENT;
         };
-        if !runtime.gpus[index].info().fabric_handles_supported {
+        if !runtime.agents.gpus[index].info().fabric_handles_supported {
             return NOT_SUPPORTED;
         }
         let Some(memory) = handle.owned_memory() else {
             return ERROR;
         };
-        match linux_interop::fabric_virtual_memory_ready(memory) {
+        match native_memory::fabric_virtual_memory_ready(memory) {
             Ok(true) => (),
             Ok(false) => return RESOURCE_NOT_READY,
             Err(error) => return map_error(error),
         }
-        let fabric = match linux_interop::export_fabric_virtual_memory(memory) {
+        let fabric = match native_memory::export_fabric_virtual_memory(memory) {
             Ok(fabric) => fabric,
             Err(error) if error.kind() == rocddi::ErrorKind::Busy => return RESOURCE_NOT_READY,
             Err(error) => return map_error(error),
@@ -910,10 +950,10 @@ pub unsafe extern "C" fn hsa_amd_vmem_export_fabric_handle(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_import_fabric_handle")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Imports virtual memory backing from a fabric handle.
 pub unsafe extern "C" fn hsa_amd_vmem_import_fabric_handle(
     fabric_handle: HsaFabricHandle,

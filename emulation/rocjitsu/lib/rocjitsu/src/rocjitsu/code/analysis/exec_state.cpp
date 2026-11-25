@@ -8,9 +8,9 @@
 #include "rocjitsu/isa/operand.h"
 
 #include <algorithm>
+#include <cassert>
 #include <deque>
 #include <optional>
-#include <stdexcept>
 #include <unordered_set>
 #include <vector>
 
@@ -34,15 +34,18 @@ enum class ExecWrite : uint8_t {
   // destination operand covers the generic move case (`s_mov_b64 exec, ...`),
   // which has no flag because writing EXEC is a property of the instance's
   // destination, not the opcode.
-  if (inst.flags() & WRITES_EXEC)
+  if (inst.flags() & WRITES_EXEC) {
     return true;
+  }
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const Operand *op = inst.dst_operand(i);
-    if (op == nullptr)
+    if (op == nullptr) {
       continue;
+    }
     auto ref = op->to_register_ref();
-    if (ref && ref->cls == RegClass::EXEC)
+    if (ref && ref->cls == RegClass::EXEC) {
       return true;
+    }
   }
   return false;
 }
@@ -69,12 +72,14 @@ struct ExecWriteExtent {
 };
 
 [[nodiscard]] ExecWriteExtent exec_write_extent(const Instruction &inst, uint32_t wave_size) {
-  if (inst.flags() & WRITES_EXEC)
+  if (inst.flags() & WRITES_EXEC) {
     return {full_exec_mask(wave_size), /*full=*/true, /*disjoint=*/false};
+  }
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const Operand *op = inst.dst_operand(i);
-    if (op == nullptr)
+    if (op == nullptr) {
       continue;
+    }
     if (auto ref = op->to_register_ref(); ref && ref->cls == RegClass::EXEC) {
       const int w = op->size_bits();
       const uint64_t mask = (w >= 64) ? ~0ULL : ((1ULL << w) - 1ULL);
@@ -95,8 +100,9 @@ struct ExecWriteExtent {
 
 /// @brief True when @p op is a compile-time all-ones constant across @p mask.
 [[nodiscard]] bool src_const_is_all_ones(const Operand *op, uint64_t mask) {
-  if (op == nullptr)
+  if (op == nullptr) {
     return false;
+  }
   const std::optional<uint64_t> cv = op->const_value();
   return cv && (*cv & mask) == mask;
 }
@@ -105,10 +111,12 @@ struct ExecWriteExtent {
 enum class Combinator { Other, Copy, Or };
 
 [[nodiscard]] Combinator combinator(const Instruction &inst) {
-  if (inst.flags() & RESULT_OR)
+  if (inst.flags() & RESULT_OR) {
     return Combinator::Or;
-  if (inst.flags() & RESULT_COPY)
+  }
+  if (inst.flags() & RESULT_COPY) {
     return Combinator::Copy;
+  }
   return Combinator::Other;
 }
 
@@ -126,9 +134,11 @@ enum class Combinator { Other, Copy, Or };
   case Combinator::Copy:
     return inst.num_src_operands() == 1 && src_const_is_all_ones(inst.src_operand(0), mask);
   case Combinator::Or:
-    for (int i = 0; i < inst.num_src_operands(); ++i)
-      if (src_const_is_all_ones(inst.src_operand(i), mask))
+    for (int i = 0; i < inst.num_src_operands(); ++i) {
+      if (src_const_is_all_ones(inst.src_operand(i), mask)) {
         return true;
+      }
+    }
     return false;
   case Combinator::Other:
     return false;
@@ -145,13 +155,16 @@ enum class Combinator { Other, Copy, Or };
 /// AND-style writes (incl. `s_and_saveexec exec, -1`, where `exec & -1 == exec`)
 /// and writes of any other value fall through to `Narrowing`.
 [[nodiscard]] ExecWrite classify(const Instruction &inst, uint32_t wave_size) {
-  if (!writes_execution_mask(inst))
+  if (!writes_execution_mask(inst)) {
     return ExecWrite::None;
+  }
   const ExecWriteExtent ext = exec_write_extent(inst, wave_size);
-  if (ext.disjoint)
+  if (ext.disjoint) {
     return ExecWrite::Preserve;
-  if (writes_all_ones_value(inst, ext.mask))
+  }
+  if (writes_all_ones_value(inst, ext.mask)) {
     return ext.full ? ExecWrite::AllOnes : ExecWrite::Preserve;
+  }
   return ExecWrite::Narrowing;
 }
 
@@ -211,8 +224,9 @@ enum class BlockEffect : uint8_t {
                                                                         uint32_t wave_size) {
   std::vector<BlockEffect> effects(blocks.size(), BlockEffect::Identity);
   for (size_t i = 0; i < blocks.size(); ++i) {
-    if (blocks[i] != nullptr)
+    if (blocks[i] != nullptr) {
       effects[i] = summarize_block_exec_effect(*blocks[i], wave_size);
+    }
   }
   return effects;
 }
@@ -235,8 +249,7 @@ ExecMaskAnalysis::ExecMaskAnalysis(KernelBlockScope blocks, uint8_t wave_size,
                                    std::span<const ScopedCfgEdge> extra_edges,
                                    std::span<const BasicBlock *const> entry_blocks)
     : wave_size_(wave_size) {
-  if (wave_size != 32 && wave_size != 64)
-    throw std::invalid_argument("ExecMaskAnalysis: wave_size must be 32 or 64");
+  assert((wave_size == 32 || wave_size == 64) && "ExecMaskAnalysis: wave_size must be 32 or 64");
   analyze(blocks, extra_edges, entry_blocks);
 }
 
@@ -245,8 +258,9 @@ void ExecMaskAnalysis::analyze(KernelBlockScope blocks, std::span<const ScopedCf
   states_.assign(blocks.size(), BlockExec{});
   block_index_.reserve(blocks.size());
   for (size_t i = 0; i < blocks.size(); ++i) {
-    if (blocks[i] != nullptr)
+    if (blocks[i] != nullptr) {
       block_index_.emplace(blocks[i], i);
+    }
   }
 
   // BasicBlock::successors()/predecessors() carry only context-free local CFG
@@ -258,23 +272,28 @@ void ExecMaskAnalysis::analyze(KernelBlockScope blocks, std::span<const ScopedCf
   auto add_edge = [&](const BasicBlock *from, const BasicBlock *to) {
     auto from_it = block_index_.find(from);
     auto to_it = block_index_.find(to);
-    if (from_it == block_index_.end() || to_it == block_index_.end())
+    if (from_it == block_index_.end() || to_it == block_index_.end()) {
       return;
+    }
     auto &succs = successors[from_it->second];
-    if (std::ranges::find(succs, to_it->second) != succs.end())
+    if (std::ranges::find(succs, to_it->second) != succs.end()) {
       return;
+    }
     succs.push_back(to_it->second);
     predecessors[to_it->second].push_back(from_it->second);
   };
 
   for (const BasicBlock *block : blocks) {
-    if (block == nullptr)
+    if (block == nullptr) {
       continue;
-    for (const BasicBlock *succ : block->successors())
+    }
+    for (const BasicBlock *succ : block->successors()) {
       add_edge(block, succ);
+    }
   }
-  for (const ScopedCfgEdge &edge : extra_edges)
+  for (const ScopedCfgEdge &edge : extra_edges) {
     add_edge(edge.from, edge.to);
+  }
 
   // A block is an entry when it is a caller-supplied kernel entry or has no
   // in-scope predecessor (scoped edges included). Entries are pinned to
@@ -285,8 +304,9 @@ void ExecMaskAnalysis::analyze(KernelBlockScope blocks, std::span<const ScopedCf
   // precision, never soundness.
   std::unordered_set<const BasicBlock *> entry_set(entry_blocks.begin(), entry_blocks.end());
   for (size_t i = 0; i < blocks.size(); ++i) {
-    if (blocks[i] == nullptr)
+    if (blocks[i] == nullptr) {
       continue;
+    }
     states_[i].is_entry = predecessors[i].empty() || entry_set.contains(blocks[i]);
   }
   // Fallback when no entry was supplied and none was found (e.g. a fully cyclic
@@ -308,8 +328,9 @@ void ExecMaskAnalysis::analyze(KernelBlockScope blocks, std::span<const ScopedCf
   std::deque<size_t> worklist;
   std::vector<bool> in_worklist(blocks.size(), false);
   auto enqueue = [&](size_t idx) {
-    if (idx >= in_worklist.size() || in_worklist[idx])
+    if (idx >= in_worklist.size() || in_worklist[idx]) {
       return;
+    }
     in_worklist[idx] = true;
     worklist.push_back(idx);
   };
@@ -319,11 +340,13 @@ void ExecMaskAnalysis::analyze(KernelBlockScope blocks, std::span<const ScopedCf
   // from the successors()-based RPO but still needs to be processed.
   for (const BasicBlock *block : rpo) {
     auto it = block_index_.find(block);
-    if (it != block_index_.end())
+    if (it != block_index_.end()) {
       enqueue(it->second);
+    }
   }
-  for (size_t idx = 0; idx < blocks.size(); ++idx)
+  for (size_t idx = 0; idx < blocks.size(); ++idx) {
     enqueue(idx);
+  }
 
   while (!worklist.empty()) {
     const size_t idx = worklist.front();
@@ -331,8 +354,9 @@ void ExecMaskAnalysis::analyze(KernelBlockScope blocks, std::span<const ScopedCf
     in_worklist[idx] = false;
 
     BasicBlock *block = blocks[idx];
-    if (block == nullptr)
+    if (block == nullptr) {
       continue;
+    }
 
     ExecState in;
     if (states_[idx].is_entry) {
@@ -350,8 +374,9 @@ void ExecMaskAnalysis::analyze(KernelBlockScope blocks, std::span<const ScopedCf
     if (in != states_[idx].in || out != states_[idx].out) {
       states_[idx].in = in;
       states_[idx].out = out;
-      for (size_t succ_idx : successors[idx])
+      for (size_t succ_idx : successors[idx]) {
         enqueue(succ_idx);
+      }
     }
   }
 
@@ -360,18 +385,21 @@ void ExecMaskAnalysis::analyze(KernelBlockScope blocks, std::span<const ScopedCf
   // rehash.
   size_t total_instructions = 0;
   for (const BasicBlock *block : blocks) {
-    if (block != nullptr)
+    if (block != nullptr) {
       total_instructions += block->num_instructions();
+    }
   }
   full_before_.reserve(total_instructions);
   for (size_t i = 0; i < blocks.size(); ++i) {
     BasicBlock *block = blocks[i];
-    if (block == nullptr)
+    if (block == nullptr) {
       continue;
+    }
     ExecState state = states_[i].in;
     for (const auto &inst : block->instructions()) {
-      if (state == ExecState::Full)
+      if (state == ExecState::Full) {
         full_before_.insert(&inst);
+      }
       state = transfer(state, inst, wave_size_);
     }
   }

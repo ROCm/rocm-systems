@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "core/common_types.hpp"
 #include "core/demangler.hpp"
 #include "function_signature.hpp"
@@ -88,39 +89,6 @@ private:
 //
 //======================================================================================//
 //
-struct rocprofsys_snippet_vec
-{
-    using entry_type = std::vector<rocprofsys_call_expr>;
-    using value_type = std::vector<call_expr_pointer_t>;
-
-    template <typename... Args>
-    void generate(procedure_t* func, Args&&... args)
-    {
-        auto       _expr = rocprofsys_call_expr(std::forward<Args>(args)...);
-        auto const _call = _expr.get(func);
-        if(_call)
-        {
-            m_entries.push_back(_expr);
-            m_data.push_back(_call);
-            // m_data.push_back(entry_type{ _call, _expr });
-        }
-    }
-
-    void append(snippet_vec_t& _obj)
-    {
-        for(auto const& itr : m_data)
-        {
-            _obj.push_back(itr.get());
-        }
-    }
-
-private:
-    entry_type m_entries;
-    value_type m_data;
-};
-//
-//======================================================================================//
-//
 static inline bool
 rocprofsys_get_is_executable(const std::string& _cmd, bool _default_v)
 {
@@ -186,10 +154,10 @@ rocprofsys_get_address_space(patch_pointer_t const& _bpatch, int _cmdc, char** _
         auto       _imported     = std::vector<strpair_t>{};
         auto       _exported     = std::vector<strpair_t>{};
         auto const _get_env_pair = [](const std::string& _full) {
-            auto const _pos = _full.find('=');
-            if(_pos < _full.length())
+            if(auto const parsed = rocprofsys::utility::string::split_key_value(_full))
             {
-                return std::make_pair(_full.substr(0, _pos), _full.substr(_pos + 1));
+                return std::make_pair(std::string{ parsed->key },
+                                      std::string{ parsed->value });
             }
             return strpair_t{};
         };
@@ -257,10 +225,6 @@ rocprofsys_get_address_space(patch_pointer_t const& _bpatch, int _cmdc, char** _
 //
 std::string&
 rocprofsys_get_exe_realpath();
-//
-std::optional<std::string>
-rocprofsys_get_origin(const char*        _name,
-                      std::vector<int>&& _open_modes = { (RTLD_LAZY | RTLD_NOLOAD) });
 //
 std::vector<std::string>
 rocprofsys_get_link_map(const char* _lib, const std::string& _exclude_linked_by = {},

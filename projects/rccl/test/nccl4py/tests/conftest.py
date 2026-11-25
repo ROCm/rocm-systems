@@ -77,12 +77,15 @@ DIST_DIR = os.path.join(RCCL_BUILD, "dist")
 LOGDIR = os.path.join(WORKDIR, "logs")
 os.makedirs(LOGDIR, exist_ok=True)
 
-# CPU smoke module: accepts NotImplementedError or NCCLError depending on
-# which RCCL symbols are present in the loaded librccl.so.
-CPU_SMOKE_TESTS = ("tests/test_rocm_extensions.py",)
+# CPU smoke modules. test_rocm_extensions.py accepts NotImplementedError or
+# NCCLError depending on which RCCL symbols are present in the loaded librccl.so.
+CPU_SMOKE_TESTS = (
+    "tests/test_rocm_extensions.py",
+    "tests/test_comm_properties_facade.py",
+)
 
-# Optional GPU-backed shim surface; the module self-skips without HIP devices.
-GPU_SMOKE_TESTS = ("tests/test_shim_surface.py",)
+# Optional GPU-backed modules; each self-skips without enough HIP devices.
+GPU_SMOKE_TESTS = ("tests/test_shim_surface.py", "tests/test_group_window.py")
 
 
 def _librccl_candidates():

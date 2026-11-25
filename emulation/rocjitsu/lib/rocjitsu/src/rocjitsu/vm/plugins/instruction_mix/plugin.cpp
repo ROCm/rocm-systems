@@ -97,12 +97,14 @@ std::string_view InstructionMixPlugin::family_name(InstructionFamily family) {
 void InstructionMixPlugin::merge(MnemonicMap &destination, const MnemonicMap &source) {
   for (const auto &[mnemonic, entry] : source) {
     auto [iter, inserted] = destination.try_emplace(mnemonic, entry);
-    if (inserted)
+    if (inserted) {
       continue;
+    }
     MnemonicStats &existing = iter->second;
     const uint64_t executions = existing.executions + entry.executions;
-    if (sighting_precedes(entry, existing))
+    if (sighting_precedes(entry, existing)) {
       existing = entry;
+    }
     existing.executions = executions;
   }
 }
@@ -154,10 +156,19 @@ void InstructionMixPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
   merge(dispatches_[wf.dispatch_id()].counts, state->counts);
 }
 
+void InstructionMixPlugin::onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) {
+  // Keep attempted instructions in the incomplete summary, without emitting
+  // a completed dispatch record.
+  if (wf.has_plugin_state(slot_index())) {
+    onAmdgpuWavefrontHalted(wf);
+  }
+}
+
 void InstructionMixPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
   auto iter = dispatches_.find(dispatch_id);
-  if (iter == dispatches_.end())
+  if (iter == dispatches_.end()) {
     return;
+  }
 
   DispatchState &state = iter->second;
   state.info.dispatch_id = dispatch_id;
@@ -168,8 +179,9 @@ void InstructionMixPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
 }
 
 void InstructionMixPlugin::onShutdown() {
-  if (summary_emitted_)
+  if (summary_emitted_) {
     return;
+  }
   summary_emitted_ = true;
 
   // Anything still in flight was executed, and the report's whole contract is
@@ -178,13 +190,14 @@ void InstructionMixPlugin::onShutdown() {
   // in flight routinely. These dispatches get no per-dispatch record: their
   // totals are not final, and only the union is trustworthy.
   //
-  // Waves that never reached wavefront-halt are still missed: their counts
+  // Waves that reached neither halt nor cancellation are still missed: their counts
   // live in wavefront-local plugin state and the plugin has no way to
   // enumerate live wavefronts. `incomplete_dispatches` is what tells a reader
   // the summary may be a subset; a run that ends cleanly reports zero.
   incomplete_dispatches_ = dispatches_.size();
-  for (const auto &[dispatch_id, state] : dispatches_)
+  for (const auto &[dispatch_id, state] : dispatches_) {
     merge(aggregate_, state.counts);
+  }
 
   emit_record("summary", nullptr, aggregate_);
 }
@@ -195,8 +208,9 @@ void InstructionMixPlugin::emit_record(std::string_view record, const KernelDisp
   // ordering and the JSONL diffs cleanly.
   std::vector<const MnemonicMap::value_type *> sorted;
   sorted.reserve(counts.size());
-  for (const auto &item : counts)
+  for (const auto &item : counts) {
     sorted.push_back(&item);
+  }
   std::sort(sorted.begin(), sorted.end(),
             [](const auto *lhs, const auto *rhs) { return lhs->first < rhs->first; });
 
@@ -229,8 +243,9 @@ void InstructionMixPlugin::emit_record(std::string_view record, const KernelDisp
   output += std::format(",\"wave_instructions\":{},\"unique_mnemonics\":{},\"families\":{{",
                         executions, sorted.size());
   for (size_t i = 0; i < kInstructionFamilyCount; ++i) {
-    if (i != 0)
+    if (i != 0) {
       output += ',';
+    }
     output += std::format("\"{}\":{{\"mnemonics\":{},\"executions\":{}}}",
                           family_name(static_cast<InstructionFamily>(i)), family_mnemonics[i],
                           family_executions[i]);
@@ -238,8 +253,9 @@ void InstructionMixPlugin::emit_record(std::string_view record, const KernelDisp
   output += "},\"mnemonics\":{";
   bool first = true;
   for (const auto *item : sorted) {
-    if (!first)
+    if (!first) {
       output += ',';
+    }
     first = false;
     const MnemonicStats &entry = item->second;
     output +=

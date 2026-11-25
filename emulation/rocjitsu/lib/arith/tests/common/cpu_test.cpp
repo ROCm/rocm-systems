@@ -4,9 +4,10 @@
 // CPU feature/OS gating, reserved flag bits, shared enumerations, and readable names.
 
 #include "common/cpu.h"
-#include "common/internal.h"
+#include "common/cpu_decode.h"
 #include "common/semantics.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <gtest/gtest.h>
 #include <stdint.h>
@@ -25,13 +26,13 @@ TEST(Cpu, LevelAndReservedFeatures) {
   EXPECT_EQ(RJ_ARITH_CPU_FEATURES_MASK, 0xfff0ULL);
   for (uint64_t level : {RJ_ARITH_CPU_BASELINE, RJ_ARITH_CPU_X86_64_V3, RJ_ARITH_CPU_X86_64_V4,
                          RJ_ARITH_CPU_X86_64_ZEN4}) {
-    EXPECT_EQ(rocjitsu::arith::validate(level), RJ_ARITH_SUCCESS);
+    EXPECT_EQ(rocjitsu::arith::validate(level, 0), RJ_ARITH_SUCCESS);
     for (int bit = 4; bit < 16; ++bit) {
-      EXPECT_EQ(rocjitsu::arith::validate(level | (1ULL << bit)), RJ_ARITH_ERROR_INVALID_FLAGS);
+      EXPECT_EQ(rocjitsu::arith::validate(level | (1ULL << bit), 0), RJ_ARITH_ERROR_INVALID_FLAGS);
     }
   }
   for (uint64_t level = RJ_ARITH_CPU_X86_64_ZEN4 + 1; level <= RJ_ARITH_CPU_MASK; ++level) {
-    EXPECT_EQ(rocjitsu::arith::validate(level), RJ_ARITH_ERROR_INVALID_FLAGS);
+    EXPECT_EQ(rocjitsu::arith::validate(level, 0), RJ_ARITH_ERROR_INVALID_FLAGS);
   }
 }
 
@@ -51,6 +52,35 @@ TEST(Cpu, FeatureAndOsGating) {
   EXPECT_EQ(rocjitsu::arith::decode_cpu(s), RJ_ARITH_CPU_X86_64_V3);
   s.leaf1_ecx &= ~(1u << 27);
   EXPECT_EQ(rocjitsu::arith::decode_cpu(s), RJ_ARITH_CPU_BASELINE);
+}
+
+TEST(Cpu, BackendLimitHonorsDetectedLevelAndRequestedCap) {
+  constexpr uint64_t compiled_levels[] = {
+      RJ_ARITH_CPU_BASELINE,
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+      RJ_ARITH_CPU_X86_64_V3,
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+      RJ_ARITH_CPU_X86_64_V4,
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16) || defined(RJ_ARITH_HAVE_AVX512VNNI)
+      RJ_ARITH_CPU_X86_64_ZEN4,
+#endif
+  };
+  for (uint64_t detected = RJ_ARITH_CPU_BASELINE; detected <= RJ_ARITH_CPU_X86_64_ZEN4;
+       ++detected) {
+    for (uint64_t cap = RJ_ARITH_CPU_BASELINE; cap <= RJ_ARITH_CPU_X86_64_ZEN4; ++cap) {
+      SCOPED_TRACE(detected);
+      SCOPED_TRACE(cap);
+      uint64_t expected = RJ_ARITH_CPU_BASELINE;
+      for (uint64_t compiled : compiled_levels) {
+        if (compiled <= detected && compiled <= cap) {
+          expected = compiled;
+        }
+      }
+      EXPECT_EQ(rj_arith_limit_cpu_flags(detected, cap), expected);
+    }
+  }
 }
 
 // Remove each required feature in turn and verify that the detected CPU level falls.
@@ -80,6 +110,10 @@ TEST(Cpu, SharedEnumerationHelpers) {
     EXPECT_TRUE(
         rocjitsu::arith::test::cpu_level_supported(level, detected | RJ_ARITH_CPU_FEATURES_MASK));
   }
+  const auto semantics = rocjitsu::arith::test::semantics_modes();
+  ASSERT_EQ(semantics.size(), 5U);
+  EXPECT_EQ(semantics.front(), RJ_ARITH_SEMANTICS_LOOSE);
+  EXPECT_EQ(semantics.back(), RJ_ARITH_SEMANTICS_COMPATIBILITY);
 }
 
 // Check readable names for supported and invalid CPU levels.

@@ -3,13 +3,14 @@
 
 #pragma once
 
-#include "profiler-hub/storage.hpp"
+#include "profiler-hub/cpp/storage.hpp"
 
-#include "profiler-hub/version.hpp"
+#include "profiler-hub/cpp/version.hpp"
 
 #include "data_storage/backends/sqlite_backend.hpp"
 
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace profiler_hub
@@ -24,26 +25,35 @@ struct storage_t::impl
         write = 2
     };
 
-    explicit impl(std::string database_path, std::string uuid);
+    explicit impl(std::string             database_path,
+                  std::string             uuid,
+                  profiler_hub::version_t schema_version);
 
     [[nodiscard]] std::string get_database_path() const;
     [[nodiscard]] std::string get_uuid() const;
 
     [[nodiscard]] profiler_hub::version_t get_storage_version() const;
+    [[nodiscard]] profiler_hub::version_t get_writer_schema_version() const;
+
+    // Schema version stamped into the trace's rocpd_metadata table. Read on first
+    // call, then cached (immutable for a trace's lifetime). An empty database path
+    // has no trace, so the version compiled into the loaded library is returned.
+    [[nodiscard]] profiler_hub::version_t get_trace_schema_version() const;
 
     std::shared_ptr<data_storage::sqlite_backend> create_database(
-        const storage_type_t& storage_type);
+        const storage_type_t& storage_type) const;
 
 private:
-    profiler_hub::version_t m_version{ PROFILER_HUB_VERSION_MAJOR,
-                                       PROFILER_HUB_VERSION_MINOR,
-                                       PROFILER_HUB_VERSION_PATCH };
+    profiler_hub::version_t m_schema_version{};  // The schema the writer will create.
 
-    storage_type_t                                m_storage_type{ storage_type_t::none };
-    std::shared_ptr<data_storage::sqlite_backend> m_database{ nullptr };
+    mutable std::optional<profiler_hub::version_t> m_version;  // Trace schema, read once.
+    mutable storage_type_t                         m_storage_type{ storage_type_t::none };
+    mutable std::shared_ptr<data_storage::sqlite_backend> m_database{ nullptr };
 
     std::string m_database_path;
     std::string m_uuid;
+
+    profiler_hub::version_t m_library_version{};
 
     struct database_factory_t;
 };

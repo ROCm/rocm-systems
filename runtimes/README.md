@@ -20,13 +20,11 @@ part of the repository's default build or installation yet.
   implementation-neutral AMD GPU device-interface layer.
 - [`ddi/libamdf`](ddi/libamdf/README.md) implements the AMDF C table ABI and
   builds a static library. Its shared ABI is an alias of the shared image.
-- [`loader/rocelf`](loader/rocelf/README.md) provides a standalone Rust library for
-  checked ELF64 parsing and AMDGPU load-image construction. It depends on
-  neither rocddi nor the HSA frontend.
-- [`image/rocaddr3`](image/rocaddr3/README.md) wraps AddrLib3 to compute GFX12
-  surface layouts and map image rows without owning device memory.
+- [`image/rocaddr3`](image/rocaddr3/README.md) wraps AddrLib2 and AddrLib3 for
+  GFX9–GFX12 surface layouts and GFX12 row mapping without owning device memory.
 - [`loader/rocloader`](loader/rocloader/README.md) interprets AMD HSA code
-  objects, creates rocddi-backed GPU images, and owns executable state.
+  objects, contains checked ELF byte operations, creates rocddi-backed loaded
+  images, and owns executable state.
 - [`ddi/libhsa`](ddi/libhsa/README.md) implements the HSA C ABI and builds a
   shared ABI in the same image. It consumes rocddi and rocloader directly,
   not through AMDF.
@@ -36,6 +34,8 @@ shared-image linker package, lockfile, toolchain, Rust profiles,
 and common CMake integration. Grouping directories do not introduce additional
 Cargo workspaces or CMake projects.
 Rocddi remains an internal `rlib`; it has no standalone native ABI.
+The [architecture guide](docs/architecture.md) describes ownership, dependency
+direction, and the distinction between surface images and executable storage.
 
 ## Shared image
 
@@ -44,8 +44,11 @@ third frontend. Its small `src/lib.rs` makes Cargo link the AMDF and HSA `rlib`s
 into one `cdylib`. The ABIs retain separate rocddi sessions and public handles;
 the shared image contains one copy of rocddi's process-local KFD backend state.
 The root `build.rs` retains both entry point sets, applies HSA symbol versions
-and SONAME, and marks the image `NODELETE` while native KFD and DRM owners may
-remain live. `cmake/SharedImage.cmake` owns the corresponding CMake targets.
+and SONAME on Linux, and marks that image `NODELETE` while native KFD and DRM
+owners may remain live. Windows staging conventions use `rocddi_runtime.dll`
+and its MSVC import library; DLL export and link integration remain deferred.
+Resident module owners retain native code independently.
+`cmake/SharedImage.cmake` owns the corresponding CMake targets.
 
 The CMake build below stages one physical `libhsa-runtime64.so.1` with
 `libhsa-runtime64.so`, `libhsa_runtime64.so`, `libamdf.so.0`, and
@@ -93,11 +96,12 @@ The library helper takes keyword arguments for the Cargo package/target, native
 output name, type, and ABI version. Component `project(... VERSION ...)` calls and the shared-image module
 own native versions; the helper handles filenames, symlinks, SONAME settings,
 and per-static-library link requirements. Platform-specific conventions live
-in the helper, with explicit errors for Windows/Darwin until implemented.
-The configure helper recognizes native Linux x86-64, AArch64, PPC64/PPC64LE,
-and RISC-V64 toolchains. This is not runtime backend support: rocddi currently
-supports only Linux x86-64/AArch64 and rejects other architectures at compile
-time in `ddi/rocddi/src/driver.rs`. Only x86-64 has been validated locally.
+in the helper, with Linux and Windows MSVC implementations. Darwin remains
+unsupported. The configure helper recognizes native Linux x86-64, AArch64,
+PPC64/PPC64LE and RISC-V64, plus Windows x86-64 MSVC toolchains.
+Driver support is separate: Linux KFD/DRM is the only production GPU provider.
+Windows host services and shared contracts compile for x86-64 MSVC, but native
+Windows SDK/C++ linkage and execution remain outstanding.
 Python's standard-library TOML parser requires Python 3.11 or newer.
 `runtime-rust-config.cmake` in the build directory records the generated Cargo
 command and environment for inspection.
@@ -123,10 +127,35 @@ be prepared before configuration; missing inputs fail rather than fetch.
   the CMake cache and generated commands so builds and regeneration do not
   depend on the caller's working directory.
 - `ROCM_RUNTIMES_CARGO_JOBS`: optional positive parallel-job limit.
+- `ROCM_RUNTIMES_ADDRLIB_SOURCE_DIR`: optional explicit AddrLib source tree.
+  Empty selects the pinned runtime copy. Source sharing needs no changes to
+  the selected tree or the ROCr build; see the [source selection contract](image/rocaddr3/README.md#source-selection).
 
 Native C libraries should be discovered by CMake and explicitly supplied to
 Rust consumers when needed. No native package-discovery abstraction is added
 before there is a concrete dependency requiring it.
+
+## OS and driver support
+
+Host OS selection and GPU provider selection are independent. The shared DDI
+owns resource lifetimes, checked geometry, optional capability requests and
+native status domains; private native owners implement OS or driver contracts.
+Windows host services include CPU-group/NUMA/cache discovery, physical-memory
+capacity, allocation and remappable section backing, placeholder reservations,
+positioned file I/O, process identity, host clocks and resident module loading.
+Placeholder APIs require Windows 10 version 1803 or later.
+
+No Windows GPU provider is installed. GPU services report unavailable;
+Windows HSA initialization still requires a qualified AQL GPU and is therefore
+unavailable. Windows tool dispatch, loaded-module enumeration and borrowed CRT
+`FILE*` logging are outside the implemented support profile. The tested target
+is Linux x86-64 with the pinned Rust toolchain. Windows cross-compilation and
+portable fault-injection tests do not establish native Windows execution.
+
+Run the independent AMDF and HSA C/Rust ABI probes after a release build;
+their native compiler adapter supports Linux compilers and MSVC/clang-cl.
+On Windows, run from a provisioned MSVC environment with the matching native
+Rust toolchain, Windows SDK and AddrLib C++ build inputs.
 
 ## Direct Rust development
 

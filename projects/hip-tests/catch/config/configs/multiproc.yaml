@@ -4,7 +4,11 @@ multiproc:
   Unit_deviceAllocation_Malloc_MultProcess: *level_default
   Unit_deviceAllocation_New_MultProcess: *level_default
   Unit_deviceAllocation_MallocFree_MultProcess: *level_default
-  Unit_deviceAllocation_NewDelete_MultProcess: *level_default
+  Unit_deviceAllocation_NewDelete_MultProcess:
+    <<: *level_default
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - failure on device side. Needs to be triaged"
   Unit_hipDeviceGet_MaskedDevices: *level_default
   Unit_hipDeviceGetPCIBusId_MaskedDevices: *level_default
   Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci:

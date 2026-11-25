@@ -1,10 +1,23 @@
 # Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+# BVH result registers expose intermediate rounding directly.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(
+        ../graphics/bvh_intersection.cpp
+        PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-frounding-math"
+    )
+endif()
+
 rj_add_object_library(rocjitsu_vm_amdgpu
+    arithmetic_policy.cpp
     aql/aql_packet_processor.cpp
     compute_queue_binding_factory.cpp
     circular_ring_reader.cpp
+    ../graphics/bvh_intersection.cpp
+    ../graphics/image_completion.cpp
+    ../graphics/image_memory.cpp
+    ../graphics/image_msaa.cpp
     buffer_format.cpp
     cluster_lds_multicast.cpp
     command_processor.cpp
@@ -16,8 +29,11 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     gpu_memory_access.cpp
     gpu_queue_registry.cpp
     gpu_vm.cpp
+    legacy_address_space.cpp
     gws_device.cpp
     hwreg.cpp
+    image_addressing.cpp
+    instruction_timing.cpp
     iod.cpp
     l1_scalar_cache.cpp
     l1_vector_cache.cpp
@@ -27,6 +43,7 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     memory_side_cache.cpp
     mes_engine.cpp
     memory_wait_scoreboard.cpp
+    pm4/pm4_data_transfer.cpp
     pm4/pm4_packet_processor.cpp
     sdma_packet_processor.cpp
     sdma_queue_binding_factory.cpp
@@ -34,8 +51,11 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     sdma_ring_consumer.cpp
     shader_engine.cpp
     wavefront.cpp
+    wavefront_slot.cpp
     xcd.cpp
 )
+
+target_link_libraries(rocjitsu_vm_amdgpu PUBLIC rj_arith)
 
 # Share ISA wait decoding with the offline checker, without its dataflow state.
 # Final VM consumers need the objects; transitive object-library linking alone
@@ -45,6 +65,12 @@ target_link_libraries(
     INTERFACE
         $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
         $<TARGET_OBJECTS:rocjitsu_waitcheck_target>
+)
+# Linking the objects by path adds no build dependency, so build them first.
+add_dependencies(
+    rocjitsu_vm_amdgpu
+    rocjitsu_wait_counter_policy
+    rocjitsu_waitcheck_target
 )
 
 add_subdirectory(pci)

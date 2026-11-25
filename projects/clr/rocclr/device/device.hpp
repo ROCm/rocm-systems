@@ -127,20 +127,33 @@ enum HandleExportResult : uint32_t {
   kError,         ///< Export failed.
 };
 
-//! Maps hipFuncCache_t to group memory carveout percentage.
-//! PreferL1 maps to 1% (not 0%) because 0 means "no preference" in the
-//! AQL packet's group_mem_carveout field; 1% is the minimum value that
-//! signals a preference for cache over LDS.
-inline constexpr std::array<uint8_t, 4> kFuncCacheToGroupMemCarveoutPercent = {0, 100, 1, 50};
+//! Maps hipFuncCache_t to group memory carveout percentage; -1 means no preference.
+inline constexpr std::array<int8_t, 4> kFuncCacheToGroupMemCarveoutPercent = {-1, 100, 0, 50};
 static_assert(kFuncCacheToGroupMemCarveoutPercent.size() == 4,
               "Must cover all hipFuncCache_t values");
 
-//! Convert hipFuncCache_t to carveout percentage, returning 0 for out-of-range values.
-inline uint8_t funcCacheToCarveoutPercent(uint32_t cacheConfig) {
+//! Convert hipFuncCache_t to carveout percentage, returning -1 for out-of-range values.
+inline int8_t funcCacheToCarveoutPercent(uint32_t cacheConfig) {
   return cacheConfig < kFuncCacheToGroupMemCarveoutPercent.size()
-      ? kFuncCacheToGroupMemCarveoutPercent[cacheConfig]
-      : 0;
+             ? kFuncCacheToGroupMemCarveoutPercent[cacheConfig]
+             : -1;
 }
+
+//! Convert carveout percentage back to hipFuncCache_t, returning 0 (no preference) if unmapped.
+constexpr uint32_t carveoutPercentToFuncCache(int8_t percent) {
+  for (uint32_t i = 0; i < kFuncCacheToGroupMemCarveoutPercent.size(); ++i) {
+    if (kFuncCacheToGroupMemCarveoutPercent[i] == percent) return i;
+  }
+  return 0;
+}
+
+//! AQL group_mem_carveout encoding: 0 = no preference, [1, 127] = 0%..100% group memory.
+constexpr uint8_t encodeGroupMemCarveout(int percent) {
+  return percent < 0 ? 0 : static_cast<uint8_t>((percent + 1) * 126 / 100);
+}
+static_assert(encodeGroupMemCarveout(-1) == 0 && encodeGroupMemCarveout(0) == 1 &&
+                  encodeGroupMemCarveout(50) == 64 && encodeGroupMemCarveout(100) == 127,
+              "Unexpected group_mem_carveout encoding");
 
 constexpr int CpuDeviceId = static_cast<int>(-1);
 constexpr int InvalidDeviceId = static_cast<int>(-2);
@@ -313,6 +326,10 @@ struct Info : public amd::EmbeddedObject {
   //! Maximum grid dimensions (from HSA_AGENT_INFO_GRID_MAX_DIM). Work-items per dimension.
   uint32_t maxGridDim_[3];
 
+  //! Maximum number of work-groups per dimension a kernel can address, limited by the
+  //  width of the HW workgroup ID. 0 means no limit beyond the grid size checks.
+  uint32_t maxWorkGroupCount_[3];
+
   //! Preferred number of work-items in a work-group executing a kernel
   //  using the data-parallel execution model.
   size_t preferredWorkGroupSize_;
@@ -357,6 +374,12 @@ struct Info : public amd::EmbeddedObject {
 
   //! Size of L2 Cache in bytes.
   uint32_t l2CacheSize_;
+
+  //! Size of L3 Cache (MALL) in bytes, 0 if the device has none.
+  uint32_t l3CacheSize_;
+
+  //! Maximum persisting L2 cache size in bytes.
+  size_t persistingL2CacheMaxSize_;
 
   //! Timestamp frequency in Hz.
   uint32_t timeStampFrequency_;
@@ -749,10 +772,11 @@ class Settings {
       uint kernel_arg_opt_ : 1;               //!< Enables kernel arg optimization for blit kernels
       uint kernel_arg_impl_ : 2;              //!< Kernel argument implementation
       uint sdma_swap_supported_ : 1;         //!< SDMA linear swap copy (gfx94x/gfx95x)
+      uint sdma_asymmetric_swap_supported_ : 1; //!< SDMA native asymmetric swap
       uint groupMemCarveout_ : 1;             //!< Group memory carveout functionality
       uint sdma_indirect_supported_ : 1;     //!< SDMA linear indirect copy (gfx1250+)
       uint aql_device_ring_buf_ : 1;          //!< Place the AQL queue ring buffer in device memory
-      uint reserved_ : 8;
+      uint reserved_ : 7;
     };
     uint value_;
   };
@@ -1413,6 +1437,13 @@ class VirtualDevice : public amd::ReferenceCountedObject {
     return false;
   }
 
+  //! Puts on the queue a wait for a command of another queue, without a command of its own: no
+  //! completion signal, no batch. The anchor holds the waited command until it completes, so
+  //! its anchor's completion must follow the wait. False if the queue can't
+  virtual bool dispatchGraphForkWait(amd::Command* wait_cmd, amd::AccumulateCommand* anchor) {
+    return false;
+  }
+
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
 
@@ -1546,10 +1577,14 @@ class MemObjMap : public AllStatic {
   static std::shared_mutex AllocatedLock_;
 
  private:
-  // Helper struct for memory object lookup results
+  //!< Helper struct for memory object lookup results.
   struct LookupResult {
     amd::Memory* memory;
     size_t offset;
+    size_t size;        //!< size == 0 for Windows overlapping VA range or a miss, and is
+                        //!< not cacheable. Otherwise (global map hit) the length from the entry's
+                        //!< start over which a fresh lookup returns this same entry: its size, cut
+                        //!< at the next key so overlapping entries cannot be served from the cache
   };
 
   //!< Core lookup helper used by all FindMemObj* functions. Caller must hold AllocatedLock_.
@@ -1876,7 +1911,8 @@ class Device : public RuntimeObject {
   cl_device_type type() const { return info().type_ & ~(CL_DEVICE_TYPE_DEFAULT); }
 
   //! Create a new virtual device environment.
-  virtual device::VirtualDevice* createVirtualDevice(CommandQueue* queue = NULL) = 0;
+  virtual device::VirtualDevice* createVirtualDevice(CommandQueue* queue = NULL,
+                                                     bool cooperative = false) = 0;
 
   //! Create a program for device.
   virtual device::Program* createProgram(amd::Program& owner, option::Options* options = NULL) = 0;
@@ -2203,6 +2239,25 @@ class Device : public RuntimeObject {
   }
 
   /**
+   * Write host data into a device global, blocking until the write has finished
+   * and without enqueuing on any queue an application feeds.
+   *
+   * Fills externally-initialized globals whose value is only known once the executable is
+   * on the device, such as the pointer a __managed__ variable is dereferenced through.
+   * Callers run on the kernel launch path  where a copy on the null stream would be
+   * host-blocking and would wait for work the application queued earlier, deadlocking
+   * whenever that work is gated on something the host only does after the launch returns.
+   *
+   * @param dst Memory object wrapping the global, as returned by createGlobalVarObj
+   * @param offset Byte offset within the global
+   * @param size Number of bytes to write
+   * @param src Host source buffer
+   * @return False if the write failed.
+   */
+  [[nodiscard]] virtual bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                               const void* src) const = 0;
+
+  /**
    * Recovers the location and size of a VMM allocation.
    *
    * @param amd_mem_obj physical memory object of the allocation
@@ -2240,6 +2295,15 @@ class Device : public RuntimeObject {
   //! Sets the current scratch limit of the device. Valid only on rocm device.
   virtual bool UpdateScratchLimitCurrent(size_t limit) const { return true; }
 
+  //! Returns current persisting L2 cache size of the device. Valid only on rocm device.
+  virtual size_t PersistingL2CacheSizeCurrent() const { return 0; }
+
+  //! Returns maximum persisting L2 cache size of the device. Valid only on rocm device.
+  virtual size_t PersistingL2CacheSizeMax() const { return 0; }
+
+  //! Sets the current persisting L2 cache size of the device. Valid only on rocm device.
+  virtual bool UpdatePersistingL2CacheSizeCurrent(size_t size) const { return true; }
+
   //! Validate kernel
   virtual bool validateKernel(const amd::Kernel& kernel, const device::VirtualDevice* vdev,
                               bool coop_groups = false) {
@@ -2260,6 +2324,9 @@ class Device : public RuntimeObject {
 
   virtual void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const {};
 
+  //! Commands a direct-dispatch queue batches before a marker completes them
+  virtual size_t SubmissionBatchLimit() const { return DEBUG_CLR_MAX_BATCH_SIZE; }
+
   virtual uint32_t getPreferredNumaNode() const {
     return static_cast<uint32_t>(-1); //!< PAL doesn't support it
   }
@@ -2278,6 +2345,19 @@ class Device : public RuntimeObject {
   }
   virtual void DestroyHwEvent(void* hw_event) const {}
 
+  //! Takes count armed HW events for a pooled graph set
+  virtual bool AcquireHwEvents(int count, std::vector<void*>& hw_events) const {
+    return CreateHwEvents(count, /*batched=*/true, hw_events);
+  }
+  //! Gives back armed HW events from AcquireHwEvents
+  virtual void ReturnHwEvents(std::vector<void*>& hw_events) const {
+    QuiesceHwEvents(hw_events);
+    for (void* hw_event : hw_events) {
+      DestroyHwEvent(hw_event);
+    }
+    hw_events.clear();
+  }
+
   //! Re-arm already-allocated HW event signals so they can be reused by a new
   //! graph launch (resets the signal value and cached timing). Used by the
   //! graph signal pool to avoid create/destroy on every launch.
@@ -2295,10 +2375,13 @@ class Device : public RuntimeObject {
   struct HwEventPatch {
     static constexpr int kCompletionSignal = -1;
     static constexpr int kExtDispatchDepSignal = -2;
+    //! hw_event_index of a signal passed separately to ApplyHwEventPatches, which is
+    //! owned elsewhere and only waited on by this launch
+    static constexpr int kExternalHwEvent = -2;
 
     uint8_t* packet;      // original dispatchPackets pointer (for UpdateAQLPacket matching)
     uint8_t* flat_packet; // pointer into flatPacketData (patched directly at launch)
-    int hw_event_index;
+    int hw_event_index;   // index into the launch's hw_events, or kExternalHwEvent
     int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
   };
 
@@ -2308,8 +2391,11 @@ class Device : public RuntimeObject {
   //! single-signal field share an offset, so callers patch slot 0 either way.
   //! num_deps == 0 is a completion-only barrier.
   virtual uint8_t* CreateBarrierPacket(int num_deps = 0) const { return nullptr; }
+  //! profiled means the launch reads the timing of its patched completion signals.
+  //! external_hw_event resolves kExternalHwEvent patches.
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                   const std::vector<void*>& hw_events) const {}
+                                   const std::vector<void*>& hw_events, bool profiled,
+                                   void* external_hw_event) const {}
 
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;
@@ -2461,10 +2547,14 @@ class Device : public RuntimeObject {
   //! Returns stack size set for the device
   size_t MaxStackSize() const { return maxStackSize_; }
   //! Return group memory carveout
-  uint8_t GetGroupMemCarveout() const { return group_mem_carveout_hint_; }
+  int8_t GetGroupMemCarveout() const {
+    return group_mem_carveout_hint_.load(std::memory_order_relaxed);
+  }
 
   //! Sets the group memory carveout percentage hint for the device
-  void UpdateGroupMemCarveout(uint8_t percent) { group_mem_carveout_hint_ = percent; }
+  void UpdateGroupMemCarveout(int8_t percent) {
+    group_mem_carveout_hint_.store(percent, std::memory_order_relaxed);
+  }
 
 #if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const = 0;
@@ -2530,7 +2620,7 @@ class Device : public RuntimeObject {
   uint64_t initial_heap_size_{HIP_INITIAL_DM_SIZE};     //!< Initial device heap size
   amd::Monitor activeQueuesLock_{};                     //!< Guards access to the activeQueues set
   std::unordered_map<amd::CommandQueue*, bool> activeQueues;  //!< The set of active queues
-  uint8_t group_mem_carveout_hint_{0}; //!< LDS carveout percentage (0 = no preference)
+  std::atomic<int8_t> group_mem_carveout_hint_{-1};  //!< LDS carveout %, -1 = no preference
  private:
   const Isa* isa_;  //!< Device isa
   bool IsTypeMatching(cl_device_type type, bool offlineDevices);

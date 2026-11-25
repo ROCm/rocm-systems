@@ -1326,6 +1326,15 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
             failures.append(f"{name} ({count})")
             details.append(f"#### {name} \u2014 {title}\n\n" + _fenced(text))
 
+    # 4b. standalone NIC suites run next to amdsmitst; they print no FAIL: line the gtest or
+    # unittest checks above would match, so the exit code is the only signal.
+    for suite_log in sorted(results_dir.glob("test_nic_*_suite.log")):
+        text = suite_log.read_text(encoding="utf-8", errors="replace")
+        rc = _exit_code(text)
+        if rc:
+            failures.append(f"{suite_log.stem} (exit {rc})")
+            details.append(f"#### {suite_log.stem}: exit {rc}\n\n" + _fenced(text))
+
     # 5. example test results (segfault detection)
     crash_re = _re.compile(r"segfault|SIGSEGV|abort", _re.IGNORECASE)
     for ex_log in ("amd_smi_drm_ex.log", "amd_smi_nodrm_ex.log"):

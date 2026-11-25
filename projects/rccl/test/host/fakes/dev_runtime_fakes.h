@@ -45,7 +45,7 @@ extern std::function<ncclResult_t(ncclComm_t, ncclWindow_t)> g_devrNcclCommWindo
 // The dev_runtime.cc functions src/cft_dev_runtime.cc calls. All fail loud by default.
 struct ncclTeam;
 struct ncclDevrTeam;
-extern std::function<int(struct ncclComm*)> g_computeLsaSize;
+extern std::function<int(struct ncclComm*)> g_computeLsaTeamSize;
 extern std::function<bool(int, ncclDevrRegisterCapability)> g_devrWinRegEnabled;
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTeam, bool, bool, bool, bool, struct ncclDevrTeam**,
                                   bool*)>

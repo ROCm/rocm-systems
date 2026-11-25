@@ -10,9 +10,6 @@ use crate::generated::amdf::{
 use rocddi::topology::Endpoint;
 use rocddi::topology::platform::linux::{host_numa_node as native_host_numa_node, kfd_drm_info};
 
-pub(crate) use rocddi::memory::interop::linux as memory;
-pub(crate) use std::os::fd::IntoRawFd;
-
 pub(crate) fn render_supported(endpoint: &Endpoint) -> bool {
     kfd_drm_info(endpoint)
         .and_then(|info| info.render_minor)

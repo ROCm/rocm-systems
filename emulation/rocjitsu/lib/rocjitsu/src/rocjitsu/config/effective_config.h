@@ -53,6 +53,8 @@ json_with_launch_overrides(std::string_view json, const LaunchOverrides &overrid
 /// @brief Return @p json with a validated per-launch local node selector.
 /// @details Escapes arbitrary node IDs as JSON strings and rejects an unknown
 /// node or a selector that disagrees with the source config before launch.
+/// Invalid graphs and selectors return failure with one diagnostic through
+/// @p emit_error. No rewritten document is returned on failure.
 [[nodiscard]] FailureOr<std::string>
 json_with_local_node(std::string_view json, std::string_view node_id,
                      const util::DiagnosticEmitter &emit_error = {});

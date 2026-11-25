@@ -103,6 +103,24 @@ add_custom_command(
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Stripping rocprofiler-sdk-c-tool...")
 
+# same C tool, but rocprofiler_configure returns a configure result without enabling any
+# services, so the tool is configured (used by the attach tests)
+add_library(rocprofiler-sdk-c-tool-configured SHARED)
+target_sources(rocprofiler-sdk-c-tool-configured PRIVATE c-tool.c)
+target_compile_definitions(rocprofiler-sdk-c-tool-configured
+                           PRIVATE ROCPROFILER_C_TOOL_ACCEPT_CONFIGURE=1)
+target_link_libraries(
+    rocprofiler-sdk-c-tool-configured PRIVATE rocprofiler-sdk::rocprofiler-sdk
+                                              rocprofiler-sdk::tests-build-flags)
+target_compile_options(rocprofiler-sdk-c-tool-configured PRIVATE -Wno-cpp)
+set_target_properties(
+    rocprofiler-sdk-c-tool-configured
+    PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
+               SOVERSION ${PROJECT_VERSION_MINOR}
+               VERSION
+               ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}
+               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+
 # thread-trace tool libraries
 set(THREAD_TRACE_TOOL_LINK_LIBRARIES
     rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
@@ -147,6 +165,17 @@ target_link_libraries(thread-trace-triple-buffer-tool
                       PRIVATE ${THREAD_TRACE_TOOL_LINK_LIBRARIES})
 set_target_properties(
     thread-trace-triple-buffer-tool
+    PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
+               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+
+# multi-SE triple buffer correctness tool
+add_library(thread-trace-triple-buffer-multise-tool SHARED)
+target_sources(thread-trace-triple-buffer-multise-tool
+               PRIVATE thread-trace-triple-buffer-multise-tool.cpp)
+target_link_libraries(thread-trace-triple-buffer-multise-tool
+                      PRIVATE ${THREAD_TRACE_TOOL_LINK_LIBRARIES})
+set_target_properties(
+    thread-trace-triple-buffer-multise-tool
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
                INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
 

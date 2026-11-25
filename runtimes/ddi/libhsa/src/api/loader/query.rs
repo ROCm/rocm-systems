@@ -6,16 +6,53 @@
 use std::ffi::c_void;
 
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
+use crate::loader::code_object::map_loader_error;
 use crate::loader::query::*;
 use crate::loader::*;
-use crate::platform::memory as linux_interop;
-use crate::runtime::{boundary, initialized_mut, lock};
+use crate::status::boundary;
+use rocloader::CodeObject as LoaderCodeObject;
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_ven_amd_loader_code_object_reader_get_load_size")
+)]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
+/// Returns the logical loaded code span without allocating device storage.
+pub unsafe extern "C" fn hsa_ven_amd_loader_code_object_reader_get_load_size(
+    reader: HsaCodeObjectReader,
+    load_size: *mut usize,
+) -> Status {
+    boundary(|| {
+        let guard = match lock() {
+            Ok(guard) => guard,
+            Err(status) => return status,
+        };
+        let Some(runtime) = guard.as_ref() else {
+            return NOT_INITIALIZED;
+        };
+        if load_size.is_null() {
+            return INVALID_ARGUMENT;
+        }
+        let Some(reader) = runtime.loader.readers.get(&reader.handle) else {
+            return INVALID_CODE_OBJECT_READER;
+        };
+        let (bytes, _) = reader.snapshot();
+        let size = match LoaderCodeObject::parse(&bytes).and_then(|object| object.load_size()) {
+            Ok(size) => size,
+            Err(error) => return map_loader_error(error),
+        };
+        // SAFETY: The public API requires writable storage for one size_t.
+        unsafe { load_size.write(size) };
+        SUCCESS
+    })
+}
+
+#[cfg_attr(
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ven_amd_loader_query_host_address")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Translates a loaded device address to its host mapping.
 pub unsafe extern "C" fn hsa_ven_amd_loader_query_host_address(
     device_address: *const c_void,
@@ -32,7 +69,7 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_query_host_address(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        match loaded_host_range(&runtime.loader, device_address as usize, 1) {
+        match loaded_query_host_range(&runtime.loader, device_address as usize) {
             Ok(Some(host)) => {
                 // SAFETY: The caller supplied writable output storage.
                 unsafe { host_address.write(host as *const c_void) };
@@ -44,10 +81,10 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_query_host_address(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ven_amd_loader_query_segment_descriptors")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Copies descriptors for loaded executable segments.
 pub unsafe extern "C" fn hsa_ven_amd_loader_query_segment_descriptors(
     segment_descriptors: *mut HsaLoaderSegmentDescriptor,
@@ -125,10 +162,10 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_query_segment_descriptors(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ven_amd_loader_query_executable")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Finds the executable containing a loaded device address.
 pub unsafe extern "C" fn hsa_ven_amd_loader_query_executable(
     device_address: *const c_void,
@@ -168,10 +205,10 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_query_executable(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ven_amd_loader_executable_iterate_loaded_code_objects")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Visits code objects loaded into an executable.
 pub unsafe extern "C" fn hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
     executable: HsaExecutable,
@@ -214,10 +251,10 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_executable_iterate_loaded_code_objec
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ven_amd_loader_loaded_code_object_get_info")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Writes a requested loaded-code-object attribute.
 pub unsafe extern "C" fn hsa_ven_amd_loader_loaded_code_object_get_info(
     loaded_code_object: HsaLoadedCodeObject,
@@ -287,21 +324,21 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_loaded_code_object_get_info(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(
         export_name = "__hsa_impl_hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size"
     )
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Snapshots a bounded file range into a code-object reader.
 pub unsafe extern "C" fn hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size(
-    file: i32,
+    file: HsaFile,
     offset: usize,
     size: usize,
     reader: *mut HsaCodeObjectReader,
 ) -> Status {
     boundary(|| {
-        if file < 0 {
+        if crate::platform::invalid_file(file) {
             return INVALID_FILE;
         }
         if size == 0 {
@@ -310,14 +347,14 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_code_object_reader_create_from_file_
         if reader.is_null() {
             return INVALID_ARGUMENT;
         }
-        let mut bytes = Vec::new();
-        if bytes.try_reserve_exact(size).is_err() {
-            return OUT_OF_RESOURCES;
-        }
-        bytes.resize(size, 0);
-        if linux_interop::read_descriptor_exact_at(file, &mut bytes, offset as u64).is_err() {
-            return INVALID_FILE;
-        }
+        let file = match crate::platform::acquire_code_object_file(file) {
+            Ok(file) => file,
+            Err(_) => return INVALID_FILE,
+        };
+        let snapshot = match Reader::snapshot_file(&file, offset, size) {
+            Ok(reader) => reader,
+            Err(status) => return status,
+        };
         let mut guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
@@ -330,10 +367,7 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_code_object_reader_create_from_file_
             Ok(handle) => handle,
             Err(status) => return status,
         };
-        runtime.loader.insert_reader(
-            handle,
-            Reader::from_file_with_offset(bytes, file, offset, size),
-        );
+        runtime.loader.insert_reader(handle, snapshot);
         // SAFETY: The caller supplied writable output storage.
         unsafe { reader.write(HsaCodeObjectReader { handle }) };
         SUCCESS
@@ -341,10 +375,10 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_code_object_reader_create_from_file_
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ven_amd_loader_iterate_executables")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Visits all live executable handles.
 pub unsafe extern "C" fn hsa_ven_amd_loader_iterate_executables(
     callback: ExecutableCallback,
@@ -356,7 +390,7 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_iterate_executables(
         };
         let _traversal = match EXECUTABLE_TRAVERSAL.read() {
             Ok(guard) => guard,
-            Err(_) => return ERROR,
+            Err(()) => return ERROR,
         };
         let mut handles = {
             let guard = match lock() {

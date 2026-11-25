@@ -47,6 +47,7 @@
 #define ROCRTST_SUITES_TEST_COMMON_TEST_COMMON_H_
 
 #include <memory>
+#include <string>
 #include <vector>
 
 struct RocrTstGlobals {
@@ -58,5 +59,22 @@ struct RocrTstGlobals {
 uint32_t ProcessCmdline(RocrTstGlobals* test, int arg_cnt, char** arg_list);
 
 int DumpMonitorInfo(void);
+
+// Saves one environment variable and restores it when destroyed. If the
+// variable was unset, it is unset again. Declare this before a test object so
+// the restore runs after Close().
+class RestoreEnvironmentVariable {
+ public:
+  explicit RestoreEnvironmentVariable(const char* name);
+  ~RestoreEnvironmentVariable();
+
+  RestoreEnvironmentVariable(const RestoreEnvironmentVariable&) = delete;
+  RestoreEnvironmentVariable& operator=(const RestoreEnvironmentVariable&) = delete;
+
+ private:
+  std::string name_;
+  bool was_set_;
+  std::string saved_;
+};
 
 #endif  // ROCRTST_SUITES_TEST_COMMON_TEST_COMMON_H_

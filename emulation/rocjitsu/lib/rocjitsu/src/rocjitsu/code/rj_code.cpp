@@ -2,39 +2,31 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/rj_code_internal.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/target_registry.h"
 
 #include <cstring>
-#include <new>
-#include <unordered_map>
+#include <string>
 
 using namespace rocjitsu;
 
 namespace {
 
-Decoder *create_decoder_for_target(rj_code_target_id_t target) {
-  const IsaTargetRegistry &registry = default_isa_target_registry();
-  const IsaTargetDescriptor *descriptor = registry.find(target);
-  if (descriptor == nullptr)
-    return nullptr;
-
-  static thread_local std::unordered_map<rj_code_target_id_t, std::unique_ptr<Decoder>> decoders;
-  std::unique_ptr<Decoder> &decoder = decoders[target];
-  if (!decoder)
-    decoder = Decoder::create(registry, target);
-  return decoder.get();
-}
-
-rj_code_arch_t arch_for_target(rj_code_target_id_t target) {
+rocjitsu::IsaFamily arch_for_target(rj_code_target_id_t target) {
   const IsaTargetDescriptor *descriptor = default_isa_target_registry().find(target);
-  if (descriptor == nullptr)
-    return ROCJITSU_CODE_ARCH_INVALID;
-  return descriptor->architecture_id;
+  if (descriptor == nullptr) {
+    return rocjitsu::IsaFamily::Invalid;
+  }
+  return descriptor->family;
 }
 
 bool code_object_accepts_target(const AmdGpuCodeObject &object, rj_code_target_id_t target) {
+  const IsaTargetBinding *binding = default_isa_target_registry().find_target(target);
+  if (binding == nullptr || binding->elf_machine == 0) {
+    return false;
+  }
   const rj_code_target_id_t object_target = object.target_id();
   return object_target == ROCJITSU_CODE_TARGET_INVALID || object_target == target;
 }
@@ -42,59 +34,65 @@ bool code_object_accepts_target(const AmdGpuCodeObject &object, rj_code_target_i
 } // namespace
 
 rj_status_t rj_code_executable_create(const char *path, rj_code_executable_t **exec) {
-  if (!path || !exec)
+  if (!path || !exec) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  }
 
-  try {
+  return [&]() noexcept -> rj_status_t {
     auto handle = std::make_unique<rj_code_executable_t>();
     handle->exec = std::make_unique<Executable>(path);
-    if (!handle->exec->is_valid())
+    if (!handle->exec->is_valid()) {
       return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
+    }
 
     *exec = handle.release();
     return ROCJITSU_STATUS_SUCCESS;
-  } catch (const std::bad_alloc &) {
-    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
-  } catch (...) {
-    return ROCJITSU_STATUS_ERROR;
-  }
+  }();
 }
 
 void rj_code_executable_retain(rj_code_executable_t *exec) {
-  if (exec)
+  if (exec) {
     exec->retain();
+  }
 }
 
 void rj_code_executable_release(rj_code_executable_t *exec) {
-  if (!exec)
+  if (!exec) {
     return;
-  if (exec->release())
+  }
+  if (exec->release()) {
     delete exec;
+  }
 }
 
 void rj_code_executable_destroy(rj_code_executable_t *exec) {
-  if (!exec)
+  if (!exec) {
     return;
-  if (exec->destroy())
+  }
+  if (exec->destroy()) {
     delete exec;
+  }
 }
 
 uint32_t rj_code_executable_num_code_objects(const rj_code_executable_t *exec,
                                              rj_code_target_id_t target) {
-  if (!exec || !exec->exec)
+  if (!exec || !exec->exec) {
     return 0;
+  }
   return exec->exec->num_code_objects(target);
 }
 
 rj_status_t rj_code_executable_get_code_object(const rj_code_executable_t *exec,
                                                rj_code_target_id_t target, uint32_t index,
                                                rj_code_object_t **obj) {
-  if (!exec || !exec->exec || !obj)
+  if (!exec || !exec->exec || !obj) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  }
 
   auto *co = const_cast<Executable *>(exec->exec.get())->code_object(target, index);
-  if (!co)
+  if (!co) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  }
 
   *obj = new rj_code_object_t{};
   (*obj)->co = co;
@@ -105,38 +103,46 @@ rj_status_t rj_code_executable_get_code_object(const rj_code_executable_t *exec,
 }
 
 void rj_code_object_retain(rj_code_object_t *obj) {
-  if (obj)
+  if (obj) {
     obj->retain();
+  }
 }
 
 void rj_code_object_release(rj_code_object_t *obj) {
-  if (!obj)
+  if (!obj) {
     return;
-  if (obj->release())
+  }
+  if (obj->release()) {
     delete obj;
+  }
 }
 
 void rj_code_object_destroy(rj_code_object_t *obj) {
-  if (!obj)
+  if (!obj) {
     return;
-  if (obj->destroy())
+  }
+  if (obj->destroy()) {
     delete obj;
+  }
 }
 
 rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t target_id,
                                      rj_code_inst_list_t **inst_list) {
-  if (!obj || !obj->co || !inst_list)
+  if (!obj || !obj->co || !inst_list) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  }
   *inst_list = nullptr;
 
-  if (!code_object_accepts_target(*obj->co, target_id))
-    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  return [&]() noexcept -> rj_status_t {
+    if (!code_object_accepts_target(*obj->co, target_id)) {
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    }
 
-  auto *decoder = create_decoder_for_target(target_id);
-  if (!decoder)
-    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    auto decoder = Decoder::create(default_isa_target_registry(), target_id);
+    if (!decoder) {
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    }
 
-  try {
     Instruction::ScopedHeapAllocation heap_allocation;
     auto owned = std::make_unique<rj_code_inst_list_t>();
 
@@ -149,9 +155,11 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
       // at word zero for each section.
       std::size_t word_index = 0;
       while (word_index < inst_data_size) {
-        DecodeResult decoded = decoder->decode(&inst_data[word_index]);
-        if (decoded.failed())
+        DecodeResult decoded =
+            decoder->decode_window(std::span(inst_data + word_index, inst_data_size - word_index));
+        if (decoded.failed()) {
           return ROCJITSU_STATUS_ERROR;
+        }
         std::unique_ptr<Instruction> inst = std::move(decoded).value();
         owned->list.push_back(*inst);
         word_index += static_cast<std::size_t>(inst->size()) / sizeof(uint32_t);
@@ -160,22 +168,20 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
     }
 
     *inst_list = owned.release();
-  } catch (const std::bad_alloc &) {
-    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
-  } catch (...) {
-    return ROCJITSU_STATUS_ERROR;
-  }
-  return ROCJITSU_STATUS_SUCCESS;
+    return ROCJITSU_STATUS_SUCCESS;
+  }();
 }
 
 void rj_code_inst_list_retain(rj_code_inst_list_t *inst_list) {
-  if (inst_list)
+  if (inst_list) {
     inst_list->retain();
+  }
 }
 
 void rj_code_inst_list_release(rj_code_inst_list_t *inst_list) {
-  if (!inst_list)
+  if (!inst_list) {
     return;
+  }
   if (inst_list->release()) {
     Instruction::ScopedHeapAllocation heap_allocation;
     delete inst_list;
@@ -183,8 +189,9 @@ void rj_code_inst_list_release(rj_code_inst_list_t *inst_list) {
 }
 
 void rj_code_inst_list_destroy(rj_code_inst_list_t *inst_list) {
-  if (!inst_list)
+  if (!inst_list) {
     return;
+  }
   if (inst_list->destroy()) {
     Instruction::ScopedHeapAllocation heap_allocation;
     delete inst_list;
@@ -193,46 +200,49 @@ void rj_code_inst_list_destroy(rj_code_inst_list_t *inst_list) {
 
 rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_target_id_t target_id,
                                             rj_code_basic_block_list_t **list) {
-  if (!obj || !obj->co || !list)
+  if (!obj || !obj->co || !list) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  }
   *list = nullptr;
 
-  if (!code_object_accepts_target(*obj->co, target_id))
-    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  return [&]() noexcept -> rj_status_t {
+    if (!code_object_accepts_target(*obj->co, target_id)) {
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    }
 
-  auto *decoder = create_decoder_for_target(target_id);
-  if (!decoder)
-    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    auto decoder = Decoder::create(default_isa_target_registry(), target_id);
+    if (!decoder) {
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    }
 
-  const rj_code_arch_t arch = arch_for_target(target_id);
-  if (arch == ROCJITSU_CODE_ARCH_INVALID)
-    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    const rocjitsu::IsaFamily arch = arch_for_target(target_id);
+    if (arch == rocjitsu::IsaFamily::Invalid) {
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    }
 
-  try {
     Instruction::ScopedHeapAllocation heap_allocation;
     auto owned = std::make_unique<rj_code_basic_block_list_t>();
     auto blocks = BasicBlock::build(*obj->co, *decoder, arch, {}, {},
                                     ExternalEntryPolicy::InferPredecessorless, {}, target_id);
-    if (blocks.failed())
+    if (blocks.failed()) {
       return ROCJITSU_STATUS_ERROR;
+    }
     owned->blocks = std::move(blocks).value();
     *list = owned.release();
     return ROCJITSU_STATUS_SUCCESS;
-  } catch (const std::bad_alloc &) {
-    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
-  } catch (...) {
-    return ROCJITSU_STATUS_ERROR;
-  }
+  }();
 }
 
 void rj_code_basic_block_list_retain(rj_code_basic_block_list_t *list) {
-  if (list)
+  if (list) {
     list->retain();
+  }
 }
 
 void rj_code_basic_block_list_release(rj_code_basic_block_list_t *list) {
-  if (!list)
+  if (!list) {
     return;
+  }
   if (list->release()) {
     Instruction::ScopedHeapAllocation heap_allocation;
     delete list;
@@ -240,8 +250,9 @@ void rj_code_basic_block_list_release(rj_code_basic_block_list_t *list) {
 }
 
 void rj_code_basic_block_list_destroy(rj_code_basic_block_list_t *list) {
-  if (!list)
+  if (!list) {
     return;
+  }
   if (list->destroy()) {
     Instruction::ScopedHeapAllocation heap_allocation;
     delete list;
@@ -249,15 +260,17 @@ void rj_code_basic_block_list_destroy(rj_code_basic_block_list_t *list) {
 }
 
 uint32_t rj_code_basic_block_list_size(const rj_code_basic_block_list_t *list) {
-  if (!list)
+  if (!list) {
     return 0;
+  }
   return static_cast<uint32_t>(list->blocks.size());
 }
 
 rj_status_t rj_code_basic_block_list_get(const rj_code_basic_block_list_t *list, uint32_t index,
                                          rj_code_basic_block_t **block) {
-  if (!list || !block || index >= list->blocks.size())
+  if (!list || !block || index >= list->blocks.size()) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  }
 
   *block = new rj_code_basic_block_t{};
   (*block)->block = list->blocks[index].get();
@@ -268,13 +281,15 @@ rj_status_t rj_code_basic_block_list_get(const rj_code_basic_block_list_t *list,
 }
 
 void rj_code_basic_block_retain(rj_code_basic_block_t *block) {
-  if (block)
+  if (block) {
     block->retain();
+  }
 }
 
 void rj_code_basic_block_release(rj_code_basic_block_t *block) {
-  if (!block)
+  if (!block) {
     return;
+  }
   if (block->release()) {
     Instruction::ScopedHeapAllocation heap_allocation;
     delete block;
@@ -282,8 +297,9 @@ void rj_code_basic_block_release(rj_code_basic_block_t *block) {
 }
 
 void rj_code_basic_block_destroy(rj_code_basic_block_t *block) {
-  if (!block)
+  if (!block) {
     return;
+  }
   if (block->destroy()) {
     Instruction::ScopedHeapAllocation heap_allocation;
     delete block;
@@ -291,72 +307,69 @@ void rj_code_basic_block_destroy(rj_code_basic_block_t *block) {
 }
 
 uint64_t rj_code_basic_block_start_offset(const rj_code_basic_block_t *block) {
-  if (!block || !block->block)
+  if (!block || !block->block) {
     return 0;
+  }
   return block->block->start_offset();
 }
 
 uint32_t rj_code_basic_block_size(const rj_code_basic_block_t *block) {
-  if (!block || !block->block)
+  if (!block || !block->block) {
     return 0;
+  }
   return block->block->size();
 }
 
 uint32_t rj_code_basic_block_num_instructions(const rj_code_basic_block_t *block) {
-  if (!block || !block->block)
+  if (!block || !block->block) {
     return 0;
+  }
   return block->block->num_instructions();
 }
 
 const char *rj_code_inst_mnemonic(const rj_code_inst_t *inst) {
-  if (!inst)
+  if (!inst) {
     return nullptr;
+  }
   // Safe: mnemonic_ is always a string_view over a null-terminated string
   // literal from the codegen (e.g., "s_add_u32"). The lifetime is static.
   return reinterpret_cast<const Instruction *>(inst)->mnemonic().data();
 }
 
 uint32_t rj_code_inst_size(const rj_code_inst_t *inst) {
-  if (!inst)
+  if (!inst) {
     return 0;
+  }
   return static_cast<uint32_t>(reinterpret_cast<const Instruction *>(inst)->size());
 }
 
-uint32_t rj_code_inst_flags(const rj_code_inst_t *inst) {
-  if (!inst)
-    return 0;
-  const auto *i = reinterpret_cast<const Instruction *>(inst);
-  uint32_t flags = 0;
-  if (i->is_branch())
-    flags |= RJ_CODE_INST_BRANCH;
-  if (i->is_memory_op())
-    flags |= RJ_CODE_INST_MEMORY_OP;
-  return flags;
-}
-
 rj_status_t rj_code_inst_disassemble(const rj_code_inst_t *inst, char *buf, uint32_t buf_size) {
-  if (!inst || !buf || buf_size == 0)
+  if (!inst || !buf || buf_size == 0) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  }
 
-  const auto &dis = reinterpret_cast<const Instruction *>(inst)->disassemble();
+  const std::string dis = reinterpret_cast<const Instruction *>(inst)->disassemble();
   std::strncpy(buf, dis.c_str(), buf_size - 1);
   buf[buf_size - 1] = '\0';
   return ROCJITSU_STATUS_SUCCESS;
 }
 
 const rj_code_inst_t *rj_code_basic_block_first_inst(const rj_code_basic_block_t *block) {
-  if (!block || !block->block)
+  if (!block || !block->block) {
     return nullptr;
+  }
   auto &list = block->block->instructions();
-  if (list.empty())
+  if (list.empty()) {
     return nullptr;
+  }
   auto it = list.begin();
   return reinterpret_cast<const rj_code_inst_t *>(it.node_pointer());
 }
 
 const rj_code_inst_t *rj_code_inst_next(const rj_code_inst_t *inst) {
-  if (!inst)
+  if (!inst) {
     return nullptr;
+  }
   const auto *node =
       reinterpret_cast<const util::IListNode<Instruction, util::IListParent<BasicBlock>> *>(inst);
   const auto *next_node = node->next_;
@@ -366,13 +379,15 @@ const rj_code_inst_t *rj_code_inst_next(const rj_code_inst_t *inst) {
   // AND the node is NOT an Instruction. Since we can't easily distinguish,
   // we use the parent pointer: real instructions in the list have parent_ set
   // to their BasicBlock, while the sentinel does not.
-  if (!next_node)
+  if (!next_node) {
     return nullptr;
+  }
   // Sentinel nodes have parent_ == nullptr (they're default-constructed).
   const auto *next_as_inst =
       reinterpret_cast<const util::IListNode<Instruction, util::IListParent<BasicBlock>> *>(
           next_node);
-  if (!next_as_inst->parent_)
+  if (!next_as_inst->parent_) {
     return nullptr;
+  }
   return reinterpret_cast<const rj_code_inst_t *>(next_node);
 }

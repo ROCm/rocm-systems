@@ -55,6 +55,8 @@ Event::~Event() {
   if (auto* notifyEvent = notify_event_.load(std::memory_order_acquire)) {
     notifyEvent->release();
   }
+  // A command that never completed, such as one recorded by a stream capture
+  releasePinnedHwEvents();
   // Destroy global HW event if available
   if ((hw_event_ != nullptr) && (device_ != nullptr)) {
     device_->ReleaseGlobalSignal(hw_event_);
@@ -62,7 +64,18 @@ Event::~Event() {
 }
 
 // ================================================================================================
+void Event::releasePinnedHwEvents() {
+  for (void* hw_event : pinned_hw_events_) {
+    device_->ReleaseGlobalSignal(hw_event);
+  }
+  pinned_hw_events_.clear();
+}
+
+// ================================================================================================
 AccumulateCommand::~AccumulateCommand() {
+  for (Command* command : held_commands_) {
+    command->release();
+  }
   // When an external owner (e.g. the graph signal pool) reclaims the signals,
   // do not destroy them here.
   if (!owns_hw_events_) {
@@ -153,6 +166,8 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
     if (!IS_HIP) {
       releaseResources();
     }
+    // The GPU passed the command's waits before it completed
+    releasePinnedHwEvents();
 
     if (profilingInfo().enabled_) {
       amd::activity_prof::ReportActivity(command());
@@ -465,26 +480,24 @@ NDRangeKernelCommand::NDRangeKernelCommand(HostQueue& queue, const EventWaitList
               AMD_SERIALIZE_KERNEL | (HIP_LAUNCH_BLOCKING << 1)),
       kernel_(kernel),
       sizes_(sizes),
+      parameters_(nullptr),
       sharedMemBytes_(sharedMemBytes),
       extraParam_(extraParam),
       gridId_(gridId),
       numGrids_(numGrids),
       prevGridSum_(prevGridSum),
       allGridSum_(allGridSum),
-      firstDevice_(firstDevice),
-      parameters_(nullptr) {
-  auto& device = queue.device();
-  auto devKernel = const_cast<device::Kernel*>(kernel.getDeviceKernel(device));
+      firstDevice_(firstDevice) {
   if (cooperativeGroups()) {
     setNumWorkgroups();
   }
 
-  // This optimization will set marker_ts_ but may not submit a batch.
+  // The stop event binds to this kernel's signal, which may not submit a batch.
   if (forceProfiling) {
     profilingInfo_.enabled_ = true;
     profilingInfo_.clear();
     profilingInfo_.correlation_id_ = activity_prof::correlation_id;
-    profilingInfo_.marker_ts_ = true;
+    profilingInfo_.signal_required_ = true;
   }
   kernel_.retain();
 }
@@ -700,8 +713,7 @@ bool MigrateMemObjectsCommand::validateMemory() {
 
 // =================================================================================================
 int32_t NDRangeKernelCommand::captureHIPArgsAndValidate(void** kernelParams, address kernArgs,
-                                                      size_t kernArgsSize) {
-  const amd::Device& device = queue()->device();
+                                                        size_t kernArgsSize) {
   // Validate the kernel before submission
   if (!queue()->device().validateKernel(kernel(), queue()->vdev(), cooperativeGroups())) {
     return CL_OUT_OF_RESOURCES;

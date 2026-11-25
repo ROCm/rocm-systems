@@ -1,72 +1,28 @@
 {
   "evaluations": [
     {
-      "id": "tt-which-operator-is-slow",
+      "id": "tt-end-to-end",
       "skill_should_trigger": true,
-      "prompt": "which PyTorch operator is launching the slow GPU kernels in my model?",
+      "prompt": "My model uses torch.compile. How do I attribute the generated Triton kernels to PyTorch operators, and then show the counters for just the relu operators?",
       "expected_behavior": [
-        "collects with --experimental --torch-trace",
-        "lists the captured operators before filtering",
-        "checks the documented PyTorch version requirement"
+        "recommends --trace-ml-api torch for torch.compile kernels and filtering with --operator"
       ],
-      "unexpected_behavior": [
-        "guesses an operator pattern without listing the captured operators first"
-      ],
-      "logs_contain": ["--torch-trace", "--list-torch-operators"]
+      "logs_contain": ["--trace-ml-api torch", "--operator"]
     },
     {
-      "id": "tt-map-kernels-to-model-code",
+      "id": "tt-triton-inductor-kernels-routing",
       "skill_should_trigger": true,
-      "prompt": "profile my training script and tell me which layer the GPU time belongs to",
-      "expected_behavior": [
-        "profiles the Python script with torch tracing enabled",
-        "advises profiling a few steady-state iterations rather than a full run"
-      ],
-      "logs_contain": ["--torch-trace"]
+      "prompt": "my model uses torch.compile, how do I attribute the generated Triton kernels?"
     },
     {
-      "id": "tt-triton-inductor-kernels",
+      "id": "tt-filter-by-operator-routing",
       "skill_should_trigger": true,
-      "prompt": "my model uses torch.compile, how do I attribute the generated Triton kernels?",
-      "expected_behavior": [
-        "uses --triton-trace, optionally combined with --torch-trace",
-        "lists the captured Triton kernels before filtering"
-      ],
-      "logs_contain": ["--triton-trace"]
+      "prompt": "show me the counters for just the relu operators in this traced PyTorch workload"
     },
     {
-      "id": "tt-filter-by-operator",
+      "id": "tt-user-roctx-no-collection-control-routing",
       "skill_should_trigger": true,
-      "prompt": "show me the counters for just the conv2d operators in this torch-trace workload",
-      "expected_behavior": [
-        "lists operators first, then filters with --torch-operator",
-        "treats the pattern as a shell-style glob rather than a regex"
-      ],
-      "logs_contain": ["--torch-operator"]
-    },
-    {
-      "id": "tt-custom-roctx-unsupported",
-      "skill_should_trigger": true,
-      "prompt": "I added my own ROCTx ranges to my HIP application, profile and report on those ranges",
-      "expected_behavior": [
-        "says plainly that rocprof-compute does not attribute results to user-authored ROCTx ranges",
-        "offers kernel filtering with -k or dispatch filtering with -d instead"
-      ],
-      "unexpected_behavior": [
-        "claims rocprof-compute can profile, filter, or start and stop collection on user-authored ROCTx ranges"
-      ]
-    },
-    {
-      "id": "tt-non-python-binary",
-      "skill_should_trigger": true,
-      "prompt": "attribute GPU kernels to functions in my compiled C++ HIP binary",
-      "expected_behavior": [
-        "says that operator attribution requires a Python workload and cannot annotate a compiled binary",
-        "offers kernel filtering with -k or dispatch filtering with -d instead"
-      ],
-      "unexpected_behavior": [
-        "claims torch or triton tracing can attribute kernels to functions in a compiled binary"
-      ]
+      "prompt": "start and stop rocprof-compute counter collection at my ROCTx range UserDefined"
     },
     {
       "id": "tt-cuda-pytorch",
@@ -76,7 +32,6 @@
     {
       "id": "tt-model-accuracy",
       "skill_should_trigger": false,
-      "note": "PyTorch question with no performance profiling in it.",
       "prompt": "why is my PyTorch model's validation accuracy dropping?"
     }
   ]

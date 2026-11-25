@@ -22,6 +22,7 @@
 /// CP documentation</a>
 
 #include "rocjitsu/code/kernel_descriptor_abi.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_processor.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
@@ -38,10 +39,12 @@
 
 #include "simdojo/sim/component.h"
 #include "util/diagnostic.h"
+#include "util/result.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -49,6 +52,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <thread>
@@ -116,27 +120,34 @@ public:
 
   /// @brief Replace the GWS store across this CP's drained compute units.
   /// @details The caller serializes topology changes. Preflights every CU and
-  /// throws std::logic_error if any active CU would change stores, before
+  /// returns failure if any active CU would change stores, before
   /// updating any CU or the CP's shared owner.
-  void set_gws_device(std::shared_ptr<GwsDevice> device) {
-    for (ComputeUnitCore *cu : cus_)
-      if (!cu->can_set_gws_device(device))
-        throw std::logic_error("Cannot replace GWS store with active waves or workgroups");
-    for (ComputeUnitCore *cu : cus_)
+  /// @param emit_error Destination for failure diagnostics.
+  util::Result set_gws_device(std::shared_ptr<GwsDevice> device,
+                              util::DiagnosticEmitter emit_error = {}) {
+    for (ComputeUnitCore *cu : cus_) {
+      if (!cu->can_set_gws_device(device)) {
+        return emit_error.emit() << "Cannot replace GWS store with active waves or workgroups";
+      }
+    }
+    for (ComputeUnitCore *cu : cus_) {
       (void)cu->set_gws_device(device);
+    }
     gws_device_ = std::move(device);
+    return util::Result::success();
   }
   void add_l2_cache(L2Cache *l2) {
     // Idempotent: the config-driven builder and the Xcd full constructor may
     // both attempt to register the same L2. Avoid duplicate entries so cache
     // maintenance does not flush the same L2 twice.
-    if (std::ranges::find(l2_caches_, l2) == l2_caches_.end())
+    if (std::ranges::find(l2_caches_, l2) == l2_caches_.end()) {
       l2_caches_.push_back(l2);
+    }
   }
   void set_packed_tid(bool enabled) { packed_tid_ = enabled; }
   bool packed_tid() const { return packed_tid_; }
   /// @brief Configure launch and packet behavior derived from the GPU architecture.
-  void configure_for_arch(rj_code_arch_t arch);
+  void configure_for_arch(rocjitsu::IsaFamily arch);
   void set_shared_dispatch_pool(CpuDispatchPool *pool);
   void set_dispatch_threads(uint32_t threads);
   uint32_t dispatch_threads() const { return dispatch_threads_; }
@@ -198,6 +209,9 @@ public:
   /// @brief Whether this CP currently owns any AQL or PM4 queue state.
   [[nodiscard]] bool has_registered_queues() const;
 
+  /// @brief Whether an admitted AQL entry has workgroups left to launch or a signal to publish.
+  [[nodiscard]] bool has_pending_aql_dispatch_work() const;
+
   /// @brief Compute queues whose root ring initially processes PM4.
   /// @details Test-only visibility for cross-layer teardown assertions.
   [[nodiscard]] size_t registered_pm4_queue_count_for_test() const;
@@ -206,6 +220,8 @@ public:
   void set_scratch_xcc_layout_for_test(uint32_t xcc_id, uint32_t xcc_count);
 
   /// @brief Register a queue and return its CP-local lifetime identity.
+  /// @details Invalid layout and VM capability publication failures return zero.
+  /// Replicas do not repeat capability publication.
   uint64_t register_queue(ComputeQueueConfig queue);
 
   /// @brief Remove only the queue incarnation identified by @p registration_id.
@@ -217,6 +233,10 @@ public:
   /// publication state for explicit force-cancel/reset handling.
   [[nodiscard]] QueuePrepareCloseStatus
   prepare_unregister_queue_registration(uint64_t registration_id) noexcept;
+
+  /// @brief Stop pending execution once committed queue publication is complete.
+  [[nodiscard]] QueuePrepareCloseStatus
+  prepare_preempt_queue_registration(uint64_t registration_id) noexcept;
 
   /// @brief Register one DRM indirect-buffer submission queue.
   [[nodiscard]] bool register_drm_queue(ComputeQueueConfig config);
@@ -244,7 +264,14 @@ public:
   void accept_fanout_shard(DispatchEntry shard);
   [[nodiscard]] bool update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
                                   uint32_t ring_size, uint32_t queue_percentage);
-  /// @brief Reconfigure only the queue incarnation identified by @p registration_id.
+  /// @brief Reconfigure a queue incarnation and propagate its state to fanout replicas.
+  /// @details A fanout owner must be called without any CP queue mutex already held:
+  /// peer propagation acquires peer locks after releasing the owner's mutation lock.
+  /// Busy reflects entries/publications on the ring owner; replicas never access
+  /// packet slots or publish its consumer pointer.
+  [[nodiscard]] QueueReconfigureStatus
+  reconfigure_queue_registration(uint64_t registration_id, const QueueReconfigureRequest &request);
+  /// @brief Compatibility update returning true for Applied or Disabled.
   [[nodiscard]] bool update_queue_registration(uint64_t registration_id, uint64_t ring_base_va,
                                                uint32_t ring_size, uint32_t queue_percentage);
   void set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id, bool suspended,
@@ -256,7 +283,7 @@ public:
   /// signal_queue_exception(..., false). This operation is safe to serialize
   /// under a driver status-publication mutex because it cannot flush CU
   /// notifications back into the driver. With wait_for_ack=false, success
-  /// means the status and interrupt were published, not consumed by ROCr.
+  /// means the status and software event were published, not consumed by ROCr.
   bool publish_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status,
                                bool wait_for_ack = true);
 
@@ -269,17 +296,20 @@ public:
 
   void add_spi(ShaderProcessorInput *spi) { spis_.push_back(spi); }
 
+  /// @brief Attach a CU during topology construction, before execution starts.
+  /// @details The CU must be compatible with the CP's GWS store.
   void add_compute_unit(ComputeUnitCore *cu) {
-    if (gws_device_ && !cu->can_set_gws_device(gws_device_))
-      throw std::logic_error("Cannot attach an active CU to a different GWS store");
+    assert((!gws_device_ || cu->can_set_gws_device(gws_device_)) &&
+           "CU must accept the CP's GWS store during construction");
     auto port_id = static_cast<simdojo::PortID>(dispatch_ports_.size());
     auto port = std::make_unique<simdojo::Port>("req_" + cu->name(), port_id, this,
                                                 simdojo::PortDirection::OUT,
                                                 simdojo::PortProtocol::DISPATCH);
     dispatch_ports_.push_back(add_port(std::move(port)));
     cus_.push_back(cu);
-    if (configured_scratch_slots_per_cu_ != 0)
+    if (configured_scratch_slots_per_cu_ != 0) {
       cu->set_scratch_slots_per_cu(configured_scratch_slots_per_cu_);
+    }
     scratch_shader_engine_count_ =
         std::max(scratch_shader_engine_count_, cu->shader_engine_id() + 1);
     scratch_waves_per_se_ =
@@ -289,8 +319,9 @@ public:
     cu->set_gpu_vm(gpu_vm_);
     // Forward the shared GWS store (like set_gpu_vm above) so a CU added after the
     // store was wired joins it too; null leaves the CU on its private default store.
-    if (gws_device_)
+    if (gws_device_) {
       cu->set_gws_device(gws_device_);
+    }
     cu->set_on_idle([this]() { on_cu_idle(); });
     cu->set_on_pool_ready([this, cu]() { on_cu_pool_ready(cu); });
     on_cu_pool_ready(cu);
@@ -304,9 +335,11 @@ public:
   /// @brief WG completion notification from CU refcount reaching zero.
   void notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id);
 
-  /// @brief Cancel all replicas of a failed queue before reporting VM failure.
+  /// @brief Cancel all replicas of a failed queue, then request engine exit.
   /// @details Thread-safe publication; callbacks and cancellation execute on
   /// each CP's engine partition after its current worker batch rejoins.
+  /// Used by GWS failures. Exit is requested only after every replica
+  /// acknowledges cancellation, so callers must not request it themselves.
   void notify_execution_failure(uint32_t queue_id, uint32_t process_id, std::string reason);
 
   /// @brief Terminate a dispatch after a CU observes a non-retryable VM fault.
@@ -315,6 +348,16 @@ public:
   /// and normal dispatch completion is suppressed.
   void notify_dispatch_vm_fault(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id,
                                 VmAccessOutcome outcome);
+
+  /// @brief Fault a dispatch's queue without publishing successful completion.
+  /// @details Called outside the CU wave-state lock. Cancels all outstanding
+  /// dispatches, including earlier admitted work, and every fan-out replica.
+  /// This method does not request engine exit or wait for peer cancellation.
+  /// A fatal instruction caller requests exit before this notification;
+  /// shutdown() then drains any peer cancellations still pending. Failure
+  /// sources that require engine termination must request it themselves, or
+  /// use notify_execution_failure() to wait for all replica acknowledgements.
+  void notify_dispatch_failure(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id);
 
   void set_workgroup_id_offset(uint32_t offset) { workgroup_id_offset_ = offset; }
 
@@ -334,6 +377,23 @@ public:
   }
 
   [[nodiscard]] size_t next_cu_index() const { return next_cu_; }
+
+  /// Return the next id after wiring this XCD into its SoC.
+  [[nodiscard]] uint32_t next_dispatch_id_for_topology(uint32_t rank, uint32_t count) const {
+    return dispatch_id_base_ == rank + 1 && dispatch_id_stride_ == count ? next_dispatch_id_
+                                                                         : rank + 1;
+  }
+
+  /// Restore this XCD's sequence before queues can allocate new dispatch ids.
+  bool restore_dispatch_id_sequence(uint32_t rank, uint32_t count, uint32_t next) {
+    if (rank >= count || next < rank + 1 || (next - rank - 1) % count != 0) {
+      return false;
+    }
+    dispatch_id_base_ = rank + 1;
+    dispatch_id_stride_ = count;
+    next_dispatch_id_ = next;
+    return true;
+  }
 
   /// @brief Number of entries (@p queue_id, @p process_id) accepted on this CP.
   ///
@@ -391,6 +451,17 @@ public:
     return queue == compute_queues_.end() ? AddressSpaceHandle{} : queue->address_space;
   }
 
+  /// @brief Numeric identity namespace retained by a registered queue.
+  [[nodiscard]] std::optional<ProcessIdentityKind>
+  queue_process_identity_kind_for_test(uint32_t queue_id, uint32_t process_id) const {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    const auto queue = std::ranges::find_if(compute_queues_, [&](const ComputeQueueRecord &entry) {
+      return entry.queue_id == queue_id && entry.process_id == process_id;
+    });
+    return queue == compute_queues_.end() ? std::nullopt
+                                          : std::optional(queue->process_identity_kind);
+  }
+
   /// @brief Address-space identity carried by the first accepted queue entry.
   /// @details Test-only. The bounded history in ComputeQueueRecord lets fan-out tests
   /// inspect an entry after it has retired without retaining production work.
@@ -429,9 +500,10 @@ public:
   [[nodiscard]] size_t polled_kfd_queue_count_for_test() const {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     size_t polled = 0;
-    for (const ComputeQueueRecord &queue : compute_queues_)
+    for (const ComputeQueueRecord &queue : compute_queues_) {
       polled +=
           (queue.doorbell_mode == QueueDoorbellMode::HostPolled && !queue.fanout_replica) ? 1 : 0;
+    }
     return polled;
   }
 
@@ -446,8 +518,9 @@ public:
   /// @param stride Number of participating XCDs.
   /// @returns The next id in the same class.
   [[nodiscard]] static uint32_t step_dispatch_id(uint32_t current, uint32_t base, uint32_t stride) {
-    if (current > std::numeric_limits<uint32_t>::max() - stride)
+    if (current > std::numeric_limits<uint32_t>::max() - stride) {
       return base;
+    }
     return current + stride;
   }
 
@@ -516,6 +589,21 @@ public:
            });
   }
 
+  /// @brief Whether a completed dispatch retained its scoped cache flush after a retry.
+  /// @details Test-only. The queued entry and ordinary VM snapshot remain live while
+  /// the blocked flush has not published the grid share or completion signal.
+  [[nodiscard]] bool completion_flush_retry_pending_for_test(uint32_t queue_id,
+                                                             uint32_t process_id) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    const ComputeQueueRecord *state = find_compute_queue(queue_id, process_id);
+    if (state == nullptr || !state->publication_retry_pending || state->entries.empty()) {
+      return false;
+    }
+    const DispatchEntry &head = state->entries.front();
+    return head.fully_completed() && !head.grid_share_published &&
+           static_cast<bool>(head.completion_publication.flush_access);
+  }
+
   void drain_fanout_inbox_for_test() {
     drain_dispatch_fault_inbox();
     drain_fanout_inbox();
@@ -545,6 +633,7 @@ public:
 private:
   friend class CommandProcessorCloseTestAccess;
   friend class CommandProcessorPlacementTestAccess;
+  friend class CommandProcessorCacheTestAccess;
 
   class QueueRegistrationTransaction {
   public:
@@ -558,8 +647,10 @@ private:
   };
 
   uint64_t register_queue(ComputeQueueConfig queue, bool fanout_replica);
+  [[nodiscard]] QueuePrepareCloseStatus
+  prepare_close_queue_registration(uint64_t registration_id, QueueCloseMode mode) noexcept;
   [[nodiscard]] QueuePrepareCloseStatus close_queue_registration(uint64_t registration_id,
-                                                                 bool force) noexcept;
+                                                                 QueueCloseMode mode) noexcept;
 
   struct DispatchLaunchMetadata {
     std::array<uint32_t, 4> scratch_resource_descriptor{};
@@ -610,10 +701,19 @@ private:
   /// @brief Fetch AQL packets from a single AQL queue.
   void fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick now);
 
-  /// @brief Coarse writeback+invalidate of the GPU data caches (L1 K$/V$ + L2).
+  /// @brief Write back L2 and invalidate scalar, vector and instruction caches.
   /// @details Scalar and vector L1 are write-through and only need
-  /// invalidation. Dirty L2 data is published under the owning VMID.
-  void flush_gpu_caches();
+  /// invalidation. A supplied address space limits L2 maintenance to its VMID;
+  /// otherwise all L2 lines are published under their owning VMIDs. If the supplied
+  /// address space cannot be looked up, returns Faulted without touching any cache.
+  /// Otherwise, returns the first incomplete L2 outcome after visiting every L2
+  /// and invalidating L1/I$.
+  /// Successful writebacks remain published; failed dirty lines remain for retry.
+  /// Requires hw_queue_mutex_ and joined CU workers. CU maintenance takes each
+  /// CU's mutex to serialize with runtime snapshots, without delivering
+  /// notifications that could re-enter the CP and invalidate queue or dispatch
+  /// references.
+  [[nodiscard]] VmAccessOutcome flush_gpu_caches(AddressSpaceHandle address_space = {});
 
   /// @brief Ask ROCr to provision scratch while leaving the head packet unconsumed.
   [[nodiscard]] AqlAdmissionResult request_dynamic_scratch(ComputeQueueRecord &queue,
@@ -628,6 +728,9 @@ private:
                                                          uint64_t packet_index,
                                                          bool alternate) const;
 
+  /// @brief Invalidate the admitted AQL slot before publishing its consumer cursor.
+  [[nodiscard]] VmAccessOutcome retire_aql_packet(ComputeQueueRecord &queue,
+                                                  const DispatchEntry &entry);
   /// @brief Hold retirement until ROCr acknowledges a use-once scratch reclaim.
   [[nodiscard]] VmAccessOutcome gate_dispatch_retirement(ComputeQueueRecord &queue,
                                                          const DispatchEntry &entry);
@@ -655,7 +758,11 @@ private:
   [[nodiscard]] DispatchWorkgroupResult dispatch_workgroups(DispatchEntry &entry);
   [[nodiscard]] bool execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry &entry,
                                      simdojo::Tick now);
+  void cancel_queue_dispatches(const ComputeQueueRecord &queue);
+  void reset_ordered_ids(const ComputeQueueRecord &queue);
   void fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs);
+  void complete_failed_queue(ComputeQueueRecord &queue);
+  void drain_pending_queue_failures();
   void fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs, simdojo::Tick now);
   util::Result dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
                             const std::array<uint32_t, 4> &dimensions,
@@ -705,7 +812,6 @@ private:
     uint32_t queue_id = 0;
     uint32_t process_id = 0;
     uint64_t dispatch_id = 0;
-    VmAccessOutcome outcome;
     std::function<void()> on_cancelled = {};
   };
   void accept_dispatch_fault(DispatchFaultNotification fault);
@@ -771,8 +877,13 @@ private:
   /// transient retry is recorded on only the affected ComputeQueueRecord so unrelated
   /// queues remain runnable.
   [[nodiscard]] bool drain_completions();
-  bool fault_dispatch_local(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id,
-                            VmAccessOutcome outcome);
+  /// @brief Cancel all outstanding work on the identified queue.
+  /// @details A supplied failed_dispatch_id must be admitted or still in transit;
+  /// otherwise a delayed fault is ignored so it cannot cancel a reused queue.
+  /// std::nullopt skips this identity check. The ID does not limit cancellation
+  /// to one dispatch: either accepted form cancels the queue's outstanding work.
+  bool fault_queue_local(uint32_t queue_id, uint32_t process_id,
+                         std::optional<uint32_t> failed_dispatch_id = std::nullopt);
   /// @brief Drop cluster LDS pins collected under cluster_placements_mutex_.
   /// @warning Must run with that lock released; it reaches the CUs' wave-state lock.
   void release_cluster_lds_pins(const std::vector<std::pair<ComputeUnitCore *, uint64_t>> &unpin);
@@ -808,9 +919,10 @@ private:
   /// @brief Return total pending entries across all queues.
   size_t pending_entries() const {
     size_t total = 0;
-    for (const auto &queue : compute_queues_)
+    for (const auto &queue : compute_queues_) {
       total += queue.entries.size() + queue.dispatches.entries.size() +
                queue.commands.submissions.size();
+    }
     return total;
   }
 
@@ -819,9 +931,11 @@ private:
   /// @details Answers whether this CP's lifecycle is anchored by the VM-level
   /// primary, which a fan-out replica does anchor just as its owner does.
   bool has_kfd_queues() const {
-    for (const auto &q : compute_queues_)
-      if (q.uses_kfd_queue_abi || q.doorbell_mode == QueueDoorbellMode::HostPolled)
+    for (const auto &q : compute_queues_) {
+      if (q.uses_kfd_queue_abi || q.doorbell_mode == QueueDoorbellMode::HostPolled) {
         return true;
+      }
+    }
     return false;
   }
 
@@ -832,9 +946,11 @@ private:
   /// to the doorbell monitor must ask this rather than has_kfd_queues(), or a CP
   /// left holding only replicas keeps a monitor alive for a ring it never reads.
   bool polls_kfd_queues() const {
-    for (const auto &q : compute_queues_)
-      if (q.doorbell_mode == QueueDoorbellMode::HostPolled && !q.fanout_replica)
+    for (const auto &q : compute_queues_) {
+      if (q.doorbell_mode == QueueDoorbellMode::HostPolled && !q.fanout_replica) {
         return true;
+      }
+    }
     return false;
   }
 
@@ -862,7 +978,7 @@ private:
   // leaf mutex, never hw_queue_mutex_: a peer appends here while holding its own
   // hw_queue_mutex_, so acquiring anything else under this one would reintroduce
   // the cross-CP lock cycle it exists to avoid.
-  std::mutex fanout_inbox_mutex_;
+  mutable std::mutex fanout_inbox_mutex_;
   std::vector<DispatchEntry> fanout_inbox_;
   std::unordered_map<uint32_t, DispatchLaunchMetadata> fanout_launch_metadata_inbox_;
 
@@ -901,6 +1017,16 @@ private:
   std::atomic<uint64_t> dispatched_workgroups_{0};
   simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
   uint32_t dispatch_threads_ = 1;
+  /// Protected by hw_queue_mutex_; true only while the CU batch owns its workers.
+  bool dispatch_workers_active_ = false;
+  /// Queue registration IDs whose waves are cancelled but whose cache maintenance
+  /// and submission callbacks must wait for the CU worker join. Protected by
+  /// hw_queue_mutex_; queue_structure_mutex_ keeps their registrations alive.
+  /// The normal batch drains these IDs before releasing the shared structure lock.
+  /// If CpuDispatchPool::run() rethrows a host exception after joining, the handler
+  /// unwinds before that drain. Close, a later queue failure, or shutdown must then
+  /// finish the deferred work before releasing the queue's submission backing.
+  std::vector<uint64_t> pending_queue_failures_;
   CpuDispatchPool *shared_dispatch_pool_ = nullptr;
   std::unique_ptr<CpuDispatchPool> local_dispatch_pool_;
   std::vector<ComputeUnitCore *> active_cu_scratch_;
@@ -916,8 +1042,13 @@ private:
   struct PendingClusterBarrierCompletion {
     uint32_t dispatch_id = 0;
     uint8_t completion_bit = 0;
+    uint64_t generation = 0; ///< The round that completed.
     std::vector<std::pair<ComputeUnitCore *, uint32_t>> peers;
   };
+  /// Complete a cluster round on each peer workgroup and report it to plugins.
+  void
+  complete_cluster_barrier_round(uint32_t dispatch_id, uint8_t completion_bit, uint64_t generation,
+                                 std::span<const std::pair<ComputeUnitCore *, uint32_t>> peers);
   std::vector<PendingClusterBarrierCompletion> pending_cluster_barrier_completions_;
 
   class ClusterWorkgroupPlacement {
@@ -947,6 +1078,8 @@ private:
     uint32_t member_count = 0;
     std::unordered_set<uint32_t> registered_workgroups;
     std::array<std::unordered_set<uint32_t>, 2> signaled_workgroups;
+    /// The current round of the cluster barrier and cluster trap barrier.
+    std::array<uint64_t, 2> generation{};
   };
   std::unordered_map<uint64_t, ClusterBarrierState> cluster_barriers_;
 
@@ -1010,7 +1143,9 @@ private:
   /// @details Serialized by doorbell_thread_mutex_. Caller MUST NOT hold
   /// hw_queue_mutex_ so lifecycle operations consistently acquire
   /// doorbell_thread_mutex_ before hw_queue_mutex_.
-  void ensure_doorbell_monitor();
+  /// Startup failures are fatal: registrations are already visible, and KFD
+  /// must not recover with a live queue whose registration handle was lost.
+  void ensure_doorbell_monitor() noexcept;
   bool scan_doorbells();
   bool schedule_retry_event();
 

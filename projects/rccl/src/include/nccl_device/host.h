@@ -76,6 +76,12 @@ typedef struct ncclDevCommRequirements {
 
   int cftCaps; // Bitmask of ncclCftCap_t values
   int cftBarrierCount;
+
+  // List of ginCustomArrayCount world ranks to connect to. Only valid if ginConnectionType
+  // is NCCL_GIN_CONNECTION_CUSTOM_ARRAY. Both ranks of a pair must request the connection (peer j
+  // appearing in rank i's ginCustomArray requires peer i to appear in rank j's ginCustomArray).
+  int* ginCustomArray;
+  int ginCustomArrayCount;
 } ncclDevCommRequirements_t;
 
 // clang-format off: maintain hand-formatted code
@@ -107,6 +113,8 @@ typedef struct ncclDevCommRequirements {
     false,                                       /* useRuntimeVersion */        \
     NCCL_CFT_NONE,                               /* cftCaps */                 \
     0,                                           /* cftBarrierCount */         \
+    NULL,                                        /* ginCustomArray */         \
+    0,                                           /* ginCustomArrayCount */    \
 }
 // clang-format on
 
@@ -144,6 +152,8 @@ typedef struct ncclCommProperties {
 // this header) silently misreads every field from ginType onward.
 // See AICOMRCCL-1530 and bindings/nccl4py/tests/test_comm_properties_abi.py,
 // which guards the same layout on the Python/Cython side.
+// C99 has no static_assert; librccl and every C++ consumer still check these.
+#ifdef __cplusplus
 static_assert(sizeof(ncclGinType_t) == sizeof(int),
               "ncclGinType_t must remain a plain 4-byte C enum; nccl4py's cynccl.pxd "
               "binding assumes this size (AICOMRCCL-1530)");
@@ -176,6 +186,7 @@ static_assert(offsetof(ncclCommProperties_t, cftCountedSupport) == 146,
               "and bindings/nccl4py/tests/test_comm_properties_abi.py to match");
 static_assert(sizeof(ncclCommProperties_t) == 152, "ncclCommProperties_t size changed; update nccl4py's cynccl.pxd and "
                                                    "bindings/nccl4py/tests/test_comm_properties_abi.py to match");
+#endif // __cplusplus
 
 #define NCCL_COMM_PROPERTIES_INITIALIZER \
   { \

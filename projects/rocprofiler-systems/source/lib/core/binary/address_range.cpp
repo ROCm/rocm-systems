@@ -75,19 +75,6 @@ address_range::contains(address_range _v) const
 }
 
 bool
-address_range::overlaps(address_range _v) const
-{
-    if(contains(_v))
-    {
-        return false;
-    }
-    const std::int64_t _lhs_diff = (high - low);
-    const std::int64_t _rhs_diff = (_v.high - _v.low);
-    const std::int64_t _diff     = (std::max(high, _v.high) - std::min(low, _v.low));
-    return (_diff < (_lhs_diff + _rhs_diff));
-}
-
-bool
 address_range::contiguous_with(address_range _v) const
 {
     return (_v.low == high || low == _v.high);

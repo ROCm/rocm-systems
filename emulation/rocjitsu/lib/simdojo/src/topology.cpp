@@ -7,7 +7,6 @@
 #include <cassert>
 #include <numeric>
 #include <random>
-#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -15,72 +14,87 @@ namespace simdojo {
 
 namespace {
 
-Component *resolve_comp(CompositeComponent *root, const std::string &path) {
+util::FailureOr<Component *> resolve_comp(CompositeComponent *root, const std::string &path,
+                                          util::DiagnosticEmitter emit_error) {
   Component *cur = root;
   size_t pos = 0;
   while (pos < path.size()) {
     auto dot = path.find('.', pos);
     auto seg = (dot == std::string::npos) ? path.substr(pos) : path.substr(pos, dot - pos);
     pos = (dot == std::string::npos) ? path.size() : dot + 1;
-    if (!cur->is_composite())
-      throw std::runtime_error("Path '" + path + "': '" + cur->name() + "' not composite");
+    if (!cur->is_composite()) {
+      return emit_error.emit() << "Path '" << path << "': '" << cur->name() << "' not composite";
+    }
     auto *c = static_cast<CompositeComponent *>(cur);
     auto *ch = c->find_child(seg);
-    if (!ch)
-      throw std::runtime_error("Path '" + path + "': '" + seg + "' not found in '" + c->name() +
-                               "'");
+    if (!ch) {
+      return emit_error.emit() << "Path '" << path << "': '" << seg << "' not found in '"
+                               << c->name() << "'";
+    }
     cur = ch;
   }
   return cur;
 }
 
 Port *find_or_create_port(Component *comp, const std::string &name) {
-  for (auto &p : comp->ports())
-    if (p->name() == name)
+  for (auto &p : comp->ports()) {
+    if (p->name() == name) {
       return p.get();
+    }
+  }
 
   auto dir = PortDirection::OUT;
   auto proto = PortProtocol::UNTYPED;
 
   // Direction inference: req = OUT (requester), cpl = IN (completer).
-  if (name.starts_with("peer_req"))
+  if (name.starts_with("peer_req")) {
     dir = PortDirection::OUT;
-  else if (name.starts_with("peer_cpl"))
+  } else if (name.starts_with("peer_cpl")) {
     dir = PortDirection::IN;
-  else if (name.find("cpl") != std::string::npos)
+  } else if (name.find("cpl") != std::string::npos) {
     dir = PortDirection::IN;
-  else if (name.find("req") != std::string::npos)
+  } else if (name.find("req") != std::string::npos) {
     dir = PortDirection::OUT;
-  else if (name.find("_in") != std::string::npos || name.find("in_") != std::string::npos)
+  } else if (name.find("_in") != std::string::npos || name.find("in_") != std::string::npos) {
     dir = PortDirection::IN;
-  else if (name.find("_out") != std::string::npos || name.find("out_") != std::string::npos)
+  } else if (name.find("_out") != std::string::npos || name.find("out_") != std::string::npos) {
     dir = PortDirection::OUT;
+  }
 
   // Protocol inference.
   // req/cpl ports default to UNTYPED so they can match any link partner
   // (dispatch or memory). Stronger signals override when present.
-  if (name.find("adj") != std::string::npos)
+  if (name.find("adj") != std::string::npos) {
     proto = PortProtocol::UNTYPED;
-  else if (name.find("dispatch") != std::string::npos)
+  } else if (name.find("dispatch") != std::string::npos) {
     proto = PortProtocol::DISPATCH;
-  else if (name.find("hbm") != std::string::npos || name.find("mem") != std::string::npos ||
-           name.find("l2") != std::string::npos || name.find("fabric") != std::string::npos ||
-           name.find("xcd") != std::string::npos)
+  } else if (name.find("hbm") != std::string::npos || name.find("mem") != std::string::npos ||
+             name.find("l2") != std::string::npos || name.find("fabric") != std::string::npos ||
+             name.find("xcd") != std::string::npos) {
     proto = PortProtocol::MEMORY;
+  }
 
   auto pid = static_cast<PortID>(comp->ports().size());
   return comp->add_port(std::make_unique<Port>(name, pid, comp, dir, proto));
 }
 
-Port *resolve_port_impl(CompositeComponent *root, const std::string &path) {
+util::FailureOr<Port *> resolve_port_impl(CompositeComponent *root, const std::string &path,
+                                          util::DiagnosticEmitter emit_error) {
   auto last = path.rfind('.');
-  if (last == std::string::npos)
-    throw std::runtime_error("Port path needs '.': " + path);
-  auto *comp = resolve_comp(root, path.substr(0, last));
+  if (last == std::string::npos) {
+    return emit_error.emit() << "Port path needs '.': " << path;
+  }
+  auto maybe_comp = resolve_comp(root, path.substr(0, last), emit_error);
+  if (maybe_comp.failed()) {
+    return util::Result::failure();
+  }
+  auto *comp = maybe_comp.value();
   auto pn = path.substr(last + 1);
-  for (auto &p : comp->ports())
-    if (p->name() == pn)
+  for (auto &p : comp->ports()) {
+    if (p->name() == pn) {
       return p.get();
+    }
+  }
   return find_or_create_port(comp, pn);
 }
 
@@ -98,9 +112,14 @@ void validate_link_ports([[maybe_unused]] Port *src, [[maybe_unused]] Port *dst)
 
 } // namespace
 
-ClockDomain *Topology::add_clock_domain(std::string name, uint64_t frequency_hz,
-                                        Tick phase_offset) {
-  auto domain = std::make_unique<ClockDomain>(std::move(name), frequency_hz, phase_offset);
+util::FailureOr<ClockDomain *> Topology::add_clock_domain(std::string name, uint64_t frequency_hz,
+                                                          Tick phase_offset,
+                                                          util::DiagnosticEmitter emit_error) {
+  auto maybe_domain = ClockDomain::create(std::move(name), frequency_hz, phase_offset, emit_error);
+  if (maybe_domain.failed()) {
+    return util::Result::failure();
+  }
+  auto domain = std::make_unique<ClockDomain>(std::move(maybe_domain.value()));
   ClockDomain *raw = domain.get();
   clock_domains_.push_back(std::move(domain));
   return raw;
@@ -141,8 +160,9 @@ std::pair<Link *, Link *> Topology::add_bidirectional_link(Port *a_out, Port *b_
 
 std::vector<Component *> Topology::collect_all_components() const {
   std::vector<Component *> result;
-  if (root_ != nullptr)
+  if (root_ != nullptr) {
     root_->collect_components(result);
+  }
   return result;
 }
 
@@ -150,44 +170,69 @@ void Topology::append_link_endpoint_owners(std::vector<Component *> &components)
   std::unordered_set<Component *> collected(components.begin(), components.end());
   for (const auto &link : links_) {
     for (Component *owner : {link->src()->owner(), link->dst()->owner()}) {
-      if (owner && collected.insert(owner).second)
+      if (owner && collected.insert(owner).second) {
         components.push_back(owner);
+      }
     }
   }
 }
 
 uint32_t Topology::num_components() const {
-  if (!root_)
+  if (!root_) {
     return 0;
+  }
   return root_->is_composite()
              ? static_cast<CompositeComponent *>(root_.get())->num_descendants() + 1
              : 1;
 }
 
-Component *Topology::resolve_component(const std::string &path) const {
-  if (!root_)
-    throw std::runtime_error("resolve_component: topology has no root");
-  return resolve_comp(root_.get(), path);
+util::FailureOr<Component *> Topology::resolve_component(const std::string &path,
+                                                         util::DiagnosticEmitter emit_error) const {
+  if (!root_) {
+    return emit_error.emit() << "resolve_component: topology has no root";
+  }
+  return resolve_comp(root_.get(), path, emit_error);
 }
 
-Port *Topology::resolve_port(const std::string &path) const {
-  if (!root_)
-    throw std::runtime_error("resolve_port: topology has no root");
-  return resolve_port_impl(root_.get(), path);
+util::FailureOr<Port *> Topology::resolve_port(const std::string &path,
+                                               util::DiagnosticEmitter emit_error) const {
+  if (!root_) {
+    return emit_error.emit() << "resolve_port: topology has no root";
+  }
+  return resolve_port_impl(root_.get(), path, emit_error);
 }
 
-void Topology::wire_links(const std::vector<LinkSpec> &specs, ExecMode mode) {
-  for (auto &ls : specs) {
-    auto *sp = resolve_port_impl(root_.get(), ls.src);
-    auto *dp = resolve_port_impl(root_.get(), ls.dst);
-    auto *link = add_link(sp, dp, ls.latency, ls.weight);
+util::Result Topology::wire_links(const std::vector<LinkSpec> &specs, ExecMode mode,
+                                  util::DiagnosticEmitter emit_error) {
+  // Resolve every component and validate every path before creating ports or links.
+  if (!root_) {
+    return emit_error.emit() << "wire_links: topology has no root";
+  }
+  for (const auto &ls : specs) {
+    for (const auto *path : {&ls.src, &ls.dst}) {
+      auto last = path->rfind('.');
+      if (last == std::string::npos) {
+        return emit_error.emit() << "Port path needs '.': " << *path;
+      }
+      if (resolve_comp(root_.get(), path->substr(0, last), emit_error).failed()) {
+        return util::Result::failure();
+      }
+    }
+  }
+  for (const auto &ls : specs) {
+    auto sp = resolve_port_impl(root_.get(), ls.src, emit_error);
+    auto dp = resolve_port_impl(root_.get(), ls.dst, emit_error);
+    assert(sp.succeeded() && dp.succeeded() && "paths validated above");
+    auto *link = add_link(sp.value(), dp.value(), ls.latency, ls.weight);
     link->set_exec_mode(mode);
   }
+  return util::Result::success();
 }
 
 void Topology::dfs_visit(std::function<void(Component *, uint32_t)> visitor) const {
-  if (root_ == nullptr)
+  if (root_ == nullptr) {
     return;
+  }
 
   struct Frame {
     Component *comp;
@@ -212,9 +257,11 @@ void Topology::dfs_visit(std::function<void(Component *, uint32_t)> visitor) con
   }
 }
 
-void Topology::partition_balanced(uint32_t num_partitions) {
-  if (num_partitions == 0)
-    throw std::invalid_argument("partition_balanced: num_partitions must be nonzero");
+util::Result Topology::partition_balanced(uint32_t num_partitions,
+                                          util::DiagnosticEmitter emit_error) {
+  if (num_partitions == 0) {
+    return emit_error.emit() << "partition_balanced: num_partitions must be nonzero";
+  }
 
   auto components = collect_all_components();
   append_link_endpoint_owners(components);
@@ -227,11 +274,12 @@ void Topology::partition_balanced(uint32_t num_partitions) {
       comp->set_partition_id(0);
       part.total_weight += comp->weight();
     }
-    for (auto &link : links_)
+    for (auto &link : links_) {
       part.internal_links.push_back(link.get());
+    }
     partitions_.clear();
     partitions_.push_back(std::move(part));
-    return;
+    return util::Result::success();
   }
 
   auto adj = AdjacencyGraph::build(components, links_);
@@ -241,12 +289,18 @@ void Topology::partition_balanced(uint32_t num_partitions) {
   partitions_ = partitioner.partition(adj);
 
   classify_links();
+  return util::Result::success();
 }
 
-void Topology::partition_manual(uint32_t num_partitions,
-                                std::function<PartitionID(Component *)> assigner) {
-  if (num_partitions == 0)
-    throw std::invalid_argument("partition_manual: num_partitions must be nonzero");
+util::Result Topology::partition_manual(uint32_t num_partitions,
+                                        std::function<PartitionID(Component *)> assigner,
+                                        util::DiagnosticEmitter emit_error) {
+  if (num_partitions == 0) {
+    return emit_error.emit() << "partition_manual: num_partitions must be nonzero";
+  }
+  if (!assigner) {
+    return emit_error.emit() << "partition_manual: assigner must be set";
+  }
 
   auto components = collect_all_components();
   append_link_endpoint_owners(components);
@@ -255,14 +309,16 @@ void Topology::partition_manual(uint32_t num_partitions,
   assignments.reserve(components.size());
   for (auto *comp : components) {
     PartitionID pid = assigner(comp);
-    if (pid >= num_partitions)
-      throw std::invalid_argument("partition_manual: assigner returned out-of-range ID");
+    if (pid >= num_partitions) {
+      return emit_error.emit() << "partition_manual: assigner returned out-of-range ID";
+    }
     assignments.push_back(pid);
   }
 
   std::vector<Partition> partitions(num_partitions);
-  for (uint32_t i = 0; i < num_partitions; ++i)
+  for (uint32_t i = 0; i < num_partitions; ++i) {
     partitions[i].id = i;
+  }
 
   for (size_t i = 0; i < components.size(); ++i) {
     auto *comp = components[i];
@@ -271,11 +327,13 @@ void Topology::partition_manual(uint32_t num_partitions,
     partitions[pid].total_weight += comp->weight();
   }
 
-  for (size_t i = 0; i < components.size(); ++i)
+  for (size_t i = 0; i < components.size(); ++i) {
     components[i]->set_partition_id(assignments[i]);
+  }
 
   partitions_ = std::move(partitions);
   classify_links();
+  return util::Result::success();
 }
 
 void Topology::classify_links() {
@@ -311,13 +369,15 @@ AdjacencyGraph AdjacencyGraph::build(const std::vector<Component *> &components,
   for (auto &link : links) {
     Component *src_comp = link->src()->owner();
     Component *dst_comp = link->dst()->owner();
-    if (src_comp == dst_comp)
+    if (src_comp == dst_comp) {
       continue;
+    }
 
     auto src_it = id_to_index.find(src_comp->id());
     auto dst_it = id_to_index.find(dst_comp->id());
-    if (src_it == id_to_index.end() || dst_it == id_to_index.end())
+    if (src_it == id_to_index.end() || dst_it == id_to_index.end()) {
       continue;
+    }
 
     uint32_t si = src_it->second;
     uint32_t di = dst_it->second;
@@ -333,17 +393,20 @@ AdjacencyGraph AdjacencyGraph::build(const std::vector<Component *> &components,
 std::vector<Partition> Partitioner::partition(AdjacencyGraph &graph) {
   std::vector<PartitionID> assignment(graph.num_nodes, 0);
 
-  if (config_.num_partitions > 1)
+  if (config_.num_partitions > 1) {
     recursive_bisect(graph, assignment, 0, config_.num_partitions);
+  }
 
   // Assign partition IDs to components.
-  for (uint32_t i = 0; i < graph.num_nodes; ++i)
+  for (uint32_t i = 0; i < graph.num_nodes; ++i) {
     graph.index_to_component[i]->set_partition_id(assignment[i]);
+  }
 
   // Build Partition structs.
   std::vector<Partition> partitions(config_.num_partitions);
-  for (uint32_t p = 0; p < config_.num_partitions; ++p)
+  for (uint32_t p = 0; p < config_.num_partitions; ++p) {
     partitions[p].id = p;
+  }
 
   for (uint32_t i = 0; i < graph.num_nodes; ++i) {
     PartitionID pid = assignment[i];
@@ -356,8 +419,9 @@ std::vector<Partition> Partitioner::partition(AdjacencyGraph &graph) {
 
 void Partitioner::recursive_bisect(AdjacencyGraph &graph, std::vector<PartitionID> &assignment,
                                    PartitionID base_id, uint32_t num_parts) {
-  if (num_parts <= 1)
+  if (num_parts <= 1) {
     return;
+  }
 
   // Multilevel FM bisection.
   std::vector<uint8_t> bisect(graph.num_nodes, 0);
@@ -370,8 +434,9 @@ void Partitioner::recursive_bisect(AdjacencyGraph &graph, std::vector<PartitionI
     levels.push_back(coarsen(current));
     current = levels.back().graph;
     // Stop if coarsening made no progress (e.g., isolated nodes).
-    if (current.num_nodes == levels.back().fine_to_coarse.size())
+    if (current.num_nodes == levels.back().fine_to_coarse.size()) {
       break;
+    }
   }
 
   // Initial bisection on the coarsest graph.
@@ -429,8 +494,9 @@ void Partitioner::recursive_bisect(AdjacencyGraph &graph, std::vector<PartitionI
       uint32_t oi = indices[ni];
       for (auto &[neighbor, w] : graph.adjacency[oi]) {
         auto it = old_to_new.find(neighbor);
-        if (it != old_to_new.end())
+        if (it != old_to_new.end()) {
           sub.adjacency[ni].emplace_back(it->second, w);
+        }
       }
     }
     return sub;
@@ -440,16 +506,18 @@ void Partitioner::recursive_bisect(AdjacencyGraph &graph, std::vector<PartitionI
     auto left_graph = build_subgraph(left_indices);
     std::vector<PartitionID> left_assign(left_graph.num_nodes, 0);
     recursive_bisect(left_graph, left_assign, base_id, left_parts);
-    for (uint32_t ni = 0; ni < left_graph.num_nodes; ++ni)
+    for (uint32_t ni = 0; ni < left_graph.num_nodes; ++ni) {
       assignment[left_indices[ni]] = left_assign[ni];
+    }
   }
 
   if (right_parts > 1) {
     auto right_graph = build_subgraph(right_indices);
     std::vector<PartitionID> right_assign(right_graph.num_nodes, 0);
     recursive_bisect(right_graph, right_assign, base_id + left_parts, right_parts);
-    for (uint32_t ni = 0; ni < right_graph.num_nodes; ++ni)
+    for (uint32_t ni = 0; ni < right_graph.num_nodes; ++ni) {
       assignment[right_indices[ni]] = right_assign[ni];
+    }
   }
 }
 
@@ -470,8 +538,9 @@ Partitioner::CoarsenLevel Partitioner::coarsen(const AdjacencyGraph &graph) {
   uint32_t coarse_id = 0;
 
   for (uint32_t idx : order) {
-    if (matched[idx])
+    if (matched[idx]) {
       continue;
+    }
 
     // Find the heaviest unmatched neighbor.
     uint32_t best_neighbor = UINT32_MAX;
@@ -497,8 +566,9 @@ Partitioner::CoarsenLevel Partitioner::coarsen(const AdjacencyGraph &graph) {
 
   // Build coarse-to-fine mapping.
   level.coarse_to_fine.resize(coarse_id);
-  for (uint32_t i = 0; i < n; ++i)
+  for (uint32_t i = 0; i < n; ++i) {
     level.coarse_to_fine[level.fine_to_coarse[i]].push_back(i);
+  }
 
   // Build coarse graph.
   AdjacencyGraph &cg = level.graph;
@@ -509,8 +579,9 @@ Partitioner::CoarsenLevel Partitioner::coarsen(const AdjacencyGraph &graph) {
 
   // Coarse node weights = sum of fine node weights.
   for (uint32_t ci = 0; ci < coarse_id; ++ci) {
-    for (uint32_t fi : level.coarse_to_fine[ci])
+    for (uint32_t fi : level.coarse_to_fine[ci]) {
       cg.node_weights[ci] += graph.node_weights[fi];
+    }
     // Representative component (first fine node).
     cg.index_to_component[ci] = graph.index_to_component[level.coarse_to_fine[ci][0]];
   }
@@ -520,8 +591,9 @@ Partitioner::CoarsenLevel Partitioner::coarsen(const AdjacencyGraph &graph) {
     uint32_t ci = level.fine_to_coarse[fi];
     for (auto &[neighbor, w] : graph.adjacency[fi]) {
       uint32_t cn = level.fine_to_coarse[neighbor];
-      if (ci == cn)
+      if (ci == cn) {
         continue;
+      }
 
       // Check if edge already exists (linear scan, fine for small graphs).
       bool found = false;
@@ -532,8 +604,9 @@ Partitioner::CoarsenLevel Partitioner::coarsen(const AdjacencyGraph &graph) {
           break;
         }
       }
-      if (!found)
+      if (!found) {
         cg.adjacency[ci].emplace_back(cn, w);
+      }
     }
   }
 
@@ -544,8 +617,9 @@ void Partitioner::fm_bisect(const AdjacencyGraph &graph, std::vector<uint8_t> &a
   uint32_t n = graph.num_nodes;
   assignment.resize(n, 0);
 
-  if (n <= 1)
+  if (n <= 1) {
     return;
+  }
 
   // Greedy initial assignment: assign to the lighter side, sorted by degree.
   // Sort nodes by degree (descending) for better initial balance.
@@ -570,15 +644,17 @@ void Partitioner::fm_bisect(const AdjacencyGraph &graph, std::vector<uint8_t> &a
   // FM refinement passes.
   for (uint32_t pass = 0; pass < config_.fm_max_passes; ++pass) {
     int64_t improvement = fm_refine(graph, assignment);
-    if (improvement <= 0)
+    if (improvement <= 0) {
       break;
+    }
   }
 }
 
 int64_t Partitioner::fm_refine(const AdjacencyGraph &graph, std::vector<uint8_t> &assignment) {
   uint32_t n = graph.num_nodes;
-  if (n <= 1)
+  if (n <= 1) {
     return 0;
+  }
 
   // Compute partition weights.
   uint64_t total_weight = 0;
@@ -599,10 +675,11 @@ int64_t Partitioner::fm_refine(const AdjacencyGraph &graph, std::vector<uint8_t>
     int64_t external = 0;
     int64_t internal = 0;
     for (auto &[neighbor, w] : graph.adjacency[i]) {
-      if (assignment[neighbor] != assignment[i])
+      if (assignment[neighbor] != assignment[i]) {
         external += w;
-      else
+      } else {
         internal += w;
+      }
     }
     gain[i] = external - internal;
   }
@@ -619,16 +696,18 @@ int64_t Partitioner::fm_refine(const AdjacencyGraph &graph, std::vector<uint8_t>
     uint32_t best_node = UINT32_MAX;
 
     for (uint32_t i = 0; i < n; ++i) {
-      if (locked[i])
+      if (locked[i]) {
         continue;
+      }
 
       uint8_t from = assignment[i];
       uint8_t to = 1 - from;
 
       // Check balance: would moving i violate the constraint?
       uint64_t new_to_weight = part_weight[to] + graph.node_weights[i];
-      if (new_to_weight > max_allowed)
+      if (new_to_weight > max_allowed) {
         continue;
+      }
 
       if (gain[i] > best_gain) {
         best_gain = gain[i];
@@ -636,8 +715,9 @@ int64_t Partitioner::fm_refine(const AdjacencyGraph &graph, std::vector<uint8_t>
       }
     }
 
-    if (best_node == UINT32_MAX)
+    if (best_node == UINT32_MAX) {
       break;
+    }
 
     // Move best_node.
     uint8_t from = assignment[best_node];
@@ -653,8 +733,9 @@ int64_t Partitioner::fm_refine(const AdjacencyGraph &graph, std::vector<uint8_t>
 
     // Update neighbors' gains.
     for (auto &[neighbor, w] : graph.adjacency[best_node]) {
-      if (locked[neighbor])
+      if (locked[neighbor]) {
         continue;
+      }
 
       // If neighbor is now on the same side as best_node's new side,
       // the edge became internal (gain decreases for neighbor).
@@ -667,8 +748,9 @@ int64_t Partitioner::fm_refine(const AdjacencyGraph &graph, std::vector<uint8_t>
     }
   }
 
-  if (move_sequence.empty())
+  if (move_sequence.empty()) {
     return 0;
+  }
 
   // Find the prefix with the best cumulative gain.
   auto best_it = std::ranges::max_element(cumulative_gain);
@@ -676,15 +758,17 @@ int64_t Partitioner::fm_refine(const AdjacencyGraph &graph, std::vector<uint8_t>
 
   if (best_total_gain <= 0) {
     // Undo all moves.
-    for (auto it = move_sequence.rbegin(); it != move_sequence.rend(); ++it)
+    for (auto it = move_sequence.rbegin(); it != move_sequence.rend(); ++it) {
       assignment[*it] = 1 - assignment[*it];
+    }
     return 0;
   }
 
   // Undo moves after the best prefix.
   size_t best_prefix = static_cast<size_t>(best_it - cumulative_gain.begin()) + 1;
-  for (size_t i = move_sequence.size(); i > best_prefix; --i)
+  for (size_t i = move_sequence.size(); i > best_prefix; --i) {
     assignment[move_sequence[i - 1]] = 1 - assignment[move_sequence[i - 1]];
+  }
 
   return best_total_gain;
 }
@@ -694,8 +778,9 @@ void Partitioner::uncoarsen(const CoarsenLevel &level,
                             std::vector<uint8_t> &fine_assignment) {
   uint32_t fine_n = static_cast<uint32_t>(level.fine_to_coarse.size());
   fine_assignment.resize(fine_n);
-  for (uint32_t i = 0; i < fine_n; ++i)
+  for (uint32_t i = 0; i < fine_n; ++i) {
     fine_assignment[i] = coarse_assignment[level.fine_to_coarse[i]];
+  }
 }
 
 uint64_t Partitioner::compute_cut(const AdjacencyGraph &graph,
@@ -703,8 +788,9 @@ uint64_t Partitioner::compute_cut(const AdjacencyGraph &graph,
   uint64_t cut = 0;
   for (uint32_t i = 0; i < graph.num_nodes; ++i) {
     for (auto &[neighbor, w] : graph.adjacency[i]) {
-      if (assignment[i] != assignment[neighbor])
+      if (assignment[i] != assignment[neighbor]) {
         cut += w;
+      }
     }
   }
   return cut / 2; // Each edge counted twice.

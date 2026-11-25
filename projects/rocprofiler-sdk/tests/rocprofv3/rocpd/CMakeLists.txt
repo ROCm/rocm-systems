@@ -219,6 +219,21 @@ rocprofiler_add_integration_execute_test(
     FIXTURES_SETUP rocprofv3-test-rocpd-generation
     FIXTURES_REQUIRED rocprofv3-test-rocpd)
 
+# Default summary (no category filtering, not by rank)
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-summary-default
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd summary -f csv -d
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-default -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-generation
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
+
 #########################################################################################
 #
 # Region category filtering tests
@@ -325,6 +340,24 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests;rocpd"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)
 
+# Validate time-window handling against the rocprofv3-generated database
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-rocpd-time-window
+    TEST_PATHS
+    COPY conftest.py validate.py
+    CONFIG pytest.ini
+    BUNDLE_TESTS
+    ARGS validate.py::test_time_window_rejects_disjoint_range
+         validate.py::test_time_window_clamps_start_before_trace --db-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    TIMEOUT 60
+    LABELS "integration-tests;rocpd;time-window"
+    PYTHON_PATH
+        "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+        LIBRARY_PATH
+        "${rocprofiler-sdk_LIB_DIR}"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
+
 # Validate kernel name format tests (truncated, mangled)
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-rocpd-kernel-name-validation
@@ -337,11 +370,11 @@ rocprofiler_add_integration_validate_test(
          --json-input
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.json
          --csv-input-summary
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_kernels_summary.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_kernels_summary_by_rank.csv
          --csv-input-truncated
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_trunc_kernels_summary.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_trunc_kernels_summary_by_rank.csv
          --csv-input-mangled
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_mangled_kernels_summary.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_mangled_kernels_summary_by_rank.csv
     TIMEOUT 60
     LABELS "integration-tests;rocpd;kernel-name"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)
@@ -370,6 +403,55 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 60
     LABELS "integration-tests;rocpd;region-category"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-region-category)
+
+# Validate default summary contents and --summary-by-rank files output
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-rocpd-summary-validation
+    TEST_PATHS
+    COPY conftest.py validate.py
+    CONFIG pytest.ini
+    BUNDLE_TESTS
+    ARGS validate.py::test_summary_markers_default
+         validate.py::test_summary_by_rank_files
+         validate.py::test_summary_by_rank_no_mpi_rank
+         --summary-markers-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-default/out_marker_summary.csv
+         --summary-files-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_files.csv
+         --summary-files-expected
+         out
+         --summary-kernels-by-rank-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_kernels_summary_by_rank.csv
+         --summary-markers-by-rank-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_marker_summary_by_rank.csv
+    TIMEOUT 60
+    LABELS "integration-tests;rocpd"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)
+
+# Validate --summary-by-rank files output for multiple processes
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-rocpd-summary-validation-multiproc
+    TEST_PATHS
+    COPY conftest.py validate.py
+    CONFIG pytest.ini
+    BUNDLE_TESTS
+    ARGS validate.py::test_summary_by_rank_files
+         validate.py::test_summary_by_rank_files_rank_and_pid_match_kernels
+         validate.py::test_summary_by_rank_kernel_rank
+         validate.py::test_summary_by_rank_marker_rank
+         --summary-files-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-test/summary/out_mp_files.csv
+         --summary-files-expected
+         out_mp_0
+         out_mp_1
+         --summary-kernels-by-rank-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-test/summary/out_mp_kernels_summary_by_rank.csv
+         --summary-markers-by-rank-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-test/summary/out_mp_marker_summary_by_rank.csv
+    TIMEOUT 60
+    LABELS "integration-tests;rocpd"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-summary-generation-multiproc
+    DISABLED "${MULTIPROC_IS_DISABLED}")
 
 #########################################################################################
 #

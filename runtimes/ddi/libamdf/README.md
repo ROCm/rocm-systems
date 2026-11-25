@@ -12,9 +12,12 @@ The Rust modules are private implementation details.
 
 ## Runtime model
 
-An instance owns a rocddi session. Creating an instance, enumerating endpoints,
-and opening an endpoint do not activate a GPU. Device creation activates an
-endpoint for execution. CPU memory services work without an available GPU.
+The private `AmdfSession` owner implements each public `amdf_instance_t`. It
+extends a rocddi session through composition with the AMDF allocator policy,
+public child borrows, scopes, IDs, and service attachments. Native admission,
+resource dependencies, process identity, and retirement stay in rocddi.
+Creating an instance, enumerating endpoints, and opening an endpoint do not
+activate a GPU. Device creation activates an endpoint for execution. CPU memory services work without an available GPU.
 Endpoint host NUMA locality is a passive OS hint captured at `endpoint_open`;
 it does not publish a CPU endpoint or determine caller CPU affinity. The host
 profiling clock is a stateless observation service. A host mapping retains its
@@ -25,6 +28,27 @@ The instance's `native_lifetime` selects a process-owned or instance-owned
 driver context. On Linux KFD, PROCESS can reuse the primary connection;
 INSTANCE GPU activation requires a secondary context supported by KFD UAPI
 1.19 or newer.
+Each instance owns its own rocddi session and teardown state. A busy or failed
+destruction attempt on one instance does not close another instance. Native
+teardown failures retain the affected public instance for a destruction retry;
+there is no process-wide AMDF init or shutdown reference count. Both frontends
+and native session retirement use rocddi's `RetainOnDrop` ownership guard when
+cleanup cannot prove release. Public handle consumption and retry rules stay
+with the AMDF adapter. See the
+[frontend session model](../../docs/architecture.md#frontend-sessions).
+
+An inherited AMDF instance and its children remain owned by their creating
+process. On Linux, stateful calls in a fork child return
+`AMDF_STATUS_CODE_FAILED_PRECONDITION` before entering copied frontend locks,
+allocator callbacks, or native operations. Immutable cached metadata queries
+remain available under their existing no-syscall contracts; any addresses in
+those records cannot be used for GPU work in the child. `amdf_query_api` stays
+inert. New passive instances may be created after `fork`, but an image that
+created an instance before the fork refuses GPU activation until the child
+executes a new image. Applications should `exec` or `_exit` promptly in
+the child rather than treating a copied instance as a fresh one.
+If an allocator or other application callback calls `fork`, its child must
+`exec` or `_exit` before returning into the inherited provider call.
 
 The CMake build stages `libamdf.a` and a `libamdf.so` alias of the shared image
 that also exports HSA. Each ABI owns a separate rocddi session and public

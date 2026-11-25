@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/isa/instruction.h"
 
@@ -25,18 +26,18 @@ enum class ScalarSop2Op {
 /// @details These builders are used for patch-time code emission, so the
 /// architecture-specific opcode mapping lives with the instruction packers
 /// instead of the static recovery matcher.
-[[nodiscard]] std::optional<uint8_t> scalar_sop2_opcode(rj_code_arch_t arch, ScalarSop2Op op) {
+[[nodiscard]] std::optional<uint8_t> scalar_sop2_opcode(rocjitsu::IsaFamily arch, ScalarSop2Op op) {
   // \NPI new ISA family: classify its scalar SOP2 opcode mapping here.
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
+  case rocjitsu::IsaFamily::Rdna4:
     switch (op) {
     case ScalarSop2Op::AddU32:
       return 0;
@@ -50,7 +51,7 @@ enum class ScalarSop2Op {
       return std::nullopt;
     }
     return std::nullopt;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     // gfx1250 retains the legacy 32-bit arithmetic opcodes and adds the
     // SCC-neutral 64-bit scalar add used by its canonical PC builders.
     switch (op) {
@@ -66,12 +67,18 @@ enum class ScalarSop2Op {
       return 83;
     }
     return std::nullopt;
-  case ROCJITSU_CODE_ARCH_RV32I:
-  case ROCJITSU_CODE_ARCH_RV64I:
-  case ROCJITSU_CODE_ARCH_NUM_ARCHS:
+  case rocjitsu::IsaFamily::Rv32i:
+  case rocjitsu::IsaFamily::Rv64i:
+  case rocjitsu::IsaFamily::Count:
     return std::nullopt;
   }
   return std::nullopt;
+}
+
+void report_unsupported_pc_delta_builder(const util::DiagnosticEmitter *error) {
+  if (error != nullptr) {
+    error->emit() << "Unimplemented instruction: scalar PC delta builder for target architecture";
+  }
 }
 
 /// @brief Build an encoded scalar `s_add_u32` instruction.
@@ -79,61 +86,94 @@ enum class ScalarSop2Op {
 /// @details Used only for final static-PC recovery fixup emission, after the
 /// recovery pass has proven that the old address-recovery region can be
 /// overwritten. The operands are already scalar operand encoding values.
-[[nodiscard]] std::optional<uint32_t> build_s_add_u32(rj_code_arch_t arch, uint16_t sdst,
-                                                      uint16_t ssrc0, uint16_t ssrc1) {
+[[nodiscard]] std::optional<uint32_t> build_s_add_u32(rocjitsu::IsaFamily arch, uint16_t sdst,
+                                                      uint16_t ssrc0, uint16_t ssrc1,
+                                                      const util::DiagnosticEmitter *error) {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddU32);
-  if (!opcode)
+  if (!opcode) {
+    report_unsupported_pc_delta_builder(error);
     return std::nullopt;
-  return build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
+  }
+  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1, error);
+  if (word.failed()) {
+    return std::nullopt;
+  }
+  return word.value();
 }
 
 /// @brief Build an encoded scalar `s_sub_u32` instruction.
 /// @copydetails build_s_add_u32
-[[nodiscard]] std::optional<uint32_t> build_s_sub_u32(rj_code_arch_t arch, uint16_t sdst,
-                                                      uint16_t ssrc0, uint16_t ssrc1) {
+[[nodiscard]] std::optional<uint32_t> build_s_sub_u32(rocjitsu::IsaFamily arch, uint16_t sdst,
+                                                      uint16_t ssrc0, uint16_t ssrc1,
+                                                      const util::DiagnosticEmitter *error) {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::SubU32);
-  if (!opcode)
+  if (!opcode) {
+    report_unsupported_pc_delta_builder(error);
     return std::nullopt;
-  return build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
+  }
+  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1, error);
+  if (word.failed()) {
+    return std::nullopt;
+  }
+  return word.value();
 }
 
 /// @brief Build an encoded scalar `s_addc_u32` instruction.
 /// @copydetails build_s_add_u32
-[[nodiscard]] std::optional<uint32_t> build_s_addc_u32(rj_code_arch_t arch, uint16_t sdst,
-                                                       uint16_t ssrc0, uint16_t ssrc1) {
+[[nodiscard]] std::optional<uint32_t> build_s_addc_u32(rocjitsu::IsaFamily arch, uint16_t sdst,
+                                                       uint16_t ssrc0, uint16_t ssrc1,
+                                                       const util::DiagnosticEmitter *error) {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddcU32);
-  if (!opcode)
+  if (!opcode) {
+    report_unsupported_pc_delta_builder(error);
     return std::nullopt;
-  return build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
+  }
+  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1, error);
+  if (word.failed()) {
+    return std::nullopt;
+  }
+  return word.value();
 }
 
 /// @brief Build an encoded scalar `s_subb_u32` instruction.
 /// @copydetails build_s_add_u32
-[[nodiscard]] std::optional<uint32_t> build_s_subb_u32(rj_code_arch_t arch, uint16_t sdst,
-                                                       uint16_t ssrc0, uint16_t ssrc1) {
+[[nodiscard]] std::optional<uint32_t> build_s_subb_u32(rocjitsu::IsaFamily arch, uint16_t sdst,
+                                                       uint16_t ssrc0, uint16_t ssrc1,
+                                                       const util::DiagnosticEmitter *error) {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::SubbU32);
-  if (!opcode)
+  if (!opcode) {
+    report_unsupported_pc_delta_builder(error);
     return std::nullopt;
-  return build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
+  }
+  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1, error);
+  if (word.failed()) {
+    return std::nullopt;
+  }
+  return word.value();
 }
 
 } // namespace
 
 bool patch_pcrel_branch_offset(const Instruction &inst, std::span<uint32_t> words,
-                               int64_t delta_bytes, [[maybe_unused]] rj_code_arch_t arch) {
-  if ((inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_CALL)) == 0)
+                               int64_t delta_bytes, [[maybe_unused]] rocjitsu::IsaFamily arch) {
+  if ((inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_CALL)) == 0) {
     return false;
-  if (!inst.branch_offset_bytes())
+  }
+  if (!inst.branch_offset_bytes()) {
     return false;
-  if (words.empty())
+  }
+  if (words.empty()) {
     return false;
-  if (delta_bytes % static_cast<int64_t>(sizeof(uint32_t)) != 0)
+  }
+  if (delta_bytes % static_cast<int64_t>(sizeof(uint32_t)) != 0) {
     return false;
+  }
 
   const int64_t delta_dwords = delta_bytes / static_cast<int64_t>(sizeof(uint32_t));
   if (delta_dwords < std::numeric_limits<int16_t>::min() ||
-      delta_dwords > std::numeric_limits<int16_t>::max())
+      delta_dwords > std::numeric_limits<int16_t>::max()) {
     return false;
+  }
 
   // AMDGPU SOPP direct branches and SOPK s_call_b64 encode a signed 16-bit
   // dword offset from the next instruction. Preserve the already-translated
@@ -142,13 +182,14 @@ bool patch_pcrel_branch_offset(const Instruction &inst, std::span<uint32_t> word
   return true;
 }
 
-bool append_pc_delta_builder(std::vector<uint32_t> &words, rj_code_arch_t arch, uint16_t pc_sreg,
-                             int64_t delta, bool prefer_literal64) {
+bool append_pc_delta_builder(std::vector<uint32_t> &words, rocjitsu::IsaFamily arch,
+                             uint16_t pc_sreg, int64_t delta, bool prefer_literal64,
+                             const util::DiagnosticEmitter *error) {
   constexpr uint16_t kLiteralOperand = 255;
   constexpr uint16_t kLiteral64Operand = 254;
   constexpr uint16_t kInlineInt0 = 128;
 
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+  if (arch == rocjitsu::IsaFamily::Cdna5) {
     // gfx1250's SCC-neutral s_add_nc_u64 is both the compiler's canonical PC
     // materialization and the smallest safe relocation replacement. Positive
     // 32-bit deltas need one literal word; negative or wider deltas use the
@@ -157,13 +198,21 @@ bool append_pc_delta_builder(std::vector<uint32_t> &words, rj_code_arch_t arch, 
     const bool use_literal32 =
         !prefer_literal64 && delta >= 0 && raw_delta <= std::numeric_limits<uint32_t>::max();
     auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddNcU64);
-    if (!opcode)
+    if (!opcode) {
+      report_unsupported_pc_delta_builder(error);
       return false;
-    words.push_back(build_sop2_encoding(arch, *opcode, pc_sreg, pc_sreg,
-                                        use_literal32 ? kLiteralOperand : kLiteral64Operand));
+    }
+    util::FailureOr<uint32_t> word =
+        build_sop2_encoding(arch, *opcode, pc_sreg, pc_sreg,
+                            use_literal32 ? kLiteralOperand : kLiteral64Operand, error);
+    if (word.failed()) {
+      return false;
+    }
+    words.push_back(word.value());
     words.push_back(static_cast<uint32_t>(raw_delta));
-    if (!use_literal32)
+    if (!use_literal32) {
       words.push_back(static_cast<uint32_t>(raw_delta >> 32));
+    }
     return true;
   }
 
@@ -179,24 +228,37 @@ bool append_pc_delta_builder(std::vector<uint32_t> &words, rj_code_arch_t arch, 
   // uses a literal; the high half uses inline zero when possible to keep the
   // replacement smaller than the original builder sequence.
   if (negative) {
-    auto sub = build_s_sub_u32(arch, pc_sreg, pc_sreg, kLiteralOperand);
-    auto subb = build_s_subb_u32(arch, pc_hi, pc_hi, hi == 0 ? kInlineInt0 : kLiteralOperand);
-    if (!sub || !subb)
+    const std::optional<uint32_t> sub =
+        build_s_sub_u32(arch, pc_sreg, pc_sreg, kLiteralOperand, error);
+    if (!sub) {
       return false;
+    }
+    const std::optional<uint32_t> subb =
+        build_s_subb_u32(arch, pc_hi, pc_hi, hi == 0 ? kInlineInt0 : kLiteralOperand, error);
+    if (!subb) {
+      return false;
+    }
     words.push_back(*sub);
     words.push_back(lo);
     words.push_back(*subb);
   } else {
-    auto add = build_s_add_u32(arch, pc_sreg, pc_sreg, kLiteralOperand);
-    auto addc = build_s_addc_u32(arch, pc_hi, pc_hi, hi == 0 ? kInlineInt0 : kLiteralOperand);
-    if (!add || !addc)
+    const std::optional<uint32_t> add =
+        build_s_add_u32(arch, pc_sreg, pc_sreg, kLiteralOperand, error);
+    if (!add) {
       return false;
+    }
+    const std::optional<uint32_t> addc =
+        build_s_addc_u32(arch, pc_hi, pc_hi, hi == 0 ? kInlineInt0 : kLiteralOperand, error);
+    if (!addc) {
+      return false;
+    }
     words.push_back(*add);
     words.push_back(lo);
     words.push_back(*addc);
   }
-  if (hi != 0)
+  if (hi != 0) {
     words.push_back(hi);
+  }
   return true;
 }
 

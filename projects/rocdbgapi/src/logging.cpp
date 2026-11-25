@@ -368,6 +368,7 @@ to_string (amd_dbgapi_status_t status)
       CASE (STATUS_ERROR_PROCESS_NOT_FROZEN);
       CASE (STATUS_ERROR_MEMORY_UNAVAILABLE);
       CASE (STATUS_ERROR_INVALID_CLUSTER_ID);
+      CASE (STATUS_ERROR_INVALID_PROPERTY_ID);
     }
   return to_string (make_hex (status));
 }
@@ -654,6 +655,87 @@ to_string (amd_dbgapi_progress_t progress)
       CASE (PROGRESS_NO_FORWARD);
     }
   return to_string (make_hex (progress));
+}
+
+template <>
+std::string
+to_string (amd_dbgapi_property_id_t property_id)
+{
+  if (property_id == AMD_DBGAPI_PROPERTY_NONE)
+    return "PROPERTY_NONE";
+
+  return string_printf ("property_%" PRId64, property_id.handle);
+}
+
+template <>
+std::string
+to_string (amd_dbgapi_property_info_t info)
+{
+  switch (info)
+    {
+      CASE (PROPERTY_INFO_NAME);
+      CASE (PROPERTY_INFO_DESCRIPTION);
+      CASE (PROPERTY_INFO_TYPE);
+      CASE (PROPERTY_INFO_SCOPE);
+    }
+  return to_string (make_hex (info));
+}
+
+template <>
+std::string
+to_string (detail::query_ref<amd_dbgapi_property_info_t> ref)
+{
+  auto [query, value] = ref;
+  switch (query)
+    {
+    case AMD_DBGAPI_PROPERTY_INFO_NAME:
+    case AMD_DBGAPI_PROPERTY_INFO_DESCRIPTION:
+      return to_string (make_ref (static_cast<char *const *> (value)));
+    case AMD_DBGAPI_PROPERTY_INFO_TYPE:
+      return to_string (
+        make_ref (static_cast<const amd_dbgapi_property_type_t *> (value)));
+    case AMD_DBGAPI_PROPERTY_INFO_SCOPE:
+      return to_string (
+        make_ref (static_cast<const amd_dbgapi_property_scope_t *> (value)));
+    }
+  fatal_error ("unhandled amd_dbgapi_property_info_t query (%s)",
+               to_cstring (query));
+}
+
+namespace
+{
+
+inline std::string
+one_scope_to_string (amd_dbgapi_property_scope_t scope)
+{
+  dbgapi_assert (!(scope & (scope - 1)) && "only 1 bit");
+
+  switch (scope)
+    {
+      CASE (PROPERTY_SCOPE_NONE);
+      CASE (PROPERTY_SCOPE_PROCESS);
+    }
+  return to_string (make_hex (scope));
+}
+
+} /* namespace */
+
+template <>
+std::string
+to_string (amd_dbgapi_property_scope_t scope)
+{
+  return utils::flags_to_string (scope, one_scope_to_string);
+}
+
+template <>
+std::string
+to_string (amd_dbgapi_property_type_t type)
+{
+  switch (type)
+    {
+      CASE (PROPERTY_TYPE_BOOL);
+    }
+  return to_string (make_hex (type));
 }
 
 template <>

@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -32,6 +33,17 @@ std::filesystem::path expected_output_directory(std::string_view output_path,
     return std::filesystem::path{std::string{output_path}} /
            std::filesystem::path{std::string{directory_name}};
 }
+
+rocprofiler_agent_t make_agent(uint64_t handle, rocprofiler_agent_type_t type, uint32_t node_id)
+{
+    rocprofiler_agent_t agent{};
+    agent.id.handle    = handle;
+    agent.type         = type;
+    agent.node_id      = node_id;
+    agent.name         = "gfx942";
+    agent.product_name = "AMD Instinct MI300X";
+    return agent;
+}
 }  // namespace
 
 TEST_F(TestRocprofilerComputeTool, ProvidedEmptyOutputPath_UsesDefault)
@@ -50,18 +62,18 @@ TEST_F(TestRocprofilerComputeTool, ProvidedPcSamplingMethod_EnablesPcSampling)
     m_input_parameters->set_pc_sampling_method("host_trap");
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_TRUE(tool_data->pc_sampling.enabled());
-    EXPECT_EQ(tool_data->pc_sampling.mode(), PcSamplingMode::HostTrap);
-    EXPECT_EQ(tool_data->pc_sampling.code_object_info_path(),
+    EXPECT_TRUE(tool_data->pc_sampling->enabled());
+    EXPECT_EQ(tool_data->pc_sampling->mode(), PcSamplingMode::HostTrap);
+    EXPECT_EQ(tool_data->pc_sampling->code_object_info_path(),
               expected_output_path("out", "_code_obj_info.json"));
-    EXPECT_EQ(tool_data->pc_sampling.source_snapshot_path(), expected_output_directory("out", "src"));
+    EXPECT_EQ(tool_data->pc_sampling->source_snapshot_path(), expected_output_directory("out", "src"));
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedNoPcSamplingMethod_DoesNotEnablePcSampling)
 {
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_FALSE(tool_data->pc_sampling.enabled());
+    EXPECT_FALSE(tool_data->pc_sampling->enabled());
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedNoRequestedCounters_Throws)
@@ -70,9 +82,9 @@ TEST_F(TestRocprofilerComputeTool, ProvidedNoRequestedCounters_Throws)
     EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
 }
 
-TEST_F(TestRocprofilerComputeTool, ProvidedEmptyInterationMultiplexingMode_DoesntThrow)
+TEST_F(TestRocprofilerComputeTool, ProvidedEmptyIterationMultiplexing_DoesntThrow)
 {
-    m_input_parameters->set_iteration_multiplexing_mode("");
+    m_input_parameters->set_iteration_multiplexing("");
     EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
 }
 
@@ -106,13 +118,12 @@ TEST_F(TestRocprofilerComputeTool, ProvidedUnsetRequestedCounters_UsesDefault)
     EXPECT_EQ(tool_data->requested_counters, EnvInputParameters::kDefaultRequestedCounters);
 }
 
-TEST_F(TestRocprofilerComputeTool, ProvidedUnsetIterationMultiplexingMode_UsesDefault)
+TEST_F(TestRocprofilerComputeTool, ProvidedUnsetIterationMultiplexing_UsesDefault)
 {
-    m_input_parameters->unset_iteration_multiplexing_mode();
+    m_input_parameters->unset_iteration_multiplexing();
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_EQ(tool_data->iteration_multiplexing_mode,
-              iteration_multiplexing_mode(EnvInputParameters::kDefaultIterationMultiplexingMode));
+    EXPECT_FALSE(tool_data->iteration_multiplexing);
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedUnsetKernelFilterIncludeRegex_UsesDefault)
@@ -148,28 +159,20 @@ TEST_F(TestRocprofilerComputeTool, ProvidedRequestedCounters_ReturnsIt)
     EXPECT_EQ(tool_data->requested_counters, m_input_parameters->get_requested_counters());
 }
 
-TEST_F(TestRocprofilerComputeTool, ProvidedIncorrectIterationMultiplexingMode_ReturnsDisabled)
+TEST_F(TestRocprofilerComputeTool, ProvidedIncorrectIterationMultiplexing_ReturnsDisabled)
 {
-    m_input_parameters->set_iteration_multiplexing_mode("incorrect");
+    m_input_parameters->set_iteration_multiplexing("incorrect");
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_EQ(tool_data->iteration_multiplexing_mode, iteration_multiplexing_mode_t::DISABLED);
+    EXPECT_FALSE(tool_data->iteration_multiplexing);
 }
 
-TEST_F(TestRocprofilerComputeTool, ProvidedKernelIterationMultiplexingMode_ReturnsIt)
+TEST_F(TestRocprofilerComputeTool, ProvidedEnabledIterationMultiplexing_SetsIt)
 {
-    m_input_parameters->set_iteration_multiplexing_mode("kernel");
+    m_input_parameters->set_iteration_multiplexing("1");
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_EQ(tool_data->iteration_multiplexing_mode, iteration_multiplexing_mode_t::KERNEL);
-}
-
-TEST_F(TestRocprofilerComputeTool, ProvidedKernelLauncParamsIterationMultiplexingMode_ReturnsIt)
-{
-    m_input_parameters->set_iteration_multiplexing_mode("kernel_launch_params");
-    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
-    const auto tool_data = get_tool_data(cfg);
-    EXPECT_EQ(tool_data->iteration_multiplexing_mode, iteration_multiplexing_mode_t::LAUNCH);
+    EXPECT_TRUE(tool_data->iteration_multiplexing);
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedKernelFilterIncludeRegex_ReturnsIt)
@@ -264,16 +267,36 @@ TEST_F(TestRocprofilerComputeTool, OnToolInit_ConfiguresDispatchCountingService)
     EXPECT_TRUE(args.record_callback_args != nullptr);
 }
 
+TEST_F(TestRocprofilerComputeTool, OnToolInit_ConfiguresKernelDispatchTracingForCompletions)
+{
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    const auto& services = m_sdk_wrapper->get_callback_tracing_service_info();
+    const auto  dispatch = std::find_if(services.begin(),
+                                        services.end(),
+                                        [](const auto& service)
+                                        {
+                                           return service.kind ==
+                                                  ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH;
+                                        });
+    ASSERT_NE(dispatch, services.end());
+    EXPECT_EQ(dispatch->operations,
+              std::vector<rocprofiler_tracing_operation_t>{ROCPROFILER_KERNEL_DISPATCH_COMPLETE});
+    EXPECT_EQ(dispatch->callback_args, cfg->tool_data);
+}
+
 TEST_F(TestRocprofilerComputeTool, OnFiniEmptyCounterRecords_DoesntWriteCounters)
 {
     const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_TRUE(test_knobs::replace_writer("counters", m_counters_writer));
     cfg->finalize(cfg->tool_data);
     EXPECT_EQ(m_counters_writer->get_write_counters_info().size(), 0);
 }
 
 TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCounterRecords_WritesCounters)
 {
-    const auto         cfg        = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_TRUE(test_knobs::replace_writer("counters", m_counters_writer));
     const auto         tool_data  = get_tool_data(cfg);
     constexpr uint64_t counter_id = 20;
     constexpr uint64_t kernel_id  = 11;
@@ -285,7 +308,8 @@ TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCounterRecords_WritesCounte
 
 TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCountersAndKernelFiltering_WriteOnlyFilteredCounters)
 {
-    const auto         cfg        = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_TRUE(test_knobs::replace_writer("counters", m_counters_writer));
     const auto         tool_data  = get_tool_data(cfg);
     constexpr uint64_t counter_id = 20;
     constexpr uint64_t kernel_id0 = 11;
@@ -320,6 +344,18 @@ TEST_F(TestRocprofilerComputeTool, ToolInit_WithoutRequestedCounters_DoesNotConf
     ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
     EXPECT_TRUE(m_sdk_wrapper->get_dispatch_counting_service_info().empty());
     EXPECT_TRUE(m_sdk_wrapper->get_started_contexts().empty());
+}
+
+TEST_F(TestRocprofilerComputeTool, ToolInit_WithoutRequestedCounters_StillTracesKernelDispatches)
+{
+    m_input_parameters->set_requested_counters("");
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    const auto& services = m_sdk_wrapper->get_callback_tracing_service_info();
+    EXPECT_TRUE(std::any_of(services.begin(),
+                            services.end(),
+                            [](const auto& service)
+                            { return service.kind == ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH; }));
 }
 
 TEST_F(TestRocprofilerComputeTool, RocprofilerConfigure_RegistersHsaInterceptCallback)
@@ -368,6 +404,66 @@ TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_AfterToolFini_IsNoOp)
     EXPECT_TRUE(m_sdk_wrapper->get_started_contexts().empty());
 }
 
+TEST_F(TestRocprofilerComputeTool, RocprofilerConfigure_NamesTheAgentsFile)
+{
+    m_input_parameters->set_output_path("out");
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    EXPECT_EQ(get_tool_data(cfg)->agents_filename,
+              expected_output_path("out", "_agents.csv.gz").string());
+}
+
+TEST_F(TestRocprofilerComputeTool, ToolInit_DoesNotQueryAgents)
+{
+    m_sdk_wrapper->set_available_agents({make_agent(4000, ROCPROFILER_AGENT_TYPE_GPU, 2)});
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    EXPECT_TRUE(get_tool_data(cfg)->agents.empty());
+}
+
+TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_RecordsOnlyGpuAgents)
+{
+    m_sdk_wrapper->set_available_agents({make_agent(4000, ROCPROFILER_AGENT_TYPE_CPU, 0),
+                                         make_agent(4002, ROCPROFILER_AGENT_TYPE_GPU, 2),
+                                         make_agent(4003, ROCPROFILER_AGENT_TYPE_GPU, 3)});
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    const auto reg = m_sdk_wrapper->get_hsa_intercept_registration_info()[0];
+    reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
+
+    const auto& agents = get_tool_data(cfg)->agents;
+    ASSERT_EQ(agents.size(), 2u);
+    EXPECT_EQ(agents.at(4002).node_id, 2u);
+    EXPECT_EQ(agents.at(4002).name, "gfx942");
+    EXPECT_EQ(agents.at(4003).node_id, 3u);
+}
+
+TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_AgentQueryFails_StillStartsContext)
+{
+    m_sdk_wrapper->set_query_available_agents_fails(true);
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    const auto reg = m_sdk_wrapper->get_hsa_intercept_registration_info()[0];
+    reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
+
+    EXPECT_TRUE(get_tool_data(cfg)->agents.empty());
+    EXPECT_EQ(m_sdk_wrapper->get_started_contexts().size(), 1u);
+}
+
+TEST_F(TestRocprofilerComputeTool, PcSamplingWithoutCounters_InitializesDispatchTracing)
+{
+    m_input_parameters->set_requested_counters("");
+    m_input_parameters->set_pc_sampling_method("stochastic");
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    EXPECT_TRUE(get_tool_data(cfg)->pc_sampling->enabled());
+    const auto& services = m_sdk_wrapper->get_callback_tracing_service_info();
+    ASSERT_EQ(services.size(), 2);
+    EXPECT_EQ(services[0].kind, ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT);
+    EXPECT_EQ(services[1].kind, ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH);
+    EXPECT_EQ(services[1].operations,
+              std::vector<rocprofiler_tracing_operation_t>{ROCPROFILER_KERNEL_DISPATCH_COMPLETE});
+}
+
 //////////////////////////////////////////////////////////////////////////
 /// TestRocprofilerComputeTool
 void TestRocprofilerComputeTool::SetUp()
@@ -378,7 +474,6 @@ void TestRocprofilerComputeTool::SetUp()
 
     test_knobs::set_input_parameters(m_input_parameters);
     test_knobs::set_sdk_wrapper(m_sdk_wrapper);
-    test_knobs::set_csv_writer(m_counters_writer);
 }
 
 void TestRocprofilerComputeTool::TearDown()

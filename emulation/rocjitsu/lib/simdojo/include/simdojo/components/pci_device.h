@@ -32,6 +32,7 @@
 #pragma once
 
 #include "simdojo/sim/component.h"
+#include "util/diagnostic.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -97,6 +98,7 @@ struct BarSpec {
   bool is_64bit = false;            ///< True if this BAR is the low half of a 64-bit pair.
   int backing_fd = -1;              ///< Backing file descriptor, or negative to always trap.
   uint64_t fd_offset = 0;           ///< Offset into @ref backing_fd of the region base.
+  uint64_t backing_id = 0;          ///< Canonical backing identity, or zero when anonymous.
   std::vector<MmapArea> mmap_areas; ///< Directly mappable windows; empty means always trap.
 };
 
@@ -181,6 +183,13 @@ struct InterruptSpec {
 /// AtomicOp completion merely because it can forward ordinary DMA: software
 /// uses these bits to decide whether the device may issue atomic requests.
 struct PcieSpec {
+  /// PCIe link speed encoding (1=2.5, 2=5, 3=8, 4=16, 5=32 GT/s).
+  uint8_t max_link_speed = 1;
+  /// Maximum and currently negotiated link width, in lanes. Until a transport
+  /// supplies a negotiated link, status defaults to a valid Gen1 x1 link.
+  uint8_t max_link_width = 1;
+  uint8_t current_link_speed = 1;
+  uint8_t current_link_width = 1;
   bool atomic_completer_32 = false; ///< Completes 32-bit PCIe AtomicOps.
   bool atomic_completer_64 = false; ///< Completes 64-bit PCIe AtomicOps.
 };
@@ -333,8 +342,9 @@ public:
     }
 
     OperationLease &operator=(OperationLease &&other) noexcept {
-      if (this == &other)
+      if (this == &other) {
         return *this;
+      }
       release();
       session_ = std::move(other.session_);
       endpoints_ = other.endpoints_;
@@ -389,8 +399,9 @@ public:
         : session_(std::move(session)), endpoints_(endpoints) {}
 
     void release() {
-      if (session_ == nullptr)
+      if (session_ == nullptr) {
         return;
+      }
       session_->release_operation();
       session_.reset();
       endpoints_ = {};
@@ -402,8 +413,9 @@ public:
 
   [[nodiscard]] OperationLease acquire() {
     std::lock_guard lock(mutex_);
-    if (state_ != State::Open)
+    if (state_ != State::Open) {
       return {};
+    }
     ++active_operations_;
     return OperationLease(shared_from_this(), endpoints_);
   }
@@ -412,8 +424,9 @@ public:
   /// @retval true This call changed the state from open to closing.
   bool begin_revoke() {
     std::lock_guard lock(mutex_);
-    if (state_ != State::Open)
+    if (state_ != State::Open) {
       return false;
+    }
     state_ = State::Closing;
     return true;
   }
@@ -421,8 +434,9 @@ public:
   /// @brief Wait for admitted operations and permanently clear the endpoints.
   void wait_until_drained() {
     std::unique_lock lock(mutex_);
-    if (state_ == State::Open)
+    if (state_ == State::Open) {
       state_ = State::Closing;
+    }
     drained_.wait(lock, [this]() { return active_operations_ == 0; });
     endpoints_ = {};
     state_ = State::Revoked;
@@ -442,8 +456,9 @@ private:
 
   void release_operation() {
     std::lock_guard lock(mutex_);
-    if (--active_operations_ == 0)
+    if (--active_operations_ == 0) {
       drained_.notify_all();
+    }
   }
 
   const uint64_t generation_;
@@ -523,11 +538,13 @@ public:
   /// @retval true The device is now attached to @p transport.
   /// @retval false Another transport holds it; this one was not installed.
   [[nodiscard]] bool attach_transport(const Transport *transport) {
-    if (transport == nullptr)
+    if (transport == nullptr) {
       return false;
+    }
     std::lock_guard lock(transport_mutex_);
-    if (transport_ != nullptr || closing_transport_session_ != nullptr)
+    if (transport_ != nullptr || closing_transport_session_ != nullptr) {
       return false;
+    }
     std::shared_ptr<PciTransportSession> session = make_transport_session_locked(*transport);
     transport_ = transport;
     transport_session_ = std::move(session);
@@ -543,8 +560,9 @@ public:
     std::lock_guard lock(transport_mutex_);
     if (transport_ != transport || transport_session_ != nullptr ||
         (closing_transport_session_ != nullptr &&
-         closing_transport_session_->state() != PciTransportSession::State::Revoked))
+         closing_transport_session_->state() != PciTransportSession::State::Revoked)) {
       return {};
+    }
     closing_transport_session_.reset();
     transport_session_ = make_transport_session_locked(*transport);
     return transport_session_;
@@ -555,8 +573,9 @@ public:
   [[nodiscard]] std::shared_ptr<PciTransportSession>
   revoke_transport_session(const Transport *transport) {
     std::lock_guard lock(transport_mutex_);
-    if (transport_ != transport || transport_session_ == nullptr)
+    if (transport_ != transport || transport_session_ == nullptr) {
       return {};
+    }
     std::shared_ptr<PciTransportSession> closing = std::move(transport_session_);
     (void)closing->begin_revoke();
     closing_transport_session_ = closing;
@@ -582,8 +601,9 @@ public:
     std::shared_ptr<PciTransportSession> closing;
     {
       std::lock_guard lock(transport_mutex_);
-      if (transport_ != transport)
+      if (transport_ != transport) {
         return false;
+      }
       closing = take_transport_session_for_shutdown_locked();
     }
     drain_transport_session(std::move(closing));
@@ -614,6 +634,7 @@ public:
                                            bool write) = 0;
 
   /// @brief Register a guest memory window as reachable by the device.
+  /// @details Transport callbacks must not throw.
   /// @param[in] region The window the guest mapped.
   virtual void dma_map(const DmaRegion &region) = 0;
 
@@ -625,7 +646,11 @@ public:
 
   /// @brief Return the device to its power-on state.
   /// @param[in] kind Why the reset was requested.
-  virtual void reset(ResetKind /*kind*/) {}
+  /// @returns Failure if reset could not complete; partial effects remain applied.
+  /// Hooks invoked by the transport must not throw.
+  virtual util::Result reset(ResetKind /*kind*/, util::DiagnosticEmitter /*diag*/ = {}) {
+    return util::Result::success();
+  }
 
 protected:
   /// @brief Revoke and drain the current peer generation without releasing the
@@ -658,10 +683,12 @@ protected:
   ///          installed, or when no transport is attached.
   [[nodiscard]] bool restart_transport_session_after_reset() {
     std::lock_guard lock(transport_mutex_);
-    if (transport_ == nullptr)
+    if (transport_ == nullptr) {
       return true;
-    if (transport_session_ != nullptr || closing_transport_session_ != nullptr)
+    }
+    if (transport_session_ != nullptr || closing_transport_session_ != nullptr) {
       return false;
+    }
     transport_session_ = make_transport_session_locked(*transport_);
     return true;
   }
@@ -709,12 +736,14 @@ private:
   }
 
   void drain_transport_session(std::shared_ptr<PciTransportSession> closing) {
-    if (closing == nullptr)
+    if (closing == nullptr) {
       return;
+    }
     closing->wait_until_drained();
     const std::lock_guard lock(transport_mutex_);
-    if (closing_transport_session_ == closing)
+    if (closing_transport_session_ == closing) {
       closing_transport_session_.reset();
+    }
   }
 
   [[nodiscard]] std::shared_ptr<PciTransportSession>

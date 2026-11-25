@@ -25,6 +25,7 @@
 ///     present.
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/isa/isa_family.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include <hsa/hsa.h>
@@ -77,26 +78,33 @@ using test::kernel_path;
 bool decodes_mnemonic_within(Decoder &decoder, std::span<const uint8_t> text, uint64_t offset,
                              std::string_view mnemonic, size_t max_insts) {
   uint64_t cur = offset;
+  std::vector<rj_code_binary_inst_t> word_buf(decoder.max_instruction_words());
   for (size_t i = 0; i < max_insts && cur + sizeof(uint32_t) <= text.size(); ++i) {
-    rj_code_binary_inst_t word_buf[2] = {0, 0};
-    const size_t avail = std::min<size_t>(sizeof(word_buf), text.size() - cur);
-    std::memcpy(word_buf, text.data() + cur, avail);
-    auto decoded = decoder.decode(word_buf);
-    if (decoded.failed())
+    std::fill(word_buf.begin(), word_buf.end(), 0);
+    const size_t avail =
+        std::min<size_t>(word_buf.size() * sizeof(rj_code_binary_inst_t), text.size() - cur);
+    std::memcpy(word_buf.data(), text.data() + cur, avail);
+    FailureOr<std::unique_ptr<Instruction>> decoded = decoder.decode(word_buf.data());
+    if (decoded.failed()) {
       return false;
+    }
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
-    if (inst->mnemonic() == mnemonic)
+    if (inst->size() <= 0 || static_cast<size_t>(inst->size()) > avail) {
+      return false;
+    }
+    if (inst->mnemonic() == mnemonic) {
       return true;
+    }
     cur += static_cast<uint64_t>(inst->size());
   }
   return false;
 }
 
-constexpr DbiTargetParams kCdna2Params{ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_TARGET_GFX90A,
+constexpr DbiTargetParams kCdna2Params{rocjitsu::IsaFamily::Cdna2, ROCJITSU_CODE_TARGET_GFX90A,
                                        "vector_add_probe_gfx90a", "rj_nop_probe_gfx90a", "gfx90a"};
-constexpr DbiTargetParams kCdna4Params{ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950,
+constexpr DbiTargetParams kCdna4Params{rocjitsu::IsaFamily::Cdna4, ROCJITSU_CODE_TARGET_GFX950,
                                        "vector_add_probe_gfx950", "rj_nop_probe_gfx950", "gfx950"};
-constexpr DbiTargetParams kRdna4Params{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201,
+constexpr DbiTargetParams kRdna4Params{rocjitsu::IsaFamily::Rdna4, ROCJITSU_CODE_TARGET_GFX1201,
                                        "vector_add_probe_gfx1201", "rj_nop_probe_gfx1201",
                                        "gfx1201"};
 
@@ -149,29 +157,8 @@ protected:
     probe_body_words_ = callable->body_words;
     ASSERT_FALSE(probe_body_words_.empty());
 
-    // Decode .text and collect relocatable anchors. Decode-and-search so the
-    // test stays stable across compiler revisions.
-    auto decoder = Decoder::create(params_.arch);
-    ASSERT_NE(decoder, nullptr);
-    auto block_result = BasicBlock::build(*co, *decoder, params_.arch);
-    ASSERT_TRUE(block_result.succeeded());
-    auto blocks = std::move(block_result).value();
-    ASSERT_FALSE(co->text_sections().empty());
-    const auto *text = co->text_sections().front();
-    const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
-                                              text->size());
-
     std::vector<uint64_t> candidates;
-    for (const auto &block : blocks) {
-      uint64_t cur = block->start_offset();
-      for (const Instruction &inst : block->instructions()) {
-        if (is_relocatable_anchor(inst, cur, text_bytes, params_.arch))
-          candidates.push_back(cur);
-        cur += static_cast<uint64_t>(inst.size());
-      }
-    }
-    ASSERT_FALSE(candidates.empty()) << "No relocatable anchor in " << params_.kernel_fixture
-                                     << ".o; did the compiler change the lowering?";
+    ASSERT_NO_FATAL_FAILURE(find_vector_add_anchors(*co, params_.arch, candidates));
 
     // Pick the first anchor whose probe-call patch the resource/spill policy
     // accepts. A live fixed link pair s[30:31] or an exhausted dead-pair pool
@@ -189,6 +176,7 @@ protected:
         anchor_offset_ = off;
         patched_elf_bytes_ = std::move(result.elf_bytes);
         patches_ = std::move(result.patches);
+        sites_ = std::move(result.sites);
         break;
       }
       last_patch_error_ = result.errors.front();
@@ -210,6 +198,7 @@ protected:
   std::vector<uint8_t> patched_elf_bytes_;
   std::vector<uint32_t> probe_body_words_;
   std::vector<InstrumentationPatch> patches_;
+  std::vector<InstrumentedSite> sites_;
   uint64_t anchor_offset_ = 0;
   std::string last_patch_error_;
 };
@@ -281,13 +270,21 @@ void HsaDbiNopProbeFixture::run_patched_elf_contains_probe_call_instrumentation(
                                       probe_body_words_.size()))
       << "Copied probe body should return via s_setpc_b64";
 
-  // (f) The trampoline contains the s_swappc_b64 call into the probe. The
-  //     call sits within the before-region envelope at the head of the
-  //     trampoline; scan a small bounded window from trampoline_offset.
-  EXPECT_TRUE(decodes_mnemonic_within(*decoder, text_bytes, patch.trampoline_offset, "s_swappc_b64",
-                                      /*max_insts=*/12))
+  // (f) Require the call inside this site's actual before-region, bounded by
+  // the relocated guest instruction. Architecture-specific guards may grow it.
+  ASSERT_EQ(sites_.size(), 1u);
+  const InstrumentedSite &site = sites_.front();
+  ASSERT_EQ(site.instrumentation_offset, patch.trampoline_offset);
+  ASSERT_LE(site.instrumentation_offset, text_bytes.size());
+  ASSERT_LE(site.instrumentation_size, text_bytes.size() - site.instrumentation_offset);
+  ASSERT_EQ(site.instrumentation_offset + site.instrumentation_size, site.guest_offset);
+  ASSERT_LE(site.guest_offset, text_bytes.size());
+  const std::span<const uint8_t> envelope =
+      text_bytes.subspan(site.instrumentation_offset, site.instrumentation_size);
+  EXPECT_TRUE(decodes_mnemonic_within(*decoder, envelope, 0, "s_swappc_b64",
+                                      envelope.size() / sizeof(uint32_t)))
       << "Trampoline at offset " << patch.trampoline_offset
-      << " should contain an s_swappc_b64 call to the probe";
+      << " should contain an s_swappc_b64 call before the relocated guest instruction";
 }
 
 // "Sabotage" verification: overwrite the first word of the COPIED probe body
@@ -318,7 +315,9 @@ void HsaDbiNopProbeHardwareBase<Params>::run_probe_body_is_actually_called_by_gp
 
   // The first word of the copied body must not already be s_endpgm; otherwise
   // the sabotage proves nothing.
-  const uint32_t s_endpgm_0 = build_s_endpgm(Params.arch);
+  util::FailureOr<uint32_t> maybe_s_endpgm_1 = build_s_endpgm(Params.arch);
+  ASSERT_TRUE(maybe_s_endpgm_1.succeeded());
+  const uint32_t s_endpgm_0 = maybe_s_endpgm_1.value();
   uint32_t pre_overwrite = 0;
   std::memcpy(&pre_overwrite, sabotaged.data() + body_file_off, sizeof(pre_overwrite));
   ASSERT_NE(pre_overwrite, s_endpgm_0) << "Probe body already starts with s_endpgm?";

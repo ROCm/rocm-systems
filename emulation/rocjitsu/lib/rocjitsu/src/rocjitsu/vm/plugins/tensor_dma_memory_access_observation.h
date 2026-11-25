@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_metadata.h"
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -40,8 +41,9 @@ public:
 
   /// Copy all addresses into an exactly sized destination.
   bool copy_to(std::span<uint64_t> destination) const {
-    if (destination.size() != size_)
+    if (destination.size() != size_) {
       return false;
+    }
     return empty() || (copy_ != nullptr && copy_(context_, destination));
   }
 
@@ -51,8 +53,9 @@ private:
 
   static bool copy_span(const void *context, std::span<uint64_t> destination) {
     const auto *source = static_cast<const uint64_t *>(context);
-    for (size_t i = 0; i < destination.size(); ++i)
+    for (size_t i = 0; i < destination.size(); ++i) {
       destination[i] = source[i];
+    }
     return true;
   }
 
@@ -66,9 +69,10 @@ private:
 /// @details The address view contains only in-bounds global element base
 /// addresses, in the exact order in which the implementation attempted them.
 /// Duplicates are preserved. The callback is emitted only after the instruction
-/// and any descriptor-requested atomic-barrier arrival return normally. Memory
-/// access outcomes are intentionally not filtered, matching the observer's
-/// boundary.
+/// and any descriptor-requested atomic-barrier arrival return normally, and only
+/// when the address view is nonempty. Its transfer fields therefore always come
+/// from a validated descriptor. Memory access outcomes are intentionally not
+/// filtered, matching the observer's boundary.
 ///
 /// The view borrows execution-owned context and is valid only for the duration
 /// of the callback. A consumer that keeps addresses must copy them during the
@@ -76,7 +80,9 @@ private:
 struct TensorDmaMemoryAccessObservation {
   /// @brief Instruction mnemonic; points at static storage.
   std::string_view mnemonic;
-  uint64_t pc = 0;              ///< PC of the issuing wavefront.
+  /// PC of the tensor DMA instruction, also when a deferred transfer completes
+  /// after the issuing wavefront has moved past it.
+  uint64_t pc = 0;
   uint32_t compute_unit_id = 0; ///< Component id of the issuing compute unit.
   uint32_t dispatch_id = 0;
   uint32_t queue_id = 0;
@@ -92,6 +98,8 @@ struct TensorDmaMemoryAccessObservation {
   uint32_t data_size = 0;         ///< Raw element-size code; bytes = 1 << data_size.
   int64_t tensor_dim0_stride = 0; ///< Descriptor dimension-zero stride in bytes.
   int64_t tensor_dim1_stride = 0; ///< Descriptor dimension-one stride in bytes.
+  /// @brief Decoded tensor operation identity, independent of display spelling.
+  Operation operation = Operation::Unknown;
 };
 
 } // namespace rocjitsu::amdgpu

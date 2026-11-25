@@ -10,12 +10,7 @@
 Panel Config:
   id: 500
   title: CPC (Command Processor - Compute)
-  description: |-
-    CPC (Command Processor - Compute) metrics for gfx1250. CPC handles compute
-    dispatch commands and coordinates workgroup launches with SPI.
-
   data source:
-
   - metric_table:
       id: 501
       title: CPC Utilizations

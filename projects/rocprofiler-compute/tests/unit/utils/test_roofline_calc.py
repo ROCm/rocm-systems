@@ -12,16 +12,16 @@ import pandas as pd
 import pytest
 
 from utils import schema
-from utils.mi_gpu_spec import mi_gpu_specs
 from utils.roofline_calc import (
     XMAX_DEFAULT,
     GraphPoints,
+    _extract_ai_metrics,
     calc_ai_analyze,
     calc_ceilings,
     construct_roof,
     machine_ceilings,
+    roofline_mem_levels,
     sanitize_ai_value,
-    sanitize_mem_level,
 )
 
 
@@ -94,6 +94,7 @@ def run_calc_ai_analyze_with_values(
         roofline_peaks: object,
         pmc_data: object,
         debug: object,
+        pass_tables: object = None,
     ) -> None:
         dfs[402] = pd.DataFrame({
             "Metric": [
@@ -231,14 +232,14 @@ def test_calc_ai_analyze_joins_per_kernel_stats(
         top_stats={"Count": 128, "Sum(ns)": 154000.0, "Percent": 12.4},
     )
     assert joined["counts"] == [128]
-    assert joined["totalTime"] == [154000.0]
-    assert joined["pctRuntime"] == [12.4]
+    assert joined["kernelTime"] == [154000.0]
+    assert joined["kernelPctRuntime"] == [12.4]
     assert joined["timeUnit"] == "ns", "the unit is only recoverable from the column"
 
     missing = run_calc_ai_analyze_with_values(monkeypatch, ai_values)
     assert missing["counts"] == [None]
-    assert missing["totalTime"] == [None]
-    assert missing["pctRuntime"] == [None]
+    assert missing["kernelTime"] == [None]
+    assert missing["kernelPctRuntime"] == [None]
     assert missing["timeUnit"] == ""
 
 
@@ -254,60 +255,26 @@ def test_sanitize_ai_value_replaces_invalid_values_with_zero() -> None:
 
 
 ##############################################################################
-# sanitize_mem_level Tests
+# roofline_mem_levels Tests
 ##############################################################################
 
 
-def test_sanitize_mem_level_all_falls_back_to_hierarchy() -> None:
-    """'ALL' results in full memory levels for the model, minus MALL."""
-    result = sanitize_mem_level("ALL", "mi210")
-    # mi210 has no MALL, so result equals memory_levels directly
-    assert result == mi_gpu_specs.get_memory_levels("mi210")
+def test_roofline_mem_levels_are_measured_levels_in_hierarchy_order() -> None:
+    """MALL (measured, not plotted) and levels without a measured ceiling (gfx1250's
+    L1) are left out."""
+    assert roofline_mem_levels("gfx90a", "mi210") == ["LDS", "L1", "L2", "HBM"]
+    assert roofline_mem_levels("gfx1151", "rdna35_halo") == ["LDS", "L0", "L1", "L2"]
+    assert roofline_mem_levels("gfx1250", "gfx1250") == ["LDS", "L0", "L2", "HBM"]
+    assert roofline_mem_levels("gfx1201", "navi48_1") == ["LDS", "L0", "VRAM"]
 
 
-def test_sanitize_mem_level_all_list_falls_back_to_hierarchy() -> None:
-    """['ALL'] behaves the same as 'ALL'."""
-    result = sanitize_mem_level(["ALL"], "mi210")
-    assert result == mi_gpu_specs.get_memory_levels("mi210")
+def test_extract_ai_metrics_reads_the_vram_point_into_its_own_field() -> None:
+    """gfx1201 names its device-memory point AI VRAM, which fills ai_vram."""
+    ai_metrics = _extract_ai_metrics(
+        pd.DataFrame({"Metric": ["AI VRAM"], "Value": [3.5]})
+    )
 
-
-def test_sanitize_mem_level_supported_string() -> None:
-    """A supported single string level is returned as a single-item list."""
-    result = sanitize_mem_level("HBM", "mi210")
-    assert result == ["HBM"]
-
-
-def test_sanitize_mem_level_supported_list() -> None:
-    """A list of supported levels is returned unchanged."""
-    result = sanitize_mem_level(["HBM", "L2"], "mi210")
-    assert result == ["HBM", "L2"]
-
-
-def test_sanitize_mem_level_unsupported_falls_back_to_hierarchy() -> None:
-    """Fully unsupported input falls back to full memory levels, minus MALL."""
-    result = sanitize_mem_level("HBM", "rdna35_halo")
-    # rdna35_halo memory_levels includes MALL, which is stripped by sanitize_mem_level
-    expected = [m for m in mi_gpu_specs.get_memory_levels("rdna35_halo") if m != "MALL"]
-    assert result == expected
-
-
-def test_sanitize_mem_level_mixed_filters_unsupported() -> None:
-    """Unsupported levels in a mixed list are filtered out."""
-    # rdna35_halo supports L0, L1, L2, MALL, LDS — not HBM; MALL is also stripped
-    result = sanitize_mem_level(["HBM", "L2"], "rdna35_halo")
-    assert result == ["L2"]
-
-
-def test_sanitize_mem_level_mall_is_stripped() -> None:
-    """MALL is always removed from results even when explicitly requested."""
-    result = sanitize_mem_level("MALL", "rdna35_halo")
-    assert "MALL" not in result
-
-
-def test_sanitize_mem_level_vl1d_normalised() -> None:
-    """'vL1D' is normalised to 'L1' before filtering."""
-    result = sanitize_mem_level("vL1D", "mi210")
-    assert result == ["L1"]
+    assert ai_metrics["ai_vram"] == 3.5
 
 
 ##############################################################################
@@ -400,7 +367,6 @@ def roofline_parameters(
     # matrix_ops_type is "MFMA" for CDNA (MI-series) and "WMMA" for RDNA.
     return {
         "device_id": 0,
-        "mem_level": "ALL",
         "workload_dir": "/tmp",
         "matrix_ops_type": matrix_ops_type,
         "gpu_arch": gpu_arch,
@@ -475,6 +441,22 @@ def test_fp8_special_mfma_only() -> None:
 
     assert result["valu"] == [], "FP8 is not a PEAK_OPS datatype; no VALU roof"
     assert result["matrix_ops"][2] == PEAK_VALUES["MFMAF8Flops"]
+
+
+def test_calc_ceilings_gfx1201_draws_the_vram_roof() -> None:
+    """gfx1201 reads its device-memory roof from VRAMBw."""
+    benchmark_data = full_benchmark_data()
+    benchmark_data["VRAMBw"] = [str(BW_VALUE)]
+
+    result = calc_ceilings(
+        roofline_parameters("WMMA", "gfx1201"),
+        "FP16",
+        benchmark_data,
+        MockMspec("navi48_1", "gfx1201"),
+        0,
+    )
+
+    assert result["vram"][2] == BW_VALUE
 
 
 def test_missing_peak_ops_column_returns_empty() -> None:
@@ -806,6 +788,7 @@ def test_construct_roof_invalid_matrix_only_peak_returns_empty_geometry(
 
     assert graph_points == {
         "hbm": [],
+        "vram": [],
         "l2": [],
         "l1": [],
         "l0": [],

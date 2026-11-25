@@ -1,12 +1,14 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "async_vm_test_support.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/sdma_packet_processor.h"
 #include "rocjitsu/vm/amdgpu/sdma_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/sdma_queue_scheduler.h"
 
@@ -25,8 +27,8 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
-#include <stdexcept>
 #include <sys/mman.h>
 #include <thread>
 #include <unistd.h>
@@ -35,6 +37,16 @@
 #include <vector>
 
 namespace rocjitsu::amdgpu {
+
+class SdmaQueueSchedulerTestAccess {
+public:
+  static std::shared_ptr<void> retain_queue(SdmaQueueScheduler &scheduler,
+                                            SdmaQueueScheduler::Handle handle) {
+    std::lock_guard lock(scheduler.mutex_);
+    return scheduler.find_locked(handle);
+  }
+};
+
 namespace {
 
 using namespace std::chrono_literals;
@@ -43,8 +55,9 @@ template <typename Predicate>
 bool wait_until(Predicate predicate, std::chrono::milliseconds timeout = 1s) {
   const std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + timeout;
   while (!predicate()) {
-    if (std::chrono::steady_clock::now() >= deadline)
+    if (std::chrono::steady_clock::now() >= deadline) {
       return false;
+    }
     std::this_thread::sleep_for(50us);
   }
   return true;
@@ -60,8 +73,9 @@ public:
   ScopedMapping(const ScopedMapping &) = delete;
   ScopedMapping &operator=(const ScopedMapping &) = delete;
   ~ScopedMapping() {
-    if (data_ != nullptr)
+    if (data_ != nullptr) {
       munmap(data_, GpuMemory::PAGE_SIZE);
+    }
   }
 
   uint8_t *data() const { return data_; }
@@ -76,8 +90,9 @@ public:
 
   VmTranslationResult translate(uint64_t address, std::size_t size, VmAccessKind) const override {
     std::lock_guard lock(mutex_);
-    if (size == 0 || address > bytes_.size() || size > bytes_.size() - address)
+    if (size == 0 || address > bytes_.size() || size > bytes_.size() - address) {
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+    }
     return {
         .outcome = VmAccessOutcome::Complete,
         .translation = {.domain = VmMemoryDomain::System,
@@ -93,19 +108,23 @@ public:
     condition_.notify_all();
     if (block_reads_) {
       condition_.wait(lock, [this]() { return !block_reads_ || permitted_reads_ != 0; });
-      if (block_reads_)
+      if (block_reads_) {
         --permitted_reads_;
+      }
     }
     if (!read_outcomes_.empty()) {
       const VmAccessOutcome outcome = read_outcomes_.front();
       read_outcomes_.pop_front();
-      if (outcome != VmAccessOutcome::Complete)
+      if (outcome != VmAccessOutcome::Complete) {
         return outcome;
+      }
     }
-    if (reads_unavailable_)
+    if (reads_unavailable_) {
       return VmAccessOutcome::Unavailable;
-    if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+    }
+    if (address > bytes_.size() || bytes.size() > bytes_.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::ranges::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(),
                         bytes.begin());
     return VmAccessOutcome::Complete;
@@ -114,8 +133,9 @@ public:
   VmAccessOutcome write(VmMemoryDomain, uint64_t address,
                         std::span<const std::byte> bytes) override {
     std::lock_guard lock(mutex_);
-    if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+    if (address > bytes_.size() || bytes.size() > bytes_.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::ranges::copy(bytes, bytes_.begin() + static_cast<std::ptrdiff_t>(address));
     write_addresses_.push_back(address);
     return VmAccessOutcome::Complete;
@@ -127,11 +147,13 @@ public:
     if (!atomic_load_outcomes_.empty()) {
       const VmAccessOutcome outcome = atomic_load_outcomes_.front();
       atomic_load_outcomes_.pop_front();
-      if (outcome != VmAccessOutcome::Complete)
+      if (outcome != VmAccessOutcome::Complete) {
         return {.outcome = outcome};
+      }
     }
-    if ((width != 4 && width != 8) || address > bytes_.size() || width > bytes_.size() - address)
+    if ((width != 4 && width != 8) || address > bytes_.size() || width > bytes_.size() - address) {
       return {.outcome = VmAccessOutcome::Faulted};
+    }
     uint64_t value = 0;
     std::memcpy(&value, bytes_.data() + address, width);
     return {.outcome = VmAccessOutcome::Complete, .value = value};
@@ -140,8 +162,9 @@ public:
   VmAccessOutcome atomic_store(VmMemoryDomain, uint64_t address, uint32_t width,
                                uint64_t value) override {
     std::lock_guard lock(mutex_);
-    if ((width != 4 && width != 8) || address > bytes_.size() || width > bytes_.size() - address)
+    if ((width != 4 && width != 8) || address > bytes_.size() || width > bytes_.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::memcpy(bytes_.data() + address, &value, width);
     return VmAccessOutcome::Complete;
   }
@@ -234,10 +257,11 @@ protected:
   static constexpr uint64_t kRing = 0x100;
   static constexpr uint32_t kRingBytes = 64;
 
-  SdmaQueueSchedulerTest() : memory_(std::make_shared<EngineMemory>()), scheduler_(gpu_vm_) {
+  SdmaQueueSchedulerTest() : memory_(std::make_shared<EngineMemory>()), scheduler_(gpu_vm_) {}
+
+  void SetUp() override {
     address_space_ = gpu_vm_.register_translated(kProcessId, memory_, memory_);
-    if (!address_space_)
-      throw std::runtime_error("cannot register SDMA scheduler test address space");
+    ASSERT_TRUE(address_space_) << "cannot register SDMA scheduler test address space";
     memory_->store<uint64_t>(kReadPointer, 0);
     memory_->store<uint64_t>(kWritePointer, 0);
   }
@@ -605,6 +629,42 @@ TEST_F(SdmaQueueSchedulerTest, RetriesUnavailableProducerPointerWithoutAnotherDo
   EXPECT_TRUE(scheduler_.detach(queue));
 }
 
+TEST_F(SdmaQueueSchedulerTest, FaultedProducerIngressFailsQueueAndWorkerServicesNextQueue) {
+  memory_->store<uint32_t>(kRing, 0);
+  memory_->store<uint64_t>(kWritePointer, sizeof(uint32_t));
+  alignas(8) uint64_t doorbell = 0;
+  SdmaQueueConfig info = queue_info();
+  info.doorbell_base = &doorbell;
+  info.host_accessible = true;
+  std::atomic<uint32_t> admissions{0};
+  SdmaPacketCallbacks callbacks;
+  callbacks.admit_memory_ingress =
+      [&](const GpuVmAccess &, std::span<const MemoryIngressSpan> spans) -> MemoryIngressAdmission {
+    if (spans.size() == 1 && spans.front().address == kWritePointer) {
+      ++admissions;
+    }
+    return {.outcome = VmAccessOutcome::Faulted, .permit = {}};
+  };
+  const SdmaQueueScheduler::Handle queue = scheduler_.attach(info, std::move(callbacks));
+  ASSERT_TRUE(queue);
+
+  std::atomic_ref<uint64_t>(doorbell).store(sizeof(uint32_t), std::memory_order_release);
+  ASSERT_TRUE(wait_until([&]() {
+    return scheduler_.notify(queue, sizeof(uint32_t)) == QueueSubmissionStatus::Faulted;
+  }));
+  EXPECT_EQ(admissions.load(), 1u);
+  EXPECT_EQ(memory_->atomic_load_attempts_at(kWritePointer), 0u);
+  EXPECT_EQ(memory_->load<uint64_t>(kReadPointer), 0u);
+  EXPECT_EQ(scheduler_.prepare_detach(queue), QueuePrepareCloseStatus::Ready);
+
+  const SdmaQueueScheduler::Handle next = scheduler_.attach(queue_info(kQueueId + 1), {});
+  ASSERT_TRUE(next);
+  EXPECT_EQ(scheduler_.notify(next, sizeof(uint32_t)), QueueSubmissionStatus::Accepted);
+  ASSERT_TRUE(
+      wait_until([&]() { return memory_->load<uint64_t>(kReadPointer) == sizeof(uint32_t); }));
+  EXPECT_TRUE(scheduler_.detach(next));
+}
+
 TEST_F(SdmaQueueSchedulerTest, ExplicitNotificationDoesNotReadProducerPointer) {
   memory_->store<uint32_t>(kRing, 0);
   SdmaQueueConfig info = queue_info();
@@ -729,8 +789,9 @@ TEST_F(SdmaQueueSchedulerTest, RoundRobinServicePreventsOneQueueFromMonopolizing
   constexpr uint32_t kNopPacketsBeforeFence = 64;
   constexpr uint32_t kFenceDwords = 4;
 
-  for (uint32_t packet_index = 0; packet_index < kNopPacketsBeforeFence; ++packet_index)
+  for (uint32_t packet_index = 0; packet_index < kNopPacketsBeforeFence; ++packet_index) {
     memory_->store<uint32_t>(kRing + packet_index * sizeof(uint32_t), 0);
+  }
   const std::array<uint32_t, kFenceDwords> first_fence = {
       5, static_cast<uint32_t>(kFirstFenceTarget), 0, 0x11111111};
   memory_->store(kRing + kNopPacketsBeforeFence * sizeof(uint32_t), first_fence);
@@ -887,6 +948,56 @@ TEST_F(SdmaQueueSchedulerTest, DetachWaitsForActiveServiceAndRejectsLaterNotific
   EXPECT_EQ(memory_->read_attempts(), reads_after_detach);
 }
 
+TEST(SdmaQueueSchedulerAsyncTest, ForceDetachCancelsDeferredWriteBeforeRecordDestruction) {
+  constexpr uint32_t kProcessId = 7;
+  constexpr uint32_t kQueueId = 11;
+  constexpr uint64_t kReadPointer = 0x80;
+  constexpr uint64_t kRing = 0x100;
+  constexpr uint64_t kSource = 0x200;
+  constexpr uint64_t kDestination = 0x300;
+  ::rocjitsu::test::AsyncVmHarness sim;
+  auto memory = std::make_shared<::rocjitsu::test::AsyncVmMemory>(*sim.owner, 0x400, kDestination,
+                                                                  kDestination + sizeof(uint32_t));
+  GpuVm gpu_vm;
+  const AddressSpaceHandle address_space = gpu_vm.register_translated(kProcessId, memory, memory);
+  ASSERT_TRUE(address_space);
+
+  constexpr uint32_t kValue = 0x11223344;
+  memory->store(kSource, std::as_bytes(std::span(&kValue, 1)));
+  const std::array<uint32_t, 7> copy = {
+      1, 3, 0, static_cast<uint32_t>(kSource), 0, static_cast<uint32_t>(kDestination), 0};
+  memory->store(kRing, std::as_bytes(std::span(copy)));
+  SdmaQueueScheduler scheduler(gpu_vm);
+  const SdmaQueueScheduler::Handle queue = scheduler.attach(
+      {.ring = {.address_space = address_space,
+                .ring_base = kRing,
+                .ring_bytes = 64,
+                .read_pointer_address = kReadPointer,
+                .initial_cursor = 0},
+       .context = {.process_id = kProcessId, .queue_id = kQueueId, .engine_id = 0}},
+      {});
+  ASSERT_TRUE(queue);
+  ASSERT_EQ(scheduler.notify(queue, sizeof(copy)), QueueSubmissionStatus::Accepted);
+  ASSERT_TRUE(scheduler.wait_for_blocked_packet_for_test(kProcessId, kQueueId, 1s));
+  ASSERT_EQ(memory->backing->posts, 1u);
+
+  // Keep the record alive after service_active_ clears, as the worker can do
+  // between publishing its turn and dropping its local reference.
+  std::shared_ptr<void> retained = SdmaQueueSchedulerTestAccess::retain_queue(scheduler, queue);
+  ASSERT_TRUE(retained);
+  EXPECT_FALSE(gpu_vm.unregister_address_space(address_space));
+  ASSERT_TRUE(scheduler.detach(queue));
+  EXPECT_FALSE(scheduler.contains(queue));
+  EXPECT_EQ(memory->backing->cancellations, 1u);
+  EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+
+  (void)sim.engine.step();
+  EXPECT_EQ(memory->backing->write_effects, 0u);
+  EXPECT_EQ(memory->load(kDestination, sizeof(uint32_t)), std::vector<std::byte>(sizeof(uint32_t)));
+  retained.reset();
+  scheduler.shutdown();
+}
+
 TEST_F(SdmaQueueSchedulerTest, ConcurrentDetachRejectsTheSecondCloser) {
   memory_->store<uint32_t>(kRing, 0);
   memory_->block_reads();
@@ -997,8 +1108,9 @@ TEST_F(SdmaQueueSchedulerTest, TerminalStateIsVisibleBeforeObserverNotification)
   bool release = false;
   const SdmaQueueScheduler::Handle queue =
       scheduler_.attach(queue_info(), {}, [&](const SdmaQueueProgress &progress) {
-        if (!progress.terminal)
+        if (!progress.terminal) {
           return;
+        }
         std::unique_lock lock(observer_mutex);
         entered = true;
         observer_condition.notify_all();
@@ -1093,12 +1205,12 @@ TEST_F(SdmaQueueSchedulerTest, GracefulDetachClosesTerminalWithoutRetirement) {
   EXPECT_FALSE(scheduler_.contains(queue));
 }
 
-TEST_F(SdmaQueueSchedulerTest, GracefulDetachClosesAfterPacketCallbackThrows) {
+TEST_F(SdmaQueueSchedulerTest, GracefulDetachClosesAfterPacketCallbackFault) {
   const std::array<uint32_t, 2> trap = {6, 37};
   memory_->store(kRing, trap);
   SdmaPacketCallbacks callbacks;
   callbacks.deliver_interrupt = [](uint32_t) -> VmAccessOutcome {
-    throw std::runtime_error("injected interrupt failure");
+    return VmAccessOutcome::Faulted;
   };
   const SdmaQueueScheduler::Handle queue = scheduler_.attach(queue_info(), std::move(callbacks));
   ASSERT_TRUE(queue);
@@ -1128,6 +1240,62 @@ TEST_F(SdmaQueueSchedulerTest, GracefulDetachClosesRetiredTerminalAfterCursorPub
   EXPECT_FALSE(scheduler_.contains(queue));
 }
 
+TEST(SdmaQueueSchedulerCacheMaintenanceTest, PreEffectRefusalBlocksAndRetriesSameFence) {
+  constexpr uint32_t kProcessId = 7;
+  constexpr uint32_t kQueueId = 11;
+  constexpr uint64_t kReadPointer = 0x80;
+  constexpr uint64_t kRing = 0x100;
+  constexpr uint64_t kFenceTarget = 0x300;
+
+  auto memory = std::make_shared<EngineMemory>();
+  GpuVm gpu_vm;
+  const AddressSpaceHandle address_space = gpu_vm.register_translated(kProcessId, memory, memory);
+  ASSERT_TRUE(address_space);
+  memory->store<uint64_t>(kReadPointer, 0);
+  const std::array<uint32_t, 4> fence = {5, static_cast<uint32_t>(kFenceTarget), 0, 0x11223344};
+  memory->store(kRing, fence);
+
+  std::atomic<bool> allow_maintenance{false};
+  std::atomic<uint32_t> attempts{0};
+  SdmaPacketCallbacks callbacks;
+  callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation operation) {
+    EXPECT_EQ(operation, SdmaCacheOperation::WritebackInvalidate);
+    attempts.fetch_add(1, std::memory_order_relaxed);
+    if (!allow_maintenance.load(std::memory_order_acquire)) {
+      return CacheMaintenanceResult{.outcome = CacheMaintenanceOutcome::Retry};
+    }
+    return CacheMaintenanceResult{};
+  };
+  SdmaQueueScheduler scheduler(gpu_vm);
+  const SdmaQueueScheduler::Handle queue = scheduler.attach(
+      {.ring = {.address_space = address_space,
+                .ring_base = kRing,
+                .ring_bytes = 64,
+                .read_pointer_address = kReadPointer,
+                .initial_cursor = 0},
+       .context = {.process_id = kProcessId, .queue_id = kQueueId, .engine_id = 0}},
+      std::move(callbacks));
+  ASSERT_TRUE(queue);
+
+  EXPECT_EQ(scheduler.notify(queue, fence.size() * sizeof(uint32_t)),
+            QueueSubmissionStatus::Accepted);
+  ASSERT_TRUE(wait_until([&] { return attempts.load(std::memory_order_acquire) >= 2; }));
+  EXPECT_EQ(memory->load<uint32_t>(kFenceTarget), 0u);
+  EXPECT_EQ(memory->load<uint64_t>(kReadPointer), 0u);
+  EXPECT_EQ(scheduler.notify(queue, fence.size() * sizeof(uint32_t)),
+            QueueSubmissionStatus::Accepted);
+
+  allow_maintenance.store(true, std::memory_order_release);
+  ASSERT_TRUE(wait_until(
+      [&] { return memory->load<uint64_t>(kReadPointer) == fence.size() * sizeof(uint32_t); }));
+  EXPECT_EQ(memory->load<uint32_t>(kFenceTarget), 0x11223344u);
+  const std::vector<uint64_t> writes = memory->write_addresses();
+  EXPECT_EQ(std::ranges::count(writes, kFenceTarget), 1);
+  EXPECT_EQ(scheduler.prepare_detach(queue), QueuePrepareCloseStatus::Ready);
+  EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+}
+
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(SdmaQueueSchedulerCacheMaintenanceTest, FailedWritebackFaultsQueueBeforePacketWrite) {
   constexpr uint32_t kProcessId = 7;
   constexpr uint32_t kQueueId = 11;
@@ -1167,12 +1335,17 @@ TEST(SdmaQueueSchedulerCacheMaintenanceTest, FailedWritebackFaultsQueueBeforePac
   dirty_line.fill(0x5c);
   l2.writeback_line(kDirtyAddress, dirty_line.data(), Mtype::RW, kProcessId);
   l2.set_backing_memory(nullptr);
-  ASSERT_EQ(mprotect(mapping.data(), GpuMemory::PAGE_SIZE, PROT_READ), 0);
+  legacy_process.unmap_pages(kDirtyAddress, GpuMemory::PAGE_SIZE);
 
   SdmaQueueScheduler scheduler(gpu_vm, coherence);
   SdmaPacketCallbacks callbacks;
   callbacks.acquire_cache_maintenance = [coherence](SdmaCacheOperation operation) {
-    return coherence->acquire_cache_maintenance(operation);
+    auto acquired = coherence->acquire_cache_maintenance(operation);
+    if (acquired.failed()) {
+      return util::FailureOr<CacheMaintenanceResult>(util::Result::failure());
+    }
+    return util::FailureOr<CacheMaintenanceResult>(
+        CacheMaintenanceResult{.lease = std::move(acquired.value())});
   };
   const SdmaQueueScheduler::Handle queue = scheduler.attach(
       {.ring = {.address_space = queue_address_space,
@@ -1195,15 +1368,106 @@ TEST(SdmaQueueSchedulerCacheMaintenanceTest, FailedWritebackFaultsQueueBeforePac
 
   EXPECT_TRUE(scheduler.detach(queue));
   scheduler.shutdown();
-  ASSERT_EQ(mprotect(mapping.data(), GpuMemory::PAGE_SIZE, PROT_READ | PROT_WRITE), 0);
+  legacy_process.map_pages(kDirtyAddress, mapping.data(), GpuMemory::PAGE_SIZE);
   {
-    [[maybe_unused]] DeviceCacheMaintenanceLease maintenance =
+    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
         coherence->acquire_cache_maintenance(DeviceCacheOperation::WritebackInvalidate);
+    ASSERT_TRUE(maintenance.succeeded());
   }
   EXPECT_EQ(mapping.data()[0], 0x5cu);
   EXPECT_TRUE(legacy_vm.unregister_vmid(kProcessId));
   EXPECT_TRUE(gpu_vm.unregister_address_space(queue_address_space));
 }
+#endif
+
+class SdmaCacheInvalidateTest : public ::testing::TestWithParam<std::pair<bool, bool>> {};
+
+TEST_P(SdmaCacheInvalidateTest, DiscardsDirtyStateBeforeWritebackOrAtomic) {
+  const auto [fail_initial_writeback, finish_with_atomic] = GetParam();
+  constexpr uint32_t kProcessId = 7;
+  constexpr uint64_t kDirtyAddress = 0x160000;
+  constexpr uint32_t kHostValue = 0x44444444;
+  auto queue_memory = std::make_shared<EngineMemory>();
+  GpuVm gpu_vm;
+  const AddressSpaceHandle queue_address_space =
+      gpu_vm.register_translated(kProcessId, queue_memory, queue_memory);
+  const std::optional<GpuVmAccess> access = gpu_vm.snapshot(queue_address_space);
+  ASSERT_TRUE(access);
+
+  ScopedMapping mapping;
+  ASSERT_NE(mapping.data(), nullptr);
+  KfdProcess legacy_process(kProcessId);
+  legacy_process.map_pages(kDirtyAddress, mapping.data(), GpuMemory::PAGE_SIZE);
+  GpuMemory legacy_memory("legacy_memory");
+  GpuVm legacy_gpu_vm;
+  LegacyGpuVmAdapter legacy_vm(legacy_gpu_vm, &legacy_memory);
+  const AddressSpaceHandle legacy_address_space = legacy_vm.register_address_space(
+      kProcessId, &legacy_process.page_table_, &legacy_process.page_table_mutex_,
+      legacy_process.page_table_generation());
+  ASSERT_TRUE(legacy_address_space);
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", coherence);
+  l2.set_backing_memory(&legacy_memory);
+  l2.set_legacy_maintenance_memory(&legacy_memory);
+  l2.set_legacy_maintenance_vm(&legacy_gpu_vm);
+  l2.set_gpu_vm(&legacy_gpu_vm);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty_line{};
+  dirty_line.fill(0x22);
+  ASSERT_EQ(l2.writeback_line(kDirtyAddress, dirty_line.data(), Mtype::RW, kProcessId),
+            VmAccessOutcome::Complete);
+
+  SdmaPacketCallbacks callbacks;
+  callbacks.acquire_cache_maintenance = [coherence](SdmaCacheOperation operation) {
+    auto acquired = coherence->acquire_cache_maintenance(operation);
+    if (acquired.failed()) {
+      return util::FailureOr<CacheMaintenanceResult>(util::Result::failure());
+    }
+    return util::FailureOr<CacheMaintenanceResult>(
+        CacheMaintenanceResult{.lease = std::move(acquired.value())});
+  };
+  SdmaPacketProcessor first(SdmaPacketDialect::Gfx1250, callbacks);
+  SdmaPacketProcessor second(SdmaPacketDialect::Gfx1250, callbacks);
+  SdmaPacketContinuation continuation;
+  constexpr std::array<uint32_t, 6> kWriteback = {17, 0, 0, (1u << 14) | (1u << 15), 0, 0};
+  constexpr std::array<uint32_t, 6> kInvalidate = {17, 0, 0, 1u << 14, 0, 0};
+  if (fail_initial_writeback) {
+    legacy_process.unmap_pages(kDirtyAddress, GpuMemory::PAGE_SIZE);
+    const SdmaPacketProcessResult failed = first.process(
+        {.available_dwords = kWriteback, .access = *access, .continuation = continuation});
+    ASSERT_EQ(failed.packet.status, PacketProcessStatus::Faulted);
+    EXPECT_FALSE(continuation.pending());
+    legacy_process.map_pages(kDirtyAddress, mapping.data(), GpuMemory::PAGE_SIZE);
+  }
+  std::memcpy(mapping.data(), &kHostValue, sizeof(kHostValue));
+  const SdmaPacketProcessResult invalidated = second.process(
+      {.available_dwords = kInvalidate, .access = *access, .continuation = continuation});
+  ASSERT_EQ(invalidated.packet.status, PacketProcessStatus::Complete);
+  // No ordinary L2 access before the next operation reconciles its own epoch.
+  if (finish_with_atomic) {
+    const auto increment = [](uint8_t *target, uint32_t) {
+      uint32_t value = 0;
+      std::memcpy(&value, target, sizeof(value));
+      ++value;
+      std::memcpy(target, &value, sizeof(value));
+    };
+    ASSERT_EQ(l2.atomic_rmw(kDirtyAddress, sizeof(uint32_t), increment, kProcessId),
+              VmAccessOutcome::Complete);
+  } else {
+    const SdmaPacketProcessResult written = second.process(
+        {.available_dwords = kWriteback, .access = *access, .continuation = continuation});
+    ASSERT_EQ(written.packet.status, PacketProcessStatus::Complete);
+  }
+  uint32_t backing = 0;
+  std::memcpy(&backing, mapping.data(), sizeof(backing));
+  EXPECT_EQ(backing, kHostValue + (finish_with_atomic ? 1u : 0u));
+  EXPECT_FALSE(continuation.pending());
+  EXPECT_TRUE(legacy_vm.unregister_vmid(kProcessId));
+  EXPECT_TRUE(gpu_vm.unregister_address_space(queue_address_space));
+}
+
+INSTANTIATE_TEST_SUITE_P(WritebackAndAtomic, SdmaCacheInvalidateTest,
+                         ::testing::Values(std::pair{true, false}, std::pair{true, true},
+                                           std::pair{false, true}));
 
 } // namespace
 } // namespace rocjitsu::amdgpu

@@ -4,6 +4,14 @@ All notable changes to rocjitsu are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Restoring an active CDNA1–5, RDNA3, RDNA3.5 or RDNA4 wave now requires its
+  saved LDS window and the compute unit's LDS contents. Older checkpoints
+  missing these records return `ROCJITSU_STATUS_INVALID_FILE`. Idle checkpoints
+  from the same writers remain usable.
+
 ## [0.3.0] - 2026-07-17
 
 ### Added

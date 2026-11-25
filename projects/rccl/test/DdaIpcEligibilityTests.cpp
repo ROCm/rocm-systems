@@ -203,11 +203,9 @@ TEST_F(DdaIpcEligibilityTest, ReduceScatter_MisalignedSendbuff)
         mockComm_.get(), misaligned, recvbuff_, 4, ncclFloat32, ncclSum));
 }
 
-// Boundaries of ddaReduceScatterIpcStaging. The host flag is the only copy
-// decision: at or below 1 MiB per shard the kernel copies each shard, including
-// a message that fits in one block. Above that the host pre-copies. A 1 MiB
-// shard stays in-kernel even when 8 ranks make the total 8 MiB, which is the
-// case that used to memcpy on the host and copy again in the kernel.
+// Shards below 1 MiB are copied in the kernel; at 1 MiB and above the host
+// pre-copies. At the cutoff, 8 ranks make the total 8 MiB, avoiding a host
+// memcpy followed by another copy in the kernel.
 TEST_F(DdaIpcEligibilityTest, ReduceScatter_StagingBoundaries)
 {
     using dda::common::DdaRsIpcStaging;
@@ -217,7 +215,8 @@ TEST_F(DdaIpcEligibilityTest, ReduceScatter_StagingBoundaries)
     EXPECT_EQ(ddaReduceScatterIpcStaging(4, sizeof(float)), DdaRsIpcStaging::InKernel);
 
     const size_t atKernelCap = kDdaRsIpcKernelCopyMaxBytes / sizeof(float);
-    EXPECT_EQ(ddaReduceScatterIpcStaging(atKernelCap, sizeof(float)), DdaRsIpcStaging::InKernel);
+    EXPECT_EQ(ddaReduceScatterIpcStaging(atKernelCap - 4, sizeof(float)), DdaRsIpcStaging::InKernel);
+    EXPECT_EQ(ddaReduceScatterIpcStaging(atKernelCap, sizeof(float)), DdaRsIpcStaging::HostPreCopy);
 
     const size_t pastKernelCap = atKernelCap + 4;
     EXPECT_EQ(ddaReduceScatterIpcStaging(pastKernelCap, sizeof(float)), DdaRsIpcStaging::HostPreCopy);

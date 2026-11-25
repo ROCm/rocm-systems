@@ -126,7 +126,12 @@ union header_type
         uint64_t UCF       : 1;
         uint64_t DPRate    : 4;
         uint64_t wv20      : 1;
-        uint64_t dp_derate : 3;
+        uint64_t dp_derate : 2;
+        uint64_t padding0  : 7;
+        uint64_t exec      : 1;
+        uint64_t dbl       : 1;
+        uint64_t padding1  : 15;
+        uint64_t exbarw    : 1;
     };
     uint64_t raw;
 

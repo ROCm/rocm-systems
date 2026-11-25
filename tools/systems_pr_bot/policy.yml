@@ -116,6 +116,7 @@ pr:
       # (e.g. projects/miopen/test/gtest/unit_conv_solver_ConvWinoRageRxS.cpp).
       - '**/test/gtest/**'
       - '*_gtest.*'
+      - 'projects/hip-tests/**'
     # Unit tests are required for source code ANYWHERE in the repository — there
     # are NO folder-based exemptions. A test file may also live in any folder;
     # it is recognised by its name or path pattern, not its location alone.

@@ -1,10 +1,20 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Private interface implemented by each concrete device driver.
+#![cfg_attr(
+    windows,
+    allow(
+        unused_imports,
+        unused_variables,
+        reason = "native provider routes are absent on this host target"
+    )
+)]
+
+//! Backend-specific interfaces and private device-driver contracts.
 //!
-//! [`Driver`] owns discovery, activation, and shutdown. GPU capabilities are
-//! separate traits so each backend implements only the services it provides.
+//! Backend modules expose native operations to runtime frontends. The private
+//! driver contract owns discovery, activation, and shutdown. GPU capabilities
+//! are separate traits so each backend implements only the services it provides.
 //! Allocation and virtual-memory operations remain separate because their
 //! owners can be shared with other device families. Queue creation belongs to
 //! the matching GPU capability; queue operations belong to the returned owner.
@@ -14,24 +24,47 @@ mod instance;
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
-mod linux_kfd;
+pub mod linux_kfd;
 mod resources;
 #[cfg(test)]
 pub(crate) mod test_driver;
 #[cfg(test)]
 mod tests;
 
+// Keep native driver and registry types out of the public configuration bound.
+mod configuration {
+    /// Routes crate-defined configuration through the session's checked helper.
+    pub trait Apply: Sized {
+        /// Selects a backend using `Session::configure_driver`.
+        fn apply(self, session: &mut crate::session::Session) -> Result<(), crate::Error>;
+    }
+}
+
+/// Typed options accepted by [`crate::session::Session::configure`].
+///
+/// Each configuration type selects its owning backend without exposing native
+/// driver types. This trait is sealed; implementations are supplied by the
+/// compiled driver backends. The backend defines its options and activation
+/// constraints, while the session enforces exclusive access to the driver.
+pub trait DriverConfiguration: configuration::Apply {}
+
+impl<C: configuration::Apply> DriverConfiguration for C {}
+
 pub(crate) use instance::{
     DeviceDriverState, DriverInstance, DriverInstanceId, EndpointSelector, EventSubscription,
-    GpuDriverRef, KfdAccessTarget, KfdAllocation, KfdDeviceState, new_driver_instance,
+    GpuDriverRef, new_driver_instance,
 };
-pub(crate) use linux_kfd::KfdEventSubscription;
+#[cfg(target_os = "linux")]
+pub(crate) use instance::{KfdAccessTarget, KfdAllocation, KfdDeviceState};
+#[cfg(target_os = "linux")]
+pub(crate) use linux_kfd::{KfdEventSubscription, notification as kfd_notifications};
 #[cfg(all(
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
 pub(crate) use linux_kfd::{
-    KfdKernelQueue, KfdPcSampling, KfdQueue, KfdSignalEvent, LinuxKfdDriver as KfdDriver,
+    KfdKernelQueue, KfdPcSampling, KfdProcessTrap, KfdQueue, KfdSignalEvent,
+    LinuxKfdDriver as KfdDriver,
 };
 pub(crate) use resources::{
     AllocationState, KernelQueueState, PcSamplingState, QueueState, VirtualAddressState,
@@ -43,20 +76,25 @@ use crate::device::gpu::kernel_queue::{
 };
 use crate::device::gpu::profiling::{
     ClockCounters, PcSamplingConfiguration, PcSamplingConfigurationSet, PcSamplingRequest,
+    SpmDestinationFailure, SpmDestinationReport,
 };
 use crate::device::gpu::queue::{QueueRequest, QueueScratch, QueueTransport};
 use crate::memory::storage::{Owned, Shared};
 use crate::memory::{
     AllocationInfo, DeviceAccess, HostRegistration, MemoryKind, VirtualAddressInfo,
-    VirtualMemoryInfo,
+    VirtualMemoryInfo, VirtualMemoryOptions,
 };
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, NativeNodeId, NodeKind, SourceKind, TopologySnapshot};
+use crate::topology::{Endpoint, NativeNodeId, NodeKind, SourceKind, TopologyGraphSnapshot};
 use crate::{Error, ErrorKind};
 
 /// Inert constructors for the driver backends compiled into this target.
 /// Each session constructs fresh instances from this immutable catalog.
-pub(crate) type DriverFactory = fn(DriverContextLifetime) -> Result<DriverInstance, Error>;
+pub(crate) type DriverFactory = fn(
+    DriverContextLifetime,
+    crate::os::ProcessIdentity,
+    crate::session::SessionAdmission,
+) -> Result<DriverInstance, Error>;
 
 pub(crate) const BUILTIN_DRIVER_FACTORIES: &[DriverFactory] = &[
     #[cfg(all(
@@ -70,9 +108,13 @@ pub(crate) const BUILTIN_DRIVER_FACTORIES: &[DriverFactory] = &[
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
-fn new_linux_kfd(lifetime: DriverContextLifetime) -> Result<DriverInstance, Error> {
+fn new_linux_kfd(
+    lifetime: DriverContextLifetime,
+    process: crate::os::ProcessIdentity,
+    admission: crate::session::SessionAdmission,
+) -> Result<DriverInstance, Error> {
     Ok(DriverInstance::LinuxKfd(Shared::new(
-        KfdDriver::with_context_lifetime(lifetime),
+        KfdDriver::with_admission(lifetime, process, admission),
     )?))
 }
 
@@ -117,6 +159,8 @@ pub(crate) trait CachedInfo {
 pub(crate) trait Driver: Send + Sync {
     /// State retained for one endpoint activated through this driver instance.
     type DeviceState: Clone + Send + Sync;
+    /// Session admission shared by every native owner derived from this driver.
+    fn admission(&self) -> &crate::session::SessionAdmission;
     /// Returns the identity stamped into this driver's passive endpoints.
     fn driver_instance(&self) -> DriverInstanceId;
     /// Returns the context policy fixed when this driver was constructed.
@@ -128,10 +172,10 @@ pub(crate) trait Driver: Send + Sync {
         &self,
         visitor: &mut dyn FnMut(Endpoint) -> Result<(), Error>,
     ) -> Result<(), Error>;
-    /// Adds one generation-consistent contributor to a candidate snapshot.
+    /// Adds one generation-consistent contributor to a candidate graph snapshot.
     /// Generic drivers report one opaque node per endpoint until they expose
     /// a richer passive topology source.
-    fn contribute_topology(&self, snapshot: &mut TopologySnapshot) -> Result<(), Error> {
+    fn contribute_topology_graph(&self, snapshot: &mut TopologyGraphSnapshot) -> Result<(), Error> {
         let source =
             snapshot.add_source(SourceKind::Driver, None, true, Some(self.driver_instance()))?;
         let mut ordinal = 0_u64;
@@ -169,6 +213,17 @@ pub(crate) trait Driver: Send + Sync {
     fn activate(&self, endpoint: &Endpoint) -> Result<Self::DeviceState, Error>;
 }
 
+/// Driver-owned passive configuration, separate from common lifecycle services.
+pub(crate) trait ConfigurableDriver: Driver {
+    /// Complete set of configuration options understood by this backend.
+    type Configuration;
+
+    /// Replaces pending configuration before activation without native effects.
+    /// Rejects invalid lifecycle state before modifying the stored options.
+    /// Preserves the installed driver's identity and context lifetime.
+    fn configure(&mut self, configuration: Self::Configuration) -> Result<(), Error>;
+}
+
 /// Allocation, registration, and access operations on activated devices.
 ///
 /// An allocation owner retains every native mapping dependency needed for
@@ -177,6 +232,29 @@ pub(crate) trait Driver: Send + Sync {
 pub(crate) trait AllocationOperations: Driver {
     /// Native allocation and mapping state retained through cleanup.
     type Allocation: CachedInfo<Info = AllocationInfo>;
+    /// Optional indexing of frontend identity for native registration reuse.
+    /// Failure must not publish a different identity or acquire an alias.
+    fn publish_local_backing_identity(
+        _allocation: &Self::Allocation,
+        _identity: crate::memory::device::LocalBackingIdentity,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+    /// Offset into identified backing, when the provider exposes that metadata.
+    fn backing_offset(_allocation: &Self::Allocation) -> Option<u64> {
+        None
+    }
+    /// Qualifies one complete memory request without activating the endpoint.
+    fn memory_capabilities(
+        &self,
+        _endpoint: &Endpoint,
+        _request: crate::memory::device::MemoryCapabilityRequest<'_>,
+    ) -> Result<crate::memory::device::DeviceMemoryCapabilities, Error> {
+        Err(Error::Operation {
+            kind: ErrorKind::Unsupported,
+            detail: "provider has not qualified this memory request",
+        })
+    }
     /// Reports whether this endpoint can register caller-owned host pages.
     fn supports_host_registration(&self, endpoint: &Endpoint) -> bool;
     /// Checks that an allocation's native backing remains usable.
@@ -266,8 +344,7 @@ pub(crate) trait VirtualMemoryOperations: Driver {
         device: &Self::DeviceState,
         kind: MemoryKind,
         size: u64,
-        pinned: bool,
-        uncached: bool,
+        options: VirtualMemoryOptions,
     ) -> Result<Owned<Self::VirtualMemory>, Error>;
     /// Releases physical backing after its mappings are gone.
     fn free_virtual_memory(memory: &mut Self::VirtualMemory) -> Result<(), Error>;
@@ -303,6 +380,15 @@ pub(crate) trait VirtualMemoryOperations: Driver {
         permissions: DeviceAccess,
     ) -> Result<(), Error>;
     /// Unmaps one host range, retaining its owner if cleanup fails.
+    /// Borrows a still-mapped CPU interval independently of device health.
+    fn diagnostic_virtual_host_mapping(
+        _mapping: &Self::VirtualHostMapping,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        Err(Error::Operation {
+            kind: crate::ErrorKind::Unsupported,
+            detail: "virtual host diagnostics unavailable",
+        })
+    }
     fn free_virtual_host_mapping(mapping: &mut Self::VirtualHostMapping) -> Result<(), Error>;
 }
 
@@ -318,6 +404,15 @@ pub(crate) trait UserQueueResource: CachedInfo<Info = QueueTransport> {
     fn check(&self) -> Result<(), Error>;
     /// Samples the native read and write positions without retiring work.
     fn progress(&self) -> Result<(u64, u64), Error>;
+    /// Permanently stops and captures native compute diagnostic state.
+    fn core_snapshot(
+        &mut self,
+    ) -> Result<crate::device::gpu::diagnostic::CoreQueueSnapshot<'_>, Error> {
+        Err(Error::Operation {
+            kind: crate::ErrorKind::Unsupported,
+            detail: "native core capture unavailable",
+        })
+    }
     /// Stops native execution while retaining the queue's backing.
     fn inactivate(&mut self) -> Result<(), Error>;
     /// Changes the native scheduling priority when supported.
@@ -334,7 +429,21 @@ pub(crate) trait UserQueueResource: CachedInfo<Info = QueueTransport> {
     /// scratch backing until a later successful replacement or driver
     /// destruction.
     #[allow(unsafe_code)]
-    unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error>;
+    unsafe fn set_scratch(&mut self, scratch: Option<QueueScratch>) -> Result<(), Error>;
+    /// Enables V2 scratch bookkeeping before any producer is admitted.
+    fn enable_async_scratch(&mut self) -> Result<(), Error> {
+        Err(Error::Operation {
+            kind: crate::ErrorKind::Unsupported,
+            detail: "asynchronous scratch bookkeeping is unavailable",
+        })
+    }
+    /// Proves the current scratch allocation cannot be used by later packets.
+    fn reclaim_scratch(&mut self, _cancel: &std::sync::atomic::AtomicBool) -> Result<(), Error> {
+        Err(Error::Operation {
+            kind: crate::ErrorKind::Unsupported,
+            detail: "asynchronous scratch reclamation is unavailable",
+        })
+    }
     /// Destroys the native queue and releases its transport.
     ///
     /// # Safety
@@ -399,21 +508,30 @@ pub(crate) trait PcSamplingResource {
     fn relinquish_adopted(&mut self) -> Result<(), Error>;
 }
 
-/// GPU queries and controls shared across operating-system drivers.
-///
-/// Allocation, virtual memory, queue, and instrumentation capabilities are
-/// independent. A GPU backend need not implement them to expose these queries.
-pub(crate) trait GpuDriver: Driver {
-    /// Queries the process-wide XNACK mode without changing it.
+/// Native fault-mode query, independent of allocation or queue services.
+pub(crate) trait GpuFaultModeOperations: Driver {
+    /// Queries the device's effective XNACK mode without changing it.
     fn xnack_enabled(&self, device: &Self::DeviceState) -> Result<bool, Error>;
+}
+
+/// VM-scoped cache controls, independent of memory availability queries.
+pub(crate) trait GpuCacheControlOperations: Driver {
     /// Sets the native VM's persisting L2 reservation in bytes.
     fn set_persisting_l2_cache_size(
         &self,
         device: &Self::DeviceState,
         size_bytes: u32,
     ) -> Result<(), Error>;
+}
+
+/// Live device memory availability; a query does not reserve capacity.
+pub(crate) trait GpuMemoryQueryOperations: Driver {
     /// Queries currently available device memory in bytes.
     fn available_memory(&self, device: &Self::DeviceState) -> Result<u64, Error>;
+}
+
+/// Validated hardware surface facts for image layout consumers.
+pub(crate) trait GpuSurfaceOperations: Driver {
     /// Returns the layout capabilities needed by GPU image consumers.
     fn surface_config(
         &self,
@@ -422,7 +540,7 @@ pub(crate) trait GpuDriver: Driver {
 }
 
 /// Direct GPU queues and their queue-specific memory resources.
-pub(crate) trait GpuUserQueueOperations: GpuDriver + AllocationOperations {
+pub(crate) trait GpuUserQueueOperations: AllocationOperations {
     /// Direct GPU queue retained by this driver's activated device state.
     type UserQueue: UserQueueResource<DeviceState = Self::DeviceState>;
     /// Reports whether this driver can use expert scheduling on the device.
@@ -449,7 +567,7 @@ pub(crate) trait GpuUserQueueOperations: GpuDriver + AllocationOperations {
 }
 
 /// Kernel-mediated GPU submission queues, independent of direct queues.
-pub(crate) trait GpuKernelQueueOperations: GpuDriver {
+pub(crate) trait GpuKernelQueueOperations: Driver {
     /// Native queue that accepts driver-mediated command submissions.
     type KernelQueue: KernelQueueResource;
     /// Returns the number of native SDMA engines available for submission.
@@ -462,25 +580,32 @@ pub(crate) trait GpuKernelQueueOperations: GpuDriver {
     ) -> Result<Owned<Self::KernelQueue>, Error>;
 }
 
-/// GPU counters, sampling, stream monitoring, and trap instrumentation.
-pub(crate) trait GpuInstrumentationOperations: GpuDriver {
-    /// Native PC sampling registration retained by this driver instance.
-    type PcSampling: PcSamplingResource;
+/// Correlated device clocks, independent of instrumentation registrations.
+pub(crate) trait GpuClockOperations: Driver {
     /// Reads correlated GPU and system clock counters.
     fn clock_counters(&self, device: &Self::DeviceState) -> Result<ClockCounters, Error>;
+}
+
+/// Native PC sampling registration and capability negotiation.
+pub(crate) trait GpuPcSamplingOperations: Driver {
+    /// Native registration retained by this driver instance.
+    type PcSampling: PcSamplingResource;
     /// Lists supported or currently available native PC sampling modes.
     fn pc_sampling_configurations(
         &self,
         device: &Self::DeviceState,
         set: PcSamplingConfigurationSet,
     ) -> Result<Vec<PcSamplingConfiguration>, Error>;
-    /// Creates a PC sampling registration, optionally reusing a trace ID.
+    /// Creates a new PC sampling registration.
     fn create_pc_sampling(
         &self,
         device: &Self::DeviceState,
         request: PcSamplingRequest,
-        existing_trace_id: Option<std::num::NonZeroU32>,
     ) -> Result<Owned<Self::PcSampling>, Error>;
+}
+
+/// Native trap registration; callers retain all reachable backing.
+pub(crate) trait GpuTrapOperations: Driver {
     /// Installs handler code and memory addresses for GPU traps.
     ///
     /// # Safety
@@ -493,6 +618,10 @@ pub(crate) trait GpuInstrumentationOperations: GpuDriver {
         handler_address: u64,
         memory_address: u64,
     ) -> Result<(), Error>;
+}
+
+/// Exclusive stream performance monitoring and destination lifetime.
+pub(crate) trait GpuSpmOperations: Driver {
     /// Acquires exclusive access to stream performance monitoring.
     fn spm_acquire(&self, device: &Self::DeviceState) -> Result<(), Error>;
     /// Releases the stream performance monitor acquired by this owner.
@@ -507,9 +636,35 @@ pub(crate) trait GpuInstrumentationOperations: GpuDriver {
         &self,
         device: &Self::DeviceState,
         size: u32,
-        timeout: &mut u32,
-        bytes_copied: &mut u32,
+        timeout: u32,
         destination: Option<usize>,
-        data_loss: &mut bool,
+    ) -> Result<SpmDestinationReport, SpmDestinationFailure>;
+}
+
+/// Optional process-range advice and migration, independent of allocation.
+/// Providers encode the whole request before native effects and stage complete
+/// query results. Success is not a durable residency guarantee.
+pub(crate) trait MemoryAdviceOperations: Driver {
+    fn advice_capabilities(&self) -> Result<crate::memory::advice::AdviceCapabilities, Error>;
+    fn advice_set(
+        &self,
+        address: u64,
+        size: u64,
+        changes: &[crate::memory::advice::AdviceChange],
+    ) -> Result<(), Error>;
+    fn advice_query(
+        &self,
+        address: u64,
+        size: u64,
+        queries: &[crate::memory::advice::AdviceQuery],
+    ) -> Result<Vec<crate::memory::advice::AdviceValue>, Error>;
+    /// Meets the requested completion guarantee or rejects it before effects.
+    /// Completed migration does not guarantee durable residency after return.
+    fn advice_prefetch(
+        &self,
+        address: u64,
+        size: u64,
+        location: crate::memory::advice::AdviceLocation,
+        completion: crate::memory::advice::PrefetchCompletion,
     ) -> Result<(), Error>;
 }

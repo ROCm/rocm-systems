@@ -4,6 +4,7 @@
 #pragma once
 
 #include "embedded_schema.h"
+#include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_loader.h"
 #include "util/diagnostic.h"
 
@@ -17,6 +18,36 @@
 
 namespace rocjitsu::test {
 
+/// Resolve expected-valid settings, preserving output on failure.
+/// Call with ASSERT_TRUE before consuming output.
+[[nodiscard]] inline testing::AssertionResult
+resolve_valid_execution_threads(config::ExecutionThreadAllocation &output,
+                                const config::ExecutionThreadSettings &settings,
+                                uint32_t host_threads) {
+  util::StringDiagnostic diagnostic;
+  util::FailureOr<config::ExecutionThreadAllocation> result =
+      settings.resolve(host_threads, diagnostic.emitter());
+  if (result.failed()) {
+    return testing::AssertionFailure() << diagnostic.message();
+  }
+  output = std::move(result).value();
+  return testing::AssertionSuccess();
+}
+
+/// Restore an expected-valid checkpoint, preserving the caller's output on failure.
+/// Call with ASSERT_TRUE so a failure stops the consuming test or fixture.
+[[nodiscard]] inline testing::AssertionResult
+restore_valid_checkpoint(const std::string &path, config::LoadedConfig &output) {
+  util::StringDiagnostic diagnostic;
+  util::FailureOr<config::LoadedConfig> result =
+      config::restore_checkpoint(path, diagnostic.emitter());
+  if (result.failed()) {
+    return testing::AssertionFailure() << diagnostic.message();
+  }
+  output = std::move(result).value();
+  return testing::AssertionSuccess();
+}
+
 /// Load an expected-valid config, preserving the caller's output on failure.
 /// Call with ASSERT_TRUE so a failure stops the consuming test or fixture.
 /// Omitting host_threads selects the loader's automatic host-affinity policy.
@@ -27,8 +58,9 @@ load_valid_config(const std::string &path, config::LoadedConfig &output,
   util::FailureOr<config::LoadedConfig> result =
       host_threads ? config::load_config(path, kEmbeddedSchema, diagnostic.emitter(), *host_threads)
                    : config::load_config(path, kEmbeddedSchema, diagnostic.emitter());
-  if (result.failed())
+  if (result.failed()) {
     return testing::AssertionFailure() << diagnostic.message();
+  }
   output = std::move(result).value();
   return testing::AssertionSuccess();
 }
@@ -44,8 +76,9 @@ load_valid_config_for_node(const std::string &path, config::LoadedConfig &output
           ? config::load_config_for_node(path, kEmbeddedSchema, node_id, diagnostic.emitter(),
                                          *host_threads)
           : config::load_config_for_node(path, kEmbeddedSchema, node_id, diagnostic.emitter());
-  if (result.failed())
+  if (result.failed()) {
     return testing::AssertionFailure() << diagnostic.message();
+  }
   output = std::move(result).value();
   return testing::AssertionSuccess();
 }
@@ -59,8 +92,9 @@ load_valid_config_from_string(const std::string &json, config::LoadedConfig &out
       host_threads ? config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter(),
                                                      *host_threads)
                    : config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter());
-  if (result.failed())
+  if (result.failed()) {
     return testing::AssertionFailure() << diagnostic.message();
+  }
   output = std::move(result).value();
   return testing::AssertionSuccess();
 }

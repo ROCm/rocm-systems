@@ -16,12 +16,76 @@ layout formulas and a fixed inventory of source/target layout names.
 | `isa_profile.py` | Per-ISA profile constants and encoding rules |
 | `semantics.py` | Derive instruction semantics from mnemonics |
 | `cross_isa.py` | Cross-ISA instruction overlap analysis |
-| `codegen/` | Generate C++ decoders, encoders, and instruction execute bodies |
+| `codegen/` | Generate C++ decoders, encoders and execute bodies, and native assembly dispatch tables |
 | `legalization.py` | Generate cross-ISA legalization tables (Action classification) |
 | `legalization_codegen.py` | Emit C++20 `InstructionLegalization[]` legalization table headers |
 | `encoding_translator_codegen.py` | Emit C++20 neutral field structs + decode/encode functions |
 | `layout_catalog.py` | Matrix lane-layout descriptors and XOR permutation formulas |
 | `codegen/dbt/rule_gen.py` | Derive and emit the matrix lane-conversion catalog |
+
+## Decoded instruction metadata
+
+Instruction constructors resolve semantic facts once. Runtime consumers use
+`InstFlags`, `amdgpu::Operation`, `amdgpu::MemoryAddressing`, and
+`amdgpu::MemoryKind`; mnemonic strings are for disassembly, diagnostics, and
+textual input. `codegen/instruction_metadata.py` owns the generated operation
+catalog and classification rules. Generation may inspect instruction names,
+encoding fields, and semantic classes; execution and analysis must not infer
+those facts by parsing the display name.
+
+The existing metadata has separate responsibilities:
+
+- `InstFlags` contains independent properties, including execution class,
+  matrix arithmetic, PC reads, relative register addressing, packed D16 memory
+  data, and transfers between memory and LDS.
+- `Operation` identifies a canonical operation across encoding decorations.
+  VOPD carries identities for both slots. Exact instruction exceptions use
+  these IDs; IDs do not replace target-qualified encoding IDs or opcodes in
+  translation tables and are not a serialized or stable public ABI.
+- `MemoryAddressing` describes the decoded addressing family. A FLAT
+  instruction stays FLAT when individual lanes route to LDS or scratch;
+  encoded segment and GDS controls are resolved during construction.
+  `MemoryKind` describes the transaction, including loads, stores, atomics,
+  sampling, cache operations, and prefetches. These facts do not promise
+  simulator execution support.
+- Source and destination operands, implicit use/def hooks, and
+  `RegisterModifiers` remain the authority for register effects. Runtime masks,
+  relative indices, register banks, and byte footprints remain dynamic.
+- `MemoryIssueInfo` describes modeled pipeline and completion obligations.
+  Target wait policy and async execution eligibility remain in their existing
+  owners; neither follows automatically from a broad memory or matrix flag.
+
+A direct-to-LDS load remains a load in its source addressing family, with
+`MEMORY_TO_LDS` describing the separate destination. An atomic remains atomic
+whether it returns data or not. Consumers must inspect its decoded operands
+and applicable return controls when that distinction matters.
+
+Production regeneration builds the shared operation header from the union of
+all supplied ISA specifications, additions, aliases, special generated
+instructions, and matrix-conversion source operations. Run
+`scripts/generate-amdisa.sh` to supply all supported targets. Generation into
+the checkout's core output directory retains this behavior automatically.
+
+Focused output must use the same `Operation` enum as the consuming C++ core's
+`instruction.h`. Select that catalog explicitly with
+`--core-operations /path/to/core/shared/operations.h`. In a source checkout,
+focused generation defaults to the checkout's core catalog. A non-editable
+Python installation requires the explicit path; a missing or malformed catalog
+is an error. This selection controls decoder identities, DBT/async header
+includes, and async table indices together. Focused output does not emit a
+second enum. Only names absent from the selected catalog become `Unknown`,
+including additions to standard profiles.
+
+Use `--regenerate-operations` when building a new core tree, and supply its
+complete set of ISA inputs. This option emits a new catalog and binds the
+generated metadata and tables to it. The consuming core must include that new
+catalog as well; it cannot share a translation unit with a different core enum.
+The two catalog-selection options are mutually exclusive. DBT-only generation
+uses the selected existing core catalog.
+
+Synthetic test instructions must set their numeric identity and semantic
+metadata explicitly; the base constructor does not classify their mnemonic.
+Unknown identities conservatively stay `Unknown`.
 
 ## Installation
 
@@ -201,9 +265,12 @@ python -m amdisa cdna5:/path/to/amdgpu_isa_cdna5.xml \
 
 ## Generated file locations
 
+The portable C++ switches and native assembly tables share the same
+opcode-to-factory rows.
+
 | Generated files | Location | Generator |
 |---|---|---|
-| ISA decoders, encoders, execute bodies, and `insts.h` | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/<output-directory>/` | `codegen/` |
+| ISA decoders (including `decode_factories.h`, `decode_tables.inc`, and `decode_tables.S`), encoders, execute bodies, and `insts.h` | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/<output-directory>/` | `codegen/` |
 | Shared execute templates | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/shared/` | `codegen/` |
 | ISA files generated at a custom path | A caller-selected tree such as `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/custom/generated/` | `codegen/` |
 | Cross-ISA legalization tables | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `legalization_codegen.py` |
@@ -218,7 +285,7 @@ layout permutations; adding a row does not implement a translation or establish
 opcode availability. In particular, `V_WMMA_I32_16X16X32_I8` is a historical
 layout-only placeholder absent from the pinned RDNA4 XML, whose 8-bit integer
 WMMA instruction is `V_WMMA_I32_16X16X16_IU8`. The current consumer in
-`cdna4_to_rdna4.cpp` selects a row by source mnemonic and emits a fixed F16 WMMA
+`cdna4_to_rdna4.cpp` selects a row by source operation ID and emits a fixed F16 WMMA
 instruction; it does not validate or select the catalog's destination names.
 
 GPUOpen's public CDNA5 MR ISA uses the architecture name `AMD CDNA 5` and the
@@ -245,7 +312,9 @@ decode/encode functions and neutral field structs are auto-generated.
 python -m amdisa [--isa-additions NAME:XML] [--isa-variants NAME:JSON]
                  [--gen-isas] [--gen-dbt]
                  [--isa-output DIR] [--include-root DIR]
-                 [--dbt-output DIR] [NAME:]XML ...
+                 [--dbt-output DIR]
+                 [--core-operations HEADER | --regenerate-operations]
+                 [NAME:]XML ...
 ```
 
 | Option | Description |
@@ -257,6 +326,8 @@ python -m amdisa [--isa-additions NAME:XML] [--isa-variants NAME:JSON]
 | `--gen-dbt` | Generate DBT legalization tables, matrix layout conversions, and encoding translators |
 | `--isa-output DIR` | Output path for generated ISA C++ files |
 | `--include-root DIR` | Compiler include root used to spell relocatable generated includes |
+| `--core-operations HEADER` | Existing generated operation catalog included by the consuming C++ core |
+| `--regenerate-operations` | Emit a new core catalog from the supplied complete ISA input set; requires ISA generation |
 | `--dbt-output DIR` | Output directory for DBT tables (defaults to `--isa-output`) |
 
 When neither `--gen-isas` nor `--gen-dbt` is specified, both are
@@ -267,6 +338,18 @@ are derived from that path. If `--include-root` is provided, `--isa-output`
 must be beneath it and includes are emitted relative to it. Otherwise, absolute
 include paths are emitted so that a relative output path does not depend on the
 generator's working directory.
+
+For example, a focused combined build against an existing core can use:
+
+```bash
+python -m amdisa cdna4:/path/to/cdna4.xml rdna4:/path/to/rdna4.xml \
+  --include-root out/include --isa-output out/include/isa --dbt-output out/dbt \
+  --core-operations /path/to/core/rocjitsu/isa/arch/amdgpu/generated/shared/operations.h
+```
+
+Compile with both `out/include` and the consuming core's include directories.
+The selected catalog path is emitted as an absolute include, so it must remain
+available when compiling. Other generated includes still follow `--include-root`.
 
 The recognized profile names include `cdna1` through `cdna5`, `rdna1` through
 `rdna4`, and both `rdna3.5` and `rdna3_5`. An unrecognized explicit name is
@@ -317,9 +400,12 @@ python -m amdisa \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     cdna5:$MRISA/amdgpu_isa_cdna5.xml \
   --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_legacy_math.xml \
+  --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_ds_src2.xml \
   --isa-additions cdna2:$MRISA/amdgpu_isa_cdna2_legacy_math.xml \
   --isa-additions cdna3:$MRISA/amdgpu_isa_cdna3_legacy_math.xml \
   --isa-additions cdna4:$MRISA/amdgpu_isa_cdna4_legacy_math.xml \
+  --isa-additions rdna2:$MRISA/amdgpu_isa_rdna2_atc_probe.xml \
+  --isa-additions rdna4:$MRISA/amdgpu_isa_rdna4_barrier_state.xml \
   --isa-additions cdna5:$MRISA/amdgpu_isa_cdna5_gfx1251_delta.xml \
   --isa-variants cdna5:$MRISA/amdgpu_isa_cdna5_variants.json \
   --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
@@ -345,9 +431,12 @@ python -m amdisa \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     cdna5:$MRISA/amdgpu_isa_cdna5.xml \
   --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_legacy_math.xml \
+  --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_ds_src2.xml \
   --isa-additions cdna2:$MRISA/amdgpu_isa_cdna2_legacy_math.xml \
   --isa-additions cdna3:$MRISA/amdgpu_isa_cdna3_legacy_math.xml \
   --isa-additions cdna4:$MRISA/amdgpu_isa_cdna4_legacy_math.xml \
+  --isa-additions rdna2:$MRISA/amdgpu_isa_rdna2_atc_probe.xml \
+  --isa-additions rdna4:$MRISA/amdgpu_isa_rdna4_barrier_state.xml \
   --isa-additions cdna5:$MRISA/amdgpu_isa_cdna5_gfx1251_delta.xml \
   --isa-variants cdna5:$MRISA/amdgpu_isa_cdna5_variants.json \
   --gen-isas \
@@ -373,9 +462,12 @@ python -m amdisa \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     cdna5:$MRISA/amdgpu_isa_cdna5.xml \
   --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_legacy_math.xml \
+  --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_ds_src2.xml \
   --isa-additions cdna2:$MRISA/amdgpu_isa_cdna2_legacy_math.xml \
   --isa-additions cdna3:$MRISA/amdgpu_isa_cdna3_legacy_math.xml \
   --isa-additions cdna4:$MRISA/amdgpu_isa_cdna4_legacy_math.xml \
+  --isa-additions rdna2:$MRISA/amdgpu_isa_rdna2_atc_probe.xml \
+  --isa-additions rdna4:$MRISA/amdgpu_isa_rdna4_barrier_state.xml \
   --isa-additions cdna5:$MRISA/amdgpu_isa_cdna5_gfx1251_delta.xml \
   --isa-variants cdna5:$MRISA/amdgpu_isa_cdna5_variants.json \
   --gen-dbt \

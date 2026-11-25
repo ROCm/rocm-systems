@@ -21,6 +21,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <algorithm>
@@ -232,8 +233,9 @@ void emit_cdna3_scratch_restore(std::vector<uint32_t> &words, const SemanticScra
 }
 
 [[nodiscard]] std::optional<uint8_t> vgpr_operand_index(uint16_t encoded_src) {
-  if (encoded_src < 256 || encoded_src > 511)
+  if (encoded_src < 256 || encoded_src > 511) {
     return std::nullopt;
+  }
   return static_cast<uint8_t>(encoded_src - 256);
 }
 
@@ -255,7 +257,7 @@ void emit_cdna3_scratch_restore(std::vector<uint32_t> &words, const SemanticScra
          encoded_src == kSrcDpp || encoded_src == kSrcLiteral64 || encoded_src == kSrcLiteral32;
 }
 
-[[nodiscard]] std::optional<SemanticScratchLease>
+FailureOr<std::optional<SemanticScratchLease>>
 choose_one_vgpr_temp_or_spill(const Instruction &inst, const LivenessAnalysis &liveness,
                               TranslationContext &context, uint8_t forbidden,
                               std::optional<uint8_t> preferred_victim) {
@@ -265,10 +267,14 @@ choose_one_vgpr_temp_or_spill(const Instruction &inst, const LivenessAnalysis &l
   request.forbidden.expand({RegClass::VGPR, forbidden, 1});
   SemanticScratchAllocator allocator(inst, liveness, context,
                                      Cdna3ScratchEmitter::allocation_policy());
-  return allocator.acquire_vgprs(request).lease;
+  const auto scratch = allocator.acquire_vgprs(request);
+  if (scratch.failure == SemanticScratchFailure::LivenessUnavailable) {
+    return Result::failure();
+  }
+  return scratch.lease;
 }
 
-[[nodiscard]] std::optional<SemanticScratchLease>
+FailureOr<std::optional<SemanticScratchLease>>
 choose_vgpr_window_or_spill(const Instruction &inst, const LivenessAnalysis &liveness,
                             TranslationContext &context, uint16_t count, uint16_t alignment,
                             std::initializer_list<VgprForbiddenRange> forbidden_ranges) {
@@ -276,12 +282,17 @@ choose_vgpr_window_or_spill(const Instruction &inst, const LivenessAnalysis &liv
   request.count = count;
   request.alignment = alignment;
   for (const VgprForbiddenRange &range : forbidden_ranges) {
-    if (range.count != 0)
+    if (range.count != 0) {
       request.forbidden.expand({RegClass::VGPR, range.base, static_cast<uint8_t>(range.count)});
+    }
   }
   SemanticScratchAllocator allocator(inst, liveness, context,
                                      Cdna3ScratchEmitter::allocation_policy());
-  return allocator.acquire_vgprs(request).lease;
+  const auto scratch = allocator.acquire_vgprs(request);
+  if (scratch.failure == SemanticScratchFailure::LivenessUnavailable) {
+    return Result::failure();
+  }
+  return scratch.lease;
 }
 
 /// @brief Reserve non-overlapping private slots for one borrowed virtual-LDS SGPR pair.
@@ -294,21 +305,24 @@ choose_vgpr_window_or_spill(const Instruction &inst, const LivenessAnalysis &liv
 make_cdna3_virtual_lds_borrow_scratch(TranslationContext &context,
                                       const SemanticScratchLease &window, uint8_t pointer_vgpr_lo,
                                       uint8_t pointer_vgpr_hi) {
-  if (!context.virtual_lds_base_sgpr_spill_per_use)
+  if (!context.virtual_lds_base_sgpr_spill_per_use) {
     return std::nullopt;
+  }
 
   // Reconstruct the per-lowering frame and consume the window's preservation
   // range before assigning the scalar-pair slots. SemanticSpillFrame owns the
   // non-overlap arithmetic; the lowering no longer compares raw reservation
   // bases or manually extends a combined allocation.
   SemanticSpillFrame frame(context);
-  if (window.spilled &&
-      !frame.allocate_dwords(window.count, sizeof(uint32_t), Cdna3ScratchEmitter::kMaxDwordOffset))
+  if (window.spilled && !frame.allocate_dwords(window.count, sizeof(uint32_t),
+                                               Cdna3ScratchEmitter::kMaxDwordOffset)) {
     return std::nullopt;
+  }
   const auto saved_sgpr =
       frame.allocate_dwords(2, sizeof(uint32_t), Cdna3ScratchEmitter::kMaxDwordOffset);
-  if (!saved_sgpr)
+  if (!saved_sgpr) {
     return std::nullopt;
+  }
 
   return Cdna3VirtualLdsBorrowScratch{.pointer_vgpr_lo = pointer_vgpr_lo,
                                       .pointer_vgpr_hi = pointer_vgpr_hi,
@@ -347,12 +361,13 @@ void emit_cdna3_exec_mask(std::vector<uint32_t> &words, uint64_t mask) {
   emit_s_mov_b32_lit(words, kExecLo + 1, static_cast<uint32_t>(mask >> 32));
 }
 
-[[nodiscard]] std::optional<uint8_t>
-choose_cdna3_exec_save_sgpr(const Instruction &inst, const LivenessAnalysis &liveness,
-                            const TranslationContext &context) {
+FailureOr<std::optional<uint8_t>> choose_cdna3_exec_save_sgpr(const Instruction &inst,
+                                                              const LivenessAnalysis &liveness,
+                                                              const TranslationContext &context) {
   const auto overlaps_virtual_lds_base = [&](uint32_t candidate) {
-    if (!context.virtualize_lds)
+    if (!context.virtualize_lds) {
       return false;
+    }
     return candidate < context.virtual_lds_base_sgpr + 2u &&
            context.virtual_lds_base_sgpr < candidate + 2u;
   };
@@ -364,8 +379,9 @@ choose_cdna3_exec_save_sgpr(const Instruction &inst, const LivenessAnalysis &liv
   if (context.num_sgprs < kCdna3MaxOrdinarySgprs) {
     const uint32_t preferred = (context.num_sgprs + 1u) & ~1u;
     for (uint32_t candidate = preferred; candidate + 1u < kCdna3MaxOrdinarySgprs; candidate += 2u) {
-      if (!overlaps_virtual_lds_base(candidate))
-        return static_cast<uint8_t>(candidate);
+      if (!overlaps_virtual_lds_base(candidate)) {
+        return std::optional<uint8_t>{static_cast<uint8_t>(candidate)};
+      }
     }
   }
 
@@ -374,12 +390,21 @@ choose_cdna3_exec_save_sgpr(const Instruction &inst, const LivenessAnalysis &liv
   // without dataflow proof; if the guest read that pair later, restoring EXEC
   // still left the guest scalar contents corrupted.
   uint16_t search_start = 0;
-  while (auto candidate = liveness.find_free_sgpr_pair(&inst, search_start)) {
-    if (!overlaps_virtual_lds_base(*candidate))
-      return static_cast<uint8_t>(*candidate);
+  while (true) {
+    auto maybe_candidate = liveness.find_free_sgpr_pair(&inst, search_start);
+    if (maybe_candidate.failed()) {
+      return Result::failure();
+    }
+    const auto candidate = maybe_candidate.value();
+    if (!candidate) {
+      break;
+    }
+    if (!overlaps_virtual_lds_base(*candidate)) {
+      return std::optional<uint8_t>{static_cast<uint8_t>(*candidate)};
+    }
     search_start = static_cast<uint16_t>(*candidate + 2);
   }
-  return std::nullopt;
+  return std::optional<uint8_t>{};
 }
 
 void require_cdna3_exec_save_sgpr(TranslationContext &context, uint8_t saved_exec) {
@@ -428,13 +453,15 @@ void emit_cdna3_mfma_to_vgpr(std::vector<uint32_t> &words, uint16_t op,
 /// is S1, and bit 0 is S2. ANF lets CDNA3 synthesize the LUT from AND/XOR.
 [[nodiscard]] std::array<uint8_t, 8> bitop3_anf_coefficients(uint8_t truth_table) {
   std::array<uint8_t, 8> coeff{};
-  for (uint8_t mask = 0; mask < coeff.size(); ++mask)
+  for (uint8_t mask = 0; mask < coeff.size(); ++mask) {
     coeff[mask] = static_cast<uint8_t>((truth_table >> mask) & 0x1);
+  }
 
   for (uint8_t variable_mask : {uint8_t{4}, uint8_t{2}, uint8_t{1}}) {
     for (uint8_t mask = 0; mask < coeff.size(); ++mask) {
-      if ((mask & variable_mask) != 0)
+      if ((mask & variable_mask) != 0) {
         coeff[mask] ^= coeff[mask ^ variable_mask];
+      }
     }
   }
   return coeff;
@@ -459,10 +486,12 @@ bitop3_spill_forbidden_ranges(uint8_t vdst, const std::array<uint16_t, 3> &src) 
   for (uint16_t encoded : src) {
     if (const auto vgpr = vgpr_operand_index(encoded)) {
       bool seen = *vgpr == vdst;
-      for (size_t i = 1; i < next; ++i)
+      for (size_t i = 1; i < next; ++i) {
         seen = seen || forbidden[i].base == *vgpr;
-      if (!seen && next < forbidden.size())
+      }
+      if (!seen && next < forbidden.size()) {
         forbidden[next++] = {static_cast<uint16_t>(*vgpr), 1};
+      }
     }
   }
   return forbidden;
@@ -470,8 +499,9 @@ bitop3_spill_forbidden_ranges(uint8_t vdst, const std::array<uint16_t, 3> &src) 
 
 [[nodiscard]] bool bitop3_needs_product_term(const std::array<uint8_t, 8> &coeff) {
   for (uint8_t mask = 1; mask < coeff.size(); ++mask) {
-    if (coeff[mask] != 0 && std::popcount(mask) >= 2)
+    if (coeff[mask] != 0 && std::popcount(mask) >= 2) {
       return true;
+    }
   }
   return false;
 }
@@ -513,7 +543,7 @@ ExpandResult lower_cdna4_bitop3_to_cdna3(const Bitop3Inst &inst, const LivenessA
                                        static_cast<uint16_t>(inst.src1.encoding_value()),
                                        static_cast<uint16_t>(inst.src2.encoding_value())};
 
-  if (is_b16 && inst.inst_.op_sel != 0)
+  if (is_b16 && inst.inst_.op_sel != 0) {
     // NYI: OP_SEL selects B16 source/destination halves. Source-half selection
     // can be lowered by shifting selected high halves down before the LUT, but
     // OP_SEL[3] is read-modify-write: it writes the high half of vdst while
@@ -527,6 +557,7 @@ ExpandResult lower_cdna4_bitop3_to_cdna3(const Bitop3Inst &inst, const LivenessA
         {
             "Implement OP_SEL handling for canonical vdst read-modify-write lowering.",
         });
+  }
   // V_BITOP3 overloads VOP3 modifier fields as TTBL bits instead of ordinary
   // arithmetic modifiers: {OMOD[1:0], ABS[2:0], NEG[2:0]}.
   const uint8_t truth_table = static_cast<uint8_t>(
@@ -544,8 +575,9 @@ ExpandResult lower_cdna4_bitop3_to_cdna3(const Bitop3Inst &inst, const LivenessA
       // S0 | S1 | S2
       emit_cdna3_vop3(words, cdna3::kVOr3B32Vop3, vdst, src[0], src[1], src[2]);
     }
-    if (is_b16)
+    if (is_b16) {
       emit_cdna3_b16_zero_extend(words, vdst);
+    }
     return ExpandResult::success(std::move(words));
   }
 
@@ -554,18 +586,24 @@ ExpandResult lower_cdna4_bitop3_to_cdna3(const Bitop3Inst &inst, const LivenessA
     std::optional<SemanticScratchLease> scratch_term;
     if (vdst_aliases_any_vgpr_source(vdst, src)) {
       const auto forbidden = bitop3_spill_forbidden_ranges(vdst, src);
-      scratch_term = choose_vgpr_window_or_spill(
+      auto maybe_scratch_term = choose_vgpr_window_or_spill(
           inst, liveness, context, 1, 1, {forbidden[0], forbidden[1], forbidden[2], forbidden[3]});
-      if (!scratch_term)
+      if (maybe_scratch_term.failed()) {
+        return ExpandResult::liveness_unavailable();
+      }
+      scratch_term = maybe_scratch_term.value();
+      if (!scratch_term) {
         return failed_existing_expand_rule(
             inst, "No VGPR or spill-backed scratch for compact bitop temporary",
             {"Provide one temporary VGPR or a spillable non-source, non-destination VGPR."});
+      }
       term = static_cast<uint8_t>(scratch_term->base);
     }
 
     std::vector<uint32_t> words;
-    if (scratch_term)
+    if (scratch_term) {
       emit_cdna3_scratch_save(words, *scratch_term);
+    }
 
     auto emit_and = [&](uint8_t dst, uint16_t src0, uint16_t src1) {
       emit_cdna3_vop3(words, cdna3::kVAndB32Vop3, dst, src0, src1);
@@ -578,8 +616,9 @@ ExpandResult lower_cdna4_bitop3_to_cdna3(const Bitop3Inst &inst, const LivenessA
     emit_or(term, src[0], src[2]);
     emit_and(vdst, src[1], vgpr_src(term));
 
-    if (scratch_term)
+    if (scratch_term) {
       emit_cdna3_scratch_restore(words, *scratch_term);
+    }
     return ExpandResult::success(std::move(words));
   }
 
@@ -604,22 +643,29 @@ ExpandResult lower_cdna4_bitop3_to_cdna3(const Bitop3Inst &inst, const LivenessA
   std::optional<SemanticScratchLease> scratch_lease;
   if (scratch_count != 0) {
     const auto forbidden = bitop3_spill_forbidden_ranges(vdst, src);
-    scratch_lease =
+    auto maybe_scratch_lease =
         choose_vgpr_window_or_spill(inst, liveness, context, scratch_count, 1,
                                     {forbidden[0], forbidden[1], forbidden[2], forbidden[3]});
-    if (!scratch_lease)
+    if (maybe_scratch_lease.failed()) {
+      return ExpandResult::liveness_unavailable();
+    }
+    scratch_lease = maybe_scratch_lease.value();
+    if (!scratch_lease) {
       return failed_existing_expand_rule(
           inst, "No VGPR or spill-backed scratch window for temporary bitop temporaries",
           {"Provide a spillable scratch window that does not overlap VDST or any VGPR source."});
+    }
 
     acc = static_cast<uint8_t>(scratch_lease->base);
-    if (needs_term_temp)
+    if (needs_term_temp) {
       term = static_cast<uint8_t>(scratch_lease->base + 1);
+    }
   }
 
   std::vector<uint32_t> words;
-  if (scratch_lease)
+  if (scratch_lease) {
     emit_cdna3_scratch_save(words, *scratch_lease);
+  }
 
   auto src_for_variable = [&](uint8_t variable_mask) -> uint16_t {
     switch (variable_mask) {
@@ -649,21 +695,24 @@ ExpandResult lower_cdna4_bitop3_to_cdna3(const Bitop3Inst &inst, const LivenessA
   }
 
   for (uint8_t mask = 1; mask < coeff.size(); ++mask) {
-    if (coeff[mask] == 0)
+    if (coeff[mask] == 0) {
       continue;
+    }
 
     std::array<uint16_t, 3> variables{};
     uint8_t variable_count = 0;
     for (uint8_t variable_mask : {uint8_t{4}, uint8_t{2}, uint8_t{1}}) {
-      if ((mask & variable_mask) != 0)
+      if ((mask & variable_mask) != 0) {
         variables[variable_count++] = src_for_variable(variable_mask);
+      }
     }
 
     uint16_t term_src = variables[0];
     if (variable_count >= 2) {
       emit_and(term, variables[0], variables[1]);
-      if (variable_count == 3)
+      if (variable_count == 3) {
         emit_and(term, vgpr_src(term), variables[2]);
+      }
       term_src = vgpr_src(term);
     }
 
@@ -675,8 +724,9 @@ ExpandResult lower_cdna4_bitop3_to_cdna3(const Bitop3Inst &inst, const LivenessA
     }
   }
 
-  if (!acc_initialized)
+  if (!acc_initialized) {
     emit_mov(acc, kInlineConst0);
+  }
 
   if (is_b16) {
     // The B16 form writes a zero-extended low half. Shift left then logical
@@ -685,11 +735,13 @@ ExpandResult lower_cdna4_bitop3_to_cdna3(const Bitop3Inst &inst, const LivenessA
     emit_cdna3_b16_zero_extend(words, acc);
   }
 
-  if (acc != vdst)
+  if (acc != vdst) {
     emit_mov(vdst, vgpr_src(acc));
+  }
 
-  if (scratch_lease)
+  if (scratch_lease) {
     emit_cdna3_scratch_restore(words, *scratch_lease);
+  }
 
   return ExpandResult::success(std::move(words));
 }
@@ -703,14 +755,15 @@ ExpandResult lower_permlane_swap_b32_cdna4_to_cdna3(const Instruction &inst,
                                                     TranslationContext &context,
                                                     uint8_t half_wave_lanes) {
   const auto *raw = inst.raw_encoding();
-  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::Vop1MachineInst))
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::Vop1MachineInst)) {
     return failed_existing_expand_rule(
         inst, "No decodable VOP1 instruction encoding",
         {"Decode the source VOP1 instruction before applying the swap lowering."});
+  }
 
   cdna4::Vop1MachineInst src{};
   std::memcpy(&src, raw, sizeof(src));
-  if (src.src0 < 256 || src.src0 > 511)
+  if (src.src0 < 256 || src.src0 > 511) {
     // Only plain VGPR sources have been validated for this first lowering.
     // Scalar sources, literals, DPP, and SDWA encodings need separate operand
     // handling before they can be lowered safely.
@@ -718,6 +771,7 @@ ExpandResult lower_permlane_swap_b32_cdna4_to_cdna3(const Instruction &inst,
         inst, "swap source is not plain VGPR form",
         {"Add lowerings for scalar/LITERAL/DPP/SDWA source operands before enabling this form.",
          "Keep this rule limited to VOP1/e32 VGPR swap until operand decoding is complete."});
+  }
 
   const uint8_t vdst = static_cast<uint8_t>(src.vdst);
   const uint8_t vsrc = static_cast<uint8_t>(src.src0 - 256);
@@ -726,13 +780,19 @@ ExpandResult lower_permlane_swap_b32_cdna4_to_cdna3(const Instruction &inst,
   // their pre-write contents. Explicitly forbid only the architectural outputs:
   // those registers are intentionally written near the end of the lowering and
   // cannot be restored as scratch victims.
-  auto scratch = choose_vgpr_window_or_spill(inst, liveness, context, 3, 1, {{vdst, 1}, {vsrc, 1}});
-  if (!scratch)
+  auto maybe_scratch =
+      choose_vgpr_window_or_spill(inst, liveness, context, 3, 1, {{vdst, 1}, {vsrc, 1}});
+  if (maybe_scratch.failed()) {
+    return ExpandResult::liveness_unavailable();
+  }
+  const auto scratch = maybe_scratch.value();
+  if (!scratch) {
     return failed_existing_expand_rule(
         inst, "No free VGPR scratch window for swap temporaries",
         {"Provide one SGPR pair for EXEC save/restore and three temporary VGPRs for lane address "
          "and pre-write swap values.",
          "Allow the spill-backed VGPR scratch path to preserve live non-output registers."});
+  }
 
   const uint8_t lane = scratch->base;
   const uint8_t partner_addr = static_cast<uint8_t>(scratch->base + 1);
@@ -741,12 +801,17 @@ ExpandResult lower_permlane_swap_b32_cdna4_to_cdna3(const Instruction &inst,
   // Prefer a fresh descriptor-backed SGPR pair for EXEC save/restore. When the
   // descriptor cannot grow, choose_cdna3_exec_save_sgpr() falls back only to a
   // pair that liveness proves dead at this replacement point.
-  const std::optional<uint8_t> saved_exec = choose_cdna3_exec_save_sgpr(inst, liveness, context);
-  if (!saved_exec)
+  auto maybe_saved_exec = choose_cdna3_exec_save_sgpr(inst, liveness, context);
+  if (maybe_saved_exec.failed()) {
+    return ExpandResult::liveness_unavailable();
+  }
+  const auto saved_exec = maybe_saved_exec.value();
+  if (!saved_exec) {
     return failed_existing_expand_rule(
         inst, "No free descriptor-backed SGPR pair for EXEC save/restore",
         {"Add SGPR spill-backed EXEC save/restore before lowering this instruction in "
          "descriptor-full kernels."});
+  }
 
   require_cdna3_exec_save_sgpr(context, *saved_exec);
 
@@ -828,18 +893,20 @@ ExpandResult lower_cvt_pk_f16_f32_cdna4_to_cdna3(const Instruction &inst,
                                                  const LivenessAnalysis &liveness,
                                                  TranslationContext &context) {
   const auto *raw = inst.raw_encoding();
-  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::Vop3MachineInst))
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::Vop3MachineInst)) {
     return failed_existing_expand_rule(inst, "No decodable VOP3 instruction encoding",
                                        {"Decode the source VOP3 instruction before lowering."});
+  }
 
   cdna4::Vop3MachineInst src{};
   std::memcpy(&src, raw, sizeof(src));
-  if (src.abs != 0 || src.op_sel != 0 || src.clamp != 0 || src.omod != 0 || src.neg != 0)
+  if (src.abs != 0 || src.op_sel != 0 || src.clamp != 0 || src.omod != 0 || src.neg != 0) {
     // Source modifiers would have to be replayed on the two scalar conversions
     // before packing, so reject them until this form is implemented and tested.
     return failed_existing_expand_rule(
         inst, "Unsupported modifiers on packed F16 conversion (abs/op_sel/clamp/omod/neg)",
         {"Implement modifier handling when source modifiers are present."});
+  }
   // CDNA4 v_cvt_pk_f16_f32 packs two f32-to-f16 conversions into one VGPR:
   //
   //   VDST[15:0]  = f32_to_f16(SRC0)
@@ -854,7 +921,11 @@ ExpandResult lower_cvt_pk_f16_f32_cdna4_to_cdna3(const Instruction &inst,
 
   const std::optional<uint8_t> preferred_temp =
       vdst_is_src1 ? src0_vgpr : (src1_vgpr ? src1_vgpr : src0_vgpr);
-  auto temp = choose_one_vgpr_temp_or_spill(inst, liveness, context, vdst, preferred_temp);
+  auto maybe_temp = choose_one_vgpr_temp_or_spill(inst, liveness, context, vdst, preferred_temp);
+  if (maybe_temp.failed()) {
+    return ExpandResult::liveness_unavailable();
+  }
+  const auto temp = maybe_temp.value();
   if (!temp) {
     return failed_existing_expand_rule(
         inst, "No VGPR temporary or scratch spill slot for packed F16 conversion",
@@ -893,20 +964,23 @@ ExpandResult lower_cvt_pk_bf16_f32_cdna4_to_cdna3(const Instruction &inst,
                                                   const LivenessAnalysis &liveness,
                                                   TranslationContext &context) {
   const auto *raw = inst.raw_encoding();
-  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::Vop3MachineInst))
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::Vop3MachineInst)) {
     return failed_existing_expand_rule(inst, "No decodable VOP3 instruction encoding",
                                        {"Decode the source VOP3 instruction before lowering."});
+  }
 
   cdna4::Vop3MachineInst src{};
   std::memcpy(&src, raw, sizeof(src));
-  if (src.abs != 0 || src.op_sel != 0 || src.clamp != 0 || src.omod != 0 || src.neg != 0)
+  if (src.abs != 0 || src.op_sel != 0 || src.clamp != 0 || src.omod != 0 || src.neg != 0) {
     return failed_existing_expand_rule(
         inst, "Unsupported modifiers on packed BF16 conversion (abs/op_sel/clamp/omod/neg)",
         {"Implement modifier handling when source modifiers are present."});
-  if (src.src0 > 511 || src.src1 > 511)
+  }
+  if (src.src0 > 511 || src.src1 > 511) {
     return failed_existing_expand_rule(
         inst, "Packed BF16 conversion operands use unsupported source encodings",
         {"Add operand-class-specific lowering for literal, DPP, or SDWA forms."});
+  }
 
   const uint8_t vdst = static_cast<uint8_t>(src.vdst);
   const std::optional<uint8_t> src1_vgpr = vgpr_operand_index(static_cast<uint16_t>(src.src1));
@@ -917,15 +991,20 @@ ExpandResult lower_cvt_pk_bf16_f32_cdna4_to_cdna3(const Instruction &inst,
   // The NaN-safe RNE lowering needs one result register per half plus three
   // shared scratch temporaries (the temps are reused across the two halves
   // because the low conversion completes before the high one begins).
-  auto scratch = choose_vgpr_window_or_spill(
+  auto maybe_scratch = choose_vgpr_window_or_spill(
       inst, liveness, context, 5, 1,
       {{vdst, 1},
        {static_cast<uint16_t>(src1_vgpr.value_or(0)), static_cast<uint16_t>(src1_vgpr ? 1 : 0)}});
-  if (!scratch)
+  if (maybe_scratch.failed()) {
+    return ExpandResult::liveness_unavailable();
+  }
+  const auto scratch = maybe_scratch.value();
+  if (!scratch) {
     return failed_existing_expand_rule(
         inst, "No VGPR scratch window for packed BF16 conversion temporaries",
         {"Provide five temporary VGPRs or spill-backed temporaries so BF16 "
          "rounding, NaN preservation, and destination/source aliases are safe."});
+  }
   std::vector<uint32_t> words;
   emit_cdna3_scratch_save(words, *scratch);
 
@@ -946,9 +1025,10 @@ ExpandResult lower_cvt_pk_bf16_f32_cdna4_to_cdna3(const Instruction &inst,
 ExpandResult lower_cvt_f32_bf16_vop1_cdna4_to_cdna3(const Instruction &inst, uint64_t offset,
                                                     std::span<const uint8_t> source_text) {
   const auto *raw = inst.raw_encoding();
-  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::Vop1MachineInst))
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::Vop1MachineInst)) {
     return failed_existing_expand_rule(inst, "No decodable VOP1 instruction encoding",
                                        {"Decode the source VOP1 instruction before lowering."});
+  }
 
   cdna4::Vop1MachineInst src{};
   std::memcpy(&src, raw, sizeof(src));
@@ -962,10 +1042,11 @@ ExpandResult lower_cvt_f32_bf16_vop1_cdna4_to_cdna3(const Instruction &inst, uin
 
     cdna4::Vop1VopSdwaMachineInst sdwa{};
     std::memcpy(&sdwa, source_text.data() + offset, sizeof(sdwa));
-    if (sdwa.src0 != kSrcSdwa || sdwa.op != src.op || sdwa.vdst != src.vdst)
+    if (sdwa.src0 != kSrcSdwa || sdwa.op != src.op || sdwa.vdst != src.vdst) {
       return failed_existing_expand_rule(
           inst, "Source text VOP1 SDWA payload does not match decoded instruction",
           {"Use the source instruction offset to read the original modifier payload."});
+    }
 
     if (sdwa.dst_sel != kSdwaDword || sdwa.clamp != 0 || sdwa.omod != 0 ||
         (sdwa.src0_sel != kSdwaWord0 && sdwa.src0_sel != kSdwaWord1) || sdwa.src0_sext != 0 ||
@@ -1002,6 +1083,20 @@ ExpandResult lower_cvt_f32_bf16_vop1_cdna4_to_cdna3(const Instruction &inst, uin
   }
 
   std::vector<uint32_t> words;
+  if (auto bf16 = amdgpu::resolve_inline_bfloat16_statically(src.src0)) {
+    // Resolve the source numerically before selecting the raw move carrier.
+    // Reuse an FP32 inline only when it exactly matches the widened BF16 bits.
+    const uint32_t widened = uint32_t{*bf16} << 16;
+    const bool reuse_inline = amdgpu::resolve_src_scalar_statically(src.src0) == widened;
+    words.push_back(
+        cdna3::build_vop1(cdna3::kVMovB32Vop1,
+                          {.src0 = reuse_inline ? static_cast<uint16_t>(src.src0) : kSrcLiteral32,
+                           .vdst = static_cast<uint8_t>(src.vdst)})[0]);
+    if (!reuse_inline) {
+      words.push_back(widened);
+    }
+    return ExpandResult::success(std::move(words));
+  }
   // BF16 has the same sign and exponent layout as FP32, with the mantissa
   // truncated to the high 7 fraction bits. Converting BF16 bits in SRC0[15:0]
   // to FP32 is therefore just placing those 16 bits in FP32[31:16] and zeroing
@@ -1041,9 +1136,10 @@ ExpandResult lower_dot2_f32_bf16_cdna4_to_cdna3(const Instruction &inst,
                                                 const LivenessAnalysis &liveness,
                                                 TranslationContext &context) {
   const auto *raw = inst.raw_encoding();
-  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::Vop3pMachineInst))
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::Vop3pMachineInst)) {
     return failed_existing_expand_rule(inst, "No decodable VOP3P instruction encoding",
                                        {"Decode the source VOP3P instruction before lowering."});
+  }
 
   cdna4::Vop3pMachineInst dot{};
   std::memcpy(&dot, raw, sizeof(dot));
@@ -1072,10 +1168,14 @@ ExpandResult lower_dot2_f32_bf16_cdna4_to_cdna3(const Instruction &inst,
   }
 
   constexpr uint16_t kScratchCount = 4;
-  auto scratch =
+  auto maybe_scratch =
       choose_vgpr_window_or_spill(inst, liveness, context, kScratchCount, 1,
                                   {forbidden[0], forbidden[1], forbidden[2],
                                    forbidden.size() > 3 ? forbidden[3] : VgprForbiddenRange{}});
+  if (maybe_scratch.failed()) {
+    return ExpandResult::liveness_unavailable();
+  }
+  const auto scratch = maybe_scratch.value();
   if (!scratch) {
     return failed_existing_expand_rule(
         inst, "No VGPR scratch window for BF16 dot2 temporaries",
@@ -1178,8 +1278,9 @@ struct WideKMfmaLowering {
   // independent: bit 0 moves source A into AccVGPRs, bit 1 moves source B into
   // AccVGPRs. Only ordinary source windows can alias an ordinary partial
   // accumulator destination.
-  if (mfma.acc_cd != 0)
+  if (mfma.acc_cd != 0) {
     return false;
+  }
 
   const uint16_t dst_base = static_cast<uint16_t>(mfma.vdst);
   const uint16_t src0_base = static_cast<uint16_t>(mfma.src0 - 256);
@@ -1196,18 +1297,20 @@ ExpandResult lower_wide_k_mfma_cdna4_to_cdna3(const Instruction &inst,
                                               const LivenessAnalysis &liveness,
                                               TranslationContext &context, WideKMfmaShape shape) {
   const auto *raw = inst.raw_encoding();
-  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::Vop3pMfmaMachineInst))
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::Vop3pMfmaMachineInst)) {
     return failed_existing_expand_rule(
         inst, "Could not decode wide-K MFMA instruction encoding",
         {"Decode the source instruction before lowering this MFMA form."});
+  }
 
   cdna4::Vop3pMfmaMachineInst mfma{};
   std::memcpy(&mfma, raw, sizeof(mfma));
   const WideKMfmaLowering lowering = lowering_for_shape(shape);
-  if (lowering.narrow_op == 0)
+  if (lowering.narrow_op == 0) {
     return failed_existing_expand_rule(
         inst, "Unsupported wide-K MFMA shape",
         {"Implement a lowering path for this wide-K MFMA shape before enabling this path."});
+  }
 
   // CDNA4's wide-K F16/BF16 forms double the K dimension by doubling each
   // contiguous A/B VGPR source window. CDNA3 has the same output layout for the
@@ -1239,10 +1342,11 @@ ExpandResult lower_wide_k_mfma_cdna4_to_cdna3(const Instruction &inst,
   //
   // NYI: non-default cbsz/abid/blgp modifiers need validation against the
   // two-instruction expansion before this can preserve them safely.
-  if (mfma.cbsz != 0 || mfma.abid != 0 || mfma.blgp != 0)
+  if (mfma.cbsz != 0 || mfma.abid != 0 || mfma.blgp != 0) {
     return failed_existing_expand_rule(
         inst, "MFMA wide-K lowering only supports default cbsz/abid/blgp modifiers",
         {"Validate and implement non-default MFMA modifiers before enabling this form."});
+  }
   // SRC0/SRC1 are OPR_SRC_VGPR_OR_ACCVGPR operands. The ISA defines the CDNA4
   // wide forms as 128-bit source windows and the CDNA3 narrow forms as 64-bit
   // source windows; the operand value is the base of that contiguous window, and
@@ -1271,14 +1375,18 @@ ExpandResult lower_wide_k_mfma_cdna4_to_cdna3(const Instruction &inst,
     scratch_request.alignment = kMfmaTupleBaseAlignment;
     scratch_request.allow_spill = false;
     const SemanticScratchResult scratch = scratch_allocator.acquire_vgprs(scratch_request);
+    if (scratch.failure == SemanticScratchFailure::LivenessUnavailable) {
+      return ExpandResult::liveness_unavailable();
+    }
     // NYI: if no dead VGPR run exists, the general solution is to spill a live
     // VGPR range and use it for the partial accumulator. That waits on spill
     // manager integration, so reject for now rather than clobbering live inputs.
-    if (!scratch)
+    if (!scratch) {
       return failed_existing_expand_rule(inst,
                                          "No free VGPR window for partial accumulator scratch",
                                          {"Add spill-backed lowering for partial accumulator "
                                           "when live inputs consume scratch registers."});
+    }
     partial_vdst = static_cast<uint8_t>(scratch.lease->base);
     partial_src2 = static_cast<uint16_t>(256 + partial_vdst);
   }
@@ -1340,18 +1448,20 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
                                                      const LivenessAnalysis &liveness,
                                                      TranslationContext &context) {
   const auto *raw = inst.raw_encoding();
-  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::DsMachineInst))
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::DsMachineInst)) {
     return failed_existing_expand_rule(inst, "No decodable DS instruction encoding",
                                        {"Decode the source DS instruction before lowering."});
+  }
 
   cdna4::DsMachineInst src{};
   std::memcpy(&src, raw, sizeof(src));
-  if (src.gds != 0)
+  if (src.gds != 0) {
     // CDNA4 DS encodings can select GDS, but CDNA3 reserves GDS=1 for this
     // instruction. Do not translate that variant into an illegal CDNA3 encoding.
     return failed_existing_expand_rule(
         inst, "DS transpose lower reads from GDS, which is illegal on CDNA3",
         {"Ensure the source DS read uses ordinary LDS addressing before enabling this rule."});
+  }
   const bool dst_is_acc = src.acc != 0;
   const uint32_t ds_offset = (static_cast<uint32_t>(src.offset1) << 8) | src.offset0;
   const uint8_t vdst = static_cast<uint8_t>(src.vdst);
@@ -1367,16 +1477,22 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   // a spill restore would otherwise overwrite the translated result. ACC
   // destinations name the AccVGPR file, so the same numeric ordinary VGPRs can
   // still be used when ordinary VGPR liveness permits it.
-  auto scratch = dst_is_acc ? choose_vgpr_window_or_spill(inst, liveness, context, kScratchCount, 2,
-                                                          {{static_cast<uint16_t>(addr), 1}})
-                            : choose_vgpr_window_or_spill(inst, liveness, context, kScratchCount, 2,
-                                                          {{static_cast<uint16_t>(vdst), 2},
-                                                           {static_cast<uint16_t>(addr), 1}});
-  if (!scratch)
+  auto maybe_scratch = dst_is_acc
+                           ? choose_vgpr_window_or_spill(inst, liveness, context, kScratchCount, 2,
+                                                         {{static_cast<uint16_t>(addr), 1}})
+                           : choose_vgpr_window_or_spill(inst, liveness, context, kScratchCount, 2,
+                                                         {{static_cast<uint16_t>(vdst), 2},
+                                                          {static_cast<uint16_t>(addr), 1}});
+  if (maybe_scratch.failed()) {
+    return ExpandResult::liveness_unavailable();
+  }
+  const auto scratch = maybe_scratch.value();
+  if (!scratch) {
     return failed_existing_expand_rule(
         inst, "No even-aligned VGPR window found for transpose scratch",
         {"Provide enough aligned scratch registers or add a spill-backed "
          "transpose lowering."});
+  }
 
   const uint8_t raw_lo = static_cast<uint8_t>(scratch->base + 0);
   const uint8_t raw_hi = static_cast<uint8_t>(scratch->base + 1);
@@ -1399,12 +1515,17 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   }
   // SemanticScratchAllocator has already fed any descriptor growth required by
   // this window back to the kernel translation context.
-  const std::optional<uint8_t> saved_exec = choose_cdna3_exec_save_sgpr(inst, liveness, context);
-  if (!saved_exec)
+  auto maybe_saved_exec = choose_cdna3_exec_save_sgpr(inst, liveness, context);
+  if (maybe_saved_exec.failed()) {
+    return ExpandResult::liveness_unavailable();
+  }
+  const auto saved_exec = maybe_saved_exec.value();
+  if (!saved_exec) {
     return failed_existing_expand_rule(
         inst, "No free descriptor-backed SGPR pair for EXEC save/restore",
         {"Add SGPR spill-backed EXEC save/restore before lowering this instruction in "
          "descriptor-full kernels."});
+  }
   require_cdna3_exec_save_sgpr(context, *saved_exec);
 
   std::vector<uint32_t> words;
@@ -1451,8 +1572,9 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
     uint32_t virtual_offset = ds_offset;
     emit_cdna3_vop2_literal(words, cdna3::kVAddU32Vop2, virtual_addr, addr,
                             ds_offset > kFlatGlobalPositiveImm13Max ? ds_offset : 0);
-    if (ds_offset > kFlatGlobalPositiveImm13Max)
+    if (ds_offset > kFlatGlobalPositiveImm13Max) {
       virtual_offset = 0;
+    }
     if (!append_cdna3_virtual_lds_access(
             words, context,
             Cdna3VirtualLdsAccess{.is_load = true,
@@ -1540,14 +1662,16 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
                                                                    TranslationContext &context,
                                                                    uint8_t num_dwords) {
   const auto *raw = inst.raw_encoding();
-  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::MubufMachineInst))
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::MubufMachineInst)) {
     return failed_existing_expand_rule(inst, "Could not decode source MUBUF fields",
                                        {"Decode the source MUBUF fields before lowering."});
+  }
 
   cdna4::MubufMachineInst src{};
   std::memcpy(&src, raw, sizeof(src));
-  if (src.lds == 0)
+  if (src.lds == 0) {
     return ExpandResult::not_handled();
+  }
   if (src.offen != 0 && src.idxen != 0) {
     return failed_existing_expand_rule(
         inst, "MUBUF LDS destination lowering does not support combined offen+idxen",
@@ -1614,9 +1738,13 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   // extra +1 scratch register holds the scalar LDS byte address; only the
   // payload tuple needs this alignment.
   const uint16_t scratch_alignment = virtual_lds || data_count >= 3 ? 2 : 1;
-  auto scratch =
+  auto maybe_scratch =
       choose_vgpr_window_or_spill(inst, liveness, context, scratch_count, scratch_alignment,
                                   {{static_cast<uint16_t>(src.vaddr), vaddr_count}});
+  if (maybe_scratch.failed()) {
+    return ExpandResult::liveness_unavailable();
+  }
+  const auto scratch = maybe_scratch.value();
   if (!scratch) {
     return failed_existing_expand_rule(
         inst, "No scratch VGPR window found for temporary global-load destination and LDS address",
@@ -1643,12 +1771,17 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   // Prefer a new descriptor-backed SGPR pair for EXEC save/restore. If the
   // descriptor is already full, the helper falls back only to a liveness-proven
   // dead pair instead of blindly borrowing a high guest SGPR.
-  const std::optional<uint8_t> saved_exec = choose_cdna3_exec_save_sgpr(inst, liveness, context);
-  if (!saved_exec)
+  auto maybe_saved_exec = choose_cdna3_exec_save_sgpr(inst, liveness, context);
+  if (maybe_saved_exec.failed()) {
+    return ExpandResult::liveness_unavailable();
+  }
+  const auto saved_exec = maybe_saved_exec.value();
+  if (!saved_exec) {
     return failed_existing_expand_rule(
         inst, "No free descriptor-backed SGPR pair for EXEC save/restore",
         {"Add SGPR spill-backed EXEC save/restore before lowering this instruction in "
          "descriptor-full kernels."});
+  }
 
   uint16_t load_op = 0;
   uint16_t ds_op = cdna3::kDsWriteB32Ds;

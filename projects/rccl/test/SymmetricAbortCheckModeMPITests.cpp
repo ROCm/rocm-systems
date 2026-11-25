@@ -32,7 +32,7 @@
  *   NCCL_CUMEM_ENABLE=1          Enables cuMem API for symmetric support
  *   HSA_NO_SCRATCH_RECLAIM=1     Required for multi-GPU RCCL tests
  *
- * Symmetric memory additionally needs a Linux kernel >= 6.8 (cuMem/VMM gate in
+ * Symmetric memory additionally needs working cuMem/VMM (capability check in
  * src/misc/rocmwrap.cc); every test here skips when it is unavailable.
  *
  * Run examples:
@@ -261,7 +261,7 @@ TEST_F(SymCheckMode_Registration, DebugGlobal_MatchingRegistration_Succeeds)
 {
     ScopedEnv checkMode("NCCL_CHECK_MODE", "DEBUG_GLOBAL");
     if (!symmetricPrerequisitesMet()) {
-        GTEST_SKIP() << "Requires symmetric support (NCCL_CUMEM_ENABLE=1, kernel >= 6.8) with 2+ ranks";
+        GTEST_SKIP() << "Requires symmetric support (NCCL_CUMEM_ENABLE=1, working cuMem/VMM) with 2+ ranks";
     }
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -273,7 +273,7 @@ TEST_F(SymCheckMode_Registration, DebugGlobal_RegistrationMismatch_Rejected)
 {
     ScopedEnv checkMode("NCCL_CHECK_MODE", "DEBUG_GLOBAL");
     if (!symmetricPrerequisitesMet()) {
-        GTEST_SKIP() << "Requires symmetric support (NCCL_CUMEM_ENABLE=1, kernel >= 6.8) with 2+ ranks";
+        GTEST_SKIP() << "Requires symmetric support (NCCL_CUMEM_ENABLE=1, working cuMem/VMM) with 2+ ranks";
     }
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -286,7 +286,7 @@ TEST_F(SymCheckMode_Registration, DebugGlobal_UserOffsetMismatch_Rejected)
 {
     ScopedEnv checkMode("NCCL_CHECK_MODE", "DEBUG_GLOBAL");
     if (!symmetricPrerequisitesMet()) {
-        GTEST_SKIP() << "Requires symmetric support (NCCL_CUMEM_ENABLE=1, kernel >= 6.8) with 2+ ranks";
+        GTEST_SKIP() << "Requires symmetric support (NCCL_CUMEM_ENABLE=1, working cuMem/VMM) with 2+ ranks";
     }
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -301,7 +301,7 @@ TEST_F(SymCheckMode_Registration, Default_MatchingRegistration_Succeeds)
 {
     ScopedEnv checkMode("NCCL_CHECK_MODE", nullptr);
     if (!symmetricPrerequisitesMet()) {
-        GTEST_SKIP() << "Requires symmetric support (NCCL_CUMEM_ENABLE=1, kernel >= 6.8) with 2+ ranks";
+        GTEST_SKIP() << "Requires symmetric support (NCCL_CUMEM_ENABLE=1, working cuMem/VMM) with 2+ ranks";
     }
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -399,7 +399,7 @@ protected:
     {
         ScopedEnv kernelEnv("NCCL_SYM_KERNEL", symKernel);
         if (!symmetricPrerequisitesMet()) {
-            GTEST_SKIP() << "Requires symmetric support (NCCL_CUMEM_ENABLE=1, kernel >= 6.8) with 2+ ranks";
+            GTEST_SKIP() << "Requires symmetric support (NCCL_CUMEM_ENABLE=1, working cuMem/VMM) with 2+ ranks";
         }
 
         int rank = 0, nRanks = 0;

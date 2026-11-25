@@ -1,11 +1,31 @@
-# CTest categories for the host-only src/graph topology microtests.
+# CTest categories for host-only src/graph/ microtests.
 #
-# gtest's `*` does not cross `.`, so a suite missing here never runs under CTest; sync with graph-dev-test.cc's suites.
+# Suites start with their source unit's stem. The exceptions are connect.cc's
+# GraphConnect* and ConnectMicrotest* suites (and its EveryRank/ instantiation),
+# rome_models.cc's GraphRomeModels* suites, graph-dev-test.cc's
+# TopoGpuDevMicrotest, and rccl_graph_gen.cc's GraphGen* suites and their
+# parameterized instantiations.
 test_categories:
   quick: &micro_graph_quick
-    description: "Smoke - host-only src/graph topology micro-tests, sub-second."
+    description: "Smoke - host-only src/graph/ micro-tests, sub-second."
     test_patterns:
-      - "TopoGpuDevMicrotest.*"
+      - "ConnectMicrotestReject.*"
+      - "Constructions/GraphGenDispatchTest.*"
+      - "EveryRank/ConnectMicrotest.*"
+      - "EvenNodeCounts/GraphGenWaleckiEvenTest.*"
+      - "GraphConnect*"
+      - "GraphGen*"
+      - "GraphRomeModels*"
+      - "NodeCounts/GraphGenWaleckiTest.*"
+      - "Paths*"
+      - "PrimeNodeCounts/GraphGenPrimeRingTest.*"
+      - "Rings*"
+      - "RomeModels*"
+      - "Search*"
+      - "Tables/GraphGenFixedRingTableTest.*"
+      - "Topo*"  # topo.cc; also matches graph-dev-test.cc's TopoGpuDevMicrotest
+      - "Trees*"
+      - "Xml*"
     exclude_windows:
       - "*"
     labels:

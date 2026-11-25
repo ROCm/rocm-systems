@@ -15,7 +15,7 @@ API (hardware multicast memory operations, SM 9.0+).
 From this directory:
 
 ```shell
-make [MPI=1] [MPI_HOME=<path-to-mpi>] [NCCL_HOME=<path-to-nccl>] [CUDA_HOME=<path-to-cuda>]
+make [MPI=1] [MPI_HOME=<path-to-mpi>] [RCCL_HOME=<path-to-rccl>] [ROCM_PATH=<path-to-rocm>] [GPU_TARGETS="<gfx-arch> ..."]
 ```
 
 ## Run

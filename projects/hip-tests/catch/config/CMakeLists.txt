@@ -37,6 +37,7 @@ set(CONFIG_CHECK_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/check_config.py)
 set(SOURCES_CHECK_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/check_sources.py)
 set(HIP_TEST_CONFIG_HEADER ${CATCH_INCLUDE_BINARY_DIR}/hip_test_config.hh)
 set(HIP_TEST_PARAMETERS_HEADER ${CATCH_INCLUDE_BINARY_DIR}/hip_test_parameters.hh)
+set(HIP_TESTS_CATEGORIES_YAML ${HIP_TESTS_CONFIGS_DIR}/test_categories.yaml)
 
 file(GLOB HIP_TESTS_GROUP_CONFIGS CONFIGURE_DEPENDS ${HIP_TESTS_CONFIGS_DIR}/*.yaml)
 file(GLOB HIP_TESTS_UNIT_CONFIGS CONFIGURE_DEPENDS ${HIP_TESTS_CONFIGS_DIR}/unit/*.yaml)
@@ -70,8 +71,9 @@ if(HIP_TESTS_RUN_DISABLED)
 endif()
 
 # Generate both test definitions and parameter headers from YAML
-# - hip_test_config.hh: TEST_CASE macros with tags
-# - hip_test_parameters.hh: Compile-time constants for level parameters
+# - hip_test_config.hh: TEST_CASE macros with tags (levels and test categories)
+# - hip_test_parameters.hh: Compile-time constants for level parameters, plus
+#   the test category -> levels mapping from test_categories.yaml
 add_custom_command(
     OUTPUT ${HIP_TEST_CONFIG_HEADER} ${HIP_TEST_PARAMETERS_HEADER}
     COMMAND "${Python3_EXECUTABLE}" "${CONFIG_PARSER_SCRIPT}"
@@ -81,8 +83,9 @@ add_custom_command(
             "${CONFIG_ARCH}"
             "${HIP_TEST_CONFIG_HEADER}"
             "${HIP_TEST_PARAMETERS_HEADER}"
+            --categories "${HIP_TESTS_CATEGORIES_YAML}"
             ${CONFIG_ASAN_FLAG}
-    DEPENDS ${CONFIG_COMMON_MODULE} ${CONFIG_PARSER_SCRIPT} ${HIP_TESTS_UNIT_CONFIGS} ${HIP_TESTS_GROUP_CONFIGS}
+    DEPENDS ${CONFIG_COMMON_MODULE} ${CONFIG_PARSER_SCRIPT} ${HIP_TESTS_UNIT_CONFIGS} ${HIP_TESTS_GROUP_CONFIGS} ${HIP_TESTS_CATEGORIES_YAML}
     COMMENT "Generating hip_test_config.hh and hip_test_parameters.hh"
 )
 

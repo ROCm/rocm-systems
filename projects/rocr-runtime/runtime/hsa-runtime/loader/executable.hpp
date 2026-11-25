@@ -468,6 +468,11 @@ class AieLoadedCodeObjectImpl : public LoadedCodeObject, public ExecutableObject
   std::vector<std::unique_ptr<AMD::AieKernelDescriptor>> descriptors;
   /// @brief Device buffers backing the blobs: (host ptr from SegmentAlloc, size).
   std::vector<std::pair<void*, size_t>> device_buffers;
+  /// @brief Buffers allocated through the agent's system allocator rather than SegmentAlloc (aie4
+  /// has no CODE_AGENT segment region to allocate from, having no device heap at all), freed via
+  /// the agent's system deallocator. Currently just each FullElf kernel's static control code; see
+  /// AieKernelDescriptor::static_ctrl_code_dev_addr.
+  std::vector<void*> system_buffers;
 
   /// @brief Reports the original hsaco ELF image and its size; all other
   /// attributes are unsupported for AIE code objects.
@@ -630,13 +635,10 @@ public:
     const std::string &uri,
     hsa_loaded_code_object_t *loaded_code_object) override;
 
-  hsa_status_t LoadCodeObject(
-    hsa_agent_t agent,
-    hsa_code_object_t code_object,
-    size_t code_object_size,
-    const char *options,
-    const std::string &uri,
-    hsa_loaded_code_object_t *loaded_code_object) override;
+  hsa_status_t LoadCodeObject(hsa_agent_t agent, hsa_code_object_t code_object,
+                              size_t code_object_size, const char* options, const std::string& uri,
+                              hsa_loaded_code_object_t* loaded_code_object, void* load_address,
+                              size_t load_limit) override;
 
   hsa_status_t Freeze(const char *options) override;
 
@@ -719,10 +721,11 @@ public:
     const char *symbol_name,
     const hsa_agent_t *agent);
 
-  hsa_status_t LoadSegments(hsa_agent_t agent, const code::AmdHsaCode *c,
-                            uint32_t majorVersion);
+  hsa_status_t LoadSegments(hsa_agent_t agent, const code::AmdHsaCode* c, uint32_t majorVersion,
+                            void* load_address, size_t load_limit);
   hsa_status_t LoadSegmentsV1(hsa_agent_t agent, const code::AmdHsaCode *c);
-  hsa_status_t LoadSegmentsV2(hsa_agent_t agent, const code::AmdHsaCode *c);
+  hsa_status_t LoadSegmentsV2(hsa_agent_t agent, const code::AmdHsaCode* c, void* load_address,
+                              size_t load_limit);
   hsa_status_t LoadSegmentV1(hsa_agent_t agent, const code::Segment *s);
   hsa_status_t LoadSegmentV2(const code::Segment *data_segment,
                              loader::Segment *load_segment);

@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/target_provider.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/target_registry.h"
 
 #include <gtest/gtest.h>
@@ -34,29 +35,29 @@ public:
 
 std::unique_ptr<Decoder> create_fixture_decoder() { return std::make_unique<FixtureDecoder>(); }
 
-std::unique_ptr<Decoder> create_fixture_variant_decoder(const IsaGpuTargetDescription &) {
+std::unique_ptr<Decoder> create_fixture_variant_decoder(const IsaTargetBinding &) {
   return std::make_unique<FixtureDecoder>();
 }
 
 constexpr IsaTargetDescriptor
 fixture_target(std::string_view id, std::span<const std::string_view> aliases = {},
-               rj_code_arch_t architecture_id = ROCJITSU_CODE_ARCH_INVALID,
-               std::span<const IsaGpuTargetDescription> gpu_targets = {}) {
+               rocjitsu::IsaFamily family = rocjitsu::IsaFamily::Invalid,
+               std::span<const IsaTargetBinding> bindings = {}) {
   return {
       .id = id,
       .aliases = aliases,
-      .architecture_id = architecture_id,
-      .gpu_targets = gpu_targets,
+      .family = family,
+      .bindings = bindings,
       .decoder_factory = &create_fixture_decoder,
   };
 }
 
-constexpr IsaGpuTargetDescription fixture_gpu_target(rj_code_target_id_t public_id,
-                                                     std::string_view code_object_id,
-                                                     uint32_t elf_machine) {
+constexpr IsaTargetBinding fixture_gpu_target(rj_code_target_id_t public_id,
+                                              std::string_view code_object_id,
+                                              uint32_t elf_machine) {
   return {
       .public_id = public_id,
-      .code_object_id = code_object_id,
+      .id = code_object_id,
       .elf_machine = elf_machine,
   };
 }
@@ -89,14 +90,13 @@ static_assert(std::is_constructible_v<IsaTargetRegistry, const FixtureTargetCArr
 static_assert(!std::is_constructible_v<IsaTargetRegistry, FixtureTargetCArray &>);
 static_assert(!std::is_constructible_v<IsaTargetRegistry, FixtureTargetCArray &&>);
 static_assert(!std::is_constructible_v<IsaTargetRegistry, const FixtureTargetCArray &&>);
-static_assert(cdna1::kTargetDescriptor.aliases.empty());
+static_assert(cdna1::kTargetDescriptor.aliases.front() == "gfx908");
 static_assert(cdna1::kTargetDescriptor.decoder_factory == &cdna1::create_target_decoder);
 static_assert(cdna2::kTargetDescriptor.id == "cdna2");
 static_assert(cdna2::kTargetDescriptor.aliases.size() == 1);
 static_assert(cdna2::kTargetDescriptor.aliases.front() == "gfx90a");
-static_assert(cdna2::kTargetDescriptor.architecture_id == ROCJITSU_CODE_ARCH_CDNA2);
-static_assert(cdna2::kTargetDescriptor.gpu_targets.front().public_id ==
-              ROCJITSU_CODE_TARGET_GFX90A);
+static_assert(cdna2::kTargetDescriptor.family == rocjitsu::IsaFamily::Cdna2);
+static_assert(cdna2::kTargetDescriptor.bindings.front().public_id == ROCJITSU_CODE_TARGET_GFX90A);
 static_assert(rdna4::kTargetDescriptor.aliases.size() == 2);
 static_assert(rdna4::kTargetDescriptor.aliases[0] == "gfx1200");
 static_assert(rdna4::kTargetDescriptor.aliases[1] == "gfx1201");
@@ -107,7 +107,8 @@ static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1200) == 3);
 static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1201) == 4);
 static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1250) == 5);
 static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1251) == 6);
-static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_NUM_TARGETS) == 7);
+static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1100) == 7);
+static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_NUM_TARGETS) == 13);
 static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_INVALID) == INT32_MAX);
 static_assert(sizeof(rj_code_target_id_t) == sizeof(int32_t));
 static_assert(std::is_same_v<std::underlying_type_t<rj_code_target_id_t>, int32_t>);
@@ -148,15 +149,15 @@ TEST(IsaTargetRegistryTest, RejectsConflictingCanonicalIdentities) {
 }
 
 TEST(IsaTargetRegistryTest, RejectsConflictingPublicEnumKeys) {
-  static constexpr std::array first_gpu_targets = {
+  static constexpr std::array first_bindings = {
       fixture_gpu_target(ROCJITSU_CODE_TARGET_GFX90A, "first", EF_AMDGPU_MACH_AMDGCN_GFX90A),
   };
   static constexpr IsaTargetDescriptor first =
-      fixture_target("first", {}, ROCJITSU_CODE_ARCH_CDNA1, first_gpu_targets);
+      fixture_target("first", {}, rocjitsu::IsaFamily::Cdna1, first_bindings);
 
   static constexpr std::array duplicate_architecture_targets = {
       first,
-      fixture_target("duplicate-architecture", {}, ROCJITSU_CODE_ARCH_CDNA1),
+      fixture_target("duplicate-architecture", {}, rocjitsu::IsaFamily::Cdna1),
   };
   expect_registry_error(duplicate_architecture_targets, "duplicate ISA target architecture");
 
@@ -164,11 +165,11 @@ TEST(IsaTargetRegistryTest, RejectsConflictingPublicEnumKeys) {
       fixture_gpu_target(ROCJITSU_CODE_TARGET_GFX90A, "duplicate-gpu-target",
                          EF_AMDGPU_MACH_AMDGCN_GFX942),
   };
-  static constexpr std::array duplicate_gpu_targets = {
+  static constexpr std::array duplicate_bindings = {
       first,
-      fixture_target("duplicate-gpu-target", {}, ROCJITSU_CODE_ARCH_CDNA2, duplicate_gpu),
+      fixture_target("duplicate-gpu-target", {}, rocjitsu::IsaFamily::Cdna2, duplicate_gpu),
   };
-  expect_registry_error(duplicate_gpu_targets, "duplicate ISA target GPU target");
+  expect_registry_error(duplicate_bindings, "duplicate ISA target concrete target");
 
   static constexpr std::array duplicate_elf = {
       fixture_gpu_target(ROCJITSU_CODE_TARGET_GFX942, "duplicate-elf-machine",
@@ -176,7 +177,7 @@ TEST(IsaTargetRegistryTest, RejectsConflictingPublicEnumKeys) {
   };
   static constexpr std::array duplicate_elf_targets = {
       first,
-      fixture_target("duplicate-elf-machine", {}, ROCJITSU_CODE_ARCH_CDNA2, duplicate_elf),
+      fixture_target("duplicate-elf-machine", {}, rocjitsu::IsaFamily::Cdna2, duplicate_elf),
   };
   expect_registry_error(duplicate_elf_targets, "duplicate ISA target GPU ELF machine");
 }
@@ -197,29 +198,29 @@ TEST(IsaTargetRegistryTest, RejectsInvalidTargetDescriptors) {
   expect_registry_error(empty_alias, "empty alias");
 
   static constexpr auto invalid_architecture =
-      static_cast<rj_code_arch_t>(static_cast<int>(ROCJITSU_CODE_ARCH_NUM_ARCHS) + 1);
+      static_cast<rocjitsu::IsaFamily>(static_cast<int>(rocjitsu::IsaFamily::Count) + 1);
   static constexpr std::array invalid_enums = {
       fixture_target("invalid-enums", {}, invalid_architecture),
   };
-  expect_registry_error(invalid_enums, "unallocated architecture");
+  expect_registry_error(invalid_enums, "unallocated ISA family");
 
   static constexpr std::array invalid_gpu_value = {
       fixture_gpu_target(ROCJITSU_CODE_TARGET_INVALID, "invalid-gpu-target",
                          EF_AMDGPU_MACH_AMDGCN_GFX90A),
   };
   static constexpr std::array invalid_gpu_target = {
-      fixture_target("invalid-gpu-target", {}, ROCJITSU_CODE_ARCH_CDNA1, invalid_gpu_value),
+      fixture_target("invalid-gpu-target", {}, rocjitsu::IsaFamily::Cdna1, invalid_gpu_value),
   };
-  expect_registry_error(invalid_gpu_target, "unallocated GPU target");
+  expect_registry_error(invalid_gpu_target, "unallocated target");
 
   static constexpr std::array past_last_gpu_value = {
       fixture_gpu_target(ROCJITSU_CODE_TARGET_NUM_TARGETS, "past-last-gpu-target",
                          EF_AMDGPU_MACH_AMDGCN_GFX90A),
   };
   static constexpr std::array past_last_gpu_target = {
-      fixture_target("past-last-gpu-target", {}, ROCJITSU_CODE_ARCH_CDNA1, past_last_gpu_value),
+      fixture_target("past-last-gpu-target", {}, rocjitsu::IsaFamily::Cdna1, past_last_gpu_value),
   };
-  expect_registry_error(past_last_gpu_target, "unallocated GPU target");
+  expect_registry_error(past_last_gpu_target, "unallocated target");
 
   static constexpr std::array<std::string_view, 1> duplicate_enum_alias{"duplicate-enums-alias"};
   static constexpr std::array duplicate_enum_values = {
@@ -229,10 +230,10 @@ TEST(IsaTargetRegistryTest, RejectsInvalidTargetDescriptors) {
                          EF_AMDGPU_MACH_AMDGCN_GFX942),
   };
   static constexpr std::array duplicate_enums = {
-      fixture_target("duplicate-enums", duplicate_enum_alias, ROCJITSU_CODE_ARCH_CDNA1,
+      fixture_target("duplicate-enums", duplicate_enum_alias, rocjitsu::IsaFamily::Cdna1,
                      duplicate_enum_values),
   };
-  expect_registry_error(duplicate_enums, "duplicate ISA target GPU target");
+  expect_registry_error(duplicate_enums, "duplicate ISA target concrete target");
 
   static constexpr std::array duplicate_code_object_values = {
       fixture_gpu_target(ROCJITSU_CODE_TARGET_GFX90A, "duplicate-code-object-id",
@@ -241,45 +242,38 @@ TEST(IsaTargetRegistryTest, RejectsInvalidTargetDescriptors) {
                          EF_AMDGPU_MACH_AMDGCN_GFX942),
   };
   static constexpr std::array duplicate_code_object_id = {
-      fixture_target("duplicate-code-object-id", {}, ROCJITSU_CODE_ARCH_CDNA1,
+      fixture_target("duplicate-code-object-id", {}, rocjitsu::IsaFamily::Cdna1,
                      duplicate_code_object_values),
   };
-  expect_registry_error(duplicate_code_object_id, "duplicate ISA target GPU code-object ID");
+  expect_registry_error(duplicate_code_object_id, "duplicate ISA target target ID");
 
   static constexpr std::array empty_code_object_value = {
       fixture_gpu_target(ROCJITSU_CODE_TARGET_GFX90A, "", EF_AMDGPU_MACH_AMDGCN_GFX90A),
   };
   static constexpr std::array empty_code_object_id = {
-      fixture_target("empty-code-object-id", {}, ROCJITSU_CODE_ARCH_CDNA1, empty_code_object_value),
+      fixture_target("empty-code-object-id", {}, rocjitsu::IsaFamily::Cdna1,
+                     empty_code_object_value),
   };
-  expect_registry_error(empty_code_object_id, "empty GPU code-object ID");
+  expect_registry_error(empty_code_object_id, "empty target ID");
 
   static constexpr std::array unknown_code_object_value = {
       fixture_gpu_target(ROCJITSU_CODE_TARGET_GFX90A, "not-an-alias", EF_AMDGPU_MACH_AMDGCN_GFX90A),
   };
   static constexpr std::array unknown_code_object_id = {
-      fixture_target("unknown-code-object-id", {}, ROCJITSU_CODE_ARCH_CDNA1,
+      fixture_target("unknown-code-object-id", {}, rocjitsu::IsaFamily::Cdna1,
                      unknown_code_object_value),
   };
   expect_registry_error(unknown_code_object_id, "not an ID or alias");
-
-  static constexpr std::array empty_elf_value = {
-      fixture_gpu_target(ROCJITSU_CODE_TARGET_GFX90A, "empty-elf-machine", 0),
-  };
-  static constexpr std::array empty_elf_machine = {
-      fixture_target("empty-elf-machine", {}, ROCJITSU_CODE_ARCH_CDNA1, empty_elf_value),
-  };
-  expect_registry_error(empty_elf_machine, "empty GPU ELF machine");
 
   static constexpr std::array missing_gpu_architecture_value = {
       fixture_gpu_target(ROCJITSU_CODE_TARGET_GFX90A, "missing-gpu-architecture",
                          EF_AMDGPU_MACH_AMDGCN_GFX90A),
   };
   static constexpr std::array missing_gpu_architecture = {
-      fixture_target("missing-gpu-architecture", {}, ROCJITSU_CODE_ARCH_INVALID,
+      fixture_target("missing-gpu-architecture", {}, rocjitsu::IsaFamily::Invalid,
                      missing_gpu_architecture_value),
   };
-  expect_registry_error(missing_gpu_architecture, "must have an architecture ID");
+  expect_registry_error(missing_gpu_architecture, "must have an ISA family");
 }
 
 TEST(IsaTargetRegistryTest, VariantProvidersRequireAnExplicitBoundDefault) {
@@ -290,19 +284,19 @@ TEST(IsaTargetRegistryTest, VariantProvidersRequireAnExplicitBoundDefault) {
   static constexpr std::array missing_default = {IsaTargetDescriptor{
       .id = "variant",
       .aliases = aliases,
-      .architecture_id = ROCJITSU_CODE_ARCH_CDNA2,
-      .gpu_targets = bindings,
+      .family = rocjitsu::IsaFamily::Cdna2,
+      .bindings = bindings,
       .decoder_factory = &create_fixture_decoder,
       .variant_decoder_factory = &create_fixture_variant_decoder,
   }};
-  expect_registry_error(missing_default, "has no default GPU target");
+  expect_registry_error(missing_default, "has no default concrete target");
 
   static constexpr std::array unbound_default = {IsaTargetDescriptor{
       .id = "variant",
       .aliases = aliases,
-      .architecture_id = ROCJITSU_CODE_ARCH_CDNA2,
-      .gpu_targets = bindings,
-      .default_gpu_target = ROCJITSU_CODE_TARGET_GFX942,
+      .family = rocjitsu::IsaFamily::Cdna2,
+      .bindings = bindings,
+      .default_target = ROCJITSU_CODE_TARGET_GFX942,
       .decoder_factory = &create_fixture_decoder,
       .variant_decoder_factory = &create_fixture_variant_decoder,
   }};
@@ -312,14 +306,14 @@ TEST(IsaTargetRegistryTest, VariantProvidersRequireAnExplicitBoundDefault) {
       IsaTargetDescriptor{
           .id = "variant",
           .aliases = aliases,
-          .architecture_id = ROCJITSU_CODE_ARCH_CDNA2,
-          .gpu_targets = bindings,
-          .default_gpu_target = ROCJITSU_CODE_TARGET_GFX90A,
+          .family = rocjitsu::IsaFamily::Cdna2,
+          .bindings = bindings,
+          .default_target = ROCJITSU_CODE_TARGET_GFX90A,
           .decoder_factory = &create_fixture_decoder,
       },
   };
   expect_registry_error(default_without_variant_factory,
-                        "has a default GPU target but no variant decoder factory");
+                        "has a default concrete target but no variant decoder factory");
 }
 
 TEST(IsaTargetRegistryTest, InvalidCompositionFailsClosed) {
@@ -331,10 +325,10 @@ TEST(IsaTargetRegistryTest, InvalidCompositionFailsClosed) {
   EXPECT_FALSE(registry.ok());
   EXPECT_TRUE(registry.targets().empty());
   EXPECT_EQ(registry.find("target"), nullptr);
-  EXPECT_EQ(registry.find(ROCJITSU_CODE_ARCH_CDNA1), nullptr);
+  EXPECT_EQ(registry.find(rocjitsu::IsaFamily::Cdna1), nullptr);
   EXPECT_EQ(registry.find(ROCJITSU_CODE_TARGET_GFX90A), nullptr);
-  EXPECT_EQ(registry.find_gpu_target_by_elf_machine(EF_AMDGPU_MACH_AMDGCN_GFX90A), nullptr);
-  EXPECT_EQ(registry.find_gpu_target_by_code_object_id("gfx9999"), nullptr);
+  EXPECT_EQ(registry.find_target_by_elf_machine(EF_AMDGPU_MACH_AMDGCN_GFX90A), nullptr);
+  EXPECT_EQ(registry.find_target_by_code_object_id("gfx9999"), nullptr);
 }
 
 TEST(IsaTargetRegistryTest, ExecutionBackendScopesNestAndRestore) {
@@ -399,8 +393,9 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
       "rdna3", "rdna3_5", "rdna4", "cdna5", "risc-v",
   };
   std::vector<std::string> actual;
-  for (const IsaTargetDescriptor &target : registry.targets())
+  for (const IsaTargetDescriptor &target : registry.targets()) {
     actual.emplace_back(target.id);
+  }
   EXPECT_EQ(actual, expected);
 
   const IsaTargetDescriptor *gfx1201 = registry.find("gfx1201");
@@ -409,7 +404,7 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
   const IsaTargetDescriptor *rv64i = registry.find("rv64i");
   ASSERT_NE(rv64i, nullptr);
   EXPECT_EQ(rv64i->id, "risc-v");
-  const IsaTargetDescriptor *cdna3 = registry.find(ROCJITSU_CODE_ARCH_CDNA3);
+  const IsaTargetDescriptor *cdna3 = registry.find(rocjitsu::IsaFamily::Cdna3);
   ASSERT_NE(cdna3, nullptr);
   EXPECT_EQ(cdna3->id, "cdna3");
   const IsaTargetDescriptor *gfx1201_enum = registry.find(ROCJITSU_CODE_TARGET_GFX1201);
@@ -418,35 +413,36 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
   const IsaTargetDescriptor *gfx1250 = registry.find("gfx1250");
   ASSERT_NE(gfx1250, nullptr);
   EXPECT_EQ(gfx1250->id, "cdna5");
-  EXPECT_EQ(gfx1250->default_gpu_target, ROCJITSU_CODE_TARGET_GFX1250);
-  const IsaGpuTargetDescription *gfx1250_binding =
-      registry.find_gpu_target(ROCJITSU_CODE_TARGET_GFX1250);
-  const IsaGpuTargetDescription *gfx1251_binding =
-      registry.find_gpu_target(ROCJITSU_CODE_TARGET_GFX1251);
+  EXPECT_EQ(gfx1250->default_target, ROCJITSU_CODE_TARGET_GFX1250);
+  const IsaTargetBinding *gfx1250_binding = registry.find_target(ROCJITSU_CODE_TARGET_GFX1250);
+  const IsaTargetBinding *gfx1251_binding = registry.find_target(ROCJITSU_CODE_TARGET_GFX1251);
+  const IsaTargetBinding *gfx1100_binding = registry.find_target(ROCJITSU_CODE_TARGET_GFX1100);
   ASSERT_NE(gfx1250_binding, nullptr);
   ASSERT_NE(gfx1251_binding, nullptr);
+  ASSERT_NE(gfx1100_binding, nullptr);
   constexpr std::array kExecutableTargets{
       ROCJITSU_CODE_TARGET_GFX90A,  ROCJITSU_CODE_TARGET_GFX942,  ROCJITSU_CODE_TARGET_GFX950,
       ROCJITSU_CODE_TARGET_GFX1200, ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_TARGET_GFX1250,
-      ROCJITSU_CODE_TARGET_GFX1251,
+      ROCJITSU_CODE_TARGET_GFX1251, ROCJITSU_CODE_TARGET_GFX1100,
   };
   for (rj_code_target_id_t target : kExecutableTargets) {
-    const IsaGpuTargetDescription *binding = registry.find_gpu_target(target);
+    const IsaTargetBinding *binding = registry.find_target(target);
     ASSERT_NE(binding, nullptr);
     EXPECT_TRUE(binding->capabilities.execution_implemented);
   }
   EXPECT_EQ(gfx1250_binding->gfx_target_version, 120500u);
   EXPECT_EQ(gfx1251_binding->gfx_target_version, 120501u);
+  EXPECT_EQ(gfx1100_binding->gfx_target_version, 110000u);
   EXPECT_NE(gfx1250_binding->capabilities.instruction_features,
             gfx1251_binding->capabilities.instruction_features);
-  EXPECT_EQ(registry.find_default_gpu_target(*gfx1250), gfx1250_binding);
+  EXPECT_EQ(registry.find_default_target(*gfx1250), gfx1250_binding);
   IsaTargetDescriptor detached_descriptor = *gfx1250;
-  EXPECT_EQ(registry.find_default_gpu_target(detached_descriptor), nullptr);
+  EXPECT_EQ(registry.find_default_target(detached_descriptor), nullptr);
   EXPECT_NE(Decoder::create(registry, "gfx942"), nullptr);
-  EXPECT_NE(Decoder::create(registry, ROCJITSU_CODE_ARCH_CDNA3), nullptr);
+  EXPECT_NE(Decoder::create(registry, rocjitsu::IsaFamily::Cdna3), nullptr);
   EXPECT_EQ(registry.find("rv32i"), nullptr);
-  EXPECT_EQ(Decoder::create(registry, ROCJITSU_CODE_ARCH_RV32I), nullptr);
-  std::unique_ptr<Decoder> risc_v_decoder = Decoder::create(registry, ROCJITSU_CODE_ARCH_RV64I);
+  EXPECT_EQ(Decoder::create(registry, rocjitsu::IsaFamily::Rv32i), nullptr);
+  std::unique_ptr<Decoder> risc_v_decoder = Decoder::create(registry, rocjitsu::IsaFamily::Rv64i);
   ASSERT_NE(risc_v_decoder, nullptr);
   constexpr rj_code_binary_inst_t kAddiX1X0One = 0x00100093;
   std::unique_ptr<Instruction> risc_v_instruction(decode_valid(*risc_v_decoder, &kAddiX1X0One));
@@ -483,18 +479,34 @@ TEST(IsaTargetRegistryTest, PublicCEntryPointAcceptsCanonicalTargetIds) {
   EXPECT_EQ(rj_code_decoder_create_for_target("", &decoder), ROCJITSU_STATUS_INVALID_ARGUMENT);
   EXPECT_EQ(rj_code_decoder_create_for_target(nullptr, &decoder), ROCJITSU_STATUS_INVALID_ARGUMENT);
 
-  EXPECT_EQ(rj_code_decoder_create(ROCJITSU_CODE_ARCH_INVALID, &decoder),
+  EXPECT_EQ(rj_code_decoder_create(ROCJITSU_CODE_TARGET_INVALID, &decoder),
             ROCJITSU_STATUS_INVALID_ARGUMENT);
   EXPECT_EQ(decoder, nullptr);
 
-  constexpr auto unnamed_architecture =
-      static_cast<rj_code_arch_t>(ROCJITSU_CODE_ARCH_NUM_ARCHS + 1);
-  EXPECT_EQ(rj_code_decoder_create(unnamed_architecture, &decoder),
-            ROCJITSU_STATUS_INVALID_ARGUMENT);
+  constexpr auto unnamed_target =
+      static_cast<rj_code_target_id_t>(ROCJITSU_CODE_TARGET_NUM_TARGETS + 1);
+  EXPECT_EQ(rj_code_decoder_create(unnamed_target, &decoder), ROCJITSU_STATUS_INVALID_ARGUMENT);
   EXPECT_EQ(decoder, nullptr);
 
-  EXPECT_EQ(rj_code_decoder_create(ROCJITSU_CODE_ARCH_RV32I, &decoder), ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(rj_code_decoder_create_for_target("rv32i", &decoder), ROCJITSU_STATUS_ERROR);
   EXPECT_EQ(decoder, nullptr);
+}
+
+TEST(IsaTargetRegistryTest, NonGpuTargetHasNoAmdGpuCodeObjectIdentity) {
+  const IsaTargetRegistry &registry = default_isa_target_registry();
+  const IsaTargetBinding *binding = registry.find_target(ROCJITSU_CODE_TARGET_RV64I);
+  ASSERT_NE(binding, nullptr);
+  EXPECT_EQ(binding->id, "rv64i");
+  EXPECT_EQ(binding->elf_machine, 0u);
+  EXPECT_TRUE(binding->capabilities.execution_implemented);
+  EXPECT_EQ(registry.find_target("rv64i"), binding);
+  EXPECT_EQ(registry.find_target_by_code_object_id("rv64i"), nullptr);
+  EXPECT_EQ(registry.find_target_by_elf_machine(0), nullptr);
+
+  static constexpr std::array subset{cdna2::kTargetDescriptor};
+  const IsaTargetRegistry scoped{subset};
+  EXPECT_NE(Decoder::create(scoped, ROCJITSU_CODE_TARGET_GFX90A), nullptr);
+  EXPECT_EQ(Decoder::create(scoped, ROCJITSU_CODE_TARGET_RV64I), nullptr);
 }
 
 } // namespace

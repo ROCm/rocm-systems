@@ -1,0 +1,3 @@
+jobs:
+  - output_directory: "@CMAKE_CURRENT_BINARY_DIR@/input_dir"
+    output_file: "input_name"

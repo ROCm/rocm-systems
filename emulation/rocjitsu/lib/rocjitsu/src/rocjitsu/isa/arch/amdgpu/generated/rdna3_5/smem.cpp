@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/smem.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_cache_flags.h"
 #include <memory>
@@ -14,8 +15,9 @@ namespace rdna3_5 {
 
 namespace {
 Operand make_smem_offset(const Smem::OpEncoding *enc) {
-  if (enc->soffset != OPR_SMEM_OFFSET_NULL && enc->soffset != 0x7f)
+  if (enc->soffset != OPR_SMEM_OFFSET_NULL && enc->soffset != 0x7f) {
     return Operand(32, OperandType::OPR_SMEM_OFFSET, static_cast<int>(enc->soffset));
+  }
   return Operand(32, OperandType::OPR_SIMM32, static_cast<int>(enc->offset));
 }
 } // namespace
@@ -39,14 +41,17 @@ SLoadB32Smem::SLoadB32Smem(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_LOAD_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
 DecodeResult decodeSLoadB32Smem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_load_b32", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SLoadB32Smem>(opcode);
 }
 } // namespace detail
@@ -71,14 +76,17 @@ SLoadB64Smem::SLoadB64Smem(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_LOAD_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
 DecodeResult decodeSLoadB64Smem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_load_b64", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SLoadB64Smem>(opcode);
 }
 } // namespace detail
@@ -103,14 +111,17 @@ SLoadB128Smem::SLoadB128Smem(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_LOAD_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
 DecodeResult decodeSLoadB128Smem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_load_b128", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SLoadB128Smem>(opcode);
 }
 } // namespace detail
@@ -135,14 +146,17 @@ SLoadB256Smem::SLoadB256Smem(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_LOAD_B256);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
 DecodeResult decodeSLoadB256Smem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_load_b256", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SLoadB256Smem>(opcode);
 }
 } // namespace detail
@@ -167,14 +181,17 @@ SLoadB512Smem::SLoadB512Smem(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_LOAD_B512);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
 DecodeResult decodeSLoadB512Smem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_load_b512", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SLoadB512Smem>(opcode);
 }
 } // namespace detail
@@ -198,6 +215,8 @@ SBufferLoadB32Smem::SBufferLoadB32Smem(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_BUFFER_LOAD_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -205,8 +224,9 @@ DecodeResult decodeSBufferLoadB32Smem(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_buffer_load_b32", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBufferLoadB32Smem>(opcode);
 }
 } // namespace detail
@@ -231,6 +251,8 @@ SBufferLoadB64Smem::SBufferLoadB64Smem(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_BUFFER_LOAD_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -238,8 +260,9 @@ DecodeResult decodeSBufferLoadB64Smem(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_buffer_load_b64", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBufferLoadB64Smem>(opcode);
 }
 } // namespace detail
@@ -264,6 +287,8 @@ SBufferLoadB128Smem::SBufferLoadB128Smem(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_BUFFER_LOAD_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -271,8 +296,9 @@ DecodeResult decodeSBufferLoadB128Smem(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_buffer_load_b128", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBufferLoadB128Smem>(opcode);
 }
 } // namespace detail
@@ -297,6 +323,8 @@ SBufferLoadB256Smem::SBufferLoadB256Smem(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_BUFFER_LOAD_B256);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -304,8 +332,9 @@ DecodeResult decodeSBufferLoadB256Smem(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_buffer_load_b256", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBufferLoadB256Smem>(opcode);
 }
 } // namespace detail
@@ -330,6 +359,8 @@ SBufferLoadB512Smem::SBufferLoadB512Smem(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_BUFFER_LOAD_B512);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -337,8 +368,9 @@ DecodeResult decodeSBufferLoadB512Smem(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_buffer_load_b512", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBufferLoadB512Smem>(opcode);
 }
 } // namespace detail
@@ -349,14 +381,17 @@ SGl1InvSmem::SGl1InvSmem(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_GL1_INV);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Cache);
 }
 
 namespace detail {
 DecodeResult decodeSGl1InvSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_gl1_inv", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SGl1InvSmem>(opcode);
 }
 } // namespace detail
@@ -367,14 +402,17 @@ SDcacheInvSmem::SDcacheInvSmem(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_DCACHE_INV);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Cache);
 }
 
 namespace detail {
 DecodeResult decodeSDcacheInvSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_dcache_inv", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SDcacheInvSmem>(opcode);
 }
 } // namespace detail
@@ -390,15 +428,21 @@ SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 0;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_ATC_PROBE);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Probe);
 }
 
 namespace detail {
 DecodeResult decodeSAtcProbeSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_atc_probe", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SAtcProbeSmem>(opcode);
 }
 } // namespace detail
@@ -414,7 +458,12 @@ SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 0;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_ATC_PROBE_BUFFER);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Probe);
 }
 
 namespace detail {
@@ -422,8 +471,9 @@ DecodeResult decodeSAtcProbeBufferSmem(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_atc_probe_buffer", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SAtcProbeBufferSmem>(opcode);
 }
 } // namespace detail

@@ -6,6 +6,18 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <hsa/hsa_ext_finalize.h>
+#include <hsa/hsa_ext_amd.h>
+#include <hsa/hsa_ext_image.h>
+#include <hsa/hsa_ven_amd_loader.h>
+
+_Static_assert(sizeof(hsa_amd_ext_kernel_dispatch_packet_t) == 64,
+               "AMD dispatch packets must occupy one AQL slot");
+_Static_assert(offsetof(hsa_amd_ext_kernel_dispatch_packet_t, private_segment_size) ==
+                   offsetof(hsa_kernel_dispatch_packet_t, private_segment_size),
+               "scratch handling shares the private-size field");
+_Static_assert(offsetof(hsa_amd_ext_kernel_dispatch_packet_t, workgroup_size_x) ==
+                   offsetof(hsa_kernel_dispatch_packet_t, workgroup_size_x),
+               "scratch handling shares the workgroup fields");
 
 #define TYPE(label, type) \
   printf("type %s %zu %zu\n", label, sizeof(type), _Alignof(type))
@@ -14,6 +26,8 @@
          sizeof(((type *)0)->member))
 
 int main(void) {
+  TYPE("HsaFile", hsa_file_t);
+  TYPE("HsaHandle", hsa_handle_t);
   TYPE("HsaSignal", hsa_signal_t);
   FIELD("HsaSignal.handle", hsa_signal_t, handle);
   TYPE("HsaDim3", hsa_dim3_t);
@@ -58,6 +72,16 @@ int main(void) {
   FIELD("HsaExtControlDirectives.reserved2",
         hsa_ext_control_directives_t, reserved2);
 
+  TYPE("HsaExtSamplerDescriptorV3", hsa_ext_sampler_descriptor_v3_t);
+  FIELD("HsaExtSamplerDescriptorV3.coordinate_mode", hsa_ext_sampler_descriptor_v3_t, coordinate_mode);
+  FIELD("HsaExtSamplerDescriptorV3.filter_mode", hsa_ext_sampler_descriptor_v3_t, filter_mode);
+  FIELD("HsaExtSamplerDescriptorV3.mipmap_filter_mode", hsa_ext_sampler_descriptor_v3_t, mipmap_filter_mode);
+  FIELD("HsaExtSamplerDescriptorV3.address_modes", hsa_ext_sampler_descriptor_v3_t, address_modes);
+  FIELD("HsaExtSamplerDescriptorV3.max_anisotropy", hsa_ext_sampler_descriptor_v3_t, max_anisotropy);
+  TYPE("HsaAmdMemoryCopyRectPtr", hsa_amd_memory_copy_rect_ptr_t);
+  FIELD("HsaAmdMemoryCopyRectPtr.pitched_ptr", hsa_amd_memory_copy_rect_ptr_t, pitched_ptr);
+  FIELD("HsaAmdMemoryCopyRectPtr.offset", hsa_amd_memory_copy_rect_ptr_t, offset);
+
   hsa_ext_control_directives_t directives = {0};
   hsa_ext_program_t program = {0};
   hsa_isa_t isa = {0};
@@ -66,5 +90,22 @@ int main(void) {
                                &code_object) != HSA_STATUS_ERROR_NOT_INITIALIZED) {
     return 2;
   }
+  hsa_agent_t agent = {1};
+  size_t bytes = 0;
+  void* pointer = NULL;
+#ifdef _WIN32
+  /* A non-null native pointer whose low 32 bits would be a negative fd. */
+  hsa_handle_t handle = (void*)(uintptr_t)UINT64_C(0x180000000);
+#else
+  hsa_handle_t handle = 0;
+#endif
+  if (hsa_amd_interop_map_buffer(1, &agent, handle, 0, &bytes, &pointer,
+                                 NULL, NULL) != HSA_STATUS_ERROR_NOT_INITIALIZED) {
+    return 3;
+  }
+  hsa_code_object_reader_t reader = {0};
+  if (hsa_ven_amd_loader_code_object_reader_get_load_size(reader, &bytes) != HSA_STATUS_ERROR_NOT_INITIALIZED) return 4;
+  hsa_ext_sampler_t sampler = {0};
+  if (hsa_ext_sampler_create_v3(agent, NULL, &sampler) != HSA_STATUS_ERROR_NOT_INITIALIZED) return 5;
   return 0;
 }

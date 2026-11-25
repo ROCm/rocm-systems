@@ -75,6 +75,7 @@ extern ProxyIpcFakes g_ipc;
 struct ProxyShmFakes {
   ncclResult_t openResult, closeResult, unlinkResult;
   int opens, closes, unlinks, lastRefcount;
+  size_t lastSize;
   std::string lastPath;
 };
 extern ProxyShmFakes g_shm;

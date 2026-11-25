@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/isa/register_set.h"
+#include "util/bit.h"
 
 #include <algorithm>
 #include <cstring>
@@ -16,47 +19,86 @@
 
 namespace rocjitsu {
 
+bool uses_kernarg_preload_firmware_skip(rocjitsu::IsaFamily arch) {
+  // CDNA3/CDNA4 implement kernarg preloading through the legacy firmware
+  // compatibility window: old firmware enters at the descriptor entry and
+  // compatible firmware enters 256 bytes later. GFX1250 supports preloading in
+  // hardware but has one entry, exactly as specified by the descriptor.
+  return arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
+}
+
+std::optional<std::vector<uint64_t>>
+kernel_hardware_entry_candidates(const KernelDescriptorInfo &kernel, rocjitsu::IsaFamily arch,
+                                 uint64_t text_size) {
+  switch (arch) {
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
+  case rocjitsu::IsaFamily::Cdna5:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
+  case rocjitsu::IsaFamily::Rdna4:
+    break;
+  default:
+    return std::nullopt;
+  }
+  const uint64_t entry = kernel.entry_text_offset;
+  if (entry >= text_size) {
+    return std::nullopt;
+  }
+  std::vector<uint64_t> roots = {entry};
+  if (kernarg_preload_length(kernel.descriptor) && uses_kernarg_preload_firmware_skip(arch)) {
+    if (text_size - entry <= kKernargPreloadSkipBytes) {
+      return std::nullopt;
+    }
+    roots.push_back(entry + kKernargPreloadSkipBytes);
+  }
+  return roots;
+}
+
 namespace {
 
 using KD = rocjitsu::amdhsa::kernel_descriptor_t;
 
 static_assert(sizeof(KD) == 64, "AMDHSA kernel descriptor size changed");
 
-// True if [offset, offset + length) fits within [0, size) without overflow (the
-// image is an arbitrary span, so offset + length may wrap). Use before forming any
-// pointer into the image.
-[[nodiscard]] bool range_in_bounds(uint64_t offset, uint64_t length, uint64_t size) {
-  return offset <= size && length <= size - offset;
-}
-
 [[nodiscard]] std::optional<std::string>
 kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t strtab_size) {
-  if (sym.st_size != sizeof(KD))
+  if (sym.st_size != sizeof(KD)) {
     return std::nullopt;
+  }
 
   // AMDHSA kernel descriptors are global object symbols. Size alone is not a
   // durable signal because unrelated data objects can also be 64 bytes.
   if (elf_symbol_type(sym.st_info) != kElfSymbolTypeObject ||
-      elf_symbol_bind(sym.st_info) != kElfSymbolBindGlobal)
+      elf_symbol_bind(sym.st_info) != kElfSymbolBindGlobal) {
     return std::nullopt;
+  }
 
   // AMDHSA descriptors are named "<kernel>.kd". An unnamed 64-byte global object
   // is ambiguous, so require the ABI suffix instead of treating stripped or
   // minimized symbol records as descriptors.
-  if (strtab == nullptr || strtab_size == 0 || sym.st_name == 0)
+  if (strtab == nullptr || strtab_size == 0 || sym.st_name == 0) {
     return std::nullopt;
-  if (sym.st_name >= strtab_size)
+  }
+  if (sym.st_name >= strtab_size) {
     return std::nullopt;
+  }
 
   const char *name = strtab + sym.st_name;
   const size_t avail = strtab_size - sym.st_name;
   const size_t len = strnlen(name, avail);
   // No NUL within bounds: the name is unterminated, so the strcmp below would read
   // past the table (the image span is arbitrary). Reject before the suffix check.
-  if (len == avail)
+  if (len == avail) {
     return std::nullopt;
-  if (len <= 3 || std::strcmp(name + len - 3, ".kd") != 0)
+  }
+  if (len <= 3 || std::strcmp(name + len - 3, ".kd") != 0) {
     return std::nullopt;
+  }
   return std::string(name, len - 3);
 }
 
@@ -65,32 +107,21 @@ text_vaddr_for_section(uint64_t text_offset, uint64_t text_size,
                        std::span<const Elf64_Shdr> sections,
                        std::optional<size_t> text_section_index) {
   if (text_section_index) {
-    if (*text_section_index >= sections.size())
+    if (*text_section_index >= sections.size()) {
       return std::nullopt;
+    }
     const Elf64_Shdr &text = sections[*text_section_index];
-    if (text.sh_type == SHT_NOBITS || text.sh_offset != text_offset || text.sh_size != text_size)
+    if (text.sh_type == SHT_NOBITS || text.sh_offset != text_offset || text.sh_size != text_size) {
       return std::nullopt;
+    }
     return text.sh_addr;
   }
   for (const Elf64_Shdr &section : sections) {
-    if (section.sh_offset == text_offset && section.sh_size == text_size)
+    if (section.sh_offset == text_offset && section.sh_size == text_size) {
       return section.sh_addr;
+    }
   }
   return std::nullopt;
-}
-
-[[nodiscard]] std::optional<uint64_t> add_signed_offset(uint64_t base, int64_t offset) {
-  if (offset >= 0) {
-    const uint64_t positive = static_cast<uint64_t>(offset);
-    if (positive > std::numeric_limits<uint64_t>::max() - base)
-      return std::nullopt;
-    return base + positive;
-  }
-  // Form the magnitude without negating INT64_MIN.
-  const uint64_t magnitude = static_cast<uint64_t>(-(offset + 1)) + 1;
-  if (magnitude > base)
-    return std::nullopt;
-  return base - magnitude;
 }
 
 } // namespace
@@ -99,44 +130,51 @@ std::vector<KernelDescriptorInfo>
 scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
                         std::optional<size_t> text_section_index) {
   std::vector<KernelDescriptorInfo> out;
-  if (image.size() < sizeof(Elf64_Ehdr))
+  if (image.size() < sizeof(Elf64_Ehdr)) {
     return out;
+  }
 
   Elf64_Ehdr ehdr{};
   std::memcpy(&ehdr, image.data(), sizeof(ehdr));
   std::optional<std::vector<Elf64_Shdr>> section_hdrs =
       read_elf_table<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum, ehdr.e_shentsize);
-  if (!section_hdrs)
+  if (!section_hdrs) {
     return out;
+  }
 
   const std::optional<uint64_t> text_vaddr =
       text_vaddr_for_section(text_offset, text_size, *section_hdrs, text_section_index);
-  if (!text_vaddr)
+  if (!text_vaddr) {
     return out;
+  }
   constexpr uint64_t max_u64 = std::numeric_limits<uint64_t>::max();
-  if (*text_vaddr > max_u64 - text_size)
+  if (*text_vaddr > max_u64 - text_size) {
     return out;
+  }
   const uint64_t text_end = *text_vaddr + text_size;
 
   // .symtab and .dynsym may both describe the same descriptor. Discovery is keyed
   // by descriptor bytes, so visit each file offset once.
   std::unordered_set<uint64_t> seen_descriptor_offsets;
   for (const Elf64_Shdr &symbol_section : *section_hdrs) {
-    if (symbol_section.sh_type != SHT_SYMTAB && symbol_section.sh_type != SHT_DYNSYM)
+    if (symbol_section.sh_type != SHT_SYMTAB && symbol_section.sh_type != SHT_DYNSYM) {
       continue;
-    if (symbol_section.sh_entsize == 0)
+    }
+    if (symbol_section.sh_entsize == 0) {
       continue;
+    }
     const uint64_t num_symbols = symbol_section.sh_size / symbol_section.sh_entsize;
     const std::optional<std::vector<Elf64_Sym>> symbols = read_elf_table<Elf64_Sym>(
         image, symbol_section.sh_offset, num_symbols, symbol_section.sh_entsize);
-    if (!symbols)
+    if (!symbols) {
       continue;
+    }
 
     const char *strtab = nullptr;
     size_t strtab_size = 0;
     if (symbol_section.sh_link < section_hdrs->size()) {
       const Elf64_Shdr &strtab_shdr = (*section_hdrs)[symbol_section.sh_link];
-      if (range_in_bounds(strtab_shdr.sh_offset, strtab_shdr.sh_size, image.size())) {
+      if (util::is_range_in_bounds(strtab_shdr.sh_offset, strtab_shdr.sh_size, image.size())) {
         strtab = reinterpret_cast<const char *>(image.data() + strtab_shdr.sh_offset);
         strtab_size = strtab_shdr.sh_size;
       }
@@ -145,8 +183,9 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
     for (const Elf64_Sym &symbol : *symbols) {
       std::optional<std::string> kernel_name =
           kernel_descriptor_symbol_name(symbol, strtab, strtab_size);
-      if (!kernel_name)
+      if (!kernel_name) {
         continue;
+      }
 
       // Map the descriptor symbol to the file bytes it points at, validating every
       // step so a crafted symbol cannot form an out-of-bounds pointer: its section
@@ -158,26 +197,31 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
       // skips this symbol rather than reading past the section.
       const uint16_t owner_index = symbol.st_shndx;
       if (owner_index >= section_hdrs->size() ||
-          symbol.st_value < (*section_hdrs)[owner_index].sh_addr)
+          symbol.st_value < (*section_hdrs)[owner_index].sh_addr) {
         continue;
+      }
 
       const Elf64_Shdr &owner = (*section_hdrs)[owner_index];
       const uint64_t delta = symbol.st_value - owner.sh_addr;
-      if (!range_in_bounds(owner.sh_offset, owner.sh_size, image.size()) ||
-          !range_in_bounds(delta, sizeof(KD), owner.sh_size))
+      if (!util::is_range_in_bounds(owner.sh_offset, owner.sh_size, image.size()) ||
+          !util::is_range_in_bounds(delta, sizeof(KD), owner.sh_size)) {
         continue;
+      }
       const uint64_t file_offset = owner.sh_offset + delta;
-      if (!seen_descriptor_offsets.insert(file_offset).second)
+      if (!seen_descriptor_offsets.insert(file_offset).second) {
         continue;
+      }
 
       KD desc;
       std::memcpy(&desc, image.data() + file_offset, sizeof(desc));
       const std::optional<uint64_t> entry_vaddr =
           add_signed_offset(symbol.st_value, desc.kernel_code_entry_byte_offset);
-      if (!entry_vaddr)
+      if (!entry_vaddr) {
         continue;
-      if (*entry_vaddr < *text_vaddr || *entry_vaddr >= text_end)
+      }
+      if (*entry_vaddr < *text_vaddr || *entry_vaddr >= text_end) {
         continue;
+      }
 
       out.push_back(KernelDescriptorInfo{
           .descriptor_file_offset = file_offset,
@@ -190,16 +234,18 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
   return out;
 }
 
-uint8_t kernel_wavefront_size(rj_code_arch_t arch, const KD &desc) {
+uint8_t kernel_wavefront_size(rocjitsu::IsaFamily arch, const KD &desc) {
   // CDNA kernels are Wave64 in the code objects currently handled here.
-  if (arch_is_cdna_4_or_lower(arch))
+  if (arch_is_cdna_4_or_lower(arch)) {
     return 64;
+  }
 
   // gfx1250 is Wave32-only. Do not interpret a missing legacy descriptor bit
   // as Wave64: older producers may omit the bit even though the hardware has
   // no Wave64 launch mode.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+  if (arch == rocjitsu::IsaFamily::Cdna5) {
     return 32;
+  }
 
   // RDNA descriptors opt into Wave32 with ENABLE_WAVEFRONT_SIZE32. If the bit is
   // clear, launch hardware interprets the descriptor as Wave64.
@@ -213,7 +259,8 @@ uint8_t kernel_wavefront_size(rj_code_arch_t arch, const KD &desc) {
   return 64;
 }
 
-uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wavefront_size) {
+uint32_t descriptor_vgpr_granularity_for_wavefront(rocjitsu::IsaFamily arch,
+                                                   uint32_t wavefront_size) {
   // This is the AMDHSA kernel-descriptor encoding granularity for
   // COMPUTE_PGM_RSRC1.GRANULATED_WORKITEM_VGPR_COUNT, not the physical VGPR
   // allocation block from the ISA manuals. For example, RDNA3/RDNA4 manuals
@@ -224,24 +271,28 @@ uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t
   // If/when occupancy modeling needs the physical allocation block size, add a
   // separate helper for that policy. Reusing this descriptor helper for
   // occupancy would mix two different hardware contracts.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA1)
+  if (arch == rocjitsu::IsaFamily::Cdna1) {
     return 4;
-  if (arch_is_cdna_4_or_lower(arch))
+  }
+  if (arch_is_cdna_4_or_lower(arch)) {
     return 8;
+  }
   // gfx1250 exposes four 256-VGPR banks selected by WAVE_MODE.VGPR_MSB. Its
   // AMDHSA descriptor allocates that combined Wave32 namespace in blocks of
   // 16 VGPRs, unlike the 8-VGPR Wave32 granule used by generic RDNA targets.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+  if (arch == rocjitsu::IsaFamily::Cdna5) {
     return 16;
-  if (arch_is_rdna(arch))
+  }
+  if (arch_is_rdna(arch)) {
     return wavefront_size == 32 ? 8 : 4;
+  }
   return 1;
 }
 
-uint32_t kernel_descriptor_user_sgpr_count(rj_code_arch_t arch, const KD &desc) {
+uint32_t kernel_descriptor_user_sgpr_count(rocjitsu::IsaFamily arch, const KD &desc) {
   // gfx1250 widens USER_SGPR_COUNT from the generic five-bit field at [5:1]
   // to a six-bit field at [6:1], allowing valid counts such as 32.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+  if (arch == rocjitsu::IsaFamily::Cdna5) {
     return RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc2,
                               rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT);
   }
@@ -249,11 +300,11 @@ uint32_t kernel_descriptor_user_sgpr_count(rj_code_arch_t arch, const KD &desc) 
                             rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
 }
 
-void set_kernel_descriptor_user_sgpr_count(rj_code_arch_t arch, KD &desc,
+void set_kernel_descriptor_user_sgpr_count(rocjitsu::IsaFamily arch, KD &desc,
                                            uint32_t user_sgpr_count) {
   // Select the same architecture-specific field when rewriting descriptors so
   // DBT and patching do not truncate gfx1250 counts above 31.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+  if (arch == rocjitsu::IsaFamily::Cdna5) {
     RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc2,
                        rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT, user_sgpr_count);
     return;
@@ -262,7 +313,7 @@ void set_kernel_descriptor_user_sgpr_count(rj_code_arch_t arch, KD &desc,
                      user_sgpr_count);
 }
 
-uint32_t ordinary_sgpr_bound(rj_code_arch_t arch, uint32_t kernel_sgpr_count) {
+uint32_t ordinary_sgpr_bound(rocjitsu::IsaFamily arch, uint32_t kernel_sgpr_count) {
   const uint32_t tail = arch_is_cdna_4_or_lower(arch) ? kCdnaSpecialSgprTailReserve : 0;
   // The tail sits at the top of the allocation itself, so it comes off before
   // the clamp to the addressable maximum, not after.
@@ -270,17 +321,27 @@ uint32_t ordinary_sgpr_bound(rj_code_arch_t arch, uint32_t kernel_sgpr_count) {
   return std::min<uint32_t>(ordinary, REGISTER_SET_ALLOCATABLE_SGPRS);
 }
 
-uint32_t kernel_descriptor_initial_sgpr_count(rj_code_arch_t arch, const KD &desc) {
+uint32_t kernel_descriptor_initial_sgpr_count(rocjitsu::IsaFamily arch, const KD &desc) {
   uint32_t sgprs = kernel_descriptor_user_sgpr_count(arch, desc);
   const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
-  if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X))
+  if (!isa_properties(arch).uses_ttmp_workgroup_ids) {
+    if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X)) {
+      ++sgprs;
+    }
+    if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y)) {
+      ++sgprs;
+    }
+    if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z)) {
+      ++sgprs;
+    }
+  }
+  if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO)) {
     ++sgprs;
-  if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y))
+  }
+  if (arch_appends_private_segment_wave_offset_sgpr(arch) &&
+      RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT)) {
     ++sgprs;
-  if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z))
-    ++sgprs;
-  if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO))
-    ++sgprs;
+  }
   return sgprs;
 }
 
@@ -293,20 +354,25 @@ bool has_kernarg_segment_ptr(const KD &desc) {
 uint16_t kernarg_segment_ptr_slot(const KD &desc) {
   const uint32_t properties = desc.kernel_code_properties;
   uint32_t sgpr = 0;
-  if (RJ_AMDHSA_BITS_GET(properties,
-                         rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER))
+  if (RJ_AMDHSA_BITS_GET(
+          properties, rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)) {
     sgpr += 4;
+  }
   if (RJ_AMDHSA_BITS_GET(properties,
-                         rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR))
+                         rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR)) {
     sgpr += 2;
-  if (RJ_AMDHSA_BITS_GET(properties, rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR))
+  }
+  if (RJ_AMDHSA_BITS_GET(properties,
+                         rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR)) {
     sgpr += 2;
+  }
   return static_cast<uint16_t>(sgpr);
 }
 
 std::optional<uint16_t> kernarg_segment_ptr_sgpr(const KD &desc) {
-  if (!has_kernarg_segment_ptr(desc))
+  if (!has_kernarg_segment_ptr(desc)) {
     return std::nullopt;
+  }
   return kernarg_segment_ptr_slot(desc);
 }
 

@@ -3,49 +3,56 @@
 
 //! Linux KFD and DRM driver. Construction is inert; activation opens KFD and
 //! retains each exact VM binding for recreation within its lifetime policy.
+mod advice;
 mod allocation;
+mod configuration;
+pub(super) mod connection;
 mod drm;
 mod event;
 mod imported_system;
-pub(crate) mod interop;
+mod interop;
 mod kernel_queue;
 pub(super) mod memory;
+pub(crate) mod notification;
 mod operations;
 mod pc_sampling;
 mod queue;
 mod registered_host;
-pub(super) mod sys;
 mod sysfs;
+mod target;
+mod trap;
 mod uapi;
-use crate::memory::storage::TryPush;
-use crate::os::linux::{
-    errno, file as os_file, memory as os_memory, process_identity as os_process,
-};
+use crate::os::linux::{errno, file as os_file, memory as os_memory};
+use target::KfdTargetProfile;
 mod vmem;
+
+pub use configuration::{
+    DebuggerRegistration, DebuggerRegistrationMode, KfdConfiguration, XnackModeRequest,
+};
 
 use crate::device::gpu::kernel_queue::{
     KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait,
 };
 use crate::device::gpu::profiling::{
     ClockCounters, PcSamplingConfiguration, PcSamplingConfigurationSet, PcSamplingIntervalUnit,
-    PcSamplingMethod, PcSamplingRequest,
+    PcSamplingMethod, PcSamplingRequest, SpmDestinationFailure, SpmDestinationReport,
 };
 use crate::device::gpu::queue::{QueuePriority, QueueRequest, QueueScratch, QueueTransport};
 use crate::driver::{
-    AddressSpaceInfo, AllocationOperations, CachedInfo, Driver, EndpointSelector, GpuDriver,
-    GpuInstrumentationOperations, GpuKernelQueueOperations, GpuUserQueueOperations,
-    KernelQueueResource, UserQueueResource, VirtualMemoryOperations,
+    AddressSpaceInfo, AllocationOperations, CachedInfo, Driver, EndpointSelector,
+    GpuCacheControlOperations, GpuClockOperations, GpuFaultModeOperations,
+    GpuKernelQueueOperations, GpuMemoryQueryOperations, GpuPcSamplingOperations, GpuSpmOperations,
+    GpuSurfaceOperations, GpuTrapOperations, GpuUserQueueOperations, KernelQueueResource,
+    UserQueueResource, VirtualMemoryOperations,
 };
 use crate::error::error;
-use crate::memory::interop::linux::{
-    AisFileOperation, AisFileResult, DmaBuf, KfdIpcMemoryHandle, KfdSvmAccess, KfdSvmAttribute,
-    KfdSvmLocation,
-};
+use crate::memory::interop::linux::{AisFileOperation, AisFileResult, DmaBuf, KfdIpcMemoryHandle};
 use crate::memory::storage::{Owned, Shared};
 use crate::memory::{
     AllocationDesc, AllocationLimits, DeviceAccess, HostMappingPolicy, HostRegistration,
-    MemoryKind, VirtualAddressInfo, VirtualMemoryInfo,
+    MemoryKind, VirtualAddressInfo, VirtualMemoryInfo, VirtualMemoryOptions,
 };
+use crate::os::ProcessIdentity;
 use crate::os::native_error;
 use crate::session::DriverContextLifetime;
 use crate::topology::Endpoint;
@@ -59,8 +66,9 @@ pub(crate) use queue::KfdQueue;
 use std::fs::OpenOptions;
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 pub(crate) use sysfs::KfdNode as LinuxSelector;
+pub(crate) use trap::KfdProcessTrap;
 pub(crate) use vmem::{
     KfdVirtualAddress, KfdVirtualDeviceMapping, KfdVirtualHostMapping, KfdVirtualMemory,
 };
@@ -71,45 +79,183 @@ pub(crate) use vmem::{
 /// establishes VM bindings, and enables the runtime under the connection's
 /// locks. Process-lifetime sessions share one process-local connection.
 pub(crate) struct LinuxKfdDriver {
+    /// Common session lifecycle, separate from native process-context ownership.
+    pub(super) admission: crate::session::SessionAdmission,
     /// Distinguishes this wrapper from other sessions' KFD drivers.
     driver_instance: crate::driver::DriverInstanceId,
     /// Rejects inherited state before accessing locks or native handles.
-    process: u32,
+    process: ProcessIdentity,
     /// Rejects new work once shutdown begins.
     closing: bool,
     /// Maximum lifetime permitted for this driver's acquired context.
     lifetime: DriverContextLifetime,
     /// Records whether this instance joined the process-owned context.
     joined_primary: AtomicBool,
+    /// Complete native options, fixed before this driver's first activation.
+    configuration: KfdConfiguration,
     /// Connection and bindings used for a session-owned context.
     local: KfdContextResources,
 }
 
 /// Connection and VM bindings for one KFD context.
 struct KfdContextResources {
+    /// Process inherited by the native connection opened on activation.
+    process: ProcessIdentity,
     /// Native connection opened on first activation.
-    kfd: OnceLock<Shared<sys::Kfd>>,
+    kfd: OnceLock<Shared<connection::Kfd>>,
     /// Prevents two callers from opening separate connections at once.
     initialization: Mutex<()>,
     /// Activated GPU VMs and their loss-event owner.
     bindings: memory::VmBindings,
+    /// Immutable executable backing shared across all process-context clients.
+    traps: Mutex<Vec<trap::ProcessTrapEntry>>,
 }
 
 /// Primary KFD context resources shared by process-lifetime sessions.
 struct ProcessState {
     /// Retained connection and VM bindings. KFD holds the exact primary DRM
     /// file after session shutdown, so this owner remains until process exit.
-    resources: Option<KfdContextResources>,
+    resources: Option<Arc<KfdContextResources>>,
     /// Sessions that still require KFD runtime enablement.
     joined_sessions: u64,
+    /// The last session left, but KFD has not confirmed runtime disable.
+    pending_disable: bool,
+    /// One thread is discharging the pending disable outside the slot lock.
+    disabling: bool,
 }
 
 /// Process-local lock and identity for the shared primary KFD context.
 struct ProcessSlot {
     /// Forked children replace the inherited slot before touching its lock.
-    process: u32,
+    process: ProcessIdentity,
     /// Serializes primary-context activation and shutdown across sessions.
     state: Mutex<ProcessState>,
+    /// Wakes sessions waiting for one pending native disable to finish.
+    changed: Condvar,
+}
+
+fn ensure_native_connection_process() -> Result<(), Error> {
+    crate::os::linux::process_identity::require_runtime_image().map_err(|source| {
+        if source.kind() == std::io::ErrorKind::Unsupported {
+            error(
+                ErrorKind::Unsupported,
+                "a fork child must exec before opening a KFD connection",
+            )
+        } else {
+            native_error("KFD connection process identity", source)
+        }
+    })
+}
+
+impl ProcessSlot {
+    /// Waits for the current disable transaction without holding the mutex
+    /// across the native ioctl.
+    fn lock_ready(&self) -> Result<MutexGuard<'_, ProcessState>, Error> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| error(ErrorKind::Internal, "KFD primary context lock poisoned"))?;
+        while state.disabling {
+            state = self
+                .changed
+                .wait(state)
+                .map_err(|_| error(ErrorKind::Internal, "KFD primary context lock poisoned"))?;
+        }
+        Ok(state)
+    }
+
+    /// Resolves a failed last-session disable before a new session can join.
+    fn finish_pending_disable(&self) -> Result<(), Error> {
+        let mut state = self.lock_ready()?;
+        if !state.pending_disable {
+            return Ok(());
+        }
+        let kfd = state
+            .resources
+            .as_ref()
+            .and_then(|resources| resources.kfd.get())
+            .cloned()
+            .ok_or_else(|| {
+                error(
+                    ErrorKind::Internal,
+                    "pending KFD disable lost its connection",
+                )
+            })?;
+        state.disabling = true;
+        drop(state);
+        let result = kfd
+            .disable_runtime()
+            .map_err(|source| native_error("AMDKFD_IOC_RUNTIME_ENABLE disable", source));
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| error(ErrorKind::Internal, "KFD primary context lock poisoned"))?;
+        state.disabling = false;
+        if result.is_ok() {
+            state.pending_disable = false;
+        }
+        self.changed.notify_all();
+        result
+    }
+
+    /// Joins the process context after any outstanding disable completes.
+    fn join(
+        &self,
+        joined: &AtomicBool,
+        process: &ProcessIdentity,
+    ) -> Result<Arc<KfdContextResources>, Error> {
+        loop {
+            self.finish_pending_disable()?;
+            let mut state = self.lock_ready()?;
+            if state.pending_disable {
+                continue;
+            }
+            if !joined.load(Ordering::Acquire) {
+                state.joined_sessions = state.joined_sessions.checked_add(1).ok_or_else(|| {
+                    error(
+                        ErrorKind::ResourceExhausted,
+                        "too many primary KFD sessions",
+                    )
+                })?;
+                // Even a failed activation can enable KFD or retain a VM.
+                joined.store(true, Ordering::Release);
+            }
+            return Ok(state
+                .resources
+                .get_or_insert_with(|| Arc::new(KfdContextResources::new(process.clone())))
+                .clone());
+        }
+    }
+
+    /// Leaves the process context, then discharges the last-session disable.
+    fn leave(&self, joined: &AtomicBool) -> Result<(), Error> {
+        let mut state = self.lock_ready()?;
+        if !joined.load(Ordering::Acquire) {
+            drop(state);
+            return self.finish_pending_disable();
+        }
+        if state.joined_sessions == 0 {
+            return Err(error(
+                ErrorKind::Internal,
+                "KFD primary session accounting underflow",
+            ));
+        }
+        state.joined_sessions -= 1;
+        joined.store(false, Ordering::Release);
+        let last = state.joined_sessions == 0;
+        if last {
+            state.pending_disable = state
+                .resources
+                .as_ref()
+                .and_then(|resources| resources.kfd.get())
+                .is_some();
+        }
+        drop(state);
+        if last {
+            self.finish_pending_disable()?;
+        }
+        Ok(())
+    }
 }
 
 // A fork child replaces the inherited slot before touching its mutex. The
@@ -118,28 +264,34 @@ struct ProcessSlot {
 static PRIMARY_SLOT: AtomicPtr<ProcessSlot> = AtomicPtr::new(std::ptr::null_mut());
 
 #[allow(unsafe_code)]
-fn primary_slot() -> &'static ProcessSlot {
-    let process = std::process::id();
+fn primary_slot() -> Result<&'static ProcessSlot, Error> {
     loop {
         let current = PRIMARY_SLOT.load(Ordering::Acquire);
         if !current.is_null() {
             // SAFETY: Published slots remain allocated for the process lifetime.
-            if unsafe { (*current).process == process } {
+            match unsafe { (*current).process.matches_current_process() } {
                 // SAFETY: The matching published slot is never freed or moved.
-                return unsafe { &*current };
+                Ok(true) => return Ok(unsafe { &*current }),
+                Ok(false) => {}
+                Err(source) => return Err(native_error("KFD primary process identity", source)),
             }
         }
+        let process = ProcessIdentity::capture()
+            .map_err(|source| native_error("KFD primary process identity", source))?;
         let candidate = Box::into_raw(Box::new(ProcessSlot {
             process,
             state: Mutex::new(ProcessState {
                 resources: None,
                 joined_sessions: 0,
+                pending_disable: false,
+                disabling: false,
             }),
+            changed: Condvar::new(),
         }));
         match PRIMARY_SLOT.compare_exchange(current, candidate, Ordering::AcqRel, Ordering::Acquire)
         {
             // SAFETY: Publication gives this allocation static process scope.
-            Ok(_) => return unsafe { &*candidate },
+            Ok(_) => return Ok(unsafe { &*candidate }),
             Err(_) => {
                 // SAFETY: This candidate was never published or borrowed.
                 unsafe { drop(Box::from_raw(candidate)) };
@@ -197,11 +349,74 @@ pub(crate) struct DeviceState {
     vm: Shared<memory::DeviceVm>,
     /// KFD topology identity revalidated during activation.
     native: sysfs::KfdNode,
+    /// ASIC family resolved against the activated native device.
+    pub(crate) asic_family_id: u32,
     /// GPU clock frequency queried from the activated native device.
     gpu_counter_frequency_hz: u64,
 }
 
 impl DeviceState {
+    pub(crate) fn core_snapshot(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::CoreDeviceSnapshot, Error> {
+        let kfd = self.vm.kfd();
+        let runtime = kfd
+            .core_runtime_info()
+            .map_err(|source| native_error("KFD core runtime info", source))?;
+        let aperture = kfd
+            .apertures()
+            .map_err(|source| native_error("KFD core apertures", source))?
+            .into_iter()
+            .find(|entry| entry.gpu_id == self.native.gpu_id)
+            .ok_or_else(|| error(ErrorKind::DeviceLost, "missing core device aperture"))?;
+        let debug = self.native.debug;
+        let device = crate::device::gpu::diagnostic::CoreDeviceInfo {
+            exception_status: 0,
+            lds_base: aperture.lds_base,
+            lds_limit: aperture.lds_limit,
+            scratch_base: aperture.scratch_base,
+            scratch_limit: aperture.scratch_limit,
+            gpuvm_base: aperture.gpuvm_base,
+            gpuvm_limit: aperture.gpuvm_limit,
+            gpu_id: self.native.gpu_id,
+            gfx_target_version: self.native.queues.gfx_target,
+            array_count: self.native.queues.shader_engine_count_per_xcc
+                * debug.simd_arrays_per_engine,
+            num_xcc: self.native.queues.xcc_count,
+            location_id: debug.location_id,
+            vendor_id: debug.vendor_id,
+            device_id: debug.device_id,
+            revision_id: debug.revision_id,
+            subsystem_vendor_id: debug.subsystem_vendor_id,
+            subsystem_device_id: debug.subsystem_device_id,
+            fw_version: debug.fw_version,
+            simd_count: debug.simd_count,
+            max_waves_per_simd: debug.max_waves_per_simd,
+            simd_arrays_per_engine: debug.simd_arrays_per_engine,
+            capability: debug.capability,
+            debug_prop: debug.debug_prop,
+        };
+        Ok(crate::device::gpu::diagnostic::CoreDeviceSnapshot {
+            version: [self.vm.version.major, self.vm.version.minor],
+            runtime,
+            device,
+        })
+    }
+
+    pub(crate) fn debugger_registration_matches(
+        &self,
+        address: usize,
+        setup_ttmp: bool,
+    ) -> Result<bool, Error> {
+        self.vm
+            .kfd()
+            .debugger_registration_matches(address as u64, setup_ttmp)
+            .map_err(|source| native_error("KFD debugger registration query", source))
+    }
+    pub(crate) fn event_origin_id(&self) -> crate::device::event::DeviceEventOriginId {
+        self.vm.event_origin_id()
+    }
+
     pub(crate) fn subscribe_events(&self) -> Result<KfdEventSubscription, Error> {
         self.vm.subscribe_events()
     }
@@ -215,11 +430,13 @@ impl DeviceState {
 }
 
 impl KfdContextResources {
-    fn new() -> Self {
+    fn new(process: ProcessIdentity) -> Self {
         Self {
+            process,
             kfd: OnceLock::new(),
             initialization: Mutex::new(()),
             bindings: memory::VmBindings::new(),
+            traps: Mutex::new(Vec::new()),
         }
     }
 
@@ -227,14 +444,18 @@ impl KfdContextResources {
         &self,
         lifetime: DriverContextLifetime,
         native: &sysfs::KfdNode,
+        xnack_requested: Option<XnackModeRequest>,
+        debugger: Option<DebuggerRegistration>,
     ) -> Result<Shared<memory::DeviceVm>, Error> {
         let kfd = self.kfd()?;
         kfd.prepare_context(lifetime)
             .map_err(|source| native_error("KFD context selection", source))?;
-        self.bindings.device(&kfd, native)
+        self.bindings
+            .device(&kfd, native, xnack_requested, debugger)
     }
 
-    fn kfd(&self) -> Result<Shared<sys::Kfd>, Error> {
+    fn kfd(&self) -> Result<Shared<connection::Kfd>, Error> {
+        ensure_native_connection_process()?;
         if self.kfd.get().is_none() {
             let _guard = self
                 .initialization
@@ -246,7 +467,7 @@ impl KfdContextResources {
                     .write(true)
                     .open("/dev/kfd")
                     .map_err(|e| native_error("KFD endpoint open", e))?;
-                let kfd = Shared::new(sys::Kfd::new(file))?;
+                let kfd = Shared::new(connection::Kfd::new(file, self.process.clone()))?;
                 let _ = self.kfd.set(kfd);
             }
         }
@@ -280,25 +501,45 @@ impl LinuxKfdDriver {
     const TOPOLOGY_ROOT: &'static str = "/sys/class/kfd/kfd/topology";
     const DRM_ROOT: &'static str = "/sys/class/drm";
     #[cfg(test)]
+    #[allow(clippy::expect_used)]
     pub(crate) fn new() -> Self {
-        Self::with_context_lifetime(DriverContextLifetime::Session)
+        Self::with_context_lifetime(
+            DriverContextLifetime::Session,
+            ProcessIdentity::capture().expect("test process identity"),
+        )
     }
 
-    pub(crate) fn with_context_lifetime(lifetime: DriverContextLifetime) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_context_lifetime(
+        lifetime: DriverContextLifetime,
+        process: ProcessIdentity,
+    ) -> Self {
+        let admission = crate::session::SessionAdmission::new(process.clone());
+        Self::with_admission(lifetime, process, admission)
+    }
+
+    pub(crate) fn with_admission(
+        lifetime: DriverContextLifetime,
+        process: ProcessIdentity,
+        admission: crate::session::SessionAdmission,
+    ) -> Self {
         Self {
+            admission,
             driver_instance: crate::driver::new_driver_instance(),
-            process: std::process::id(),
+            process: process.clone(),
             closing: false,
             lifetime,
             joined_primary: AtomicBool::new(false),
-            local: KfdContextResources::new(),
+            configuration: KfdConfiguration::default(),
+            local: KfdContextResources::new(process),
         }
     }
 
     fn ensure_open(&self) -> Result<(), Error> {
         // Reject inherited instances before touching filesystem state or a
         // mutex that may have been held across fork.
-        os_process::check_process(self.process)
+        self.process
+            .check()
             .map_err(|e| native_error("session process check", e))?;
         if self.closing {
             Err(error(
@@ -324,181 +565,27 @@ impl LinuxKfdDriver {
                 "this session has not activated the primary KFD context",
             ));
         }
-        let slot = primary_slot();
-        let state = slot
-            .state
-            .lock()
-            .map_err(|_| error(ErrorKind::Internal, "KFD primary context lock poisoned"))?;
-        let resources = state.resources.as_ref().ok_or_else(|| {
+        let slot = primary_slot()?;
+        let resources = slot.lock_ready()?.resources.clone().ok_or_else(|| {
             error(
                 ErrorKind::InvalidArgument,
                 "KFD primary context is not active",
             )
         })?;
-        f(resources)
+        f(&resources)
     }
 
-    fn kfd(&self) -> Result<Shared<sys::Kfd>, Error> {
+    fn kfd(&self) -> Result<Shared<connection::Kfd>, Error> {
         self.with_context_resources(KfdContextResources::kfd)
-    }
-
-    fn svm_location_to_native(&self, location: KfdSvmLocation) -> Result<u32, Error> {
-        match location {
-            KfdSvmLocation::System => Ok(uapi::SVM_LOCATION_SYSTEM),
-            KfdSvmLocation::Undefined => Ok(uapi::SVM_LOCATION_UNDEFINED),
-            KfdSvmLocation::Device(identity) => {
-                self.with_context_resources(|resources| resources.bindings.svm_gpu_id(identity))
-            }
-        }
-    }
-
-    fn svm_location_from_native(&self, location: u32) -> Result<KfdSvmLocation, Error> {
-        match location {
-            uapi::SVM_LOCATION_SYSTEM => Ok(KfdSvmLocation::System),
-            uapi::SVM_LOCATION_UNDEFINED => Ok(KfdSvmLocation::Undefined),
-            gpu_id => self
-                .with_context_resources(|resources| resources.bindings.svm_identity(gpu_id))
-                .map(KfdSvmLocation::Device),
-        }
-    }
-
-    fn encode_svm_attributes(
-        &self,
-        attributes: &[KfdSvmAttribute],
-    ) -> Result<Vec<uapi::SvmAttribute>, Error> {
-        let mut native = crate::memory::storage::try_vec_with_capacity(attributes.len())?;
-        for attribute in attributes {
-            let encoded = match *attribute {
-                KfdSvmAttribute::PreferredLocation(location) => uapi::SvmAttribute {
-                    attribute_type: uapi::SVM_ATTR_PREFERRED_LOCATION,
-                    value: self.svm_location_to_native(location)?,
-                },
-                KfdSvmAttribute::PrefetchLocation(location) => uapi::SvmAttribute {
-                    attribute_type: uapi::SVM_ATTR_PREFETCH_LOCATION,
-                    value: self.svm_location_to_native(location)?,
-                },
-                KfdSvmAttribute::Access { device, access } => uapi::SvmAttribute {
-                    attribute_type: match access {
-                        KfdSvmAccess::Accessible => uapi::SVM_ATTR_ACCESS,
-                        KfdSvmAccess::AccessibleInPlace => uapi::SVM_ATTR_ACCESS_IN_PLACE,
-                        KfdSvmAccess::NoAccess => uapi::SVM_ATTR_NO_ACCESS,
-                    },
-                    value: self.with_context_resources(|resources| {
-                        resources.bindings.svm_gpu_id(device)
-                    })?,
-                },
-                KfdSvmAttribute::SetFlags(value) => {
-                    if value & !uapi::SVM_FLAGS != 0 {
-                        return Err(error(
-                            ErrorKind::InvalidArgument,
-                            "SVM set-flags attribute contains unknown bits",
-                        ));
-                    }
-                    uapi::SvmAttribute {
-                        attribute_type: uapi::SVM_ATTR_SET_FLAGS,
-                        value,
-                    }
-                }
-                KfdSvmAttribute::ClearFlags(value) => {
-                    if value & !uapi::SVM_FLAGS != 0 {
-                        return Err(error(
-                            ErrorKind::InvalidArgument,
-                            "SVM clear-flags attribute contains unknown bits",
-                        ));
-                    }
-                    uapi::SvmAttribute {
-                        attribute_type: uapi::SVM_ATTR_CLEAR_FLAGS,
-                        value,
-                    }
-                }
-                KfdSvmAttribute::MigrationGranularity(value) => uapi::SvmAttribute {
-                    attribute_type: uapi::SVM_ATTR_GRANULARITY,
-                    value,
-                },
-            };
-            native.try_push(encoded)?;
-        }
-        Ok(native)
-    }
-
-    fn decode_svm_attributes(
-        &self,
-        attributes: &mut [KfdSvmAttribute],
-        native: &[uapi::SvmAttribute],
-    ) -> Result<(), Error> {
-        for (attribute, returned) in attributes.iter_mut().zip(native) {
-            *attribute = match *attribute {
-                KfdSvmAttribute::PreferredLocation(_) => {
-                    if returned.attribute_type != uapi::SVM_ATTR_PREFERRED_LOCATION {
-                        return Err(error(
-                            ErrorKind::DriverContract,
-                            "KFD changed an SVM preferred-location query type",
-                        ));
-                    }
-                    KfdSvmAttribute::PreferredLocation(
-                        self.svm_location_from_native(returned.value)?,
-                    )
-                }
-                KfdSvmAttribute::PrefetchLocation(_) => {
-                    if returned.attribute_type != uapi::SVM_ATTR_PREFETCH_LOCATION {
-                        return Err(error(
-                            ErrorKind::DriverContract,
-                            "KFD changed an SVM prefetch-location query type",
-                        ));
-                    }
-                    KfdSvmAttribute::PrefetchLocation(
-                        self.svm_location_from_native(returned.value)?,
-                    )
-                }
-                KfdSvmAttribute::Access { device, .. } => {
-                    let access = match returned.attribute_type {
-                        uapi::SVM_ATTR_ACCESS => KfdSvmAccess::Accessible,
-                        uapi::SVM_ATTR_ACCESS_IN_PLACE => KfdSvmAccess::AccessibleInPlace,
-                        uapi::SVM_ATTR_NO_ACCESS => KfdSvmAccess::NoAccess,
-                        _ => {
-                            return Err(error(
-                                ErrorKind::DriverContract,
-                                "KFD returned an invalid SVM access mode",
-                            ));
-                        }
-                    };
-                    KfdSvmAttribute::Access { device, access }
-                }
-                KfdSvmAttribute::SetFlags(_) => {
-                    if returned.attribute_type != uapi::SVM_ATTR_SET_FLAGS {
-                        return Err(error(
-                            ErrorKind::DriverContract,
-                            "KFD changed an SVM set-flags query type",
-                        ));
-                    }
-                    KfdSvmAttribute::SetFlags(returned.value)
-                }
-                KfdSvmAttribute::ClearFlags(_) => {
-                    if returned.attribute_type != uapi::SVM_ATTR_CLEAR_FLAGS {
-                        return Err(error(
-                            ErrorKind::DriverContract,
-                            "KFD changed an SVM clear-flags query type",
-                        ));
-                    }
-                    KfdSvmAttribute::ClearFlags(returned.value)
-                }
-                KfdSvmAttribute::MigrationGranularity(_) => {
-                    if returned.attribute_type != uapi::SVM_ATTR_GRANULARITY {
-                        return Err(error(
-                            ErrorKind::DriverContract,
-                            "KFD changed an SVM granularity query type",
-                        ));
-                    }
-                    KfdSvmAttribute::MigrationGranularity(returned.value)
-                }
-            };
-        }
-        Ok(())
     }
 }
 
 impl Driver for LinuxKfdDriver {
     type DeviceState = DeviceState;
+
+    fn admission(&self) -> &crate::session::SessionAdmission {
+        &self.admission
+    }
 
     fn driver_instance(&self) -> crate::driver::DriverInstanceId {
         self.driver_instance
@@ -507,39 +594,14 @@ impl Driver for LinuxKfdDriver {
         self.lifetime
     }
     fn shutdown(&mut self) -> Result<(), Error> {
-        os_process::check_process(self.process)
+        self.process
+            .check()
             .map_err(|e| native_error("session shutdown process check", e))?;
         self.closing = true;
         if self.lifetime == DriverContextLifetime::Session {
             return self.local.shutdown();
         }
-        if !self.joined_primary.load(Ordering::Acquire) {
-            return Ok(());
-        }
-        let slot = primary_slot();
-        let mut state = slot
-            .state
-            .lock()
-            .map_err(|_| error(ErrorKind::Internal, "KFD primary context lock poisoned"))?;
-        if state.joined_sessions == 0 {
-            return Err(error(
-                ErrorKind::Internal,
-                "KFD primary session accounting underflow",
-            ));
-        }
-        if state.joined_sessions == 1 {
-            if let Some(kfd) = state
-                .resources
-                .as_ref()
-                .and_then(|resources| resources.kfd.get())
-            {
-                kfd.disable_runtime()
-                    .map_err(|source| native_error("AMDKFD_IOC_RUNTIME_ENABLE disable", source))?;
-            }
-        }
-        state.joined_sessions -= 1;
-        self.joined_primary.store(false, Ordering::Release);
-        Ok(())
+        primary_slot()?.leave(&self.joined_primary)
     }
     fn enumerate(
         &self,
@@ -553,18 +615,29 @@ impl Driver for LinuxKfdDriver {
             visitor,
         )
     }
-    fn contribute_topology(
+    fn contribute_topology_graph(
         &self,
-        snapshot: &mut crate::topology::TopologySnapshot,
+        snapshot: &mut crate::topology::TopologyGraphSnapshot,
     ) -> Result<(), Error> {
         self.ensure_open()?;
-        sysfs::contribute_topology(
+        let start = snapshot.endpoints.len();
+        sysfs::contribute_topology_graph(
             Self::TOPOLOGY_ROOT,
             Self::DRM_ROOT,
             self.driver_instance,
             snapshot,
-        )
+        )?;
+        // DRM NUMA attachment is an independent OS locality observation. It
+        // does not identify a KFD node or qualify peer memory access.
+        for index in start..snapshot.endpoints.len() {
+            let endpoint = &snapshot.endpoints[index];
+            if let Some(numa) = crate::topology::platform::linux::host_numa_node(endpoint) {
+                snapshot.attach_host_locality(endpoint.id, self.driver_instance, numa)?;
+            }
+        }
+        Ok(())
     }
+
     fn can_access_local_memory(&self, consumer: &Endpoint, owner: &Endpoint) -> bool {
         sysfs::can_access_local_memory(consumer, owner)
     }
@@ -604,6 +677,7 @@ impl Driver for LinuxKfdDriver {
                 "the Linux KFD driver activates only GPU endpoints",
             ));
         }
+        ensure_native_connection_process()?;
         let current = self.open_endpoint(endpoint.id)?;
         if !endpoint.matches_discovery(&current) {
             return Err(error(
@@ -625,36 +699,36 @@ impl Driver for LinuxKfdDriver {
             ));
         };
         let vm = if self.lifetime == DriverContextLifetime::Session {
-            self.local.activate_device(self.lifetime, &native)?
+            self.local.activate_device(
+                self.lifetime,
+                &native,
+                self.configuration.xnack,
+                self.configuration.debugger,
+            )?
         } else {
-            let slot = primary_slot();
-            let mut state = slot
-                .state
-                .lock()
-                .map_err(|_| error(ErrorKind::Internal, "KFD primary context lock poisoned"))?;
-            if !self.joined_primary.load(Ordering::Acquire) {
-                state.joined_sessions = state.joined_sessions.checked_add(1).ok_or_else(|| {
-                    error(
-                        ErrorKind::ResourceExhausted,
-                        "too many primary KFD sessions",
-                    )
-                })?;
-                // Even a failed activation can enable KFD or retain a VM.
-                // Its session must discharge runtime enablement on shutdown.
-                self.joined_primary.store(true, Ordering::Release);
-            }
-            let resources = state.resources.get_or_insert_with(KfdContextResources::new);
-            resources.activate_device(self.lifetime, &native)?
+            let resources = primary_slot()?.join(&self.joined_primary, &self.process)?;
+            resources.activate_device(
+                self.lifetime,
+                &native,
+                self.configuration.xnack,
+                self.configuration.debugger,
+            )?
         };
-        let gpu_counter_frequency_hz = vm
+        let device_info = vm
             .render()
             .ok()
-            .and_then(|render| operations::matching_device_info(endpoint, render))
+            .and_then(|render| operations::matching_device_info(endpoint, render));
+        let gpu_counter_frequency_hz = device_info
             .and_then(operations::device_counter_frequency_hz)
             .unwrap_or(0);
+        let asic_family_id = operations::resolved_family_id(
+            endpoint.gpu().map_or(0, |info| info.asic_family_id),
+            device_info,
+        );
         Ok(DeviceState {
             vm,
             native,
+            asic_family_id,
             gpu_counter_frequency_hz,
         })
     }
@@ -662,8 +736,23 @@ impl Driver for LinuxKfdDriver {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
+#[allow(unsafe_code)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Weak};
+
+    #[test]
+    fn activated_family_uses_matching_native_information_without_losing_fallback() {
+        assert_eq!(operations::resolved_family_id(11, None), 11);
+        assert_eq!(
+            operations::resolved_family_id(11, Some(drm::DeviceInfoPrefix::default())),
+            11
+        );
+        let mut native = drm::DeviceInfoPrefix::default();
+        native.family_id = 42;
+        assert_eq!(operations::resolved_family_id(11, Some(native)), 42);
+    }
 
     #[test]
     fn marketing_name_matches_device_and_revision() {
@@ -694,7 +783,7 @@ mod tests {
     #[test]
     fn inherited_instance_rejects_work_before_mutating_state() {
         let mut native = LinuxKfdDriver::new();
-        native.process = std::process::id().wrapping_add(1);
+        native.process = ProcessIdentity::with_pid_for_test(std::process::id().wrapping_add(1));
         let mut visited = false;
         assert_eq!(
             native
@@ -719,7 +808,134 @@ mod tests {
         assert!(!native.closing);
         assert!(native.local.kfd.get().is_none());
 
-        native.process = std::process::id();
+        native.process = ProcessIdentity::capture().unwrap();
         native.shutdown().unwrap();
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn fork_child_rejects_new_kfd_connection_before_inherited_lock() {
+        ensure_native_connection_process().unwrap();
+        let resources = KfdContextResources::new(ProcessIdentity::capture().unwrap());
+        let held = resources.initialization.lock().unwrap();
+        // SAFETY: The child only checks the process fence, then exits without
+        // dropping inherited Rust owners or entering a test-harness lock.
+        let child = unsafe { libc::syscall(libc::SYS_fork) };
+        assert!(child >= 0);
+        if child == 0 {
+            // SAFETY: Bound a regression if an inherited mutex is entered.
+            unsafe { libc::alarm(3) };
+            let rejected = resources
+                .kfd()
+                .err()
+                .is_some_and(|error| error.kind() == ErrorKind::Unsupported);
+            // SAFETY: _exit avoids inherited Rust destructors.
+            unsafe { libc::_exit(i32::from(!rejected)) }
+        }
+        let pid = i32::try_from(child).unwrap();
+        let mut status = 0;
+        // SAFETY: This waits only for the child created above.
+        assert_eq!(unsafe { libc::waitpid(pid, &raw mut status, 0) }, pid);
+        assert_eq!(status, 0);
+        drop(held);
+        assert!(ensure_native_connection_process().is_ok());
+    }
+
+    #[test]
+    fn clean_primary_generations_rejoin_the_same_native_resources() {
+        let disables = Arc::new(AtomicUsize::new(0));
+        let observed = disables.clone();
+        let mut kfd = connection::Kfd::with_hook(
+            std::fs::File::open("/dev/null").unwrap(),
+            Arc::new(move |call| {
+                let connection::Call::RuntimeEnable(args) = call else {
+                    return Err(std::io::Error::other("unexpected KFD call"));
+                };
+                if args.mode_mask == 0 {
+                    observed.fetch_add(1, Ordering::Relaxed);
+                }
+                Ok(())
+            }),
+        );
+        kfd.mark_runtime_enabled_for_test();
+        let process = ProcessIdentity::capture().unwrap();
+        let resources = Arc::new(KfdContextResources::new(process.clone()));
+        assert!(resources.kfd.set(Shared::new(kfd).unwrap()).is_ok());
+        let slot = ProcessSlot {
+            process: process.clone(),
+            state: Mutex::new(ProcessState {
+                resources: Some(resources.clone()),
+                joined_sessions: 1,
+                pending_disable: false,
+                disabling: false,
+            }),
+            changed: Condvar::new(),
+        };
+        let joined = AtomicBool::new(true);
+        slot.leave(&joined).unwrap();
+        let next = AtomicBool::new(false);
+        let recreated = slot.join(&next, &process).unwrap();
+        assert!(Arc::ptr_eq(&resources, &recreated));
+        assert_eq!(disables.load(Ordering::Relaxed), 1);
+        recreated.kfd().unwrap().enable_runtime().unwrap();
+        slot.leave(&next).unwrap();
+        assert_eq!(disables.load(Ordering::Relaxed), 2);
+        assert_eq!(slot.state.lock().unwrap().joined_sessions, 0);
+    }
+
+    #[test]
+    fn failed_primary_disable_stays_pending_until_kfd_confirms_it() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        let slot_ref = Arc::new(OnceLock::<Weak<ProcessSlot>>::new());
+        let hook_slot = slot_ref.clone();
+        let file = std::fs::File::open("/dev/null").unwrap();
+        let mut kfd = connection::Kfd::with_hook(
+            file,
+            Arc::new(move |call| {
+                let connection::Call::RuntimeEnable(args) = call else {
+                    return Err(std::io::Error::other("unexpected KFD call"));
+                };
+                assert_eq!(args.mode_mask, 0);
+                let slot = hook_slot.get().and_then(Weak::upgrade).unwrap();
+                assert!(slot.state.try_lock().is_ok());
+                if observed.fetch_add(1, Ordering::Relaxed) == 0 {
+                    Err(std::io::Error::from_raw_os_error(errno::EINTR))
+                } else {
+                    Ok(())
+                }
+            }),
+        );
+        kfd.mark_runtime_enabled_for_test();
+        let process = ProcessIdentity::capture().unwrap();
+        let resources = KfdContextResources::new(process.clone());
+        assert!(resources.kfd.set(Shared::new(kfd).unwrap()).is_ok());
+        let slot = Arc::new(ProcessSlot {
+            process,
+            state: Mutex::new(ProcessState {
+                resources: Some(Arc::new(resources)),
+                joined_sessions: 0,
+                pending_disable: true,
+                disabling: false,
+            }),
+            changed: Condvar::new(),
+        });
+        slot_ref.set(Arc::downgrade(&slot)).unwrap();
+        let joining = AtomicBool::new(false);
+        assert_eq!(
+            slot.join(&joining, &slot.process)
+                .err()
+                .unwrap()
+                .native_status()
+                .and_then(crate::NativeStatus::errno_code),
+            Some(errno::EINTR)
+        );
+        assert!(!joining.load(Ordering::Acquire));
+        assert_eq!(slot.state.lock().unwrap().joined_sessions, 0);
+        assert!(slot.state.lock().unwrap().pending_disable);
+        slot.finish_pending_disable().unwrap();
+        assert!(!slot.state.lock().unwrap().pending_disable);
+        slot.finish_pending_disable().unwrap();
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
     }
 }

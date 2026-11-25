@@ -15,7 +15,7 @@ graph:
   Unit_hipGraph_ConcurrentCreate_GraphIDRace:
     <<: *level_default
     tags: [node]
-  Unit_hipGraph_ConcurrentConstruct_NextIDRace:
+  Unit_hipGraph_ConcurrentConstruct_LocalIDSequence:
     <<: *level_default
     tags: [node]
   Unit_hipGraph_ConcurrentConstruct_LaunchDropSmoke:
@@ -85,7 +85,7 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraph_BasicFunctional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [lifecycle, P0]
   Unit_hipGraph_SimpleGraphWithKernel:
     <<: *level_default
@@ -107,6 +107,18 @@ graph:
     tags: [lifecycle]
   Unit_hipGraphClone_MultiThreaded:
     <<: *level_default
+    tags: [lifecycle]
+  Unit_hipGraphInstantiate_NullStreamFenceUnchanged:
+    <<: *level_default
+    unsupported:
+      targets: [amd_windows, nvidia_linux, nvidia_windows]
+      reason: "ROCM-33637 - requires AMD AQL packet tracing and Linux fork/exec."
+    tags: [lifecycle]
+  Unit_hipGraphInstantiate_CapturedPacketSystemScopePreserved:
+    <<: *level_default
+    unsupported:
+      targets: [amd_windows, nvidia_linux, nvidia_windows]
+      reason: "ROCM-33637 - requires AMD AQL packet tracing and Linux fork/exec."
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithFlags_Negative:
     <<: *level_default
@@ -276,9 +288,6 @@ graph:
   Unit_hipGraphExecUpdate_3DMemset_AllocationExtent: *level_default
   Unit_hipGraphExecMemsetNodeSetParams_FlatAlloc_2D: *level_default
   Unit_hipGraphExecNodeSetParams_Memset_FlatAlloc_2D: *level_default
-  Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative:
-    <<: *level_default
-    tags: [node]
   Unit_hipGraphMemcpyNodeSetParamsToSymbol_Positive_Basic:
     <<: *level_default
     disabled:
@@ -429,6 +438,15 @@ graph:
   Unit_hipGraphAddChildGraphNode_CmplxGrph_SchedLogic:
     <<: *level_default
     tags: [node]
+  Unit_hipGraphChildMultiStream_ParentChildBoundarySync:
+    <<: *level_2
+    tags: [node, child, multistream]
+  Unit_hipGraphChildMultiStream_SiblingChildren:
+    <<: *level_2
+    tags: [node, child, multistream]
+  Unit_hipGraphChildMultiStream_NestedChild:
+    <<: *level_2
+    tags: [node, child, multistream]
   Unit_hipGraphNodeGetType_Negative:
     <<: *level_default
     tags: [query]
@@ -467,6 +485,15 @@ graph:
     tags: [exec]
   Unit_hipGraphExecMemcpyNodeSetParams1D_CaptureTransitions:
     <<: *level_default
+    tags: [exec]
+  Unit_hipGraphExecMemcpyNodeSetParams1D_SdmaMemcpyOrderedAfterProducer:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphExecMemcpyNodeSetParams1D_SdmaMemcpyOrderedAfterProducer_Child:
+    <<: *level_2
+    disabled:
+      targets: [amd_wsl, amd_linux, amd_windows, nvidia_windows, nvidia_linux]
+      reason: "ROCM-30708 - child process; spawned by name from Unit_hipGraphExecMemcpyNodeSetParams1D_SdmaMemcpyOrderedAfterProducer, never run standalone."
     tags: [exec]
   Unit_hipGraphGetEdges_Positive_Functional:
     <<: *level_default
@@ -663,7 +690,7 @@ graph:
       reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [exec, image]
   Unit_hipStreamBeginCapture_Positive_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [capture]
   Unit_hipStreamBeginCapture_Negative_Parameters:
     <<: *level_default
@@ -774,6 +801,9 @@ graph:
     <<: *level_default
     tags: [capture]
   Unit_hipStreamBeginCapture_Negative_WaitDoesNotJoinInvalidatedCapture:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Negative_LegacyStreamWaitIsRejected:
     <<: *level_default
     tags: [capture]
   Unit_hipStreamBeginCapture_Negative_StreamOffenceInvalidatesWholeCapture:
@@ -1067,7 +1097,8 @@ graph:
   Unit_hipGraphExecGetFlags_Negative:
     <<: *level_default
     tags: [exec]
-  Unit_hipGraphExecGetFlags_Positive: *level_default
+  Unit_hipGraphExecGetFlags_Positive:
+    <<: *level_default
   Unit_hipStreamGetCaptureInfo_Positive_Functional:
     <<: *level_default
     tags: [capture]
@@ -1142,6 +1173,9 @@ graph:
     tags: [exec]
   Unit_hipGraphAddMemsetNode_Positive_Basic:
     <<: *level_default
+  Unit_hipGraphAddMemsetNode_Positive_2DPadding:
+    <<: *level_default
+    tags: [node]
   Unit_hipGraphAddMemsetNode_Negative_Parameters:
     <<: *level_default
     tags: [node]
@@ -1202,8 +1236,6 @@ graph:
   Unit_hipGraphKernelNodeGetParams_Functional:
     <<: *level_default
     tags: [query]
-  Unit_hipGraphKernelNodeSetAttribute_Functional: *level_default
-  Unit_hipGraphKernelNodeSetAttribute_Negative: *level_default
   Unit_hipGraphKernelNodeSetParams_Negative:
     <<: *level_default
     tags: [node]
@@ -1219,6 +1251,12 @@ graph:
   Unit_hipGraphExecKernelNodeSetParams_Functional:
     <<: *level_default
     tags: [exec]
+  Unit_hipGraphExecKernelNodeSetParams_DisabledNeighborInBatch:
+    <<: *level_default
+    tags: [exec]
+  Unit_hipGraphExecKernelNodeSetParams_DisabledBatchHead:
+    <<: *level_default
+    tags: [exec]
   Unit_hipGraphLaunch_Positive:
     <<: *level_default
     tags: [exec, smoke, P0]
@@ -1230,6 +1268,15 @@ graph:
     tags: [exec]
   Unit_hipGraphLaunch_Functional_MultipleLaunch:
     <<: *level_default
+    tags: [exec]
+  Unit_hipGraphLaunch_SdmaMemcpyOrderedAfterProducer:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphLaunch_SdmaMemcpyOrderedAfterProducer_Child:
+    <<: *level_2
+    disabled:
+      targets: [amd_wsl, amd_linux, amd_windows, nvidia_windows, nvidia_linux]
+      reason: "ROCM-30708 - child process; spawned by name from Unit_hipGraphLaunch_SdmaMemcpyOrderedAfterProducer, never run standalone."
     tags: [exec]
   Unit_hipGraphMemcpyNodeSetParams1D_Positive_Basic:
     <<: *level_default
@@ -1654,6 +1701,9 @@ graph:
   Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative:
     <<: *level_default
     tags: [node]
+  Unit_hipGraphKernelNodeSetAttribute_Priority:
+    <<: *level_2
+    tags: [node]
   Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters:
     <<: *level_default
     tags: [node]
@@ -1676,6 +1726,12 @@ graph:
     <<: *level_2
     tags: [exec]
   Unit_hipGraphSegmentOrdering_EmptyNodeCrossStreamCompletion:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphDualStreamCapture_LightBranchOnSideStream:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphDualStreamCapture_HeavyBranchOnSideStream:
     <<: *level_2
     tags: [exec]
   Unit_hipGraphKernelNodePriority_CaptureStreamPriorityCopied:
@@ -1978,3 +2034,171 @@ graph:
   Unit_hipGraph_SimpleGraphWithKernel_kernel_arg_prefetch:
     <<: *level_default
     tags: [exec]
+  Unit_hipMemset_LegacyStream_GlobalCapture_BlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemset_LegacyStream_GlobalCapture_NonBlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemset_LegacyStream_ThreadLocalCapture_BlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemset_LegacyStream_ThreadLocalCapture_NonBlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemset_LegacyStream_RelaxedCapture_BlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemset_LegacyStream_RelaxedCapture_NonBlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemcpy_LegacyStream_ThreadLocalCapture_NonBlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemcpy_LegacyStream_RelaxedCapture_NonBlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemcpy_LegacyStream_GlobalCapture_BlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemcpy_LegacyStream_RelaxedCapture_BlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemset_NonBlockingOrigin_BlockingParticipant_Relaxed_Invalidated:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemset_NonBlockingOrigin_BlockingParticipant_ThreadLocal_Invalidated:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_SameStream_GlobalCapture_BlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_SameStream_RelaxedCapture_NonBlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_GlobalCapture_Blocking_SyncNonBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_ThreadLocalCapture_Blocking_SyncNonBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_RelaxedCapture_Blocking_SyncNonBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_GlobalCapture_NonBlocking_SyncNonBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_ThreadLocalCapture_NonBlocking_SyncNonBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_RelaxedCapture_NonBlocking_SyncNonBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_GlobalCapture_Blocking_SyncBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_ThreadLocalCapture_Blocking_SyncBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_RelaxedCapture_Blocking_SyncBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_GlobalCapture_NonBlocking_SyncBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_ThreadLocalCapture_NonBlocking_SyncBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_RelaxedCapture_NonBlocking_SyncBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_CrossThread_GlobalCapture_Blocking_Invalidated:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_CrossThread_GlobalCapture_NonBlocking_Invalidated:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_CrossThread_ThreadLocalCapture_Blocking_Active:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_CrossThread_ThreadLocalCapture_NonBlocking_Active:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_CrossThread_RelaxedCapture_Blocking_Active:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_CrossThread_RelaxedCapture_NonBlocking_Active:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipGraphAddExternalSemaphoresSignalNode_Negative_InvalidArgs:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphAddExternalSemaphoresWaitNode_Negative_InvalidArgs:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphExternalSemaphoresNodeParams_Negative_NullNode:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphExecExternalSemaphoresNodeSetParams_Negative_InvalidArgs:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphGetId_Positive_UniqueAcrossGraphs:
+    <<: *level_2
+    tags: [query]
+  Unit_hipGraphGetId_Positive_ClonedGraphHasDifferentId:
+    <<: *level_2
+    tags: [query]
+  Unit_hipGraphGetId_Positive_StableAfterNodeRemoval:
+    <<: *level_2
+    tags: [query]
+  Unit_hipGraphGetId_Positive_EmbeddedChildGraphHasDifferentId:
+    <<: *level_2
+    tags: [query]
+  Unit_hipGraphGetId_Positive_NoReuseAfterDestroy:
+    <<: *level_2
+    tags: [query]
+  Unit_hipGraphExecGetId_Positive_SharesCounterWithGraphId:
+    <<: *level_2
+    tags: [query, exec]
+  Unit_hipGraphExecGetId_Positive_StableAfterUpdateAndLaunch:
+    <<: *level_2
+    tags: [query, exec]
+  Unit_hipGraphExecGetId_Positive_NoReuseAfterDestroy:
+    <<: *level_2
+    tags: [query, exec]
+  Unit_hipGraphNodeGetLocalId_Positive_StartsAtZeroAndIncrements:
+    <<: *level_2
+    tags: [query, node]
+  Unit_hipGraphNodeGetLocalId_Positive_ChildGraphNode:
+    <<: *level_2
+    tags: [query, node]
+  Unit_hipGraphNodeGetLocalId_Positive_CapturedStream:
+    <<: *level_2
+    tags: [query, node]
+  Unit_hipGraphNodeGetLocalId_Positive_ClonedGraphPreservesIds:
+    <<: *level_2
+    tags: [query, node]
+  Unit_hipGraphNodeGetLocalId_Positive_RestartsForEachGraph:
+    <<: *level_2
+    tags: [query, node]
+  Unit_hipGraphNodeGetLocalId_Positive_RemovalPreservesAndAdvancesIds:
+    <<: *level_2
+    tags: [query, node]
+  Unit_hipGraphNodeGetToolsId_Positive_EncodesGraphIdAndLocalId:
+    <<: *level_2
+    tags: [query, node]
+  Unit_hipGraphNodeGetToolsId_Positive_EncodingHoldsForClonedGraph:
+    <<: *level_2
+    tags: [query, node]
+  Unit_hipGraphNodeGetToolsId_Positive_ChildGraphNodeUsesParentGraphId:
+    <<: *level_2
+    tags: [query, node]
+  Unit_hipGraphExecChildGraphNodeSetParams_UpdateEmbeddedNodes:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphExecChildGraphNodeSetParams_UpdateNestedChildGraphNodes:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphExecChildGraphNodeSetParams_NodeFromUnrelatedGraphRejected:
+    <<: *level_default
+    tags: [node]

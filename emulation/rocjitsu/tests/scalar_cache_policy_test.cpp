@@ -1,10 +1,14 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "legacy_gpu_memory_fixture.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
@@ -13,6 +17,7 @@
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
 #include <array>
@@ -26,21 +31,29 @@ using namespace rocjitsu;
 
 class ScalarCachePolicyTest : public ::testing::Test {
 protected:
-  void SetUp() override {
+  virtual rocjitsu::IsaFamily arch() const { return rocjitsu::IsaFamily::Cdna4; }
+  void SetUp() override { initialize(1); }
+
+  void initialize(uint32_t num_wf_slots) {
     l2.set_backing_memory(&memory);
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
-    cfg.num_wf_slots = 1;
+    cfg.arch = arch();
+    cfg.num_wf_slots = num_wf_slots;
     cfg.sgprs_per_wf = 102;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("scalar_cache", cfg, &memory, &l2);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "scalar_cache", cfg, &memory, &l2));
     wave = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wave, nullptr);
     decoder = Decoder::create(cfg.arch);
   }
 
-  void TearDown() override { wave->halt(); }
+  void TearDown() override {
+    if (wave) {
+      wave->halt();
+    }
+  }
 
   void issue(uint32_t op, bool glc, uint64_t address, uint32_t records = 0xffffffffu) {
     const auto base = wave->sgpr_alloc().base;
@@ -72,6 +85,69 @@ protected:
   std::unique_ptr<Decoder> decoder;
 };
 
+class Gfx11ScalarCachePolicyTest : public ScalarCachePolicyTest,
+                                   public testing::WithParamInterface<rocjitsu::IsaFamily> {
+protected:
+  rocjitsu::IsaFamily arch() const override { return GetParam(); }
+};
+
+INSTANTIATE_TEST_SUITE_P(Gfx11, Gfx11ScalarCachePolicyTest,
+                         testing::Values(rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5));
+
+TEST_P(Gfx11ScalarCachePolicyTest, GlcBypassesAWarmScalarCacheLine) {
+  constexpr uint32_t address = 0x4000;
+  const auto sgpr_base = wave->sgpr_alloc().base;
+  cu->write_sgpr(sgpr_base, address);
+  cu->write_sgpr(sgpr_base + 1, 0);
+  cu->write_sgpr(sgpr_base + 2, 0);
+
+  const auto load = [&](bool glc, uint32_t expected) {
+    const auto words =
+        rdna3::build_smem(rdna3::kSLoadB32Smem, {.sdata = 32, .glc = glc, .soffset = 2});
+    auto decoded = decoder->decode_window(words);
+    ASSERT_TRUE(decoded.succeeded());
+    auto inst = std::move(decoded).value();
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+    ASSERT_EQ(pipeline.issue(inst.release(), *wave), amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(result(0), expected);
+  };
+
+  memory.write32(address, 11);
+  ASSERT_NO_FATAL_FAILURE(load(false, 11));
+  const uint32_t fresh = 22;
+  ASSERT_EQ(l2.write(address, reinterpret_cast<const uint8_t *>(&fresh), sizeof(fresh),
+                     amdgpu::Mtype::RW),
+            amdgpu::VmAccessOutcome::Complete);
+  ASSERT_NO_FATAL_FAILURE(load(false, 11));
+  ASSERT_NO_FATAL_FAILURE(load(true, fresh));
+}
+
+TEST(ScalarCachePolicyTestSetup, RejectedComputeUnitAllowsTearDown) {
+  class RejectedFixture : public ScalarCachePolicyTest {
+  public:
+    void TestBody() override {}
+    void SetUp() override { initialize(33); }
+    using ScalarCachePolicyTest::TearDown;
+
+    bool setup_stopped() const { return !cu && !wave; }
+  };
+
+  RejectedFixture fixture;
+  ::testing::TestPartResultArray failures;
+  {
+    ::testing::ScopedFakeTestPartResultReporter reporter(
+        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
+    fixture.SetUp();
+  }
+  EXPECT_TRUE(fixture.setup_stopped());
+  fixture.TearDown();
+  ASSERT_GE(failures.size(), 1);
+  EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
+  EXPECT_NE(std::string(failures.GetTestPartResult(0).message())
+                .find("num_wf_slots exceeds the ISA maximum of 32"),
+            std::string::npos);
+}
+
 TEST_F(ScalarCachePolicyTest, GlcLoadsRefetchWarmScalarAndL2Lines) {
   // CDNA4 ISA 9.1.10.1: GLC loads miss both caches. Each external update
   // deliberately leaves their cached copies stale, as in a polling consumer.
@@ -79,42 +155,51 @@ TEST_F(ScalarCachePolicyTest, GlcLoadsRefetchWarmScalarAndL2Lines) {
     SCOPED_TRACE(op);
     const uint32_t words = 1u << op;
     const uint64_t address = 0x103c + op * 0x100;
-    for (uint32_t i = 0; i < words; ++i)
+    for (uint32_t i = 0; i < words; ++i) {
       memory.write32(address + 4 * i, 100 + i);
+    }
     ASSERT_NO_FATAL_FAILURE(issue(op, false, address));
-    for (uint32_t i = 0; i < words; ++i)
+    for (uint32_t i = 0; i < words; ++i) {
       EXPECT_EQ(result(i), 100 + i);
+    }
 
     for (uint32_t version : {200u, 300u}) {
-      for (uint32_t i = 0; i < words; ++i)
+      for (uint32_t i = 0; i < words; ++i) {
         memory.write32(address + 4 * i, version + i);
+      }
       if (version == 200) {
         ASSERT_NO_FATAL_FAILURE(issue(op, false, address));
-        for (uint32_t i = 0; i < words; ++i)
+        for (uint32_t i = 0; i < words; ++i) {
           EXPECT_EQ(result(i), 100 + i);
+        }
       }
       ASSERT_NO_FATAL_FAILURE(issue(op, true, address));
-      for (uint32_t i = 0; i < words; ++i)
+      for (uint32_t i = 0; i < words; ++i) {
         EXPECT_EQ(result(i), version + i);
+      }
     }
   }
 }
 
 TEST_F(ScalarCachePolicyTest, GlcBufferLoadsRefreshOnlyInBoundsWords) {
   constexpr uint64_t address = 0x203c;
-  for (uint32_t i = 0; i < 4; ++i)
+  for (uint32_t i = 0; i < 4; ++i) {
     memory.write32(address + 4 * i, 100 + i);
+  }
   ASSERT_NO_FATAL_FAILURE(issue(/*s_buffer_load_dwordx4=*/10, false, address, /*records=*/12));
-  for (uint32_t i = 0; i < 4; ++i)
+  for (uint32_t i = 0; i < 4; ++i) {
     memory.write32(address + 4 * i, 200 + i);
+  }
   ASSERT_NO_FATAL_FAILURE(issue(10, true, address, 12));
-  for (uint32_t i = 0; i < 4; ++i)
+  for (uint32_t i = 0; i < 4; ++i) {
     EXPECT_EQ(result(i), i < 3 ? 200 + i : 0);
+  }
 
   const auto transactions = l2.backing_read_transactions();
   ASSERT_NO_FATAL_FAILURE(issue(10, true, /*unmapped base=*/0, /*records=*/0));
-  for (uint32_t i = 0; i < 4; ++i)
+  for (uint32_t i = 0; i < 4; ++i) {
     EXPECT_EQ(result(i), 0u);
+  }
   EXPECT_EQ(l2.backing_read_transactions(), transactions);
 }
 
@@ -126,11 +211,13 @@ TEST_F(ScalarCachePolicyTest, GlcStoresDoNotLeavePersistentScalarCopies) {
       SCOPED_TRACE(testing::Message() << "op=" << op << " glc=" << glc);
       const uint32_t words = 1u << op;
       const uint64_t address = 0x303c + op * 0x200 + uint32_t{glc} * 0x100;
-      for (uint32_t i = 0; i < words; ++i)
+      for (uint32_t i = 0; i < words; ++i) {
         memory.write32(address + 4 * i, 100 + i);
+      }
       ASSERT_NO_FATAL_FAILURE(issue(op, false, address));
-      for (uint32_t i = 0; i < words; ++i)
+      for (uint32_t i = 0; i < words; ++i) {
         cu->write_sgpr(wave->sgpr_alloc().base + 32 + i, 200 + i);
+      }
       ASSERT_NO_FATAL_FAILURE(issue(/*s_store_dword[xN]=*/16 + op, glc, address));
       for (uint32_t i = 0; i < words; ++i) {
         EXPECT_EQ(memory.read32(address + 4 * i), 200 + i);
@@ -140,8 +227,9 @@ TEST_F(ScalarCachePolicyTest, GlcStoresDoNotLeavePersistentScalarCopies) {
                   amdgpu::VmAccessOutcome::Complete);
       }
       ASSERT_NO_FATAL_FAILURE(issue(op, false, address));
-      for (uint32_t i = 0; i < words; ++i)
+      for (uint32_t i = 0; i < words; ++i) {
         EXPECT_EQ(result(i), (glc ? 300 : 200) + i);
+      }
     }
   }
 }
@@ -212,12 +300,14 @@ TEST(ScalarCacheMtypeTest, NarrowPipelineLoadsForwardDecodedPolicy) {
     amdgpu::L1ScalarCache l1(&l2);
     amdgpu::ScalarMemPipeline pipeline(&l1);
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+    cfg.arch = rocjitsu::IsaFamily::Rdna4;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("narrow_scalar", cfg, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "narrow_scalar", cfg, &memory, &l2));
     auto *wave = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wave, nullptr);
     auto decoder = Decoder::create(cfg.arch);

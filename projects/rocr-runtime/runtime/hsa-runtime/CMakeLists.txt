@@ -213,6 +213,20 @@ else()
   target_sources(${CORE_RUNTIME_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/hsacore.dll.def")
 endif()
 
+## Enable code coverage
+if(ENABLE_CODE_COVERAGE)
+  target_compile_options(${CORE_RUNTIME_TARGET} PRIVATE
+    -O0
+    -g
+    -fprofile-instr-generate
+    -fcoverage-mapping)
+
+  target_link_options(${CORE_RUNTIME_TARGET} PRIVATE
+    -fprofile-instr-generate)
+
+  message(STATUS "Code coverage enabled")
+endif()
+
 target_compile_options(${CORE_RUNTIME_TARGET} PRIVATE ${HSA_CXX_FLAGS})
 #target_link_options not available prior to CMake 3.13
 set_property(TARGET ${CORE_RUNTIME_TARGET} PROPERTY LINK_FLAGS ${HSA_SHARED_LINK_FLAGS})
@@ -268,7 +282,8 @@ if(UNIX)
 	     libamdhsacode/lnx/amd_core_dump.cpp)
   set(SRC_XDNA core/driver/xdna/amd_xdna_driver.cpp
                core/runtime/amd_aie_agent.cpp
-               core/runtime/amd_aie_aql_queue.cpp
+               core/runtime/amd_aie_kmq_queue.cpp
+               core/runtime/amd_aie_umq_queue.cpp
                core/runtime/amd_aie_elf.cpp)
 else()
   target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE NOMINMAX)

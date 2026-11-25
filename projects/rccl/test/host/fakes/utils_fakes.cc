@@ -12,9 +12,12 @@
 // there is a duplicate symbol at link time rather than an unused one.
 
 #include <cstdlib>
+#include <functional>
 
 #include "fail_loud.h"
+#include "signature-drift.h"
 #include "utils.h"
+#include "utils_fakes.h"
 
 // Per-thread wait signal referenced by the inline MPSC-callback drain helpers
 // in utils.h.
@@ -47,10 +50,26 @@ ncclResult_t busIdToInt64(const char* busId, int64_t* id)
     return ncclSuccess;
 }
 
-ncclResult_t getBusId(int /*cudaDev*/, int64_t* busId)
+static ncclResult_t DefaultGetBusId(int /*cudaDev*/, int64_t* busId)
 {
     if (busId) *busId = 0;
     return ncclSuccess;
+}
+std::function<ncclResult_t(int, int64_t*)> g_getBusId = DefaultGetBusId;
+ASSERT_HOOK_MATCHES_PROD(g_getBusId, getBusId);
+
+ncclResult_t getBusId(int cudaDev, int64_t* busId) { return g_getBusId(cudaDev, busId); }
+
+static ncclResult_t DefaultInt64ToBusId(int64_t, char*) {
+  FailLoudUnfaked("utils_fakes", "int64ToBusId");
+}
+std::function<ncclResult_t(int64_t, char*)> g_int64ToBusId = DefaultInt64ToBusId;
+ASSERT_HOOK_MATCHES_PROD(g_int64ToBusId, int64ToBusId);
+ncclResult_t int64ToBusId(int64_t id, char* busId) { return g_int64ToBusId(id, busId); }
+
+void ResetUtilsFakes() {
+  g_getBusId = DefaultGetBusId;
+  g_int64ToBusId = DefaultInt64ToBusId;
 }
 
 // ncclMemoryStackConstruct is inline and leaves bumper == end == 0, so the first

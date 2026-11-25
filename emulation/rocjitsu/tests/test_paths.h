@@ -9,8 +9,9 @@
 namespace rocjitsu::test {
 
 inline std::string config_path(const char *name) {
-  if (const char *dir = std::getenv("ROCJITSU_CONFIG_DIR"))
+  if (const char *dir = std::getenv("ROCJITSU_CONFIG_DIR")) {
     return std::string(dir) + "/" + name;
+  }
 #ifdef CONFIG_DIR
   return std::string(CONFIG_DIR) + "/" + name;
 #else
@@ -19,8 +20,9 @@ inline std::string config_path(const char *name) {
 }
 
 inline std::string kernel_path(const char *name) {
-  if (const char *dir = std::getenv("ROCJITSU_KERNEL_DIR"))
+  if (const char *dir = std::getenv("ROCJITSU_KERNEL_DIR")) {
     return std::string(dir) + "/" + name + ".o";
+  }
 #ifdef KERNEL_DIR
   return std::string(KERNEL_DIR) + "/" + name + ".o";
 #else
@@ -29,8 +31,9 @@ inline std::string kernel_path(const char *name) {
 }
 
 inline std::string kernel_hsaco_path(const char *name) {
-  if (const char *dir = std::getenv("ROCJITSU_KERNEL_DIR"))
+  if (const char *dir = std::getenv("ROCJITSU_KERNEL_DIR")) {
     return std::string(dir) + "/" + name + ".hsaco";
+  }
 #ifdef KERNEL_DIR
   return std::string(KERNEL_DIR) + "/" + name + ".hsaco";
 #else

@@ -32,6 +32,37 @@ set the HSA environment variable as follows:
 This feature requires GPUs that support peer-to-peer access along with
 proper large BAR addressing support.
 
+AMD EPYC inter-socket bandwidth
+===============================
+
+On a multi-socket AMD EPYC host, RCCL models the CPU-to-CPU link from the
+CPUID family:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Generation
+     - CPUID family
+     - Modeled bandwidth
+   * - Zen 1/2 (Naples, Rome)
+     - 23
+     - 16 GB/s
+   * - Zen 3/4 (Milan, Genoa, Bergamo)
+     - 25
+     - 24 GB/s
+   * - Zen 5 (Turin)
+     - 26
+     - 32 GB/s
+
+Graph search uses this weight when a path crosses sockets: PCIe GPUs on
+different sockets, or a GPU reaching a NIC on the other socket. The topology
+log shows the link itself (``SYS[16.0]``, ``SYS[24.0]``, or ``SYS[32.0]``).
+Search then picks the largest entry in its speed table that does not exceed
+the slowest hop, so a 32 GB/s Turin link can still produce a 24 GB/s graph
+speed. Intra-node GPU-to-GPU traffic that stays on xGMI does not cross
+that link, so its bandwidth is unchanged. ``NCCL_GRAPH_FILE``
+overrides the computed graph.
+
 Symmetric memory and ``NCCL_P2P_LEVEL``
 =======================================
 
@@ -260,6 +291,21 @@ faults inside the lookup, confirm the prerequisites above
 (``NCCL_CUMEM_ENABLE=1``, ``NCCL_WIN_ENABLE=1``, peer-to-peer capable ranks),
 that the buffer was registered with ``NCCL_WIN_COLL_SYMMETRIC``, and that the
 pointer passed to ``ncclFindWindow`` lies within that registration.
+
+``ncclDevCommCreate`` copies the ``ncclDevCommRequirements_t`` you pass,
+including its resource and team lists, so you can free or reuse that structure
+as soon as the call returns. The copy keeps the ``outBufferHandle``,
+``outGinSignalStart``, ``outGinCounterStart`` and ``outMultimemHandle``
+pointers as they are, and RCCL writes through them, and fills in the
+``ncclDevComm_t`` you pass, when the device communicator is actually created.
+Inside a ``ncclGroupStart``/``ncclGroupEnd`` block that happens at
+``ncclGroupEnd``, and on a nonblocking communicator only once the operation
+completes, so the ``ncclDevComm_t`` and the objects those pointers target, such
+as a handle filled in by ``ncclLsaBarrierCreateRequirement``, must stay valid
+until then. A request that ``ncclDevCommCreate`` itself rejects, for example with
+``ncclInvalidArgument`` for ``cftCaps`` that the communicator does not support,
+releases its copy before returning, so you can change the requirements and call
+it again without leaking memory.
 
 Ignoring CPU affinity with multi-node
 =====================================
@@ -559,8 +605,10 @@ support. VMM is available only when all of the following conditions are met:
   limited to gfx1250; on other architectures set ``1`` explicitly.
 - The HIP/ROCm runtime provides the cuMem VMM APIs: ROCm 7.12 or later, or a
   ROCm 7.0.x build that includes the cuMem backport.
-- The Linux kernel is version 6.8 or later.
-- The GPU and driver report VMM support.
+- The GPU and driver report VMM support, and the kernel can export cuMem
+  allocations as DMA-BUF.
+
+Linux kernel 6.8 or later is recommended for performance but is not required.
 
 Without VMM support, ``ncclCommSuspend`` and ``ncclCommResume`` still succeed,
 but they can't release the physical GPU memory, so the operation is

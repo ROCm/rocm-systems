@@ -24,10 +24,12 @@
 ###############################################################################
 
 import argparse
-import os
+import json
 import math
+import os
+import re
 
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 from .importer import RocpdImportData, execute_statement
 from .query import export_sqlite_query
 
@@ -44,17 +46,35 @@ __all__ = [
     "main",
 ]
 
+# POSIX environment-variable names. Rejects quotes and other characters that would
+# change the SQL text when the name is placed in a json_extract path literal.
+_RANK_ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _usable_rank_env_name(name, env_data) -> bool:
+    """True when name is a plain identifier and a key in the process environment."""
+    return (
+        isinstance(name, str)
+        and _RANK_ENV_NAME_PATTERN.fullmatch(name) is not None
+        and name in env_data
+    )
+
 
 def check_function_availability(connection, function_name):
     """
-    Checks if a given function exists in the SQLite database.
+    Check if a given SQL function is available in the SQLite database connection.
+
+    This function first attempts to use the modern SQLite pragma_function_list (available in SQLite 3.30.0+)
+    to check for the existence of the specified function. If this approach fails (e.g., on older SQLite versions),
+    it falls back to attempting to execute the function directly in a simple query. If both checks fail,
+    the function is considered unavailable.
 
     Args:
-        connection (sqlite3 db connection): The SQLite database connection handler.
-        function_name (str): The name of the function to check.
+        connection: The SQLite database connection object.
+        function_name (str): The name of the SQL function to check.
 
     Returns:
-        bool: True if the function exists, False otherwise.
+        bool: True if the function is available, False otherwise.
     """
     cursor = connection.cursor()
 
@@ -101,7 +121,20 @@ def export_query(
     query_name,
     query,
 ) -> None:
-    """Write the contents of a SQL query to an output format."""
+    """
+    Execute a SQL query and export its results to the specified output format and location.
+
+    Args:
+        connection (RocpdImportData): The database connection object.
+        output_path (str): Directory where the output file will be saved.
+        output_file (str): Base name for the output file. If empty, uses the query_name.
+        output_format (str): Output format (e.g., "console", "csv", "json", etc.).
+        query_name (str): Name of the query, used for labeling and filenames.
+        query (str): The SQL query to execute and export.
+
+    Returns:
+        None
+    """
 
     query_not_empty = f"""
         SELECT EXISTS (
@@ -129,13 +162,94 @@ def export_query(
     )
 
 
+# Same list and order as rocprofv3
+_POSSIBLE_RANK_COLUMNS = (
+    "MPI_RANK",  # most generic to most runtime-specific
+    "MPI_LOCALRANKID",
+    "MPI_RANKID",
+    "OMPI_COMM_WORLD_RANK",
+    "MV2_COMM_WORLD_RANK",
+    "PMI_RANK",
+    "SLURM_PROCID",
+    "PBS_NODENUM",
+)
+
+
+class _RankEnvCache:
+    """Cache the MPI rank variable name per connection; a new connection is looked up again."""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        """Forget the stored name so the next get() queries the database."""
+        self._connection = None
+        self._found = False
+        self._name = None
+
+    def get(self, connection):
+        """Return the rank variable name, querying only for a new connection."""
+        if not self._found or self._connection is not connection:
+            self._name = self._lookup(connection)
+            self._connection = connection
+            self._found = True
+        return self._name
+
+    @staticmethod
+    def _lookup(connection):
+        """Return ROCPROF_MPI_RANK_VAR if valid, else the most specific known rank variable, else None."""
+        rows = execute_statement(
+            connection,
+            "SELECT environment FROM rocpd_info_process ORDER BY pid, guid",
+        ).fetchall()
+        for (env_text,) in rows:
+            try:
+                env = json.loads(env_text or "{}")
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(env, dict):
+                continue
+            requested = env.get("ROCPROF_MPI_RANK_VAR")
+            if _usable_rank_env_name(requested, env):
+                return requested
+            for name in reversed(_POSSIBLE_RANK_COLUMNS):  # same precedence as today
+                if name in env:
+                    return name
+        return None
+
+
+_rank_env_cache = _RankEnvCache()
+
+
+def get_rank_env_variable_name(connection: RocpdImportData) -> Optional[str]:
+    """Return the environment variable name holding the MPI rank, or None; cached per connection."""
+    return _rank_env_cache.get(connection)
+
+
 def generate_summary_query(
     view_name: str,
     view_query="",
     name_column="name",
     by_rank=False,
+    by_rank_env_var=None,
 ) -> Tuple[str, str]:
-    """Generate the SQL statement to create a summary query."""
+    """
+    Generate a SQL statement and view name for summarizing data from a specified view.
+
+    This function constructs a SQL query that aggregates and summarizes profiling data
+    from a given view. It supports both standard and per-rank summaries, grouping by
+    the specified name column and optionally by a rank environment variable.
+
+    Args:
+        view_name (str): The name of the view to summarize.
+        view_query (str, optional): The SQL query to create the view, if needed.
+        name_column (str, optional): The column name to group by (default: "name").
+        by_rank (bool, optional): If True, generate a summary grouped by rank.
+        by_rank_env_var (str, optional): The environment variable name to use for rank grouping.
+
+    Returns:
+        Tuple[str, str]: A tuple containing the full view name and the generated SQL query.
+    """
 
     if by_rank:
         view_suffix = "_summary_by_rank"
@@ -144,7 +258,6 @@ def generate_summary_query(
             name_column=name_column
         )
         total_duration_group_by = "guid"
-        additional_select_columns = "AD.pid AS ProcessID, P.hostname AS Hostname,"
         additional_aggregated_columns = """
                     T.guid,
                     T.nid,
@@ -152,7 +265,30 @@ def generate_summary_query(
         join_condition = "T.guid = A.guid AND T.{name_column} = A.name".format(
             name_column=name_column
         )
-        total_duration_join = "JOIN total_duration TD ON AD.guid = TD.guid JOIN processes P ON AD.pid = P.pid"
+        # If by_rank_env_var is found, include it in the select and join clauses; otherwise, only include Process_Id and Hostname
+        if by_rank_env_var is not None:
+            rank_column_name = by_rank_env_var
+            additional_select_columns = "json_extract(PI.environment, '$.{rank_column_name}') AS Rank, AD.pid AS Process_Id, N.hostname AS Hostname,".format(
+                rank_column_name=rank_column_name
+            )
+            total_duration_join = (
+                "JOIN total_duration TD ON AD.guid = TD.guid "
+                "JOIN rocpd_info_node N ON AD.nid = N.id AND AD.guid = N.guid "
+                "JOIN rocpd_info_process PI ON AD.pid = PI.pid AND AD.guid = PI.guid"
+            )
+            # Rank is text from json_extract, so cast it. Duration stays descending
+            # so the busiest name in a rank still comes first.
+            order_by = (
+                "CAST(json_extract(PI.environment, '$.{rank_column_name}') AS INTEGER), "
+                "AD.pid, AD.total_duration DESC"
+            ).format(rank_column_name=rank_column_name)
+        else:
+            additional_select_columns = "AD.pid AS Process_Id, N.hostname AS Hostname,"
+            total_duration_join = (
+                "JOIN total_duration TD ON AD.guid = TD.guid "
+                "JOIN rocpd_info_node N ON AD.nid = N.id AND AD.guid = N.guid"
+            )
+            order_by = "AD.pid, AD.total_duration DESC"
     else:
         view_suffix = "_summary"
         group_by_columns = name_column
@@ -162,6 +298,8 @@ def generate_summary_query(
         additional_aggregated_columns = ""
         join_condition = "T.{name_column} = A.name".format(name_column=name_column)
         total_duration_join = "CROSS JOIN total_duration TD"
+        # aggregated_data has no pid column in the combined summary.
+        order_by = "AD.total_duration DESC"
 
     full_view_name = f"{view_name}{view_suffix}"
 
@@ -223,30 +361,81 @@ def generate_summary_query(
             aggregated_data AD
             {total_duration_join}
         ORDER BY
-            {"AD.pid," if by_rank else ""} AD.total_duration DESC
+            {order_by}
     """
 
     return (full_view_name, summary_query)
 
 
+def _summary_sql_with_guid(summary_sql: str) -> str:
+    """Add the aggregated guid to a per-rank summary select so domain queries can join on it.
+
+    The guid column is for the domain-summary subquery only. The summary query that is exported
+    stays unchanged, so guid is not written to the summary CSV.
+    """
+
+    needle = "AD.name AS Name,"
+    if summary_sql.count(needle) != 1:
+        raise ValueError(
+            "Per-rank summary query does not expose a single name column to attach guid"
+        )
+    return summary_sql.replace(
+        needle, "AD.guid AS guid,\n            AD.name AS Name,", 1
+    )
+
+
 def generate_domain_query(
     connection: RocpdImportData, summary_queries, by_rank=False
 ) -> Tuple[str, str]:
-    """Generate the SQL statement for domain summary by doing union over all summary queries."""
+    """
+    Generate a SQL statement and view name for a domain-level summary by combining multiple summary queries.
+
+    This function constructs a SQL query that aggregates and summarizes profiling data across different domains
+    by performing a UNION over all provided summary queries. It supports both standard and per-rank summaries,
+    grouping and aggregating results as appropriate.
+
+    Args:
+        connection (RocpdImportData): The database connection object.
+        summary_queries (dict): A dictionary mapping summary query names to their SQL statements.
+        by_rank (bool, optional): If True, generate a summary grouped by rank (default: False).
+
+    Returns:
+        Tuple[str, str]: A tuple containing the domain summary view name and the generated SQL query.
+                         Returns an empty tuple if no matching summary queries are found.
+    """
 
     if by_rank:
         view_suffix = "_summary_by_rank"
         view_name = "domain_summary_by_rank"
-        additional_group_columns = "ProcessID, Hostname,"
-        additional_select_columns = "GD.ProcessID, GD.Hostname,"
-        total_duration_group_by = "GROUP BY ProcessID"
-        join_condition = "JOIN total_duration TD ON GD.ProcessID = TD.ProcessID"
-        order_by = "ORDER BY GD.ProcessID"
+        by_rank_env_var = get_rank_env_variable_name(connection)
+        # guid stays inside the subqueries. The final select lists Process_Id and Hostname only.
+        additional_group_columns = "guid, Process_Id, Hostname,"
+        grouped_domains_group_by = "domain, guid, Process_Id, Hostname"
+        total_duration_group_by = "GROUP BY guid, Process_Id"
+        order_by = 'ORDER BY GD.Process_Id, GD.guid, GD."DURATION (nsec)" DESC'
+        if by_rank_env_var is not None:
+            rank_column_name = by_rank_env_var
+            additional_select_columns = "json_extract(PI.environment, '$.{rank_column_name}') AS Rank, GD.Process_Id, GD.Hostname,".format(
+                rank_column_name=rank_column_name
+            )
+            join_condition = (
+                "JOIN total_duration TD ON GD.guid = TD.guid AND GD.Process_Id = TD.Process_Id "
+                "JOIN rocpd_info_process PI ON GD.Process_Id = PI.pid AND GD.guid = PI.guid"
+            )
+            # Rank is text from json_extract, so cast it to sort 2 before 10.
+            order_by = (
+                "ORDER BY CAST(json_extract(PI.environment, '$.{rank_column_name}') AS INTEGER), "
+                'GD.Process_Id, GD.guid, GD."DURATION (nsec)" DESC'
+            ).format(rank_column_name=rank_column_name)
+        else:
+            additional_select_columns = "GD.Process_Id, GD.Hostname,"
+            join_condition = "JOIN total_duration TD ON GD.guid = TD.guid AND GD.Process_Id = TD.Process_Id"
     else:
         view_suffix = "_summary"
         view_name = "domain_summary"
         additional_group_columns = ""
         additional_select_columns = ""
+        grouped_domains_group_by = "domain"
         total_duration_group_by = ""
         join_condition = "CROSS JOIN total_duration TD"
         order_by = 'ORDER BY GD."DURATION (nsec)" DESC'
@@ -260,8 +449,17 @@ def generate_domain_query(
     if len(summary_dictionary) < 1:
         return ()
 
+    # Per-rank summaries group by guid internally but do not export it. Reattach it
+    # here so processes that reuse an OS pid stay separate in the domain summary.
+    if by_rank:
+        nested_items = [
+            (query_name, _summary_sql_with_guid(query))
+            for query_name, query in summary_dictionary.items()
+        ]
+    else:
+        nested_items = list(summary_dictionary.items())
     summary_selects = [
-        f"{query_name} AS ({query}) ," for query_name, query in summary_dictionary.items()
+        f"{query_name} AS ({query}) ," for query_name, query in nested_items
     ]
 
     union_selects = [
@@ -286,7 +484,7 @@ def generate_domain_query(
                     MAX("MAX (nsec)") AS "MAX (nsec)",
                     SUM("STD_DEV") AS "STD_DEV"
                 FROM all_domains
-                GROUP BY domain{", ProcessID" if by_rank else ""}
+                GROUP BY {grouped_domains_group_by}
             ),
             total_duration AS (
                 SELECT
@@ -330,8 +528,23 @@ def create_summary_queries(
 ):
     """Create summary queries for eligible temporary views in the database.
 
+    Generate and return a dictionary of summary queries for all suitable temporary views in the database.
+
+    This function scans the temporary views in the database, filters out views that do not meet
+    certain criteria, and generates summary queries for each remaining view. It supports both
+    standard and per-rank summaries, depending on the by_rank flag.
+
     When only_view_categories is set (e.g. ["kernel"]), only include views whose
     name matches one of the categories (e.g. "kernels" matches "kernel").
+
+    Args:
+        connection (RocpdImportData): The database connection object.
+        by_rank (bool, optional): If True, generate summary queries grouped by rank (default: False).
+        only_view_categories (list, optional): List of view categories to include. If None, all views are included.
+        kernel_name_type (str, optional): The type of kernel name to use (default, truncated or mangled)
+
+    Returns:
+        dict: A dictionary mapping summary query names to their SQL statements.
     """
 
     NAME_COLUMN_MAP = {
@@ -383,16 +596,20 @@ def create_summary_queries(
             """
             name_column = "display_name"
 
-        # Create regular summary query
-        summary_query_name, summary_query = generate_summary_query(
-            view_name, view_query, name_column=name_column
-        )
-        queries[summary_query_name] = summary_query
-
-        # Create per-rank summary query
-        if by_rank:
+        if not by_rank:
+            # Create regular summary query
+            summary_query_name, summary_query = generate_summary_query(
+                view_name, view_query, name_column=name_column
+            )
+            queries[summary_query_name] = summary_query
+        else:
+            # Create per-rank summary query
             per_rank_query_name, summary_by_rank_query = generate_summary_query(
-                view_name, view_query, name_column=name_column, by_rank=True
+                view_name,
+                view_query,
+                name_column=name_column,
+                by_rank=True,
+                by_rank_env_var=get_rank_env_variable_name(connection),
             )
             queries[per_rank_query_name] = summary_by_rank_query
 
@@ -404,15 +621,33 @@ def create_summary_region_queries(
     by_rank=False,
     region_categories=None,
 ):
-    """Create summary and region queries"""
+    """
+    Generate and return a dictionary of region-specific summary queries for the database.
+
+    This function identifies region categories from the database (or uses those provided),
+    constructs queries for each region category, and generates summary queries for each.
+    It supports both standard and per-rank summaries.
+
+    Args:
+        connection (RocpdImportData): The database connection object.
+        by_rank (bool, optional): If True, generate summary queries grouped by rank (default: False).
+        region_categories (list, optional): List of region categories to include. If None, categories are auto-detected.
+
+    Returns:
+        dict: A dictionary mapping summary query names to their SQL statements.
+    """
 
     query = "SELECT DISTINCT(category) FROM regions_and_samples"
     categories = execute_statement(connection, query).fetchall()
 
     category_prefixes = ["rocm_"]
 
+    # Keep the categories exactly as stored so the marker query can match them with
+    # plain equality (no LIKE wildcards).
+    raw_categories = [cat[0] for cat in categories if cat[0] is not None]
+
     # Convert all categories and prefixes to lowercase for correct comparison
-    categories = [(cat[0].lower(),) for cat in categories]
+    categories = [(cat[0].lower(),) for cat in categories if cat[0] is not None]
     category_prefixes = [prefix.lower() for prefix in category_prefixes]
 
     if region_categories is not None:
@@ -433,10 +668,19 @@ def create_summary_region_queries(
             first_part = category_name[len(matching_prefix) :].split("_")[0]
             region_categories.add(f"{matching_prefix}{first_part}")
 
+    # rocprofiler-systems writes rocm_marker_*, rocprofiler-sdk writes marker_*, and
+    # "markers" is a common typo. Treat all of them as the single "marker" category.
+    marker_aliases = {"markers", "rocm_marker", "rocm_markers"}
+    marker_prefixes = ("marker_", "rocm_marker_")
+    region_categories = {
+        "marker" if cat in marker_aliases or cat.startswith(marker_prefixes) else cat
+        for cat in region_categories
+    }
+
     category_map = {
         cat: [c[0] for c in categories if c[0] == cat or c[0].startswith(cat + "_")]
         for cat in region_categories
-        if "MARKER" not in cat.upper()
+        if "marker" not in cat
     }
 
     queries = {}
@@ -450,38 +694,59 @@ def create_summary_region_queries(
                 WHERE {" OR ".join(conditions)}
             """
 
-            # Create regular summary query
-            summary_query_name, summary_query = generate_summary_query(k, region_query)
-            queries[summary_query_name] = summary_query
-
-            # Create per-rank summary query
-            if by_rank:
+            if not by_rank:
+                # Create regular summary query
+                summary_query_name, summary_query = generate_summary_query(
+                    k, region_query
+                )
+                queries[summary_query_name] = summary_query
+            else:
+                # Create per-rank summary query
                 per_rank_query_name, summary_by_rank_query = generate_summary_query(
-                    k, region_query, by_rank=True
+                    k,
+                    region_query,
+                    by_rank=True,
+                    by_rank_env_var=get_rank_env_variable_name(connection),
                 )
                 queries[per_rank_query_name] = summary_by_rank_query
 
-    # Markers
-    if "MARKER" not in region_categories:
+    # Marker
+    if "marker" not in region_categories:
         return queries
 
-    markers_query_name = "markers"
-    markers_query = """
-        SELECT JSON_EXTRACT(extdata, '$.message') AS marker_name, *
+    # Resolve the stored marker category names once and match them with IN. LIKE
+    # patterns over the regions_and_samples view are slow.
+    marker_categories = sorted(
+        c for c in raw_categories if c.lower().startswith(("marker_", "rocm_marker_"))
+    )
+    if not marker_categories:
+        return queries
+
+    marker_in_list = ", ".join(
+        "'" + c.replace("'", "''") + "'" for c in marker_categories
+    )
+
+    marker_query_name = "rocm_marker" if "rocm_marker" in marker_in_list else "marker"
+    marker_query = f"""
+        SELECT COALESCE(JSON_EXTRACT(extdata, '$.message'), name) AS marker_name, *
         FROM regions_and_samples
-        WHERE category LIKE 'MARKER_%'
+        WHERE category IN ({marker_in_list})
     """
 
     # Create regular summary query
-    summary_query_name, summary_query = generate_summary_query(
-        markers_query_name, markers_query, name_column="marker_name"
-    )
-    queries[summary_query_name] = summary_query
-
-    # Create per-rank summary query
-    if by_rank:
+    if not by_rank:
+        summary_query_name, summary_query = generate_summary_query(
+            marker_query_name, marker_query, name_column="marker_name"
+        )
+        queries[summary_query_name] = summary_query
+    else:
+        # Create per-rank summary query
         per_rank_query_name, summary_by_rank_query = generate_summary_query(
-            markers_query_name, markers_query, name_column="marker_name", by_rank=True
+            marker_query_name,
+            marker_query,
+            name_column="marker_name",
+            by_rank=True,
+            by_rank_env_var=get_rank_env_variable_name(connection),
         )
         queries[per_rank_query_name] = summary_by_rank_query
 
@@ -489,7 +754,20 @@ def create_summary_region_queries(
 
 
 def create_domain_query(connection: RocpdImportData, summary_queries, by_rank=False):
-    """Create a domain summary query by aggregating all summary queries."""
+    """
+    Create a domain summary query by aggregating all provided summary queries.
+
+    This function generates a domain-level summary query by combining the given summary queries,
+    optionally grouping by rank if requested.
+
+    Args:
+        connection (RocpdImportData): The database connection object.
+        summary_queries (dict): A dictionary mapping summary query names to their SQL statements.
+        by_rank (bool, optional): If True, generate a summary grouped by rank (default: False).
+
+    Returns:
+        dict: A dictionary with the domain summary query name as key and its SQL statement as value.
+    """
 
     result = generate_domain_query(connection, summary_queries, by_rank=by_rank)
     if not result:
@@ -500,8 +778,59 @@ def create_domain_query(connection: RocpdImportData, summary_queries, by_rank=Fa
     return {query_name: query}
 
 
+def create_process_files_query(connection: RocpdImportData, by_rank=False):
+    """
+    Generate a query mapping each process to the database file it was recorded in.
+
+    Args:
+        connection (RocpdImportData): The database connection object.
+        by_rank (bool, optional): If True, prepend the MPI rank as the first column (default: False).
+
+    Returns:
+        dict: A dictionary mapping the query name to its SQL statement.
+    """
+
+    rank_env_var = get_rank_env_variable_name(connection) if by_rank else None
+    rank_select = (
+        f"json_extract(P.environment, '$.{rank_env_var}') AS Rank,"
+        if rank_env_var is not None
+        else ""
+    )
+    rank_order = (
+        f"CAST(json_extract(P.environment, '$.{rank_env_var}') AS INTEGER),"
+        if rank_env_var is not None
+        else ""
+    )
+
+    query_name = "files"
+    query = f"""
+        SELECT
+            {rank_select}
+            P.pid AS Process_Id,
+            N.hostname AS Hostname,
+            json_extract(P.extdata, '$.output_file') AS Filename
+        FROM rocpd_info_process P
+        LEFT JOIN rocpd_info_node N ON P.nid = N.id AND P.guid = N.guid
+        ORDER BY {rank_order} P.pid
+    """
+
+    return {query_name: query}
+
+
 def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
-    """Generate all summaries and export them to selected format."""
+    """
+    Generate all summary queries and export their results in the selected format.
+
+    This function creates summary and domain summary queries, executes them, and exports
+    the results to the specified output format and location.
+
+    Args:
+        connection (RocpdImportData): The database connection object.
+        **kwargs: Additional keyword arguments controlling summary generation and export options.
+
+    Returns:
+        None
+    """
 
     domain_summary = kwargs.get("domain_summary", False)
     by_rank = kwargs.get("summary_by_rank", False)
@@ -530,7 +859,7 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
             ),
         )
 
-    summary_queries = {}
+    summary_queries = create_process_files_query(connection, by_rank)
 
     # Create the summary queries.
     # When region_categories is specified (and not NONE), only include view-based
@@ -562,12 +891,11 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
     )
 
     if domain_summary:
-        summary_queries.update(create_domain_query(connection, summary_queries))
-        # Create domain summary per rank only if both domain_summary and summary_by_rank are enabled
-        if by_rank:
-            summary_queries.update(
-                create_domain_query(connection, summary_queries, by_rank=True)
-            )
+        # by_rank selects the per-rank domain summary, which is only built when both
+        # domain_summary and summary_by_rank are enabled.
+        summary_queries.update(
+            create_domain_query(connection, summary_queries, by_rank=by_rank)
+        )
 
     # Export all summary queries
     for query_name, query in summary_queries.items():
@@ -580,7 +908,18 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
 # Command-line interface functions
 #
 def add_args(parser):
-    """Add arguments for summary."""
+    """
+    Add summary-related command-line arguments to the argument parser.
+
+    This function defines and adds options for output format, domain summary, summary by rank,
+    and region categories to the provided argparse parser.
+
+    Args:
+        parser (argparse.ArgumentParser): The argument parser to which arguments will be added.
+
+    Returns:
+        function: A function that processes parsed arguments and returns a dictionary of relevant options.
+    """
 
     io_options = parser.add_argument_group("I/O options")
     io_options.add_argument(
@@ -604,7 +943,7 @@ def add_args(parser):
         "--summary-by-rank",
         action="store_true",
         default=False,
-        help="Generate summary views by-rank (or Process ID)",
+        help="Generate per-rank (per-process) summaries instead of the aggregate summaries",
     )
     summary_options.add_argument(
         "--region-categories",
@@ -647,6 +986,18 @@ def add_args(parser):
 
 
 def execute(input, **kwargs: Any) -> RocpdImportData:
+    """
+    Execute the summary generation and export process.
+
+    This function calls generate_all_summaries with the provided input and keyword arguments.
+
+    Args:
+        input (RocpdImportData): The database connection object.
+        **kwargs: Additional keyword arguments for summary generation.
+
+    Returns:
+        RocpdImportData: The input database connection object.
+    """
 
     generate_all_summaries(input, **kwargs)
 
@@ -682,7 +1033,7 @@ def main(argv=None) -> int:
 
     summary_args = process_summary_args(input, args)
     io_args = process_outcfg_args(input, args)
-    process_time_window_args(input, args)
+    time_window.process_args_or_exit(process_time_window_args, input, args)
 
     all_args = {**summary_args, **io_args}
 

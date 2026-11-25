@@ -16,7 +16,7 @@
 ///      floating destinations).
 ///   4. OMOD, then CLAMP, on a floating result (output_modifier.h).
 ///
-/// ToFloat, F32ToInteger (FloorI32, NearestI32), PackU8, PackB32F16 and ToFp8
+/// ToFloat and ToFp8
 /// hold the settings of every stage that applies to them, so a scalar body and
 /// its SIMD probe pass the same object. Every stage works on raw encodings in
 /// unsigned integer lanes, so host rounding, DAZ and FTZ cannot change a result.
@@ -25,7 +25,7 @@
 /// Evidence: gfx1201 captures cover every operation here; gfx1100 captures cover
 /// all but the FP8/BF8 ones; gfx1030 captures cover ToFloat's F16/F32/F64 OMOD
 /// and MODE boundaries. Other targets share the code without measurement;
-/// only RDNA4 uses the FP8/BF8 operations (see fp8_formats.py).
+/// CDNA5 shares RDNA4's non-scaled F32-to-OCP FP8/BF8 narrowing operations.
 /// Measured differences from the ISA manual's pseudocode or tables are marked
 /// "ISA manual discrepancy" below.
 
@@ -93,8 +93,9 @@ template <typename V> using Lane = typename LaneOf<V>::type;
 template <typename Fmt, typename V, typename Mask>
 constexpr Mask rounds_up(Rounding rounding, const Mask &negative, V kept, V rest, V half) {
   const V zero(Lane<V>{0});
-  if (rounding == Rounding::NEAREST_UP)
+  if (rounding == Rounding::NEAREST_UP) {
     return rest > half || (rest == half && rest != zero && !negative);
+  }
   return rest != zero && round_increment::rounds_up<Fmt>(static_cast<uint32_t>(rounding), negative,
                                                          kept, rest, half);
 }
@@ -132,8 +133,8 @@ constexpr V f32_to_integer(V bits, Rounding rounding, NanResult nan_result) {
   const V half = (V(L{1}) << shift) >> 1;
   const V rounded =
       kept + choose(detail::rounds_up<F32>(rounding, negative, kept, rest, half), V(L{1}), V(L{0}));
-  // At or above 2^31 every Int saturates; below it the left shift is at most 7 bits.
-  const auto huge = field >= V(kUnitField + 8);
+  // Unsigned DWORD results retain one more magnitude bit than signed results.
+  const auto huge = field >= V(kUnitField + (std::is_same_v<Int, uint32_t> ? 9 : 8));
   const V left = choose(integral && !huge, field - V(kUnitField), V(L{0}));
   const V units = choose(integral, significand << left, rounded);
 
@@ -149,74 +150,6 @@ constexpr V f32_to_integer(V bits, Rounding rounding, NanResult nan_result) {
                     : choose(negative, V(L{0} - kNegativeLimit), V(kHighest));
   return choose(magnitude > V(F32::kInfinity), nan, result);
 }
-
-/// @brief An F32-to-integer conversion with the instruction's ABS/NEG and input flush.
-/// @details Usable directly as a scalar or SIMD lane operation on raw F32 bits.
-template <typename Int, Rounding Direction, NanResult Nan> struct F32ToInteger {
-  /// VOP3 ABS and NEG fields; bit 0 applies to the source.
-  uint32_t abs = 0;
-  uint32_t neg = 0;
-  input_denormal::Policy input;
-
-  template <typename V> constexpr V operator()(V bits) const {
-    bits = source_modifier::apply<fp_format::F32>(bits, 0, abs, neg);
-    return f32_to_integer<Int>(input_denormal::flush_input<fp_format::F32>(bits, input), Direction,
-                               Nan);
-  }
-};
-
-/// V_CVT_FLOOR_I32_F32 (V_CVT_FLR_I32_F32).
-using FloorI32 = F32ToInteger<int32_t, Rounding::FLOOR, NanResult::SATURATE_BY_SIGN>;
-/// V_CVT_NEAREST_I32_F32 (V_CVT_RPI_I32_F32).
-using NearestI32 = F32ToInteger<int32_t, Rounding::NEAREST_UP, NanResult::SATURATE_BY_SIGN>;
-
-/// @brief V_CVT_PK_U8_F32: an F32 source rounded in MODE to an unsigned byte.
-/// @details The byte replaces the one that bits [1:0] of the selector pick in
-/// the third source; the other bytes pass through. A NaN gives zero.
-struct PackU8 {
-  /// VOP3 ABS and NEG fields; bit 0 applies to the F32 source.
-  uint32_t abs = 0;
-  uint32_t neg = 0;
-  input_denormal::Policy input;
-  Rounding rounding = Rounding::NEAREST_EVEN;
-
-  template <typename V> constexpr V operator()(V value, V selector, V packed) const {
-    using L = typename fp_format::F32::Lane;
-    value = source_modifier::apply<fp_format::F32>(value, 0, abs, neg);
-    value = input_denormal::flush_input<fp_format::F32>(value, input);
-    const V byte = f32_to_integer<uint8_t>(value, rounding, NanResult::ZERO);
-    const V shift = (selector & V(L{3})) << 3;
-    return (packed & ~(V(L{0xff}) << shift)) | (byte << shift);
-  }
-};
-
-/// @brief V_PACK_B32_F16: two F16 sources in the low and high halves of the result.
-/// @details Each half takes its ABS/NEG bit, a flush of a subnormal under MODE and,
-/// when the target quiets NaNs, the quiet bit of a NaN.
-// ISA manual discrepancy: the manual expects the halves to be copied unchanged,
-// but gfx1201 applies ABS/NEG, flushes input denormals and quiets signaling NaNs.
-struct PackB32F16 {
-  /// VOP3 ABS and NEG fields; bit i applies to source i.
-  uint32_t abs = 0;
-  uint32_t neg = 0;
-  input_denormal::Policy input;
-  bool quiet_nan = true;
-
-  template <typename V> constexpr V operator()(V low, V high) const {
-    return half(low, 0) | (half(high, 1) << 16);
-  }
-
-private:
-  template <typename V> constexpr V half(V bits, unsigned index) const {
-    using F16 = fp_format::F16;
-    bits = source_modifier::apply<F16>(bits & V(F16::kBits), index, abs, neg);
-    bits = input_denormal::flush_input<F16>(bits, input);
-    if (quiet_nan)
-      bits = detail::choose((bits & V(F16::kMagnitude)) > V(F16::kInfinity), bits | V(F16::kQuiet),
-                            bits);
-    return bits;
-  }
-};
 
 /// @brief Rounding into a floating destination, fixed before any lane is evaluated.
 /// @details Every value is rounded once, in the destination format:
@@ -235,10 +168,6 @@ struct FloatRounding {
   Rounding direction = Rounding::NEAREST_EVEN;
   bool flush_tiny = false;
   bool saturate = false;
-  /// Scale the exact value by 2^prescale before rounding. Only
-  /// sdwa_conversion_to_f16 sets it, to keep the simulator's SDWA F16 order;
-  /// gfx1030 rounds first instead (see sdwa_conversion_to_f16).
-  int32_t prescale = 0;
 };
 
 namespace detail {
@@ -365,8 +294,7 @@ constexpr V round_finite(V bits, const FloatRounding &policy) {
   const V fraction = magnitude & V(From::kMinNormal - 1);
   const auto subnormal = field == V(L{0});
   const V significand = fraction | choose(subnormal, V(L{0}), V(From::kMinNormal));
-  const V exponent =
-      choose(subnormal, V(L{1}), field) + V(L(kRebias + static_cast<L>(policy.prescale)));
+  const V exponent = choose(subnormal, V(L{1}), field) + V(L(kRebias));
   return detail::round_magnitude<To, From::kMantissaBits>(significand, exponent, negative, policy);
 }
 
@@ -432,7 +360,7 @@ constexpr V from_integer(V magnitude, const Mask &negative, const FloatRounding 
   // Integers are at least one, so results are never tiny.
   const V top = fp_format::bit_width(magnitude | V(L{1})) - V(L{1});
   const V significand = magnitude << (V(L{kTopBit}) - top);
-  const V exponent = top + V(L((To::kExponentMax >> 1) + static_cast<L>(policy.prescale)));
+  const V exponent = top + V(L((To::kExponentMax >> 1)));
   V result = detail::round_normal<To, kTopBit>(significand, exponent, negative, policy.direction);
   result = detail::resolve_overflow<To>(result, negative, policy);
   result = choose(magnitude == V(L{0}), V(L{0}), result);
@@ -515,28 +443,16 @@ private:
       if constexpr (From::kMantissaBits > To::kMantissaBits) {
         return narrow<Source, Destination>(bits, rounding);
       } else {
-        assert(rounding.prescale == 0 && "widening is exact and applies no prescale");
         const V widened = widen<Source, Destination>(bits);
-        if (quiet_nan)
+        if (quiet_nan) {
           return widened;
+        }
         // A signaling NaN keeps its quiet bit clear; its payload survives widening.
         const auto signaling = (bits & V(Source::kMagnitude)) > V(Source::kInfinity) &&
                                (bits & V(Source::kQuiet)) == V(Lane{0});
         return choose(signaling, widened & ~V(Destination::kQuiet), widened);
       }
     }
-  }
-};
-
-/// @brief Two conversions to F16 packed into the low and high halves of a 32-bit lane.
-/// @details `low` converts the first source and `high` the second; each carries the
-/// modifier bits of its own source in bit 0.
-template <typename From> struct PackedF16 {
-  ToFloat<From, fp_format::F16> low;
-  ToFloat<From, fp_format::F16> high;
-
-  template <typename V> constexpr V operator()(V first, V second) const {
-    return low(first) | (high(second) << 16);
   }
 };
 
@@ -578,10 +494,10 @@ template <typename Fmt, typename V> constexpr V finish_fp8(V bits, V magnitude, 
   const V overflow(L{Encoding::kOverflow});
   V result = choose(magnitude > V(L{Encoding::kLargest}),
                     saturate ? V(L{Encoding::kLargest}) : overflow, magnitude);
-  // ISA manual discrepancy: the manual's FP16_OVFL table also saturates an
-  // infinity to the largest finite value, but gfx1201 gives the overflow
-  // encoding whatever FP16_OVFL says. Only gfx1201 is measured; CDNA4 and CDNA5
-  // keep the table's rule.
+  // ISA manual discrepancy: gfx1201 produces the overflow encoding for a true
+  // infinity in both modes. CDNA5 uses that measurement as a proxy pending a
+  // gfx1250 capture. Its Table 7 (p. 22) preserves infinity outside WMMA, while
+  // section 7.6.2 (p. 81) saturates it when FP16_OVFL is set.
   result = choose(f32_magnitude == V(F32::kInfinity), overflow, result);
   result = result | ((bits & V(F32::kSign)) >> 24);
   const L nan = std::is_same_v<Fmt, Fp8> ? kFp8Nan : kBf8Nan;

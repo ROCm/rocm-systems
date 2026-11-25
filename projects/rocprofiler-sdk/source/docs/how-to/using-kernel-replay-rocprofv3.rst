@@ -69,6 +69,11 @@ Collecting counters with kernel replay
 counter groups (one pass per group). There is no separate pass-count flag. ``rocprofv3`` uses
 callback dispatch counting for counter records; ``replay_pass`` is emitted on that path.
 
+``--kernel-replay-beta-enabled`` only acknowledges the beta; it does not select kernel replay.
+Passing it without ``--replay-mode kernel`` or an input-file job with ``replay_mode: kernel`` is
+rejected rather than ignored, so a command line that asks only for the acknowledgement cannot
+quietly fall back to application replay.
+
 .. code-block:: bash
 
    rocprofv3 --pmc SQ_WAVES GRBM_COUNT --pmc GRBM_GUI_ACTIVE --replay-mode kernel --kernel-replay-beta-enabled -- <application_path>
@@ -139,14 +144,33 @@ Default ``rocpd``
 The default output format is ``rocpd``. Convert with ``rocpd convert`` as described in
 :ref:`using-rocpd-output-format`.
 
+The ``counters_collection`` view, which ``rocpd convert`` uses for counter CSV and Perfetto output,
+has one row per dispatch and counter. A counter repeated across groups is collected by every pass
+whose group lists it, and the view reports the mean of those passes, so a sanity counter such as
+``SQ_WAVES`` in every group reads the same as it does in a single pass. The individual passes stay
+in the database: a ``rocpd_pmc_event`` row from a pass after the first carries the pass index as
+``replay_pass`` in its ``extdata`` column, and a row without it belongs to pass 0. The
+``pmc_events`` view, which has one row per counter instance and pass, reports it as a
+``replay_pass`` column.
+
+The mean counts only passes that contain that counter. A replay pass dedicated to another service,
+such as ATT, has no PMC row and therefore does not change the counter's denominator. For a run
+without kernel replay, all PMC rows are untagged, so ``counters_collection`` retains its existing
+columns and continues to report the sum across hardware instances.
+
 What is snapshotted
 ===================
 
-Snapshot and restore are implemented in the SDK. Between passes, kernel replay restores
-coarse-grained device VRAM and module-scope ``__device__`` / ``__constant__`` variables. Unified,
-managed, ``hipMallocAsync``, host, fine-grained, kernarg, and executable allocations are not
-restored. Capture is a full in-memory copy; cost is ``O(tracked_bytes × passes)``. See
-:ref:`kernel-replay-memory-snapshot` and :ref:`using-kernel-replay`.
+Between passes, kernel replay restores tracked coarse-grained device VRAM and module-scope
+``__device__`` / ``__constant__`` variables exposed as HSA variable symbols. Internal or static
+state not exposed as symbols is not restored. Detected unsupported argument memory, failed
+snapshot capture, or failed required memory checks cause the dispatch to run once without replay.
+Capture is a full in-memory copy; cost is ``O(tracked_bytes × passes)``.
+
+The guard is best effort: it checks metadata-described pointers, ``by_value`` arguments of at
+least 16 bytes, and printf/hostcall/heap pointers. Other hidden arguments, smaller aggregates,
+pointer fields off the eight-byte scan stride, and indirect pointers can be missed.
+See :ref:`kernel-replay-memory-snapshot` and :ref:`using-kernel-replay`.
 
 The last executed pass is **not** restored, so the application sees the memory the kernel actually
 produced.

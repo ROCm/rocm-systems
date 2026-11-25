@@ -53,32 +53,6 @@ union timestamp_type
     const char* typestr() const { return "TIMESTAMP"; };
 };
 
-union util_ctr_type
-{
-    struct
-    {
-        uint64_t header   : 7;
-        uint64_t tm       : 2;
-        uint64_t cID      : 2;
-        uint64_t spi_busy : 4;
-        uint64_t vdata0   : 4;
-        uint64_t vdata1   : 4;
-        uint64_t sdata0   : 4;
-        uint64_t sdata1   : 4;
-        uint64_t lds0     : 4;
-        uint64_t lds1     : 4;
-        uint64_t exp0     : 4;
-        uint64_t exp1     : 4;
-        uint64_t SA       : 1;
-    };
-    uint64_t raw;
-
-    static const int ctr_size = 4;
-
-    std::stringstream print() const { return std::stringstream{}; }
-    const char* typestr() const { return "UTILCTR"; };
-};
-
 union shader_data_type
 {
     struct

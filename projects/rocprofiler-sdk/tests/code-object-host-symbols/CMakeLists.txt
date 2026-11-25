@@ -26,3 +26,25 @@ rocprofiler_add_integration_execute_test(
     FAIL_REGULAR_EXPRESSION
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}|SEGFAULT|Failed to \.*|Context is not valid|ERROR: \.*"
     )
+
+# Same checks with HIP compiler API tracing enabled. The tracing wrappers on the HIP
+# compiler dispatch table must chain into the code object wrappers that collect the host
+# symbols rather than bypassing them.
+add_library(code-object-host-symbols-hip-compiler-client SHARED)
+target_sources(code-object-host-symbols-hip-compiler-client PRIVATE client.cpp)
+target_compile_definitions(code-object-host-symbols-hip-compiler-client
+                           PRIVATE CODE_OBJECT_HOST_SYMBOLS_TRACE_HIP_COMPILER_API=1)
+target_link_libraries(code-object-host-symbols-hip-compiler-client
+                      PRIVATE rocprofiler-sdk::rocprofiler-sdk)
+
+rocprofiler_add_integration_execute_test(
+    test-code-object-host-symbols-hip-compiler-trace
+    COMMAND $<TARGET_FILE:vector-ops>
+    DEPENDS code-object-host-symbols-hip-compiler-client
+    TIMEOUT 120
+    PRELOAD "$<TARGET_FILE:code-object-host-symbols-hip-compiler-client>"
+    PASS_REGULAR_EXPRESSION
+        "Test PASSED: Successfully verified host function id assignment!"
+    FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|SEGFAULT|Failed to \.*|Context is not valid|ERROR: \.*"
+    )

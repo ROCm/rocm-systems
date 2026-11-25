@@ -471,7 +471,7 @@ __device__ int GDAContext::reduce_wave(rocshmem_team_t team, T *dest,
         }
       }
     } else {
-      LOGD_WARN("Unsupported reduction size for GDA wave conduit.");
+      LOGD_WARN("Unsupported reduction size for GDA wave backend.");
       return ROCSHMEM_ERROR;
     }
   }
@@ -745,7 +745,7 @@ __device__ int GDAContext::reduce_wg(rocshmem_team_t team, T *dest,
         }
       }
     } else {
-      LOGD_WARN("Unsupported reduction size for GDA conduit.");
+      LOGD_WARN("Unsupported reduction size for GDA backend.");
       return ROCSHMEM_ERROR;
     }
   }
@@ -930,31 +930,6 @@ __device__ int GDAContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ void GDAContext::internal_put_broadcast_wave(T *dst, const T *src,
-    int nelems, int pe_root, int pe_start, int stride, int pe_size,
-    ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
-  if (constmem.my_pe == pe_root) {
-    int finish = pe_start + stride * pe_size;
-    for (int i = pe_start; i < finish; i += stride) {
-      if (i != constmem.my_pe) {
-        internal_putmem_nbi_wave(dst, src, nelems * sizeof(T), i, i, wf_info);
-      }
-    }
-    memcpy_wave<MemcpyKind::Put>(dst, const_cast<T *>(src), nelems * sizeof(T));
-  }
-}
-
-template <typename T>
-__device__ void GDAContext::internal_get_broadcast_wave(T *dst, const T *src,
-    int nelems, int pe_root, ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
-  if (constmem.my_pe != pe_root) {
-    internal_getmem_wave(dst, src, nelems * sizeof(T), pe_root, pe_root, wf_info);
-  } else {
-    memcpy_wave<MemcpyKind::Get>(dst, const_cast<T *>(src), nelems * sizeof(T));
-  }
-}
-
-template <typename T>
 __device__ int GDAContext::broadcast_wave(rocshmem_team_t team, T *dest,
     const T* source, int nelems, int PE_root) {
   if (dest == nullptr ||
@@ -962,51 +937,14 @@ __device__ int GDAContext::broadcast_wave(rocshmem_team_t team, T *dest,
     team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
 
-  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
-
-  int stride = team_obj->tinfo_wrt_world->stride;
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int pe_size = team_obj->tinfo_wrt_world->size;
-  long *p_sync = team_obj->bcast_pSync;
-
-  // Passed pe_root is relative to team, convert to world root
-  int pe_root_world = team_obj->get_pe_in_world(PE_root);
-  internal_broadcast_wave<T>(dest, source, nelems, pe_root_world, pe_start, stride,
-               pe_size, p_sync);
+  internal_broadcastmem_wave(team, dest, source, nelems * sizeof(T), PE_root);
   return ROCSHMEM_SUCCESS;
-}
-
-template <typename T>
-__device__ void GDAContext::internal_broadcast_wave(T *dst, const T *src,
-    int nelems, int pe_root, int pe_start, int stride, int pe_size,
-    long *p_sync) {  // NOLINT(runtime/int)
-
-  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
-  if (constmem.num_pes < 4) { //TODO: optimized for IPC
-    internal_put_broadcast_wave(dst, src, nelems, pe_root, pe_start, stride,
-      pe_size, wf_info);
-  } else {
-    internal_get_broadcast_wave(dst, src, nelems, pe_root, wf_info);
-  }
-
-  // Synchronize on completion of broadcast
-  internal_sync_wave(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
 }
 
 template <typename T>
 __device__ void GDAContext::broadcast_wg(rocshmem_team_t team, T *dst,
     const T *src, int nelems, int pe_root) {
-  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
-
-  int stride = team_obj->tinfo_wrt_world->stride;
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int pe_size = team_obj->tinfo_wrt_world->size;
-  long *p_sync = team_obj->bcast_pSync;
-
-  // Passed pe_root is relative to team, convert to world root
-  int pe_root_world = team_obj->get_pe_in_world(pe_root);
-  internal_broadcastmem_wg(dst, src, nelems * sizeof(T), pe_root_world, pe_start, stride,
-               pe_size, p_sync);
+  internal_broadcastmem_wg(team, dst, src, nelems * sizeof(T), pe_root);
 }
 
 template <typename T>
@@ -1211,7 +1149,7 @@ __device__ int GDAContext::alltoall_wave(rocshmem_team_t team,
 template <typename T>
 __device__ void GDAContext::fcollect_wg(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
-  fcollectmem_linear_wg(team, dst, src, nelems * sizeof(T));
+  fcollectmem_wg(team, dst, src, nelems * sizeof(T));
 }
 
 template <typename T>
@@ -1219,8 +1157,7 @@ __device__ int GDAContext::fcollect_wave(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
   if (dst == nullptr || src == nullptr || team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
-
-  fcollectmem_linear_wave(team, dst, src, nelems * sizeof(T));
+  fcollectmem_wave(team, dst, src, nelems * sizeof(T));
 
   return ROCSHMEM_SUCCESS;
 }
@@ -1587,6 +1524,67 @@ __device__ inline void GDAContext::tile_get_strided_2d_nbi(
   }
 }
 
+// Shape of the per-WQE decomposition of an N-D strided tile: the number of
+// leading dimensions iterated over, the bytes per chunk, and the chunk count.
+struct GdaTileNdChunks {
+  int outer_ndim;
+  size_t chunk_bytes;
+  size_t num_chunks;
+};
+
+__device__ __forceinline__ GdaTileNdChunks
+gda_tile_nd_chunks(const TileView &view) {
+  const int last = view.ndim - 1;
+  const bool inner_contig = view.src_s[last] == 1 && view.dst_s[last] == 1;
+  GdaTileNdChunks c;
+  c.outer_ndim = inner_contig ? last : view.ndim;
+  c.chunk_bytes = (inner_contig ? view.ext[last] : 1) * view.element_size;
+  c.num_chunks = 1;
+  for (int d = 0; d < c.outer_ndim; d++) c.num_chunks *= view.ext[d];
+  if (c.chunk_bytes == 0) c.num_chunks = 0;
+  return c;
+}
+
+__device__ __forceinline__ void gda_tile_nd_chunk_offsets(
+    const TileView &view, int outer_ndim, size_t idx, size_t *dst_off,
+    size_t *src_off) {
+  size_t s = 0, d_off = 0, rem = idx;
+  for (int d = outer_ndim - 1; d >= 0; d--) {
+    const size_t coord = rem % view.ext[d];
+    rem /= view.ext[d];
+    s += coord * view.src_s[d];
+    d_off += coord * view.dst_s[d];
+  }
+  *dst_off = d_off * view.element_size;
+  *src_off = s * view.element_size;
+}
+
+__device__ inline void GDAContext::tile_put_strided_nd_nbi(
+    const TileView &view, int pe, int qp_index, int worker_id,
+    int worker_count) {
+  const GdaTileNdChunks c = gda_tile_nd_chunks(view);
+  for (size_t idx = static_cast<size_t>(worker_id); idx < c.num_chunks;
+       idx += static_cast<size_t>(worker_count)) {
+    size_t dst_off, src_off;
+    gda_tile_nd_chunk_offsets(view, c.outer_ndim, idx, &dst_off, &src_off);
+    tile_put_chunk_nbi(view.dst_base + dst_off, view.src_base + src_off,
+                       c.chunk_bytes, pe, qp_index);
+  }
+}
+
+__device__ inline void GDAContext::tile_get_strided_nd_nbi(
+    const TileView &view, int pe, int qp_index, int worker_id,
+    int worker_count) {
+  const GdaTileNdChunks c = gda_tile_nd_chunks(view);
+  for (size_t idx = static_cast<size_t>(worker_id); idx < c.num_chunks;
+       idx += static_cast<size_t>(worker_count)) {
+    size_t dst_off, src_off;
+    gda_tile_nd_chunk_offsets(view, c.outer_ndim, idx, &dst_off, &src_off);
+    tile_get_chunk_nbi(view.dst_base + dst_off, view.src_base + src_off,
+                       c.chunk_bytes, pe, qp_index);
+  }
+}
+
 __device__ inline void GDAContext::tile_put_gda_workers(
     void *dst_data, const void *src_data, const size_t *dst_strides,
     const size_t *src_strides, const size_t *start_coord,
@@ -1594,18 +1592,16 @@ __device__ inline void GDAContext::tile_put_gda_workers(
     int worker_id, int worker_count) {
   const int qp_index = tile_qp_index_for_worker(pe, worker_id, worker_count);
 
+  const TileView view = tile_make_view(
+      dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
+      ndim, element_size);
+  char *src_base = view.src_base;
+  char *dst_base = view.dst_base;
+
   if (ndim == 2) {
-    const TileView view = tile_make_view(
-        dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
-        ndim, element_size);
-    const size_t src_s0 = view.src_s0;
-    const size_t src_s1 = view.src_s1;
-    const size_t dst_s0 = view.dst_s0;
-    const size_t dst_s1 = view.dst_s1;
-    const size_t ext0 = view.ext0;
-    const size_t ext1 = view.ext1;
-    char *src_base = view.src_base;
-    char *dst_base = view.dst_base;
+    const size_t ext0 = view.ext[0], ext1 = view.ext[1];
+    const size_t src_s0 = view.src_s[0], src_s1 = view.src_s[1];
+    const size_t dst_s0 = view.dst_s[0], dst_s1 = view.dst_s[1];
     const TileLayout layout = tile_classify(view);
 
     switch (layout) {
@@ -1659,23 +1655,27 @@ __device__ inline void GDAContext::tile_put_gda_workers(
       }
     }
   } else if (ndim == 1) {
-    const TileView view = tile_make_view(
-        dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
-        ndim, element_size);
-    const size_t ext = view.ext0;
-    char *src_ptr = view.src_base;
-    char *dst_ptr = view.dst_base;
-    if (view.src_s0 == 1 && view.dst_s0 == 1) {
-      tile_put_contig_slices_nbi(dst_ptr, src_ptr, ext * element_size, pe,
+    const size_t ext = view.ext[0];
+    if (view.src_s[0] == 1 && view.dst_s[0] == 1) {
+      tile_put_contig_slices_nbi(dst_base, src_base, ext * element_size, pe,
                                  qp_index, worker_id, worker_count);
     } else if (gda_tile_use_multi_wqe(ext, worker_count)) {
-      tile_put_rows_nbi(dst_ptr, src_ptr, view.dst_s0 * element_size,
-                        view.src_s0 * element_size, ext, element_size,
+      tile_put_rows_nbi(dst_base, src_base, view.dst_s[0] * element_size,
+                        view.src_s[0] * element_size, ext, element_size,
                         pe, qp_index, worker_id, worker_count);
     } else if (worker_id == 0) {
-      tile_put_rows_nbi(dst_ptr, src_ptr, view.dst_s0 * element_size,
-                        view.src_s0 * element_size, ext, element_size,
+      tile_put_rows_nbi(dst_base, src_base, view.dst_s[0] * element_size,
+                        view.src_s[0] * element_size, ext, element_size,
                         pe, qp_index, 0, 1);
+    }
+  } else {
+    if (tile_classify(view) == TileLayout::Contiguous) {
+      size_t total = 1;
+      for (int d = 0; d < view.ndim; d++) total *= view.ext[d];
+      tile_put_contig_slices_nbi(dst_base, src_base, total * element_size,
+                                 pe, qp_index, worker_id, worker_count);
+    } else {
+      tile_put_strided_nd_nbi(view, pe, qp_index, worker_id, worker_count);
     }
   }
 
@@ -1689,18 +1689,16 @@ __device__ inline void GDAContext::tile_get_gda_workers(
     int worker_id, int worker_count) {
   const int qp_index = tile_qp_index_for_worker(pe, worker_id, worker_count);
 
+  const TileView view = tile_make_view(
+      dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
+      ndim, element_size);
+  char *src_base = view.src_base;
+  char *dst_base = view.dst_base;
+
   if (ndim == 2) {
-    const TileView view = tile_make_view(
-        dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
-        ndim, element_size);
-    const size_t src_s0 = view.src_s0;
-    const size_t src_s1 = view.src_s1;
-    const size_t dst_s0 = view.dst_s0;
-    const size_t dst_s1 = view.dst_s1;
-    const size_t ext0 = view.ext0;
-    const size_t ext1 = view.ext1;
-    char *src_base = view.src_base;
-    char *dst_base = view.dst_base;
+    const size_t ext0 = view.ext[0], ext1 = view.ext[1];
+    const size_t src_s0 = view.src_s[0], src_s1 = view.src_s[1];
+    const size_t dst_s0 = view.dst_s[0], dst_s1 = view.dst_s[1];
     const TileLayout layout = tile_classify(view);
 
     switch (layout) {
@@ -1754,23 +1752,27 @@ __device__ inline void GDAContext::tile_get_gda_workers(
       }
     }
   } else if (ndim == 1) {
-    const TileView view = tile_make_view(
-        dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
-        ndim, element_size);
-    const size_t ext = view.ext0;
-    char *src_ptr = view.src_base;
-    char *dst_ptr = view.dst_base;
-    if (view.src_s0 == 1 && view.dst_s0 == 1) {
-      tile_get_contig_slices_nbi(dst_ptr, src_ptr, ext * element_size, pe,
+    const size_t ext = view.ext[0];
+    if (view.src_s[0] == 1 && view.dst_s[0] == 1) {
+      tile_get_contig_slices_nbi(dst_base, src_base, ext * element_size, pe,
                                  qp_index, worker_id, worker_count);
     } else if (gda_tile_use_multi_wqe(ext, worker_count)) {
-      tile_get_rows_nbi(dst_ptr, src_ptr, view.dst_s0 * element_size,
-                        view.src_s0 * element_size, ext, element_size,
+      tile_get_rows_nbi(dst_base, src_base, view.dst_s[0] * element_size,
+                        view.src_s[0] * element_size, ext, element_size,
                         pe, qp_index, worker_id, worker_count);
     } else if (worker_id == 0) {
-      tile_get_rows_nbi(dst_ptr, src_ptr, view.dst_s0 * element_size,
-                        view.src_s0 * element_size, ext, element_size,
+      tile_get_rows_nbi(dst_base, src_base, view.dst_s[0] * element_size,
+                        view.src_s[0] * element_size, ext, element_size,
                         pe, qp_index, 0, 1);
+    }
+  } else {
+    if (tile_classify(view) == TileLayout::Contiguous) {
+      size_t total = 1;
+      for (int d = 0; d < view.ndim; d++) total *= view.ext[d];
+      tile_get_contig_slices_nbi(dst_base, src_base, total * element_size,
+                                 pe, qp_index, worker_id, worker_count);
+    } else {
+      tile_get_strided_nd_nbi(view, pe, qp_index, worker_id, worker_count);
     }
   }
 
@@ -1783,7 +1785,7 @@ __device__ inline int GDAContext::tile_put(void* dst_data, const void* src_data,
                                            const size_t* start_coord, const size_t* boundary,
                                            int ndim, size_t element_size, int pe,
                                            [[maybe_unused]] uint64_t flags) {
-  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
   const TileView view = tile_make_view(
@@ -1794,34 +1796,34 @@ __device__ inline int GDAContext::tile_put(void* dst_data, const void* src_data,
     switch (tile_classify(view)) {
       case TileLayout::Contiguous:
         internal_putmem_nbi(view.dst_base, view.src_base,
-                            view.ext0 * view.ext1 * view.element_size, pe,
+                            view.ext[0] * view.ext[1] * view.element_size, pe,
                             qp_index, wf_info);
         break;
       case TileLayout::RowContig:
-        for (size_t i = 0; i < view.ext0; i++) {
+        for (size_t i = 0; i < view.ext[0]; i++) {
           internal_putmem_nbi(
-              view.dst_base + i * view.dst_s0 * view.element_size,
-              view.src_base + i * view.src_s0 * view.element_size,
-              view.ext1 * view.element_size, pe, qp_index, wf_info);
+              view.dst_base + i * view.dst_s[0] * view.element_size,
+              view.src_base + i * view.src_s[0] * view.element_size,
+              view.ext[1] * view.element_size, pe, qp_index, wf_info);
         }
         break;
       case TileLayout::ColContig:
-        for (size_t j = 0; j < view.ext1; j++) {
+        for (size_t j = 0; j < view.ext[1]; j++) {
           internal_putmem_nbi(
-              view.dst_base + j * view.dst_s1 * view.element_size,
-              view.src_base + j * view.src_s1 * view.element_size,
-              view.ext0 * view.element_size, pe, qp_index, wf_info);
+              view.dst_base + j * view.dst_s[1] * view.element_size,
+              view.src_base + j * view.src_s[1] * view.element_size,
+              view.ext[0] * view.element_size, pe, qp_index, wf_info);
         }
         break;
       case TileLayout::Strided:
       default:
-        for (size_t i = 0; i < view.ext0; i++) {
-          for (size_t j = 0; j < view.ext1; j++) {
+        for (size_t i = 0; i < view.ext[0]; i++) {
+          for (size_t j = 0; j < view.ext[1]; j++) {
             internal_putmem_nbi(
                 view.dst_base +
-                    (i * view.dst_s0 + j * view.dst_s1) * view.element_size,
+                    (i * view.dst_s[0] + j * view.dst_s[1]) * view.element_size,
                 view.src_base +
-                    (i * view.src_s0 + j * view.src_s1) * view.element_size,
+                    (i * view.src_s[0] + j * view.src_s[1]) * view.element_size,
                 view.element_size, pe, qp_index, wf_info);
           }
         }
@@ -1830,12 +1832,34 @@ __device__ inline int GDAContext::tile_put(void* dst_data, const void* src_data,
   } else if (view.ndim == 1) {
     if (tile_classify(view) == TileLayout::Contiguous) {
       internal_putmem_nbi(view.dst_base, view.src_base,
-                          view.ext0 * view.element_size, pe, qp_index, wf_info);
+                          view.ext[0] * view.element_size, pe, qp_index, wf_info);
     } else {
-      for (size_t i = 0; i < view.ext0; i++) {
+      for (size_t i = 0; i < view.ext[0]; i++) {
         internal_putmem_nbi(
-            view.dst_base + i * view.dst_s0 * view.element_size,
-            view.src_base + i * view.src_s0 * view.element_size,
+            view.dst_base + i * view.dst_s[0] * view.element_size,
+            view.src_base + i * view.src_s[0] * view.element_size,
+            view.element_size, pe, qp_index, wf_info);
+      }
+    }
+  } else {
+    // N-D (ndim > 2): flatten all dimensions into a linear element index.
+    size_t total = 1;
+    for (int d = 0; d < view.ndim; d++) total *= view.ext[d];
+    if (tile_classify(view) == TileLayout::Contiguous) {
+      internal_putmem_nbi(view.dst_base, view.src_base,
+                          total * view.element_size, pe, qp_index, wf_info);
+    } else {
+      for (size_t idx = 0; idx < total; idx++) {
+        size_t src_off = 0, dst_off = 0, rem = idx;
+        for (int d = view.ndim - 1; d >= 0; d--) {
+          const size_t coord = rem % view.ext[d];
+          rem /= view.ext[d];
+          src_off += coord * view.src_s[d];
+          dst_off += coord * view.dst_s[d];
+        }
+        internal_putmem_nbi(
+            view.dst_base + dst_off * view.element_size,
+            view.src_base + src_off * view.element_size,
             view.element_size, pe, qp_index, wf_info);
       }
     }
@@ -1850,7 +1874,7 @@ __device__ inline int GDAContext::tile_put_wave(void* dst_data, const void* src_
                                                 const size_t* start_coord, const size_t* boundary,
                                                 int ndim, size_t element_size, int pe,
                                                 [[maybe_unused]] uint64_t flags) {
-  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   int local_pe{-1};
   const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
 
@@ -1881,7 +1905,7 @@ __device__ inline int GDAContext::tile_put_wg(void* dst_data, const void* src_da
                                               const size_t* start_coord, const size_t* boundary,
                                               int ndim, size_t element_size, int pe,
                                               [[maybe_unused]] uint64_t flags) {
-  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   int local_pe{-1};
   const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
 
@@ -1915,7 +1939,7 @@ __device__ inline int GDAContext::tile_get(void* dst_data, const void* src_data,
                                            const size_t* start_coord, const size_t* boundary,
                                            int ndim, size_t element_size, int pe,
                                            [[maybe_unused]] uint64_t flags) {
-  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
   const TileView view = tile_make_view(
@@ -1926,34 +1950,34 @@ __device__ inline int GDAContext::tile_get(void* dst_data, const void* src_data,
     switch (tile_classify(view)) {
       case TileLayout::Contiguous:
         internal_getmem_nbi(view.dst_base, view.src_base,
-                            view.ext0 * view.ext1 * view.element_size, pe,
+                            view.ext[0] * view.ext[1] * view.element_size, pe,
                             qp_index, wf_info);
         break;
       case TileLayout::RowContig:
-        for (size_t i = 0; i < view.ext0; i++) {
+        for (size_t i = 0; i < view.ext[0]; i++) {
           internal_getmem_nbi(
-              view.dst_base + i * view.dst_s0 * view.element_size,
-              view.src_base + i * view.src_s0 * view.element_size,
-              view.ext1 * view.element_size, pe, qp_index, wf_info);
+              view.dst_base + i * view.dst_s[0] * view.element_size,
+              view.src_base + i * view.src_s[0] * view.element_size,
+              view.ext[1] * view.element_size, pe, qp_index, wf_info);
         }
         break;
       case TileLayout::ColContig:
-        for (size_t j = 0; j < view.ext1; j++) {
+        for (size_t j = 0; j < view.ext[1]; j++) {
           internal_getmem_nbi(
-              view.dst_base + j * view.dst_s1 * view.element_size,
-              view.src_base + j * view.src_s1 * view.element_size,
-              view.ext0 * view.element_size, pe, qp_index, wf_info);
+              view.dst_base + j * view.dst_s[1] * view.element_size,
+              view.src_base + j * view.src_s[1] * view.element_size,
+              view.ext[0] * view.element_size, pe, qp_index, wf_info);
         }
         break;
       case TileLayout::Strided:
       default:
-        for (size_t i = 0; i < view.ext0; i++) {
-          for (size_t j = 0; j < view.ext1; j++) {
+        for (size_t i = 0; i < view.ext[0]; i++) {
+          for (size_t j = 0; j < view.ext[1]; j++) {
             internal_getmem_nbi(
                 view.dst_base +
-                    (i * view.dst_s0 + j * view.dst_s1) * view.element_size,
+                    (i * view.dst_s[0] + j * view.dst_s[1]) * view.element_size,
                 view.src_base +
-                    (i * view.src_s0 + j * view.src_s1) * view.element_size,
+                    (i * view.src_s[0] + j * view.src_s[1]) * view.element_size,
                 view.element_size, pe, qp_index, wf_info);
           }
         }
@@ -1962,12 +1986,34 @@ __device__ inline int GDAContext::tile_get(void* dst_data, const void* src_data,
   } else if (view.ndim == 1) {
     if (tile_classify(view) == TileLayout::Contiguous) {
       internal_getmem_nbi(view.dst_base, view.src_base,
-                          view.ext0 * view.element_size, pe, qp_index, wf_info);
+                          view.ext[0] * view.element_size, pe, qp_index, wf_info);
     } else {
-      for (size_t i = 0; i < view.ext0; i++) {
+      for (size_t i = 0; i < view.ext[0]; i++) {
         internal_getmem_nbi(
-            view.dst_base + i * view.dst_s0 * view.element_size,
-            view.src_base + i * view.src_s0 * view.element_size,
+            view.dst_base + i * view.dst_s[0] * view.element_size,
+            view.src_base + i * view.src_s[0] * view.element_size,
+            view.element_size, pe, qp_index, wf_info);
+      }
+    }
+  } else {
+    // N-D (ndim > 2): flatten all dimensions into a linear element index.
+    size_t total = 1;
+    for (int d = 0; d < view.ndim; d++) total *= view.ext[d];
+    if (tile_classify(view) == TileLayout::Contiguous) {
+      internal_getmem_nbi(view.dst_base, view.src_base,
+                          total * view.element_size, pe, qp_index, wf_info);
+    } else {
+      for (size_t idx = 0; idx < total; idx++) {
+        size_t src_off = 0, dst_off = 0, rem = idx;
+        for (int d = view.ndim - 1; d >= 0; d--) {
+          const size_t coord = rem % view.ext[d];
+          rem /= view.ext[d];
+          src_off += coord * view.src_s[d];
+          dst_off += coord * view.dst_s[d];
+        }
+        internal_getmem_nbi(
+            view.dst_base + dst_off * view.element_size,
+            view.src_base + src_off * view.element_size,
             view.element_size, pe, qp_index, wf_info);
       }
     }
@@ -1982,7 +2028,7 @@ __device__ inline int GDAContext::tile_get_wave(void* dst_data, const void* src_
                                                 const size_t* start_coord, const size_t* boundary,
                                                 int ndim, size_t element_size, int pe,
                                                 [[maybe_unused]] uint64_t flags) {
-  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   int local_pe{-1};
   const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
 
@@ -2013,7 +2059,7 @@ __device__ inline int GDAContext::tile_get_wg(void* dst_data, const void* src_da
                                               const size_t* start_coord, const size_t* boundary,
                                               int ndim, size_t element_size, int pe,
                                               [[maybe_unused]] uint64_t flags) {
-  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   int local_pe{-1};
   const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
 
@@ -2052,6 +2098,7 @@ __device__ inline int GDAContext::tile_allgather(rocshmem_team_t team,
                                                  int ndim,
                                                  size_t element_size,
                                                  uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int team_size = team_obj->num_pes;
 
@@ -2092,6 +2139,7 @@ __device__ inline int GDAContext::tile_allgather_wave(rocshmem_team_t team,
                                                       int ndim,
                                                       size_t element_size,
                                                       uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int team_size = team_obj->num_pes;
 
@@ -2131,6 +2179,7 @@ __device__ inline int GDAContext::tile_allgather_wg(rocshmem_team_t team,
                                                     int ndim,
                                                     size_t element_size,
                                                     uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int team_size = team_obj->num_pes;
 
@@ -2172,6 +2221,7 @@ __device__ inline int GDAContext::tile_broadcast(rocshmem_team_t team,
                                                  size_t element_size,
                                                  int pe_root,
                                                  uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int my_pe_in_team = team_obj->my_pe;
   int root_pe_world = team_obj->get_pe_in_world(pe_root);
@@ -2187,7 +2237,6 @@ __device__ inline int GDAContext::tile_broadcast(rocshmem_team_t team,
     // Root PE: copy src tile into dst locally when they are different buffers.
     // Non-root PEs receive via tile_get above; the root must populate its own
     // dst explicitly — the GET path does not write to the root's dst.
-    // Use Put (not Get) to avoid system-scope loads on local finegrained memory.
     tile_memcpy_rma<MemcpyKind::Put, TileScope::Lane>(
         dst_data, src_data, dst_strides, src_strides,
         start_coord, boundary, ndim, element_size);
@@ -2210,6 +2259,7 @@ __device__ inline int GDAContext::tile_broadcast_wave(rocshmem_team_t team,
                                                       size_t element_size,
                                                       int pe_root,
                                                       uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int my_pe_in_team = team_obj->my_pe;
   int root_pe_world = team_obj->get_pe_in_world(pe_root);
@@ -2223,7 +2273,6 @@ __device__ inline int GDAContext::tile_broadcast_wave(rocshmem_team_t team,
     }
   } else if (dst_data != src_data) {
     // Root PE: copy src tile into dst locally when they are different buffers.
-    // Use Put (not Get) to avoid system-scope loads on local finegrained memory.
     tile_memcpy_rma<MemcpyKind::Put, TileScope::Wave>(
         dst_data, src_data, dst_strides, src_strides,
         start_coord, boundary, ndim, element_size);
@@ -2246,6 +2295,7 @@ __device__ inline int GDAContext::tile_broadcast_wg(rocshmem_team_t team,
                                                     size_t element_size,
                                                     int pe_root,
                                                     uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int my_pe_in_team = team_obj->my_pe;
   int root_pe_world = team_obj->get_pe_in_world(pe_root);
@@ -2259,7 +2309,6 @@ __device__ inline int GDAContext::tile_broadcast_wg(rocshmem_team_t team,
     }
   } else if (dst_data != src_data) {
     // Root PE: copy src tile into dst locally when they are different buffers.
-    // Use Put (not Get) to avoid system-scope loads on local finegrained memory.
     tile_memcpy_rma<MemcpyKind::Put, TileScope::Wg>(
         dst_data, src_data, dst_strides, src_strides,
         start_coord, boundary, ndim, element_size);
@@ -2345,7 +2394,7 @@ __device__ inline int GDAContext::tile_reduce_typed_impl(
   const int my_pe_in_team = team_obj->my_pe;
   const int root_pe_world = team_obj->get_pe_in_world(root);
 
-  if (root < 0 || root >= team_size || ndim < 1 || ndim > 2) {
+  if (root < 0 || root >= team_size || ndim < 1 || ndim > TileView::MAX_NDIM) {
     LOGD_WARN("Invalid tile reduce arguments for GDA backend");
     return ROCSHMEM_ERROR;
   }
