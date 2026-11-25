@@ -426,8 +426,9 @@ get_ids()
 }
 
 // Wrap the four graph lifecycle entry points on the HIP runtime dispatch table. The launch state
-// they maintain is only consumed by HIP_GRAPH tracing and by kernel replay (which must not replay
-// graph dispatches), and the wrappers add work to every hipGraphLaunch, so skip them otherwise.
+// they maintain is only consumed by HIP_GRAPH tracing, by kernel replay (which must not replay
+// graph dispatches) and by range replay (which declines a range containing a graph launch), and
+// the wrappers add work to every hipGraphLaunch, so skip them otherwise.
 template <>
 void
 update_table(::HipDispatchTable* table)
@@ -439,7 +440,8 @@ update_table(::HipDispatchTable* table)
         {
             if(itr->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH,
                                       ROCPROFILER_BUFFER_TRACING_HIP_GRAPH,
-                                      ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY))
+                                      ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
+                                      ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY))
                 return true;
         }
         return false;
