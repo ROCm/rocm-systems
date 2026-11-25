@@ -1964,9 +1964,13 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
     if (comm->planner.nTasksP2p == collQueue->nElems) {
       // Drain explicit P2P first, then one originating collective per plan sequence.
       // This keeps unrelated send/recv directions from weakening a collective's cap.
+      // Isolation that comes only from P2P batching keeps the group's collectives together:
+      // starting them in a fresh plan and epoch is enough for every rank to fuse them alike.
       if (plan->workBytes != 0) return ncclSuccess;
+      bool oneCollPerPlan = comm->planner.p2pCollNeedsIsolation;
       int collOpCount = ncclIntruQueueHead(collQueue)->collOpCount;
-      while (!ncclIntruQueueEmpty(collQueue) && ncclIntruQueueHead(collQueue)->collOpCount == collOpCount) {
+      while (!ncclIntruQueueEmpty(collQueue) &&
+             (!oneCollPerPlan || ncclIntruQueueHead(collQueue)->collOpCount == collOpCount)) {
         struct ncclTaskP2p* task = ncclIntruQueueDequeue(collQueue);
         ncclIntruQueueEnqueue(task->func == ncclFuncSend ? &peers[task->root].sendQueue : &peers[task->root].recvQueue,
                               task);

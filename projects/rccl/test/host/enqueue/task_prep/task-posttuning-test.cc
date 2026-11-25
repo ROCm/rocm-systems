@@ -1383,6 +1383,45 @@ TEST_F(TaskPostTuningMicrotest, P2pChannelBase_AnyPeer_AsksThisCommForItsEffecti
   EXPECT_EQ(kP2pSendRound, base);
 }
 
+// Multi-node with batching on: rounds 0 and 1 share the batched base, while send/recv keeps the round's own.
+TEST_F(TaskPostTuningMicrotest, P2pChannelBase_MultiNodeBatchingOn_SendRecvTakesTheUnbatchedLayout) {
+  TaskPostTuning_P2pScene p2p;
+  p2p.comm()->nNodes = 3;
+  p2p.comm()->maxLocalRanks = 2;
+  ScopedHook batchEnable(g_rcclEffectiveP2pBatchEnable, [](struct ncclComm*) { return 1; });
+  // PXN off keeps the PXN QP-usage stride out of the layout; the layouts differ only by batching.
+  ScopedHook pxn(g_pxnDisable, [](struct ncclComm*) { return kPxnDisabled; });
+  uint8_t alltoallBase = kPoisonedBase;
+  uint8_t sendBase = kPoisonedBase;
+
+  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsSend, ncclFuncAlltoAll, &alltoallBase));
+  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsSend, ncclFuncSend, &sendBase));
+
+  EXPECT_EQ(0, alltoallBase);
+  EXPECT_EQ(kP2pSendRound, sendBase);
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_MultiNodeBatchingOn_TracksBothLayoutsToOnePeer) {
+  TaskPostTuning_P2pScene p2p;
+  p2p.comm()->nNodes = 3;
+  p2p.comm()->maxLocalRanks = 2;
+  ScopedHook batchEnable(g_rcclEffectiveP2pBatchEnable, [](struct ncclComm*) { return 1; });
+  // PXN off keeps the PXN QP-usage stride out of the layout; the layouts differ only by batching.
+  ScopedHook pxn(g_pxnDisable, [](struct ncclComm*) { return kPxnDisabled; });
+  bool needPreconnect = false;
+
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, ncclFuncAlltoAll, &needPreconnect));
+  EXPECT_TRUE(needPreconnect);
+  EXPECT_TRUE(p2p.comm()->planner.peers[kP2pPeer].sendSeen);
+  EXPECT_FALSE(p2p.comm()->planner.peers[kP2pPeer].sendSeenUnbatched);
+
+  // A send/recv to the same peer is not covered by the AlltoAll's channels.
+  needPreconnect = false;
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, ncclFuncSend, &needPreconnect));
+  EXPECT_TRUE(needPreconnect);
+  EXPECT_TRUE(p2p.comm()->planner.peers[kP2pPeer].sendSeenUnbatched);
+}
+
 // Harness-only schedule: init.cc:1498-1503 builds p2pSchedule as a full permutation, so production always matches.
 TEST_F(TaskPostTuningMicrotest, P2pChannelBase_HandBuiltScheduleOmittingThePeer_ScansPastTheRankCount) {
   TaskPostTuning_P2pScene p2p;
