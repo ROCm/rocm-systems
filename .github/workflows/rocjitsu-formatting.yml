@@ -1,4 +1,4 @@
-# Formatting checks for the emulation/ subtrees.
+# Formatting checks for selected project subtrees.
 name: "rocjitsu-formatting"
 
 on:
@@ -13,6 +13,7 @@ on:
     paths:
       - "emulation/mirage/**"
       - "emulation/rocjitsu/**"
+      - "projects/clr/opencl/**"
       - ".github/scripts/collect_rocjitsu_afl_results.py"
       - ".github/scripts/rocjitsu_fuzz_report.js"
       - ".github/scripts/rocjitsu_benchmark_report.js"
@@ -45,6 +46,7 @@ jobs:
           sparse-checkout: |
             emulation/mirage
             emulation/rocjitsu
+            projects/clr/opencl
             .github
           persist-credentials: false
 
